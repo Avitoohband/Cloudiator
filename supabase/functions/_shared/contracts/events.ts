@@ -23,28 +23,34 @@ export type RevealedCombatant = {
   name: string;
   classId: ClassId | null;
   stance: Stance;
-  attributes: Attributes;
+  attributes: Readonly<Attributes>;
   maxHealth: number;
+  initialHealth: number;
   armor: number;
   weaponDamage: number;
   attackIntervalMs: number;
   efficiencyBasisPoints: number;
-  equipmentSilhouettes: string[];
+  equipmentSilhouettes: readonly string[];
 };
 export type BattleAction = {
-  kind: 'attack'; elapsedMs: number; attackerId: string; defenderId: string;
-  hit: boolean; critical: boolean; damage: number; healthBefore: number; healthAfter: number;
+  kind: 'attack'; sequence: number; elapsedMs: number; attackerId: string; defenderId: string;
+  /** defend means a landed attack received Defensive stance mitigation; evade means a miss. */
+  hit: boolean; critical: boolean; defend: boolean; evade: boolean;
+  damage: number; healthBefore: number; healthAfter: number;
 };
 export type BattleVictory = {
-  kind: 'victory'; elapsedMs: number; winnerId: string; loserId: string;
+  kind: 'victory'; sequence: number; elapsedMs: number; winnerId: string; loserId: string;
   reason: 'defeat' | 'health-fraction' | 'tie-break';
 };
 export type BattleLog = {
   battleId: string; rulesVersion: string;
-  participants: [RevealedCombatant, RevealedCombatant];
-  events: (BattleAction | BattleVictory)[];
+  participants: readonly [Readonly<RevealedCombatant>, Readonly<RevealedCombatant>];
+  events: readonly (Readonly<BattleAction> | Readonly<BattleVictory>)[];
   durationMs: number; winnerId: string;
   victoryReason: BattleVictory['reason'];
+  /** Health values use the same order as participants. */
+  finalHp: readonly [number, number];
+  tieBreakReason: 'simultaneous-defeat' | 'equal-health-fraction' | null;
 };
 export type RevealedStage = {
   id: string; kind: 'depart' | 'travel' | 'exploration' | 'encounter' | 'return' | 'settlement' | 'staging' | 'bout';

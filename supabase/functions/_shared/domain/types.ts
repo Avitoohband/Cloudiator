@@ -21,6 +21,25 @@ export type DerivedStats = {
   overload: number; efficiency: number; armor: number; weaponDamage: number; weaponIntervalMs: number;
   arenaWeaponMultiplier: number; arenaArmor: number;
 };
+/** Private backend inputs. Neither seeds nor these authoritative snapshots are read DTOs. */
+export type Seed = string;
+export type FighterSnapshot = DeepReadonly<{
+  rulesVersion: string; classId: ClassId | null; stance: Stance; attributes: Attributes;
+  maxHealth: number; armor: number; weaponDamage: number;
+  /** Arena-adjusted item damage plus Strength, before efficiency/critical/stances/armor.
+   * NPC templates may override baseDamage/maxHealth without re-applying efficiency. */
+  baseDamage: number;
+  attackIntervalMs: number; efficiency: number; equipmentSilhouettes: string[];
+}>;
+export type BattleParticipant = DeepReadonly<{
+  id: string; gladiatorId: string | null; name: string; snapshot: FighterSnapshot;
+  /** Omit for full-health arena/tournament bouts; expeditions carry encounter health. */
+  startingHealth?: number;
+}>;
+export type BattleInput = DeepReadonly<{
+  battleId: string; rulesVersion: string; rules: Rules;
+  fighters: [BattleParticipant, BattleParticipant];
+}>;
 export type CatalogItem = DeepReadonly<{
   id: string; templateId: string; name: string; slot: EquipmentSlot; hands: 0 | 1 | 2;
   tier: 1 | 5 | 10; rarity: ItemRarity; stats: ItemStats; binding: ItemInstance['binding'];

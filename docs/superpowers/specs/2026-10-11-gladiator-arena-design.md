@@ -4,7 +4,7 @@ Date: 2026-10-11, Asia/Jerusalem
 
 Project directory: `Cloudiator`
 
-Status: Written proposal awaiting Avi's review. Implementation is not authorized by this document's creation.
+Status: Approved by Avi on 2026-10-11, including the explicitly proposed launch defaults. Implementation-plan writing is authorized; implementation follows plan review and execution-method selection.
 
 Review route: section 2 summarizes confirmed decisions; section 3 describes the visible game; sections 5–9 contain proposed gameplay defaults; sections 10–13 cover implementation boundaries and acceptance. The checklist at the end identifies the defaults needing particular attention.
 

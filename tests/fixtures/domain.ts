@@ -1,6 +1,8 @@
 import type { OwnerState, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads.ts';
+import type { ItemInstance } from '../../supabase/functions/_shared/contracts/reads.ts';
+import type { BuildInput, BuildSnapshot, CatalogItem } from '../../supabase/functions/_shared/domain/types.ts';
 
-/** Minimal serializable wire fixtures; private engine snapshots/catalogs arrive in Task 2. */
+/** Minimal serializable wire fixtures, supplemented by private domain fixtures below. */
 export const ownerFixture: OwnerState = {
   gladiatorId: '0d5f8471-d919-428f-9ab7-058c95821757', name: 'Aster',
   currentBuild: { version: 1, classId: 'guardian', stance: 'balanced',
@@ -24,3 +26,22 @@ export const worldFixture: WorldSnapshot = {
     activityId: ownerFixture.currentActivity!.id, activityStatus: 'active',
     startsAtMs: 1791590400000, endsAtMs: 1791595200000, visibleStage: null }],
 };
+
+export const buildInputFixture: BuildInput = {
+  classId: 'berserker', stance: 'balanced',
+  allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 },
+  equipment: { weapon: null, offHand: null, head: null, body: null, feet: null },
+};
+
+export const baseFiveBuild: BuildSnapshot = {
+  rulesVersion: 'v1', classId: 'berserker', stance: 'balanced',
+  allocations: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 },
+  equipment: { weapon: null, offHand: null, head: null, body: null, feet: null },
+};
+
+/** A fresh canonical item DTO, with catalog stats copied as immutable rolls. */
+export function itemFixture(entry: CatalogItem): ItemInstance {
+  return { id: `item-${entry.id}`, ownerId: ownerFixture.gladiatorId, catalogId: entry.id, catalogVersion: 'v1',
+    tier: entry.tier, rarity: entry.rarity, stats: structuredClone(entry.stats), quantity: 1,
+    origin: entry.renownPrice === null ? 'shop' : 'renown', binding: entry.binding, reservation: null };
+}

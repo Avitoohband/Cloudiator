@@ -1,0 +1,66 @@
+import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
+import type { ActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
+
+export type BuildView = { version: number; classId: ClassId; stance: Stance; allocations: Attributes; equipment: Equipment };
+export type PendingBuildView = { build: BuildView; effectiveSlotIndex: number; reservedMoney: number; operationId: string };
+export type ItemInstance = {
+  id: string; ownerId: GladiatorId; catalogId: string; catalogVersion: string;
+  tier: 1 | 5 | 10; rarity: ItemRarity; stats: ItemStats; quantity: number;
+  origin: 'starter' | 'shop' | 'expedition' | 'renown';
+  binding: 'bound' | 'tradable';
+  reservation: { kind: 'equipment' | 'pending-build' | 'listing'; referenceId: string } | null;
+};
+export type CurrentActivity = {
+  id: ActivityId; kind: 'orientation' | 'training' | 'rest' | 'expedition' | 'arena' | 'tournament';
+  status: 'queued' | 'active' | 'processing' | 'completed';
+  startsAtMs: number; endsAtMs: number; label: string;
+};
+/** Authenticated owner-only management DTO. No private activity planning inputs. */
+export type OwnerState = {
+  gladiatorId: GladiatorId; name: string;
+  currentBuild: BuildView; pendingBuild: PendingBuildView | null;
+  schedule: Schedule; scheduleVersion: number;
+  wallets: { money: number; renown: number }; reservedFees: { money: number; renown: number };
+  inventory: ItemInstance[]; inventoryCapacity: number;
+  progression: { level: number; xp: number; earnedAttributePoints: number; unspentAttributePoints: number; league: LeagueId; peakStrength: number; rating: number };
+  stamina: { current: number; maximum: number };
+  tournamentOptIn: boolean; processedSlotIndex: number;
+  currentActivity: CurrentActivity | null;
+};
+/** Whitelisted public projection: never spread an OwnerState into this shape. */
+export type PublicActor = {
+  gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: string[];
+  league: LeagueId; level: number; phase: Phase; location: string;
+  activityId: ActivityId | null; activityStatus: CurrentActivity['status'] | 'idle';
+  startsAtMs: number | null; endsAtMs: number | null; visibleStage: RevealedStage | null;
+};
+export type RevisionState = { revision: string; serverNowMs: number; slotIndex: number };
+export type WorldSnapshot = RevisionState & { actors: PublicActor[] };
+export type PublicProfile = { actor: PublicActor; combatStrength: number; rating: number; prestige: string[] };
+/** Producers enforce <= 50 rows. Cursors are opaque strings. */
+export type CursorPage<T> = { rows: T[]; nextCursor: string | null };
+export type MarketListing = {
+  listingId: string; seller: Pick<PublicActor, 'gladiatorId' | 'name'>;
+  item: Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'stats' | 'quantity'>;
+  price: number; expiresAtMs: number;
+};
+export type MarketPage = CursorPage<MarketListing>;
+export type StandingRow = {
+  rank: number; gladiatorId: GladiatorId; name: string; rating: number;
+  humanWins: number; humanLosses: number; promoted: boolean; inactive: boolean; rewardEligible: boolean;
+};
+export type StandingsPage = CursorPage<StandingRow> & { league: LeagueId; seasonId: string; archived: boolean };
+export type TournamentEntrant = { gladiatorId: GladiatorId; name: string; classId: ClassId };
+export type TournamentBout = {
+  id: string; round: number; position: number; parentBoutIds: string[];
+  /** Null means not revealed, including participants in future rounds. */
+  revealedResult: { participants: TournamentEntrant[]; winnerId: GladiatorId; bye: boolean; battleLog?: BattleLog } | null;
+};
+export type TournamentView = {
+  id: string; league: LeagueId; slotIndex: number; startsAtMs: number; endsAtMs: number;
+  status: 'scheduled' | 'active' | 'processing' | 'completed' | 'insufficient-entrants';
+  entrants: TournamentEntrant[]; bouts: TournamentBout[];
+  placements: { gladiatorId: GladiatorId; place: number; summary: ActivitySummary }[];
+};
+export type ResultRow = { gladiatorId: GladiatorId; name: string; summary: ActivitySummary };
+export type ResultsPage = CursorPage<ResultRow>;

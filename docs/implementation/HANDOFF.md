@@ -13,7 +13,7 @@ Last updated: 2026-10-11. Development is in progress.
 
 ## Resume here
 
-Task 1 passed independent specification and quality review. Next mainline work is Task 2, versioned clock/catalog/build rules and derived stats. Claude owns the separate visual lane described below. Do not reimplement completed tasks.
+Tasks 1 and 2 passed independent specification and quality review. Task 1 was pushed at `275625f` (remote ref verified); Task 2's publication checkpoint is next. Next mainline work: Task 3, deterministic automatic combat. Claude owns the separate visual lane described below. Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.
 
@@ -24,6 +24,7 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | Task | Commit range | Review | Verification and limitations |
 | --- | --- | --- | --- |
 | 1 — Static shell and contracts | `2261fb7..096a02e` (source `9ca36d9`, report `096a02e`) | Spec compliant; quality approved; [review](task-01-review.md) | 17 unit tests; four development and four production browser checks; TypeScript, static build, and 35-asset scan passed. Fixture-only preview; authentication/backend/animations remain later tasks. |
+| 2 — Versioned rules and stats | `275625f..f668893` (source `a361ecd`, report `f668893`) | Spec compliant; quality approved; [review](task-02-review.md) | 82 owning tests, 99 full-suite tests, TypeScript/whitespace passed. Clock/catalog/build validation and fixed-point stats complete. Backend must supply verified inventory and perform reservation/fee/boundary transactions. |
 
 Deferred Minor findings to carry into final review: escaped seed signatures in the supplemental static scanner, and conflicting color-variable warnings in the browser harness. Exact evidence and suggested coverage are in the Task 1 review.
 
@@ -32,8 +33,8 @@ Deferred Minor findings to carry into final review: escaped seed signatures in t
 Avi explicitly authorized communication and parallel development through the [Cloudiator Message Board](https://docs.google.com/document/d/1Fz_MTVcUJkBU52wRuLQCgftMzJtTNn3l6snRQw9RSkM). Claude replied with a layer split, and Codex posted agreement and ownership refinements.
 
 - Codex owns Tasks 1–10, 16, 18, 19, 21, and 22: root dependency/config files, `supabase/**`, `src/app/**`, `src/lib/api/**`, management features, existing domain/backend/database/browser tests, and this handoff file.
-- Claude owns Tasks 11, 12, 14, and 15: `assets/source/**`, `public/assets/**`, `tests/assets/**`, `src/game/**`, `src/features/arena/BattleReplay.tsx`, and new camp/replay/expedition browser and replay/scene-layout domain tests with filenames reserved on the board. Claude may author only those task numbers' report/review files in `docs/implementation/`.
-- Claude proposed `C:\Avi\Studies\Projects\Cloudiator-claude` on `claude/visual-track`. Await confirmation of actual creation and exact base SHA; the most recent local worktree inventory showed only the main checkout. Codex will post the clean reviewed/pushed Task 1 checkpoint.
+- Claude owns Tasks 11, 12, 14, and 15: `assets/source/**`, `public/assets/**`, `tests/assets/**`, `src/game/**`, `src/features/arena/BattleReplay.tsx`, and `src/features/character/ExpeditionView.tsx`. Reserved tests: `tests/assets/manifest.test.ts`, `tests/assets/png-tools.test.ts`, `tests/domain/scene-layout.test.ts`, `tests/domain/replay.test.ts`, `tests/browser/camp.spec.ts`, `tests/browser/replay.spec.ts`, `tests/browser/expedition.spec.ts`. Claude may author only those task numbers' report/review files in `docs/implementation/`.
+- Claude confirmed `C:\Avi\Studies\Projects\Cloudiator-claude` on `claude/visual-track`, initially based at `096a02e`. Codex verified the actual worktree in Git inventory and posted the reviewed/pushed `275625f` checkpoint for Claude to incorporate.
 - UI Tasks 13, 17, 20 and release Tasks 23–24 remain unassigned between the agents until their prerequisites land.
 - Shared contract, dependency, config, or app integration changes require an exact request to the owning agent. Do not edit the other lane's files.
 - Codex coordinates independent review and integration. Claude posts base/head SHAs, touched paths, actual checks, limitations, and readiness; never merges directly into the integration branch.
@@ -44,6 +45,8 @@ Avi explicitly authorized communication and parallel development through the [Cl
 - Explicit local development/test fixture mode is allowed; production static exports deny it. Task 1 verifies both cases.
 - Task 1 checks TypeScript and contracts. Actual Edge entrypoints introduced in Task 4 must add Deno checking.
 - Player allocations, counts, and currencies must be finite safe integers. Derived attributes and immutable item values can have two decimal places, as required by class/tier/rarity formulas.
+- Task 2 controller ruling: an empty weapon contributes zero item damage and uses a 1000 ms base interval; later combat can still add Strength damage. The specification does not define unarmed stats. Cost if wrong: revisit unarmed balance.
+- Task 2 controller ruling: named versioned upper bound 1,000,000,000 for player level/point inputs and total earned/allocation budgets, alongside safe-integer checks. The plan requires oversized rejection without exact caps. Cost if wrong: raise this administrative limit for future legitimate progression.
 - Task 23 builds and locally verifies release harnesses; hosted benchmarks run after Task 24 provisions infrastructure.
 - Verified pins: Next 16.4.0, React/React DOM 19.3.0, TypeScript 5.9.3, Phaser 4.2.1, Vitest 5.0.3, Playwright 1.64.0, React type packages 19.3.0, Node types 22.20.5. Runtime Node 22.19.0/npm 11.8.0.
 - Docker server 29.8.2 is running locally. Supabase CLI 2.120.0, client 2.117.3, and npm Deno 2.9.6 versions were verified for later installation, not yet installed.

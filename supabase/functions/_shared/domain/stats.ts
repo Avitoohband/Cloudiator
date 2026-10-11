@@ -27,8 +27,9 @@ export function deriveStats(build: BuildSnapshot, rules: Rules): DerivedStats {
   const overload = Math.max(0, (load - loadCapacity) / loadCapacity);
   const efficiency = Math.max(r.minimumEfficiency, 1 - r.overloadPenalty * overload);
   const armor = items.reduce((sum, item) => sum + cents(item.stats.armor), 0) / 100;
-  const arenaArmor = Math.round(items.reduce((sum, item) => sum + cents(item.stats.armor)
-    * (item.origin === 'renown' ? Math.round(rules.shops.renownArenaMultiplier * 100) : 100), 0) / 100) / 100;
+  // Keep hundredths × percentage points exact; combat rounds only final damage.
+  const arenaArmor = items.reduce((sum, item) => sum + cents(item.stats.armor)
+    * (item.origin === 'renown' ? Math.round(rules.shops.renownArenaMultiplier * 100) : 100), 0) / 10_000;
   const weapon = build.equipment.weapon;
   return { attributes, maxHp, maxStamina, loadCapacity, load, overload, efficiency, armor,
     weaponDamage: weapon?.stats.damage ?? rules.combat.unarmedDamage,

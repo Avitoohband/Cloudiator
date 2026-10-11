@@ -104,6 +104,12 @@ describe('derived resources', () => {
     const equipment = { ...baseFiveBuild.equipment, weapon: itemFixture('sword:1:renown'), body: itemFixture('heavy-armor:1:renown') };
     expect(deriveStats({ ...baseFiveBuild, equipment }, RULES_V1)).toMatchObject({ weaponDamage: 6, armor: 6, arenaWeaponMultiplier: 1.1, arenaArmor: 6.6 });
   });
+  it('retains fractional renown arena armor without intermediate rounding', () => {
+    const body = itemFixture('heavy-armor:1:renown');
+    body.stats.armor = 6.65;
+    const equipment = { ...baseFiveBuild.equipment, body };
+    expect(deriveStats({ ...baseFiveBuild, equipment }, RULES_V1)).toMatchObject({ armor: 6.65, arenaArmor: 7.315 });
+  });
   it('supports an empty weapon slot with zero item damage and a 1000 ms base interval', () => {
     expect(deriveStats(baseFiveBuild, RULES_V1)).toMatchObject({ weaponDamage: 0, weaponIntervalMs: 1000 });
   });

@@ -76,6 +76,17 @@ describe('fighter derivation', () => {
     expect(snapshot.weaponDamage).toBe(7.315);
     expect(snapshot.baseDamage).toBe(10.065);
   });
+  it('preserves fractional bound arena armor through final attack damage rounding', () => {
+    const body = itemFixture(CATALOG_V1.items['heavy-armor:1:renown']);
+    body.stats.armor = 6.65;
+    const build = { ...baseFiveBuild, equipment: { ...baseFiveBuild.equipment, body } };
+    const defender = { ...participant('b'), snapshot: makeFighter(build, 'arena', RULES_V1) };
+    // 20.5 × (1 − .02 × (6.65 × 1.1)) = 17.50085, rounds to 18.
+    const log = simulateBattle(battle(participant('a', { baseDamage: 20.5, attackIntervalMs: 250 }), defender), 'seed-a');
+    expect(log.events[0]).toMatchObject({ kind: 'attack', damage: 18, healthBefore: 100, healthAfter: 82 });
+    expect(log.participants[1].armor).toBe(7.315);
+    expect(makeFighter(build, 'expedition', RULES_V1).armor).toBe(6.65);
+  });
   it('clamps very fast attacks to 250ms and freezes copied combat display data', () => {
     const sword = itemFixture(CATALOG_V1.items['sword:1:common']);
     const build = { ...baseFiveBuild, allocations: { ...baseFiveBuild.allocations, agility: 1000 },

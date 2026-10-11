@@ -86,3 +86,46 @@ Self-review checked exact formulas, decimal half cases, queue cutoff and simulta
 No blocking product concern identified. Later backend tasks must securely generate/store seeds, select retained rule/algorithm modules, create explicit NPC/expedition snapshots, persist snapshots and public logs, reveal at the authorized time and award rewards transactionally. This task alone does not claim playable backend battles or UI replay integration. Existing skill guidance already covers independent expected values, true RED/GREEN and reproducible verification; no reusable upkeep change is proposed.
 
 The controller owns independent review, durable review/HANDOFF updates and the authorized push. This report is committed separately so it can record the exact implementation SHA without a self-referential hash.
+
+## Independent review fix — round 1
+
+Fix base: `f3852216a70fb5051cad0a2403ccf2dff87cdd05`. Task date: 2026-10-11.
+
+The controller supplied one Important finding: arena armor was prematurely rounded in the unchanged Task 2 derivation before reaching combat. A valid immutable renown armor roll of 6.65 was boosted to 7.32 rather than 7.315. A guaranteed balanced attack with base damage 20.5 therefore dealt 17 instead of the required 18. This finding invalidates the earlier no-blocking-concern self-review statement for the original checkpoint; the correction below is verified, while independent re-review remains controller-owned.
+
+Read the receiving-code-review skill, inspected the full finding and the `deriveStats` → `makeFighter` → final damage path, and reproduced both the wrong derived stat and its observable attack effect before changing production code.
+
+Smallest shared fix: remove only the final hundredths rounding from `deriveStats.arenaArmor`. Armor roll hundredths multiplied by integer percentage points now divide once by 10,000, retaining `6.65 × 1.1 = 7.315`. Combat already consumes that value and uses exact decimal factors with one final damage rounding, so no duplicate derivation or combat/renderer workaround is needed. Ordinary armor, effective attributes, item roll precision, overload, and all rule coefficients remain unchanged. This authorized file-map adjustment touches Task 2's shared `supabase/functions/_shared/domain/stats.ts`; the `DerivedStats.arenaArmor` number interface remains the same, but its arena-modifier intermediate can have more than two decimal places. Backend consumers must preserve that precision until their defined final rounding point.
+
+Added covering regressions:
+
+- `tests/domain/rules.test.ts` — **retains fractional renown arena armor without intermediate rounding**: derives ordinary armor 6.65 and exact arena armor 7.315 from a canonical bound item with a valid fractional immutable roll.
+- `tests/domain/combat.test.ts` — **preserves fractional bound arena armor through final attack damage rounding**: consumes the real derived fighter, verifies the first attack deals 18 and changes HP 100 → 82, verifies public effective armor 7.315, and confirms expedition armor stays 6.65. Hand-derived result: `20.5 × (1 − .02 × 7.315) = 17.50085`, which rounds upward to 18.
+
+Exact commands and results:
+
+```powershell
+npm test -- tests/domain/combat.test.ts tests/domain/rules.test.ts -t "fractional.*armor"
+# RED, exit 1, 23:25:58.
+# Test Files 2 failed (2); Tests 2 failed | 108 skipped (110).
+# Combat actual damage 17 / healthAfter 83, expected 18 / 82.
+# Shared stats actual arenaArmor 7.32, expected 7.315.
+
+npm test -- tests/domain/combat.test.ts tests/domain/rules.test.ts
+# GREEN, exit 0, 23:26:14.
+# Test Files 2 passed (2); Tests 110 passed (110).
+# Includes 46 combat tests and 64 rules/build/catalog/resource tests.
+
+npm run typecheck
+# exit 0; tsc --noEmit; no diagnostics.
+
+npm test
+# exit 0, 23:26:23.
+# Test Files 5 passed (5); Tests 146 passed (146).
+
+git diff --check
+git diff --cached --check
+# exit 0; no whitespace errors.
+```
+
+Vitest commands used the already verified necessary approved escalation for Windows shared transformed-module cache isolation; no repeated environment investigation or harness workaround. Self-review confirmed exactly one bound armor modifier, unchanged ordinary/expedition armor, unchanged public/domain type shapes and no new premature damage rounding. Source fix, the two tests and this appended report are committed together; the ignored scratch report is copied identically. No app/browser/build rerun, preview interruption, visual-lane changes, HANDOFF staging, helper/reviewer spawning or push. Independent scoped re-review/publication remain with the controller. No remaining fix-specific limitation identified.

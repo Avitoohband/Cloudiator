@@ -1,12 +1,13 @@
 # Task 14 implementation report: battle-log replay with consistent controls
 
-Status: **DONE_WITH_CONCERNS**. Implemented and verified locally, ready for independent review. The concerns are listed under "Limitations".
+Status: **DONE_WITH_CONCERNS**. Implemented, independently reviewed (spec Pass, quality Pass, visual Pass, ready to merge; see `task-14-review.md`), and its review Minors fixed. The concerns are listed under "Limitations".
 
 - Date: 2026-10-12, Asia/Jerusalem. Owner: Claude (fresh implementer; the controller reviews and integrates).
 - Branch: `claude/task-14`, worktree `C:\Avi\Studies\Projects\Cloudiator-replay`. Base: `9b39edc`, the pushed integration checkpoint (Tasks 1–6, 11 and 12 reviewed).
 - Commits:
   - `344521b`: `feat: animate authoritative battle replays` (source, art, tests, the art-review note).
-  - The follow-up commit: this report and `task-14-evidence/`.
+  - `6607017`: this report and `task-14-evidence/`.
+  - The review-fix commit recorded in `task-14-review.md`: the `startGame` boot race and `window.onblur`/`onfocus` restore, local-day dates, reward keys, a development-only warning when a non-gladiator matches no creature art, and the review record. After it: 296 unit tests, build, static scan (4 routes, 81 assets) and the development browser suite all green.
 - Nothing was pushed or merged. No Supabase command, database, `supabase/**` file or other checkout was touched.
 
 ## Delivered behaviour
@@ -272,6 +273,7 @@ The art review image is `docs/operations/art-review/closeups.png` (see the "Task
   - camp click-to-replay and arena staging (Task 17);
   - the expedition view (Task 15).
 - **Fixture assumptions.** The NPC and creature snapshots follow the assumptions above. Task 9's fallback factory and Task 8's encounter factory may differ: rounding, creature base damage and participant ids.
+- **Creature ids.** Producers must emit `creature:<manifest id>` participant ids for expedition enemies. A non-gladiator that matches nothing is drawn as an NPC fallback, with a development-only console warning. This is recorded in HANDOFF as a Task 8/9 rule.
 - **Bundle size.**
   - `assets.ts` still inlines every atlas and map JSON in the lazy scene chunk, so the replay also loads camp and expedition map data. Splitting it per scene is still open.
   - The panel chunk embeds `manifest.json` (about 66 KB raw) to label creatures.

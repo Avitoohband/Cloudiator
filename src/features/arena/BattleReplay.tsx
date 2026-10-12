@@ -36,7 +36,8 @@ let activeLoops = 0;
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const decimals = (n: number) => `${Math.round(n * 100) / 100}`;
 const seconds = (ms: number) => `${(ms / 1000).toFixed(2)} s`;
-const day = (ms: number) => new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' }).format(ms);
+/** The viewer's own calendar day, so a date near midnight is never off by one. */
+const day = (ms: number) => new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(ms);
 /** 'sword:1:common' → 'Sword (tier 1, common)'; public layer ids such as 'weapon-sword' → 'Sword'. */
 function itemName(id: string): string {
   const [template, tier, kind] = id.split(':');
@@ -281,7 +282,7 @@ function Rewards({ summary, scope }: { summary: ActivitySummary; scope: string }
   const rating = summary.ratingDelta === undefined ? null : summary.ratingDelta === 0 ? 'No rating change' : `Rating ${summary.ratingDelta > 0 ? '+' : ''}${summary.ratingDelta}`;
   return <div className={styles.rewards}>
     <p className={styles.note}>{scope}</p>
-    <ul>{parts.length ? parts.map(p => <li key={p}>{p}</li>) : <li>No rewards</li>}{rating && <li>{rating}</li>}</ul>
+    <ul>{parts.length ? parts.map((p, i) => <li key={`${i}-${p}`}>{p}</li>) : <li>No rewards</li>}{rating && <li>{rating}</li>}</ul>
   </div>;
 }
 

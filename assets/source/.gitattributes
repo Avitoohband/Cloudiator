@@ -1,0 +1,2 @@
+# provenance.json is generated and compared byte-for-byte by build-assets.mjs --check.
+provenance.json -text

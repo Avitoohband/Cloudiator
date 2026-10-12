@@ -64,3 +64,26 @@ The maintained source is indigo-channel-ops/.agents/SKILL-UPKEEP.md, currently:
 C:\Users\Avi_OP_PC\Documents\Youtube Channel Videos\.agents\SKILL-UPKEEP.md.
 User-level Codex and Claude instructions mirror this policy so it applies
 outside this repository too; keep those copies consistent when it changes.
+
+# Supabase CLI — persistent project override
+
+Avi approved this local override on 2026-10-12 for the `supabase:supabase`
+skill's **Supabase CLI** and **Making and Committing Schema Changes** sections.
+Keep vendor skill caches unchanged; this project instruction survives package
+updates and supplements their existing CLI discovery and migration workflow.
+
+Observed with Supabase CLI **2.120.0**: `db query --local --file` rejects the
+multi-statement identity SQL source with `cannot insert multiple commands into
+a prepared statement`. Single-statement queries work. Check the installed
+version and current `--help` before treating this as a continuing limitation.
+
+For a multi-statement source, use the tested local-container `psql` fallback
+documented in [the migration guide](docs/operations/migrations.md). Confirm
+the named container belongs to the intended local test stack, pipe the source
+to `docker exec -i ... psql -v ON_ERROR_STOP=1`, and check the exit status.
+Never apply this fallback to an unrelated or hosted database. It iterates SQL
+without adding migration history; CLI migration generation, inspection,
+advisors and clean reset/replay remain separate required checks.
+
+Keep status output, gateway configuration and credential-bearing files out of
+diagnostic output. Record commands and sanitized results, never key values.

@@ -48,7 +48,7 @@ export function parseCommand(value: unknown): GameCommand | null {
 
 export type CommandDependencies = {
   verifyActor(request: Request): Promise<Actor>;
-  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator'>;
+  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan'>;
   allowedOrigins: readonly string[];
 };
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
@@ -72,8 +72,9 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (command.kind !== 'create-character') return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
-    const result = await deps.database.createGladiator(actor, command);
+    if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    const result = command.kind === 'create-character' ? await deps.database.createGladiator(actor, command)
+      : await deps.database.plan(actor, command as Extract<GameCommand, { kind: 'edit-schedule' | 'queue-build' | 'cancel-build' }>);
     return jsonResponse(result, result.ok ? 200 : statusFor(result.code), origin);
   } catch { return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin); }
 }

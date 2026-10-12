@@ -8,7 +8,7 @@ export const ownerFixture: OwnerState = {
   currentBuild: { version: 1, classId: 'guardian', stance: 'balanced',
     allocations: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 },
     equipment: { weapon: null, offHand: null, head: null, body: null, feet: null } },
-  pendingBuild: null,
+  pendingBuild: null, buildVersion: 1,
   schedule: { morning: { kind: 'training' }, afternoon: { kind: 'expedition', expeditionId: 'woodland' }, evening: { kind: 'rest' } },
   scheduleVersion: 1, wallets: { money: 100, renown: 0 }, reservedFees: { money: 0, renown: 0 },
   inventory: [], inventoryCapacity: 60,

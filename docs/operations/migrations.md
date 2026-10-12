@@ -1,5 +1,33 @@
 # Local identity backend and migrations
 
+## Task 6 planning migration and worker boundary
+
+M02 is **`supabase/migrations/20261012121232_build_schedule.sql`**, generated with CLI 2.120.0:
+
+```powershell
+Get-Content supabase/sql/02-build-schedule.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1
+npx supabase db lint --local --schema public,private --fail-on warning
+npx supabase db advisors --local --type all --level info --fail-on warn
+npx supabase db pull build_schedule --local --schema public,private --yes
+npx supabase migration list --local
+npx supabase db reset --local --no-seed --yes *> .task6-reset.log
+npm run test:db -- tests/db/build-schedule.test.ts tests/db/identity.test.ts
+```
+
+The CLI-generated uncommitted `migra` diff required review completion: move cross-schema triggers after their private functions, retain explicit function and table revocations/grants, preserve the view's security-invoker option, and add the source's existing-character schedule-history backfill. Schema diffing does not capture that data backfill. The first replay's security regression found inherited mutation privileges on `pending_build_items` and `schedule_revisions`; explicit source-equivalent revoke/regrant statements corrected the draft. A second clean replay passed both suites (26 tests), real Edge HTTP, lint, and advisors (only two INFO unused indexes). M01 was unchanged. Once committed, M02 is immutable.
+
+All three public backend-only RPCs are `(actor_id uuid, operation_id uuid, input jsonb) returns jsonb`: `edit_schedule`, `queue_build`, and `cancel_build`. `input` is the server-only `{command, prepared}` envelope; HTTP accepts only canonical `GameCommand`. Cancellation includes the canonical expected version despite the plan's abbreviated two-argument signature. `OwnerState.buildVersion` is the queue/replace/cancel revision; `currentBuild.version` stays unchanged until activation. `PendingBuildView.reservedItemIds` records the reserved item IDs.
+
+Mutation lock order is account advisory lock `hashtextextended(actor_id::text,0)`, then its gladiator row, builds/schedules/wallet and item rows in ID order. Read the database clock after acquiring the account/character lock. Task 7 must share this order and the common slot cutoff. A new mutation returns transient, unrecorded `processing` while `processed_slot_index` is behind database time; a matching committed receipt replays before that check and before new preparation validation. Defined business failures are retained; changed payload reuse returns conflict.
+
+`schedule_revisions` retains phase, version, choice, received milliseconds and effective slot. For historical snapshots, select the latest revision for that character and phase with `effective_slot_index <= slot`, ordered by effective slot then version descending. The baseline contains all three initial choices; future edits never rewrite it. `schedules.schedule` is the owner's latest repeating plan, not historical activity authority.
+
+`private.pending_build_preparations` stores the canonical validated snapshot (including rules version), derived stamina maximum, operation ID and received time. It has no client schema/table access and is excluded from owner DTOs and public base tables. `private.apply_pending_build(gid uuid,boundary_slot bigint) returns boolean` is a backend-only atomic application primitive: it takes the common locks, refuses earlier slots, returns false when nothing is pending, consumes the held fee once, writes one ledger row, switches item reservations/current build, preserves absolute stamina with a downward clamp, computes unspent points from current earned points, and clears pending state. Task 7 alone owns chronological settlement, the global cutoff/barrier and checkpoint advancement; call this primitive after prior-slot settlement and before new-slot snapshots. It does not advance a checkpoint, award rewards or implement a scheduler.
+
+Task 8 sale/list/discard commands must take the same locks and require no active or pending item reservation. `pending_build_items` tracks every selected item even when it is also currently equipped; the item guard rejects deletion, transfer, quantity/stat changes while reserved. Replacement/cancel releases only pending reservations, retaining current equipment. Wallet money includes held funds; spendable money is money minus held reservations. Fees leave the wallet only at activation.
+
+The controller authorized the deliberate local reset/replay exception to service preservation. The existing Edge runtime remained up (no manual serve restart), real Edge tests passed afterward, and preview port 3000 returned HTTP 200. Capture reset/startup output to ignored logs and never publish raw credentials.
+
 Task 4 uses Supabase CLI **2.120.0**, supabase-js **2.117.3**, npm Deno **2.9.6**, and PostgreSQL test driver **postgres 3.4.7**, all pinned. Node **22.19.0** and Docker **29.8.2** were verified; the local database image is PostgreSQL **17.11.0.004**. The test driver provides independent pooled SQL transactions and trusted local fixture setup; production mutations use Supabase RPC, not this driver.
 
 Only the local `Cloudiator` stack is used here. Do not link, reset, or otherwise reuse unrelated hosted projects. Never print `supabase status` credentials, gateway configuration, or local environment files. The test runner reads status into memory and refuses non-loopback URLs. CLI status/telemetry and Docker may require the approved Windows sandbox escalation.

@@ -1,12 +1,12 @@
 // Six ambient camp NPCs (two merchants, trainer, cook, healer, gate guard), fully composed per frame.
 import { flatten, renderLayers } from './rig.mjs';
 import { NPC_ACTIONS } from './poses.mjs';
-import { RAMP, SKIN, apron, beard, body, cap, cape, hair, heavyArmor, held, helmet, hood, kilt, robe, tool, tunic, weapon } from './outfits.mjs';
+import { RAMP, SKIN, apron, beard, body, cap, cape, hair, headband, heavyArmor, held, helmet, hood, kilt, robe, tool, tunic, weapon } from './outfits.mjs';
 
 export const NPCS = [
   {
     id: 'smith', name: 'Brutus the Smith', role: 'merchant-weapons',
-    layers: [body(SKIN.dark), kilt(RAMP.leather, 0.6), apron(RAMP.leather), beard(RAMP.grayHair), tool('hammer')],
+    layers: [body(SKIN.dark), kilt(RAMP.leather, 0.6), apron(RAMP.leather), beard(RAMP.grayHair), cap(RAMP.leather), tool('hammer')],
   },
   {
     id: 'armorer', name: 'Livia the Armorer', role: 'merchant-armor',
@@ -14,7 +14,7 @@ export const NPCS = [
   },
   {
     id: 'trainer', name: 'Doctore Cassius', role: 'trainer',
-    layers: [body(SKIN.tan), tunic(RAMP.crimson, { skirt: 0.6, sleeves: 0.5 }), beard(RAMP.grayHair), tool('staff')],
+    layers: [body(SKIN.tan), tunic(RAMP.crimson, { skirt: 0.6, sleeves: 0.5 }), hair(RAMP.blackHair, 'short'), beard(RAMP.grayHair), headband(RAMP.gold), tool('staff')],
   },
   {
     id: 'cook', name: 'Old Marta', role: 'cook',

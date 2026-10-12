@@ -4,6 +4,7 @@
 import { createRandom, hashSeed } from '../tools/random.mjs';
 import { ARENA } from './props.mjs';
 import { TILESETS, tileVariants } from './tiles.mjs';
+import { ENCOUNTER_CREATURES } from './creatures.mjs';
 
 export const CAMP = { width: 46, height: 46, arenaCentre: [23, 23] };
 
@@ -147,7 +148,7 @@ export function buildCamp(propMeta) {
   }
   b.place('gate-pillar', 42, 20);
   b.place('gate-pillar', 42, 24);
-  b.place('gate-arch', 42, 21);
+  b.place('gate-arch', 42, 21, { interact: 'expedition-gate' });
   for (let y = 0; y < H; y += 1) for (let x = 0; x < W; x += 1) {
     const outside = x < 3 || y < 3 || x > 42 || y > 42;
     if (!outside || (x > 42 && y >= 20 && y <= 24)) continue;
@@ -216,7 +217,7 @@ export function buildCamp(propMeta) {
   const rest = [];
   b.place('tent-large', 15, 31);
   b.place('tent-small', 19, 31);
-  [[15, 35], [17, 35], [19, 35], [15, 37], [17, 37], [19, 37], [15, 39], [17, 39]].forEach(([x, y], i) => {
+  [[15, 35], [17, 35], [19, 35], [15, 37], [17, 37], [19, 37], [15, 39], [17, 39], [19, 39], [15, 41], [17, 41], [19, 41]].forEach(([x, y], i) => {
     b.place(i % 2 ? 'bedroll-crimson' : 'bedroll-teal', x, y);
     rest.push({ id: `sleep-${i}`, kind: 'sleep', x, y, facing: 'se' });
   });
@@ -239,13 +240,13 @@ export function buildCamp(propMeta) {
   b.zone('rest', 'Resting quarters', { x: 14, y: 30, w: 14, h: 12 }, rest);
 
   // --- merchant stalls
-  b.place('stall-weapons', 17, 5);
-  b.place('stall-armor', 23, 5);
+  b.place('stall-weapons', 17, 5, { interact: 'merchant-weapons' });
+  b.place('stall-armor', 23, 5, { interact: 'merchant-armor' });
   const merchants = [
     { id: 'merchant-weapons', kind: 'merchant-weapons', x: 18, y: 7, facing: 'sw', npc: 'smith' },
     { id: 'merchant-armor', kind: 'merchant-armor', x: 24, y: 7, facing: 'sw', npc: 'armorer' },
   ];
-  [[18, 9], [19, 9], [24, 9], [25, 9], [21, 10]].forEach(([x, y], i) => merchants.push({ id: `customer-${i}`, kind: 'browse', x, y, facing: 'se' }));
+  [[18, 9], [19, 9], [24, 9], [25, 9], [21, 10], [17, 10], [20, 10], [23, 10], [26, 10]].forEach(([x, y], i) => merchants.push({ id: `customer-${i}`, kind: 'browse', x, y, facing: 'se' }));
   for (const [f, x, y] of [['crate', 16, 5], ['barrel', 21, 5], ['sacks', 22, 5], ['crate', 27, 5], ['barrel', 27, 6], ['banner-crimson', 20, 4], ['torch/0', 16, 10], ['torch/0', 28, 10]]) {
     b.place(f, x, y, f.startsWith('torch') ? { animation: 'torch' } : {});
   }
@@ -332,7 +333,7 @@ export function buildExpedition(id, propMeta) {
   };
   const encounters = [1, 2, 3].map(index => {
     const [px, py] = pointAt(index / 4).map(Math.floor);
-    return { index, x: px, y: py, enemyX: px + 1, enemyY: py - 1, facing: 'se', enemyFacing: 'sw' };
+    return { index, x: px, y: py, enemyX: px + 1, enemyY: py - 1, facing: 'se', enemyFacing: 'sw', creature: ENCOUNTER_CREATURES[id][index - 1] };
   });
   const safePoint = (() => {
     const offsets = [];

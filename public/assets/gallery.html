@@ -74,7 +74,7 @@
       g.globalCompositeOperation = 'multiply'; g.fillStyle = tint; g.fillRect(0, 0, c.width, c.height);
       g.globalCompositeOperation = 'destination-in'; g.drawImage(a.img, f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
     }
-    const out = { canvas: c, anchor: f.anchor };
+    const out = { canvas: c, anchor: f.anchorPx };
     tintCache.set(id, out);
     return out;
   }
@@ -103,8 +103,8 @@
   const glad = manifest.actors.gladiator;
   const state = {
     action: 'idle', dir: 'se', speed: 1,
-    layers: new Set(['body', 'cloth', 'hair', 'weapon-sword', 'offhand-shield', 'held']),
-    cloth: '#22a39d', hair: '#a8693a',
+    layers: new Set(['body', 'cloth', 'hair', 'accent', 'weapon-sword', 'offhand-shield', 'held']),
+    skin: '#ffffff', cloth: '#22a39d', hair: '#a8693a',
   };
   const controls = document.getElementById('glad-controls');
   const actionNames = Object.keys(glad.animations);
@@ -112,6 +112,7 @@
     <label>Action <select id="c-action">${actionNames.map(a => `<option>${a}</option>`).join('')}</select></label>
     <label>Direction <select id="c-dir"><option>se</option><option>sw</option><option>ne</option><option>nw</option></select></label>
     <label>Speed <select id="c-speed"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option></select></label>
+    <label>Skin <input type="color" id="c-skin" value="${state.skin}"></label>
     <label>Cloth <input type="color" id="c-cloth" value="${state.cloth}"></label>
     <label>Hair <input type="color" id="c-hair" value="${state.hair}"></label>
     ${glad.layers.map(l => `<label><input type="checkbox" data-layer="${l.id}" ${state.layers.has(l.id) ? 'checked' : ''}> ${l.id}</label>`).join('')}`;
@@ -120,6 +121,7 @@
     if (t.id === 'c-action') state.action = t.value;
     if (t.id === 'c-dir') state.dir = t.value;
     if (t.id === 'c-speed') state.speed = Number(t.value);
+    if (t.id === 'c-skin') state.skin = t.value;
     if (t.id === 'c-cloth') state.cloth = t.value;
     if (t.id === 'c-hair') state.hair = t.value;
     if (t.dataset.layer) { if (t.checked) state.layers.add(t.dataset.layer); else state.layers.delete(t.dataset.layer); }
@@ -132,7 +134,7 @@
     const frame = anim.frames[frameAt(anim, t)].replace(/^body\//, '');
     for (const layer of glad.layers) {
       if (!state.layers.has(layer.id)) continue;
-      const tint = layer.id === 'cloth' ? state.cloth : layer.id === 'hair' ? state.hair : undefined;
+      const tint = layer.tint ? state[layer.tint] : undefined;
       blitFrame(g, glad.atlas, `${layer.id}/${frame}`, x, y, scale, { flip, tint });
     }
     return anim;
@@ -170,7 +172,7 @@
       g.fillStyle = bgColor; g.fillRect(0, 0, c.width, c.height);
       const name = anim.frames[frameAt(anim, now * state.speed)];
       const f = atlases[atlasKey].frames[name];
-      blitFrame(g, atlasKey, name, (flip ? f.frame.w - f.anchor.x : f.anchor.x) * scale, f.anchor.y * scale, scale, { flip });
+      blitFrame(g, atlasKey, name, (flip ? f.frame.w - f.anchorPx.x : f.anchorPx.x) * scale, f.anchorPx.y * scale, scale, { flip });
     });
   }
   for (const npc of manifest.actors.npcs) for (const [action, dirs] of Object.entries(npc.animations)) for (const dir of Object.keys(dirs)) {
@@ -235,8 +237,8 @@
         items.push({ depth: sy, draw: () => drawGladiator(g, action, s.facing, t + offset, sx, sy, scale) });
       }
       if (map.expedition) {
-        const cr = manifest.actors.creatures.find(c => c.expedition === map.id);
         for (const e of map.expedition.encounters) {
+          const cr = manifest.actors.creatures.find(c => c.id === e.creature);
           const [px, py] = S(e.x + 0.5, e.y + 0.5);
           const [ex, ey] = S(e.enemyX + 0.5, e.enemyY + 0.5);
           items.push({ depth: py, draw: () => drawGladiator(g, 'attack', 'se', t + e.index * 500, px, py, scale) });

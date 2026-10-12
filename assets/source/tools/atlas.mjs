@@ -55,8 +55,9 @@ export function phaserAtlasJson(image, sheet, frames) {
       trimmed: false,
       spriteSourceSize: { x: 0, y: 0, w: r.w, h: r.h },
       sourceSize: { w: r.w, h: r.h },
-      pivot: { x: +(r.anchorX / r.w).toFixed(4), y: +(r.anchorY / r.h).toFixed(4) },
-      anchor: { x: r.anchorX, y: r.anchorY },
+      // Phaser reads `anchor` or `pivot` as a normalized origin, so the pixel anchor lives in `anchorPx`.
+      pivot: { x: r.anchorX / r.w, y: r.anchorY / r.h },
+      anchorPx: { x: r.anchorX, y: r.anchorY },
     }])),
     meta: { app: 'cloudiator assets/source/build-assets.mjs', image, format: 'RGBA8888', size: { w: sheet.width, h: sheet.height }, scale: '1' },
   };

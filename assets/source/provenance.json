@@ -9,109 +9,226 @@
   "files": [
     {
       "file": "actors/creatures.json",
-      "sha256": "1e5f4bc5fe0594c682457389c8a20a2c9ae552fbcbbe2fbdf93fe5e2f0cd91b6",
-      "bytes": 17057,
+      "sha256": "c96052d2a9c7b9f48fd89a26dfba9e32502dcbe1629b18ce3e06f140ebf95989",
+      "bytes": 40332,
       "source": "generated",
       "generator": "assets/source/generators/creatures.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/outfits.mjs",
+        "assets/source/generators/poses.mjs",
+        "assets/source/generators/rig.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "actors/creatures.png",
-      "sha256": "d369e01e3c5651088382fd42b4f1f5f85596a9d5475f3a80cdc6a31fb036a2bb",
-      "bytes": 21040,
+      "sha256": "f728488526e67209fbfac9bd3089a684c7474cda43952c0c3ed41ef5f6965dee",
+      "bytes": 46939,
       "source": "generated",
       "generator": "assets/source/generators/creatures.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/outfits.mjs",
+        "assets/source/generators/poses.mjs",
+        "assets/source/generators/rig.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "actors/gladiators.json",
-      "sha256": "067467e3b7b4c0f351dde0aac21f7c611c907e8b46297d9f9aceb4714e5baf09",
-      "bytes": 210442,
+      "sha256": "65f54cb4c4d47837aeef961991dcc20782c253d98f84c5713fadabc10742b2a8",
+      "bytes": 246434,
       "source": "generated",
       "generator": "assets/source/generators/gladiator.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/outfits.mjs",
+        "assets/source/generators/poses.mjs",
+        "assets/source/generators/rig.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "actors/gladiators.png",
-      "sha256": "fab3eb11a24fa2077f4f2bfcdc3173e88688c8db93a7a3feac9ffad7c5d50ced",
-      "bytes": 122674,
+      "sha256": "8b68d1a5b24214e5b07606507a00d7c0992fc92a349f2a57aad199d5a6b29618",
+      "bytes": 133029,
       "source": "generated",
       "generator": "assets/source/generators/gladiator.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/outfits.mjs",
+        "assets/source/generators/poses.mjs",
+        "assets/source/generators/rig.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "actors/npcs.json",
-      "sha256": "314cede9e96d471254544bb78e5b78c49f6814d64061cf32784c50fcc86a5dff",
-      "bytes": 37520,
+      "sha256": "ca935fb1df8f3369e80c12f8ce198bcc7eb80e3b53bd388d5afcb66894766891",
+      "bytes": 38024,
       "source": "generated",
       "generator": "assets/source/generators/npcs.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/outfits.mjs",
+        "assets/source/generators/poses.mjs",
+        "assets/source/generators/rig.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "actors/npcs.png",
-      "sha256": "f589925d0b311158fcc0d8be345367803095a544de6b832c95935fc561499ac3",
-      "bytes": 35889,
+      "sha256": "5568f7663cb608b0e35cc86b35879795609502bc42a9594a359b20ee440e64c4",
+      "bytes": 36224,
       "source": "generated",
       "generator": "assets/source/generators/npcs.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/outfits.mjs",
+        "assets/source/generators/poses.mjs",
+        "assets/source/generators/rig.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "camp/map.json",
-      "sha256": "cc5a8861da2f0d7ed171de399c947e6e9ce4148dbe71f43552b2b5cb4fd3751e",
-      "bytes": 101245,
+      "sha256": "b0a0a1dc055040fc0af2bc548e7c2ed939065bb77f52eaaac0d5f9bf9af41842",
+      "bytes": 102386,
       "source": "generated",
       "generator": "assets/source/generators/maps.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/creatures.mjs",
+        "assets/source/generators/props.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "camp/props.json",
-      "sha256": "c045d3b4e0cf9cb8b5060e316f0df3e4fcaedc76387ec749262ba7692a09b230",
-      "bytes": 17815,
+      "sha256": "cd388422cf145b7f071c2148800096ce109f08be6f62bf4b5656b263d2d30774",
+      "bytes": 19016,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "camp/props.png",
-      "sha256": "354e8a47825fbdb8982616781d49b1363b5f34034d9845d3baea5bcc35e45820",
-      "bytes": 29312,
+      "sha256": "63c58647f5096bf399a9e3cabe0c7614fc6f19ceab2080b2ae7a34c0ee054715",
+      "bytes": 30000,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "camp/tiles.json",
-      "sha256": "1c1ba3ffd4c57c205108b74805068581c4d6a98a1ba716c45124958d175bdfd8",
-      "bytes": 7632,
+      "sha256": "35ffe7cd6cd2c47288d2631801aed03ccce0c280e1b7b695a7f2506a952fd811",
+      "bytes": 7712,
       "source": "generated",
       "generator": "assets/source/generators/tiles.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "camp/tiles.png",
-      "sha256": "4a7b8f6f2dafb29a6b737e83a1239eaf2a5c4b841e9c1b661606565e570fd3b6",
-      "bytes": 11251,
+      "sha256": "ceaf9f6a979fedce18a3fd43d2bd0d28a03074a69ff9a010faecf1d83127c34b",
+      "bytes": 11472,
       "source": "generated",
       "generator": "assets/source/generators/tiles.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "effects/combat.json",
-      "sha256": "01a42a6b24dc90103f89d783b3de5d89c84065484e4b7ef809e93f0d8894846c",
-      "bytes": 5818,
+      "sha256": "f04cc1fa3144acc64f7c17c3bcc64d558e0b59f0382b0a6cc182d2acf3e0a6c1",
+      "bytes": 5872,
       "source": "generated",
       "generator": "assets/source/generators/effects.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
@@ -121,24 +238,52 @@
       "bytes": 2602,
       "source": "generated",
       "generator": "assets/source/generators/effects.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "expeditions/mountain-map.json",
-      "sha256": "46e9b250b8872686be658ecbf795c429398bc6a344dcd85aba68d586272821a2",
-      "bytes": 53275,
+      "sha256": "7f971e2c87594803f83e98c5da81337820ec609e87c131cef2c7dd5e9c4962c1",
+      "bytes": 53348,
       "source": "generated",
       "generator": "assets/source/generators/maps.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/creatures.mjs",
+        "assets/source/generators/props.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "expeditions/mountain.json",
-      "sha256": "272e19a4ab93a0dd7401b57e12519da687a30a2f04b6a96ef3018793379e81f8",
-      "bytes": 12261,
+      "sha256": "8bd17c7a49dbcf1512f8a44a786ea99ad05a6a56c6f549aed30200b825019e2e",
+      "bytes": 12631,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
@@ -148,24 +293,53 @@
       "bytes": 14252,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "expeditions/outpost-map.json",
-      "sha256": "96c97b13a3efc3d61caa4c9bf6662a0b9163631fabf391788ef6ef1625fc386e",
-      "bytes": 46499,
+      "sha256": "08abf8d2972c193122c671422a4078d79252c83e09efaacc636545de469b485d",
+      "bytes": 46566,
       "source": "generated",
       "generator": "assets/source/generators/maps.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/creatures.mjs",
+        "assets/source/generators/props.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "expeditions/outpost.json",
-      "sha256": "923ffde5d7c37a7f049566a9d603ecdcade0b616e80cddb291b762e05820329a",
-      "bytes": 13786,
+      "sha256": "4c5161e86c532ad0bdf3bca281d618377b8ddf58b4d75486074ecbc01fd8c157",
+      "bytes": 14191,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
@@ -175,24 +349,53 @@
       "bytes": 13877,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "expeditions/woodland-map.json",
-      "sha256": "caa914b7be0b57403e4438354789898592ed7c23de7c12424d9b128a0d23f319",
-      "bytes": 60764,
+      "sha256": "aecc44d800798de7a8c8917608038f0c76576bb24df5fecc11319723b2f93481",
+      "bytes": 60835,
       "source": "generated",
       "generator": "assets/source/generators/maps.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/creatures.mjs",
+        "assets/source/generators/props.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
       "file": "expeditions/woodland.json",
-      "sha256": "6b5367fd93131da87fe3bddbced96f567e15942bce44f7b83cc8a8e52e01f171",
-      "bytes": 12888,
+      "sha256": "6ceb7ad1cda73d14694166808ef01bda0d764dee801bde941a312c31d5b556c8",
+      "bytes": 13324,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
@@ -202,15 +405,42 @@
       "bytes": 16685,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/generators/tiles.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
+      "file": "gallery.html",
+      "sha256": "75fa262ad2db6ea7ad0c36877e1cf0a8e47651d3e8639df1faeafd1c6196235e",
+      "bytes": 14992,
+      "source": "hand-written inspection tool",
+      "generator": "assets/source/README.md",
+      "inputs": [],
+      "command": "none (edit directly)",
+      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+    },
+    {
       "file": "ui/icons.json",
-      "sha256": "710a501a8111d43ddbfc9840044fb28fd93afeda0b2000ecae51651344a7cd44",
-      "bytes": 7793,
+      "sha256": "88f0657759da002fa0bb7762bd98050f6b0049d2a1ed451d76296cc295d42bf9",
+      "bytes": 7867,
       "source": "generated",
       "generator": "assets/source/generators/effects.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
@@ -220,6 +450,14 @@
       "bytes": 2559,
       "source": "generated",
       "generator": "assets/source/generators/effects.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
       "command": "node assets/source/build-assets.mjs",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     }

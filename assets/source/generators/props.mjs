@@ -331,10 +331,10 @@ function gatePillar() {
 
 function gateArch() {
   // Wooden crossbeam with banner spanning three tiles along the y axis; drawn over walkers.
-  const P = proto(1, 3, 80);
+  const P = proto(1, 3, 80, 40);
   const { c, m, g } = P;
-  const a = up(g(0.5, 0.15), 62);
-  const b = up(g(0.5, 2.85), 62);
+  const a = up(g(0.5, -0.5), 62);
+  const b = up(g(0.5, 3.5), 62);
   c.stamp(m().polygon([a, b, add(b, [0, 7]), add(a, [0, 7])]), planks('wood1', 'wood2', 'wood3', 7));
   const mid = lerp(a, b, 0.5);
   c.stamp(m().polygon([add(mid, [-9, 8]), add(mid, [9, 8]), add(mid, [9, 30]), add(mid, [0, 25]), add(mid, [-9, 30])]), shade('teal1', 'teal2', 'teal3'));

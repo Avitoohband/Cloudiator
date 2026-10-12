@@ -35,20 +35,25 @@ export type AtlasKind = 'actor' | 'tiles' | 'props' | 'environment' | 'effects' 
 export type AtlasDef = { key: string; image: string; data: string; width: number; height: number; kind: AtlasKind; frames: Record<string, FrameRect> };
 export type AnimationDef = { atlas: string; frames: string[]; durationsMs: number[]; loop: boolean };
 export type DirectionalAnimation = { se: string; ne?: string };
-export type GladiatorLayer = { id: string; slot: string; tintable: boolean };
+export type TintKey = 'skin' | 'cloth' | 'hair';
+export type GladiatorLayer = { id: string; slot: string; tintable: boolean; tint?: TintKey };
+export type CreatureAction = 'idle' | 'walk' | 'attack' | 'hit' | 'defend' | 'evade' | 'defeat' | 'victory';
+export type EffectId = 'hit' | 'critical' | 'defend' | 'evade' | 'defeat' | 'victory' | 'dust' | 'arrow';
 export type ActorAnimations<A extends string> = Record<A, DirectionalAnimation>;
 
 export type MapStation = { id: string; kind: string; x: number; y: number; facing: Direction; partner?: string; npc?: string };
 export type MapZone = { id: string; label: string; bounds: { x: number; y: number; w: number; h: number }; walkableTiles: number; stations: MapStation[] };
 export type MapProp = {
   id: string; frame: string; x: number; y: number; w: number; d: number; sortY: number;
-  layer: PropMeta['layer']; occludes: boolean; walkable: boolean; animation?: string; interact?: string;
+  layer: PropMeta['layer']; occludes: boolean; walkable: boolean; animation?: string;
+  /** Click target: opens a shop or the expedition gate panel. */
+  interact?: 'merchant-weapons' | 'merchant-armor' | 'expedition-gate';
 };
 export type MapLight = { x: number; y: number; radius: number; color: string; kind: string };
 export type TilePoint = { x: number; y: number };
 export type ExpeditionLayout = {
   start: TilePoint; end: TilePoint; route: TilePoint[];
-  encounters: { index: 1 | 2 | 3; x: number; y: number; enemyX: number; enemyY: number; facing: Direction; enemyFacing: Direction }[];
+  encounters: { index: 1 | 2 | 3; x: number; y: number; enemyX: number; enemyY: number; facing: Direction; enemyFacing: Direction; creature: string }[];
   searchSpots: TilePoint[]; safePoint: TilePoint;
 };
 export type MapData = {
@@ -60,7 +65,8 @@ export type MapData = {
   arena?: { centre: [number, number]; radius: number };
   expedition?: ExpeditionLayout;
 };
-export type ProvenanceRecord = { file: string; sha256: string; bytes: number; source: string; generator: string; command: string; license: string };
+export type ProvenanceRecord = { file: string; sha256: string; bytes: number; source: string; generator: string; inputs: string[]; command: string; license: string };
+export type MapFile = { id: MapId; data: string; tilesAtlas: string; propsAtlas: string };
 
 export type AssetManifest = {
   version: number;
@@ -77,23 +83,32 @@ export type AssetManifest = {
     gladiator: {
       atlas: string; anchor: { x: number; y: number }; layers: GladiatorLayer[];
       animations: ActorAnimations<ActionId | AttackVariant>; attackVariants: Record<string, AttackVariant>; notes: string;
+      walk: { tilesPerSecond: number };
     };
     npcs: { id: string; name: string; role: string; atlas: string; animations: Partial<ActorAnimations<'idle' | 'walk' | 'talk' | 'tend'>> }[];
-    creatures: { id: string; name: string; expedition: Exclude<MapId, 'camp'>; atlas: string; animations: Partial<ActorAnimations<'idle' | 'walk' | 'attack' | 'hit' | 'defend' | 'evade' | 'defeat'>> }[];
+    creatures: { id: string; name: string; expedition: Exclude<MapId, 'camp'>; atlas: string; animations: Partial<ActorAnimations<CreatureAction>> }[];
+    /** Creature id shown at encounters 1, 2 and 3 of each expedition. */
+    encounterCreatures: Record<Exclude<MapId, 'camp'>, [string, string, string]>;
   };
-  effects: Record<string, string>;
+  effects: Record<EffectId, string>;
+  /** Catalog template id (prefix of 'sword:1:common') to gladiator layer id; null when not drawn. */
+  equipmentLayers: Record<string, string | null>;
+  depthRule: string;
+  /** Data file of each map, for provenance checks. */
+  mapFiles: MapFile[];
   icons: Record<string, string>;
   maps: MapData[];
   provenance: ProvenanceRecord[];
 };
 
-type PhaserAtlas = { frames: Record<string, { frame: { x: number; y: number; w: number; h: number }; anchor: { x: number; y: number }; meta?: PropMeta }>; meta: { size: { w: number; h: number } } };
-type RawManifest = Omit<AssetManifest, 'atlases' | 'maps'> & {
+type PhaserAtlas = { frames: Record<string, { frame: { x: number; y: number; w: number; h: number }; pivot: { x: number; y: number }; anchorPx: { x: number; y: number }; meta?: PropMeta }>; meta: { size: { w: number; h: number } } };
+type RawManifest = Omit<AssetManifest, 'atlases' | 'maps' | 'mapFiles'> & {
   atlases: Record<string, Omit<AtlasDef, 'key' | 'frames'>>;
-  maps: { id: MapId; data: string; tilesAtlas: string; propsAtlas: string }[];
+  maps: MapFile[];
 };
 
-const ATLAS_DATA: Record<string, unknown> = {
+/** Raw Phaser JSON-hash atlas tables keyed by their manifest data path (passed to the loader to avoid refetching). */
+export const ATLAS_DATA: Record<string, unknown> = {
   'actors/gladiators.json': gladiatorsAtlas, 'actors/npcs.json': npcsAtlas, 'actors/creatures.json': creaturesAtlas,
   'camp/tiles.json': campTilesAtlas, 'camp/props.json': campPropsAtlas,
   'expeditions/woodland.json': woodlandAtlas, 'expeditions/outpost.json': outpostAtlas, 'expeditions/mountain.json': mountainAtlas,
@@ -106,6 +121,15 @@ const MAP_DATA: Record<string, unknown> = {
 
 let cached: AssetManifest | null = null;
 
+/** The shared manifest is read-only: freeze it once so no consumer can mutate another's view. */
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  }
+  return value;
+}
+
 /** The complete asset package: manifest metadata joined with every atlas frame table and map. */
 export function loadAssetManifest(): AssetManifest {
   if (cached) return cached;
@@ -116,7 +140,7 @@ export function loadAssetManifest(): AssetManifest {
     if (!data) throw new Error(`Atlas data ${def.data} is not bundled in src/game/assets.ts`);
     const frames: Record<string, FrameRect> = {};
     for (const [name, f] of Object.entries(data.frames)) {
-      frames[name] = { x: f.frame.x, y: f.frame.y, w: f.frame.w, h: f.frame.h, anchorX: f.anchor.x, anchorY: f.anchor.y, ...(f.meta ? { meta: f.meta } : {}) };
+      frames[name] = { x: f.frame.x, y: f.frame.y, w: f.frame.w, h: f.frame.h, anchorX: f.anchorPx.x, anchorY: f.anchorPx.y, ...(f.meta ? { meta: f.meta } : {}) };
     }
     atlases[key] = { key, ...def, frames };
   }
@@ -125,7 +149,7 @@ export function loadAssetManifest(): AssetManifest {
     if (!data) throw new Error(`Map data ${entry.data} is not bundled in src/game/assets.ts`);
     return data;
   });
-  cached = { ...raw, atlases, maps };
+  cached = deepFreeze({ ...raw, atlases, maps, mapFiles: raw.maps });
   return cached;
 }
 
@@ -171,7 +195,7 @@ export function validateProvenance(manifest: AssetManifest): string[] {
   }
   const required = [
     ...Object.values(manifest.atlases).flatMap(a => [a.image, a.data]),
-    ...(rawManifest as unknown as RawManifest).maps.map(m => m.data),
+    ...manifest.mapFiles.map(m => m.data),
   ];
   for (const file of required) if (!records.has(file)) errors.push(`${file} has no provenance record`);
   return errors;

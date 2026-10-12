@@ -6,13 +6,29 @@ import { RAMP, SKIN, body, hood, kilt, lightArmor, shield, tool, trollFeatures, 
 
 export const CREATURES = [
   { id: 'dire-wolf', name: 'Dire Wolf', expedition: 'woodland' },
+  { id: 'timber-wolf', name: 'Timber Wolf', expedition: 'woodland' },
   { id: 'raider', name: 'Outpost Raider', expedition: 'outpost' },
+  { id: 'raider-archer', name: 'Raider Archer', expedition: 'outpost' },
   { id: 'rock-troll', name: 'Rock Troll', expedition: 'mountain' },
+  { id: 'frost-troll', name: 'Frost Troll', expedition: 'mountain' },
 ];
+
+/** Which creature appears at encounters 1, 2 and 3 of each expedition (visual variety only). */
+export const ENCOUNTER_CREATURES = {
+  woodland: ['dire-wolf', 'timber-wolf', 'dire-wolf'],
+  outpost: ['raider', 'raider-archer', 'raider'],
+  mountain: ['rock-troll', 'frost-troll', 'rock-troll'],
+};
 
 const HUMANOIDS = {
   raider: { scale: 1, layers: [body(SKIN.tan), kilt(RAMP.leather, 0.6), lightArmor(), hood(RAMP.crimson), weapon('axe'), shield(RAMP.wood, RAMP.steel, 0.85)] },
-  'rock-troll': { scale: 1.3, pose: { offhand: 'none' }, layers: [body(SKIN.troll), kilt(RAMP.fur, 0.5), trollFeatures(), tool('club')] },
+  'raider-archer': { scale: 1, pose: { offhand: 'none' }, attack: 'shoot', layers: [body(SKIN.dark), kilt(RAMP.leather, 0.6), lightArmor(), hood(RAMP.teal), weapon('bow')] },
+  'rock-troll': { scale: 1.3, pose: { offhand: 'none' }, layers: [body(SKIN.troll), kilt(RAMP.fur, 0.5), trollFeatures(SKIN.troll), tool('club')] },
+  'frost-troll': { scale: 1.3, pose: { offhand: 'none' }, layers: [body(SKIN.stone), kilt(RAMP.leather, 0.5), trollFeatures(SKIN.stone), tool('club')] },
+};
+const WOLF_PALETTES = {
+  'dire-wolf': { fur: ['fur1', 'fur2', 'fur3'], belly: 'gray1' },
+  'timber-wolf': { fur: ['leather1', 'leather2', 'leather3'], belly: 'sand1' },
 };
 
 // ------------------------------------------------------------- wolf
@@ -41,6 +57,9 @@ const WOLF_POSES = {
   evade: { durations: [90, 110, 130], loop: false, frames: [
     { crouch: 2, tail: 20 }, { dx: -5, lift: 4, legs: [-30, -30, 30, 30], tail: 50 }, { dx: -3, crouch: 1, tail: 30 },
   ] },
+  victory: { durations: [160, 200, 260, 420], loop: false, frames: [
+    { tail: 40, head: [0, -1] }, { tail: 60, head: [-1, -4], jaw: 1, crouch: -1 }, { tail: 70, head: [-1, -5], jaw: 1, crouch: -1 }, { tail: 50, head: [0, -2] },
+  ] },
   defeat: { durations: [160, 180, 180, 400], loop: false, frames: [
     { dx: -1, head: [-1, 1], hurt: true, crouch: 2, tail: 0 },
     { dx: -1, head: [0, 4], hurt: true, crouch: 5, tail: -10, legs: [30, 30, -30, -30] },
@@ -49,7 +68,7 @@ const WOLF_POSES = {
   ] },
 };
 
-function drawWolf(pose) {
+function drawWolf(pose, palette = WOLF_PALETTES['dire-wolf']) {
   const c = new PixelCanvas(FRAME, FRAME);
   const m = () => new Mask(FRAME, FRAME);
   const dx = pose.dx ?? 0;
@@ -62,8 +81,9 @@ function drawWolf(pose) {
   const bx = 29 + dx;
   const legs = pose.legs ?? [0, 0, 0, 0];
   const legLen = 9 - crouch * 0.6 - lying * 4;
-  const fur = shade('fur1', 'fur2', 'fur3');
-  const furDark = shade('fur2', 'fur3', 'outline');
+  const [f1, f2, f3] = palette.fur;
+  const fur = shade(f1, f2, f3);
+  const furDark = shade(f2, f3, 'outline');
   const ta = (pose.tail ?? 25) * D2R;
   const tailBase = [bx - 9, by - 2];
   const tailMid = [tailBase[0] - Math.cos(ta) * 5, tailBase[1] - Math.sin(ta) * 5];
@@ -79,7 +99,7 @@ function drawWolf(pose) {
   c.stamp(leg(bx - 6, legs[3], true), furDark);
   c.stamp(m().ellipse(bx, by - breath * 0.5, 9.5, 5.5 + breath * 0.3).ellipse(bx + 5, by - 1, 5.5, 6), (x, y, mk) => {
     const v = fur(x, y, mk);
-    return y > by + 3 && v !== 'fur1' ? 'gray1' : v;
+    return y > by + 3 && v !== f1 ? palette.belly : v;
   });
   c.stamp(leg(bx + 5, legs[0], false), fur);
   c.stamp(leg(bx - 7, legs[2], false), fur);
@@ -91,7 +111,7 @@ function drawWolf(pose) {
   const jaw = pose.jaw ? 2 : 0;
   c.stamp(m().polygon([[hx + 2, hy - 2], [hx + 9, hy + 0.5], [hx + 8.5, hy + 2], [hx + 2, hy + 3]]), fur);
   if (jaw) {
-    c.stamp(m().polygon([[hx + 2, hy + 3], [hx + 8, hy + 3 + jaw], [hx + 7.5, hy + 4.5 + jaw], [hx + 1.5, hy + 4.5]]), shade('fur2', 'fur3', 'outline'));
+    c.stamp(m().polygon([[hx + 2, hy + 3], [hx + 8, hy + 3 + jaw], [hx + 7.5, hy + 4.5 + jaw], [hx + 1.5, hy + 4.5]]), furDark);
     c.set(hx + 7, hy + 3, 'white'); c.set(hx + 5, hy + 3, 'white'); c.set(hx + 6, hy + 4, 'crimson2');
   }
   c.set(hx + 9, hy + 0.5, 'outline');
@@ -111,16 +131,16 @@ export function renderCreatures() {
     for (const action of CREATURE_ACTIONS) {
       let def;
       let names;
-      if (creature.id === 'dire-wolf') {
+      if (WOLF_PALETTES[creature.id]) {
         def = WOLF_POSES[action];
         names = def.frames.map((pose, i) => {
           const name = `${creature.id}/${action}/se/${i}`;
-          frames.push({ name, canvas: drawWolf(pose) });
+          frames.push({ name, canvas: drawWolf(pose, WOLF_PALETTES[creature.id]) });
           return name;
         });
       } else {
         const spec = HUMANOIDS[creature.id];
-        def = GLADIATOR_ACTIONS[action];
+        def = GLADIATOR_ACTIONS[action === 'attack' && spec.attack ? spec.attack : action];
         const painters = Object.fromEntries(spec.layers.map((p, i) => [`l${i}`, p]));
         names = def.frames.map((pose, i) => {
           const name = `${creature.id}/${action}/se/${i}`;

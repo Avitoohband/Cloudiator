@@ -16,6 +16,7 @@ export const SKIN = {
   tan: { hi: 'skin2', mid: 'skin3', lo: 'skin4', deep: 'dskin3' },
   dark: { hi: 'dskin1', mid: 'dskin2', lo: 'dskin3', deep: 'outline' },
   troll: { hi: 'troll1', mid: 'troll2', lo: 'troll3', deep: 'outline' },
+  stone: { hi: 'snow2', mid: 'stone1', lo: 'stone2', deep: 'stone4' },
 };
 export const RAMP = {
   gray: { hi: 'white', mid: 'gray1', lo: 'gray2', deep: 'gray3' },
@@ -199,10 +200,10 @@ export function beard(r = RAMP.blackHair) {
     const T = frameTools(ctx);
     const mask = T.regionMask(T.headBox(6, 6), (x, y) => {
       const [lx, ly] = T.headLocal(x, y);
-      return (lx / 6.2) ** 2 + (ly / 7.2) ** 2 <= 1 && ly > 1.4 && lx > -2.4;
+      return (lx / 6) ** 2 + (ly / 7.4) ** 2 <= 1 && ly > 2.3 && lx > -1.4;
     });
     c.stamp(mask, lit(r));
-    c.set(...T.H(3.3, 2.9), 'outline');
+    c.set(...T.H(3.3, 3.3), 'outline');
   });
 }
 
@@ -316,14 +317,76 @@ export function helmet(crest = RAMP.crimson) {
       const v = lit(RAMP.steel)(x, y, mk);
       return Math.abs(ly - 0.6) < 0.55 && v === 'steel2' ? 'steel3' : v;
     });
-    const arc = [[-5.8, -3], [-4.4, -7], [-1, -9], [2.4, -8.4], [4.8, -5.8]].map(([x, y]) => T.H(x, y));
-    c.stamp(m().curve(arc, 2), lit(crest));
+    if (crest) c.stamp(m().curve(CREST_ARC.map(([x, y]) => T.H(x, y)), 2), lit(crest));
+  });
+}
+
+const CREST_ARC = [[-5.8, -3], [-4.4, -7], [-1, -9], [2.4, -8.4], [4.8, -5.8]];
+/** Helmet crest on its own layer so the runtime can tint it with the player's colour. */
+export function helmetCrest(r = RAMP.gray) {
+  return ctx => ctx.part('head', c => {
+    const T = frameTools(ctx);
+    c.stamp(m().curve(CREST_ARC.map(([x, y]) => T.H(x, y)), 2), lit(r));
+  });
+}
+
+/** Player-colour accent worn over any armour: a chest sash and a front flap below the belt. */
+export function accent(r = RAMP.gray) {
+  return ctx => {
+    const { p, view } = ctx;
+    const T = frameTools(ctx);
+    const sc = T.sc;
+    ctx.part('torso', c => {
+      const a = lerp(p.nearShoulder, p.neck, 0.15);
+      const b = add(lerp(p.farHip, p.hip, 0.35), mul(T.up, 1 * sc));
+      c.stamp(m().line(a[0], a[1], b[0], b[1], 2), lit(r));
+      if (view === 'front') {
+        const top = add(lerp(p.nearHip, p.farHip, 0.5), mul(T.up, 0.6 * sc));
+        const bot = lerp(top, lerp(p.nearKnee, p.farKnee, 0.5), 0.62);
+        const w = mul(T.hv, 1.6 * sc);
+        c.stamp(m().polygon([add(top, mul(w, -1)), add(top, w), add(bot, w), add(bot, [0, 1]), add(bot, mul(w, -1))]), lit(r));
+      }
+    });
+  };
+}
+
+/** Cloth band around the head (NPC headwear). */
+export function headband(r = RAMP.crimson) {
+  return ctx => ctx.part('head', c => {
+    const T = frameTools(ctx);
+    const band = T.regionMask(T.headBox(7, 7), (x, y) => {
+      const [lx, ly] = T.headLocal(x, y);
+      return (lx / 6) ** 2 + ((ly + 0.3) / 6.4) ** 2 <= 1 && ly > -3.4 && ly < -1.8;
+    });
+    c.stamp(band, lit(r));
   });
 }
 
 // ---------------------------------------------------------------- weapons
-function drawBlade(c, g, ang, kind) {
+const REACH = { sword: [-2.5, 15], axe: [-3, 14], spear: [-9, 24], club: [-2, 15], hammer: [-2, 11.5], ladle: [-1, 13], staff: [-10, 15.5] };
+/** Slide a weapon along its own axis so both ends stay inside the frame (shafts slide freely, short weapons a little). */
+function keepInFrame(g, d, kind) {
+  const [back, front] = REACH[kind] ?? [0, 0];
+  let lo = -Infinity;
+  let hi = Infinity;
+  for (const axis of [0, 1]) {
+    if (Math.abs(d[axis]) < 1e-6) continue;
+    for (const t of [back, front]) {
+      const a = (2 - g[axis]) / d[axis] - t;
+      const b = (FRAME - 3 - g[axis]) / d[axis] - t;
+      lo = Math.max(lo, Math.min(a, b));
+      hi = Math.min(hi, Math.max(a, b));
+    }
+  }
+  if (lo > hi) return g;
+  const limit = kind === 'spear' || kind === 'staff' ? Infinity : 4;
+  const shift = Math.max(-limit, Math.min(limit, Math.min(hi, Math.max(lo, 0))));
+  return add(g, mul(d, shift));
+}
+
+function drawBlade(c, g0, ang, kind) {
   const d = dirVec(ang, 1);
+  const g = keepInFrame(g0, d, kind);
   const perp = [-d[1], d[0]];
   const at = t => add(g, mul(d, t));
   if (kind === 'sword') {
@@ -598,13 +661,13 @@ export function cap(r) {
   });
 }
 
-export function trollFeatures() {
+export function trollFeatures(skin = SKIN.troll) {
   return ctx => ctx.part('head', c => {
     const T = frameTools(ctx);
     const ear = ctx.view === 'front'
       ? [T.H(-3.6, -1.6), T.H(-8.2, -5.2), T.H(-3.2, 1.2)]
       : [T.H(4.2, -1.2), T.H(8.4, -4.8), T.H(4.4, 1.6)];
-    c.stamp(m().polygon(ear), lit(SKIN.troll));
+    c.stamp(m().polygon(ear), lit(skin));
     if (ctx.view === 'front') {
       c.set(...T.H(4, 2.6), 'white'); c.set(...T.H(2.7, 3), 'white');
       c.set(...T.H(2.8, -1), 'fire2');

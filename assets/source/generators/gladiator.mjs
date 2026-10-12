@@ -1,17 +1,19 @@
 // Gladiator layered animation package: one reusable body plus aligned equipment layers.
 import { renderLayers } from './rig.mjs';
 import { GLADIATOR_ACTIONS } from './poses.mjs';
-import { RAMP, SKIN, body, heavyArmor, held, helmet, hood, kilt, lightArmor, hair, shield, weapon, wristWraps } from './outfits.mjs';
+import { RAMP, SKIN, accent, body, heavyArmor, held, helmet, helmetCrest, hood, kilt, lightArmor, hair, shield, weapon, wristWraps } from './outfits.mjs';
 
 /** Runtime draw order (back to front). Depth inside a frame is resolved by slot clipping. */
 export const GLADIATOR_LAYERS = [
-  { id: 'body', slot: 'body', tintable: false },
-  { id: 'cloth', slot: 'cloth', tintable: true },
-  { id: 'hair', slot: 'hair', tintable: true },
+  { id: 'body', slot: 'body', tintable: true, tint: 'skin' },
+  { id: 'cloth', slot: 'cloth', tintable: true, tint: 'cloth' },
+  { id: 'hair', slot: 'hair', tintable: true, tint: 'hair' },
   { id: 'armor-light', slot: 'body-armor', tintable: false },
   { id: 'armor-heavy', slot: 'body-armor', tintable: false },
+  { id: 'accent', slot: 'accent', tintable: true, tint: 'cloth' },
   { id: 'head-hood', slot: 'head', tintable: false },
   { id: 'head-helmet', slot: 'head', tintable: false },
+  { id: 'head-helmet-crest', slot: 'head', tintable: true, tint: 'cloth' },
   { id: 'weapon-sword', slot: 'weapon', tintable: false },
   { id: 'weapon-axe', slot: 'weapon', tintable: false },
   { id: 'weapon-spear', slot: 'weapon', tintable: false },
@@ -26,8 +28,10 @@ const PAINTERS = {
   hair: hair(RAMP.gray, 'short'),
   'armor-light': lightArmor(),
   'armor-heavy': heavyArmor(),
+  accent: accent(RAMP.gray),
   'head-hood': hood(RAMP.leather),
-  'head-helmet': helmet(RAMP.crimson),
+  'head-helmet': helmet(null),
+  'head-helmet-crest': helmetCrest(RAMP.gray),
   'weapon-sword': weapon('sword'),
   'weapon-axe': weapon('axe'),
   'weapon-spear': weapon('spear'),

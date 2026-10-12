@@ -10,6 +10,19 @@ import { fileURLToPath } from 'node:url';
 import { PixelCanvas } from './canvas.mjs';
 import { decodePng, encodePng } from './png.mjs';
 
+/** Multiply tint, as the runtime does with Phaser setTint. */
+function tinted(img, tint) {
+  if (!tint) return img;
+  const out = new PixelCanvas(img.width, img.height);
+  out.data.set(img.data);
+  for (let i = 0; i < out.data.length; i += 4) {
+    out.data[i] = Math.round((out.data[i] * ((tint >> 16) & 255)) / 255);
+    out.data[i + 1] = Math.round((out.data[i + 1] * ((tint >> 8) & 255)) / 255);
+    out.data[i + 2] = Math.round((out.data[i + 2] * (tint & 255)) / 255);
+  }
+  return out;
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..', '..');
 const ASSETS = join(ROOT, 'public', 'assets');
@@ -46,18 +59,21 @@ function grid(rows, cell, bg) {
 const save = (name, c, s = 2) => { const big = upscale(c, s); writeFileSync(join(OUT, name), encodePng(big.width, big.height, big.data)); console.log(name, big.width, big.height); };
 
 const g = manifest.actors.gladiator;
+// Each sheet uses runtime-style multiply tints: [skin, cloth/accent/crest, hair].
 const loadouts = {
-  'sword-shield': ['body', 'cloth', 'hair', 'weapon-sword', 'offhand-shield', 'held'],
-  'axe-light-hood': ['body', 'cloth', 'armor-light', 'head-hood', 'weapon-axe', 'offhand-shield', 'held'],
-  'spear-heavy-helmet': ['body', 'cloth', 'armor-heavy', 'head-helmet', 'weapon-spear', 'held'],
-  'bow-light': ['body', 'cloth', 'hair', 'armor-light', 'weapon-bow', 'held'],
+  'sword-shield': [['body', 'cloth', 'hair', 'accent', 'weapon-sword', 'offhand-shield', 'held'], [0xffffff, 0x22a39d, 0x5a3418]],
+  'axe-light-hood': [['body', 'cloth', 'armor-light', 'accent', 'head-hood', 'weapon-axe', 'offhand-shield', 'held'], [0xcf9a74, 0xbd3429, 0x2a2024]],
+  'spear-heavy-helmet': [['body', 'cloth', 'armor-heavy', 'accent', 'head-helmet', 'head-helmet-crest', 'weapon-spear', 'held'], [0x9f6e4c, 0xf2b43d, 0x2a2024]],
+  'bow-light': [['body', 'cloth', 'hair', 'armor-light', 'accent', 'weapon-bow', 'held'], [0x7a5038, 0x6a4fb8, 0xe6c06a]],
 };
-for (const [id, layers] of Object.entries(loadouts)) {
+const tintKey = new Map(g.layers.map(l => [l.id, l.tint]));
+for (const [id, [layers, [skin, cloth, hair]]] of Object.entries(loadouts)) {
+  const tints = { skin, cloth, hair };
   const rows = [];
   for (const [action, dirs] of Object.entries(g.animations)) for (const dir of Object.values(dirs)) {
     rows.push(manifest.animations[dir].frames.map(name => {
       const c = new PixelCanvas(64, 64);
-      for (const l of layers) c.blit(frame(g.atlas, name.replace(/^body\//, `${l}/`)), 0, 0);
+      for (const l of layers) c.blit(tinted(frame(g.atlas, name.replace(/^body\//, `${l}/`)), tints[tintKey.get(l)]), 0, 0);
       return c;
     }));
   }
@@ -73,3 +89,4 @@ save('icons.png', grid([icons.slice(0, 19), icons.slice(19)], [16, 16], ['canvas
 for (const id of ['camp', 'woodland', 'outpost', 'mountain']) {
   execFileSync(process.execPath, [join(HERE, 'render-map.mjs'), id, join(OUT, `map-${id}.png`), '1', '--actors'], { stdio: 'inherit' });
 }
+execFileSync(process.execPath, [join(HERE, 'render-map.mjs'), 'camp', join(OUT, 'depth-probe-camp.png'), '1', '--depth-probe'], { stdio: 'inherit' });

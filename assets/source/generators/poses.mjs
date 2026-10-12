@@ -12,14 +12,14 @@ export const GLADIATOR_ACTIONS = {
   idle: {
     loop: true, views: ['front', 'back'], durations: [260, 220, 260, 220],
     frames: [
-      { ...stand, nearArm: [-14, 30], farArm: [32, 52], weaponAngle: 176 },
-      { ...stand, breath: 1, nearArm: [-13, 29], farArm: [33, 51], weaponAngle: 177 },
-      { ...stand, breath: 1, nearArm: [-13, 29], farArm: [34, 50], weaponAngle: 178, head: [0, -0.4] },
-      { ...stand, nearArm: [-14, 30], farArm: [32, 52], weaponAngle: 176 },
+      { ...stand, nearArm: [-14, 30], farArm: [12, 24], weaponAngle: 176 },
+      { ...stand, breath: 1, nearArm: [-13, 29], farArm: [13, 23], weaponAngle: 177 },
+      { ...stand, breath: 1, nearArm: [-13, 29], farArm: [14, 22], weaponAngle: 178, head: [0, -0.4] },
+      { ...stand, nearArm: [-14, 30], farArm: [12, 24], weaponAngle: 176 },
     ],
   },
   walk: {
-    loop: true, views: ['front', 'back'], durations: [110, 110, 110, 110, 110, 110],
+    loop: true, views: ['front', 'back'], durations: [120, 120, 120, 120, 120, 120],
     frames: [
       { lean: 1, nearLeg: [24, -6], farLeg: [-22, -20], nearArm: [-16, 30], farArm: [18, 25], weaponAngle: 196 },
       { lean: 1, nearLeg: [12, -4], farLeg: [-6, -42], nearArm: [-8, 30], farArm: [8, 25], weaponAngle: 186, breath: 1 },
@@ -185,4 +185,6 @@ export const NPC_ACTIONS = {
   },
 };
 
-export const CREATURE_ACTIONS = ['idle', 'walk', 'attack', 'hit', 'defend', 'evade', 'defeat'];
+export const CREATURE_ACTIONS = ['idle', 'walk', 'attack', 'hit', 'defend', 'evade', 'defeat', 'victory'];
+/** Walking speed that matches the walk cycle's stride (no foot sliding). */
+export const WALK_TILES_PER_SECOND = 1;

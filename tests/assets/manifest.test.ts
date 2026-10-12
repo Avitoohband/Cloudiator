@@ -4,6 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decodePng } from '../../assets/source/tools/png.mjs';
+import { skeleton } from '../../assets/source/generators/rig.mjs';
+import { GLADIATOR_ACTIONS } from '../../assets/source/generators/poses.mjs';
 import {
   ACTIONS,
   loadAssetManifest,
@@ -13,6 +15,8 @@ import {
   validateProvenance,
   type AssetManifest,
 } from '@/game/assets';
+import { frontEdgeY, needsSlices } from '@/game/depth';
+import { worldToScreen } from '@/game/iso';
 
 const ROOT = join(__dirname, '..', '..');
 const PUBLIC = join(ROOT, 'public', 'assets');
@@ -92,6 +96,18 @@ describe('shipped files', () => {
     for (const record of manifest.provenance) expect(existsSync(join(ROOT, record.generator)), record.generator).toBe(true);
   });
 
+  it('stores normalized pivots for Phaser and keeps pixel anchors under a separate key', () => {
+    for (const atlas of Object.values(manifest.atlases)) {
+      const json = JSON.parse(readFileSync(join(PUBLIC, atlas.data), 'utf8')) as { frames: Record<string, { frame: { w: number; h: number }; anchor?: unknown; pivot: { x: number; y: number }; anchorPx: { x: number; y: number } }> };
+      for (const [name, f] of Object.entries(json.frames)) {
+        expect(f.anchor, `${atlas.key}:${name} must not use Phaser's 'anchor' key for pixels`).toBeUndefined();
+        expect(f.pivot.x * f.frame.w, `${atlas.key}:${name}`).toBeCloseTo(f.anchorPx.x, 6);
+        expect(f.pivot.y * f.frame.h, `${atlas.key}:${name}`).toBeCloseTo(f.anchorPx.y, 6);
+        expect(f.pivot.x >= 0 && f.pivot.x <= 1 && f.pivot.y >= 0 && f.pivot.y <= 1, `${atlas.key}:${name}`).toBe(true);
+      }
+    }
+  });
+
   it('regenerates byte-identical files from the committed generators', () => {
     const out = execFileSync(process.execPath, [join(ROOT, 'assets', 'source', 'build-assets.mjs'), '--check'], { encoding: 'utf8' });
     expect(out).toMatch(/assets up to date/);
@@ -151,9 +167,12 @@ describe('gladiator animation package', () => {
 
   it('layers four weapon silhouettes, a shield, two armors and head gear over one reusable body', () => {
     expect(gladiator.layers.map(l => l.id)).toEqual(expect.arrayContaining([
-      'body', 'cloth', 'hair', 'armor-light', 'armor-heavy', 'head-hood', 'head-helmet',
+      'body', 'cloth', 'hair', 'armor-light', 'armor-heavy', 'accent', 'head-hood', 'head-helmet', 'head-helmet-crest',
       'weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow', 'offhand-shield',
     ]));
+    expect(Object.fromEntries(gladiator.layers.filter(l => l.tint).map(l => [l.id, l.tint]))).toEqual({
+      body: 'skin', cloth: 'cloth', hair: 'hair', accent: 'cloth', 'head-helmet-crest': 'cloth',
+    });
     const bodyFrames = Object.keys(manifest.atlases[gladiator.atlas].frames).filter(k => k.startsWith('body/'));
     for (const layer of gladiator.layers) {
       for (const frame of bodyFrames) {
@@ -163,6 +182,30 @@ describe('gladiator animation package', () => {
     const silhouettes = ['weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow'].map(id => framePixels(gladiator.atlas, `${id}/idle/se/0`).join(','));
     expect(new Set(silhouettes).size).toBe(4);
     expect(opaqueCount(framePixels(gladiator.atlas, 'armor-heavy/idle/se/0'))).toBeGreaterThan(opaqueCount(framePixels(gladiator.atlas, 'armor-light/idle/se/0')));
+  });
+
+  it('keeps the player colour visible over full heavy armour', () => {
+    const count = (layers: string[], tinted: string[]) => {
+      const cover = new Array(64 * 64).fill('');
+      for (const layer of layers) {
+        const px = framePixels(gladiator.atlas, `${layer}/idle/se/0`);
+        for (let i = 0; i < 64 * 64; i += 1) if (px[i * 4 + 3]) cover[i] = layer;
+      }
+      const visible = cover.filter(Boolean).length;
+      return cover.filter(l => tinted.includes(l)).length / visible;
+    };
+    const share = count(['body', 'cloth', 'armor-heavy', 'accent', 'head-helmet', 'head-helmet-crest', 'weapon-spear'], ['cloth', 'accent', 'head-helmet-crest']);
+    expect(share).toBeGreaterThan(0.08);
+  });
+
+  it('relaxes the off-hand arm in idle so shield-less loadouts do not hold an empty guard', () => {
+    for (const pose of GLADIATOR_ACTIONS.idle.frames) {
+      const { p } = skeleton(pose, 'front') as unknown as { p: Record<string, [number, number]> };
+      expect(p.farHand[1] - p.farShoulder[1], 'hand hangs below the shoulder').toBeGreaterThan(8);
+      expect(Math.abs(p.farHand[0] - p.farShoulder[0]), 'hand stays close to the body').toBeLessThan(5);
+    }
+    const { p: guard } = skeleton(GLADIATOR_ACTIONS.attack.frames[0], 'front') as unknown as { p: Record<string, [number, number]> };
+    expect(guard.farHand[1] - guard.farShoulder[1]).toBeLessThan(8);
   });
 
   it('keeps a transparent border so nearest-neighbour scaling never bleeds', () => {
@@ -191,10 +234,17 @@ describe('world actors', () => {
     }
   });
 
-  it('provides a fighting creature for each expedition', () => {
-    expect(manifest.actors.creatures.map(c => c.expedition)).toEqual(['woodland', 'outpost', 'mountain']);
+  it('provides two fighting creature variants for each expedition and assigns one per encounter', () => {
+    expect(manifest.actors.creatures.map(c => c.expedition)).toEqual(['woodland', 'woodland', 'outpost', 'outpost', 'mountain', 'mountain']);
+    for (const [expedition, ids] of Object.entries(manifest.actors.encounterCreatures)) {
+      expect(ids).toHaveLength(3);
+      for (const id of ids) expect(manifest.actors.creatures.find(c => c.id === id)?.expedition, `${expedition} ${id}`).toBe(expedition);
+      expect(new Set(ids).size, expedition).toBe(2);
+      const map = manifest.maps.find(m => m.id === expedition)!;
+      expect(map.expedition!.encounters.map(e => e.creature)).toEqual(ids);
+    }
     for (const creature of manifest.actors.creatures) {
-      for (const action of ['idle', 'walk', 'attack', 'hit', 'defend', 'evade', 'defeat'] as const) {
+      for (const action of ['idle', 'walk', 'attack', 'hit', 'defend', 'evade', 'defeat', 'victory'] as const) {
         expect(manifest.animations[creature.animations[action]!.se].frames.length, `${creature.id} ${action}`).toBeGreaterThanOrEqual(2);
       }
     }
@@ -207,14 +257,48 @@ describe('world actors', () => {
 });
 
 describe('camp and expedition maps', () => {
-  it('lays out the five camp zones with room for 50 gladiators each', () => {
+  it('lays out the five camp zones with dedicated stations and at least 50 walkable tiles each for overflow', () => {
     const camp = manifest.maps.find(m => m.id === 'camp')!;
     expect(camp.zones.map(z => z.id).sort()).toEqual(['arena', 'expedition-gate', 'merchants', 'rest', 'training']);
     for (const zone of camp.zones) expect(zone.walkableTiles, zone.id).toBeGreaterThanOrEqual(50);
+    const stations = (id: string) => camp.zones.find(z => z.id === id)!.stations.filter(s => !s.npc).length;
+    expect(stations('training')).toBeGreaterThanOrEqual(16);
+    expect(stations('rest')).toBeGreaterThanOrEqual(26);
+    expect(stations('arena')).toBeGreaterThanOrEqual(30);
+    expect(stations('merchants')).toBeGreaterThanOrEqual(9);
     const kinds = new Set(camp.zones.flatMap(z => z.stations.map(s => s.kind)));
     for (const kind of ['weights', 'practice', 'spar', 'sit', 'eat', 'sleep', 'merchant-weapons', 'merchant-armor', 'gate', 'arena-ring', 'arena-staging']) expect(kinds, kind).toContain(kind);
     expect(camp.props.some(p => p.occludes)).toBe(true);
     expect(camp.lights.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('marks merchant stalls as click targets', () => {
+    const camp = manifest.maps.find(m => m.id === 'camp')!;
+    expect(camp.props.filter(p => p.interact).map(p => p.interact).sort()).toEqual(['expedition-gate', 'merchant-armor', 'merchant-weapons']);
+  });
+
+  it('draws actors on tiles in front of wide props over them and actors behind them under them', () => {
+    let checked = 0;
+    for (const map of manifest.maps) {
+      const walk = (x: number, y: number) => map.walkable[y]?.[x] === '1';
+      for (const p of map.props) {
+        if (!needsSlices({ w: p.w, d: p.d }, p.layer)) continue;
+        const anchor = worldToScreen(p.x, p.y);
+        const depthAt = (x: number, y: number) => {
+          const feet = worldToScreen(x + 0.5, y + 0.5);
+          return { actor: feet.y - anchor.y, slice: frontEdgeY({ w: p.w, d: p.d }, feet.x - anchor.x) };
+        };
+        for (let x = p.x; x < p.x + p.w; x += 1) {
+          if (walk(x, p.y + p.d)) { const d = depthAt(x, p.y + p.d); expect(d.actor, `${map.id} ${p.id} front ${x}`).toBeGreaterThan(d.slice); checked += 1; }
+          if (walk(x, p.y - 1)) { const d = depthAt(x, p.y - 1); expect(d.actor, `${map.id} ${p.id} back ${x}`).toBeLessThan(d.slice); checked += 1; }
+        }
+        for (let y = p.y; y < p.y + p.d; y += 1) {
+          if (walk(p.x + p.w, y)) { const d = depthAt(p.x + p.w, y); expect(d.actor, `${map.id} ${p.id} front ${y}`).toBeGreaterThan(d.slice); checked += 1; }
+          if (walk(p.x - 1, y)) { const d = depthAt(p.x - 1, y); expect(d.actor, `${map.id} ${p.id} back ${y}`).toBeLessThan(d.slice); checked += 1; }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
   });
 
   it('gives every expedition a route with three encounters and a safe return point', () => {

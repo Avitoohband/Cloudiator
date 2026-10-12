@@ -6,13 +6,14 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "test": "vitest run",
-    "test:db": "vitest run --config vitest.db.config.ts",
+    "test:db": "node scripts/test-db.mjs",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && deno check --frozen --config supabase/functions/deno.json supabase/functions/game-command/index.ts && deno test --frozen --config supabase/functions/deno.json tests/backend/edge.deno.ts",
     "build": "next build",
     "verify:static": "node scripts/verify-static.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.117.3",
     "next": "16.4.0",
     "phaser": "4.2.1",
     "react": "19.3.0",
@@ -23,6 +24,9 @@
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "deno": "2.9.6",
+    "postgres": "3.4.7",
+    "supabase": "2.120.0",
     "typescript": "5.9.3",
     "vitest": "5.0.3"
   }

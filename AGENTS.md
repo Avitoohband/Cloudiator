@@ -85,5 +85,27 @@ Never apply this fallback to an unrelated or hosted database. It iterates SQL
 without adding migration history; CLI migration generation, inspection,
 advisors and clean reset/replay remain separate required checks.
 
+**Compare every generated migration with its SQL source before committing.**
+Avi approved this check on 2026-10-12. With CLI 2.120.0 (engine `migra`),
+`db pull <name> --local --yes` dropped objects the source defines, across
+M02, M03 and M04: extension declarations (`pg_net`, `pg_cron`), seed and
+configuration rows, `cron.schedule` calls, function ACLs (a new function then
+keeps PostgreSQL's default `EXECUTE` for `PUBLIC`), explicit table revokes,
+trigger ordering, data backfills and a view's `security_invoker` option.
+
+- Diff the draft against the source and list each missing item. Append the
+  missing statements verbatim from the source, after the objects they
+  depend on.
+- `migra` can also re-emit unchanged functions as `CREATE OR REPLACE`.
+  Confirm they are byte-identical to the previous migration before leaving
+  them in.
+- Prove the result with a clean `db reset --local --no-seed --yes` replay, then
+  check the replayed database, not just the file: function bodies and
+  `search_path`, ACLs for `anon`/`authenticated`/`service_role`, policies,
+  triggers and view options. Then run the owning tests, `db lint` and the
+  advisors.
+- Record what was appended in `docs/operations/migrations.md`. Committed
+  migrations stay immutable; a later fix goes in a new migration.
+
 Keep status output, gateway configuration and credential-bearing files out of
 diagnostic output. Record commands and sanitized results, never key values.

@@ -7,7 +7,8 @@ Status: **DONE_WITH_CONCERNS**. Ordered boundaries, Training/Rest settlement, fe
 Date: 2026-10-12, Asia/Jerusalem. Worktree `C:\Avi\Studies\Projects\Cloudiator-claude`, branch `claude/visual-track`.
 Base: `9b39edc2fc103f87bfead19993ae4ba37c5ace51` (contains reviewed Tasks 1–6 and 11/12).
 Source: **`0dea40c2401a678b1d8e9d4b32cac628d27261da`**, `feat: process recoverable authoritative activity slots`.
-M03: **`supabase/migrations/20261012135526_activities_jobs.sql`**. M01 and M02 are unchanged.
+Review fix pass: **`8aa29e547296cc48ff1c7e1f5794a77f14facf0b`**, `fix: address Task 7 review` (see [Review fix pass](#review-fix-pass-2026-10-12)).
+M03: **`supabase/migrations/20261012135526_activities_jobs.sql`**. M04: **`supabase/migrations/20261012143533_task7_review_fixes.sql`**. M01 and M02 are unchanged.
 
 The controller owns independent review, the HANDOFF update and the push. I spawned no helper or reviewer, and I did not push, merge or change branches. Codex's checkout `C:\Avi\Studies\Projects\Cloudiator` was only read, using `git --no-optional-locks ... diff` and file reads. Preview port 3000 was not touched.
 
@@ -34,14 +35,14 @@ The controller owns independent review, the HANDOFF update and the push. I spawn
 - **Coordinator lease.** The coordinator token is a fenced lease, so a stale coordinator receives `conflict`.
 - **Extension barrier.** `private.boundary_work(slot, phase, key, status)` lets later tasks register work, such as season close, that holds a phase while pending.
 - **Late-committed characters.** A never-started character whose creation committed after an earlier cohort froze joins the next cohort; its orientation extends to that cutoff. A *participating* straggler stops the boundary with `straggler` for operator action.
-- **`public.coordinate_work()`.** It takes the coordinator row with `SKIP LOCKED` and respects an unexpired external lease. It advances at most six boundaries per call, so catch-up is bounded and continues across calls. It skips provably empty boundaries. On its first run it starts at the earliest existing checkpoint, so offline slots are never skipped.
+- **`public.coordinate_work()`.** It takes the coordinator row with `SKIP LOCKED` and respects an unexpired external lease. It advances at most six boundaries per call, so catch-up is bounded and continues across calls. It skips provably empty boundaries. On its first run it starts at the earliest existing checkpoint, so offline slots are never skipped. Each boundary runs in its own subtransaction: a failing boundary rolls back only itself, the boundaries completed earlier in the pass stay committed, the pass reports `{ok:false, code:'boundary-failed', slotIndex, sqlstate}` (SQLSTATE only, never raw text), the boundary row persists `wait_reason='error'` with `last_error`, and the coordinator records `last_error`/`last_failed_slot`. All of these clear on the next failure-free pass or phase advance.
 
 ### Settlement
 
 `public.settle_activity(activity_id uuid, lease_token uuid) returns jsonb` follows the common lock order: account, character, activity, then job. In one transaction it:
 - verifies the current lease token;
 - inserts the permanent `private.settled_slots(gladiator, slot)` checkpoint;
-- applies `private.settle_rewards`: Training adds one earned and unspent point (versioned `trainingPoints`), and Rest sets current stamina to the current maximum;
+- applies `private.settle_rewards`: Training adds one earned and unspent point (versioned `trainingPoints`), and Rest sets current stamina to the current maximum. Since the fix pass the hook returns the settlement outcome `{rewards, result, success, replayExpiry, ratingDelta?}`, which `settle_activity` validates (fail closed on a malformed outcome) and completes with `activityId`, `resolvedKind`, `receiptId` and `settledAtMs`;
 - writes the receipt and the canonical `ActivitySummary`;
 - completes the activity and the job.
 
@@ -49,7 +50,7 @@ A retry of a committed settlement with the same token returns the stored receipt
 
 ### Jobs
 
-`private.jobs` has the kinds `prepare`, `simulation`, `reveal` and `settlement`, a unique `dedupe_key`, and a SQL-generated 256-bit seed. The `guard_job` trigger makes input, seed, rules version and identity immutable, forbids decreasing attempts and refuses deletion of unfinished jobs. Leases and tokens work as follows:
+`private.jobs` has the kinds `prepare`, `simulation`, `reveal` and `settlement`, a unique `dedupe_key`, and a 256-bit seed: jobs of an activity carry a copy of the authoritative `activity_snapshots.seed`, and `prepare` jobs (which have no activity) keep a job-local seed. The `guard_job` trigger makes input, seed, rules version and identity immutable, forbids decreasing attempts, refuses deletion of unfinished jobs, and enforces the status machine `pending→leased`, `leased→completed|pending|operator`, `operator→pending` (any status may renew itself): `completed` is terminal and `result` is written only by the `leased→completed` transition. Leases and tokens work as follows:
 - `public.claim_jobs(worker_id uuid, kind text, batch_limit integer) returns jsonb` uses `FOR UPDATE SKIP LOCKED` and caps each claim at 20 simple or 5 simulation jobs. Each claim gets a fresh token and a 120-second lease, and the retry keeps the same seed and input. Invalid arguments raise an error.
 - `public.renew_job(job_id, lease_token)` extends the lease without rotating the token.
 - `public.complete_job(job_id uuid, lease_token uuid, result jsonb) returns jsonb` validates preparation results:
@@ -60,7 +61,7 @@ A retry of a committed settlement with the same token returns the stored receipt
   It rejects settlement jobs, and simulation/reveal results go to the `private.accept_job_result` hook, which accepts none in Task 7.
 - `public.fail_job(job_id, lease_token, failure_code)` keeps only a sanitized `[a-z0-9-]` code.
 
-Attempts are counted per claim. The third failure, or the third expired lease, retains the job as `operator` with `last_failure`, and no fourth attempt happens. `private.resume_operator_job(id)` resumes the same seed and input; it is reachable through direct SQL only, because the private schema is not exposed. `private.job_attempts` logs job, attempt, worker, timing, outcome and failure code, never tokens or messages.
+Attempts are counted per claim. The third failure, or the third expired lease, retains the job as `operator` with `last_failure`, and no fourth attempt happens. `private.sweep_exhausted_leases(now_ms)` performs the expired-lease retention at the start of every claim, every `advance_boundary` call and every `coordinate_work` pass (before the coordinator's busy check, so it does not depend on the coordinator lease), so a worker killed on its final attempt surfaces as `wait:'operator'` without any further claim. `private.resume_operator_job(id)` resumes the same seed and input; it is reachable through direct SQL only, because the private schema is not exposed. `private.job_attempts` logs job, attempt, worker, timing, outcome and failure code, never tokens or messages.
 
 ### Dispatch
 
@@ -99,7 +100,7 @@ All RPCs are backend-only (`service_role`), `SECURITY INVOKER`, with an empty `s
 | Function | Returns |
 | --- | --- |
 | `advance_boundary(target_slot bigint, coordinator_token uuid) returns jsonb` | `{ok, slotIndex, phase, status:'complete'|'waiting', wait?, replayed?}`. Waits are `settlement`, `extension`, `preparation`, `integration`, `operator` or `straggler`. Errors are `{ok:false, code:'invalid'|'conflict'}`. |
-| `coordinate_work() returns jsonb` | `{ok, busy?, publishedSlot, currentSlot, boundaries[]}`. |
+| `coordinate_work() returns jsonb` | `{ok, busy?, publishedSlot, currentSlot, boundaries[]}`. An isolated boundary failure appears in `boundaries[]` as `{ok:false, code:'boundary-failed', slotIndex, sqlstate}` and ends the pass. |
 | `claim_jobs(worker_id uuid, kind text, batch_limit integer) returns jsonb` | An array of `JobLease`. |
 | `renew_job(job_id uuid, lease_token uuid) returns jsonb` | `{ok:true, expiresAtMs}` or `conflict`/`not-found`. |
 | `complete_job(job_id uuid, lease_token uuid, result jsonb) returns jsonb` | `{ok:true, jobId, replayed?}` or `conflict`/`invalid`/`not-found`. |
@@ -119,7 +120,7 @@ Later tasks replace these with exactly the same signatures in their own SQL sour
 | `private.boundary_pair(bigint)` | Tasks 16/19 | May convert opted-in Arena entrants to `tournament` on tournament slots. |
 | `private.activity_executor_ready(text)` and `private.prepare_activity_jobs(uuid)` | Tasks 9/16/19 | Add expedition, arena and tournament job creation; return the readiness of each kind. |
 | `private.accept_job_result(uuid,jsonb)` | Tasks 9/16/19 | Validate and accept simulation/reveal results, or use their own `commit_*` RPCs that call the same fencing checks. |
-| `private.settle_rewards(uuid)` | Tasks 9/16/19 | Add their kinds; return `CreditedRewards`. |
+| `private.settle_rewards(uuid)` | Tasks 9/16/19 | Add their kinds; return the settlement outcome `{rewards: CreditedRewards, result: 'completed'|'victory'|'defeat', success: boolean, replayExpiry, ratingDelta?}`. `settle_activity` fails closed on a malformed outcome and adds `activityId`, `resolvedKind`, `receiptId` and `settledAtMs`. Jobs created by `prepare_activity_jobs` must pass the snapshot seed. |
 | `private.boundary_published(bigint)` | Task 10 | Projection rows and revision. |
 
 ### Barrier and new tables
@@ -129,7 +130,7 @@ Later tasks replace these with exactly the same signatures in their own SQL sour
 
 ### TypeScript
 
-- **Domain types** (`_shared/domain/types.ts`): `ActivityKind`, `ActivityCosts`, `JobKind`, `PreparationInput`, `PreparationResult`, the frozen `ActivitySnapshot`, `SettlementInput`, `JobInput`, `JobLease<Input>` (id, token, expiry, kind, activity/gladiator/slot, immutable `snapshot` input, seed, rules version, attempt), `BoundaryReport`, `CoordinatorReport` and `WorkerReport`.
+- **Domain types** (`_shared/domain/types.ts`): `ActivityKind`, `ActivityCosts`, `JobKind`, `PreparationInput`, `PreparationResult`, the frozen `ActivitySnapshot`, `SettlementInput`, `JobInput`, `JobLease<Input>` (id, token, expiry, kind, activity/gladiator/slot, immutable `snapshot` input, seed, rules version, attempt), `BoundaryReport` (now also `sqlstate?`), `CoordinatorReport` (now also `code?`; the worker reports `code:'coordinator-unavailable'` when the coordination RPC itself is unreachable) and `WorkerReport` (now also `unrecorded`: failures whose fail RPC was unreachable; their leases expire and are reclaimed).
 - **RPC port** (`_shared/backend/database.ts`): `WorkerDatabase`, `JobOutcome`, `RenewOutcome`, `JobExecutor`, `ExecutorRegistry`, `WorkerDependencies { database, workerId, executors?, now? }` and `createWorkerDatabase(client)`.
 - **Worker** (`_shared/backend/jobs.ts`): `runWorker(deps: WorkerDependencies): Promise<WorkerReport>`, `prepareActivityV1(input)`, `DEFAULT_EXECUTORS` (`{ v1: { prepare } }`, keyed by persisted rules version; keep old versions registered), `WORKER_LIMITS`, `WorkerFailure` and `handleWorker(request, { secret, run })`.
 - **For Task 9:** the expedition `simulation`/`reveal` executors go into the registry, and `planExpedition(snapshot: ActivitySnapshot, seed, rules)` can read `snapshot.build`, `derived`, `costs` and `starting`.
@@ -140,9 +141,9 @@ The plan's Files list:
 - `supabase/sql/03-activities-jobs.sql`
 - `supabase/functions/game-worker/index.ts`
 - `supabase/functions/_shared/backend/jobs.ts`
-- `tests/db/activities.test.ts` (29 tests)
-- `tests/backend/worker.test.ts` (13 tests)
-- generated M03
+- `tests/db/activities.test.ts` (29 tests, 35 after the fix pass)
+- `tests/backend/worker.test.ts` (13 tests, 15 after the fix pass)
+- generated M03, and generated M04 from the fix pass
 
 Interface files named by the plan: `supabase/functions/_shared/backend/database.ts` and `supabase/functions/_shared/domain/types.ts`.
 
@@ -245,6 +246,66 @@ The final verification ran after a clean reset/replay. No source SQL was applied
 - Access: negative access for the owner, other owner, anonymous client, direct RPCs, private tables and `prosecdef`.
 - Scheduling and HTTP: cron registered, inert and executed; the dispatch budget of 2, then 3, then 0 (five per minute, only with work); the real Edge worker rejects anonymous, publishable and near-miss credentials directly and through the gateway, and its secret runs a full boundary; real pg_net delivery.
 
+## Review fix pass (2026-10-12)
+
+The independent review returned spec Pass with one gap, quality Pass, ready to merge with fixes. Commit **`8aa29e547296cc48ff1c7e1f5794a77f14facf0b`**, `fix: address Task 7 review`, resolves them. The previous fix-pass implementer had left uncommitted RED tests; they were judged test by test, kept where right, corrected where not (below), and every new test was watched failing for the right reason before any implementation.
+
+### Fixed now
+
+| Finding | Fix | Test |
+| --- | --- | --- |
+| **Important 1.** A job whose third lease expired never reached operator state: the sweep lived only in `claim_jobs`, `dispatch_workers` counts only claimable jobs, and the barriers check only `status='operator'`, so an Edge kill on attempt 3 stalled the world on `wait:'settlement'`/`'preparation'`. | `private.sweep_exhausted_leases(now_ms)` retains every lease expired at its attempt limit as `operator` (`last_failure='lease-expired'`, attempt row `expired`) with `FOR UPDATE SKIP LOCKED`; it runs at the start of `claim_jobs`, `advance_boundary` and `coordinate_work` (before the busy check, independent of the coordinator lease). | `moves a job whose third lease expired to operator state without another claim` (settlement at phase 1, through a busy `coordinate_work`) and `reports a preparation job whose third lease expired as an operator wait at phase 4`. The old test's manual fourth claim is gone. |
+| **M4.** `guard_job` let `completed` return to `pending` and a result change after completion. | Status machine in `guard_job`; `completed` rejects every update; `result` changes only on `leased→completed`. | `keeps completed jobs terminal with an immutable result`. |
+| **M5.** One deterministic exception rolled back all boundaries of a `coordinate_work` pass, left `wait_reason` stale, and made every worker return 503 because `runWorker` coordinates first. | Per-boundary subtransaction in `coordinate_work`; SQLSTATE-only failure record on the boundary (`wait_reason='error'`, `last_error`) and coordinator (`last_error`, `last_failed_slot`); `runWorker` catches a coordinate failure, reports `{ok:false, code:'coordinator-unavailable'}` and still claims. | `isolates a failing boundary inside coordinate_work and records only a sanitized failure` (two injected failures: the boundary-row insert of a later slot, and the settlement-job insert at phase 8) and the unit test `still claims and runs due jobs when coordination itself is unavailable`. |
+| **M8a.** `report.failed` incremented when the `fail` RPC itself threw. | Counted as `WorkerReport.unrecorded`. | `does not count a failure as recorded when the fail RPC itself is unreachable`. |
+| **M8b.** Two identical conflicts satisfied `results[0]` equal to `results[1]`. | The test asserts exactly one `operation_receipts` row per operation ID, collation-independent. | `serializes concurrent queue requests…` (Task 6 suite). |
+| **M8c.** No coordinator-level test of the clamp. | Coverage test: a pending Guardian build with Endurance 0 (maximum 100) applied at the boundary clamps 104 to 100 before the snapshot (`starting {100,100}`), then the Training debit leaves 80, fee 100 consumed. | `clamps stamina for a pending lower-Endurance build before the snapshot and the debit`. It passed on first run because the Task 6 primitive and the Task 7 recompute already behaved this way; its expected values (100/80) differ from the no-clamp values (104/84), so it discriminates. |
+
+### Gates implemented because they were small and safe
+
+- **M1 (implemented).** `private.settle_rewards` returns the settlement outcome `{rewards, result, success, replayExpiry, ratingDelta?}`; `settle_activity` fails closed on a malformed outcome and adds the identity fields. Task 9 can return `defeat`/`success:false` and Task 16 `ratingDelta` through the hook alone. Test: `builds the settlement summary from the settle_rewards hook outcome` (operator stand-in hook restored afterwards), plus the summary guard in the nine-slot test.
+- **M3 (implemented).** The frozen `activity_snapshots.seed` is authoritative for activity outcomes. `prepare_activity_jobs` copies it onto every job of that activity, so Task 9/16/19 simulation and reveal jobs created there inherit it. `prepare` jobs have no activity and keep a job-local seed that v1 preparation never reads. Test: `copies the authoritative snapshot seed onto the activity jobs`.
+
+### Recorded as gates
+
+- **M2.** `private.jobs` has no `depends_on`/dependency gating (spec 10.3), and the worker claims settlement before reveal. Task 9/19 must add dependency gating before a simulation→reveal→settlement chain exists; nothing in Task 7 creates such a chain.
+- **M6.** Lease renewal happens only before execution and uses the worker clock. Task 9 combat execution must renew during long simulations against database time.
+- **M7.** `replayExpiry {state:'expired'}` on Training/Rest would make the UI say the animation is gone. The canonical `ActivitySummary` offers no non-replay state; Task 10/13 must add one (or special-case non-combat kinds). The hook now owns `replayExpiry`, so the change is one line in `settle_rewards` when the contract exists.
+
+### Test corrections to the inherited RED set
+
+- The inherited isolation test expected stamina 84 after two Training slots; the correct value is 64 (104 − 20 − 20) with 11 earned points, which is what the suite proved. The assertion now checks `stamina: 64, earned: 11`.
+- The inherited M8b assertion ordered UUID text with `order by 1` under the database's `en_US.UTF-8` collation; it now compares a map of `operation_id → count`.
+
+### Migration M04
+
+`supabase/migrations/20261012143533_task7_review_fixes.sql`, generated by `npx supabase db pull task7_review_fixes --local --schema public,private --yes` (CLI 2.120.0, engine `migra`) after applying the updated source with the documented psql fallback, lint and advisors. The draft captured the new columns (`private.coordinator.last_failed_slot`, `private.boundaries.last_error`), the widened `boundaries_wait_reason_check` (now also `'error'`), the new `private.sweep_exhausted_leases(bigint)` and every changed body; it omitted the new function's ACL, appended from the source. It re-emits unchanged private functions as `CREATE OR REPLACE`; sampled bodies are byte-identical to M03. M01–M03 are unchanged. Details: `docs/operations/migrations.md`.
+
+### RED and GREEN
+
+1. **Unit RED.** `tests/backend/worker.test.ts`: 2 failed of 15. The coordination test failed because the thrown `worker-database-unavailable` propagated from `jobs.ts:84`; the fail-RPC test reported `failed: 1` instead of `unrecorded: 1`. **GREEN:** 15/15 after `coordinate()` wrapper and the `unrecorded` counter.
+2. **Database RED** (targeted run, before any SQL change): 6 failed of 9 selected. The settlement job stayed `leased` after three expired leases; phase 4 reported `wait:'preparation'`; `completed→pending` resolved instead of rejecting; `seed` differed from the snapshot seed; the summary lacked the hook fields; and `coordinate_work` surfaced the raw `injected later boundary failure`. The three selected tests that passed immediately are the nine-slot summary guard, the M8c coverage test and the M8b receipt count, as stated above.
+3. **GREEN after the source:** 7 of 8 new DB tests, then 8 of 8 after correcting the inherited stamina expectation (64, not 84).
+
+### Re-run evidence after the clean replay
+
+| Command | Result |
+| --- | --- |
+| `cat supabase/sql/03-activities-jobs.sql \| docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1` | `COMMIT`, exit 0. |
+| `npx supabase db lint --local --schema public,private --fail-on warning` | `results=[]` before the pull and after the replay. |
+| `npx supabase db advisors --local --type all --level info --fail-on warn` | Exit 0 before the pull and after the replay; the same four INFO `unused_index` notices as M03. |
+| `npx supabase db pull task7_review_fixes --local --schema public,private --yes` | Wrote `20261012143533_task7_review_fixes.sql`; `migration list --local` shows M01–M04. |
+| `npx supabase db reset --local --no-seed --yes *> .task7-fix-reset.log` | Applied all four migrations. Afterwards: 4 rows in `schema_migrations`; `cloudiator-coordinate` registered and active; `anon`/`authenticated` lack EXECUTE on `private.sweep_exhausted_leases(bigint)` and `service_role` has it; the constraint includes `'error'`; both new columns exist; no `prosecdef` function in `public`/`private`; the Edge runtime stayed up. |
+| `npm run test:db` (all suites) | **61 passed** (55 + 6): identity 11, planning 15, activities 35. Includes the real Edge worker and real pg_net delivery. |
+| `npm test` | **234 passed**, 11 files (232 + 2). |
+| `npm run typecheck` | `tsc` clean; frozen Deno check of `game-command`, `game-worker` and `edge.deno.ts`; Deno runtime 2 passed. |
+| `npm run build`, then `npm run verify:static` | 3 fixed routes; 69 assets scanned; no forbidden backend material. Unchanged. |
+| `npx playwright test -c node_modules/.cache/pw-claude.config.mjs` (port 3200) | **63 passed, 5 skipped**, unchanged. |
+| Live worker probe (secret on stdin from the ignored env file, never printed) | HTTP 200; the report keys include `unrecorded`, so the running Edge runtime already serves the updated worker; no `functions serve` restart was needed. |
+| `git diff --check`, `git diff --cached --check` | Clean (only the configured LF-to-CRLF notices). |
+
+Status output, gateway configuration and env files were never printed. CLI, reset and test output is in the ignored `.task7-fix-*.log` files. No subagent was dispatched; nothing was pushed or merged; `C:\Avi\Studies\Projects\Cloudiator` and `Cloudiator-replay` were not touched.
+
 ## Concerns and deferred gates
 
 1. **Integration gates halt the world truthfully.** Without Tasks 9 and 16, any cohort member with an affordable Expedition or Arena stops that boundary at phase 8 or 7, and the whole cohort waits. The default schedule's afternoon Woodland Expedition means a live world stalls at its first afternoon boundary until Task 9. Owners see `queued` and `processing`, never invented rewards. A public preview before Task 9 would need Training/Rest schedules or this gate.
@@ -255,13 +316,15 @@ The final verification ran after a clean reset/replay. No source SQL was applied
    - enable `private.scheduler`;
    - prove hosted pg_cron and pg_net dispatch to the function URL.
    Locally, cron registration and execution, the dispatch budget and real pg_net delivery are proven. Hosted behavior is not claimed.
-3. **Ambiguity: `ActivitySummary.replayExpiry` for Training/Rest.** These activities never have replay events, and the canonical type offers only `available(expiresAtMs)` or `expired`. I store `{state:'expired'}`. Cost if wrong: Task 10/13 may special-case non-combat kinds in the summary UI.
+3. **Ambiguity: `ActivitySummary.replayExpiry` for Training/Rest.** These activities never have replay events, and the canonical type offers only `available(expiresAtMs)` or `expired`. I store `{state:'expired'}`. Cost if wrong: Task 10/13 may special-case non-combat kinds in the summary UI. Recorded as gate M7 in the fix pass; the hook now owns the value.
 4. **`currentActivity` after settlement.** While the next boundary is still processing, `currentActivity` shows the last settled activity as `completed`. "Behind" is visible via `processedSlotIndex` compared with server time. Task 13 should combine the two for the Processing results / Preparing states.
-5. **Global barrier.** A single job in operator state stalls every later boundary, as the spec's cohort barrier and three-failure rule intend. It is visible as `wait: 'operator'`, the job status and `job_attempts`. Alerts, health and the runbook are Task 22. Retention must also prune `cron.job_run_details` (one row per minute) and completed jobs. It must never prune `settled_slots`, unfinished jobs or the needed revisions.
+5. **Global barrier.** A single job in operator state stalls every later boundary, as the spec's cohort barrier and three-failure rule intend. It is visible as `wait: 'operator'`, the job status and `job_attempts`; since the fix pass an expired final lease reaches that state by itself, and an isolated boundary failure is visible as `wait_reason='error'` with the SQLSTATE on the boundary and coordinator rows. Alerts, health and the runbook are Task 22. Retention must also prune `cron.job_run_details` (one row per minute) and completed jobs. It must never prune `settled_slots`, unfinished jobs or the needed revisions.
 6. **Late-commit edge.** A creation whose clock was read before a cutoff but committed after that cohort froze joins the next slot instead of stalling the world. The rule is "participate next slot"; the race is unlikely, and the orientation end is updated to stay truthful.
 7. **Performance is unmeasured.** The two-minute, 50-character target was not measured. A boundary needs roughly one worker round for settlement and one for preparation per 20 characters. The estimate under cron plus at most five dispatches per minute is about two minutes, but that is an estimate, not evidence. Hosted measurement is Task 23.
 8. **Design choices for review:**
    - Renewal extends a lease without rotating its token; fencing tokens change only on a claim or reclaim.
    - Completion requires an unexpired lease.
    - Failures retry immediately (no backoff) until the third attempt.
+   - The exhausted-lease sweep in `coordinate_work` runs before the busy check and uses `SKIP LOCKED`, so a job row locked by a worker finishing its own completion is skipped and swept on the next pass instead of blocking the coordinator.
+   - A `completed` job row is fully immutable (only deletion by retention remains); `resume_operator_job` is the only path out of `operator`.
 9. **Edge runtime hot-loading.** The running Edge runtime served the new function before my restart. I restarted serving anyway, as the dispatch addendum required, and all final HTTP evidence ran after that restart and the replay.

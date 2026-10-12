@@ -1,19 +1,30 @@
 # Cloudiator development handoff
 
-Last updated: 2026-10-12. Development is in progress.
+Last updated: 2026-10-12, after Claude's takeover and the Task 6 + Tasks 11/12 integration checkpoint. Development is in progress.
 
 ## Authority and repository
 
 - Avi approved the [design](../superpowers/specs/2026-10-11-gladiator-arena-design.md), including proposed launch defaults, and the [24-task implementation plan](../superpowers/plans/2026-10-11-gladiator-arena-implementation.md).
 - Execution method: Superpowers subagent-driven development. A fresh implementer owns each task; an independent reviewer checks specification compliance and code quality before the next task.
-- Work in the current checkout on `codex/gladiator-arena`; Avi explicitly selected this instead of a worktree.
+- **Since 2026-10-12 16:05 IDT, Claude is the sole executor.** Codex ran out of tokens, and Avi directed Claude to take over all remaining tasks, integration, this file, and the reviewed pushes. This was announced on the message board.
+- Claude works in the worktree `C:\Avi\Studies\Projects\Cloudiator-claude` on `claude/visual-track`, and pushes reviewed checkpoints to `origin/codex/gladiator-arena` as fast-forwards (`git push origin HEAD:codex/gladiator-arena`).
+- Codex's checkout `C:\Avi\Studies\Projects\Cloudiator` (`codex/gladiator-arena`, which Avi originally selected for Codex) still holds Codex's uncommitted Task 7 work. It is read, never modified. Its local branch lags origin after each push: fetch before working there.
 - Repository: https://github.com/Avitoohband/Cloudiator. Avi authorized committing and pushing each completed task with detailed notes so another agent can take over.
 - Push reviewed task checkpoints to this feature branch. Do not force-push or merge into another branch without authorization.
 - Branch starting point: `2261fb77ff38ecba5678e2f70446c593d2cdade7`.
 
 ## Resume here
 
-Tasks1–5 passed independent specification and quality review. Task4 was pushed and remote-verified at `3d41ae900e5eaa0d2fafff5ab1cfd7b26321b3d5`. Task5 passed review from that base through `a003751`: source `8fcb9c3`, stale-owner-read fix `5b3c2a5`, report `a003751`. Its review/HANDOFF checkpoint was pushed and remote-verified at `ad1b7e8b9a5bb52c01c5ee7e8897980ebd62582a`, including the public camp machine identifiers. Task6 passed independent specification and quality review from ad1b7e8 through 1b45b20 (source f35c9ac). M02 is committed and immutable; ordered activity processing in Task7 is next. Claude owns the confirmed visual/UI lane below. Do not reimplement completed tasks.
+Tasks 1–6, 11 and 12 passed independent specification and quality review.
+- Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`.
+- Claude's integration checkpoint (see "Takeover and integration checkpoint" below):
+  - merges Task 6 with the reviewed Tasks 11/12 branch;
+  - applies request R2, which mounts the camp in fixture mode on `/game/`;
+  - fixes the last Task 12 Minor;
+  - re-verifies all suites.
+- M01 and M02 are committed and immutable.
+- **Next: Task 7** (ordered boundaries, Training/Rest, fenced job recovery). Claude starts it from the plan, Codex's saved brief `.superpowers/sdd/2026-10-11-gladiator-arena-implementation/task-7-brief.md`, and Codex's uncommitted Task 7 files, all read-only.
+- Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.
 
@@ -28,10 +39,15 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | 3 — Deterministic combat | `190d8c7..9fffaf5` (source `f6d9081`, report `f385221`, fix `9fffaf5`) | One Important corrected; focused re-review approved; [review](task-03-review.md) | 110 affected and 146 full-suite tests, TypeScript/whitespace passed. Fixed named PRNG, simultaneous events, exact damage/tie handling, immutable sanitized log. Seeds, timed reveals and settlement remain backend tasks. |
 | 4 — Protected persistent identity | `b739870..4a2ee84` (source `6bf2d97`, UUID fix `0769a12`, report `4a2ee84`) | Spec compliant; quality approved; [review](task-04-review.md) | 151 units, 11 real DB/Auth/RLS/Edge tests, TypeScript+Deno compile/runtime passed. CLI-generated M01 reset/replay and lint clean; one unused-index INFO. Hosted Google/CORS/configuration proof remains Task24. |
 | 5 — Google login and character creation | `3d41ae9..a003751` (source `8fcb9c3`, stale-owner fix `5b3c2a5`, report `a003751`) | Spec compliant; quality approved; [review](task-05-review.md) | 153 units; 22 development browser checks plus 8 final affected checks; 6 production checks; TypeScript/Deno compile/runtime, fresh build/static37asset scan passed. Real Google/provider/CORS proof remains Task24; browser identity transport is test-only. |
+| 6 — Schedule revisions and pending builds | `ad1b7e8..ec69393` (source `f35c9ac`, report `1b45b20`) | Spec compliant; quality approved; [review](task-06-review.md) | 153 units, 26 real DB/Auth/Edge tests on a clean M01/M02 replay, 30 development and 6 production browser tests. Details under "Task 6 reviewed planning checkpoint". |
+| 11 — Production pixel art and manifest (Claude) | `b739870..8f83ba8` on `claude/visual-track` (`edd78ab`, `6f99f50`, `bc5b4d6`, `3051531`, `e5eb8fc`, `8f83ba8`) | Round 3: spec Pass, quality Pass; [review](task-11-review.md) | Code-generated original art (Avi-approved route): 10 atlases, 1,719 frames, 116 animations, 4 maps; `build-assets --check` deterministic; 33 asset tests. Close-up battle view deferred to Task 14 with acceptance criteria ([report](task-11-report.md)). |
+| 12 — Living isometric camp (Claude) | `bc5b4d6..33016d6` (`c6aeab0`, `3051531`, `ddb9bec`, `e5eb8fc`, `8f83ba8`, fix `33016d6`) | Rounds 2–3: spec Pass, quality Pass; Codex scoped review of `8f83ba8` Pass plus one Minor (fixed in `33016d6`); [review](task-12-review.md) | 33 scene-layout tests; 17 camp browser tests on desktop and mobile; R2 applied at this checkpoint. Task 13 must add the shared sync clock and a scene-availability status ([report](task-12-report.md)). |
 
 Deferred Minor findings to carry into final review: escaped seed signatures in the supplemental static scanner, and conflicting color-variable warnings in the browser harness. Exact evidence and suggested coverage are in the Task 1 review.
 
-## Parallel coordination with Claude
+## Coordination history (Codex and Claude)
+
+**Current state:** since the 2026-10-12 takeover, Claude owns every task and file, including the shared files and this handoff. The ownership split below is historical. If Codex returns, it should read the board, fetch origin, and re-split the work there before editing.
 
 Avi explicitly authorized communication and parallel development through the [Cloudiator Message Board](https://docs.google.com/document/d/1Fz_MTVcUJkBU52wRuLQCgftMzJtTNn3l6snRQw9RSkM). Claude replied with a layer split, and Codex posted agreement and ownership refinements.
 
@@ -64,7 +80,7 @@ Avi explicitly authorized communication and parallel development through the [Cl
 
 ## Task checkpoint protocol
 
-1. Record the task's base commit before implementation. Pass the exact task brief, binding constraints, and relevant previous reports to a fresh implementer. Keep the Codex mainline sequential; parallel work is allowed only in Claude's explicitly reserved independent lane with agreed ownership.
+1. Record the task's base commit before implementation. Pass the exact task brief, binding constraints, and relevant previous reports to a fresh implementer. Keep the mainline sequential. Independent tasks may run in parallel only in separate checkouts with declared file ownership.
 2. Implement the owning task with meaningful red/green evidence. Commit exact task files and a detailed commit body; keep credentials, exports, and generated builds ignored.
 3. Generate a review package for the entire base-to-head range. Obtain independent specification and quality verdicts. Fix blocking findings through the implementer and scoped review.
 4. Commit the durable report/review and update this file with the task range, verdict, tests, limitations, and next task. Push the feature branch and verify the remote head before reporting it uploaded.
@@ -80,9 +96,37 @@ After all tasks, perform the whole-branch review and full release verification d
 - Avi approved the Supabase skill-upkeep override on2026-10-12. The persistent project guidance is appended to rootAGENTS.md, referencing the tested local CLI2.120.0/psql workflow in migrations.md. Existing Next/upkeep rules remain intact; vendor caches are unchanged. Whitespace/content markers checked; the update was committed and pushed in reviewed checkpoint3d41ae9.
 
 
-Claude marked Tasks11/12 ready at `8f83ba889fb0f13341776afb7c55e1fb69a9b01a`, including reviewed Codex checkpointad1b7e8. Its tracked task11/12 reports/reviews record the initial findings and clean fixes through e5eb8fc. Reported final evidence:218units,57development browser cases, TypeScript/Deno, build/static69asset scan and reproducible assets. Root has inspected the reports and camp screenshot; it has not repeated those suites or merged the visual branch. A fresh scoped Codex review of the final8f83ba8 fix confirmed every prior Minor addressed, but reproduced one new Minor: a disposed scene's queued refusal can cancel a replacement scene's follow. Claude has the minimal fix/regression request; the fix needs scoped re-review before serialized integration after Task6's clean checkpoint. R2 is rebased onto the Task5 route; adapt it again to any Task6 route changes. C1 machine types are consumed; battle catalog-ID silhouettes remain unchanged.
+Claude marked Tasks 11/12 ready at `8f83ba889fb0f13341776afb7c55e1fb69a9b01a`, including the reviewed Codex checkpoint `ad1b7e8`.
+- A fresh scoped Codex review of `8f83ba8` confirmed every prior Minor addressed. It reproduced one new Minor: a disposed scene's queued refusal could cancel a replacement scene's follow.
+- Claude fixed it in `33016d6`. A lifecycle regression failed first, receiving `['g1', null]`.
+- Claude then integrated it with Task 6 (next section). C1 machine types are consumed; battle catalog-ID silhouettes are unchanged.
 
 Task14 retains the recorded close-up replay acceptance criteria: reproducible arena backdrop, layered fighters at integer3x scale facing each other, no action clipping, correctly placed effects and readable desktop/mobile screenshots at360px width. Task13 must use the shared live sync clock and provide a scene-availability status for late panels. Physical FPS remains Task23; those later requirements are not claimed by camp screenshots.
+
+### Takeover and integration checkpoint (Claude, 2026-10-12)
+
+**What it contains**
+- The merge of reviewed Task 6 `ec69393` into `claude/visual-track` (merge commit `362ed34`), which was clean.
+- The Task 12 fix `33016d6`.
+- **R2 applied** to `src/app/game/page.tsx`. The rebased patch no longer applied verbatim after Task 6 added imports, so the same six edits were re-applied by hand. In fixture mode only, the page now:
+  - mounts `GameViewport` with a page-scoped `SceneBridge`;
+  - loads `gateway.world()` next to `owner()`, plus the demo crowd (world kept within 50 rows);
+  - passes `focusGladiatorId` as the owner's id;
+  - corrects the fixture note.
+- Live and production mode still show the placeholder. Task 6's `SchedulePanel` and `BuildPanel` mounting is unchanged.
+
+**Verification, from the worktree, after this file's update**
+- `npx supabase db reset --local --no-seed --yes`: a clean replay of M01 and M02, with output captured in an ignored log.
+- `npx supabase functions serve --env-file .env.edge.local`, run from the worktree. This replaced Codex's earlier serve container, so the real Edge tests exercise this checkpoint's code, not Codex's uncommitted files.
+- `npm test`: 219 passed.
+- `npm run typecheck`: tsc, frozen Deno check and Deno test all pass.
+- `npm run test:db`: 26 passed.
+- `npm run build` and `npm run verify:static`: 3 routes, 69 assets, no forbidden material.
+- Development Playwright, desktop and mobile: 63 passed, 5 skipped. This includes the shell, identity, planning and camp suites.
+- Isolated production gate (`CLOUDIATOR_BROWSER_TEST=true` build, `verify:static -- .next/browser-test`, `PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test` with shell and camp): 6 passed. The rest are skipped by design: the camp is fixture-only, plus the 2 shell skips.
+- A broader production run, which also included the identity and planning suites, failed 7 tests. Those suites need the development-only test identity transport and are not part of the production gate (Task 5 report). That run is excluded from evidence.
+
+**Environment notes.** The Edge runtime now serves the worktree's `supabase/functions` (`.env.edge.local` is ignored). The preview on port 3000 belongs to Codex's checkout and was not touched.
 
 ### Task5 integration notes
 

@@ -12,8 +12,9 @@ const forbidden = [
   /(?:GAME_)?WORKER_(?:SECRET|TOKEN|KEY|AUTH)/i,
   /sb_secret_[a-zA-Z0-9_-]+/,
   // Next's router uses seed:null/seed:identifier. Private game seeds are string inputs.
-  /\bseed["']?\s*[:=]\s*["'`]/i,
-  /\b(?:private_?seed|private_?plan)["']?\s*:/i,
+  // Quotes can have repeated backslashes when JSON is nested in JavaScript strings.
+  /\bseed(?:\\*["'])?\s*[:=]\s*\\*["'`]/i,
+  /\b(?:private_?seed|private_?plan)(?:\\*["'])?\s*:/i,
   /(?:encounter_?plan|private_?fixture_?plan|future_?opponent_?snapshot)/i,
 ];
 let scanned = 0;

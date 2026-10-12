@@ -44,6 +44,27 @@ test('scanner accepts framework navigation seed references without private strin
   expect(scan(exportedSite('previousTree:i,url:t,nextUrl:r,seed:n; exitStatus:2,url:n,seed:null')).status).toBe(0);
 });
 test.each([
+  String.raw`const payload = "{\"seed\":null}";`,
+  String.raw`const payload = "\"{\\\"seed\\\":null}\"";`,
+])('scanner accepts escaped JSON containing a null framework seed: %s', (content) => {
+  expect(scan(exportedSite(content)).status).toBe(0);
+});
+test.each([
+  String.raw`const payload = "{\"seed\":\"private-input\"}";`,
+  String.raw`const payload = "{\"privateSeed\":\"private-input\"}";`,
+  String.raw`const payload = "\"{\\\"seed\\\":\\\"private-input\\\"}\"";`,
+  String.raw`const payload = "\"{\\\"privateSeed\\\":\\\"private-input\\\"}\"";`,
+])('scanner refuses escaped JSON private seeds in a nested JavaScript asset: %s', (content) => {
+  const directory = exportedSite();
+  const asset = join(directory, '_next/static/chunks/payload.js');
+  mkdirSync(join(directory, '_next/static/chunks'), { recursive: true });
+  writeFileSync(asset, content);
+  const result = scan(directory);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Forbidden backend material');
+  expect(result.stderr).toContain('payload.js');
+});
+test.each([
   'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY', 'GAME_WORKER_SECRET',
   'sb_secret_example', '"seed":"private-input"', 'encounterPlan', 'futureOpponentSnapshot',
   'seed:"private-input"', 'encounter_plan', 'future_opponent_snapshot',

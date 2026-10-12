@@ -1,5 +1,29 @@
 # Local identity backend and migrations
 
+## Task 7 review fixes: exhausted-lease sweep, terminal jobs, isolated boundaries
+
+M04 is **`supabase/migrations/20261012143533_task7_review_fixes.sql`**, generated with CLI 2.120.0 (engine `migra`) from the updated reapplicable source `supabase/sql/03-activities-jobs.sql`. M01–M03 are unchanged and remain immutable:
+
+```powershell
+Get-Content supabase/sql/03-activities-jobs.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1
+npx supabase db lint --local --schema public,private --fail-on warning
+npx supabase db advisors --local --type all --level info --fail-on warn
+npx supabase db pull --help
+npx supabase db pull task7_review_fixes --local --schema public,private --yes
+npx supabase migration list --local
+npx supabase db reset --local --no-seed --yes *> .task7-fix-reset.log
+npm run test:db
+```
+
+The draft captured the two new columns (`private.coordinator.last_failed_slot`, `private.boundaries.last_error`), the widened `boundaries_wait_reason_check` (now also `'error'`), the new `private.sweep_exhausted_leases(bigint)` and every changed function body. It omitted the function ACL of the new private function, which would otherwise keep PostgreSQL's default `EXECUTE` for `PUBLIC`; the source's revoke/grant pair was appended verbatim. The draft also re-emits every unchanged private function as `CREATE OR REPLACE`; sampled bodies are byte-identical to M03, so they were left in place. The clean replay (M01–M04) then passed all 61 database tests; lint was clean; advisors reported only the same four INFO unused-index notices as M03.
+
+**Source changes behind M04:**
+- `private.sweep_exhausted_leases(now_ms)` moves every lease that expired at its attempt limit to `operator` state (with `last_failure='lease-expired'` and the attempt row closed as `expired`), using `FOR UPDATE SKIP LOCKED`. It runs at the start of `claim_jobs`, `advance_boundary` and `coordinate_work` (before the coordinator's busy check, so it is independent of the coordinator lease). A worker killed on its final attempt therefore surfaces as `wait:'operator'` at phase 1 or 4 without any further claim.
+- `private.guard_job` is now a status machine: `pending→leased`, `leased→completed|pending|operator`, `operator→pending`, any status may renew itself. A `completed` row rejects every update, and `result` changes only on the `leased→completed` transition.
+- `public.coordinate_work` runs each `advance_boundary` call in its own subtransaction. A failing boundary rolls back only itself; earlier boundaries of the same pass stay committed. The failure is reported as `{ok:false, code:'boundary-failed', slotIndex, sqlstate}` (SQLSTATE only, never raw text), persisted on the boundary row as `wait_reason='error'` with `last_error`, and on the coordinator as `last_error`/`last_failed_slot`. Both clear on the next failure-free pass or phase advance.
+- `private.settle_rewards(uuid)` now returns the settlement outcome `{rewards, result, success, replayExpiry, ratingDelta?}`; `settle_activity` validates it (fail closed) and adds `activityId`, `resolvedKind`, `receiptId` and `settledAtMs` to form the stored `ActivitySummary`.
+- `private.prepare_activity_jobs` copies the frozen `activity_snapshots.seed` onto every job of that activity; the snapshot seed is the authoritative activity seed. `prepare` jobs have no activity and keep a job-local seed that v1 preparation never reads.
+
 ## Task 7 activity boundaries, fenced jobs and worker
 
 M03 is **`supabase/migrations/20261012135526_activities_jobs.sql`**, generated with CLI 2.120.0 from the reapplicable source `supabase/sql/03-activities-jobs.sql`:
@@ -32,7 +56,7 @@ The `migra` draft needed reviewed completion before commit, as in M02. It omitte
 
 Later tasks replace these exact hook signatures, along with `private.settle_rewards(uuid)` and `private.accept_job_result(uuid,jsonb)`. An activity kind without an executor (Arena at phase 7, Expedition at phase 8) is an `integration` wait: no debit, no job, no checkpoint advance and no attempts consumed.
 
-**Jobs.** `private.jobs` has the kinds `prepare`, `simulation`, `reveal` and `settlement`, a unique `dedupe_key`, and an immutable input/seed/rules version, enforced by the `guard_job` trigger. Unfinished jobs cannot be deleted. `claim_jobs` uses `FOR UPDATE SKIP LOCKED` and caps a claim at 20 simple jobs or 5 simulation jobs. Each claim issues a fresh token and a 120-second lease. `renew_job` extends a lease without rotating its token. `complete_job`, `fail_job` and `settle_activity` require the current token. A completed job replays only to its own token. Attempts are counted per claim. A third failure, or a third expired lease, retains the job in `operator` state with the sanitized `last_failure`. `private.resume_operator_job(id)` (direct SQL only) resumes the same seed and input. `private.job_attempts` logs worker, timing, outcome and failure code, never tokens. `private.settled_slots(gladiator, slot)` is the permanent grant guard. It deliberately has no activity FK, so summary retention can never remove it.
+**Jobs.** `private.jobs` has the kinds `prepare`, `simulation`, `reveal` and `settlement`, a unique `dedupe_key`, and an immutable input/seed/rules version, enforced by the `guard_job` trigger (since M04 also a status machine with terminal `completed` rows). Unfinished jobs cannot be deleted. `claim_jobs` uses `FOR UPDATE SKIP LOCKED` and caps a claim at 20 simple jobs or 5 simulation jobs. Each claim issues a fresh token and a 120-second lease. `renew_job` extends a lease without rotating its token. `complete_job`, `fail_job` and `settle_activity` require the current token. A completed job replays only to its own token. Attempts are counted per claim. A third failure, or a third expired lease, retains the job in `operator` state with the sanitized `last_failure`; since M04 the expired case is swept by every claim, boundary step and coordination pass, not only by a later claim. `private.resume_operator_job(id)` (direct SQL only) resumes the same seed and input. `private.job_attempts` logs worker, timing, outcome and failure code, never tokens. `private.settled_slots(gladiator, slot)` is the permanent grant guard. It deliberately has no activity FK, so summary retention can never remove it.
 
 **Coordinator and dispatch.** `coordinate_work()` takes the coordinator row with `SKIP LOCKED` and respects an unexpired external lease. It advances at most six boundaries per call, skips provably empty boundaries, and starts at the earliest existing checkpoint on its first run. `private.cron_tick()` is registered every minute and stays inert until `private.scheduler.enabled` is true. When enabled, it coordinates and then calls `private.dispatch_workers()`. Dispatch sends at most five `net.http_post` calls per rolling minute, and only for claimable work. It authenticates with the Vault secrets `game_worker_url` and `game_worker_secret`; without both, nothing is sent. Locally, the cron registration and execution, the dispatch budget and a real pg_net delivery to the local `game-worker` were tested. **Task 24 must** store the hosted Vault secrets, set `GAME_WORKER_SECRET` as a function secret, deploy `game-worker` with JWT verification disabled (the handler checks the secret), enable `private.scheduler`, and verify hosted scheduling and dispatch. None of that is claimed here.
 

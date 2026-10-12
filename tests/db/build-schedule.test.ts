@@ -183,8 +183,13 @@ describe('schedule revisions and pending reservations', () => {
   it('serializes concurrent queue requests and rejects changed reuse of an operation ID', async () => {
     const owner = await fighter(), state = await owner.state();
     const command = build(state);
-    const results = await Promise.all([send(owner.token, command), send(owner.token, command), send(owner.token, { ...command, operationId: randomUUID() })]);
+    const other = { ...command, operationId: randomUUID() };
+    const results = await Promise.all([send(owner.token, command), send(owner.token, command), send(owner.token, other)]);
     expect(results[0]).toEqual(results[1]);
+    // Two identical conflicts alone would also satisfy equality: each operation must own exactly one durable receipt.
+    const receipts = await sql`select operation_id::text as id, count(*)::int as n from public.operation_receipts
+      where operation_id in (${command.operationId}, ${other.operationId}) group by operation_id`;
+    expect(Object.fromEntries(receipts.map(r => [r.id, r.n]))).toEqual({ [command.operationId]: 1, [other.operationId]: 1 });
     // Either operation may take the account lock first: exactly one of the two distinct operations commits, and both
     // copies of the first operation share its single receipt (two conflicts when the other operation won first).
     expect([results[0].ok, results[2].ok].sort()).toEqual([false, true]);

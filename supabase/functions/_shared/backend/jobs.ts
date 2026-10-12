@@ -2,7 +2,7 @@ import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
 import { freezeDomain } from '../domain/types.ts';
-import type { ActivityCosts, ActivityKind, BuildInput, ItemInstance, JobKind, JobLease, PreparationInput, PreparationResult, WorkerReport } from '../domain/types.ts';
+import type { ActivityCosts, ActivityKind, BuildInput, CoordinatorReport, ItemInstance, JobKind, JobLease, PreparationInput, PreparationResult, WorkerReport } from '../domain/types.ts';
 import type { ExecutorRegistry, JobOutcome, WorkerDependencies } from './database.ts';
 
 /** Spec 10.4 batch limits and lease length; CPU measurements may lower the batch sizes without changing semantics. */
@@ -38,13 +38,21 @@ export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({
 export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport> {
   const executors = deps.executors ?? DEFAULT_EXECUTORS;
   const now = deps.now ?? Date.now;
-  const report: WorkerReport = { claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0,
+  const report: WorkerReport = { claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0, unrecorded: 0,
     byKind: { prepare: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null };
   const record = (outcome: JobOutcome) => {
     if (!outcome.ok) report.conflicts += 1;
     else if (outcome.replayed) report.replayed += 1;
     else report.completed += 1;
   };
+  /** Coordination failing must never stop claimable work: due jobs still drain, and the report says coordination was unreachable. */
+  async function coordinate(): Promise<CoordinatorReport> {
+    try {
+      return await deps.database.coordinate();
+    } catch {
+      return { ok: false, code: 'coordinator-unavailable', publishedSlot: null };
+    }
+  }
   async function execute(job: JobLease): Promise<unknown> {
     const versioned = Object.hasOwn(executors, job.rulesVersion) ? executors[job.rulesVersion] : undefined;
     if (!versioned) throw new WorkerFailure('unsupported-rules');
@@ -76,12 +84,12 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
         const failed = await deps.database.fail(job.id, job.token, code);
         if (failed.ok) report.failed += 1; else report.conflicts += 1;
       } catch {
-        // The lease expires and is reclaimed with the same seed and input.
-        report.failed += 1;
+        // Nothing was recorded: the lease expires and the job is reclaimed with the same seed and input.
+        report.unrecorded += 1;
       }
     }
   }
-  report.coordination = await deps.database.coordinate();
+  report.coordination = await coordinate();
   let simple = WORKER_LIMITS.simple;
   for (const kind of ['settlement', 'prepare', 'reveal'] as const satisfies readonly JobKind[]) {
     if (simple <= 0) break;
@@ -90,12 +98,12 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
     simple -= jobs.length;
     for (const job of jobs) await process(job);
     // Settled slots or completed preparation can release the next ordered boundary phase.
-    report.coordination = await deps.database.coordinate();
+    report.coordination = await coordinate();
   }
   if (simple === WORKER_LIMITS.simple) {
     const jobs = await deps.database.claim(deps.workerId, 'simulation', WORKER_LIMITS.combat);
     for (const job of jobs) await process(job);
-    if (jobs.length) report.coordination = await deps.database.coordinate();
+    if (jobs.length) report.coordination = await coordinate();
   }
   return report;
 }

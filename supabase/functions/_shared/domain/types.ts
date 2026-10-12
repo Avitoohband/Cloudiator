@@ -56,14 +56,19 @@ export type JobLease<Input = JobInput> = DeepReadonly<{
   activityId: string | null; gladiatorId: string; slotIndex: number;
   snapshot: Input; seed: Seed; rulesVersion: string; attempt: number;
 }>;
-/** Coordinator results returned by `advance_boundary`/`coordinate_work`; no seeds, snapshots or tokens. */
+/** Coordinator results returned by `advance_boundary`/`coordinate_work`; no seeds, snapshots or tokens.
+ * A boundary isolated by `coordinate_work` after an exception reports `{ok:false, code:'boundary-failed', slotIndex, sqlstate}`. */
 export type BoundaryReport = {
   ok: boolean; code?: string; slotIndex?: number; phase?: number;
   status?: 'complete' | 'waiting'; wait?: 'settlement' | 'extension' | 'preparation' | 'integration' | 'operator' | 'straggler'; replayed?: boolean;
+  sqlstate?: string;
 };
-export type CoordinatorReport = { ok: boolean; busy?: boolean; publishedSlot: number | null; currentSlot?: number; boundaries?: BoundaryReport[] };
+/** `code:'coordinator-unavailable'` is the worker's own report when the coordination RPC itself could not be reached. */
+export type CoordinatorReport = { ok: boolean; code?: string; busy?: boolean; publishedSlot: number | null; currentSlot?: number; boundaries?: BoundaryReport[] };
 export type WorkerReport = {
   claimed: number; completed: number; replayed: number; failed: number; conflicts: number;
+  /** Failures the worker could not record because the fail RPC was unreachable; their leases expire and are reclaimed. */
+  unrecorded: number;
   byKind: Record<JobKind, number>; coordination: CoordinatorReport | null;
 };
 export type FighterSnapshot = DeepReadonly<{

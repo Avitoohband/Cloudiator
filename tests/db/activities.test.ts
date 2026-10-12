@@ -173,6 +173,9 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
       ['training', 'training', 'rest', 'training', 'training', 'rest', 'training', 'training', 'rest']);
     expect(await sql`select count(*)::int as n from private.jobs where kind='settlement' and status='completed'`).toEqual([{ n: 9 }]);
     expect((await result.owner.state()).currentActivity).toMatchObject({ kind: 'rest', status: 'completed', startsAtMs: 308 * SLOT, endsAtMs: 309 * SLOT });
+    const summaries = await sql`select summary from public.activities where gladiator_id=${result.owner.gid} order by slot_index`;
+    expect(summaries[0].summary).toMatchObject({ resolvedKind: 'training', result: 'completed', success: true, rewards: { attributePoints: 1, money: 0 } });
+    expect(summaries[2].summary).toMatchObject({ resolvedKind: 'rest', result: 'completed', success: true, rewards: { attributePoints: 0 } });
   });
 
   it('replaces unaffordable Training with automatic Rest that refills only at settlement', async () => {
@@ -340,19 +343,117 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect((await owner.row()).earned).toBe(11);
   });
 
-  it('exhausts repeatedly expired leases into the operator state instead of a fourth attempt', async () => {
+  it('moves a job whose third lease expired to operator state without another claim', async () => {
     await fighter();
-    await runBoundary(300);
+    const token = await coordinatorLease();
+    await runBoundary(300, token);
     for (let attempt = 1; attempt <= 3; attempt++) {
       const [job] = await claim('settlement');
       expect(job.attempt).toBe(attempt);
       await sql`update private.jobs set lease_until_ms=0 where id=${job.id}`;
     }
-    expect(await claim('settlement')).toEqual([]);
-    expect(await sql`select status, attempts::int, last_failure from private.jobs where kind='settlement'`)
-      .toEqual([{ status: 'operator', attempts: 3, last_failure: 'lease-expired' }]);
+    // No fourth claim: an Edge CPU/wall-clock kill on attempt 3 must still surface as operator state.
+    expect(await rpc('coordinate_work')).toMatchObject({ ok: true, busy: true });
+    expect(await sql`select status, attempts::int, last_failure, lease_token from private.jobs where kind='settlement'`)
+      .toEqual([{ status: 'operator', attempts: 3, last_failure: 'lease-expired', lease_token: null }]);
     expect((await settlementAttempts()).map(r => r.outcome)).toEqual(['expired', 'expired', 'expired']);
+    expect(await advance(301, token)).toMatchObject({ phase: 1, status: 'waiting', wait: 'operator' });
+    expect(await claim('settlement')).toEqual([]);
   });
+
+  it('reports a preparation job whose third lease expired as an operator wait at phase 4', async () => {
+    await fighter();
+    const token = await coordinatorLease();
+    expect(await advance(300, token)).toMatchObject({ wait: 'preparation' });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const [job] = await claim('prepare');
+      expect(job.attempt).toBe(attempt);
+      await sql`update private.jobs set lease_until_ms=0 where id=${job.id}`;
+    }
+    expect(await advance(300, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'operator' });
+    expect(await sql`select status, last_failure from private.jobs where kind='prepare'`).toEqual([{ status: 'operator', last_failure: 'lease-expired' }]);
+  });
+
+  it('keeps completed jobs terminal with an immutable result', async () => {
+    await fighter();
+    await runBoundary(300);
+    const [prepared] = await sql`select id from private.jobs where kind='prepare' and status='completed'`;
+    await expect(sql`update private.jobs set status='pending' where id=${prepared.id}`).rejects.toThrow('immutable job');
+    await expect(sql`update private.jobs set result='{}' where id=${prepared.id}`).rejects.toThrow('immutable job');
+    await expect(sql`update private.jobs set lease_token=${randomUUID()} where id=${prepared.id}`).rejects.toThrow('immutable job');
+    const [settlement] = await claim('settlement');
+    // Only completion writes a result; operator state resumes only to pending.
+    await expect(sql`update private.jobs set result='{"forged":true}' where id=${settlement.id}`).rejects.toThrow('immutable job');
+    await sql`update private.jobs set status='operator',lease_token=null where id=${settlement.id}`;
+    await expect(sql`update private.jobs set status='completed' where id=${settlement.id}`).rejects.toThrow('immutable job');
+    await expect(sql`update private.jobs set status='leased' where id=${settlement.id}`).rejects.toThrow('immutable job');
+  });
+
+  it('copies the authoritative snapshot seed onto the activity jobs', async () => {
+    await fighter();
+    await runBoundary(300);
+    expect(await sql`select j.seed=s.seed as same, length(s.seed)::int as size from private.jobs j
+      join private.activity_snapshots s on s.activity_id=j.activity_id where j.kind='settlement'`).toEqual([{ same: true, size: 64 }]);
+  });
+
+  it('builds the settlement summary from the settle_rewards hook outcome', async () => {
+    await fighter();
+    await runBoundary(300);
+    const [{ definition }] = await sql`select pg_get_functiondef('private.settle_rewards(uuid)'::regprocedure) as definition`;
+    // Operator stand-in for a later executor's hook (Task 9 defeat / Task 16 rating); restored below.
+    await sql.unsafe(`create or replace function private.settle_rewards(activity uuid) returns jsonb language sql security invoker set search_path='' as $$
+      select jsonb_build_object('rewards',jsonb_build_object('money',0,'renown',3,'xp',0,'attributePoints',0,'items','[]'::jsonb,'overflowMoney',0),
+        'result','defeat','success',false,'ratingDelta',-12,'replayExpiry',jsonb_build_object('state','available','expiresAtMs',123)) $$`);
+    try {
+      const [job] = await claim('settlement');
+      const settled = await rpc('settle_activity', { activity_id: job.activityId, lease_token: job.token });
+      expect(settled.summary).toMatchObject({ resolvedKind: 'training', result: 'defeat', success: false, ratingDelta: -12,
+        replayExpiry: { state: 'available', expiresAtMs: 123 }, rewards: { renown: 3, attributePoints: 0 }, receiptId: settled.receiptId });
+    } finally {
+      await sql.unsafe(definition);
+    }
+  });
+
+  it('isolates a failing boundary inside coordinate_work and records only a sanitized failure', async () => {
+    const current = await stableRealSlot(120_000);
+    await resetWorld(current - 2);
+    const owner = await fighter({ firstSlot: current - 1, schedule: TRAINING });
+    expect(await rpc('coordinate_work')).toMatchObject({ ok: true, boundaries: [{ slotIndex: current - 1, wait: 'preparation' }] });
+    await completePreparations();
+    await sql.unsafe(`create function private.task7_fail_boundary() returns trigger language plpgsql set search_path='' as $$
+      begin raise exception 'injected later boundary failure'; end $$;
+      create trigger task7_fail_boundary before insert on private.boundaries for each row when (new.slot_index=${current})
+      execute function private.task7_fail_boundary();`);
+    let isolated: Outcome;
+    try { isolated = await rpc('coordinate_work'); }
+    finally { await sql.unsafe('drop trigger task7_fail_boundary on private.boundaries; drop function private.task7_fail_boundary();'); }
+    expect(isolated).toMatchObject({ ok: true, publishedSlot: current - 1, boundaries: [
+      { ok: true, slotIndex: current - 1, status: 'complete' }, { ok: false, code: 'boundary-failed', slotIndex: current, sqlstate: 'P0001' }] });
+    expect(JSON.stringify(isolated)).not.toContain('injected');
+    expect(await owner.row()).toMatchObject({ processed: current - 1 });
+    expect(await sql`select last_error, last_failed_slot::int as slot from private.coordinator`).toEqual([{ last_error: 'P0001', slot: current }]);
+
+    const [settlement] = await claim('settlement');
+    expect(await rpc('settle_activity', { activity_id: settlement.activityId, lease_token: settlement.token })).toMatchObject({ ok: true });
+    expect(await rpc('coordinate_work')).toMatchObject({ boundaries: [{ slotIndex: current, wait: 'preparation' }] });
+    await completePreparations();
+    await sql.unsafe(`create function private.task7_crash_start() returns trigger language plpgsql set search_path='' as $$
+      begin raise exception 'injected start failure'; end $$;
+      create trigger task7_crash_start before insert on private.jobs for each row when (new.kind='settlement') execute function private.task7_crash_start();`);
+    let failed: Outcome;
+    try { failed = await rpc('coordinate_work'); }
+    finally { await sql.unsafe('drop trigger task7_crash_start on private.jobs; drop function private.task7_crash_start();'); }
+    expect(failed).toMatchObject({ ok: true, boundaries: [{ ok: false, code: 'boundary-failed', slotIndex: current, sqlstate: 'P0001' }] });
+    // The persisted wait is truthful rather than a stale 'preparation', and none of the failed call's work survives.
+    expect(await sql`select phase::int, status, wait_reason, last_error from private.boundaries where slot_index=${current}`)
+      .toEqual([{ phase: 4, status: 'waiting', wait_reason: 'error', last_error: 'P0001' }]);
+    expect(await sql`select count(*)::int as n from public.activities where slot_index=${current}`).toEqual([{ n: 0 }]);
+    expect(await rpc('coordinate_work')).toMatchObject({ boundaries: [{ slotIndex: current, status: 'complete' }] });
+    expect(await sql`select wait_reason, last_error from private.boundaries where slot_index=${current}`).toEqual([{ wait_reason: null, last_error: null }]);
+    expect(await sql`select last_error, last_failed_slot from private.coordinator`).toEqual([{ last_error: null, last_failed_slot: null }]);
+    // One settled Training point and two Training debits (104 -> 84 -> 64): the retried boundary debited exactly once.
+    expect(await owner.row()).toMatchObject({ processed: current, stamina: 64, earned: 11 });
+  }, 180_000);
 
   it('keeps an in-progress boundary on its persisted rules version and fails an unknown version closed', async () => {
     const owner = await fighter();
@@ -469,6 +570,38 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     });
     const [{ now }] = await sql`select private.planning_now_ms()::float8 as now`;
     expect(Math.abs(now - Date.now())).toBeLessThan(5000);
+  });
+
+  it('clamps stamina for a pending lower-Endurance build before the snapshot and the debit', async () => {
+    const owner = await fighter();
+    await sql`update public.wallets set money=300 where gladiator_id=${owner.gid}`;
+    const before = await owner.state();
+    expect(before.stamina).toEqual({ current: 104, maximum: 104 });
+    await sql.begin(async tx => {
+      // Rollback-only operator clock inside slot 299, never a player time input.
+      await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker set search_path='' as 'select ${299 * SLOT + 10}::bigint'`);
+      const command = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: before.buildVersion, classId: 'guardian', stance: 'balanced',
+        allocation: { strength: 4, agility: 2, vitality: 2, endurance: 0, precision: 2 }, equipment: before.currentBuild.equipment } as const;
+      const [{ queued }] = await tx`select public.queue_build(${owner.id},${command.operationId},${tx.json({ command, prepared: prepareBuild(command, before) } as never)}) as queued`;
+      expect(queued).toMatchObject({ ok: true, value: { effectiveSlotIndex: 300, reservedMoney: 100 } });
+      await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker set search_path='' as 'select ${300 * SLOT + 10}::bigint'`);
+      const token = randomUUID();
+      await tx`update private.coordinator set lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
+      expect((await tx`select public.advance_boundary(300,${token}) as r`)[0].r).toMatchObject({ phase: 4, wait: 'preparation' });
+      const job = ((await tx`select public.claim_jobs(${randomUUID()},'prepare',20) as jobs`)[0].jobs as JobLease[])[0];
+      const prepared = prepareActivityV1(job.snapshot as PreparationInput);
+      // Guardian Endurance 5 x 1.05 = 5.25: maximum floor(90 + 10.5) = 100.
+      expect(prepared.staminaMaximum).toBe(100);
+      expect((await tx`select public.complete_job(${job.id},${job.token},${tx.json(prepared as never)}) as r`)[0].r).toMatchObject({ ok: true });
+      expect((await tx`select public.advance_boundary(300,${token}) as r`)[0].r).toMatchObject({ status: 'complete' });
+      const [{ starting }] = await tx`select snapshot->'starting'->'stamina' as starting from private.activity_snapshots`;
+      expect(starting).toEqual({ current: 100, maximum: 100 });
+      expect(await tx`select stamina_current::int as current, stamina_maximum::int as maximum from public.gladiators where id=${owner.gid}`)
+        .toEqual([{ current: 80, maximum: 100 }]);
+      expect(await tx`select stamina_debit::int as debit, resolved_kind from public.activities`).toEqual([{ debit: 20, resolved_kind: 'training' }]);
+      expect(await tx`select money::int from public.wallets where gladiator_id=${owner.gid}`).toEqual([{ money: 200 }]);
+      await tx`rollback`;
+    });
   });
 
   it('waits behind an in-flight account lock before applying builds', async () => {

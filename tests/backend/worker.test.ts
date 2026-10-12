@@ -134,6 +134,20 @@ describe('fenced worker orchestration', () => {
     const { database } = port({ settlement: jobs }, () => outcomes.shift()!);
     expect(await runWorker({ database, workerId: 'worker-f' })).toMatchObject({ completed: 1, replayed: 1, conflicts: 1, failed: 0 });
   });
+  it('still claims and runs due jobs when coordination itself is unavailable', async () => {
+    const job = lease('settlement');
+    const { database, calls } = port({ settlement: [job] });
+    database.coordinate = async () => { calls.push({ name: 'coordinate', args: [] }); throw new Error('worker-database-unavailable'); };
+    const report = await runWorker({ database, workerId: 'worker-h' });
+    expect(calls.filter(c => c.name === 'settle').map(c => c.args[0])).toEqual([job.activityId]);
+    expect(report).toMatchObject({ claimed: 1, completed: 1, coordination: { ok: false, code: 'coordinator-unavailable', publishedSlot: null } });
+  });
+  it('does not count a failure as recorded when the fail RPC itself is unreachable', async () => {
+    const job = lease('prepare', { rulesVersion: 'v9' });
+    const { database } = port({ prepare: [job] });
+    database.fail = async () => { throw new Error('worker-database-unavailable'); };
+    expect(await runWorker({ database, workerId: 'worker-i' })).toMatchObject({ claimed: 1, failed: 0, unrecorded: 1, completed: 0 });
+  });
   it('fails a job whose prepared result the database rejects as invalid', async () => {
     const job = lease('prepare');
     const { database, calls } = port({ prepare: [job] }, () => ({ ok: false, code: 'invalid' }));
@@ -143,7 +157,7 @@ describe('fenced worker orchestration', () => {
 });
 
 describe('private worker HTTP boundary', () => {
-  const run = async () => ({ claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0,
+  const run = async () => ({ claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0, unrecorded: 0,
     byKind: { prepare: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null });
   it('rejects missing, publishable and near-miss credentials before any database work', async () => {
     for (const authorization of [undefined, 'Bearer publishable-key', `Bearer ${SECRET}x`, SECRET, `Bearer ${SECRET.slice(0, -1)}`]) {

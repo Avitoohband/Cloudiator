@@ -51,18 +51,23 @@ create table if not exists private.coordinator (
   lease_token uuid,
   lease_until_ms bigint not null default 0,
   last_error text,
+  last_failed_slot bigint,
   updated_at_ms bigint
 );
+-- Review fix: the slot whose isolated boundary last failed (SQLSTATE only in last_error); both clear on a failure-free run.
+alter table private.coordinator add column if not exists last_failed_slot bigint;
 insert into private.coordinator(singleton) values(true) on conflict do nothing;
 
 -- Persisted boundary phase: the next phase to run (1-8), 9 once complete. One historical cutoff per slot.
+-- wait_reason 'error' with last_error (SQLSTATE only) records an isolated boundary failure until the phase is retried.
 create table if not exists private.boundaries (
   slot_index bigint primary key check (slot_index >= 1),
   cutoff_ms bigint not null,
   rules_version text not null references private.rules_versions(version),
   phase smallint not null default 1 check (phase between 1 and 9),
   status text not null default 'running' check (status in ('running','waiting','complete')),
-  wait_reason text check (wait_reason in ('settlement','extension','preparation','integration','operator','straggler')),
+  wait_reason text,
+  last_error text,
   members_frozen boolean not null default false,
   member_count integer,
   opened_at_ms bigint not null,
@@ -70,6 +75,10 @@ create table if not exists private.boundaries (
   completed_at_ms bigint,
   check (cutoff_ms = slot_index*4800000)
 );
+alter table private.boundaries add column if not exists last_error text;
+alter table private.boundaries drop constraint if exists boundaries_wait_reason_check;
+alter table private.boundaries add constraint boundaries_wait_reason_check
+  check (wait_reason in ('settlement','extension','preparation','integration','operator','straggler','error'));
 create index if not exists boundaries_rules_idx on private.boundaries(rules_version);
 create table if not exists private.boundary_members (
   slot_index bigint not null,
@@ -174,15 +183,27 @@ create policy owner_read on public.activities for select to authenticated
   using (gladiator_id in (select id from public.gladiators where owner_id=(select auth.uid())));
 
 -- Immutable job identity, seed, input and rules version; unfinished work is never deleted.
+-- Status machine: pending->leased (claim), leased->completed|pending|operator (complete, fail, sweep), operator->pending
+-- (resume); any status may renew itself. completed is terminal and its result is written only by that one transition.
 create or replace function private.guard_job() returns trigger language plpgsql security invoker set search_path='' as $$
 begin
   if tg_op='DELETE' then
     if old.status<>'completed' then raise exception 'unfinished job'; end if;
     return old;
   end if;
+  if old.status='completed' then raise exception 'immutable job'; end if;
   if new.id<>old.id or new.kind<>old.kind or new.dedupe_key<>old.dedupe_key or new.slot_index<>old.slot_index
     or new.gladiator_id<>old.gladiator_id or new.activity_id is distinct from old.activity_id or new.input<>old.input
     or new.seed<>old.seed or new.rules_version<>old.rules_version or new.attempts<old.attempts then
+    raise exception 'immutable job';
+  end if;
+  if new.status<>old.status and not (
+    (old.status='pending' and new.status='leased')
+    or (old.status='leased' and new.status in ('completed','pending','operator'))
+    or (old.status='operator' and new.status='pending')) then
+    raise exception 'immutable job';
+  end if;
+  if new.result is distinct from old.result and not (old.status='leased' and new.status='completed') then
     raise exception 'immutable job';
   end if;
   return new;
@@ -225,23 +246,27 @@ create or replace function private.activity_executor_ready(kind text) returns bo
   select coalesce(kind in ('training','rest'),false)
 $$;
 -- Phase 8: create the activity's private jobs. Training and Rest need only their minute-80 settlement.
+-- The frozen activity_snapshots.seed is the authoritative activity seed: every job of an activity carries a copy of it,
+-- so simulation/reveal jobs added here by Tasks 9/16/19 must pass s.seed too. prepare jobs have no activity and keep a job-local seed.
 create or replace function private.prepare_activity_jobs(activity uuid) returns void language plpgsql security invoker set search_path='' as $$
 declare a public.activities%rowtype; s private.activity_snapshots%rowtype;
 begin
   select * into a from public.activities where id=activity;
   select * into s from private.activity_snapshots where activity_id=activity;
   if a.resolved_kind not in ('training','rest') then raise exception 'unsupported activity executor'; end if;
-  insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,rules_version,due_at_ms)
+  insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
     values('settlement','settlement:'||a.id,a.slot_index,a.gladiator_id,a.id,
       jsonb_build_object('activityId',a.id,'gladiatorId',a.gladiator_id,'slotIndex',a.slot_index,'resolvedKind',a.resolved_kind,'endsAtMs',a.ends_at_ms),
-      s.rules_version,a.ends_at_ms)
+      s.seed,s.rules_version,a.ends_at_ms)
     on conflict (dedupe_key) do nothing;
 end $$;
 -- End of phase 8 (Task 10): publish safe projection rows/revision for the new slot.
 create or replace function private.boundary_published(target bigint) returns text language sql stable security invoker set search_path='' as $$
   select null::text
 $$;
--- Settlement (Tasks 9/16/19 add their kinds): apply rewards once; returns canonical CreditedRewards.
+-- Settlement (Tasks 9/16/19 add their kinds): apply rewards once and return the settlement outcome
+-- {rewards: CreditedRewards, result: 'completed'|'victory'|'defeat', success: boolean, replayExpiry, ratingDelta?}.
+-- settle_activity adds the identity fields (activityId, resolvedKind, receiptId, settledAtMs) to form the canonical ActivitySummary.
 create or replace function private.settle_rewards(activity uuid) returns jsonb language plpgsql security invoker set search_path='' as $$
 declare a public.activities%rowtype; s private.activity_snapshots%rowtype; points bigint := 0; earned bigint;
 begin
@@ -257,7 +282,9 @@ begin
   else
     raise exception 'unsupported settlement';
   end if;
-  return jsonb_build_object('money',0,'renown',0,'xp',0,'attributePoints',points,'items','[]'::jsonb,'overflowMoney',0);
+  -- Training and Rest have no replay; the canonical contract offers no non-replay state yet (Task 10/13 gate).
+  return jsonb_build_object('rewards',jsonb_build_object('money',0,'renown',0,'xp',0,'attributePoints',points,'items','[]'::jsonb,'overflowMoney',0),
+    'result','completed','success',true,'replayExpiry',jsonb_build_object('state','expired'));
 end $$;
 -- Completion of simulation/reveal results (Tasks 9/16/19). Task 7 registers no such executor and accepts none.
 create or replace function private.accept_job_result(job uuid, result jsonb) returns boolean language sql stable security invoker set search_path='' as $$
@@ -389,6 +416,26 @@ begin
   return private.boundary_published(target);
 end $$;
 
+-- A lease that expired at its attempt limit is retained for operator action instead of a further attempt. Called by
+-- claims, by every boundary step and by every coordination pass, so a worker killed on its final attempt still surfaces
+-- as operator state without another claim. SKIP LOCKED never blocks behind a worker finishing that same row.
+create or replace function private.sweep_exhausted_leases(now_ms bigint) returns integer language plpgsql security invoker set search_path='' as $$
+declare swept integer;
+begin
+  with exhausted as (
+    select j.id,j.attempts from private.jobs j where j.status='leased' and j.lease_until_ms<=now_ms and j.attempts>=j.max_attempts
+    order by j.id for update skip locked
+  ), retained as (
+    update private.jobs j set status='operator',lease_token=null,lease_owner=null,lease_until_ms=null,last_failure='lease-expired'
+    from exhausted e where j.id=e.id returning j.id,j.attempts
+  ), logged as (
+    update private.job_attempts a set finished_at_ms=now_ms,outcome='expired',failure_code='lease-expired'
+    from retained r where a.job_id=r.id and a.attempt=r.attempts and a.outcome is null returning a.job_id
+  )
+  select count(*) into swept from retained;
+  return swept;
+end $$;
+
 -- Backend-only coordinator step. Runs every phase possible inside this transaction; a failure rolls back only this call.
 create or replace function public.advance_boundary(target_slot bigint,coordinator_token uuid) returns jsonb
 language plpgsql security invoker set search_path='' as $$
@@ -405,6 +452,8 @@ begin
   end if;
   if c.published_slot is not null and target_slot<>c.published_slot+1 then return jsonb_build_object('ok',false,'code','invalid'); end if;
   if c.published_slot is null then update private.coordinator set published_slot=target_slot-1,updated_at_ms=now_ms where singleton; end if;
+  -- A job whose final lease expired without a further claim must reach operator state before the barriers look.
+  perform private.sweep_exhausted_leases(now_ms);
   insert into private.boundaries(slot_index,cutoff_ms,rules_version,opened_at_ms,updated_at_ms)
     values(target_slot,target_slot*4800000,private.active_rules_version(),now_ms,now_ms) on conflict do nothing;
   select * into b from private.boundaries where slot_index=target_slot for update;
@@ -420,25 +469,29 @@ begin
     else wait:=private.boundary_start(target_slot);
     end if;
     if wait is not null then
-      update private.boundaries set status='waiting',wait_reason=wait,updated_at_ms=now_ms where slot_index=target_slot;
+      update private.boundaries set status='waiting',wait_reason=wait,last_error=null,updated_at_ms=now_ms where slot_index=target_slot;
       return jsonb_build_object('ok',true,'slotIndex',target_slot,'phase',b.phase,'status','waiting','wait',wait);
     end if;
     b.phase:=b.phase+1;
-    update private.boundaries set phase=b.phase,status=case when b.phase=9 then 'complete' else 'running' end,wait_reason=null,
+    update private.boundaries set phase=b.phase,status=case when b.phase=9 then 'complete' else 'running' end,wait_reason=null,last_error=null,
       updated_at_ms=now_ms,completed_at_ms=case when b.phase=9 then now_ms end where slot_index=target_slot;
   end loop;
   update private.coordinator set published_slot=target_slot,updated_at_ms=now_ms where singleton;
   return jsonb_build_object('ok',true,'slotIndex',target_slot,'phase',9,'status','complete');
 end $$;
 
--- Single coordinator lease; bounded catch-up per invocation that continues across invocations.
+-- Single coordinator lease; bounded catch-up per invocation that continues across invocations. Each boundary runs in
+-- its own subtransaction: a failing boundary rolls back only itself, is recorded by SQLSTATE alone (never raw text),
+-- and the boundaries completed earlier in the same pass stay committed.
 create or replace function public.coordinate_work() returns jsonb language plpgsql security invoker set search_path='' as $$
 declare c private.coordinator%rowtype; now_ms bigint; current_slot bigint; token uuid:=gen_random_uuid(); result jsonb;
-  reports jsonb:='[]'::jsonb; steps integer:=0; next_slot bigint;
+  reports jsonb:='[]'::jsonb; steps integer:=0; next_slot bigint; failure text;
 begin
+  now_ms:=private.planning_now_ms(); current_slot:=now_ms/4800000;
+  -- Independent of the coordinator lease: exhausted leases reach operator state even while another coordinator runs.
+  perform private.sweep_exhausted_leases(now_ms);
   select * into c from private.coordinator where singleton for update skip locked;
   if not found then return jsonb_build_object('ok',true,'busy',true,'publishedSlot',null); end if;
-  now_ms:=private.planning_now_ms(); current_slot:=now_ms/4800000;
   if c.lease_token is not null and c.lease_until_ms>now_ms then return jsonb_build_object('ok',true,'busy',true,'publishedSlot',c.published_slot); end if;
   update private.coordinator set lease_token=token,lease_until_ms=now_ms+120000,updated_at_ms=now_ms where singleton;
   if c.published_slot is null then
@@ -457,12 +510,23 @@ begin
         coalesce((select min(w.slot_index) from private.boundary_work w where w.status='pending' and w.slot_index>c.published_slot),current_slot));
       if next_slot>c.published_slot+1 then update private.coordinator set published_slot=next_slot-1 where singleton; end if;
     end if;
-    result:=public.advance_boundary(next_slot,token);
+    begin
+      result:=public.advance_boundary(next_slot,token);
+    exception when others then
+      -- The subtransaction rolled back every effect of this boundary. Keep only the SQLSTATE: raw messages can carry
+      -- provider details or data. The persisted wait becomes truthful ('error') instead of a stale earlier reason.
+      failure:=sqlstate;
+      result:=jsonb_build_object('ok',false,'code','boundary-failed','slotIndex',next_slot,'sqlstate',failure);
+      update private.boundaries set status='waiting',wait_reason='error',last_error=failure,updated_at_ms=now_ms where slot_index=next_slot;
+      update private.coordinator set last_error=failure,last_failed_slot=next_slot,updated_at_ms=now_ms where singleton;
+    end;
     reports:=reports||jsonb_build_array(result);
     steps:=steps+1;
     exit when result->>'status' is distinct from 'complete';
   end loop;
-  update private.coordinator set lease_token=null,lease_until_ms=0,last_error=null,updated_at_ms=now_ms where singleton;
+  update private.coordinator set lease_token=null,lease_until_ms=0,updated_at_ms=now_ms,
+    last_error=case when failure is null then null else last_error end,
+    last_failed_slot=case when failure is null then null else last_failed_slot end where singleton;
   return jsonb_build_object('ok',true,'publishedSlot',(select published_slot from private.coordinator where singleton),
     'currentSlot',current_slot,'boundaries',reports);
 end $$;
@@ -477,13 +541,7 @@ begin
     raise exception 'invalid claim' using errcode='22023';
   end if;
   cap:=least(batch_limit,case when claim_jobs.kind='simulation' then 5 else 20 end);
-  -- An expired lease at its attempt limit is retained for operator action instead of a further attempt.
-  with exhausted as (
-    update private.jobs j set status='operator',lease_token=null,lease_owner=null,last_failure='lease-expired'
-    where j.kind=claim_jobs.kind and j.status='leased' and j.lease_until_ms<=now_ms and j.attempts>=j.max_attempts
-    returning j.id,j.attempts)
-  update private.job_attempts a set finished_at_ms=now_ms,outcome='expired',failure_code='lease-expired'
-    from exhausted e where a.job_id=e.id and a.attempt=e.attempts and a.outcome is null;
+  perform private.sweep_exhausted_leases(now_ms);
   with picked as (
     select j.id,j.status as previous_status,j.attempts as previous_attempt from private.jobs j
     where j.kind=claim_jobs.kind and j.due_at_ms<=now_ms
@@ -597,7 +655,7 @@ end $$;
 create or replace function public.settle_activity(activity_id uuid,lease_token uuid) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare a public.activities%rowtype; j private.jobs%rowtype; owner uuid; now_ms bigint; receipt uuid:=gen_random_uuid();
-  rewards jsonb; result_summary jsonb; outcome jsonb; inserted integer;
+  settlement jsonb; result_summary jsonb; outcome jsonb; inserted integer;
 begin
   if settle_activity.activity_id is null or settle_activity.lease_token is null then return jsonb_build_object('ok',false,'code','invalid'); end if;
   select g.owner_id into owner from public.activities x join public.gladiators g on g.id=x.gladiator_id where x.id=settle_activity.activity_id;
@@ -625,9 +683,15 @@ begin
     select s.receipt_id into receipt from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index;
     outcome:=jsonb_build_object('ok',true,'activityId',a.id,'receiptId',receipt,'newGrants',0,'replayed',true);
   else
-    rewards:=private.settle_rewards(a.id);
-    result_summary:=jsonb_build_object('activityId',a.id,'resolvedKind',a.resolved_kind,'result','completed','success',true,'rewards',rewards,
-      'receiptId',receipt,'settledAtMs',now_ms,'replayExpiry',jsonb_build_object('state','expired'));
+    settlement:=private.settle_rewards(a.id);
+    -- Fail closed on a malformed hook outcome: the job fails, retries and reaches operator state rather than storing a false summary.
+    if jsonb_typeof(settlement) is distinct from 'object' or jsonb_typeof(settlement->'rewards') is distinct from 'object'
+      or coalesce(settlement->>'result','') not in ('completed','victory','defeat') or jsonb_typeof(settlement->'success') is distinct from 'boolean'
+      or jsonb_typeof(settlement->'replayExpiry') is distinct from 'object' then
+      raise exception 'invalid settlement outcome';
+    end if;
+    -- The canonical ActivitySummary: the hook's outcome plus the identity fields only settlement itself knows.
+    result_summary:=settlement||jsonb_build_object('activityId',a.id,'resolvedKind',a.resolved_kind,'receiptId',receipt,'settledAtMs',now_ms);
     update public.activities set status='completed',receipt_id=receipt,summary=result_summary,settled_at_ms=now_ms where id=a.id;
     outcome:=jsonb_build_object('ok',true,'activityId',a.id,'receiptId',receipt,'newGrants',1,'summary',result_summary);
   end if;
@@ -705,7 +769,8 @@ revoke all on function public.advance_boundary(bigint,uuid),public.coordinate_wo
   private.boundary_recompute_leagues(bigint),private.boundary_pair(bigint),private.activity_executor_ready(text),private.prepare_activity_jobs(uuid),
   private.boundary_published(bigint),private.settle_rewards(uuid),private.accept_job_result(uuid,jsonb),private.boundary_settle_previous(bigint),
   private.boundary_apply_changes(bigint),private.boundary_recompute(bigint),private.boundary_snapshot(bigint),private.boundary_check_stamina(bigint),
-  private.boundary_start(bigint),private.valid_preparation(uuid,jsonb),private.resume_operator_job(uuid),private.dispatch_workers(),private.cron_tick()
+  private.boundary_start(bigint),private.valid_preparation(uuid,jsonb),private.resume_operator_job(uuid),private.dispatch_workers(),private.cron_tick(),
+  private.sweep_exhausted_leases(bigint)
   from public,anon,authenticated,service_role;
 grant execute on function public.advance_boundary(bigint,uuid),public.coordinate_work(),public.claim_jobs(uuid,text,integer),public.renew_job(uuid,uuid),
   public.complete_job(uuid,uuid,jsonb),public.fail_job(uuid,uuid,text),public.settle_activity(uuid,uuid),
@@ -713,7 +778,7 @@ grant execute on function public.advance_boundary(bigint,uuid),public.coordinate
   private.boundary_recompute_leagues(bigint),private.boundary_pair(bigint),private.activity_executor_ready(text),private.prepare_activity_jobs(uuid),
   private.boundary_published(bigint),private.settle_rewards(uuid),private.accept_job_result(uuid,jsonb),private.boundary_settle_previous(bigint),
   private.boundary_apply_changes(bigint),private.boundary_recompute(bigint),private.boundary_snapshot(bigint),private.boundary_check_stamina(bigint),
-  private.boundary_start(bigint),private.valid_preparation(uuid,jsonb),private.resume_operator_job(uuid)
+  private.boundary_start(bigint),private.valid_preparation(uuid,jsonb),private.resume_operator_job(uuid),private.sweep_exhausted_leases(bigint)
   to service_role;
 notify pgrst,'reload schema';
 commit;

@@ -20,7 +20,9 @@ export function prepareCreation(command: Creation) {
   const build = validateBuild({ classId: command.classId, stance: 'balanced', allocation: command.allocation,
     equipment: { weapon: items[0].id, body: items[1].id, offHand: null, head: null, feet: null } }, items, RULES_V1.attributes.creationPoints, 1);
   if (!build.ok) throw new Error('invalid');
-  return { command, starterItems: items.map(({ catalogId, catalogVersion, tier, rarity, stats, binding }) => ({ catalogId, catalogVersion, tier, rarity, stats, binding })),
+  // PostgreSQL UUID parameters normalize casing; receipts must use that same identity representation.
+  return { command: { ...command, operationId: command.operationId.toLowerCase() },
+    starterItems: items.map(({ catalogId, catalogVersion, tier, rarity, stats, binding }) => ({ catalogId, catalogVersion, tier, rarity, stats, binding })),
     staminaMaximum: deriveStats(build.snapshot, RULES_V1).maxStamina };
 }
 export function createDatabase(client: SupabaseClient) {

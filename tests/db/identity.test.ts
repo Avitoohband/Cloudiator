@@ -191,4 +191,12 @@ describe('persistent identity', () => {
     }
     expect(await database.loadOwnedInventory({ userId: owner.id })).toHaveLength(60);
   });
+
+  it('treats uppercase and lowercase UUID operation IDs as the same retry identity', async () => {
+    const owner = await account();
+    const command = creation('UUID Case', crypto.randomUUID().toUpperCase());
+    const first = await send(owner.token, command);
+    expect(first).toMatchObject({ ok: true });
+    expect(await send(owner.token, { ...command, operationId: command.operationId.toLowerCase() })).toEqual(first);
+  });
 });

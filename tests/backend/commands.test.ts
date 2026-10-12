@@ -5,7 +5,7 @@ const operationId = '8d2f0216-c41a-4056-89aa-8f0c1da612e0';
 const create = { kind: 'create-character', operationId, name: 'Avi Fighter', classId: 'guardian',
   allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } };
 const deps: CommandDependencies = { allowedOrigins: ['http://127.0.0.1:3000'], verifyActor: async () => ({ userId: operationId }),
-  database: { plan: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }) } };
+  database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }) } };
 function req(body: unknown, origin = 'http://127.0.0.1:3000') { return new Request('http://local', { method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) }); }
 
@@ -13,7 +13,7 @@ it('rejects missing identity before any command executes', async () => {
   const response = await handleCommand(new Request('http://local', { method: 'POST', body: '{}' }), {
     allowedOrigins: ['http://127.0.0.1:3000'],
     verifyActor: async () => { throw new Error('unauthenticated'); },
-    database: { plan: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); } },
+    database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); } },
   });
   expect(response.status).toBe(401);
   expect(await response.json()).toEqual({ ok: false, code: 'unauthenticated' });
@@ -68,4 +68,21 @@ it('returns durable rate-limit retry hints and does not expose unexpected backen
   const broken = await handleCommand(req(create), { ...deps, database: { ...deps.database, createGladiator: async () => { throw new Error('secret database detail'); } } });
   expect(await broken.json()).toEqual({ ok: false, code: 'unavailable' });
   expect(await (await handleCommand(req({ kind: 'cancel-build', expectedVersion: 1, operationId }), deps)).json()).toEqual({ ok: false, code: 'unavailable' });
+});
+
+it('routes item commands to the inventory transaction with the verified actor and parsed command only', async () => {
+  const calls: unknown[] = [];
+  const routed = { ...deps, database: { ...deps.database,
+    plan: async () => { throw new Error('item commands must not reach planning'); },
+    inventory: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return { ok: false as const, code: 'inventory-full' as const }; } } };
+  const commands = [{ kind: 'buy-shop', operationId, catalogId: 'sword:1:renown', catalogVersion: 'v1', quantity: 1 },
+    { kind: 'sell-item', operationId, itemId: operationId, quantity: 2 }, { kind: 'discard-item', operationId, itemId: operationId, quantity: 1 }];
+  for (const command of commands) {
+    const response = await handleCommand(req(command), routed);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ ok: false, code: 'inventory-full' });
+  }
+  expect(calls).toEqual(commands.map(command => ({ actor: { userId: operationId }, command })));
+  const marketplace = await handleCommand(req({ kind: 'cancel-listing', operationId, listingId: operationId }), routed);
+  expect(await marketplace.json()).toEqual({ ok: false, code: 'unavailable' });
 });

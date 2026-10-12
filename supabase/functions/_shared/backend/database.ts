@@ -6,6 +6,8 @@ import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { buildChangeFee, validateBuild, validateCreationAllocation } from '../domain/build.ts';
 import { deriveStats } from '../domain/stats.ts';
+import { historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer } from '../domain/inventory.ts';
+import type { InventoryGrantPlan, ShopOffer } from '../domain/inventory.ts';
 import type { CoordinatorReport, JobKind, JobLease } from '../domain/types.ts';
 
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
@@ -23,6 +25,40 @@ export function prepareBuild(command: Extract<PlanningCommand, { kind: 'queue-bu
     fee: buildChangeFee({ ...state.currentBuild, allocation: state.currentBuild.allocations }, command),
     staminaMaximum: deriveStats(validation.snapshot, RULES_V1).maxStamina,
     snapshot: validation.snapshot };
+}
+export type InventoryCommand = Extract<GameCommand, { kind: 'buy-shop' | 'sell-item' | 'discard-item' }>;
+export type ShopPurchaseValue = { itemIds: string[]; catalogId: string; catalogVersion: string; quantity: number;
+  currency: ShopOffer['currency']; moneyDebit: number; renownDebit: number; bound: boolean; peakStrength: number };
+export type ItemSaleValue = { itemId: string; quantity: number; remainingQuantity: number; moneyCredit: number };
+export type ItemDiscardValue = { itemId: string; quantity: number; remainingQuantity: number };
+export type InventoryValue = ShopPurchaseValue | ItemSaleValue | ItemDiscardValue;
+/**
+ * The locked identity a prepared grant was computed from: each owned item ID with its quantity, plus historical strength.
+ * Every other item field is immutable in SQL, so an equal baseline means the canonical plan still describes the inventory.
+ */
+export type InventoryBaseline = { items: Record<string, number>; peakStrength: number };
+/** Backend-only grant envelope applied by `private.apply_inventory_plan`; Task 9 settlement builds the same shape. */
+export type PreparedGrant = { baseline: InventoryBaseline; plan: InventoryGrantPlan; peakStrength: number };
+export function inventoryBaseline(state: OwnerState): InventoryBaseline {
+  return { items: Object.fromEntries(state.inventory.map(item => [item.id, item.quantity])), peakStrength: state.progression.peakStrength };
+}
+/** Canonical grant: capacity/stacking/overflow plan plus the acquisition's new historical strength. */
+export function prepareGrant(state: OwnerState, grants: Parameters<typeof planInventoryGrant>[1]): PreparedGrant {
+  const plan = planInventoryGrant(state.inventory, grants, CATALOG_V1);
+  return { baseline: inventoryBaseline(state), plan, peakStrength: historicalGearScore([...state.inventory, ...plan.retained], state.progression.peakStrength) };
+}
+/** Exact versioned merchant offer and its grant; null for anything the NPC shops do not sell. SQL decides level, funds and capacity under lock. */
+export function prepareShopPurchase(command: Extract<InventoryCommand, { kind: 'buy-shop' }>, state: OwnerState) {
+  const offer = shopOffer(command.catalogId, CATALOG_V1);
+  if (!offer || command.catalogVersion !== offer.catalogVersion) return null;
+  return { offer, ...prepareGrant(state, [{ catalogId: offer.catalogId, catalogVersion: offer.catalogVersion, quantity: command.quantity,
+    origin: offer.currency === 'renown' ? 'renown' : 'shop' }]) };
+}
+/** NPC unit value for the server-read item; null when it is absent or unsellable (bound or renown origin). */
+export function prepareItemSale(command: Extract<InventoryCommand, { kind: 'sell-item' }>, state: OwnerState) {
+  const item = state.inventory.find(candidate => candidate.id === command.itemId);
+  const unitValue = item ? npcSaleValue(item, CATALOG_V1) : null;
+  return item && unitValue !== null ? { catalogId: item.catalogId, catalogVersion: item.catalogVersion, unitValue } : null;
 }
 export type CreationValue = { gladiatorId: string };
 /** Server-computed catalog rolls and derived values; never accepted by the HTTP parser. */
@@ -66,6 +102,21 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc(rpc, { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
       if (error) throw new Error('planning-unavailable');
       return data as CommandResult<PlanningValue>;
+    },
+    async inventory(actor: Actor, original: InventoryCommand): Promise<CommandResult<InventoryValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase(), ...('itemId' in original ? { itemId: original.itemId.toLowerCase() } : {}) } as InventoryCommand;
+      let prepared = null;
+      if (command.kind !== 'discard-item') {
+        const { data, error } = await client.from('owner_state').select('state').eq('owner_id', actor.userId).maybeSingle();
+        if (error) throw new Error('inventory-unavailable');
+        // Malformed stored items cannot produce a canonical plan; SQL still replays a committed receipt first.
+        try { if (data) prepared = command.kind === 'buy-shop' ? prepareShopPurchase(command, data.state as OwnerState) : prepareItemSale(command, data.state as OwnerState); }
+        catch { prepared = null; }
+      }
+      const rpc = command.kind === 'buy-shop' ? 'buy_shop' : command.kind === 'sell-item' ? 'sell_item' : 'discard_item';
+      const { data, error } = await client.rpc(rpc, { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
+      if (error) throw new Error('inventory-unavailable');
+      return data as CommandResult<InventoryValue>;
     },
     /** Future build commands must use this actor-scoped inventory, never a player-supplied owned list. */
     async loadOwnedInventory(actor: Actor): Promise<ItemInstance[]> {

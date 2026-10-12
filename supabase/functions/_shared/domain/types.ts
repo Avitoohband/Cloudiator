@@ -2,10 +2,13 @@ import type { ActivityChoice, Attributes, ClassId, EquipmentSlot, GameCommand, L
 import type { BuildView, ItemInstance } from '../contracts/reads.ts';
 import type { ItemRarity, ItemStats } from '../contracts/events.ts';
 import type { RULES_V1 } from './rules-v1.ts';
+import type { CATALOG_V1 } from './catalog-v1.ts';
 
 export type { Attributes, ClassId, EquipmentSlot, Phase, Stance, ItemInstance };
 export type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
 export type Rules = typeof RULES_V1;
+/** Typed versioned catalog: equipment variants, expeditions and the stackable salvage material. */
+export type Catalog = typeof CATALOG_V1;
 /** Private domain inputs reuse the canonical queue command's fields. */
 export type BuildInput = Pick<Extract<GameCommand, { kind: 'queue-build' }>, 'classId' | 'stance' | 'allocation' | 'equipment'>;
 export type BuildSnapshot = DeepReadonly<{
@@ -92,6 +95,10 @@ export type CatalogItem = DeepReadonly<{
   id: string; templateId: string; name: string; slot: EquipmentSlot; hands: 0 | 1 | 2;
   tier: 1 | 5 | 10; rarity: ItemRarity; stats: ItemStats; binding: ItemInstance['binding'];
   moneyPrice: number | null; renownPrice: number | null; npcSellValue: number | null;
+}>;
+export type SalvageEntry = DeepReadonly<{
+  id: 'salvage'; name: string; tier: 1; rarity: 'common'; binding: 'tradable'; stats: ItemStats;
+  stackLimit: number; npcSellValue: number;
 }>;
 export type Expedition = DeepReadonly<{
   id: string; name: string; requiredLevel: 1 | 5 | 10; encounters: number;

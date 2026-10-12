@@ -89,7 +89,15 @@ export function skeleton(rawPose, view, scale = 1) {
     dy = GROUND - (pose.rotate ? lowest : lowestLegs);
   }
   dy -= pose.air;
-  const dx = ANCHOR.x + pose.shiftX;
+  let dx = ANCHOR.x + pose.shiftX;
+  if (pose.rotate) {
+    // Lying bodies are long: shift horizontally so head and feet (with outline) stay inside the frame.
+    const xs = Object.entries(p).map(([key, [x]]) => (key === 'head' ? [x - DIMS.headRx * s - 1, x + DIMS.headRx * s + 1] : [x - 3 * s, x + 3 * s])).flat();
+    const lo = Math.min(...xs) + dx;
+    const hi = Math.max(...xs) + dx;
+    if (lo < 3) dx += 3 - lo;
+    else if (hi > FRAME - 4) dx -= hi - (FRAME - 4);
+  }
   for (const key of Object.keys(p)) p[key] = [p[key][0] + dx, p[key][1] + dy];
   return { p, pose, view, side, scale: s };
 }

@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PixelCanvas } from './canvas.mjs';
 import { decodePng, encodePng } from './png.mjs';
+import { drawSlices } from './depth.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const ASSETS = join(ROOT, 'public', 'assets');
@@ -58,24 +59,6 @@ function draw(key, frameName, sx, sy, flipX = false, tint = null, slice = null) 
   scene.blit(img, Math.round(originX + sx - ax), Math.round(originY + sy - f.anchorPx.y), { flipX });
 }
 
-// Mirrors src/game/depth.ts: wide props are drawn as 32px slices sorted by the footprint front edge.
-function frontEdgeY(w, d, u) {
-  const c = Math.min(32 * w, Math.max(-32 * d, u));
-  const south = 32 * (w - d);
-  return c <= south ? 16 * d + (c + 32 * d) / 2 : 16 * (w + d) - (c - south) / 2;
-}
-function propSlices(w, d, imageLeft, imageWidth) {
-  const out = [];
-  const first = Math.floor((imageLeft + 16) / 32);
-  const last = Math.ceil((imageLeft + imageWidth - 16) / 32);
-  for (let k = first; k <= last; k += 1) {
-    const left = Math.max(imageLeft, k * 32 - 16);
-    const right = Math.min(imageLeft + imageWidth, k * 32 + 16);
-    if (right > left) out.push({ left, width: right - left, depthOffset: frontEdgeY(w, d, k * 32) });
-  }
-  return out;
-}
-
 for (let y = 0; y < map.height; y += 1) for (let x = 0; x < map.width; x += 1) {
   const [sx, sy] = toScreen(x, y);
   draw(map.tilesAtlas, map.groundFrames[map.ground[y * map.width + x]], sx, sy);
@@ -83,13 +66,12 @@ for (let y = 0; y < map.height; y += 1) for (let x = 0; x < map.width; x += 1) {
 const items = [];
 for (const p of map.props) {
   const [sx, sy] = toScreen(p.x, p.y);
-  if (p.layer === 'object' && p.w + p.d > 2) {
-    const f = atlas(map.propsAtlas).frames[p.frame];
-    for (const slice of propSlices(p.w, p.d, -f.anchorPx.x, f.frame.w)) items.push({ depth: sy + slice.depthOffset, draw: () => draw(map.propsAtlas, p.frame, sx, sy, false, null, slice) });
-    continue;
+  const f = atlas(map.propsAtlas).frames[p.frame];
+  const slices = drawSlices(p, { w: f.frame.w, anchorX: f.anchorPx.x });
+  for (const slice of slices) {
+    const whole = slices.length === 1 && slice.width === f.frame.w;
+    items.push({ depth: sy + slice.depthOffset, draw: () => draw(map.propsAtlas, p.frame, sx, sy, false, null, whole ? null : slice) });
   }
-  const depth = p.layer === 'floor' ? -1e6 + sy : p.layer === 'foreground' ? 1e6 + sy : sy + p.sortY;
-  items.push({ depth, draw: () => draw(map.propsAtlas, p.frame, sx, sy) });
 }
 if (withActors) {
   const g = manifest.actors.gladiator;
@@ -139,14 +121,26 @@ if (withActors) {
 if (process.argv.includes('--depth-probe')) {
   const g = manifest.actors.gladiator;
   const walk = (x, y) => map.walkable[y]?.[x] === '1';
+  const probed = new Set();
   let n = 0;
   for (const p of map.props) {
-    if (!(p.layer === 'object' && p.w + p.d > 2)) continue;
+    if (!(p.layer === 'object' && (p.w + p.d > 2 || p.slices))) continue;
     const front = [];
     for (let x = p.x; x < p.x + p.w; x += 1) front.push([x, p.y + p.d], [x, p.y - 1]);
     for (let y = p.y; y < p.y + p.d; y += 1) front.push([p.x + p.w, y], [p.x - 1, y]);
+    if (p.slices && map.arena) {
+      // Arena wall: probe every walkable tile just inside and just outside the ring.
+      if (n > 0 && front.length === 0) continue;
+      front.length = 0;
+      const [cx, cy] = map.arena.centre;
+      for (let y = 0; y < map.height; y += 1) for (let x = 0; x < map.width; x += 1) {
+        const r = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+        if (Math.abs(r - map.arena.radius) > 0.8 && Math.abs(r - map.arena.radius) < 1.9 && !probed.has(`${x},${y}`)) front.push([x, y]);
+      }
+    }
     for (const [x, y] of front) {
-      if (!walk(x, y)) continue;
+      if (!walk(x, y) || probed.has(`${x},${y}`)) continue;
+      probed.add(`${x},${y}`);
       const [sx, sy] = toScreen(x + 0.5, y + 0.5);
       const frame = manifest.animations[g.animations.idle.se].frames[0].replace(/^body\//, '');
       const k = n++;

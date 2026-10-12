@@ -164,7 +164,7 @@ export function buildCamp(propMeta) {
   }
   for (const { index, anchorTile } of arenaSegmentAnchors()) {
     const meta = propMeta[`arena-wall/${index}`];
-    b.props.push({ id: `arena-wall-${index}`, frame: `arena-wall/${index}`, x: anchorTile[0], y: anchorTile[1], w: 1, d: 1, sortY: meta.sortY, layer: 'object', occludes: true, walkable: false });
+    b.props.push({ id: `arena-wall-${index}`, frame: `arena-wall/${index}`, x: anchorTile[0], y: anchorTile[1], w: 1, d: 1, sortY: meta.sortY, layer: 'object', occludes: true, walkable: false, slices: meta.slices });
   }
   for (const [deg, frame] of [[ARENA.gateAngle - ARENA.gateHalfWidth - 2, 'arena-gate-post-right'], [ARENA.gateAngle + ARENA.gateHalfWidth + 2, 'arena-gate-post-left']]) {
     const a = (deg * Math.PI) / 180;

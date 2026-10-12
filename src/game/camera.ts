@@ -12,6 +12,12 @@ export function clampZoom(zoom: number): number {
   return Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, zoom));
 }
 
+/** Zoom levels are powers of ZOOM_STEP; snap to the nearest level, then move `steps` levels. */
+export function stepZoom(zoom: number, steps: number): number {
+  const level = Math.round(Math.log(clampZoom(zoom)) / Math.log(ZOOM_STEP));
+  return clampZoom(ZOOM_STEP ** (level + steps));
+}
+
 function clampAxis(center: number, half: number, min: number, size: number): number {
   if (half * 2 >= size) return min + size / 2;
   return Math.min(min + size - half, Math.max(min + half, center));

@@ -15,7 +15,10 @@ import {
   validateProvenance,
   type AssetManifest,
 } from '@/game/assets';
+import * as depthTs from '@/game/depth';
 import { frontEdgeY, needsSlices } from '@/game/depth';
+import * as depthMjs from '../../assets/source/tools/depth.mjs';
+import { CATALOG_V1 } from '@domain/catalog-v1';
 import { worldToScreen } from '@/game/iso';
 
 const ROOT = join(__dirname, '..', '..');
@@ -208,14 +211,19 @@ describe('gladiator animation package', () => {
     expect(guard.farHand[1] - guard.farShoulder[1]).toBeLessThan(8);
   });
 
-  it('keeps a transparent border so nearest-neighbour scaling never bleeds', () => {
-    for (const name of Object.keys(manifest.atlases[gladiator.atlas].frames)) {
-      const px = framePixels(gladiator.atlas, name);
-      const size = 64;
-      for (let i = 0; i < size; i += 1) {
-        for (const [x, y] of [[i, 0], [i, size - 1], [0, i], [size - 1, i]]) {
-          expect(px[(y * size + x) * 4 + 3], `${name} border ${x},${y}`).toBe(0);
+  it('keeps a transparent border and never clips art against it in any actor atlas', () => {
+    const size = 64;
+    for (const atlasKey of ['gladiators', 'npcs', 'creatures']) {
+      for (const name of Object.keys(manifest.atlases[atlasKey].frames)) {
+        const px = framePixels(atlasKey, name);
+        const alpha = (x: number, y: number) => px[(y * size + x) * 4 + 3];
+        for (let i = 0; i < size; i += 1) {
+          for (const [x, y] of [[i, 0], [i, size - 1], [0, i], [size - 1, i]]) expect(alpha(x, y), `${atlasKey}:${name} border ${x},${y}`).toBe(0);
         }
+        // Art reaching the second row/column means the 1px border cleared part of a shape.
+        let clipped = 0;
+        for (let i = 1; i < size - 1; i += 1) for (const [x, y] of [[i, 1], [1, i], [size - 2, i]]) if (alpha(x, y)) clipped += 1;
+        expect(clipped, `${atlasKey}:${name} touches the frame edge`).toBe(0);
       }
     }
   });
@@ -270,6 +278,63 @@ describe('camp and expedition maps', () => {
     for (const kind of ['weights', 'practice', 'spar', 'sit', 'eat', 'sleep', 'merchant-weapons', 'merchant-armor', 'gate', 'arena-ring', 'arena-staging']) expect(kinds, kind).toContain(kind);
     expect(camp.props.some(p => p.occludes)).toBe(true);
     expect(camp.lights.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('maps every catalog equipment template to a layer', () => {
+    const templates = new Set(Object.values(CATALOG_V1.items).map((item: { templateId: string }) => item.templateId));
+    expect(new Set(Object.keys(manifest.equipmentLayers))).toEqual(templates);
+    for (const layer of Object.values(manifest.equipmentLayers)) if (layer) expect(manifest.actors.gladiator.layers.some(l => l.id === layer), layer).toBe(true);
+  });
+
+  it('keeps the game and offline-renderer depth rules identical', () => {
+    for (let w = 1; w <= 3; w += 1) for (let d = 1; d <= 3; d += 1) {
+      for (const [left, width] of [[-100, 200], [-37, 81], [-160, 300], [-5, 9]]) {
+        expect(depthMjs.propSlices({ w, d }, left, width)).toEqual(depthTs.propSlices({ w, d }, left, width));
+      }
+      for (let u = -120; u <= 120; u += 7) expect(depthMjs.frontEdgeY({ w, d }, u)).toBe(depthTs.frontEdgeY({ w, d }, u));
+    }
+    for (const map of manifest.maps) for (const p of map.props) {
+      const f = manifest.atlases[map.propsAtlas].frames[p.frame];
+      expect(depthMjs.drawSlices(p, { w: f.w, anchorX: f.anchorX }), p.id).toEqual(depthTs.drawSlices(p, { w: f.w, anchorX: f.anchorX }));
+    }
+  });
+
+  it('sorts walkers on both sides of the arena wall by the exact wall geometry', () => {
+    const camp = manifest.maps.find(m => m.id === 'camp')!;
+    const [cx, cy] = camp.arena!.centre;
+    const R = camp.arena!.radius;
+    const segments = camp.props.filter(p => p.frame.startsWith('arena-wall/'));
+    expect(segments).toHaveLength(16);
+    // Lowest ground point of each segment's wall band per screen column (independent of the generator).
+    const ground = segments.map(p => {
+      const k = Number(p.frame.split('/')[1]);
+      const cols = new Map<number, number>();
+      for (let deg = k * 22.5; deg <= (k + 1) * 22.5; deg += 0.02) {
+        if (Math.abs(((deg - 45 + 540) % 360) - 180) < 13) continue;
+        const a = (deg * Math.PI) / 180;
+        for (let r = R - 0.45; r <= R + 0.451; r += 0.05) {
+          const s = worldToScreen(cx + r * Math.cos(a), cy + r * Math.sin(a));
+          const col = Math.round(s.x);
+          cols.set(col, Math.max(cols.get(col) ?? -Infinity, s.y));
+        }
+      }
+      return cols;
+    });
+    let checked = 0;
+    for (let y = 0; y < camp.height; y += 1) for (let x = 0; x < camp.width; x += 1) {
+      if (camp.walkable[y][x] !== '1') continue;
+      if (Math.abs(Math.hypot(x + 0.5 - cx, y + 0.5 - cy) - R) > 2.2) continue;
+      const feet = worldToScreen(x + 0.5, y + 0.5);
+      segments.forEach((p, i) => {
+        const anchor = worldToScreen(p.x, p.y);
+        const slice = p.slices!.find(s => feet.x >= anchor.x + s.left && feet.x < anchor.x + s.left + s.width);
+        const wallY = ground[i].get(Math.round(feet.x));
+        if (!slice || wallY === undefined) return;
+        checked += 1;
+        expect(feet.y > anchor.y + slice.depthOffset, `${x},${y} vs ${p.id}`).toBe(feet.y > wallY);
+      });
+    }
+    expect(checked).toBeGreaterThan(40);
   });
 
   it('marks merchant stalls as click targets', () => {

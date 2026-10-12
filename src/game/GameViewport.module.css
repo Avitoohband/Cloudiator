@@ -38,7 +38,13 @@
   background: #241d2bdd;
   border: 1px solid #b5a07a;
   border-radius: 6px;
+  padding: 0 10px;
   cursor: pointer;
+}
+
+.controls button[aria-pressed='true'] {
+  background: #5b4a1edd;
+  border-color: #ffe48f;
 }
 
 .controls button:focus-visible {

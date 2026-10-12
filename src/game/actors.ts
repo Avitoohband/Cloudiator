@@ -37,7 +37,7 @@ export function hashString(text: string): number {
   return h >>> 0;
 }
 
-/** Canonical CampLocation ids, with a keyword fallback for older display labels. */
+/** CampLocation ids (contract request C1, accepted for Codex Task 5), with a keyword fallback for older display labels. */
 export function locationKind(location: string): RoutineKind {
   const l = location.toLowerCase();
   if (l.startsWith('expedition')) return 'away';
@@ -161,13 +161,50 @@ function freeTiles(map: MapData, zoneId: ZoneId, taken: Set<string>): { x: numbe
  * Assign every visible actor a unique tile in its zone. Sparring variants are placed as
  * face-to-face pairs; when stations run out, actors fill free zone tiles.
  */
-export function layoutCamp(actors: PublicActor[], map: MapData, slotIndex: number): { placements: Map<string, Placement>; away: PublicActor[] } {
+export type LayoutOptions = {
+  /** Tiles players must not use (NPC posts). */
+  reserved?: Iterable<string>;
+  /** The previous layout: unchanged actors keep their spots when others arrive or leave. */
+  previous?: Map<string, Placement>;
+};
+
+export function layoutCamp(actors: PublicActor[], map: MapData, slotIndex: number, options: LayoutOptions = {}): { placements: Map<string, Placement>; away: PublicActor[] } {
   const placements = new Map<string, Placement>();
   const away: PublicActor[] = [];
-  const taken = new Set<string>();
+  const taken = new Set<string>(options.reserved ?? []);
   const usedStations = new Set<string>();
   for (const zone of map.zones) for (const s of zone.stations) if (s.npc) taken.add(`${s.x},${s.y}`);
   const routines = actors.map(a => planActorRoutine(a, slotIndex));
+  // Keep previous spots for actors whose zone and variant did not change (and pairs whose partner stays).
+  const previous = options.previous;
+  const kept = new Set<string>();
+  if (previous) {
+    const byId = new Map(routines.map(r => [r.gladiatorId, r]));
+    for (const [id, prev] of previous) {
+      const routine = byId.get(id);
+      if (!routine || routine.zone !== prev.zone || prev.routine.variant !== routine.variant || taken.has(`${prev.x},${prev.y}`)) continue;
+      if (prev.partnerId) {
+        const partner = previous.get(prev.partnerId);
+        const partnerRoutine = byId.get(prev.partnerId);
+        if (!partner || !partnerRoutine || partnerRoutine.zone !== partner.zone || partner.routine.variant !== partnerRoutine.variant) continue;
+      }
+      kept.add(id);
+      taken.add(`${prev.x},${prev.y}`);
+      if (prev.stationId) usedStations.add(prev.stationId);
+      placements.set(id, { ...prev, routine });
+    }
+    // A pair stays together or not at all.
+    for (const id of [...kept]) {
+      const partnerId = placements.get(id)?.partnerId;
+      if (partnerId && !kept.has(partnerId)) {
+        const p = placements.get(id)!;
+        kept.delete(id);
+        placements.delete(id);
+        taken.delete(`${p.x},${p.y}`);
+        if (p.stationId) usedStations.delete(p.stationId);
+      }
+    }
+  }
   const order = routines
     .map((routine, i) => ({ routine, actor: actors[i], rank: hashString(`${routine.gladiatorId}#${slotIndex}`) }))
     .sort((a, b) => a.rank - b.rank || a.routine.gladiatorId.localeCompare(b.routine.gladiatorId));
@@ -192,6 +229,7 @@ export function layoutCamp(actors: PublicActor[], map: MapData, slotIndex: numbe
 
   const pending = new Map<ZoneId, { routine: ActorRoutine; variant: Variant }[]>();
   for (const { routine, actor } of order) {
+    if (kept.has(routine.gladiatorId)) continue;
     if (!routine.zone) { away.push(actor); continue; }
     const variant = routine.variant!;
     if (PAIRED.has(variant)) {

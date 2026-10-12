@@ -156,7 +156,7 @@
   "camp-props": {
    "image": "camp/props.png",
    "data": "camp/props.json",
-   "width": 2039,
+   "width": 2044,
    "height": 240,
    "kind": "props"
   },
@@ -2647,8 +2647,8 @@
   },
   {
    "file": "actors/creatures.png",
-   "sha256": "f728488526e67209fbfac9bd3089a684c7474cda43952c0c3ed41ef5f6965dee",
-   "bytes": 46939,
+   "sha256": "fcc8ef502018ea7d3088fdf80d3b54ca0b6f5be4612cf68cd5b2a7e9411ef3a1",
+   "bytes": 46884,
    "source": "generated",
    "generator": "assets/source/generators/creatures.mjs",
    "inputs": [
@@ -2687,8 +2687,8 @@
   },
   {
    "file": "actors/gladiators.png",
-   "sha256": "8b68d1a5b24214e5b07606507a00d7c0992fc92a349f2a57aad199d5a6b29618",
-   "bytes": 133029,
+   "sha256": "60230e0ad3c0c9355404d9e620933cebec956bc792a49500bfa9fcad1f8e4094",
+   "bytes": 133314,
    "source": "generated",
    "generator": "assets/source/generators/gladiator.mjs",
    "inputs": [
@@ -2727,8 +2727,8 @@
   },
   {
    "file": "actors/npcs.png",
-   "sha256": "5568f7663cb608b0e35cc86b35879795609502bc42a9594a359b20ee440e64c4",
-   "bytes": 36224,
+   "sha256": "8a1df614771d2b7e10c9267a5d8d91e3f4807372a17086db35ccc08cec6082a4",
+   "bytes": 36185,
    "source": "generated",
    "generator": "assets/source/generators/npcs.mjs",
    "inputs": [
@@ -2747,8 +2747,8 @@
   },
   {
    "file": "camp/map.json",
-   "sha256": "b0a0a1dc055040fc0af2bc548e7c2ed939065bb77f52eaaac0d5f9bf9af41842",
-   "bytes": 102386,
+   "sha256": "c405e4a2d3e6b123c6e94b5e96be2a58b73288a43d2648011f224008dcc2d293",
+   "bytes": 105238,
    "source": "generated",
    "generator": "assets/source/generators/maps.mjs",
    "inputs": [
@@ -2767,8 +2767,8 @@
   },
   {
    "file": "camp/props.json",
-   "sha256": "cd388422cf145b7f071c2148800096ce109f08be6f62bf4b5656b263d2d30774",
-   "bytes": 19016,
+   "sha256": "336b251f35266dfae44e997bcc862ad9974881e973ab0cd282235dd6f55b730f",
+   "bytes": 21868,
    "source": "generated",
    "generator": "assets/source/generators/props.mjs",
    "inputs": [
@@ -2784,8 +2784,8 @@
   },
   {
    "file": "camp/props.png",
-   "sha256": "63c58647f5096bf399a9e3cabe0c7614fc6f19ceab2080b2ae7a34c0ee054715",
-   "bytes": 30000,
+   "sha256": "eb5072ed347b55dc4ebaffe0265206de1e8ccdadd40c9fd4b9a94075925455d2",
+   "bytes": 29960,
    "source": "generated",
    "generator": "assets/source/generators/props.mjs",
    "inputs": [

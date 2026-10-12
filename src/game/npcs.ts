@@ -1,51 +1,56 @@
-// Ambient NPC routines: deterministic waypoint loops driven by the shared clock, so every
-// viewer sees the same merchants tending stalls, the trainer touring the yard and the
-// cook and healer stopping to chat. They never affect progression.
-import type { Direction, MapData } from './assets';
+// Ambient NPC routines on the shared clock. Each NPC repeats a fixed period of scheduled steps and
+// walks between them, so every viewer sees the same merchants tending stalls, the trainer touring
+// the yard and pairs of NPCs meeting face to face (one facing se, the partner at x+1, y-1 facing sw).
+// NPCs never affect progression.
+import type { Direction, MapData, TilePoint } from './assets';
 import { findPath, gridFromMap, pathLength, pointAlong } from './paths';
-import type { TilePoint } from './assets';
 
 export type NpcAction = 'idle' | 'walk' | 'talk' | 'tend';
-export type NpcStep = { x: number; y: number; action: Exclude<NpcAction, 'walk'>; durationMs: number; facing: Direction };
-export type NpcRoutine = { npcId: string; steps: NpcStep[] };
+/** Stand at (x, y) from `at` for `durationMs` within the routine period. */
+export type NpcStep = { x: number; y: number; at: number; durationMs: number; action: Exclude<NpcAction, 'walk'>; facing: Direction };
+export type NpcRoutine = { npcId: string; periodMs: number; steps: NpcStep[]; meetsWith?: string };
 export type NpcPosition = { x: number; y: number; action: NpcAction; facing: Direction };
 
-const WALK_TILES_PER_MS = 1.3 / 1000;
+/** Matches manifest actors.gladiator.walk.tilesPerSecond so NPC feet do not slide. */
+export const NPC_WALK_TILES_PER_SECOND = 1;
 
 export const NPC_ROUTINES: NpcRoutine[] = [
-  { npcId: 'smith', steps: [
-    { x: 18, y: 7, action: 'tend', durationMs: 18_000, facing: 'sw' },
-    { x: 19, y: 9, action: 'talk', durationMs: 8_000, facing: 'se' },
+  { npcId: 'smith', periodMs: 60_000, meetsWith: 'armorer', steps: [
+    { x: 18, y: 7, at: 0, durationMs: 30_000, action: 'tend', facing: 'sw' },
+    { x: 20, y: 8, at: 36_000, durationMs: 12_000, action: 'talk', facing: 'se' },
   ] },
-  { npcId: 'armorer', steps: [
-    { x: 24, y: 7, action: 'tend', durationMs: 15_000, facing: 'sw' },
-    { x: 25, y: 9, action: 'talk', durationMs: 7_000, facing: 'se' },
-    { x: 24, y: 7, action: 'idle', durationMs: 5_000, facing: 'se' },
+  { npcId: 'armorer', periodMs: 60_000, meetsWith: 'smith', steps: [
+    { x: 24, y: 7, at: 0, durationMs: 28_000, action: 'tend', facing: 'sw' },
+    { x: 21, y: 7, at: 36_000, durationMs: 12_000, action: 'talk', facing: 'sw' },
   ] },
-  { npcId: 'trainer', steps: [
-    { x: 7, y: 18, action: 'talk', durationMs: 10_000, facing: 'se' },
-    { x: 10, y: 21, action: 'idle', durationMs: 6_000, facing: 'sw' },
-    { x: 13, y: 16, action: 'talk', durationMs: 10_000, facing: 'sw' },
+  { npcId: 'cook', periodMs: 90_000, meetsWith: 'healer', steps: [
+    { x: 24, y: 33, at: 0, durationMs: 30_000, action: 'tend', facing: 'se' },
+    { x: 26, y: 33, at: 40_000, durationMs: 13_000, action: 'talk', facing: 'se' },
+    { x: 23, y: 38, at: 62_000, durationMs: 18_000, action: 'tend', facing: 'se' },
   ] },
-  { npcId: 'cook', steps: [
-    { x: 24, y: 33, action: 'tend', durationMs: 20_000, facing: 'se' },
-    { x: 26, y: 33, action: 'talk', durationMs: 9_000, facing: 'se' },
-    { x: 23, y: 38, action: 'tend', durationMs: 9_000, facing: 'se' },
+  { npcId: 'healer', periodMs: 90_000, meetsWith: 'cook', steps: [
+    { x: 27, y: 32, at: 40_000, durationMs: 13_000, action: 'talk', facing: 'sw' },
+    { x: 16, y: 27, at: 68_000, durationMs: 2_000, action: 'idle', facing: 'se' },
+    { x: 12, y: 22, at: 78_000, durationMs: 10_000, action: 'talk', facing: 'se' },
   ] },
-  { npcId: 'healer', steps: [
-    { x: 27, y: 32, action: 'talk', durationMs: 9_000, facing: 'sw' },
-    { x: 20, y: 34, action: 'idle', durationMs: 6_000, facing: 'se' },
-    { x: 12, y: 22, action: 'talk', durationMs: 8_000, facing: 'sw' },
-    { x: 16, y: 27, action: 'idle', durationMs: 5_000, facing: 'se' },
+  { npcId: 'trainer', periodMs: 90_000, meetsWith: 'healer', steps: [
+    { x: 7, y: 18, at: 8_000, durationMs: 8_000, action: 'talk', facing: 'se' },
+    { x: 10, y: 21, at: 22_000, durationMs: 6_000, action: 'idle', facing: 'sw' },
+    { x: 13, y: 16, at: 40_000, durationMs: 12_000, action: 'talk', facing: 'sw' },
+    { x: 13, y: 21, at: 78_000, durationMs: 10_000, action: 'talk', facing: 'sw' },
   ] },
-  { npcId: 'guard', steps: [
-    { x: 40, y: 20, action: 'idle', durationMs: 22_000, facing: 'sw' },
-    { x: 39, y: 24, action: 'idle', durationMs: 12_000, facing: 'se' },
-    { x: 37, y: 21, action: 'talk', durationMs: 6_000, facing: 'se' },
+  { npcId: 'guard', periodMs: 60_000, steps: [
+    { x: 40, y: 20, at: 0, durationMs: 30_000, action: 'idle', facing: 'sw' },
+    { x: 39, y: 24, at: 38_000, durationMs: 12_000, action: 'idle', facing: 'se' },
   ] },
 ];
 
-type Leg = { step: NpcStep; path: TilePoint[]; walkMs: number };
+/** Every tile an NPC stands on during its routine (players are kept off these). */
+export function npcPostTiles(routines: NpcRoutine[] = NPC_ROUTINES): Set<string> {
+  return new Set(routines.flatMap(r => r.steps.map(s => `${s.x},${s.y}`)));
+}
+
+type Leg = { step: NpcStep; next: NpcStep; nextAt: number; path: TilePoint[]; length: number };
 const legCache = new WeakMap<MapData, Map<string, Leg[]>>();
 
 function legsFor(routine: NpcRoutine, map: MapData): Leg[] {
@@ -54,11 +59,13 @@ function legsFor(routine: NpcRoutine, map: MapData): Leg[] {
   const cached = perMap.get(routine.npcId);
   if (cached) return cached;
   const grid = gridFromMap(map);
-  const legs = routine.steps.map((step, i) => {
-    const next = routine.steps[(i + 1) % routine.steps.length];
+  const steps = [...routine.steps].sort((a, b) => a.at - b.at);
+  const legs = steps.map((step, i) => {
+    const next = steps[(i + 1) % steps.length];
+    const nextAt = i + 1 < steps.length ? next.at : next.at + routine.periodMs;
     const path = findPath(grid, { x: step.x, y: step.y }, { x: next.x, y: next.y });
     if (!path) throw new Error(`NPC ${routine.npcId}: no path from ${step.x},${step.y} to ${next.x},${next.y}`);
-    return { step, path, walkMs: pathLength(path) / WALK_TILES_PER_MS };
+    return { step, next, nextAt, path, length: pathLength(path) };
   });
   perMap.set(routine.npcId, legs);
   return legs;
@@ -73,19 +80,27 @@ export function facingFor(dx: number, dy: number, fallback: Direction = 'se'): D
 }
 
 /** Where an NPC is and what it is doing at shared time `nowMs`. */
-export function planNpcPosition(routine: NpcRoutine, map: MapData, nowMs: number): NpcPosition {
+export function planNpcPosition(routine: NpcRoutine, map: MapData, nowMs: number, tilesPerSecond = NPC_WALK_TILES_PER_SECOND): NpcPosition {
   const legs = legsFor(routine, map);
-  const cycle = legs.reduce((s, l) => s + l.step.durationMs + l.walkMs, 0);
-  let t = ((nowMs % cycle) + cycle) % cycle;
+  const speed = tilesPerSecond / 1000;
+  let t = ((nowMs % routine.periodMs) + routine.periodMs) % routine.periodMs;
+  if (t < legs[0].step.at) t += routine.periodMs;
   for (const leg of legs) {
-    if (t < leg.step.durationMs) return { x: leg.step.x + 0.5, y: leg.step.y + 0.5, action: leg.step.action, facing: leg.step.facing };
-    t -= leg.step.durationMs;
-    if (t < leg.walkMs) {
-      const p = pointAlong(leg.path, t * WALK_TILES_PER_MS);
-      return { x: p.x, y: p.y, action: 'walk', facing: facingFor(p.dx, p.dy, leg.step.facing) };
+    const { step } = leg;
+    if (t < step.at) continue;
+    if (t < step.at + step.durationMs) return { x: step.x + 0.5, y: step.y + 0.5, action: step.action, facing: step.facing };
+    if (t < leg.nextAt) {
+      const walked = (t - step.at - step.durationMs) * speed;
+      if (walked >= leg.length) return { x: leg.next.x + 0.5, y: leg.next.y + 0.5, action: 'idle', facing: leg.next.facing };
+      const p = pointAlong(leg.path, walked);
+      return { x: p.x, y: p.y, action: 'walk', facing: facingFor(p.dx, p.dy, step.facing) };
     }
-    t -= leg.walkMs;
   }
-  const last = legs[legs.length - 1].step;
-  return { x: last.x + 0.5, y: last.y + 0.5, action: last.action, facing: last.facing };
+  const first = legs[0].step;
+  return { x: first.x + 0.5, y: first.y + 0.5, action: first.action, facing: first.facing };
+}
+
+/** Walking time each leg needs versus the time the schedule allows (used by tests). */
+export function routineSlack(routine: NpcRoutine, map: MapData, tilesPerSecond = NPC_WALK_TILES_PER_SECOND): number[] {
+  return legsFor(routine, map).map(leg => leg.nextAt - (leg.step.at + leg.step.durationMs) - (leg.length / tilesPerSecond) * 1000);
 }

@@ -2,14 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PublicActor } from '@contracts/reads';
 import { loadAssetManifest } from '@/game/assets';
 import { mapScreenBounds, screenToWorld, worldToScreen } from '@/game/iso';
-import { clampView, zoomAround, ZOOM_LIMITS } from '@/game/camera';
+import { clampView, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
 import { findPath, gridFromMap } from '@/game/paths';
 import { EQUIPMENT_LAYERS, layoutCamp, locationKind, planActorRoutine } from '@/game/actors';
-import { frontEdgeY, propSlices } from '@/game/depth';
-import { NPC_ROUTINES, planNpcPosition } from '@/game/npcs';
+import { frontEdgeY, hidesActor, propSlices } from '@/game/depth';
+import { NPC_ROUTINES, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
 import { phaseLighting } from '@/game/lighting';
 import { createSceneBridge } from '@/game/bridge';
 import { createDemoWorld } from '@/game/demo-world';
+import { createCampScene } from '@/game/camp-scene';
 
 const manifest = loadAssetManifest();
 const camp = manifest.maps.find(m => m.id === 'camp')!;
@@ -71,6 +72,22 @@ describe('camera limits', () => {
     expect(after.y).toBeCloseTo(before.y, 6);
     expect(zoomAround(start, 100, anchor, bounds).zoom).toBe(ZOOM_LIMITS.max);
     expect(zoomAround(start, 0.0001, anchor, bounds).zoom).toBe(ZOOM_LIMITS.min);
+  });
+
+  it('steps zoom through fixed levels so buttons, keys and the wheel agree', () => {
+    expect(stepZoom(1, 1)).toBeCloseTo(ZOOM_STEP, 9);
+    expect(stepZoom(1, -2)).toBeCloseTo(1 / ZOOM_STEP ** 2, 9);
+    // Off-level zooms (after a pinch) snap to the nearest level before stepping.
+    expect(stepZoom(1.3, 1)).toBeCloseTo(ZOOM_STEP ** 2, 9);
+    expect(stepZoom(1.3, 0)).toBeCloseTo(ZOOM_STEP, 9);
+    expect(stepZoom(ZOOM_LIMITS.max, 1)).toBe(ZOOM_LIMITS.max);
+    expect(stepZoom(ZOOM_LIMITS.min, -1)).toBe(ZOOM_LIMITS.min);
+    expect(stepZoom(ZOOM_LIMITS.max, -1)).toBeLessThan(ZOOM_LIMITS.max);
+    expect(stepZoom(ZOOM_LIMITS.min, 1)).toBeGreaterThan(ZOOM_LIMITS.min);
+    let zoom = 1;
+    for (let i = 0; i < 4; i += 1) zoom = stepZoom(zoom, 1);
+    for (let i = 0; i < 4; i += 1) zoom = stepZoom(zoom, -1);
+    expect(zoom).toBeCloseTo(1, 9);
   });
 });
 
@@ -166,6 +183,30 @@ describe('actor routines', () => {
       }
     }
   });
+
+  it('keeps players off every tile an NPC stands on', () => {
+    const posts = npcPostTiles();
+    for (const location of ['training', 'rest', 'arena', 'somewhere unknown']) {
+      const actors = Array.from({ length: 50 }, (_, i) => actor(i, location));
+      const { placements } = layoutCamp(actors, camp, SLOT, { reserved: posts });
+      for (const p of placements.values()) expect(posts.has(`${p.x},${p.y}`), `${location} ${p.x},${p.y}`).toBe(false);
+    }
+  });
+
+  it('leaves everyone else in place when one gladiator arrives or leaves', () => {
+    const world = createDemoWorld(1_791_592_800_000, 50, 6);
+    const first = layoutCamp(world.actors, camp, world.slotIndex).placements;
+    const tile = (p: { x: number; y: number }) => `${p.x},${p.y}`;
+    for (const leaver of world.actors.filter(a => first.has(a.gladiatorId)).slice(0, 12)) {
+      const next = layoutCamp(world.actors.filter(a => a !== leaver), camp, world.slotIndex, { previous: first }).placements;
+      const partner = first.get(leaver.gladiatorId)!.partnerId;
+      for (const [id, p] of next) if (id !== partner) expect(tile(p), `${id} after ${leaver.gladiatorId} left`).toBe(tile(first.get(id)!));
+    }
+    const arrival = actor(999, 'training');
+    const grown = layoutCamp([...world.actors, arrival], camp, world.slotIndex, { previous: first }).placements;
+    for (const [id, p] of first) expect(tile(grown.get(id)!), id).toBe(tile(p));
+    expect(grown.has(arrival.gladiatorId)).toBe(true);
+  });
 });
 
 describe('wide prop depth slices', () => {
@@ -188,6 +229,22 @@ describe('wide prop depth slices', () => {
   });
 });
 
+describe('occlusion fading', () => {
+  // A 40x40 prop at (0, 0) whose only opaque pixels are its lower-left quarter, sorted at y = 100.
+  const prop = { left: 0, top: 0, width: 40, height: 40, slices: [{ x0: 0, x1: 40, depth: 100 }] };
+  const alphaAt = (x: number, y: number) => (x < 20 && y >= 20 ? 255 : 0);
+
+  it('fades a prop only where its opaque pixels cover the body of an actor behind it', () => {
+    expect(hidesActor(prop, alphaAt, { x: 10, y: 60 })).toBe(true);
+    // Same depth relation, but the body overlaps only transparent pixels.
+    expect(hidesActor(prop, alphaAt, { x: 30, y: 60 })).toBe(false);
+    // In front of the prop: never hidden.
+    expect(hidesActor(prop, alphaAt, { x: 10, y: 120 })).toBe(false);
+    // Far outside the image.
+    expect(hidesActor(prop, alphaAt, { x: 200, y: 60 })).toBe(false);
+  });
+});
+
 describe('ambient NPCs', () => {
   it('keeps six NPCs on walkable tiles near their posts at all times', () => {
     expect(NPC_ROUTINES.map(n => n.npcId).sort()).toEqual(['armorer', 'cook', 'guard', 'healer', 'smith', 'trainer']);
@@ -203,10 +260,41 @@ describe('ambient NPCs', () => {
     expect(Math.hypot(at.x - 18.5, at.y - 7.5)).toBeLessThan(3);
   });
 
-  it('brings NPCs together for ambient conversations', () => {
-    const talks = new Set<string>();
-    for (let t = 0; t < 30 * 60_000; t += 10_000) for (const r of NPC_ROUTINES) if (planNpcPosition(r, camp, t).action === 'talk') talks.add(r.npcId);
-    expect(talks.size).toBeGreaterThanOrEqual(3);
+  it('schedules enough walking time between every pair of posts', () => {
+    for (const routine of NPC_ROUTINES) for (const slack of routineSlack(routine, camp)) expect(slack, routine.npcId).toBeGreaterThanOrEqual(0);
+  });
+
+  it('walks between posts without teleporting', () => {
+    const maxStep = (manifest.actors.gladiator.walk.tilesPerSecond * 250) / 1000 + 1e-6;
+    for (const routine of NPC_ROUTINES) {
+      let prev = planNpcPosition(routine, camp, 0);
+      for (let t = 250; t <= 2 * routine.periodMs; t += 250) {
+        const p = planNpcPosition(routine, camp, t);
+        expect(Math.hypot(p.x - prev.x, p.y - prev.y), `${routine.npcId} at ${t}`).toBeLessThanOrEqual(maxStep);
+        prev = p;
+      }
+    }
+  });
+
+  it('meets a partner face to face for most of their talking time', () => {
+    const facesEachOther = (a: NpcPosition, b: NpcPosition) => {
+      const [se, sw] = a.x < b.x ? [a, b] : [b, a];
+      return se.facing === 'se' && sw.facing === 'sw' && Math.abs(sw.x - se.x - 1) < 1e-9 && Math.abs(se.y - sw.y - 1) < 1e-9;
+    };
+    let talking = 0;
+    let meeting = 0;
+    const pairs = new Set<string>();
+    for (let t = 0; t < 180_000; t += 500) {
+      const at = new Map(NPC_ROUTINES.map(r => [r.npcId, planNpcPosition(r, camp, t)]));
+      for (const [id, p] of at) {
+        if (p.action !== 'talk') continue;
+        talking += 1;
+        const partner = [...at].find(([other, q]) => other !== id && q.action === 'talk' && facesEachOther(p, q));
+        if (partner) { meeting += 1; pairs.add([id, partner[0]].sort().join('+')); }
+      }
+    }
+    expect(meeting / talking).toBeGreaterThan(0.7);
+    expect([...pairs].sort()).toEqual(['armorer+smith', 'cook+healer', 'healer+trainer']);
   });
 });
 
@@ -235,6 +323,33 @@ describe('scene bridge', () => {
     bridge.destroy();
     bridge.emit('open-merchant', { merchant: 'weapons' });
     expect(merchant).not.toHaveBeenCalled();
+    expect(bridge.listenerCount()).toBe(0);
+  });
+
+  it('removes the camp scene listeners on dispose so a remount on the same bridge starts clean', () => {
+    const bridge = createSceneBridge();
+    const destroyHandlers: (() => void)[] = [];
+    const P = {
+      Scene: class { constructor(_config: unknown) {} },
+      Scenes: { Events: { DESTROY: 'destroy' } },
+    } as unknown as typeof import('phaser');
+    const deps = { manifest, atlasData: {}, assetBase: '/assets/', world: null, bridge, now: () => 0, onReady() {}, onError() {} };
+    const first = createCampScene(P, deps);
+    expect(bridge.listenerCount()).toBe(4);
+    // Commands sent before the scene is ready (or after it is gone) are ignored, not thrown.
+    expect(() => bridge.emit('camera-zoom', { direction: 'in' })).not.toThrow();
+    first.handle.dispose();
+    first.handle.dispose();
+    expect(bridge.listenerCount()).toBe(0);
+    expect(first.handle.debug().disposed).toBe(true);
+
+    const second = createCampScene(P, deps);
+    expect(bridge.listenerCount()).toBe(4);
+    // Game.destroy emits the scene DESTROY event, which disposes as well.
+    const scene = second.scene as unknown as { events: { once(event: string, fn: () => void): void }; init(): void };
+    scene.events = { once: (event, fn) => { if (event === 'destroy') destroyHandlers.push(fn); } };
+    scene.init();
+    destroyHandlers.forEach(fn => fn());
     expect(bridge.listenerCount()).toBe(0);
   });
 

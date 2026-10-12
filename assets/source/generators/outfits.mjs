@@ -363,30 +363,40 @@ export function headband(r = RAMP.crimson) {
 }
 
 // ---------------------------------------------------------------- weapons
-const REACH = { sword: [-2.5, 15], axe: [-3, 14], spear: [-9, 24], club: [-2, 15], hammer: [-2, 11.5], ladle: [-1, 13], staff: [-10, 15.5] };
-/** Slide a weapon along its own axis so both ends stay inside the frame (shafts slide freely, short weapons a little). */
-function keepInFrame(g, d, kind) {
-  const [back, front] = REACH[kind] ?? [0, 0];
+/** Extent points along each weapon: [distance from the grip, half-width across the shaft]. */
+const EXTENT = {
+  sword: [[-2.5, 1], [15, 1], [2, 3]], axe: [[-3, 1], [13.5, 1], [10.8, 6.5]], spear: [[-9, 1], [24, 2]],
+  club: [[-2, 1.5], [11.5, 4.5], [16, 1.5]], hammer: [[-2, 1], [11, 3.5], [12.5, 3.5]], ladle: [[-1, 1], [11, 3], [13, 1]], staff: [[-10, 1], [15.5, 1]],
+};
+
+/** Slide a weapon along its own axis so every extent point (plus outline) stays inside the frame. */
+export function keepInFrame(g, d, kind, scale = 1) {
+  const perp = [-d[1], d[0]];
   let lo = -Infinity;
   let hi = Infinity;
-  for (const axis of [0, 1]) {
-    if (Math.abs(d[axis]) < 1e-6) continue;
-    for (const t of [back, front]) {
-      const a = (2 - g[axis]) / d[axis] - t;
-      const b = (FRAME - 3 - g[axis]) / d[axis] - t;
-      lo = Math.max(lo, Math.min(a, b));
-      hi = Math.min(hi, Math.max(a, b));
+  for (const [t, half] of EXTENT[kind] ?? []) {
+    for (const side of [-1, 1]) {
+      const base = add(g, mul(perp, side * half));
+      for (const axis of [0, 1]) {
+        if (Math.abs(d[axis]) < 1e-6) continue;
+        // Keep a 1px outline clear of the transparent border: stay within [3, FRAME - 4].
+        const a = (3 - base[axis]) / d[axis] - t;
+        const b = (FRAME - 4 - base[axis]) / d[axis] - t;
+        lo = Math.max(lo, Math.min(a, b));
+        hi = Math.min(hi, Math.max(a, b));
+      }
     }
   }
   if (lo > hi) return g;
-  const limit = kind === 'spear' || kind === 'staff' ? Infinity : 4;
+  // Shafts slide freely; short weapons only a little, except on scaled-up actors (trolls).
+  const limit = kind === 'spear' || kind === 'staff' || scale > 1.1 ? Infinity : 4;
   const shift = Math.max(-limit, Math.min(limit, Math.min(hi, Math.max(lo, 0))));
   return add(g, mul(d, shift));
 }
 
-function drawBlade(c, g0, ang, kind) {
+function drawBlade(c, g0, ang, kind, scale = 1) {
   const d = dirVec(ang, 1);
-  const g = keepInFrame(g0, d, kind);
+  const g = keepInFrame(g0, d, kind, scale);
   const perp = [-d[1], d[0]];
   const at = t => add(g, mul(d, t));
   if (kind === 'sword') {
@@ -502,8 +512,8 @@ export function weapon(kind) {
 export const tool = kind => ctx => {
   const { p, pose, part } = ctx;
   if (pose.weapon === 'none' || pose.weapon === 'stowed') return;
-  if (pose.weapon === 'dropped') { part('back', c => drawBlade(c, [42, GROUND - 1], 90, kind)); return; }
-  part('weapon', c => drawBlade(c, p.nearHand, pose.weaponAngle, kind));
+  if (pose.weapon === 'dropped') { part('back', c => drawBlade(c, [34, GROUND - 1], 90, kind, ctx.scale)); return; }
+  part('weapon', c => drawBlade(c, p.nearHand, pose.weaponAngle, kind, ctx.scale));
 };
 
 // ---------------------------------------------------------------- shield
@@ -533,7 +543,8 @@ export function shield(face = RAMP.teal, rim = RAMP.gold, size = 1) {
       return;
     }
     const raised = mode === 'raised';
-    const cx = p.farHand[0] + (raised ? 2 : 1.5);
+    // From behind the shield hangs beside the far hand, pushed outward so its rim stays visible.
+    const cx = p.farHand[0] + (view === 'back' ? -3 : raised ? 2 : 1.5);
     const cy = p.farHand[1] + (raised ? -2 : 0.5);
     const rx = (raised ? 5 : 4.6) * size;
     const ry = (raised ? 7.2 : 6.6) * size;

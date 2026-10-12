@@ -18,6 +18,12 @@ const LOADOUTS = [
 const CLASSES: ClassId[] = ['berserker', 'guardian', 'duelist'];
 const LEAGUES: LeagueId[] = ['bronze', 'bronze', 'bronze', 'silver', 'silver', 'gold', 'champion'];
 
+/** Deterministic version-4-shaped UUID from a label (fixture data only). */
+function demoUuid(label: string): string {
+  const hex = [0, 1, 2, 3].map(k => hashString(`${label}#${k}`).toString(16).padStart(8, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 /** `inCamp` gladiators spread over the camp zones plus `away` gladiators on expeditions. */
 export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): WorldSnapshot {
   const count = inCamp + away;
@@ -27,7 +33,7 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
     const h = hashString(`demo-${i}`);
     const location = i < inCamp ? CAMP_LOCATIONS[i % CAMP_LOCATIONS.length] : AWAY_LOCATIONS[(i - inCamp) % AWAY_LOCATIONS.length];
     return {
-      gladiatorId: `d3m0${String(i).padStart(4, '0')}-0000-4000-8000-${h.toString(16).padStart(12, '0')}`,
+      gladiatorId: demoUuid(`demo-gladiator-${i}`),
       name: NAMES[i % NAMES.length],
       classId: CLASSES[h % CLASSES.length],
       equipmentSilhouettes: LOADOUTS[(h >>> 3) % LOADOUTS.length],
@@ -35,7 +41,7 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
       level: 1 + ((h >>> 11) % 12),
       phase: phaseOfSlot(slotIndex),
       location,
-      activityId: `demo-activity-${i}`,
+      activityId: demoUuid(`demo-activity-${i}`),
       activityStatus: 'active',
       startsAtMs,
       endsAtMs: startsAtMs + SLOT_MS,

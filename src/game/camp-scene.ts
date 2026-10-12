@@ -5,16 +5,17 @@ import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor } from '@contracts/reads';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
 import { layoutCamp, type Placement } from './actors';
-import { NPC_ROUTINES, facingFor, planNpcPosition } from './npcs';
-import { clampView, panBy, zoomAround, ZOOM_STEP, type ViewState } from './camera';
-import { mapScreenBounds, worldToScreen, type Rect } from './iso';
+import { NPC_ROUTINES, facingFor, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
+import { clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
+import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
 import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
 import { lightingAt } from './lighting';
-import { needsSlices, propSlices } from './depth';
+import { drawSlices, hidesActor, type PlacedImage } from './depth';
 import type { SceneBridge } from './bridge';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
+type Image = PhaserNS.GameObjects.Image;
 type Container = PhaserNS.GameObjects.Container;
 
 export type CampSceneDeps = {
@@ -25,29 +26,54 @@ export type CampSceneDeps = {
   bridge: SceneBridge;
   /** Estimated server time in ms. */
   now: () => number;
+  /** Gladiator to centre on when the first world arrives (the owner); the arena otherwise. */
+  focusId?: () => string | null;
+  reducedMotion?: boolean;
   onReady: () => void;
   onError: (reason: 'assets' | 'error', message: string) => void;
 };
 
 export type CampSceneHandle = {
   setWorld(world: WorldSnapshot): void;
+  setReducedMotion(reduced: boolean): void;
+  /** Removes the scene's bridge listeners. Idempotent; also runs when the game destroys the scene. */
+  dispose(): void;
   debug(): CampDebugState;
+  props(): PropDebug[];
+  /** Centre the camera on a tile (fixture tests and evidence captures). */
+  centerOn(x: number, y: number, zoom?: number): void;
+  /** Canvas-relative CSS pixel position of an actor's body, or null when it is not placed. */
+  screenOf(id: string): Point | null;
 };
 
+export type CampDebugActor = {
+  id: string; kind: 'player' | 'npc'; name: string; x: number; y: number;
+  zone: string | null; location: string | null; action: string; frame: string;
+  layers: string[]; tint: { skin: number; cloth: number; hair: number } | null;
+  visible: boolean; depth: number; walking: boolean;
+};
 export type CampDebugState = {
   ready: boolean;
+  disposed: boolean;
+  failed: boolean;
+  reducedMotion: boolean;
   players: number;
   ambientNpcs: number;
   away: number;
-  zones: string[];
   camera: { centerX: number; centerY: number; zoom: number; worldView: Rect; bounds: Rect };
-  actors: { id: string; kind: 'player' | 'npc'; x: number; y: number; action: string; frame: string; visible: boolean; depth: number }[];
+  actors: CampDebugActor[];
   selected: string | null;
   following: string | null;
+  faded: string[];
+  /** What the scene actually applied this frame. */
+  lighting: { overlayColor: number; overlayAlpha: number; torchAlpha: number };
 };
+export type PropDebug = { id: string; frame: string; x: number; y: number; occludes: boolean; slices: { left: number; width: number; depth: number }[]; alpha: number };
 
-const GATE: TilePoint = { x: 41, y: 22 };
 const BG = 0x1c3f24;
+const FADED_ALPHA = 0.45;
+/** Wheel delta (CSS px) per zoom step: one mouse notch, or a short trackpad swipe. */
+const WHEEL_STEP = 100;
 
 type ActorView = {
   id: string;
@@ -55,7 +81,7 @@ type ActorView = {
   name: string;
   container: Container;
   layers: { id: string; sprite: Sprite }[];
-  atlas: string;
+  look: string;
   label: PhaserNS.GameObjects.Text;
   x: number;
   y: number;
@@ -64,9 +90,23 @@ type ActorView = {
   offsetMs: number;
   walk: { path: TilePoint[]; startedAt: number; then: { action: ActionId; facing: Direction }; remove?: boolean } | null;
   placement: Placement | null;
-  npcRoutine?: (typeof NPC_ROUTINES)[number];
-  merchant?: 'weapons' | 'armor';
+  location: string | null;
+  npcRoutine?: NpcRoutine;
+  npcAnimations?: AssetManifest['actors']['npcs'][number]['animations'];
   frame: string;
+  flip: boolean | null;
+  depth: number;
+};
+
+type PropGroup = Omit<PlacedImage, 'slices'> & {
+  id: string;
+  frame: string;
+  x: number;
+  y: number;
+  occludes: boolean;
+  images: Image[];
+  /** Absolute screen ranges and sort depths of the drawn slices, plus their anchor-relative ranges. */
+  slices: { x0: number; x1: number; depth: number; left: number; width: number }[];
 };
 
 function frameIndex(anim: AnimationDef, t: number): number {
@@ -79,6 +119,9 @@ function frameIndex(anim: AnimationDef, t: number): number {
   return anim.frames.length - 1;
 }
 
+const lookKey = (p: Placement) => `${p.routine.layers.join('+')}|${p.routine.tint.skin}|${p.routine.tint.cloth}|${p.routine.tint.hair}`;
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: PhaserNS.Scene; handle: CampSceneHandle } {
   const { manifest } = deps;
   const map = manifest.maps.find(m => m.id === 'camp') as MapData;
@@ -86,25 +129,44 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   const tileBounds = mapScreenBounds(map.width, map.height);
   const bounds: Rect = { x: tileBounds.x, y: tileBounds.y - 96, width: tileBounds.width, height: tileBounds.height + 96 };
   const gladiator = manifest.actors.gladiator;
-  const WALK_SPEED = gladiator.walk.tilesPerSecond / 1000; // tiles per ms
+  const walkTilesPerSecond = gladiator.walk.tilesPerSecond;
+  const WALK_SPEED = walkTilesPerSecond / 1000; // tiles per ms
   const layerTint = new Map(gladiator.layers.map(l => [l.id, l.tint]));
+  const stations = map.zones.flatMap(z => z.stations);
+  const gateStation = stations.find(s => s.kind === 'gate');
+  if (!gateStation) throw new Error('camp map has no gate station');
+  const GATE: TilePoint = { x: gateStation.x, y: gateStation.y };
+  const reserved = npcPostTiles();
 
   let ready = false;
+  let disposed = false;
+  let failed = false;
+  let reducedMotion = !!deps.reducedMotion;
   let world = deps.world;
+  let worldApplied = false;
   let awayCount = 0;
   let selected: string | null = null;
   let following: string | null = null;
+  let placements = new Map<string, Placement>();
   const views = new Map<string, ActorView>();
-  const animatedProps: { image: PhaserNS.GameObjects.Image; anim: AnimationDef }[] = [];
-  const occluders: { image: PhaserNS.GameObjects.Image; depth: number }[] = [];
-  const lights: { image: PhaserNS.GameObjects.Image; base: number; seed: number }[] = [];
-  const unsubscribe: (() => void)[] = [];
+  const animatedProps: { image: Image; anim: AnimationDef; index: number }[] = [];
+  const propGroups: PropGroup[] = [];
+  const faded = new Set<PropGroup>();
+  const alphaMasks = new Map<string, { width: number; alpha: Uint8Array }>();
+  const lights: { image: Image; seed: number }[] = [];
+  let lastLight = { color: -1, alpha: -1, torch: -1 };
   let view: ViewState = { centerX: 0, centerY: tileBounds.height / 2, zoom: 1, viewWidth: 800, viewHeight: 600 };
   let overlay: PhaserNS.GameObjects.Rectangle | null = null;
   let ring: PhaserNS.GameObjects.Ellipse | null = null;
+  let ringDepth = NaN;
 
   class CampScene extends P.Scene {
     constructor() { super({ key: 'camp' }); }
+
+    init() {
+      // Game.destroy emits DESTROY (never SHUTDOWN); the host also calls dispose() directly.
+      this.events.once(P.Scenes.Events.DESTROY, dispose);
+    }
 
     preload() {
       const keys = new Set([gladiator.atlas, 'npcs', map.tilesAtlas, map.propsAtlas]);
@@ -121,28 +183,54 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         this.buildGround();
         this.buildProps();
         this.buildLights();
-        overlay = this.add.rectangle(0, 0, 10, 10, 0xffffff, 0).setOrigin(0.5).setDepth(2_000_000);
+        // Large enough to cover the view at minimum zoom wherever the clamped camera sits.
+        overlay = this.add.rectangle(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width + 8000, bounds.height + 8000, 0xffffff, 0).setDepth(2_000_000);
         ring = this.add.ellipse(0, 0, 30, 14).setStrokeStyle(2, 0xffe48f).setVisible(false);
         this.buildNpcs();
-        if (world) this.applyWorld(world, true);
         this.setupInput();
-        this.setupBridge();
         this.scale.on(P.Scale.Events.RESIZE, () => this.syncCamera());
         const spawn = worldToScreen(map.arena!.centre[0], map.arena!.centre[1] + 4);
         view = { ...view, centerX: spawn.x, centerY: spawn.y };
         this.syncCamera();
-        this.events.once(P.Scenes.Events.SHUTDOWN, () => { for (const off of unsubscribe) off(); unsubscribe.length = 0; });
         ready = true;
+        if (world) this.applyWorld(world);
         deps.onReady();
       } catch (error) {
-        deps.onError('error', error instanceof Error ? error.message : String(error));
+        this.fail(error);
       }
     }
 
+    fail(error: unknown) {
+      if (failed) return;
+      failed = true;
+      deps.onError('error', errorText(error));
+    }
+
+    /** Ground tiles never change, so they are baked into four render textures instead of 2,116 images. */
     buildGround() {
+      const frames = manifest.atlases[map.tilesAtlas].frames;
+      const tiles: { frame: string; left: number; top: number; w: number; h: number }[] = [];
+      let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
       for (let y = 0; y < map.height; y += 1) for (let x = 0; x < map.width; x += 1) {
+        const frame = map.groundFrames[map.ground[y * map.width + x]];
+        const f = frames[frame];
         const s = worldToScreen(x, y);
-        this.add.image(s.x, s.y, map.tilesAtlas, map.groundFrames[map.ground[y * map.width + x]]).setDepth(-10_000_000);
+        const t = { frame, left: s.x - f.anchorX, top: s.y - f.anchorY, w: f.w, h: f.h };
+        tiles.push(t);
+        minX = Math.min(minX, t.left); minY = Math.min(minY, t.top);
+        maxX = Math.max(maxX, t.left + t.w); maxY = Math.max(maxY, t.top + t.h);
+      }
+      const chunkW = Math.ceil((maxX - minX) / 2);
+      const chunkH = Math.ceil((maxY - minY) / 2);
+      for (let cy = 0; cy < 2; cy += 1) for (let cx = 0; cx < 2; cx += 1) {
+        const left = minX + cx * chunkW;
+        const top = minY + cy * chunkH;
+        const rt = this.add.renderTexture(left, top, chunkW, chunkH).setOrigin(0, 0).setDepth(-10_000_000);
+        for (const t of tiles) {
+          if (t.left >= left + chunkW || t.left + t.w <= left || t.top >= top + chunkH || t.top + t.h <= top) continue;
+          rt.stamp(map.tilesAtlas, t.frame, t.left - left, t.top - top, { originX: 0, originY: 0 });
+        }
+        rt.render();
       }
     }
 
@@ -150,30 +238,31 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       const frames = manifest.atlases[map.propsAtlas].frames;
       for (const p of map.props) {
         const s = worldToScreen(p.x, p.y);
-        const images: { image: PhaserNS.GameObjects.Image; depth: number }[] = [];
-        if (needsSlices({ w: p.w, d: p.d }, p.layer)) {
-          // Wide props are sliced so actors in front of any face draw over it (src/game/depth.ts).
-          const f = frames[p.frame];
-          for (const slice of propSlices({ w: p.w, d: p.d }, -f.anchorX, f.w)) {
-            const image = this.add.image(s.x, s.y, map.propsAtlas, p.frame).setCrop(slice.left + f.anchorX, 0, slice.width, f.h);
-            images.push({ image, depth: s.y + slice.depthOffset });
-          }
-        } else {
-          const depth = p.layer === 'floor' ? -1_000_000 + s.y : p.layer === 'foreground' ? 1_000_000 + s.y : s.y + p.sortY;
-          images.push({ image: this.add.image(s.x, s.y, map.propsAtlas, p.frame), depth });
+        const f = frames[p.frame];
+        const slices = drawSlices(p, { w: f.w, anchorX: f.anchorX });
+        const whole = slices.length === 1 && slices[0].left === -f.anchorX && slices[0].width === f.w;
+        const group: PropGroup = {
+          id: p.id, frame: p.frame, x: p.x, y: p.y, occludes: p.occludes, images: [],
+          left: s.x - f.anchorX, top: s.y - f.anchorY, width: f.w, height: f.h, slices: [],
+        };
+        for (const slice of slices) {
+          // Wide props draw as slices so actors in front of any face draw over it (src/game/depth.ts).
+          const image = this.add.image(s.x, s.y, map.propsAtlas, p.frame).setDepth(s.y + slice.depthOffset);
+          if (!whole) image.setCrop(slice.left + f.anchorX, 0, slice.width, f.h);
+          group.images.push(image);
+          group.slices.push({ x0: s.x + slice.left, x1: s.x + slice.left + slice.width, depth: s.y + slice.depthOffset, left: slice.left, width: slice.width });
         }
-        for (const { image, depth } of images) {
-          image.setDepth(depth);
-          if (p.occludes) occluders.push({ image, depth });
-        }
+        propGroups.push(group);
         if (p.animation) {
           const anim = manifest.animations[`prop-${map.propsAtlas}-${p.animation}`];
-          if (anim) for (const { image } of images) animatedProps.push({ image, anim });
+          if (anim) for (const image of group.images) animatedProps.push({ image, anim, index: -1 });
         }
         if (p.interact === 'merchant-weapons' || p.interact === 'merchant-armor') {
           const merchant = p.interact === 'merchant-weapons' ? 'weapons' : 'armor';
-          const target = images[0].image.setInteractive({ useHandCursor: true });
-          target.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer)) deps.bridge.emit('open-merchant', { merchant }); });
+          for (const image of group.images) {
+            image.setInteractive({ useHandCursor: true });
+            image.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer)) deps.bridge.emit('open-merchant', { merchant }); });
+          }
         }
       }
     }
@@ -196,13 +285,20 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const image = this.add.image(s.x, s.y - 24, 'glow').setBlendMode(P.BlendModes.ADD).setDepth(2_000_001);
         const base = (l.radius * 32) / size;
         image.setScale(base * 2, base);
-        lights.push({ image, base, seed: i * 1.7 });
+        lights.push({ image, seed: i * 1.7 });
       });
     }
 
     makeLabel(name: string) {
       return this.add.text(0, 0, name, { fontFamily: 'monospace', fontSize: '10px', color: '#f4e8cb', stroke: '#1a1423', strokeThickness: 3 })
-        .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2);
+        .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2).setVisible(false);
+    }
+
+    makeContainer(sprites: Sprite[]) {
+      const container = this.add.container(0, 0, sprites);
+      container.setSize(26, 46);
+      container.setInteractive(new P.Geom.Rectangle(-13, -46, 26, 46), P.Geom.Rectangle.Contains);
+      return container;
     }
 
     buildNpcs() {
@@ -210,44 +306,57 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const npc = manifest.actors.npcs.find(n => n.id === routine.npcId);
         if (!npc) continue;
         const sprite = this.add.sprite(0, 0, npc.atlas, manifest.animations[npc.animations.idle!.se].frames[0]);
-        const container = this.add.container(0, 0, [sprite]);
-        container.setSize(26, 46);
-        container.setInteractive(new P.Geom.Rectangle(-13, -46, 26, 46), P.Geom.Rectangle.Contains);
+        const container = this.makeContainer([sprite]);
         const merchant = npc.role === 'merchant-weapons' ? 'weapons' : npc.role === 'merchant-armor' ? 'armor' : undefined;
         container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer) && merchant) deps.bridge.emit('open-merchant', { merchant }); });
-        const label = this.makeLabel(npc.name).setColor('#ffe48f').setVisible(false);
         views.set(`npc:${npc.id}`, {
-          id: `npc:${npc.id}`, kind: 'npc', name: npc.name, container, layers: [{ id: 'npc', sprite }], atlas: npc.atlas, label,
-          x: 0, y: 0, action: 'idle', facing: 'se', offsetMs: 0, walk: null, placement: null, npcRoutine: routine, merchant, frame: '',
+          id: `npc:${npc.id}`, kind: 'npc', name: npc.name, container, layers: [{ id: 'npc', sprite }], look: '', label: this.makeLabel(npc.name).setColor('#ffe48f'),
+          x: 0, y: 0, action: 'idle', facing: 'se', offsetMs: 0, walk: null, placement: null, location: null,
+          npcRoutine: routine, npcAnimations: npc.animations, frame: '', flip: null, depth: NaN,
         });
       }
     }
 
-    createPlayer(actor: PublicActor, placement: Placement): ActorView {
-      const sprites = placement.routine.layers.map(id => {
+    playerSprites(placement: Placement): { id: string; sprite: Sprite }[] {
+      return placement.routine.layers.map(id => {
         const sprite = this.add.sprite(0, 0, gladiator.atlas, `${id}/idle/se/0`);
         const key = layerTint.get(id);
         if (key) sprite.setTint(placement.routine.tint[key]);
         return { id, sprite };
       });
-      const container = this.add.container(0, 0, sprites.map(s => s.sprite));
-      container.setSize(26, 46);
-      container.setInteractive(new P.Geom.Rectangle(-13, -46, 26, 46), P.Geom.Rectangle.Contains);
+    }
+
+    createPlayer(actor: PublicActor, placement: Placement): ActorView {
+      const layers = this.playerSprites(placement);
+      const container = this.makeContainer(layers.map(l => l.sprite));
       container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => {
         if (dragged(pointer)) return;
         selected = actor.gladiatorId;
         deps.bridge.emit('select-character', { gladiatorId: actor.gladiatorId });
       });
       return {
-        id: actor.gladiatorId, kind: 'player', name: actor.name, container, layers: sprites, atlas: gladiator.atlas,
+        id: actor.gladiatorId, kind: 'player', name: actor.name, container, layers, look: lookKey(placement),
         label: this.makeLabel(actor.name), x: placement.x + 0.5, y: placement.y + 0.5, action: placement.action, facing: placement.facing,
-        offsetMs: placement.routine.offsetMs, walk: null, placement, frame: '',
+        offsetMs: placement.routine.offsetMs, walk: null, placement, location: actor.location, frame: '', flip: null, depth: NaN,
       };
     }
 
-    applyWorld(next: WorldSnapshot, initial: boolean) {
+    /** Public equipment or colours changed: swap the layer sprites in place. */
+    restyle(v: ActorView, placement: Placement) {
+      for (const l of v.layers) l.sprite.destroy();
+      v.layers = this.playerSprites(placement);
+      v.container.add(v.layers.map(l => l.sprite));
+      v.look = lookKey(placement);
+      v.frame = '';
+    }
+
+    applyWorld(next: WorldSnapshot) {
       world = next;
-      const { placements, away } = layoutCamp(next.actors, map, next.slotIndex);
+      // The first world shows everyone where they are; later ones walk arrivals in from the gate.
+      const initial = !worldApplied;
+      worldApplied = true;
+      const layout = layoutCamp(next.actors, map, next.slotIndex, { reserved, previous: placements });
+      placements = layout.placements;
       const now = deps.now();
       const seen = new Set<string>();
       for (const actor of next.actors) {
@@ -261,30 +370,42 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           if (!initial) this.walkTo(v, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing }, GATE);
           continue;
         }
+        if (lookKey(placement) !== existing.look) this.restyle(existing, placement);
         existing.placement = placement;
+        existing.location = actor.location;
         existing.offsetMs = placement.routine.offsetMs;
         const target = existing.walk ? existing.walk.path[existing.walk.path.length - 1] : { x: Math.floor(existing.x), y: Math.floor(existing.y) };
         if (target.x !== placement.x || target.y !== placement.y) this.walkTo(existing, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing });
-        else if (!existing.walk) { existing.action = placement.action; existing.facing = placement.facing; }
+        else if (existing.walk) existing.walk.then = { action: placement.action, facing: placement.facing };
+        else { existing.action = placement.action; existing.facing = placement.facing; }
       }
       for (const [id, v] of views) {
         if (v.kind !== 'player' || seen.has(id)) continue;
-        const leaving = away.some(a => a.gladiatorId === id);
+        const leaving = layout.away.some(a => a.gladiatorId === id);
         if (leaving && !initial) this.walkTo(v, GATE, now, { action: 'idle', facing: 'se' }, undefined, true);
         else this.removeView(v);
       }
-      awayCount = away.length;
+      awayCount = layout.away.length;
+      const focusId = initial ? deps.focusId?.() : null;
+      const owner = focusId ? views.get(focusId) : undefined;
+      if (owner) this.centerOnActor(owner);
       deps.bridge.emit('roster', {
         inCamp: [...placements.keys()],
-        away: away.map(a => ({ gladiatorId: a.gladiatorId, name: a.name, location: a.location })),
+        away: layout.away.map(a => ({ gladiatorId: a.gladiatorId, name: a.name, location: a.location })),
       });
     }
 
     walkTo(v: ActorView, to: TilePoint, now: number, then: { action: ActionId; facing: Direction }, from?: TilePoint, remove = false) {
       const start = from ?? { x: Math.floor(v.x), y: Math.floor(v.y) };
-      const path = findPath(grid, start, to);
-      if (!path) { v.x = to.x + 0.5; v.y = to.y + 0.5; v.action = then.action; v.facing = then.facing; v.walk = null; if (remove) this.removeView(v); return; }
+      const path = reducedMotion ? null : findPath(grid, start, to);
+      if (!path) {
+        v.walk = null;
+        if (remove) { this.removeView(v); return; }
+        v.x = to.x + 0.5; v.y = to.y + 0.5; v.action = then.action; v.facing = then.facing;
+        return;
+      }
       v.walk = { path, startedAt: now, then, remove };
+      if (from) { v.x = from.x + 0.5; v.y = from.y + 0.5; }
     }
 
     removeView(v: ActorView) {
@@ -292,61 +413,52 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       v.label.destroy();
       views.delete(v.id);
       if (selected === v.id) selected = null;
-      if (following === v.id) following = null;
+      if (following === v.id) stopFollowing();
     }
 
     setupInput() {
       this.input.addPointer(1);
       let pinch: { distance: number; zoom: number } | null = null;
+      let wheel = 0;
       this.input.on(P.Input.Events.POINTER_MOVE, (pointer: PhaserNS.Input.Pointer) => {
         const p1 = this.input.pointer1;
         const p2 = this.input.pointer2;
         if (p1?.isDown && p2?.isDown) {
           const distance = P.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-          if (!pinch) pinch = { distance, zoom: view.zoom };
+          if (!pinch || pinch.distance < 1) { pinch = { distance, zoom: view.zoom }; return; }
           const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-          const factor = (pinch.zoom * (distance / pinch.distance)) / view.zoom;
-          view = zoomAround(view, factor, mid, bounds);
+          view = zoomAround(view, (pinch.zoom * (distance / pinch.distance)) / view.zoom, mid, bounds);
           this.syncCamera();
           return;
         }
         pinch = null;
         if (!pointer.isDown) return;
-        following = null;
+        stopFollowing();
         view = panBy(view, pointer.x - pointer.prevPosition.x, pointer.y - pointer.prevPosition.y, bounds);
         this.syncCamera();
       });
       this.input.on(P.Input.Events.POINTER_UP, () => { pinch = null; });
       this.input.on(P.Input.Events.POINTER_WHEEL, (pointer: PhaserNS.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
-        view = zoomAround(view, dy > 0 ? 1 / 1.12 : 1.12, { x: pointer.x, y: pointer.y }, bounds);
-        this.syncCamera();
+        if (!dy) return; // horizontal scroll never zooms
+        if (Math.sign(dy) !== Math.sign(wheel)) wheel = 0; // a reversal starts a fresh gesture
+        const mode = (pointer.event as WheelEvent | undefined)?.deltaMode ?? 0;
+        wheel += dy * (mode === 1 ? 33 : mode === 2 ? WHEEL_STEP * 3 : 1);
+        const steps = Math.trunc(wheel / WHEEL_STEP);
+        if (!steps) return;
+        wheel -= steps * WHEEL_STEP;
+        this.zoomTo(stepZoom(view.zoom, -Math.sign(steps) * Math.min(3, Math.abs(steps))), { x: pointer.x, y: pointer.y });
       });
     }
 
-    setupBridge() {
-      const b = deps.bridge;
-      unsubscribe.push(b.on('camera-zoom', ({ direction }) => {
-        const centre = { x: view.viewWidth / 2, y: view.viewHeight / 2 };
-        view = direction === 'reset' ? clampView({ ...view, zoom: 1 }, bounds) : zoomAround(view, direction === 'in' ? ZOOM_STEP : 1 / ZOOM_STEP, centre, bounds);
-        this.syncCamera();
-      }));
-      unsubscribe.push(b.on('camera-pan', ({ dx, dy }) => {
-        following = null;
-        view = panBy(view, dx, dy, bounds);
-        this.syncCamera();
-      }));
-      unsubscribe.push(b.on('find-character', ({ gladiatorId }) => {
-        const v = views.get(gladiatorId);
-        if (!v) return;
-        selected = gladiatorId;
-        const s = worldToScreen(v.x, v.y);
-        view = clampView({ ...view, centerX: s.x, centerY: s.y - 24 }, bounds);
-        this.syncCamera();
-      }));
-      unsubscribe.push(b.on('follow-character', ({ gladiatorId }) => {
-        following = gladiatorId && views.has(gladiatorId) ? gladiatorId : null;
-        if (following) selected = following;
-      }));
+    zoomTo(zoom: number, anchor: Point) {
+      view = zoomAround(view, zoom / view.zoom, anchor, bounds);
+      this.syncCamera();
+    }
+
+    centerOnActor(v: ActorView) {
+      const s = worldToScreen(v.x, v.y);
+      view = clampView({ ...view, centerX: s.x, centerY: s.y - 24 }, bounds);
+      this.syncCamera();
     }
 
     syncCamera() {
@@ -357,22 +469,33 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     update() {
-      if (!ready) return;
-      const now = deps.now();
+      if (!ready || failed || disposed) return;
+      try {
+        this.tick(deps.now());
+      } catch (error) {
+        this.fail(error);
+      }
+    }
+
+    tick(now: number) {
       const cam = this.cameras.main;
       const light = lightingAt(now);
-      if (overlay) {
-        overlay.setPosition(cam.midPoint.x, cam.midPoint.y).setSize(cam.width / cam.zoom + 8, cam.height / cam.zoom + 8);
-        overlay.setFillStyle(light.overlayColor, light.overlayAlpha);
+      if (overlay && (light.overlayColor !== lastLight.color || light.overlayAlpha !== lastLight.alpha)) overlay.setFillStyle(light.overlayColor, light.overlayAlpha);
+      const torch = Math.min(1, 0.12 + 0.55 * light.torchIntensity);
+      if (!reducedMotion || torch !== lastLight.torch) {
+        for (const l of lights) l.image.setAlpha(reducedMotion ? torch : torch * (0.88 + 0.12 * Math.sin(now / 170 + l.seed)));
       }
-      for (const l of lights) l.image.setAlpha(Math.min(1, 0.12 + 0.55 * light.torchIntensity) * (0.88 + 0.12 * Math.sin(now / 170 + l.seed)));
-      for (const { image, anim } of animatedProps) image.setFrame(anim.frames[frameIndex(anim, now)]);
+      lastLight = { color: light.overlayColor, alpha: light.overlayAlpha, torch };
+      for (const a of animatedProps) {
+        const index = reducedMotion ? 0 : frameIndex(a.anim, now);
+        if (index !== a.index) { a.index = index; a.image.setFrame(a.anim.frames[index]); }
+      }
 
       const viewRect = cam.worldView;
       const margin = 80;
       for (const v of views.values()) {
         if (v.npcRoutine) {
-          const p = planNpcPosition(v.npcRoutine, map, now);
+          const p = reducedMotion ? stillNpc(v.npcRoutine) : planNpcPosition(v.npcRoutine, map, now, walkTilesPerSecond);
           v.x = p.x; v.y = p.y; v.action = p.action; v.facing = p.facing;
         } else if (v.walk) {
           const walked = (now - v.walk.startedAt) * WALK_SPEED;
@@ -389,50 +512,102 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           }
         }
         const s = worldToScreen(v.x, v.y);
-        v.container.setPosition(s.x, s.y).setDepth(s.y);
+        v.container.setPosition(s.x, s.y);
+        if (v.depth !== s.y) { v.depth = s.y; v.container.setDepth(s.y); }
         const visible = s.x > viewRect.x - margin && s.x < viewRect.right + margin && s.y > viewRect.y - margin && s.y < viewRect.bottom + margin * 1.5;
-        v.container.setVisible(visible);
-        const showLabel = visible && v.kind === 'player' && (cam.zoom >= 1.4 || selected === v.id || following === v.id);
-        v.label.setVisible(showLabel || (visible && v.kind === 'npc' && cam.zoom >= 2));
-        if (v.label.visible) v.label.setPosition(s.x, s.y - 46);
-        if (!visible) continue;
-        this.updateFrames(v, now);
+        if (v.container.visible !== visible) v.container.setVisible(visible);
+        const showLabel = visible && (v.kind === 'player' ? cam.zoom >= 1.4 || selected === v.id || following === v.id : cam.zoom >= 2);
+        if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
+        if (showLabel) v.label.setPosition(s.x, s.y - 46);
+        if (visible) this.updateFrames(v, now);
       }
       const focus = following ?? selected;
       const fv = focus ? views.get(focus) : undefined;
       if (ring) {
-        ring.setVisible(!!fv && fv.container.visible);
-        if (fv) { const s = worldToScreen(fv.x, fv.y); ring.setPosition(s.x, s.y).setDepth(s.y - 0.5); }
+        const show = !!fv && fv.container.visible;
+        if (ring.visible !== show) ring.setVisible(show);
+        if (fv && show) {
+          const s = worldToScreen(fv.x, fv.y);
+          ring.setPosition(s.x, s.y);
+          if (ringDepth !== s.y - 0.5) { ringDepth = s.y - 0.5; ring.setDepth(ringDepth); }
+        }
       }
       if (following && fv) {
         const s = worldToScreen(fv.x, fv.y);
-        view = clampView({ ...view, centerX: view.centerX + (s.x - view.centerX) * 0.12, centerY: view.centerY + (s.y - 24 - view.centerY) * 0.12 }, bounds);
-        this.syncCamera();
+        const k = reducedMotion ? 1 : 0.12;
+        const centerX = view.centerX + (s.x - view.centerX) * k;
+        const centerY = view.centerY + (s.y - 24 - view.centerY) * k;
+        if (Math.abs(centerX - view.centerX) > 0.01 || Math.abs(centerY - view.centerY) > 0.01) {
+          view = clampView({ ...view, centerX, centerY }, bounds);
+          this.syncCamera();
+        }
       }
-      // Fade buildings that hide the focused character.
-      for (const o of occluders) o.image.setAlpha(1);
+      this.updateOccluders(fv);
+    }
+
+    /** Fade whole buildings whose pixels hide the focused character; only faded ones are restored. */
+    updateOccluders(fv: ActorView | undefined) {
+      const hiding = new Set<PropGroup>();
       if (fv) {
-        const s = worldToScreen(fv.x, fv.y);
-        for (const o of occluders) if (o.depth > s.y && o.image.getBounds().contains(s.x, s.y - 20)) o.image.setAlpha(0.45);
+        const feet = worldToScreen(fv.x, fv.y);
+        for (const g of propGroups) {
+          if (!g.occludes || feet.x < g.left - 8 || feet.x >= g.left + g.width + 8 || feet.y - 40 >= g.top + g.height || feet.y <= g.top) continue;
+          const mask = this.alphaMask(g.frame);
+          if (hidesActor(g, (x, y) => mask.alpha[y * mask.width + x], feet)) hiding.add(g);
+        }
       }
+      for (const g of faded) if (!hiding.has(g)) { for (const image of g.images) image.setAlpha(1); faded.delete(g); }
+      for (const g of hiding) if (!faded.has(g)) { for (const image of g.images) image.setAlpha(FADED_ALPHA); faded.add(g); }
+    }
+
+    /** Alpha of a prop frame, read once from the atlas the first time it might hide someone. */
+    alphaMask(frameName: string) {
+      let mask = alphaMasks.get(frameName);
+      if (mask) return mask;
+      const frame = this.textures.getFrame(map.propsAtlas, frameName);
+      const canvas = document.createElement('canvas');
+      canvas.width = frame.cutWidth;
+      canvas.height = frame.cutHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(frame.source.image as CanvasImageSource, frame.cutX, frame.cutY, frame.cutWidth, frame.cutHeight, 0, 0, frame.cutWidth, frame.cutHeight);
+      const rgba = ctx.getImageData(0, 0, frame.cutWidth, frame.cutHeight).data;
+      const alpha = new Uint8Array(frame.cutWidth * frame.cutHeight);
+      for (let i = 0; i < alpha.length; i += 1) alpha[i] = rgba[i * 4 + 3];
+      mask = { width: frame.cutWidth, alpha };
+      alphaMasks.set(frameName, mask);
+      return mask;
     }
 
     updateFrames(v: ActorView, now: number) {
       const { frame, flip } = frameFor(v, now);
-      if (v.kind === 'npc') v.layers[0].sprite.setFrame(frame);
-      else for (const l of v.layers) l.sprite.setFrame(`${l.id}/${frame}`);
-      v.container.setScale(flip ? -1 : 1, 1);
-      v.frame = frame;
+      if (frame !== v.frame) {
+        if (v.kind === 'npc') v.layers[0].sprite.setFrame(frame);
+        else for (const l of v.layers) l.sprite.setFrame(`${l.id}/${frame}`);
+        v.frame = frame;
+      }
+      if (flip !== v.flip) { v.container.setScale(flip ? -1 : 1, 1); v.flip = flip; }
     }
+  }
+
+  /** Dragging or panning ends a follow; tell the UI so its Follow toggle stays truthful. */
+  function stopFollowing() {
+    if (!following) return;
+    following = null;
+    deps.bridge.emit('follow-character', { gladiatorId: null });
+  }
+
+  /** Reduced motion: NPCs keep to their first post instead of touring the camp. */
+  function stillNpc(routine: NpcRoutine) {
+    const first = [...routine.steps].sort((a, b) => a.at - b.at)[0];
+    return { x: first.x + 0.5, y: first.y + 0.5, action: first.action, facing: first.facing };
   }
 
   /** Frame (layer-relative suffix for players, full name for NPCs) and mirroring for an actor at `now`. */
   function frameFor(v: ActorView, now: number): { frame: string; flip: boolean } {
     const flip = v.facing === 'sw' || v.facing === 'nw';
     const back = v.facing === 'ne' || v.facing === 'nw';
-    if (v.kind === 'npc') {
-      const npc = manifest.actors.npcs.find(n => `npc:${n.id}` === v.id)!;
-      const dirs = npc.animations[v.action as 'idle'] ?? npc.animations.idle!;
+    if (v.npcAnimations) {
+      const dirs = v.npcAnimations[v.action as 'idle'] ?? v.npcAnimations.idle!;
       const anim = manifest.animations[back && dirs.ne ? dirs.ne : dirs.se];
       return { frame: anim.frames[frameIndex(anim, now)], flip };
     }
@@ -447,26 +622,94 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   }
 
   const scene = new CampScene();
+  const live = () => ready && !disposed && !failed;
+
+  // Bridge listeners belong to this scene instance and are removed by dispose(), never by SHUTDOWN.
+  const unsubscribe: (() => void)[] = [
+    deps.bridge.on('camera-zoom', ({ direction }) => {
+      if (!live()) return;
+      const centre = { x: view.viewWidth / 2, y: view.viewHeight / 2 };
+      scene.zoomTo(direction === 'reset' ? 1 : stepZoom(view.zoom, direction === 'in' ? 1 : -1), centre);
+    }),
+    deps.bridge.on('camera-pan', ({ dx, dy }) => {
+      if (!live()) return;
+      stopFollowing();
+      view = panBy(view, dx, dy, bounds);
+      scene.syncCamera();
+    }),
+    deps.bridge.on('find-character', ({ gladiatorId }) => {
+      if (!live()) return;
+      const v = views.get(gladiatorId);
+      if (!v) return;
+      selected = gladiatorId;
+      scene.centerOnActor(v);
+    }),
+    deps.bridge.on('follow-character', ({ gladiatorId }) => {
+      if (!live()) return;
+      following = gladiatorId && views.has(gladiatorId) ? gladiatorId : null;
+      if (following) selected = following;
+    }),
+  ];
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (const off of unsubscribe.splice(0)) off();
+  }
+
   const handle: CampSceneHandle = {
     setWorld(next) {
       world = next;
-      if (ready) scene.applyWorld(next, false);
+      if (live()) scene.applyWorld(next);
     },
+    setReducedMotion(reduced) {
+      reducedMotion = reduced;
+    },
+    dispose,
     debug() {
-      const cam = scene.cameras?.main;
+      const cam = live() ? scene.cameras.main : undefined;
+      const now = deps.now();
       return {
         ready,
+        disposed,
+        failed,
+        reducedMotion,
         players: [...views.values()].filter(v => v.kind === 'player').length,
         ambientNpcs: [...views.values()].filter(v => v.kind === 'npc').length,
         away: awayCount,
-        zones: map.zones.map(z => z.id),
         camera: cam
           ? { centerX: cam.midPoint.x, centerY: cam.midPoint.y, zoom: cam.zoom, worldView: { x: cam.worldView.x, y: cam.worldView.y, width: cam.worldView.width, height: cam.worldView.height }, bounds }
           : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds },
-        actors: [...views.values()].map(v => ({ id: v.id, kind: v.kind, x: v.x, y: v.y, action: v.action, frame: frameFor(v, deps.now()).frame, visible: v.container.visible, depth: v.container.depth })),
+        actors: [...views.values()].map(v => ({
+          id: v.id, kind: v.kind, name: v.name, x: v.x, y: v.y, zone: v.placement?.zone ?? null, location: v.location,
+          action: v.action, frame: frameFor(v, now).frame, layers: v.layers.map(l => l.id), tint: v.placement ? { ...v.placement.routine.tint } : null,
+          visible: v.container.visible, depth: v.container.depth, walking: !!v.walk,
+        })),
         selected,
         following,
+        faded: [...faded].map(g => g.id),
+        lighting: { overlayColor: overlay?.fillColor ?? 0, overlayAlpha: overlay?.fillAlpha ?? 0, torchAlpha: lights[0]?.image.alpha ?? 0 },
       };
+    },
+    props() {
+      return propGroups.map(g => ({
+        id: g.id, frame: g.frame, x: g.x, y: g.y, occludes: g.occludes, alpha: g.images[0].alpha,
+        slices: g.slices.map((s, i) => ({ left: s.left, width: s.width, depth: g.images[i].depth })),
+      }));
+    },
+    centerOn(x, y, zoom) {
+      if (!live()) return;
+      stopFollowing();
+      const s = worldToScreen(x, y);
+      view = clampView({ ...view, centerX: s.x, centerY: s.y, zoom: zoom ?? view.zoom }, bounds);
+      scene.syncCamera();
+    },
+    screenOf(id) {
+      const v = views.get(id);
+      if (!v || !live()) return null;
+      const cam = scene.cameras.main;
+      const s = worldToScreen(v.x, v.y);
+      return { x: (s.x - cam.worldView.x) * cam.zoom, y: (s.y - 20 - cam.worldView.y) * cam.zoom };
     },
   };
   return { scene, handle };

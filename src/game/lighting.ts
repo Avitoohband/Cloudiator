@@ -2,12 +2,12 @@
 // characters, nameplates and controls remain readable in every phase.
 import type { Phase } from '@contracts/commands';
 
-export type Lighting = { overlayColor: number; overlayAlpha: number; torchIntensity: number; skyColor: number };
+export type Lighting = { overlayColor: number; overlayAlpha: number; torchIntensity: number };
 
 const PHASES: Record<Phase, Lighting> = {
-  morning: { overlayColor: 0xffc98a, overlayAlpha: 0.12, torchIntensity: 0.25, skyColor: 0x9fd6f2 },
-  afternoon: { overlayColor: 0xfff4e0, overlayAlpha: 0.04, torchIntensity: 0.1, skyColor: 0x8ecff0 },
-  evening: { overlayColor: 0x2e2a6b, overlayAlpha: 0.32, torchIntensity: 1, skyColor: 0x2e2433 },
+  morning: { overlayColor: 0xffc98a, overlayAlpha: 0.12, torchIntensity: 0.25 },
+  afternoon: { overlayColor: 0xfff4e0, overlayAlpha: 0.04, torchIntensity: 0.1 },
+  evening: { overlayColor: 0x2e2a6b, overlayAlpha: 0.32, torchIntensity: 1 },
 };
 const ORDER: Phase[] = ['morning', 'afternoon', 'evening'];
 export const SLOT_MS = 4_800_000;
@@ -39,6 +39,5 @@ export function lightingAt(nowMs: number): Lighting {
     overlayColor: mixColor(current.overlayColor, next.overlayColor, t),
     overlayAlpha: mix(current.overlayAlpha, next.overlayAlpha, t),
     torchIntensity: mix(current.torchIntensity, next.torchIntensity, t),
-    skyColor: mixColor(current.skyColor, next.skyColor, t),
   };
 }

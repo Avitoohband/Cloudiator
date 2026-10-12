@@ -31,7 +31,7 @@ manifest's projection, anchors and depth rule, including wide-prop slices.
 | `effects.png`, `icons.png` | Eight combat effects and 37 interface icons. |
 | `map-camp.png` | Living camp with sample gladiators at their stations, NPCs at stalls and gate. |
 | `map-woodland.png`, `map-outpost.png`, `map-mountain.png` | Expedition routes with three encounters each, showing the creature assigned to each encounter. |
-| `depth-probe-camp.png` | A gladiator on every walkable tile directly in front of and behind each wide prop. Front ones draw over the prop, back ones under it. |
+| `depth-probe-camp.png` | A gladiator on every walkable tile directly in front of and behind each wide prop, and on every walkable tile on either side of the arena ring. Front ones draw over the prop or wall, back ones under it. |
 
 The live gallery (`public/assets/gallery.html`) plays every loop at the real frame durations,
 shows SE, SW, NE and NW, toggles layers, and tints skin, cloth and hair.
@@ -51,9 +51,9 @@ shows SE, SW, NE and NW, toggles layers, and tints skin, cloth and hair.
 | Silhouettes | Sword, axe, spear and bow are distinct (test). Heavy armor visibly bulks the figure past light armor (test). | Pass. |
 | NPCs | Six distinct looks: smith, armorer, trainer, cook, healer, guard. | Pass after fixes. |
 | Environments | Camp, woodland, outpost and mountain read as distinct places, with seamless autotiled transitions. | Pass. |
-| Foreground layering | Palisade, stalls, tents and the 16 arena wall segments are sorted correctly. Fighters inside the arena draw behind the front wall, and the gate arch draws over walkers. | Pass in the offline composites. In-scene check belongs to Task 12. |
+| Foreground layering | Palisade, stalls, tents and the 16 arena wall segments are sorted correctly. Fighters inside the arena draw behind the front wall, and the gate arch draws over walkers. | Pass. Wide props use front-edge slices; each arena wall segment ships its own slices computed from the ring geometry. A test sorts every walkable tile near the ring against the exact wall shape. In the live scene (Task 12), a browser test checks every slice depth Phaser actually uses, with a walker-behind-a-pine screenshot. |
 | Transparent edges | No halos. Alpha is 0 or 255 only. | Pass. |
-| Nameplates | Rendered as runtime text in Task 12. Frames leave about 14px of headroom above the head. | Deferred to Task 12. |
+| Nameplates | Rendered as runtime text in Task 12. Frames leave about 14px of headroom above the head. | Pass in Task 12: names show when zoomed in, selected or followed. |
 
 ## Fixed during review
 
@@ -68,7 +68,8 @@ shows SE, SW, NE and NW, toggles layers, and tints skin, cloth and hair.
 7. Arena gate posts, torches and a crate blocked the plaza walkway. The ring stations were too close
    to the wall. The outpost camp tent stood on the route. All were moved.
 8. The smith's black beard on dark skin read as a mask, and the trainer's gray hair looked like a
-   helmet. The smith now has a white beard, and the trainer is bald with a gray beard.
+   helmet. Both got lighter beards. The independent review below then gave them distinct heads:
+   the smith wears a leather cap, and the trainer has black hair and a gold headband.
 
 ## Independent review fixes (2026-10-12)
 
@@ -80,19 +81,48 @@ An independent reviewer returned "with fixes". Each finding was checked before i
 | Actors in front of multi-tile props sorted behind them | Important | Fixed. Wide props are drawn as 32px front-edge slices (`src/game/depth.ts`), and a test covers every front and back tile of every wide prop. See `depth-probe-camp.png`. |
 | Player colour disappeared under armor | Important | Fixed. A tintable `accent` sash and flap, a tintable `head-helmet-crest`, and a skin-tone tint on `body` were added. Heavy armor now shows more than 8% player colour (test). |
 | Off-hand arm held an empty guard without a shield | Important | Fixed. The idle pose relaxes the off-hand arm (geometry test), and the shield is carried at the side. |
-| Not enough activity stations for 50 players | Important | Fixed. There are now 12 bedrolls and 9 browse spots, with tested station counts. Task 12's `layoutCamp` assigns unique overflow tiles, tested with 50 gladiators per zone. |
+| Not enough activity stations for 50 players | Important | Fixed. There are now 12 bedrolls and 9 browse spots, with tested station counts (`tests/assets`). Task 12's `layoutCamp` assigns unique overflow tiles; its test (`tests/domain`) places 50 gladiators per zone. |
 | NPC beards read as masks; smith and trainer looked alike | Important | Fixed. Beards now cover only the jaw. The smith has a leather cap; the trainer has dark hair and a gold headband. |
 | zlib-dependent byte checks | Important | Fixed. The builder keeps committed PNGs when their decoded pixels are unchanged. `--check` also reports orphan files. |
-| Close-up battle style (reference A) has no assets | Important | Deferred to Task 14 (this lane). The replay will add a close-up arena backdrop and show fighters at an integer 3× scale. |
+| Close-up battle style (reference A) has no assets | Important | Deferred to Task 14 (this lane), with acceptance criteria under "Deferred to Task 14" below and in `docs/implementation/task-11-report.md`. |
 | Evidence images untinted and missing `held` | Minor | Fixed. Review sheets and map renders now use runtime tints and the `held` layer. |
 | Weapon tips clipped at the frame edge | Minor | Fixed. Shafts slide along their axis to stay inside the frame; short weapons slide by at most 4px. |
 | No creature victory; identical enemies per expedition | Minor | Fixed. All creatures now have `victory`, with two variants per expedition assigned per encounter. |
-| No catalog-to-layer mapping | Minor | Fixed. `manifest.equipmentLayers` was added and is tested against the renderer's table. |
+| No catalog-to-layer mapping | Minor | Fixed. `manifest.equipmentLayers` was added. `tests/assets` checks that it maps every `CATALOG_V1` template to a real layer, and `tests/domain` checks it equals the renderer's table. |
 | `validateProvenance` used module state; maps lost their data path; mutable cache; no click targets; untyped effects | Minor | Fixed. Added `mapFiles`, a deep-frozen manifest, `interact` on stalls and the gate, and typed effect ids. |
 | Camp tiles atlas without padding | Minor | Fixed. Padding is now 2px. |
 | Gallery outside provenance; generator lists incomplete | Minor | Fixed. The gallery has a hand-written provenance record, and every record lists its input modules. |
 | Gate beam short of the left pillar | Minor | Fixed. |
 | No walk speed in the manifest | Minor | Fixed. `walk.tilesPerSecond` is set to 1, with 120 ms walk frames. |
+
+## Scoped re-review fixes (2026-10-12)
+
+A scoped re-review confirmed the fixes above, except two partial ones, and found new Minors.
+
+| Finding | Severity | Resolution |
+| --- | --- | --- |
+| Arena wall segments (wide images on a 1×1 footprint) were never sliced; 10 walkable tiles sorted on the wrong side of the wall | Important | Fixed. Each segment's slices come from sampling the ring's ground line, biased half a pixel. A test sorts walkers on both sides of every segment against the exact geometry, and the depth probe covers the ring. |
+| Close-up deferral recorded in only one table row | Important | Fixed. Recorded with acceptance criteria below and in the Task 11 report. |
+| NPC beards still a hard block on the smith | Minor | Accepted. It reads correctly at game scale; the reviewer downgraded it to Minor. |
+| Troll victory clipped the club at the top of the frame | Minor | Fixed. Weapon clamping now uses per-weapon extent points and the actor's scale, with a 3px margin. The transparent-border test covers all actor atlases (gladiators, NPCs, creatures) and also fails when art touches the second pixel row. |
+| Gate beam covered the brazier flames | Minor | Fixed. The beam now ends at the pillars' inner faces and sits below the braziers. |
+| Shield nearly vanished in NE/NW idle | Minor | Fixed. The hanging shield is offset outward in the back view. |
+| Depth ties left to insertion order | Minor | Fixed. Slices sort half a pixel before the edge (`TIE_BIAS`), so actors win ties by rule. |
+| Offline renderer re-implemented the depth math | Minor | Fixed. `assets/source/tools/depth.mjs` is the renderer's only copy, and a test checks it matches `src/game/depth.ts` for every prop. |
+| Documentation claims ahead of the code | Minor | Fixed in this document: each claim now names the test that backs it. |
+
+## Deferred to Task 14: close-up battle view
+
+Reference panel A shows battles as a close-up. Task 11 ships no close-up assets. Task 14 (battle
+replay, this lane) accepts it only when:
+
+1. A close-up arena backdrop (sand floor, wall arc, crowd or banners) is generated by the same
+   code pipeline, listed in `provenance.json` and covered by `--check`.
+2. Fighters reuse the gladiator and creature atlases with their layers and tints, drawn at an
+   integer 3× scale (no fractional scaling of the art).
+3. Two fighters face each other (SE and SW), stay fully inside the frame for every action, and
+   effects land on the defender.
+4. It stays readable at 360px wide; desktop and mobile screenshots are recorded with the report.
 
 ## Known limitations
 

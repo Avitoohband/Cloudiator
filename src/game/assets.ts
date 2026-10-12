@@ -46,6 +46,8 @@ export type MapZone = { id: string; label: string; bounds: { x: number; y: numbe
 export type MapProp = {
   id: string; frame: string; x: number; y: number; w: number; d: number; sortY: number;
   layer: PropMeta['layer']; occludes: boolean; walkable: boolean; animation?: string;
+  /** Explicit depth slices (arena wall segments); see src/game/depth.ts. */
+  slices?: { left: number; width: number; depthOffset: number }[];
   /** Click target: opens a shop or the expedition gate panel. */
   interact?: 'merchant-weapons' | 'merchant-armor' | 'expedition-gate';
 };

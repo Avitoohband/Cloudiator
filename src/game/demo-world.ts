@@ -1,6 +1,6 @@
 // Deterministic 50-gladiator public world for fixture previews and scene tests.
 // Uses only public projection fields; no private schedules, wallets or seeds.
-import type { PublicActor, WorldSnapshot } from '@contracts/reads';
+import type { CampLocation, EquipmentSilhouette, PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { ClassId, LeagueId } from '@contracts/commands';
 import { phaseOfSlot, SLOT_MS } from './lighting';
 import { hashString } from './actors';
@@ -8,9 +8,9 @@ import { hashString } from './actors';
 const NAMES = ['Aster', 'Brennus', 'Cassia', 'Drusus', 'Eira', 'Flavia', 'Gaius', 'Hesper', 'Ilaria', 'Jovan', 'Kael', 'Livius', 'Mira', 'Nero', 'Octavia', 'Pax',
   'Quintus', 'Rhea', 'Severus', 'Talia', 'Ursa', 'Varro', 'Wren', 'Xanthe', 'Yara', 'Zeno', 'Atticus', 'Bryn', 'Corvin', 'Dara', 'Elio', 'Fenna', 'Galen', 'Hale',
   'Isolde', 'Juno', 'Kestrel', 'Lucan', 'Maren', 'Niko', 'Orla', 'Petra', 'Remus', 'Sabine', 'Tiber', 'Una', 'Vesta', 'Wulf', 'Xeno', 'Yorick'];
-const CAMP_LOCATIONS = [...Array(14).fill('training'), ...Array(12).fill('rest'), ...Array(14).fill('arena'), ...Array(4).fill('orientation'), ...Array(6).fill('camp')];
-const AWAY_LOCATIONS = ['expedition:woodland', 'expedition:outpost', 'expedition:mountain'];
-const LOADOUTS = [
+const CAMP_LOCATIONS: CampLocation[] = [...Array(14).fill('training'), ...Array(12).fill('rest'), ...Array(14).fill('arena'), ...Array(4).fill('orientation'), ...Array(6).fill('camp')];
+const AWAY_LOCATIONS: CampLocation[] = ['expedition:woodland', 'expedition:outpost', 'expedition:mountain'];
+const LOADOUTS: EquipmentSilhouette[][] = [
   ['weapon-sword', 'offhand-shield'], ['weapon-axe', 'offhand-shield', 'armor-light'], ['weapon-spear', 'armor-heavy', 'head-helmet'],
   ['weapon-bow', 'armor-light', 'head-hood'], ['weapon-sword', 'armor-light'], ['weapon-axe', 'armor-heavy', 'head-helmet', 'offhand-shield'],
   ['weapon-spear', 'armor-light'], ['weapon-sword', 'offhand-shield', 'head-hood'],

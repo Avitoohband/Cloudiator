@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PublicActor } from '@contracts/reads';
+import type { CampLocation, EquipmentSilhouette, PublicActor } from '@contracts/reads';
 import { loadAssetManifest } from '@/game/assets';
 import { mapScreenBounds, screenToWorld, worldToScreen } from '@/game/iso';
 import { clampView, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
 import { findPath, gridFromMap } from '@/game/paths';
-import { EQUIPMENT_LAYERS, layoutCamp, locationKind, planActorRoutine } from '@/game/actors';
+import { EQUIPMENT_LAYERS, layersFor, layoutCamp, locationKind, planActorRoutine } from '@/game/actors';
 import { frontEdgeY, hidesActor, propSlices } from '@/game/depth';
 import { NPC_ROUTINES, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
 import { phaseLighting } from '@/game/lighting';
@@ -16,7 +16,7 @@ const manifest = loadAssetManifest();
 const camp = manifest.maps.find(m => m.id === 'camp')!;
 const SLOT = 373_248;
 
-function actor(i: number, location: string, overrides: Partial<PublicActor> = {}): PublicActor {
+function actor(i: number, location: CampLocation, overrides: Partial<PublicActor> = {}): PublicActor {
   return {
     gladiatorId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, name: `Gladiator ${i}`, classId: 'duelist',
     equipmentSilhouettes: ['weapon-sword', 'offhand-shield'], league: 'bronze', level: 1, phase: 'morning', location,
@@ -143,8 +143,9 @@ describe('actor routines', () => {
   it('draws only the equipment the public projection shows and tints each player', () => {
     const r = planActorRoutine(actor(3, 'rest', { equipmentSilhouettes: ['weapon-spear', 'armor-heavy', 'head-helmet'] }), SLOT);
     expect(r.layers).toEqual(['body', 'cloth', 'armor-heavy', 'accent', 'head-helmet', 'head-helmet-crest', 'weapon-spear', 'held']);
-    const fromCatalog = planActorRoutine(actor(5, 'rest', { equipmentSilhouettes: ['sword:1:common', 'light-armor:1:common', 'round-shield:5:rare', 'light-boots:1:common'] }), SLOT);
-    expect(fromCatalog.layers).toEqual(['body', 'cloth', 'hair', 'armor-light', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    // Battle logs still carry catalog ids; the replay maps them through the same table.
+    expect(layersFor(['sword:1:common', 'light-armor:1:common', 'round-shield:5:rare', 'light-boots:1:common']))
+      .toEqual(['body', 'cloth', 'hair', 'armor-light', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
     expect(EQUIPMENT_LAYERS).toEqual(manifest.equipmentLayers);
     const twoHanded = planActorRoutine(actor(4, 'rest', { equipmentSilhouettes: ['weapon-bow', 'offhand-shield'] }), SLOT);
     expect(twoHanded.layers).not.toContain('offhand-shield');
@@ -153,8 +154,17 @@ describe('actor routines', () => {
     expect(new Set(Array.from({ length: 50 }, (_, i) => planActorRoutine(actor(i, 'rest'), SLOT).tint.skin)).size).toBeGreaterThanOrEqual(4);
   });
 
+  it('draws every public equipment silhouette except boots, which have no layer', () => {
+    const all: EquipmentSilhouette[] = ['weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow', 'offhand-shield', 'armor-light', 'armor-heavy', 'head-hood', 'head-helmet', 'feet-light', 'feet-heavy'];
+    for (const id of all) {
+      const layers = layersFor([id]);
+      if (id.startsWith('feet-')) expect(layers, id).toEqual(layersFor([]));
+      else expect(layers, id).toContain(id);
+    }
+  });
+
   it('gives 50 gladiators in one zone 50 unique walkable positions inside it', () => {
-    for (const location of ['training', 'rest', 'arena']) {
+    for (const location of ['training', 'rest', 'arena'] as const) {
       const actors = Array.from({ length: 50 }, (_, i) => actor(i, location));
       const { placements } = layoutCamp(actors, camp, SLOT);
       expect(placements.size, location).toBe(50);
@@ -186,7 +196,7 @@ describe('actor routines', () => {
 
   it('keeps players off every tile an NPC stands on', () => {
     const posts = npcPostTiles();
-    for (const location of ['training', 'rest', 'arena', 'somewhere unknown']) {
+    for (const location of ['training', 'rest', 'arena', 'camp'] as const) {
       const actors = Array.from({ length: 50 }, (_, i) => actor(i, location));
       const { placements } = layoutCamp(actors, camp, SLOT, { reserved: posts });
       for (const p of placements.values()) expect(posts.has(`${p.x},${p.y}`), `${location} ${p.x},${p.y}`).toBe(false);

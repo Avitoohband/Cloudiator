@@ -37,7 +37,7 @@ export function hashString(text: string): number {
   return h >>> 0;
 }
 
-/** CampLocation ids (contract request C1, accepted for Codex Task 5), with a keyword fallback for older display labels. */
+/** Contract CampLocation ids ('camp' means idling about camp), with a keyword fallback for older display labels. */
 export function locationKind(location: string): RoutineKind {
   const l = location.toLowerCase();
   if (l.startsWith('expedition')) return 'away';
@@ -81,7 +81,10 @@ export const EQUIPMENT_LAYERS: Record<string, string | null> = {
 
 const LAYER_ORDER = ['body', 'cloth', 'hair', 'armor-light', 'armor-heavy', 'accent', 'head-hood', 'head-helmet', 'head-helmet-crest', 'weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow', 'offhand-shield', 'held'];
 
-/** Accepts catalog variant ids ('sword:1:common'), template ids ('sword') or layer ids ('weapon-sword'). */
+/**
+ * Accepts public silhouettes (layer ids such as 'weapon-sword'), catalog variant ids ('sword:1:common')
+ * or template ids ('sword'). Boots ('feet-light', 'light-boots') have no layer.
+ */
 export function equipmentLayer(silhouette: string): string | null {
   if (LAYER_ORDER.includes(silhouette)) return silhouette;
   return EQUIPMENT_LAYERS[silhouette.split(':')[0]] ?? null;

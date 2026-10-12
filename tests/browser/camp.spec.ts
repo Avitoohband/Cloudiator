@@ -31,7 +31,8 @@ test.describe('living isometric camp', () => {
   test('places every gladiator inside the zone its public location names, off the NPC posts', async ({ page }, testInfo) => {
     await openCamp(page);
     const state = await campState(page);
-    expect({ players: state.players, ambientNpcs: state.ambientNpcs, away: state.away }).toEqual({ players: 50, ambientNpcs: 6, away: 6 });
+    expect(await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors.length)).toBeLessThanOrEqual(50);
+    expect({ players: state.players, ambientNpcs: state.ambientNpcs, away: state.away }).toEqual({ players: 44, ambientNpcs: 6, away: 6 });
     const posts = npcPostTiles();
     const players = state.actors.filter(a => a.kind === 'player');
     expect(new Set(players.map(a => a.location)).size).toBeGreaterThanOrEqual(4);
@@ -77,6 +78,35 @@ test.describe('living isometric camp', () => {
     await page.mouse.up();
     await expect(follow).toHaveAttribute('aria-pressed', 'false');
     expect((await campState(page)).following).toBeNull();
+    // A click with a few pixels of jitter is not a drag and keeps the follow.
+    await follow.click();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.6);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.5 + 3, box.y + box.height * 0.6 + 2, { steps: 3 });
+    await page.mouse.up();
+    await expect(follow).toHaveAttribute('aria-pressed', 'true');
+    expect((await campState(page)).following).toBe(ownerId);
+  });
+
+  test('disables Find and Follow while the owner is away, and never shows a follow that did not happen', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' }); // departures leave at once
+    await openCamp(page);
+    const find = page.getByRole('button', { name: 'Find my gladiator' });
+    const follow = page.getByRole('button', { name: 'Follow my gladiator' });
+    await expect(find).toBeEnabled();
+    const ownerId = await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors[0].gladiatorId);
+    await page.evaluate(id => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, actors: world.actors.map(a => (a.gladiatorId === id ? { ...a, location: 'expedition:woodland' as const } : a)) });
+    }, ownerId);
+    expect((await campState(page)).actors.some(a => a.id === ownerId)).toBe(false);
+    await expect(find).toBeDisabled();
+    await expect(follow).toBeDisabled();
+    // The scene refuses a follow it cannot apply, and the toggle reflects what the scene did.
+    await page.evaluate(id => window.__cloudiatorCamp!.emit('follow-character', { gladiatorId: id }), ownerId);
+    expect((await campState(page)).following).toBeNull();
+    await expect(follow).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('keeps the camera inside the map after panning far beyond its edges', async ({ page }) => {
@@ -127,6 +157,24 @@ test.describe('living isometric camp', () => {
     await page.mouse.wheel(0, 100); // one mouse notch out
     await nextFrames(page);
     expect(await zoom()).toBeCloseTo(1, 5);
+    // Line-mode wheels (Firefox) step once per notch of three lines.
+    const lineNotch = (deltaY: number) => page.evaluate(dy => {
+      const canvas = document.querySelector('canvas')!;
+      const r = canvas.getBoundingClientRect();
+      canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, deltaMode: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, bubbles: true, cancelable: true }));
+    }, deltaY);
+    await lineNotch(-3);
+    await nextFrames(page);
+    expect(await zoom()).toBeCloseTo(1.25, 5);
+    await lineNotch(3);
+    await nextFrames(page);
+    expect(await zoom()).toBeCloseTo(1, 5);
+    // Leftover deltas from an earlier gesture do not add up with a later one.
+    await page.mouse.wheel(0, -60);
+    await page.waitForTimeout(400);
+    await page.mouse.wheel(0, -60);
+    await nextFrames(page);
+    expect(await zoom()).toBeCloseTo(1, 5);
   });
 
   test('pinches to zoom with two fingers on a phone', async ({ page }, testInfo) => {
@@ -175,9 +223,9 @@ test.describe('living isometric camp', () => {
     for (const a of actors) expect(a.depth, a.id).toBeCloseTo(worldToScreen(a.x, a.y).y, 6);
   });
 
-  test('draws an NPC behind a building and fades that building while the NPC is selected', async ({ page }, testInfo) => {
-    // From the shared routines, find a moment when an NPC walks behind an occluding building.
-    const occluders = campMap.props.filter(p => p.occludes).map(p => {
+  test('draws the guard behind the watchtower and fades the tower while he is selected', async ({ page }, testInfo) => {
+    // From the shared routines, find a moment when an NPC stands behind a building (not a tree or wall).
+    const occluders = campMap.props.filter(p => p.occludes && !/^(tree|palisade|arena-wall)/.test(p.frame)).map(p => {
       const f = propFrames[p.frame];
       const a = worldToScreen(p.x, p.y);
       const slices = drawSlices(p, { w: f.frame.w, anchorX: f.anchorPx.x }).map(sl => ({ x0: a.x + sl.left, x1: a.x + sl.left + sl.width, depth: a.y + sl.depthOffset }));
@@ -196,6 +244,8 @@ test.describe('living isometric camp', () => {
     }
     expect(moment, 'some NPC route passes behind a building').not.toBeNull();
     const { routine, t, x, y, covering } = moment!;
+    expect(routine.npcId).toBe('guard');
+    expect(covering).toContain('watchtower@38,16');
 
     await openCamp(page);
     const base = await page.evaluate(() => window.__cloudiatorCamp!.world()!.serverNowMs);
@@ -275,7 +325,7 @@ test.describe('living isometric camp', () => {
     }
     await page.waitForFunction(id => !window.__cloudiatorCamp!.state()!.actors.some(a => a.id === id), leaver.id, { timeout: 40_000 });
     const final = await campState(page);
-    expect(final.players).toBe(50);
+    expect(final.players).toBe(44);
     expect(final.away).toBe(6);
   });
 
@@ -285,9 +335,11 @@ test.describe('living isometric camp', () => {
     const npcs = async () => (await campState(page)).actors.filter(a => a.kind === 'npc').map(a => ({ id: a.id, x: a.x, y: a.y, action: a.action }));
     expect((await campState(page)).reducedMotion).toBe(true);
     const first = await npcs();
+    const torch = (await campState(page)).lighting.torchAlpha;
     await page.waitForTimeout(1500);
     expect(await npcs()).toEqual(first);
     expect(first.every(n => n.action !== 'walk')).toBe(true);
+    expect((await campState(page)).lighting.torchAlpha).toBe(torch);
   });
 
   test('re-entering the game keeps one canvas and the camera still responds', async ({ page }) => {
@@ -302,6 +354,30 @@ test.describe('living isometric camp', () => {
     expect(await page.evaluate(() => window.__cloudiatorCamp!.listeners())).toBe(listeners);
     await page.getByRole('button', { name: 'Zoom in' }).click();
     expect((await campState(page)).camera.zoom).toBeCloseTo(1.25, 5);
+  });
+
+  test('repaints the baked ground after the WebGL context is lost and restored', async ({ page }) => {
+    await openCamp(page);
+    await page.evaluate(() => window.__cloudiatorCamp!.freezeClock(window.__cloudiatorCamp!.world()!.serverNowMs));
+    await nextFrames(page);
+    const canvas = page.locator('canvas');
+    const before = decodePng(await canvas.screenshot());
+    await page.evaluate(async () => {
+      const gl = (document.querySelector('canvas')!.getContext('webgl2') ?? document.querySelector('canvas')!.getContext('webgl'))!;
+      const ext = gl.getExtension('WEBGL_lose_context')!;
+      ext.loseContext();
+      await new Promise(resolve => setTimeout(resolve, 300));
+      ext.restoreContext();
+      await new Promise(resolve => setTimeout(resolve, 600));
+    });
+    await nextFrames(page);
+    const after = decodePng(await canvas.screenshot());
+    expect([after.width, after.height]).toEqual([before.width, before.height]);
+    let differing = 0;
+    for (let i = 0; i < before.rgba.length; i += 4) {
+      if (Math.abs(before.rgba[i] - after.rgba[i]) + Math.abs(before.rgba[i + 1] - after.rgba[i + 1]) + Math.abs(before.rgba[i + 2] - after.rgba[i + 2]) > 24) differing += 1;
+    }
+    expect(differing / (before.width * before.height)).toBeLessThan(0.02);
   });
 
   test('keeps management usable when the camp art cannot load', async ({ page }) => {

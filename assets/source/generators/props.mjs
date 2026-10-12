@@ -335,7 +335,7 @@ function gateArch() {
   const { c, m, g } = P;
   // Seated between the pillars' inner faces, below their braziers.
   const a = up(g(0.5, -0.15), 44);
-  const b = up(g(0.5, 3.15), 44);
+  const b = up(g(0.5, 3), 44); // ends at the near pillar's hidden face, never over its top
   c.stamp(m().polygon([a, b, add(b, [0, 7]), add(a, [0, 7])]), planks('wood1', 'wood2', 'wood3', 7));
   const mid = lerp(a, b, 0.5);
   c.stamp(m().polygon([add(mid, [-9, 8]), add(mid, [9, 8]), add(mid, [9, 30]), add(mid, [0, 25]), add(mid, [-9, 30])]), shade('teal1', 'teal2', 'teal3'));
@@ -432,17 +432,16 @@ export function arenaSegment(index, centre, anchorTile) {
     c.stamp(m().ellipse(p[0] + 5, p[1] + 6, 2, 2), 'gold2');
   }
   const anchor = L(toScreen(anchorTile[0], anchorTile[1]));
-  // Explicit depth slices: each 32px column sorts at the lowest ground point of the wall band under
-  // it, so walkers outside the front wall draw over it and walkers inside draw over the back wall.
+  // Explicit depth slices: each slice sorts at the lowest ground point of the wall band anywhere in
+  // its own columns, so walkers outside the front wall draw over it and walkers inside draw over the
+  // back wall, even where the band ends partway through a slice.
   const groundMax = new Map();
-  for (let d = t0; d <= t1 + 1e-9; d += span / 400) {
+  for (let d = t0; d <= t1 + 1e-9; d += span / 1200) {
     if (inGate(d)) continue;
-    for (let r = R - 0.45; r <= R + 0.45 + 1e-9; r += 0.09) {
+    for (let r = R - 0.45; r <= R + 0.45 + 1e-9; r += 0.05) {
       const [sx, sy] = L(ring(r, d));
-      const u = sx - anchor[0];
-      const k = Math.round(u / 32);
-      if (Math.abs(u - k * 32) > 1.5) continue;
-      groundMax.set(k, Math.max(groundMax.get(k) ?? -Infinity, sy - anchor[1]));
+      const u = Math.round(sx - anchor[0]);
+      groundMax.set(u, Math.max(groundMax.get(u) ?? -Infinity, sy - anchor[1]));
     }
   }
   const frame = {
@@ -464,8 +463,11 @@ export function arenaSegment(index, centre, anchorTile) {
     const l = Math.max(left, k * 32 - 16);
     const r = Math.min(right, k * 32 + 16);
     if (r <= l || !known.length) continue;
-    const nearest = known.reduce((best, q) => (Math.abs(q - k) < Math.abs(best - k) ? q : best), known[0]);
-    slices.push({ left: l, width: r - l, depthOffset: Math.round((groundMax.get(nearest) - 0.5) * 2) / 2 });
+    const inside = known.filter(u => u >= l && u < r);
+    const centre = k * 32;
+    const nearest = known.reduce((best, u) => (Math.abs(u - centre) < Math.abs(best - centre) ? u : best), known[0]);
+    const deepest = Math.max(...(inside.length ? inside : [nearest]).map(u => groundMax.get(u)));
+    slices.push({ left: l, width: r - l, depthOffset: Math.round((deepest - 0.5) * 2) / 2 });
   }
   return { ...cropped, slices };
 }

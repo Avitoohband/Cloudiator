@@ -5,8 +5,8 @@ import { mapScreenBounds, screenToWorld, worldToScreen } from '@/game/iso';
 import { clampView, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
 import { findPath, gridFromMap } from '@/game/paths';
 import { EQUIPMENT_LAYERS, layersFor, layoutCamp, locationKind, planActorRoutine } from '@/game/actors';
-import { frontEdgeY, hidesActor, propSlices } from '@/game/depth';
-import { NPC_ROUTINES, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
+import { drawSlices, frontEdgeY, hidesActor, propSlices } from '@/game/depth';
+import { NPC_ROUTINES, NPC_WALK_TILES_PER_SECOND, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
 import { phaseLighting } from '@/game/lighting';
 import { createSceneBridge } from '@/game/bridge';
 import { createDemoWorld } from '@/game/demo-world';
@@ -179,6 +179,7 @@ describe('actor routines', () => {
   });
 
   it('pairs sparring partners face to face and keeps a mixed camp unique', () => {
+    // A stress layout beyond the 50-row public world: 50 in camp plus 6 away.
     const world = createDemoWorld(1_791_592_800_000, 50, 6);
     expect(world.actors).toHaveLength(56);
     const { placements, away } = layoutCamp(world.actors, camp, world.slotIndex);
@@ -227,6 +228,15 @@ describe('wide prop depth slices', () => {
     expect(frontEdgeY({ w: 3, d: 2 }, 32)).toBe(80);
   });
 
+  it('lets actors win ties against one-tile props by rule, not by insertion order', () => {
+    // A crate at (10, 10): actors on the SE and SW neighbouring tiles have feet exactly at its sort line.
+    const crate = { w: 1, d: 1, layer: 'object' as const, sortY: 32 };
+    const [slice] = drawSlices(crate, { w: 64, anchorX: 32 });
+    const anchorY = worldToScreen(10, 10).y;
+    for (const [x, y] of [[11.5, 10.5], [10.5, 11.5]]) expect(worldToScreen(x, y).y).toBeGreaterThan(anchorY + slice.depthOffset);
+    expect(worldToScreen(10.5, 9.5).y).toBeLessThan(anchorY + slice.depthOffset);
+  });
+
   it('draws actors in front of a tent face over it and actors behind it under it', () => {
     const slices = propSlices({ w: 3, d: 3 }, -100, 200);
     const sliceAt = (x: number) => slices.find(s => x >= s.left && x < s.left + s.width)!;
@@ -268,6 +278,10 @@ describe('ambient NPCs', () => {
     const smith = NPC_ROUTINES.find(n => n.npcId === 'smith')!;
     const at = planNpcPosition(smith, camp, 0);
     expect(Math.hypot(at.x - 18.5, at.y - 7.5)).toBeLessThan(3);
+  });
+
+  it('walks NPCs at the manifest walk speed so their feet do not slide', () => {
+    expect(NPC_WALK_TILES_PER_SECOND).toBe(manifest.actors.gladiator.walk.tilesPerSecond);
   });
 
   it('schedules enough walking time between every pair of posts', () => {
@@ -342,6 +356,7 @@ describe('scene bridge', () => {
     const P = {
       Scene: class { constructor(_config: unknown) {} },
       Scenes: { Events: { DESTROY: 'destroy' } },
+      Renderer: { Events: { RESTORE_WEBGL: 'restorewebgl' } },
     } as unknown as typeof import('phaser');
     const deps = { manifest, atlasData: {}, assetBase: '/assets/', world: null, bridge, now: () => 0, onReady() {}, onError() {} };
     const first = createCampScene(P, deps);
@@ -356,8 +371,9 @@ describe('scene bridge', () => {
     const second = createCampScene(P, deps);
     expect(bridge.listenerCount()).toBe(4);
     // Game.destroy emits the scene DESTROY event, which disposes as well.
-    const scene = second.scene as unknown as { events: { once(event: string, fn: () => void): void }; init(): void };
+    const scene = second.scene as unknown as { events: { once(event: string, fn: () => void): void }; renderer: object; init(): void };
     scene.events = { once: (event, fn) => { if (event === 'destroy') destroyHandlers.push(fn); } };
+    scene.renderer = { on() {}, off() {} };
     scene.init();
     destroyHandlers.forEach(fn => fn());
     expect(bridge.listenerCount()).toBe(0);

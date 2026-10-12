@@ -2,7 +2,8 @@
 // a tent's face and one behind it, so wide props draw as 32px vertical slices, each sorted at the
 // footprint's front edge under it; arena wall segments ship explicit slices from the generator.
 // Actors stand on tile centres, which fall exactly on slice centres. Slices sort half a pixel
-// earlier than the edge so an actor exactly on the edge line draws in front (actors win ties).
+// earlier than the edge, and one-tile props half a pixel before their sortY, so an actor exactly on
+// a sort line draws in front (actors win ties).
 // Mirrors assets/source/tools/depth.mjs (used by the offline renderers); tests check they agree.
 
 export const SLICE_WIDTH = 32;
@@ -49,7 +50,7 @@ export function drawSlices(prop: SliceableProp, frame: { w: number; anchorX: num
   if (prop.layer === 'foreground') return whole(FOREGROUND);
   if (prop.slices?.length) return prop.slices;
   if (needsSlices(prop, prop.layer)) return propSlices(prop, -frame.anchorX, frame.w);
-  return whole(prop.sortY);
+  return whole(prop.sortY - TIE_BIAS);
 }
 
 /** Points relative to an actor's feet that stand for its visible body (a 64px frame, anchor 32,58). */

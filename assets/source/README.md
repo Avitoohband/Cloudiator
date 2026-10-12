@@ -59,9 +59,13 @@ decoded pixels are unchanged. Hashes therefore stay stable across Node versions 
 - **Projection.** The north vertex of tile (x, y) is at screen ((x − y)·32, (x + y)·16). A prop's
   anchor is the north vertex of its anchor tile. One-tile props draw at `screenY(anchor) + sortY`.
   Wider props are drawn as 32px vertical slices, each at the screen y of the footprint's front edge
-  under it (`src/game/depth.ts`), so actors in front of any face draw over it. `floor` props draw
-  under all actors and `foreground` props over them. The rule is also in `manifest.depthRule` and
-  is tested against every wide prop on every map.
+  under it, so actors in front of any face draw over it. Arena wall segments ship explicit
+  `slices`: each one sorts at the lowest ground point of the wall band within its own columns.
+  Every sort line is biased half a pixel early, so an actor exactly on it draws in front.
+  `floor` props draw under all actors and `foreground` props over them. Use `drawSlices` in
+  `src/game/depth.ts` (the offline renderers use the identical `tools/depth.mjs`). The rule is also
+  in `manifest.depthRule`. It is tested against every wide prop and, pixel by pixel, against the
+  arena ring.
 
 ## Runtime notes for Tasks 12, 14 and 15
 

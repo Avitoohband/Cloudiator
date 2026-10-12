@@ -51,8 +51,8 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
   return { revision: `demo-${slotIndex}`, serverNowMs, slotIndex, actors };
 }
 
-/** Fixture previews only: surround the real fixture actors with a demo crowd so the camp shows a full population. */
-export function withDemoCrowd(world: WorldSnapshot, inCamp = 49, away = 6): WorldSnapshot {
+/** Fixture previews only: surround the real fixture actor with a demo crowd, keeping the world within its 50 public rows (43 in camp, 6 away). */
+export function withDemoCrowd(world: WorldSnapshot, inCamp = 43, away = 6): WorldSnapshot {
   const crowd = createDemoWorld(world.serverNowMs, inCamp, away).actors.filter(a => !world.actors.some(b => b.gladiatorId === a.gladiatorId));
   return { ...world, actors: [...world.actors, ...crowd] };
 }

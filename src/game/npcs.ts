@@ -39,9 +39,11 @@ export const NPC_ROUTINES: NpcRoutine[] = [
     { x: 13, y: 16, at: 40_000, durationMs: 12_000, action: 'talk', facing: 'sw' },
     { x: 13, y: 21, at: 78_000, durationMs: 10_000, action: 'talk', facing: 'sw' },
   ] },
-  { npcId: 'guard', periodMs: 60_000, steps: [
+  // The guard's patrol passes behind the watchtower, where only the selection fade shows him.
+  { npcId: 'guard', periodMs: 90_000, steps: [
     { x: 40, y: 20, at: 0, durationMs: 30_000, action: 'idle', facing: 'sw' },
-    { x: 39, y: 24, at: 38_000, durationMs: 12_000, action: 'idle', facing: 'se' },
+    { x: 36, y: 14, at: 40_000, durationMs: 10_000, action: 'idle', facing: 'se' },
+    { x: 39, y: 24, at: 64_000, durationMs: 12_000, action: 'idle', facing: 'se' },
   ] },
 ];
 

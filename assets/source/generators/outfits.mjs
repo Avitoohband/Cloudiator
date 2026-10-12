@@ -501,7 +501,8 @@ export function weapon(kind) {
       const [g, ang] = stowedGrip(ctx, kind);
       part('back', c => drawBlade(c, g, ang, kind));
     } else if (mode === 'dropped') {
-      part('back', c => drawBlade(c, kind === 'spear' ? [36, GROUND - 1] : [42, GROUND - 1], 90, kind));
+      // The axe head spreads across the shaft; lift it so the head's outline stays inside the frame.
+      part('back', c => drawBlade(c, kind === 'spear' ? [36, GROUND - 1] : [42, GROUND - (kind === 'axe' ? 4 : 1)], 90, kind));
     } else {
       part('weapon', c => drawBlade(c, p.nearHand, pose.weaponAngle, kind));
     }
@@ -512,7 +513,8 @@ export function weapon(kind) {
 export const tool = kind => ctx => {
   const { p, pose, part } = ctx;
   if (pose.weapon === 'none' || pose.weapon === 'stowed') return;
-  if (pose.weapon === 'dropped') { part('back', c => drawBlade(c, [34, GROUND - 1], 90, kind, ctx.scale)); return; }
+  // A dropped tool lies along the front of the fallen body, so it stays visible instead of hiding under it.
+  if (pose.weapon === 'dropped') { part('weapon', c => drawBlade(c, [34, GROUND - 1], 90, kind, ctx.scale)); return; }
   part('weapon', c => drawBlade(c, p.nearHand, pose.weaponAngle, kind, ctx.scale));
 };
 

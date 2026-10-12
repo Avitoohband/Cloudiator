@@ -74,6 +74,12 @@ const BG = 0x1c3f24;
 const FADED_ALPHA = 0.45;
 /** Wheel delta (CSS px) per zoom step: one mouse notch, or a short trackpad swipe. */
 const WHEEL_STEP = 100;
+/** CSS px per wheel line (deltaMode 1), so a three-line notch makes one step. */
+const WHEEL_LINE = 40;
+/** A pause this long ends a wheel gesture; leftover delta does not carry into the next one. */
+const WHEEL_IDLE_MS = 250;
+/** Pointer travel (CSS px) before a press becomes a drag. */
+const DRAG_THRESHOLD = 6;
 
 type ActorView = {
   id: string;
@@ -159,6 +165,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   let overlay: PhaserNS.GameObjects.Rectangle | null = null;
   let ring: PhaserNS.GameObjects.Ellipse | null = null;
   let ringDepth = NaN;
+  let groundChunks: { rt: PhaserNS.GameObjects.RenderTexture; left: number; top: number; tiles: { frame: string; left: number; top: number }[] }[] = [];
 
   class CampScene extends P.Scene {
     constructor() { super({ key: 'camp' }); }
@@ -166,6 +173,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     init() {
       // Game.destroy emits DESTROY (never SHUTDOWN); the host also calls dispose() directly.
       this.events.once(P.Scenes.Events.DESTROY, dispose);
+      // Render textures come back empty after a WebGL context restore; repaint the baked ground.
+      const repaint = () => this.paintGround();
+      this.renderer.on(P.Renderer.Events.RESTORE_WEBGL, repaint);
+      this.events.once(P.Scenes.Events.DESTROY, () => this.renderer.off(P.Renderer.Events.RESTORE_WEBGL, repaint));
     }
 
     preload() {
@@ -222,14 +233,21 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
       const chunkW = Math.ceil((maxX - minX) / 2);
       const chunkH = Math.ceil((maxY - minY) / 2);
+      groundChunks = [];
       for (let cy = 0; cy < 2; cy += 1) for (let cx = 0; cx < 2; cx += 1) {
         const left = minX + cx * chunkW;
         const top = minY + cy * chunkH;
         const rt = this.add.renderTexture(left, top, chunkW, chunkH).setOrigin(0, 0).setDepth(-10_000_000);
-        for (const t of tiles) {
-          if (t.left >= left + chunkW || t.left + t.w <= left || t.top >= top + chunkH || t.top + t.h <= top) continue;
-          rt.stamp(map.tilesAtlas, t.frame, t.left - left, t.top - top, { originX: 0, originY: 0 });
-        }
+        const inside = tiles.filter(t => t.left < left + chunkW && t.left + t.w > left && t.top < top + chunkH && t.top + t.h > top);
+        groundChunks.push({ rt, left, top, tiles: inside });
+      }
+      this.paintGround();
+    }
+
+    paintGround() {
+      for (const { rt, left, top, tiles } of groundChunks) {
+        rt.clear();
+        for (const t of tiles) rt.stamp(map.tilesAtlas, t.frame, t.left - left, t.top - top, { originX: 0, originY: 0 });
         rt.render();
       }
     }
@@ -420,6 +438,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       this.input.addPointer(1);
       let pinch: { distance: number; zoom: number } | null = null;
       let wheel = 0;
+      let lastWheelAt = -Infinity;
+      let dragging = false;
+      this.input.on(P.Input.Events.POINTER_DOWN, () => { dragging = false; });
       this.input.on(P.Input.Events.POINTER_MOVE, (pointer: PhaserNS.Input.Pointer) => {
         const p1 = this.input.pointer1;
         const p2 = this.input.pointer2;
@@ -433,16 +454,22 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         }
         pinch = null;
         if (!pointer.isDown) return;
+        // A press with a little jitter is a click, not a drag, and keeps a follow going.
+        if (!dragging && P.Math.Distance.Between(pointer.downX, pointer.downY, pointer.x, pointer.y) <= DRAG_THRESHOLD) return;
+        dragging = true;
         stopFollowing();
         view = panBy(view, pointer.x - pointer.prevPosition.x, pointer.y - pointer.prevPosition.y, bounds);
         this.syncCamera();
       });
-      this.input.on(P.Input.Events.POINTER_UP, () => { pinch = null; });
+      this.input.on(P.Input.Events.POINTER_UP, () => { pinch = null; dragging = false; });
       this.input.on(P.Input.Events.POINTER_WHEEL, (pointer: PhaserNS.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
         if (!dy) return; // horizontal scroll never zooms
-        if (Math.sign(dy) !== Math.sign(wheel)) wheel = 0; // a reversal starts a fresh gesture
+        const at = performance.now();
+        // A reversal or a pause starts a fresh gesture.
+        if (Math.sign(dy) !== Math.sign(wheel) || at - lastWheelAt > WHEEL_IDLE_MS) wheel = 0;
+        lastWheelAt = at;
         const mode = (pointer.event as WheelEvent | undefined)?.deltaMode ?? 0;
-        wheel += dy * (mode === 1 ? 33 : mode === 2 ? WHEEL_STEP * 3 : 1);
+        wheel += dy * (mode === 1 ? WHEEL_LINE : mode === 2 ? WHEEL_STEP * 3 : 1);
         const steps = Math.trunc(wheel / WHEEL_STEP);
         if (!steps) return;
         wheel -= steps * WHEEL_STEP;
@@ -645,9 +672,13 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       scene.centerOnActor(v);
     }),
     deps.bridge.on('follow-character', ({ gladiatorId }) => {
-      if (!live()) return;
-      following = gladiatorId && views.has(gladiatorId) ? gladiatorId : null;
-      if (following) selected = following;
+      const applied = live() && gladiatorId && views.has(gladiatorId) ? gladiatorId : null;
+      if (live()) {
+        following = applied;
+        if (applied) selected = applied;
+      }
+      // Answer a refused request with what was applied, so UI toggles never show a follow that is not happening.
+      if (gladiatorId && !applied) deps.bridge.emit('follow-character', { gladiatorId: null });
     }),
   ];
 

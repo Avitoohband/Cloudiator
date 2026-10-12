@@ -1,6 +1,7 @@
 // Painter's-order depth for props, shared by the offline renderers. src/game/depth.ts mirrors
 // this logic for the game and tests/assets checks the two agree.
-// Actors sort at the screen y of their feet; slices sort half a pixel earlier so actors win ties.
+// Actors sort at the screen y of their feet; slices and one-tile props sort half a pixel earlier so
+// actors win ties.
 
 export const SLICE_WIDTH = 32;
 export const TIE_BIAS = 0.5;
@@ -42,5 +43,5 @@ export function drawSlices(prop, frame) {
   if (prop.layer === 'foreground') return whole(FOREGROUND);
   if (prop.slices?.length) return prop.slices;
   if (needsSlices({ w: prop.w, d: prop.d }, prop.layer)) return propSlices({ w: prop.w, d: prop.d }, -frame.anchorX, frame.w);
-  return whole(prop.sortY);
+  return whole(prop.sortY - TIE_BIAS);
 }

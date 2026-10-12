@@ -29,8 +29,8 @@
     },
     {
       "file": "actors/creatures.png",
-      "sha256": "fcc8ef502018ea7d3088fdf80d3b54ca0b6f5be4612cf68cd5b2a7e9411ef3a1",
-      "bytes": 46884,
+      "sha256": "2e12db675934269a2dc3eaa80d1244f974cee2d984e48f5324869063d0497359",
+      "bytes": 46861,
       "source": "generated",
       "generator": "assets/source/generators/creatures.mjs",
       "inputs": [
@@ -69,8 +69,8 @@
     },
     {
       "file": "actors/gladiators.png",
-      "sha256": "60230e0ad3c0c9355404d9e620933cebec956bc792a49500bfa9fcad1f8e4094",
-      "bytes": 133314,
+      "sha256": "efb9952383968f8af06bfb6754d00297457248d856bf2e54a62c6e9094d3cb1e",
+      "bytes": 133330,
       "source": "generated",
       "generator": "assets/source/generators/gladiator.mjs",
       "inputs": [
@@ -129,8 +129,8 @@
     },
     {
       "file": "camp/map.json",
-      "sha256": "c405e4a2d3e6b123c6e94b5e96be2a58b73288a43d2648011f224008dcc2d293",
-      "bytes": 105238,
+      "sha256": "979d02e6f2557772f7e73bdc8c8431609abb91f8909985b1f6b698db1ad683a6",
+      "bytes": 105226,
       "source": "generated",
       "generator": "assets/source/generators/maps.mjs",
       "inputs": [
@@ -149,8 +149,8 @@
     },
     {
       "file": "camp/props.json",
-      "sha256": "336b251f35266dfae44e997bcc862ad9974881e973ab0cd282235dd6f55b730f",
-      "bytes": 21868,
+      "sha256": "e6dc7ef55c6eb920dd6c3724a24768abb9a7dcb0fe6a30a4733e329afe13726c",
+      "bytes": 21855,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
       "inputs": [
@@ -166,8 +166,8 @@
     },
     {
       "file": "camp/props.png",
-      "sha256": "eb5072ed347b55dc4ebaffe0265206de1e8ccdadd40c9fd4b9a94075925455d2",
-      "bytes": 29960,
+      "sha256": "b664d8dc84c2b5bf27f7d0a9746d99ddefdcc6c5ef4a57539411f1fe75dcf09a",
+      "bytes": 29826,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
       "inputs": [

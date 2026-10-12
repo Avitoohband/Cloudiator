@@ -222,7 +222,7 @@ describe('gladiator animation package', () => {
         }
         // Art reaching the second row/column means the 1px border cleared part of a shape.
         let clipped = 0;
-        for (let i = 1; i < size - 1; i += 1) for (const [x, y] of [[i, 1], [1, i], [size - 2, i]]) if (alpha(x, y)) clipped += 1;
+        for (let i = 1; i < size - 1; i += 1) for (const [x, y] of [[i, 1], [i, size - 2], [1, i], [size - 2, i]]) if (alpha(x, y)) clipped += 1;
         expect(clipped, `${atlasKey}:${name} touches the frame edge`).toBe(0);
       }
     }
@@ -299,7 +299,7 @@ describe('camp and expedition maps', () => {
     }
   });
 
-  it('sorts walkers on both sides of the arena wall by the exact wall geometry', () => {
+  it('sorts every walker pixel on both sides of the arena wall by the exact wall geometry', () => {
     const camp = manifest.maps.find(m => m.id === 'camp')!;
     const [cx, cy] = camp.arena!.centre;
     const R = camp.arena!.radius;
@@ -320,21 +320,43 @@ describe('camp and expedition maps', () => {
       }
       return cols;
     });
+    // Every opaque pixel of a well-equipped gladiator (both facings) that overlaps an opaque wall pixel
+    // must sort by the wall's ground in that pixel's own column, not just the column under the feet.
+    const size = 64;
+    const layers = ['body', 'armor-heavy', 'head-helmet', 'offhand-shield', 'weapon-spear'];
+    const pixels = layers.map(id => framePixels(manifest.actors.gladiator.atlas, `${id}/idle/se/0`));
+    const body: [number, number][] = [];
+    for (let py = 0; py < size; py += 1) for (let px = 0; px < size; px += 1) {
+      if (pixels.some(layer => layer[(py * size + px) * 4 + 3])) body.push([px, py], [size - 1 - px, py]);
+    }
+    const propFrames = manifest.atlases[camp.propsAtlas].frames;
+    const walls = segments.map(p => ({ p, f: propFrames[p.frame], px: framePixels(camp.propsAtlas, p.frame), anchor: worldToScreen(p.x, p.y) }));
+    const wrong = new Set<string>();
     let checked = 0;
     for (let y = 0; y < camp.height; y += 1) for (let x = 0; x < camp.width; x += 1) {
       if (camp.walkable[y][x] !== '1') continue;
-      if (Math.abs(Math.hypot(x + 0.5 - cx, y + 0.5 - cy) - R) > 2.2) continue;
+      if (Math.abs(Math.hypot(x + 0.5 - cx, y + 0.5 - cy) - R) > 3) continue;
       const feet = worldToScreen(x + 0.5, y + 0.5);
-      segments.forEach((p, i) => {
-        const anchor = worldToScreen(p.x, p.y);
-        const slice = p.slices!.find(s => feet.x >= anchor.x + s.left && feet.x < anchor.x + s.left + s.width);
-        const wallY = ground[i].get(Math.round(feet.x));
-        if (!slice || wallY === undefined) return;
-        checked += 1;
-        expect(feet.y > anchor.y + slice.depthOffset, `${x},${y} vs ${p.id}`).toBe(feet.y > wallY);
+      walls.forEach(({ p, f, px, anchor }, i) => {
+        const left = anchor.x - f.anchorX;
+        const top = anchor.y - f.anchorY;
+        if (feet.x + 32 < left || feet.x - 32 > left + f.w || feet.y < top || feet.y - 58 > top + f.h) return;
+        for (const [bx, by] of body) {
+          const sx = Math.floor(feet.x - 32 + bx);
+          const sy = Math.floor(feet.y - 58 + by);
+          const lx = sx - left;
+          const ly = sy - top;
+          if (lx < 0 || ly < 0 || lx >= f.w || ly >= f.h || !px[(ly * f.w + lx) * 4 + 3]) continue;
+          const wallY = ground[i].get(sx);
+          const slice = p.slices!.find(sl => sx >= anchor.x + sl.left && sx < anchor.x + sl.left + sl.width);
+          if (wallY === undefined || !slice) continue;
+          checked += 1;
+          if ((feet.y > anchor.y + slice.depthOffset) !== (feet.y > wallY)) wrong.add(`${x},${y} vs ${p.id} at column ${sx}`);
+        }
       });
     }
-    expect(checked).toBeGreaterThan(40);
+    expect(checked).toBeGreaterThan(1000);
+    expect([...wrong]).toEqual([]);
   });
 
   it('marks merchant stalls as click targets', () => {

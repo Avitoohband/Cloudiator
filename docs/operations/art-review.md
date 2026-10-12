@@ -51,7 +51,7 @@ shows SE, SW, NE and NW, toggles layers, and tints skin, cloth and hair.
 | Silhouettes | Sword, axe, spear and bow are distinct (test). Heavy armor visibly bulks the figure past light armor (test). | Pass. |
 | NPCs | Six distinct looks: smith, armorer, trainer, cook, healer, guard. | Pass after fixes. |
 | Environments | Camp, woodland, outpost and mountain read as distinct places, with seamless autotiled transitions. | Pass. |
-| Foreground layering | Palisade, stalls, tents and the 16 arena wall segments are sorted correctly. Fighters inside the arena draw behind the front wall, and the gate arch draws over walkers. | Pass. Wide props use front-edge slices; each arena wall segment ships its own slices computed from the ring geometry. A test sorts every walkable tile near the ring against the exact wall shape. In the live scene (Task 12), a browser test checks every slice depth Phaser actually uses, with a walker-behind-a-pine screenshot. |
+| Foreground layering | Palisade, stalls, tents and the 16 arena wall segments are sorted correctly. Fighters inside the arena draw behind the front wall, and the gate arch draws over walkers. | Pass. Wide props use front-edge slices. Each arena wall segment ships its own slices, which sort at the lowest ground point of the wall band within each slice's columns. A test overlays every opaque pixel of an equipped gladiator (both facings) on every wall segment's opaque pixels, on all walkable tiles within 3 tiles of the ring, and checks each overlapping column against the exact wall geometry. In the live scene (Task 12), a browser test checks every slice depth Phaser actually uses, with screenshots of the guard behind the watchtower. |
 | Transparent edges | No halos. Alpha is 0 or 255 only. | Pass. |
 | Nameplates | Rendered as runtime text in Task 12. Frames leave about 14px of headroom above the head. | Pass in Task 12: names show when zoomed in, selected or followed. |
 
@@ -101,15 +101,29 @@ A scoped re-review confirmed the fixes above, except two partial ones, and found
 
 | Finding | Severity | Resolution |
 | --- | --- | --- |
-| Arena wall segments (wide images on a 1×1 footprint) were never sliced; 10 walkable tiles sorted on the wrong side of the wall | Important | Fixed. Each segment's slices come from sampling the ring's ground line, biased half a pixel. A test sorts walkers on both sides of every segment against the exact geometry, and the depth probe covers the ring. |
+| Arena wall segments (wide images on a 1×1 footprint) were never sliced; 10 walkable tiles sorted on the wrong side of the wall | Important | Fixed in two steps. The first fix sliced the segments but took each slice's depth from its centre column, which left 4 tiles wrong (second re-review, below). Now each slice sorts at the deepest ground point within its own columns, and the test checks every overlapping body pixel. |
 | Close-up deferral recorded in only one table row | Important | Fixed. Recorded with acceptance criteria below and in the Task 11 report. |
 | NPC beards still a hard block on the smith | Minor | Accepted. It reads correctly at game scale; the reviewer downgraded it to Minor. |
-| Troll victory clipped the club at the top of the frame | Minor | Fixed. Weapon clamping now uses per-weapon extent points and the actor's scale, with a 3px margin. The transparent-border test covers all actor atlases (gladiators, NPCs, creatures) and also fails when art touches the second pixel row. |
+| Troll victory clipped the club at the top of the frame | Minor | Fixed. Weapon clamping now uses per-weapon extent points and the actor's scale, with a 3px margin. The transparent-border test covers all actor atlases (gladiators, NPCs, creatures) and also fails when art reaches the second row or column from any edge. |
 | Gate beam covered the brazier flames | Minor | Fixed. The beam now ends at the pillars' inner faces and sits below the braziers. |
 | Shield nearly vanished in NE/NW idle | Minor | Fixed. The hanging shield is offset outward in the back view. |
-| Depth ties left to insertion order | Minor | Fixed. Slices sort half a pixel before the edge (`TIE_BIAS`), so actors win ties by rule. |
+| Depth ties left to insertion order | Minor | Fixed. Slices and one-tile props sort half a pixel before their line (`TIE_BIAS`), so actors win ties by rule (tested for both). |
 | Offline renderer re-implemented the depth math | Minor | Fixed. `assets/source/tools/depth.mjs` is the renderer's only copy, and a test checks it matches `src/game/depth.ts` for every prop. |
 | Documentation claims ahead of the code | Minor | Fixed in this document: each claim now names the test that backs it. |
+
+## Second scoped re-review fixes (2026-10-12)
+
+The second scoped re-review confirmed the rest, and found that the arena fix was incomplete.
+
+| Finding | Severity | Resolution |
+| --- | --- | --- |
+| Inside (23,17) and (17,23) and outside (19,29) and (29,19), body pixels still sorted wrong against a segment's edge slice, because its depth came from a column 32px away | Important | Fixed. Each slice's depth is the deepest ground point within its own columns, minus 0.5. The reviewer's independent pixel checker reports 0 wrong tiles across 179 tiles and four silhouettes. The test now checks every overlapping body pixel instead of the feet column, and it failed before the fix (`23,17 vs arena-wall-12`). |
+| Arena claims in this document were not backed | Important | Fixed with the above. The depth probe now shows inside walkers fully over the back wall. |
+| One-tile props tied with neighbouring actors | Minor | Fixed. `TIE_BIAS` now applies to one-tile props in both depth files, with a test. |
+| `manifest.depthRule` and the asset README were stale | Minor | Fixed. Both now describe explicit slices, the per-column rule and the bias. |
+| The border test skipped the second-to-last row; 7 frames (heavy armour lying down, the dropped axe) lost their bottom outline | Minor | Fixed. The test checks all four inner edges. Lying bodies sit 2px higher, and the dropped axe is lifted so its head stays whole. |
+| The gate beam's near end overdrew the near pillar's top | Minor | Fixed. It ends at that pillar's hidden face. |
+| The troll's dropped club was hidden under its body | Minor | Fixed. Dropped creature tools lie along the front of the fallen body. |
 
 ## Deferred to Task 14: close-up battle view
 

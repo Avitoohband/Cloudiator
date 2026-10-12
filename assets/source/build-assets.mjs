@@ -149,7 +149,7 @@ const manifest = {
     'leather-hood': 'head-hood', 'iron-helmet': 'head-helmet', 'light-armor': 'armor-light', 'heavy-armor': 'armor-heavy',
     'light-boots': null, 'heavy-boots': null,
   },
-  depthRule: 'actors: depth = screen y of the feet. floor props: under all actors. foreground props: over all actors. object props one tile wide: depth = anchor screen y + sortY. wider object props: drawn as 32px vertical slices, each at the screen y of the footprint front edge under the slice centre (src/game/depth.ts).',
+  depthRule: 'actors: depth = screen y of the feet. floor props: under all actors. foreground props: over all actors. props with explicit slices (arena wall segments): each slice draws its column range at anchor screen y + slice.depthOffset. other object props one tile wide: depth = anchor screen y + sortY - 0.5. wider object props: drawn as 32px vertical slices, each at the screen y of the footprint front edge under the slice centre - 0.5. The 0.5 bias means actors win ties. Implemented by drawSlices in src/game/depth.ts.',
   effects: effects.effects,
   icons: icons.icons,
   maps: [

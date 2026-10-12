@@ -55,6 +55,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
   const frozenAt = useRef<number | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [following, setFollowing] = useState(false);
+  const [ownerInCamp, setOwnerInCamp] = useState(false);
   const statusId = useId();
 
   useEffect(() => { focus.current = focusGladiatorId; }, [focusGladiatorId]);
@@ -75,6 +76,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
   }, []);
 
   useEffect(() => bridge.on('follow-character', ({ gladiatorId }) => setFollowing(!!gladiatorId && gladiatorId === focus.current)), [bridge]);
+  // Find and Follow only make sense while the owner is drawn in camp (not away, not before the scene is ready).
+  useEffect(() => bridge.on('roster', ({ inCamp }) => setOwnerInCamp(!!focus.current && inCamp.includes(focus.current))), [bridge]);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,10 +185,11 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
           <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'reset' })} aria-label="Reset zoom">1:1</button>
           {focusGladiatorId && (
             <>
-              <button type="button" onClick={() => bridge.emit('find-character', { gladiatorId: focusGladiatorId })} aria-label="Find my gladiator">Find</button>
+              <button type="button" disabled={!ownerInCamp} onClick={() => bridge.emit('find-character', { gladiatorId: focusGladiatorId })} aria-label="Find my gladiator">Find</button>
               <button
                 type="button"
-                aria-pressed={following}
+                disabled={!ownerInCamp}
+                aria-pressed={following && ownerInCamp}
                 onClick={() => bridge.emit('follow-character', { gladiatorId: following ? null : focusGladiatorId })}
                 aria-label="Follow my gladiator"
               >Follow</button>

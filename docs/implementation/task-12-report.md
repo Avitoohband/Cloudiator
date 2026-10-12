@@ -118,6 +118,7 @@ No shared files, dependencies or configs were changed.
     - the ground left blank after a context loss and restore (measured, not just read from the source).
 
     Each passed after its fix. The one-tile tie test also failed first.
+11. **Codex's scoped review of `8f83ba8`.** It found that a disposed scene's queued follow refusal could cancel a replacement scene's follow. The regression test "drops a refusal queued by a scene that is disposed before it is sent" failed first, receiving `['g1', null]`. The fix adds a `disposed` check.
 
 ## Verification (2026-10-12, final commit plus the R2 page change)
 

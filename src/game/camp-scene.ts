@@ -679,8 +679,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
       // Answer a refused request with what was applied, so UI toggles never show a follow that is not
       // happening. The answer waits until every listener has seen the request, and is dropped if a
-      // later request was accepted meanwhile.
-      if (gladiatorId && !applied) queueMicrotask(() => { if (!following) deps.bridge.emit('follow-character', { gladiatorId: null }); });
+      // later request was accepted meanwhile or this scene was disposed (a replacement scene may own
+      // the bridge by then).
+      if (gladiatorId && !applied) queueMicrotask(() => { if (!disposed && !following) deps.bridge.emit('follow-character', { gladiatorId: null }); });
     }),
   ];
 

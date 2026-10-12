@@ -16,6 +16,7 @@ Date: 2026-10-12. Reviewer: a fresh Claude reviewer subagent, read-only on the w
 | 1, full review | `c6aeab0` plus R2 | Fail | Fail | With fixes, 7 Important: bridge listeners leaked on unmount (`game.destroy` emits DESTROY, not SHUTDOWN); a re-entry test that could not catch it; a late first world parading in; equipment never redrawn; trackpad and horizontal wheel zoom; tautological assertions; per-frame cost. Also about 20 Minors. Fixed in `3051531` and `ddb9bec`. |
 | 2, re-review | `3051531`, `ddb9bec` | **Pass** | **Pass** | **Yes.** Every Important finding fixed and checked against the Phaser source; reverting any of them fails a test. 8 Minors, fixed in `e5eb8fc`. |
 | 3, delta check | `e5eb8fc` | **Pass** | **Pass** | **Yes.** Each fix verified (context-restore repaint, Find/Follow gating, wheel line mode and idle reset, drag threshold, watchtower evidence, 50-row world). 6 Minors, addressed in the final follow-up. |
+| 4, Codex scoped review | `e5eb8fc..8f83ba8` | Pass | Pass | Every prior Minor addressed, with no Critical or Important findings. One new Minor was reproduced: a scene refuses a follow and is disposed, a replacement scene on the same bridge accepts a follow, and the disposed scene's queued refusal then cancels it. Fixed in the takeover fix commit. The queued callback now also checks `disposed`, and a lifecycle regression that failed first (`seen` was `['g1', null]`) pins it. |
 
 ## Delta-check Minors and resolution
 

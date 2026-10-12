@@ -390,6 +390,20 @@ describe('scene bridge', () => {
     expect(seen).toEqual(['g1', null]);
   });
 
+  it('drops a refusal queued by a scene that is disposed before it is sent', async () => {
+    // Unmount and remount on one bridge: the old scene refuses a follow, is disposed, and a replacement
+    // may accept a follow before microtasks drain. The old scene's queued null must never arrive.
+    const bridge = createSceneBridge();
+    const P = { Scene: class { constructor(_config: unknown) {} } } as unknown as typeof import('phaser');
+    const old = createCampScene(P, { manifest, atlasData: {}, assetBase: '/assets/', world: null, bridge, now: () => 0, onReady() {}, onError() {} });
+    const seen: (string | null)[] = [];
+    bridge.on('follow-character', ({ gladiatorId }) => seen.push(gladiatorId));
+    bridge.emit('follow-character', { gladiatorId: 'g1' });
+    old.handle.dispose();
+    await Promise.resolve();
+    expect(seen).toEqual(['g1']);
+  });
+
   it('supports every scene event the plan names', () => {
     const bridge = createSceneBridge();
     const seen: string[] = [];

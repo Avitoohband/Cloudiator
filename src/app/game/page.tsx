@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { OwnerState } from '@contracts/reads';
@@ -26,23 +26,24 @@ function GameShell() {
   const [ownerError, setOwnerError] = useState(false);
   const [reload, setReload] = useState(0);
   const [signOutError, setSignOutError] = useState(false);
+  const ownerReadRevision = useRef(0);
 
   useEffect(() => {
     if (fixture || session.status !== 'signed-in' || !session.userId) {
+      ownerReadRevision.current++;
       setLiveOwner(null); setOwnerError(false);
       return;
     }
     const account = session.userId;
     let active = true;
-    let requestNumber = 0;
     async function load() {
-      const request = ++requestNumber;
+      const request = ++ownerReadRevision.current;
       setOwnerError(false);
       try {
         const value = await gateway.owner();
-        if (active && request === requestNumber) setLiveOwner({ account, value });
+        if (active && request === ownerReadRevision.current) setLiveOwner({ account, value });
       } catch (error) {
-        if (!active || request !== requestNumber) return;
+        if (!active || request !== ownerReadRevision.current) return;
         if (error instanceof GatewayReadError && error.code === 'not-found') setLiveOwner({ account, value: null });
         else { setLiveOwner(null); setOwnerError(true); }
       }
@@ -107,7 +108,7 @@ function GameShell() {
           {session.status === 'loading' ? <p role="status">Checking your session…</p> : session.status !== 'signed-in' ? <SignIn available={session.status === 'signed-out'} />
             : ownerError ? <><p role="alert">Your character could not be loaded. Please retry before creating a gladiator.</p><button onClick={() => setReload(value => value + 1)}>Retry owner load</button></>
               : !noCharacter ? <p role="status">Loading your gladiator…</p> : null}
-          {(noCharacter || session.status === 'signed-out' || session.status === 'unavailable') && <CreateCharacter key={session.userId ?? 'signed-out'} gateway={gateway} onCreated={value => { if (session.userId) setLiveOwner({ account: session.userId, value }); }} />}
+          {(noCharacter || session.status === 'signed-out' || session.status === 'unavailable') && <CreateCharacter key={session.userId ?? 'signed-out'} gateway={gateway} onCreated={value => { ownerReadRevision.current++; if (session.userId) setLiveOwner({ account: session.userId, value }); }} />}
         </>}
         {signOutError && <p role="alert">Sign-out could not be completed. Please try again.</p>}
         {fixture && !owner && <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}

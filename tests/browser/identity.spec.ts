@@ -17,6 +17,7 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
   const receipts = new Map<string, unknown>();
   const challenges = new Map<string, string>();
   let codeNumber = 0;
+  let delayedOwnerRead: { started(): void; wait: Promise<void>; done(): void } | null = null;
   const user = { id: userId, aud: 'authenticated', role: 'authenticated', email: 'test@example.invalid',
     app_metadata: { provider: 'google', providers: ['google'] }, user_metadata: {},
     identities: [{ id: randomUUID(), user_id: userId, provider: 'google', identity_data: { sub: userId } }],
@@ -59,6 +60,16 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
       expect(url.searchParams.get('select')).toBe('state');
       expect(request.headers().authorization).toMatch(/^Bearer /);
       if (readsFail) return json({ message: 'Read unavailable', code: 'XX000' }, 400);
+      if (delayedOwnerRead) {
+        const delayed = delayedOwnerRead;
+        delayedOwnerRead = null;
+        const snapshot = owner ? structuredClone(owner) : null;
+        delayed.started();
+        await delayed.wait;
+        await json(snapshot ? [{ state: snapshot }] : []);
+        delayed.done();
+        return;
+      }
       return json(owner ? [{ state: owner }] : []);
     }
     if (url.pathname === '/functions/v1/game-command') {
@@ -88,6 +99,16 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
     commands, characterCount: () => creationCount,
     loseNextResponse: () => { failResponse = true; },
     switchAccount: () => { user.id = randomUUID(); },
+    holdNextOwnerRead() {
+      let started = () => {};
+      let done = () => {};
+      let release = () => {};
+      const startedPromise = new Promise<void>(resolve => { started = resolve; });
+      const donePromise = new Promise<void>(resolve => { done = resolve; });
+      const wait = new Promise<void>(resolve => { release = resolve; });
+      delayedOwnerRead = { started, done, wait };
+      return { started: startedPromise, done: donePromise, release };
+    },
     conflict: (value: boolean) => { forceConflict = value; },
     failOwner: (value: boolean) => { readsFail = value; },
     async signIn(page: Page) {
@@ -254,4 +275,23 @@ test('account changes cannot reuse another account creation attempt', async ({ p
   await expect(page.getByRole('heading', { name: 'Account Draft', exact: true })).toBeVisible();
   expect(flow.commands[1].operationId).not.toBe(firstId);
   expect(await page.evaluate(() => localStorage.getItem('cloudiator.creation-draft.v1'))).toBeNull();
+});
+
+test('a slow no-character focus read cannot replace the confirmed creation owner', async ({ page, context }) => {
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await page.getByLabel('Gladiator name').fill('Confirmed Fighter');
+  await flow.signIn(page);
+  await expect(page.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();
+  const held = flow.holdNextOwnerRead();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await held.started;
+  await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Confirmed Fighter', exact: true })).toBeVisible();
+  const response = page.waitForResponse(url => url.url().includes('/rest/v1/owner_state'));
+  held.release();
+  await Promise.all([held.done, response]);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByRole('heading', { name: 'Confirmed Fighter', exact: true })).toBeVisible();
+  expect(flow.characterCount()).toBe(1);
 });

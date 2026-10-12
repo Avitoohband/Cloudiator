@@ -1,0 +1,46 @@
+// Renderer-independent camera rules: zoom limits, bounds clamping and pointer-anchored zoom.
+// The Phaser scene mirrors this state with camera.centerOn(centerX, centerY) and setZoom(zoom).
+import type { Point, Rect } from './iso';
+
+export type ViewState = { centerX: number; centerY: number; zoom: number; viewWidth: number; viewHeight: number };
+
+export const ZOOM_LIMITS = { min: 0.5, max: 3 } as const;
+export const ZOOM_STEP = 1.25;
+
+export function clampZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 1;
+  return Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, zoom));
+}
+
+function clampAxis(center: number, half: number, min: number, size: number): number {
+  if (half * 2 >= size) return min + size / 2;
+  return Math.min(min + size - half, Math.max(min + half, center));
+}
+
+/** Keep the visible world rectangle inside bounds; centre the map when it is smaller than the view. */
+export function clampView(view: ViewState, bounds: Rect): ViewState {
+  const zoom = clampZoom(view.zoom);
+  const halfW = view.viewWidth / 2 / zoom;
+  const halfH = view.viewHeight / 2 / zoom;
+  return {
+    ...view,
+    zoom,
+    centerX: clampAxis(view.centerX, halfW, bounds.x, bounds.width),
+    centerY: clampAxis(view.centerY, halfH, bounds.y, bounds.height),
+  };
+}
+
+/** Multiply zoom by `factor`, keeping the world point under the screen `anchor` fixed. */
+export function zoomAround(view: ViewState, factor: number, anchor: Point, bounds: Rect): ViewState {
+  const zoom = clampZoom(view.zoom * factor);
+  const dx = anchor.x - view.viewWidth / 2;
+  const dy = anchor.y - view.viewHeight / 2;
+  const worldX = view.centerX + dx / view.zoom;
+  const worldY = view.centerY + dy / view.zoom;
+  return clampView({ ...view, zoom, centerX: worldX - dx / zoom, centerY: worldY - dy / zoom }, bounds);
+}
+
+/** Pan by a screen-space drag delta. */
+export function panBy(view: ViewState, dxScreen: number, dyScreen: number, bounds: Rect): ViewState {
+  return clampView({ ...view, centerX: view.centerX - dxScreen / view.zoom, centerY: view.centerY - dyScreen / view.zoom }, bounds);
+}

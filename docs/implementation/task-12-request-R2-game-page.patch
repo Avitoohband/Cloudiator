@@ -1,0 +1,52 @@
+diff --git a/src/app/game/page.tsx b/src/app/game/page.tsx
+index d651da3..7ade043 100644
+--- a/src/app/game/page.tsx
++++ b/src/app/game/page.tsx
+@@ -3,8 +3,11 @@
+ import { Suspense, useEffect, useState } from 'react';
+ import Link from 'next/link';
+ import { useSearchParams } from 'next/navigation';
+-import type { OwnerState } from '@contracts/reads';
++import type { OwnerState, WorldSnapshot } from '@contracts/reads';
+ import type { Phase } from '@contracts/commands';
++import { GameViewport } from '../../game/GameViewport';
++import { createSceneBridge } from '../../game/bridge';
++import { withDemoCrowd } from '../../game/demo-world';
+ 
+ const panels = ['Schedule', 'Gladiator', 'Inventory', 'Marketplace', 'Standings', 'Tournaments', 'Results'] as const;
+ type Panel = typeof panels[number];
+@@ -14,6 +17,8 @@ function GameShell() {
+   const requested = search.get('mode') === 'fixture';
+   const fixture = requested && process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true';
+   const [owner, setOwner] = useState<OwnerState | null>(null);
++  const [world, setWorld] = useState<WorldSnapshot | null>(null);
++  const [bridge] = useState(createSceneBridge);
+   const [panel, setPanel] = useState<Panel>('Schedule');
+   const [previewError, setPreviewError] = useState(false);
+ 
+@@ -21,8 +26,8 @@ function GameShell() {
+     let active = true;
+     if (fixture) {
+       import('../../lib/api/fixture-gateway')
+-        .then(({ createFixtureGateway }) => createFixtureGateway().owner())
+-        .then((data) => { if (active) setOwner(data); })
++        .then(({ createFixtureGateway }) => { const gateway = createFixtureGateway(); return Promise.all([gateway.owner(), gateway.world()]); })
++        .then(([ownerData, worldData]) => { if (active) { setOwner(ownerData); setWorld(withDemoCrowd(worldData)); } })
+         .catch(() => { if (active) setPreviewError(true); });
+     }
+     return () => { active = false; };
+@@ -39,12 +44,12 @@ function GameShell() {
+     <main id="main" className="dashboard">
+       <section className="camp-area" aria-labelledby="camp-heading">
+         <div className="section-title"><div><p className="eyebrow">THE SHARED WORLD</p><h1 id="camp-heading">Hearthstone Camp</h1></div><span className="tag">{fixture ? 'Preview' : 'Coming soon'}</span></div>
+-        <div className="scene-placeholder">
++        {fixture ? <GameViewport world={world} bridge={bridge} /> : <div className="scene-placeholder">
+           <div className="scene-label">CAMP VIEW</div>
+           <h2>Your world is taking shape.</h2>
+           <p>The living camp and its fighters will appear here.<br />Management stays available alongside the world.</p>
+           <span className="scene-caption">Animated scene coming in a later build</span>
+-        </div>
++        </div>}
+         <div className="day-strip" aria-label="Shared game day">
+           <div><span className="eyebrow">WORLD RHYTHM</span><strong>4 hours, 3 chapters</strong></div>
+           <div><strong>Morning</strong><span>80 minutes</span></div>

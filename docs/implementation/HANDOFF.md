@@ -23,7 +23,7 @@ Tasks 1–6, 11 and 12 passed independent specification and quality review.
   - fixes the last Task 12 Minor;
   - re-verifies all suites.
 - M01 and M02 are committed and immutable.
-- **Next: Task 7** (ordered boundaries, Training/Rest, fenced job recovery). Claude starts it from the plan and from Codex's saved brief, which is ignored and exists only in Codex's checkout: `C:\Avi\Studies\Projects\Cloudiator\.superpowers\sdd6-10-11-gladiator-arena-implementation	ask-7-brief.md`. Codex's uncommitted Task 7 files in that same checkout are also used, all read-only.
+- **Next: Task 7** (ordered boundaries, Training/Rest, fenced job recovery). Claude starts it from the plan and from Codex's saved brief, which is ignored and exists only in Codex's checkout: `C:\Avi\Studies\Projects\Cloudiator\.superpowers\sdd\2026-10-11-gladiator-arena-implementation\task-7-brief.md`. Codex's uncommitted Task 7 files in that same checkout are also used, all read-only.
 - Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.

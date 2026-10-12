@@ -1,6 +1,6 @@
 # Cloudiator development handoff
 
-Last updated: 2026-10-12, after Claude's takeover and the Task 6 + Tasks 11/12 integration checkpoint. Development is in progress.
+Last updated: 2026-10-12, after the second takeover checkpoint (Tasks 7 and 14). Development is in progress.
 
 ## Authority and repository
 
@@ -15,15 +15,11 @@ Last updated: 2026-10-12, after Claude's takeover and the Task 6 + Tasks 11/12 i
 
 ## Resume here
 
-Tasks 1–6, 11 and 12 passed independent specification and quality review.
-- Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`.
-- Claude's integration checkpoint (see "Takeover and integration checkpoint" below):
-  - merges Task 6 with the reviewed Tasks 11/12 branch;
-  - applies request R2, which mounts the camp in fixture mode on `/game/`;
-  - fixes the last Task 12 Minor;
-  - re-verifies all suites.
-- M01 and M02 are committed and immutable.
-- **Next: Task 7** (ordered boundaries, Training/Rest, fenced job recovery). Claude starts it from the plan and from Codex's saved brief, which is ignored and exists only in Codex's checkout: `C:\Avi\Studies\Projects\Cloudiator\.superpowers\sdd\2026-10-11-gladiator-arena-implementation\task-7-brief.md`. Codex's uncommitted Task 7 files in that same checkout are also used, all read-only.
+Tasks 1–7, 11, 12 and 14 passed independent specification and quality review.
+- Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`; Claude pushed the first takeover checkpoint at `9b39edc` (Task 6 merged with Tasks 11/12, R2 applied) and the second at `9f2b69d` (Tasks 7 and 14; see the checkpoint sections below).
+- M01–M04 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`.
+- **Next: Task 8** (inventory, loot grants, the two NPC shops), then 9 and 10 in plan order. Codex's saved briefs for Tasks 7–9 are ignored files in Codex's checkout: `C:\Avi\Studies\Projects\Cloudiator\.superpowers\sdd\2026-10-11-gladiator-arena-implementation\task-N-brief.md` (read-only). The controller writes a dispatch addendum per task that overrides their Codex-era controller sections.
+- Task 15 (expedition scenes) can run in parallel in the `Cloudiator-replay` worktree once Task 9 defines the revealed stages; Task 13 waits for Tasks 8 and 10.
 - Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.
@@ -41,9 +37,12 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | 5 — Google login and character creation | `3d41ae9..a003751` (source `8fcb9c3`, stale-owner fix `5b3c2a5`, report `a003751`) | Spec compliant; quality approved; [review](task-05-review.md) | 153 units; 22 development browser checks plus 8 final affected checks; 6 production checks; TypeScript/Deno compile/runtime, fresh build/static37asset scan passed. Real Google/provider/CORS proof remains Task24; browser identity transport is test-only. |
 | 6 — Schedule revisions and pending builds | `ad1b7e8..ec69393` (source `f35c9ac`, report `1b45b20`) | Spec compliant; quality approved; [review](task-06-review.md) | 153 units, 26 real DB/Auth/Edge tests on a clean M01/M02 replay, 30 development and 6 production browser tests. Details under "Task 6 reviewed planning checkpoint". |
 | 11 — Production pixel art and manifest (Claude) | `b739870..8f83ba8` on `claude/visual-track` (`edd78ab`, `6f99f50`, `bc5b4d6`, `3051531`, `e5eb8fc`, `8f83ba8`) | Round 3: spec Pass, quality Pass; [review](task-11-review.md) | Code-generated original art (Avi-approved route): 10 atlases, 1,719 frames, 116 animations, 4 maps; `build-assets --check` deterministic; 33 asset tests. Close-up battle view deferred to Task 14 with acceptance criteria ([report](task-11-report.md)). |
+| 7 — Ordered boundaries, Training/Rest, fenced jobs | `9b39edc..92eec27` (source `0dea40c`, report `5919999`, review fixes `8aa29e5` with M04, report update `92eec27`) | Spec Pass, quality Pass, ready with fixes; scoped re-review of the fixes Pass; [review](task-07-review.md) | 234 units, 61 real DB/Auth/Edge tests on a clean M01–M04 replay (real pg_cron, pg_net and worker HTTP), typecheck incl. both Deno entrypoints, build/static scan, 63 dev browser checks. Expedition/Arena boundaries stall truthfully until Tasks 9/16; hosted scheduling is a Task 24 gate ([report](task-07-report.md)). |
 | 12 — Living isometric camp (Claude) | `bc5b4d6..33016d6` (`c6aeab0`, `3051531`, `ddb9bec`, `e5eb8fc`, `8f83ba8`, fix `33016d6`) | Rounds 2–3: spec Pass, quality Pass; Codex scoped review of `8f83ba8` Pass plus one Minor (fixed in `33016d6`); [review](task-12-review.md) | 33 scene-layout tests; 17 camp browser tests on desktop and mobile; R2 applied at this checkpoint. Task 13 must add the shared sync clock and a scene-availability status ([report](task-12-report.md)). |
 
 Deferred Minor findings to carry into final review: escaped seed signatures in the supplemental static scanner, and conflicting color-variable warnings in the browser harness. Exact evidence and suggested coverage are in the Task 1 review.
+
+| 14 — Battle-log replay (Claude) | `9b39edc..3283feb` on `claude/task-14` (source `344521b`, report `6607017`, review fixes `3283feb`), merged at `9f2b69d` | Spec Pass, quality Pass, visual Pass, ready; [review](task-14-review.md) | Pure replay core, close-up battle scene meeting the four Task 11 criteria, `/replay/?activity=` fixed route, engine-generated fixture logs (PvP, NPC, expedition, tie-break, expired). 296 units, 99 dev browser checks in its worktree. Live replays wait for Task 10's `timeline()` ([report](task-14-report.md)). |
 
 ## Coordination history (Codex and Claude)
 
@@ -71,6 +70,10 @@ Avi explicitly authorized communication and parallel development through the [Cl
 - Task6 controller ruling: the service-only cancel_build RPC also receives the canonical expectedVersion command input, extending the plan's two-argument shorthand. Version checks must occur inside the locked transaction; an adapter-only check would race. Cost if wrong: reconcile the internal RPC signature in later callers/tests. The reviewed signature and canonical command input are recorded in task-06-report.md; no player may invoke this backend-only RPC directly.
 - Task 6 controller ruling: supported CLI clean migration reset/replay may temporarily restart the verified isolated local Cloudiator Edge service, followed by restoration and HTTP/owning-test verification. Required migration proof takes precedence over continuous availability of an idle local test service. Cost: brief local backend downtime. Keep preview port3000 and unrelated/hosted services untouched; capture credential-bearing output in ignored logs and inspect sanitized errors only.
 - Task 11 controller ruling: allow original pixel art authored by deterministic source-code generators as a third production route. Claude lacks an image-generation tool; reproducible original sources can meet the binding asset outcome. All frame, direction, action, equipment, provenance, and colorful fantasy requirements remain mandatory, including independent visual review against reference A. Cost if wrong: rework assets with generated/licensed sources if visual quality fails. Claude had asked Avi about this route; any subsequent human preference overrides the controller's method choice. Codex can supply generated sources if later review requires them.
+- Task 7 controller rulings (Claude): derived stats come from fenced TypeScript `prepare` jobs in phase 4 (adopting Codex's ledger ruling); phase 4 recomputes the stamina maximum, clamps down and never refills; renewal extends a lease without rotating its token; completion requires an unexpired lease; three failures or three expired leases put a job in `operator` state (resumable through `private.resume_operator_job`); unsupported activity kinds (Expedition before Task 9, Arena before Task 16) stall their boundary with no debit, job or checkpoint advance, and are never settled as Training/Rest; `private.scheduler` is off by default; the worker secret is a server-only value of at least 32 characters compared in constant time. Cost if wrong: later executors must keep the hook signatures in `task-07-report.md`.
+- Task 7 review-fix rulings: `private.settle_rewards` returns `{rewards, result, success, replayExpiry, ratingDelta?}` and `settle_activity` validates it fail-closed; the activity snapshot seed is authoritative and copied onto jobs; `coordinate_work` isolates each boundary in a subtransaction and persists only a sqlstate, never raw error text. Recorded gates: job dependency ids and reveal-before-settlement claiming (Tasks 9/19), lease renewal during long jobs (Task 9), a non-replay `replayExpiry` state for Training/Rest (Tasks 10/13), and Task 13 combining `currentActivity` with `processedSlotIndex` for the Processing/Preparing states.
+- Task 14 controller rulings (Claude): the replay core is pure and reads HP only from the log; fighters draw at an integer 3× scale from the shared atlases; expedition enemies must carry `creature:<manifest creature id>` participant ids (Tasks 8/9), otherwise the replay draws an NPC fallback with a development-only warning; camp click-to-replay belongs to Task 17; live replays need Task 10's `timeline()`.
+- Migration generation note (Tasks 6, 7 and the Task 7 fix): the CLI's `db pull` draft omitted extensions, seed rows, `cron.schedule`, function ACLs, table revokes and a view's `security_invoker`. Every migration is diffed against its SQL source before commit, and the omissions are appended. A standing AGENTS.md note for this is proposed to Avi and awaits his approval.
 - Task 23 builds and locally verifies release harnesses; hosted benchmarks run after Task 24 provisions infrastructure.
 - Verified pins: Next 16.4.0, React/React DOM 19.3.0, TypeScript 5.9.3, Phaser 4.2.1, Vitest 5.0.3, Playwright 1.64.0, React type packages 19.3.0, Node types 22.20.5. Runtime Node 22.19.0/npm 11.8.0.
 - Docker server 29.8.2 is running locally. Supabase CLI2.120.0, client2.117.3, npmDeno2.9.6 and test-driver postgres3.4.7 are pinned/installed. LocalPG17.11, real Edge runtime and Deno checks passed Task4; see migration guide for sanitized setup.
@@ -127,6 +130,20 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - A broader production run, which also included the identity and planning suites, failed 7 tests. Those suites need the development-only test identity transport and are not part of the production gate (Task 5 report). That run is excluded from evidence.
 
 **Environment notes.** The Edge runtime now serves the worktree's `supabase/functions` (`.env.edge.local` is ignored). The preview on port 3000 belongs to Codex's checkout and was not touched.
+
+### Second takeover checkpoint: Tasks 7 and 14 (Claude, 2026-10-12)
+
+**What it contains**
+- Task 7 (`0dea40c`, `5919999`), its review fixes with M04 (`8aa29e5`, `92eec27`), and the merge of `claude/task-14` (Task 14 at `3283feb`) into `claude/visual-track`.
+- Avi switched the executing model to Fable 5.1 partway through (the Task 7 fix pass, the Task 14 review and the Task 7 re-review ran on it; both stopped agents restarted from committed state with nothing lost), then back to Opus 5.5.
+
+**Verification, from the worktree, after the merge**
+- Clean `npx supabase db reset --local --no-seed --yes` replaying M01–M04; Edge served from the worktree with `GAME_WORKER_SECRET` in the ignored env file.
+- `npm test`: 311 passed. `npm run typecheck`: tsc, Deno check of `game-command` and `game-worker`, Deno runtime tests.
+- `npm run test:db`: 61 passed.
+- `npm run build` and `npm run verify:static`: 4 fixed routes (`/replay` added), 81 assets, no forbidden material.
+- Development Playwright, desktop and mobile: 99 passed, 5 skipped (shell, identity, planning, camp, replay).
+- Isolated production gate (shell and camp against `.next/browser-test`): 6 passed; the rest skip by design.
 
 ### Task5 integration notes
 

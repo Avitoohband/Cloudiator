@@ -1,5 +1,26 @@
 # Local identity backend and migrations
 
+## Required generated-artifact review
+
+The persistent Supabase skill override in [AGENTS.md](../../AGENTS.md) was
+extended with Avi's approval on 2026-10-12. CLI 2.120.0's observed omissions
+and the tested corrections below support this workflow:
+
+1. Iterate the intended SQL source on the verified local stack and generate
+   the draft through the CLI after checking its installed version and help.
+2. Compare the draft with the tested source: ACLs, RLS, invoker-view options,
+   function/trigger dependencies, data backfills, extensions, seed rows and
+   scheduler initialization. A schema diff cannot stand in for required DML.
+3. Complete omissions before committing that draft. Keep already committed
+   migrations immutable; later corrections belong in a new migration.
+4. Clean-reset/replay the migrations without applying SQL source afterward.
+   Run owning and affected access-denial tests against that artifact, then
+   lint and advisors. Document actual evidence and remaining limitations.
+
+Task 6's corrected draft passed 26 database/Auth/Edge tests after clean replay.
+Task 7 separately verified M01–M04 with 61 tests. These are observed results,
+not verification of an untested future migration or a hosted deployment.
+
 ## Task 7 review fixes: exhausted-lease sweep, terminal jobs, isolated boundaries
 
 M04 is **`supabase/migrations/20261012143533_task7_review_fixes.sql`**, generated with CLI 2.120.0 (engine `migra`) from the updated reapplicable source `supabase/sql/03-activities-jobs.sql`. M01–M03 are unchanged and remain immutable:

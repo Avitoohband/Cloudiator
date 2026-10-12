@@ -87,3 +87,24 @@ advisors and clean reset/replay remain separate required checks.
 
 Keep status output, gateway configuration and credential-bearing files out of
 diagnostic output. Record commands and sanitized results, never key values.
+
+## Generated migration completion — approved local guidance
+
+Avi approved this extension on 2026-10-12 for **Making and Committing Schema
+Changes**. With CLI **2.120.0** and its `migra` diff, Task 6 generation omitted
+function/table ACLs and existing-character data backfills, and placed triggers
+before their private functions. The first clean replay exposed inherited
+client mutation privileges; completing the uncommitted draft from the tested
+source made all 26 database/Auth/Edge tests pass. Task 7 also observed omitted
+function ACLs and initialization/scheduler statements. These are recorded
+version-specific observations, not a claim that every generated diff omits
+the same statements.
+
+Before committing a generated draft, compare it with the tested source for
+grants/revocations, RLS and invoker-view settings, function/trigger dependency
+order, required data backfills, and initialization statements. Complete
+omissions in that draft, then clean-reset/replay the migrations alone and run
+the owning and affected access-denial tests, lint and advisors. Reapplying
+source after reset is not migration-artifact proof. Never edit an already
+committed migration; generate a new one for subsequent corrections. Follow
+the exact local workflow and evidence in [the migration guide](docs/operations/migrations.md).

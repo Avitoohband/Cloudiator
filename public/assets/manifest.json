@@ -1,0 +1,2277 @@
+{
+ "version": 1,
+ "generatedBy": "assets/source/build-assets.mjs",
+ "artDirection": "Colorful fantasy pixel art, angled isometric world (approved reference A); hard-edged single palette; nearest-neighbour scaling.",
+ "pixelScale": {
+  "tileWidth": 64,
+  "tileHeight": 32,
+  "actorWidth": 64,
+  "actorHeight": 64
+ },
+ "projection": {
+  "tileWidth": 64,
+  "tileHeight": 32,
+  "rule": "tile (x, y) north vertex at screen ((x - y) * 32, (x + y) * 16); actors stand at tile centres (x + 0.5, y + 0.5)"
+ },
+ "palette": {
+  "outline": "#1a1423",
+  "shadow": "#2e2433",
+  "white": "#ffffff",
+  "gray1": "#d4d4d8",
+  "gray2": "#a1a1aa",
+  "gray3": "#71717a",
+  "gray4": "#4b4b55",
+  "skin1": "#f6d2a8",
+  "skin2": "#e0a273",
+  "skin3": "#b56f45",
+  "skin4": "#7a432a",
+  "dskin1": "#a8673f",
+  "dskin2": "#7f4529",
+  "dskin3": "#55291a",
+  "steel1": "#eef4f7",
+  "steel2": "#bccad3",
+  "steel3": "#8394a1",
+  "steel4": "#4f5d69",
+  "wood1": "#d8995a",
+  "wood2": "#a8693a",
+  "wood3": "#744424",
+  "wood4": "#472813",
+  "leather1": "#c47d3e",
+  "leather2": "#93552a",
+  "leather3": "#5f3519",
+  "gold1": "#ffe48f",
+  "gold2": "#f2b43d",
+  "gold3": "#b67b1d",
+  "teal1": "#6fd8cf",
+  "teal2": "#22a39d",
+  "teal3": "#16716f",
+  "teal4": "#0d4747",
+  "crimson1": "#ef6450",
+  "crimson2": "#bd3429",
+  "crimson3": "#81201c",
+  "crimson4": "#4e1313",
+  "sand1": "#f5dba4",
+  "sand2": "#e6bd78",
+  "sand3": "#cc9d58",
+  "sand4": "#a27a41",
+  "grass1": "#a6d86f",
+  "grass2": "#76b44c",
+  "grass3": "#4e8d3b",
+  "grass4": "#30632f",
+  "leaf1": "#3f7d3a",
+  "leaf2": "#2a5a2e",
+  "leaf3": "#1c3f24",
+  "stone1": "#dcd5c8",
+  "stone2": "#b0a89b",
+  "stone3": "#837c71",
+  "stone4": "#59534c",
+  "stone5": "#3a3531",
+  "water1": "#8edcf4",
+  "water2": "#44a6dc",
+  "water3": "#226fab",
+  "fire1": "#fff4b5",
+  "fire2": "#ffcb42",
+  "fire3": "#ff8b21",
+  "fire4": "#d9471c",
+  "snow1": "#f5f8fc",
+  "snow2": "#d2dce9",
+  "snow3": "#9eadc1",
+  "canvas1": "#f4e8cb",
+  "canvas2": "#dcc9a2",
+  "canvas3": "#b5a07a",
+  "fur1": "#a8a39c",
+  "fur2": "#78726b",
+  "fur3": "#4f4a45",
+  "troll1": "#a3b56f",
+  "troll2": "#768a4c",
+  "troll3": "#4f6234",
+  "sky1": "#9fd6f2",
+  "violet1": "#9b7ee0",
+  "violet2": "#6a4fb8"
+ },
+ "actions": [
+  "idle",
+  "walk",
+  "weights",
+  "practice",
+  "spar",
+  "sit",
+  "eat",
+  "sleep",
+  "search",
+  "attack",
+  "hit",
+  "defend",
+  "evade",
+  "defeat",
+  "victory"
+ ],
+ "directions": {
+  "se": {
+   "source": "se",
+   "flipX": false
+  },
+  "sw": {
+   "source": "se",
+   "flipX": true
+  },
+  "ne": {
+   "source": "ne",
+   "flipX": false
+  },
+  "nw": {
+   "source": "ne",
+   "flipX": true
+  }
+ },
+ "atlases": {
+  "gladiators": {
+   "image": "actors/gladiators.png",
+   "data": "actors/gladiators.json",
+   "width": 2048,
+   "height": 1856,
+   "kind": "actor"
+  },
+  "npcs": {
+   "image": "actors/npcs.png",
+   "data": "actors/npcs.json",
+   "width": 1536,
+   "height": 448,
+   "kind": "actor"
+  },
+  "creatures": {
+   "image": "actors/creatures.png",
+   "data": "actors/creatures.json",
+   "width": 1536,
+   "height": 256,
+   "kind": "actor"
+  },
+  "camp": {
+   "image": "camp/tiles.png",
+   "data": "camp/tiles.json",
+   "width": 512,
+   "height": 160,
+   "kind": "tiles"
+  },
+  "camp-props": {
+   "image": "camp/props.png",
+   "data": "camp/props.json",
+   "width": 2024,
+   "height": 240,
+   "kind": "props"
+  },
+  "woodland": {
+   "image": "expeditions/woodland.png",
+   "data": "expeditions/woodland.json",
+   "width": 1020,
+   "height": 181,
+   "kind": "environment"
+  },
+  "outpost": {
+   "image": "expeditions/outpost.png",
+   "data": "expeditions/outpost.json",
+   "width": 1012,
+   "height": 204,
+   "kind": "environment"
+  },
+  "mountain": {
+   "image": "expeditions/mountain.png",
+   "data": "expeditions/mountain.json",
+   "width": 988,
+   "height": 145,
+   "kind": "environment"
+  },
+  "effects": {
+   "image": "effects/combat.png",
+   "data": "effects/combat.json",
+   "width": 384,
+   "height": 192,
+   "kind": "effects"
+  },
+  "icons": {
+   "image": "ui/icons.png",
+   "data": "ui/icons.json",
+   "width": 192,
+   "height": 64,
+   "kind": "icons"
+  }
+ },
+ "animations": {
+  "gladiator/idle/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/idle/se/0",
+    "body/idle/se/1",
+    "body/idle/se/2",
+    "body/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "gladiator/idle/ne": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/idle/ne/0",
+    "body/idle/ne/1",
+    "body/idle/ne/2",
+    "body/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "gladiator/walk/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/walk/se/0",
+    "body/walk/se/1",
+    "body/walk/se/2",
+    "body/walk/se/3",
+    "body/walk/se/4",
+    "body/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "gladiator/walk/ne": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/walk/ne/0",
+    "body/walk/ne/1",
+    "body/walk/ne/2",
+    "body/walk/ne/3",
+    "body/walk/ne/4",
+    "body/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "gladiator/weights/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/weights/se/0",
+    "body/weights/se/1",
+    "body/weights/se/2",
+    "body/weights/se/3"
+   ],
+   "durationsMs": [
+    320,
+    240,
+    420,
+    240
+   ],
+   "loop": true
+  },
+  "gladiator/practice/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/practice/se/0",
+    "body/practice/se/1",
+    "body/practice/se/2",
+    "body/practice/se/3"
+   ],
+   "durationsMs": [
+    220,
+    120,
+    200,
+    220
+   ],
+   "loop": true
+  },
+  "gladiator/spar/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/spar/se/0",
+    "body/spar/se/1",
+    "body/spar/se/2",
+    "body/spar/se/3"
+   ],
+   "durationsMs": [
+    240,
+    160,
+    240,
+    220
+   ],
+   "loop": true
+  },
+  "gladiator/sit/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/sit/se/0",
+    "body/sit/se/1"
+   ],
+   "durationsMs": [
+    800,
+    700
+   ],
+   "loop": true
+  },
+  "gladiator/eat/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/eat/se/0",
+    "body/eat/se/1",
+    "body/eat/se/2",
+    "body/eat/se/3"
+   ],
+   "durationsMs": [
+    320,
+    240,
+    360,
+    240
+   ],
+   "loop": true
+  },
+  "gladiator/sleep/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/sleep/se/0",
+    "body/sleep/se/1"
+   ],
+   "durationsMs": [
+    1000,
+    900
+   ],
+   "loop": true
+  },
+  "gladiator/search/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/search/se/0",
+    "body/search/se/1",
+    "body/search/se/2",
+    "body/search/se/3"
+   ],
+   "durationsMs": [
+    300,
+    260,
+    360,
+    360
+   ],
+   "loop": true
+  },
+  "gladiator/attack/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/attack/se/0",
+    "body/attack/se/1",
+    "body/attack/se/2",
+    "body/attack/se/3"
+   ],
+   "durationsMs": [
+    90,
+    80,
+    120,
+    150
+   ],
+   "loop": false
+  },
+  "gladiator/thrust/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/thrust/se/0",
+    "body/thrust/se/1",
+    "body/thrust/se/2",
+    "body/thrust/se/3"
+   ],
+   "durationsMs": [
+    90,
+    80,
+    130,
+    150
+   ],
+   "loop": false
+  },
+  "gladiator/shoot/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/shoot/se/0",
+    "body/shoot/se/1",
+    "body/shoot/se/2",
+    "body/shoot/se/3"
+   ],
+   "durationsMs": [
+    120,
+    170,
+    80,
+    170
+   ],
+   "loop": false
+  },
+  "gladiator/hit/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/hit/se/0",
+    "body/hit/se/1"
+   ],
+   "durationsMs": [
+    120,
+    170
+   ],
+   "loop": false
+  },
+  "gladiator/defend/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/defend/se/0",
+    "body/defend/se/1"
+   ],
+   "durationsMs": [
+    140,
+    220
+   ],
+   "loop": false
+  },
+  "gladiator/evade/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/evade/se/0",
+    "body/evade/se/1",
+    "body/evade/se/2"
+   ],
+   "durationsMs": [
+    90,
+    110,
+    130
+   ],
+   "loop": false
+  },
+  "gladiator/defeat/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/defeat/se/0",
+    "body/defeat/se/1",
+    "body/defeat/se/2",
+    "body/defeat/se/3"
+   ],
+   "durationsMs": [
+    160,
+    180,
+    160,
+    400
+   ],
+   "loop": false
+  },
+  "gladiator/victory/se": {
+   "atlas": "gladiators",
+   "frames": [
+    "body/victory/se/0",
+    "body/victory/se/1",
+    "body/victory/se/2",
+    "body/victory/se/3"
+   ],
+   "durationsMs": [
+    140,
+    140,
+    140,
+    420
+   ],
+   "loop": false
+  },
+  "npc-smith/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "smith/idle/se/0",
+    "smith/idle/se/1",
+    "smith/idle/se/2",
+    "smith/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-smith/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "smith/idle/ne/0",
+    "smith/idle/ne/1",
+    "smith/idle/ne/2",
+    "smith/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-smith/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "smith/walk/se/0",
+    "smith/walk/se/1",
+    "smith/walk/se/2",
+    "smith/walk/se/3",
+    "smith/walk/se/4",
+    "smith/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-smith/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "smith/walk/ne/0",
+    "smith/walk/ne/1",
+    "smith/walk/ne/2",
+    "smith/walk/ne/3",
+    "smith/walk/ne/4",
+    "smith/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-smith/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "smith/talk/se/0",
+    "smith/talk/se/1",
+    "smith/talk/se/2",
+    "smith/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-smith/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "smith/tend/se/0",
+    "smith/tend/se/1",
+    "smith/tend/se/2",
+    "smith/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-armorer/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "armorer/idle/se/0",
+    "armorer/idle/se/1",
+    "armorer/idle/se/2",
+    "armorer/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-armorer/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "armorer/idle/ne/0",
+    "armorer/idle/ne/1",
+    "armorer/idle/ne/2",
+    "armorer/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-armorer/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "armorer/walk/se/0",
+    "armorer/walk/se/1",
+    "armorer/walk/se/2",
+    "armorer/walk/se/3",
+    "armorer/walk/se/4",
+    "armorer/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-armorer/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "armorer/walk/ne/0",
+    "armorer/walk/ne/1",
+    "armorer/walk/ne/2",
+    "armorer/walk/ne/3",
+    "armorer/walk/ne/4",
+    "armorer/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-armorer/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "armorer/talk/se/0",
+    "armorer/talk/se/1",
+    "armorer/talk/se/2",
+    "armorer/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-armorer/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "armorer/tend/se/0",
+    "armorer/tend/se/1",
+    "armorer/tend/se/2",
+    "armorer/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-trainer/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "trainer/idle/se/0",
+    "trainer/idle/se/1",
+    "trainer/idle/se/2",
+    "trainer/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-trainer/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "trainer/idle/ne/0",
+    "trainer/idle/ne/1",
+    "trainer/idle/ne/2",
+    "trainer/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-trainer/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "trainer/walk/se/0",
+    "trainer/walk/se/1",
+    "trainer/walk/se/2",
+    "trainer/walk/se/3",
+    "trainer/walk/se/4",
+    "trainer/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-trainer/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "trainer/walk/ne/0",
+    "trainer/walk/ne/1",
+    "trainer/walk/ne/2",
+    "trainer/walk/ne/3",
+    "trainer/walk/ne/4",
+    "trainer/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-trainer/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "trainer/talk/se/0",
+    "trainer/talk/se/1",
+    "trainer/talk/se/2",
+    "trainer/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-trainer/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "trainer/tend/se/0",
+    "trainer/tend/se/1",
+    "trainer/tend/se/2",
+    "trainer/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-cook/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "cook/idle/se/0",
+    "cook/idle/se/1",
+    "cook/idle/se/2",
+    "cook/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-cook/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "cook/idle/ne/0",
+    "cook/idle/ne/1",
+    "cook/idle/ne/2",
+    "cook/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-cook/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "cook/walk/se/0",
+    "cook/walk/se/1",
+    "cook/walk/se/2",
+    "cook/walk/se/3",
+    "cook/walk/se/4",
+    "cook/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-cook/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "cook/walk/ne/0",
+    "cook/walk/ne/1",
+    "cook/walk/ne/2",
+    "cook/walk/ne/3",
+    "cook/walk/ne/4",
+    "cook/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-cook/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "cook/talk/se/0",
+    "cook/talk/se/1",
+    "cook/talk/se/2",
+    "cook/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-cook/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "cook/tend/se/0",
+    "cook/tend/se/1",
+    "cook/tend/se/2",
+    "cook/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-healer/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "healer/idle/se/0",
+    "healer/idle/se/1",
+    "healer/idle/se/2",
+    "healer/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-healer/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "healer/idle/ne/0",
+    "healer/idle/ne/1",
+    "healer/idle/ne/2",
+    "healer/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-healer/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "healer/walk/se/0",
+    "healer/walk/se/1",
+    "healer/walk/se/2",
+    "healer/walk/se/3",
+    "healer/walk/se/4",
+    "healer/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-healer/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "healer/walk/ne/0",
+    "healer/walk/ne/1",
+    "healer/walk/ne/2",
+    "healer/walk/ne/3",
+    "healer/walk/ne/4",
+    "healer/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-healer/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "healer/talk/se/0",
+    "healer/talk/se/1",
+    "healer/talk/se/2",
+    "healer/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-healer/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "healer/tend/se/0",
+    "healer/tend/se/1",
+    "healer/tend/se/2",
+    "healer/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-guard/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "guard/idle/se/0",
+    "guard/idle/se/1",
+    "guard/idle/se/2",
+    "guard/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-guard/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "guard/idle/ne/0",
+    "guard/idle/ne/1",
+    "guard/idle/ne/2",
+    "guard/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-guard/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "guard/walk/se/0",
+    "guard/walk/se/1",
+    "guard/walk/se/2",
+    "guard/walk/se/3",
+    "guard/walk/se/4",
+    "guard/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-guard/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "guard/walk/ne/0",
+    "guard/walk/ne/1",
+    "guard/walk/ne/2",
+    "guard/walk/ne/3",
+    "guard/walk/ne/4",
+    "guard/walk/ne/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "npc-guard/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "guard/talk/se/0",
+    "guard/talk/se/1",
+    "guard/talk/se/2",
+    "guard/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-guard/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "guard/tend/se/0",
+    "guard/tend/se/1",
+    "guard/tend/se/2",
+    "guard/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "creature-dire-wolf/idle/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/idle/se/0",
+    "dire-wolf/idle/se/1",
+    "dire-wolf/idle/se/2",
+    "dire-wolf/idle/se/3"
+   ],
+   "durationsMs": [
+    300,
+    260,
+    300,
+    260
+   ],
+   "loop": true
+  },
+  "creature-dire-wolf/walk/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/walk/se/0",
+    "dire-wolf/walk/se/1",
+    "dire-wolf/walk/se/2",
+    "dire-wolf/walk/se/3",
+    "dire-wolf/walk/se/4",
+    "dire-wolf/walk/se/5"
+   ],
+   "durationsMs": [
+    100,
+    100,
+    100,
+    100,
+    100,
+    100
+   ],
+   "loop": true
+  },
+  "creature-dire-wolf/attack/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/attack/se/0",
+    "dire-wolf/attack/se/1",
+    "dire-wolf/attack/se/2",
+    "dire-wolf/attack/se/3"
+   ],
+   "durationsMs": [
+    110,
+    90,
+    130,
+    160
+   ],
+   "loop": false
+  },
+  "creature-dire-wolf/hit/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/hit/se/0",
+    "dire-wolf/hit/se/1"
+   ],
+   "durationsMs": [
+    120,
+    170
+   ],
+   "loop": false
+  },
+  "creature-dire-wolf/defend/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/defend/se/0",
+    "dire-wolf/defend/se/1"
+   ],
+   "durationsMs": [
+    150,
+    220
+   ],
+   "loop": false
+  },
+  "creature-dire-wolf/evade/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/evade/se/0",
+    "dire-wolf/evade/se/1",
+    "dire-wolf/evade/se/2"
+   ],
+   "durationsMs": [
+    90,
+    110,
+    130
+   ],
+   "loop": false
+  },
+  "creature-dire-wolf/defeat/se": {
+   "atlas": "creatures",
+   "frames": [
+    "dire-wolf/defeat/se/0",
+    "dire-wolf/defeat/se/1",
+    "dire-wolf/defeat/se/2",
+    "dire-wolf/defeat/se/3"
+   ],
+   "durationsMs": [
+    160,
+    180,
+    180,
+    400
+   ],
+   "loop": false
+  },
+  "creature-raider/idle/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/idle/se/0",
+    "raider/idle/se/1",
+    "raider/idle/se/2",
+    "raider/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "creature-raider/walk/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/walk/se/0",
+    "raider/walk/se/1",
+    "raider/walk/se/2",
+    "raider/walk/se/3",
+    "raider/walk/se/4",
+    "raider/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "creature-raider/attack/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/attack/se/0",
+    "raider/attack/se/1",
+    "raider/attack/se/2",
+    "raider/attack/se/3"
+   ],
+   "durationsMs": [
+    90,
+    80,
+    120,
+    150
+   ],
+   "loop": false
+  },
+  "creature-raider/hit/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/hit/se/0",
+    "raider/hit/se/1"
+   ],
+   "durationsMs": [
+    120,
+    170
+   ],
+   "loop": false
+  },
+  "creature-raider/defend/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/defend/se/0",
+    "raider/defend/se/1"
+   ],
+   "durationsMs": [
+    140,
+    220
+   ],
+   "loop": false
+  },
+  "creature-raider/evade/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/evade/se/0",
+    "raider/evade/se/1",
+    "raider/evade/se/2"
+   ],
+   "durationsMs": [
+    90,
+    110,
+    130
+   ],
+   "loop": false
+  },
+  "creature-raider/defeat/se": {
+   "atlas": "creatures",
+   "frames": [
+    "raider/defeat/se/0",
+    "raider/defeat/se/1",
+    "raider/defeat/se/2",
+    "raider/defeat/se/3"
+   ],
+   "durationsMs": [
+    160,
+    180,
+    160,
+    400
+   ],
+   "loop": false
+  },
+  "creature-rock-troll/idle/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/idle/se/0",
+    "rock-troll/idle/se/1",
+    "rock-troll/idle/se/2",
+    "rock-troll/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "creature-rock-troll/walk/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/walk/se/0",
+    "rock-troll/walk/se/1",
+    "rock-troll/walk/se/2",
+    "rock-troll/walk/se/3",
+    "rock-troll/walk/se/4",
+    "rock-troll/walk/se/5"
+   ],
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "loop": true
+  },
+  "creature-rock-troll/attack/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/attack/se/0",
+    "rock-troll/attack/se/1",
+    "rock-troll/attack/se/2",
+    "rock-troll/attack/se/3"
+   ],
+   "durationsMs": [
+    90,
+    80,
+    120,
+    150
+   ],
+   "loop": false
+  },
+  "creature-rock-troll/hit/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/hit/se/0",
+    "rock-troll/hit/se/1"
+   ],
+   "durationsMs": [
+    120,
+    170
+   ],
+   "loop": false
+  },
+  "creature-rock-troll/defend/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/defend/se/0",
+    "rock-troll/defend/se/1"
+   ],
+   "durationsMs": [
+    140,
+    220
+   ],
+   "loop": false
+  },
+  "creature-rock-troll/evade/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/evade/se/0",
+    "rock-troll/evade/se/1",
+    "rock-troll/evade/se/2"
+   ],
+   "durationsMs": [
+    90,
+    110,
+    130
+   ],
+   "loop": false
+  },
+  "creature-rock-troll/defeat/se": {
+   "atlas": "creatures",
+   "frames": [
+    "rock-troll/defeat/se/0",
+    "rock-troll/defeat/se/1",
+    "rock-troll/defeat/se/2",
+    "rock-troll/defeat/se/3"
+   ],
+   "durationsMs": [
+    160,
+    180,
+    160,
+    400
+   ],
+   "loop": false
+  },
+  "prop-camp-props-torch": {
+   "atlas": "camp-props",
+   "frames": [
+    "torch/0",
+    "torch/1",
+    "torch/2"
+   ],
+   "durationsMs": [
+    140,
+    120,
+    160
+   ],
+   "loop": true
+  },
+  "prop-camp-props-campfire": {
+   "atlas": "camp-props",
+   "frames": [
+    "campfire/0",
+    "campfire/1",
+    "campfire/2"
+   ],
+   "durationsMs": [
+    130,
+    150,
+    120
+   ],
+   "loop": true
+  },
+  "prop-woodland-campfire": {
+   "atlas": "woodland",
+   "frames": [
+    "campfire/0",
+    "campfire/1",
+    "campfire/2"
+   ],
+   "durationsMs": [
+    130,
+    150,
+    120
+   ],
+   "loop": true
+  },
+  "prop-outpost-campfire": {
+   "atlas": "outpost",
+   "frames": [
+    "campfire/0",
+    "campfire/1",
+    "campfire/2"
+   ],
+   "durationsMs": [
+    130,
+    150,
+    120
+   ],
+   "loop": true
+  },
+  "prop-mountain-campfire": {
+   "atlas": "mountain",
+   "frames": [
+    "campfire/0",
+    "campfire/1",
+    "campfire/2"
+   ],
+   "durationsMs": [
+    130,
+    150,
+    120
+   ],
+   "loop": true
+  },
+  "effect-hit": {
+   "atlas": "effects",
+   "frames": [
+    "hit/0",
+    "hit/1",
+    "hit/2",
+    "hit/3"
+   ],
+   "durationsMs": [
+    50,
+    60,
+    70,
+    80
+   ],
+   "loop": false
+  },
+  "effect-critical": {
+   "atlas": "effects",
+   "frames": [
+    "critical/0",
+    "critical/1",
+    "critical/2",
+    "critical/3",
+    "critical/4"
+   ],
+   "durationsMs": [
+    50,
+    50,
+    70,
+    80,
+    90
+   ],
+   "loop": false
+  },
+  "effect-defend": {
+   "atlas": "effects",
+   "frames": [
+    "defend/0",
+    "defend/1",
+    "defend/2"
+   ],
+   "durationsMs": [
+    60,
+    80,
+    100
+   ],
+   "loop": false
+  },
+  "effect-evade": {
+   "atlas": "effects",
+   "frames": [
+    "evade/0",
+    "evade/1",
+    "evade/2"
+   ],
+   "durationsMs": [
+    60,
+    80,
+    100
+   ],
+   "loop": false
+  },
+  "effect-defeat": {
+   "atlas": "effects",
+   "frames": [
+    "defeat/0",
+    "defeat/1",
+    "defeat/2",
+    "defeat/3"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    160
+   ],
+   "loop": false
+  },
+  "effect-victory": {
+   "atlas": "effects",
+   "frames": [
+    "victory/0",
+    "victory/1",
+    "victory/2",
+    "victory/3"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    160
+   ],
+   "loop": false
+  },
+  "effect-dust": {
+   "atlas": "effects",
+   "frames": [
+    "dust/0",
+    "dust/1",
+    "dust/2"
+   ],
+   "durationsMs": [
+    70,
+    90,
+    110
+   ],
+   "loop": false
+  },
+  "effect-arrow": {
+   "atlas": "effects",
+   "frames": [
+    "arrow/0"
+   ],
+   "durationsMs": [
+    100
+   ],
+   "loop": false
+  }
+ },
+ "actors": {
+  "gladiator": {
+   "atlas": "gladiators",
+   "anchor": {
+    "x": 32,
+    "y": 58
+   },
+   "layers": [
+    {
+     "id": "body",
+     "slot": "body",
+     "tintable": false
+    },
+    {
+     "id": "cloth",
+     "slot": "cloth",
+     "tintable": true
+    },
+    {
+     "id": "hair",
+     "slot": "hair",
+     "tintable": true
+    },
+    {
+     "id": "armor-light",
+     "slot": "body-armor",
+     "tintable": false
+    },
+    {
+     "id": "armor-heavy",
+     "slot": "body-armor",
+     "tintable": false
+    },
+    {
+     "id": "head-hood",
+     "slot": "head",
+     "tintable": false
+    },
+    {
+     "id": "head-helmet",
+     "slot": "head",
+     "tintable": false
+    },
+    {
+     "id": "weapon-sword",
+     "slot": "weapon",
+     "tintable": false
+    },
+    {
+     "id": "weapon-axe",
+     "slot": "weapon",
+     "tintable": false
+    },
+    {
+     "id": "weapon-spear",
+     "slot": "weapon",
+     "tintable": false
+    },
+    {
+     "id": "weapon-bow",
+     "slot": "weapon",
+     "tintable": false
+    },
+    {
+     "id": "offhand-shield",
+     "slot": "offhand",
+     "tintable": false
+    },
+    {
+     "id": "held",
+     "slot": "held",
+     "tintable": false
+    }
+   ],
+   "animations": {
+    "idle": {
+     "se": "gladiator/idle/se",
+     "ne": "gladiator/idle/ne"
+    },
+    "walk": {
+     "se": "gladiator/walk/se",
+     "ne": "gladiator/walk/ne"
+    },
+    "weights": {
+     "se": "gladiator/weights/se"
+    },
+    "practice": {
+     "se": "gladiator/practice/se"
+    },
+    "spar": {
+     "se": "gladiator/spar/se"
+    },
+    "sit": {
+     "se": "gladiator/sit/se"
+    },
+    "eat": {
+     "se": "gladiator/eat/se"
+    },
+    "sleep": {
+     "se": "gladiator/sleep/se"
+    },
+    "search": {
+     "se": "gladiator/search/se"
+    },
+    "attack": {
+     "se": "gladiator/attack/se"
+    },
+    "hit": {
+     "se": "gladiator/hit/se"
+    },
+    "defend": {
+     "se": "gladiator/defend/se"
+    },
+    "evade": {
+     "se": "gladiator/evade/se"
+    },
+    "defeat": {
+     "se": "gladiator/defeat/se"
+    },
+    "victory": {
+     "se": "gladiator/victory/se"
+    },
+    "thrust": {
+     "se": "gladiator/thrust/se"
+    },
+    "shoot": {
+     "se": "gladiator/shoot/se"
+    }
+   },
+   "attackVariants": {
+    "spear": "thrust",
+    "bow": "shoot"
+   },
+   "notes": "Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Tint cloth and hair per player. Two-handed weapons hide offhand-shield."
+  },
+  "npcs": [
+   {
+    "id": "smith",
+    "name": "Brutus the Smith",
+    "role": "merchant-weapons",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-smith/idle/se",
+      "ne": "npc-smith/idle/ne"
+     },
+     "walk": {
+      "se": "npc-smith/walk/se",
+      "ne": "npc-smith/walk/ne"
+     },
+     "talk": {
+      "se": "npc-smith/talk/se"
+     },
+     "tend": {
+      "se": "npc-smith/tend/se"
+     }
+    }
+   },
+   {
+    "id": "armorer",
+    "name": "Livia the Armorer",
+    "role": "merchant-armor",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-armorer/idle/se",
+      "ne": "npc-armorer/idle/ne"
+     },
+     "walk": {
+      "se": "npc-armorer/walk/se",
+      "ne": "npc-armorer/walk/ne"
+     },
+     "talk": {
+      "se": "npc-armorer/talk/se"
+     },
+     "tend": {
+      "se": "npc-armorer/tend/se"
+     }
+    }
+   },
+   {
+    "id": "trainer",
+    "name": "Doctore Cassius",
+    "role": "trainer",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-trainer/idle/se",
+      "ne": "npc-trainer/idle/ne"
+     },
+     "walk": {
+      "se": "npc-trainer/walk/se",
+      "ne": "npc-trainer/walk/ne"
+     },
+     "talk": {
+      "se": "npc-trainer/talk/se"
+     },
+     "tend": {
+      "se": "npc-trainer/tend/se"
+     }
+    }
+   },
+   {
+    "id": "cook",
+    "name": "Old Marta",
+    "role": "cook",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-cook/idle/se",
+      "ne": "npc-cook/idle/ne"
+     },
+     "walk": {
+      "se": "npc-cook/walk/se",
+      "ne": "npc-cook/walk/ne"
+     },
+     "talk": {
+      "se": "npc-cook/talk/se"
+     },
+     "tend": {
+      "se": "npc-cook/tend/se"
+     }
+    }
+   },
+   {
+    "id": "healer",
+    "name": "Sister Iona",
+    "role": "healer",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-healer/idle/se",
+      "ne": "npc-healer/idle/ne"
+     },
+     "walk": {
+      "se": "npc-healer/walk/se",
+      "ne": "npc-healer/walk/ne"
+     },
+     "talk": {
+      "se": "npc-healer/talk/se"
+     },
+     "tend": {
+      "se": "npc-healer/tend/se"
+     }
+    }
+   },
+   {
+    "id": "guard",
+    "name": "Gate Guard",
+    "role": "guard",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-guard/idle/se",
+      "ne": "npc-guard/idle/ne"
+     },
+     "walk": {
+      "se": "npc-guard/walk/se",
+      "ne": "npc-guard/walk/ne"
+     },
+     "talk": {
+      "se": "npc-guard/talk/se"
+     },
+     "tend": {
+      "se": "npc-guard/tend/se"
+     }
+    }
+   }
+  ],
+  "creatures": [
+   {
+    "id": "dire-wolf",
+    "name": "Dire Wolf",
+    "expedition": "woodland",
+    "atlas": "creatures",
+    "animations": {
+     "idle": {
+      "se": "creature-dire-wolf/idle/se"
+     },
+     "walk": {
+      "se": "creature-dire-wolf/walk/se"
+     },
+     "attack": {
+      "se": "creature-dire-wolf/attack/se"
+     },
+     "hit": {
+      "se": "creature-dire-wolf/hit/se"
+     },
+     "defend": {
+      "se": "creature-dire-wolf/defend/se"
+     },
+     "evade": {
+      "se": "creature-dire-wolf/evade/se"
+     },
+     "defeat": {
+      "se": "creature-dire-wolf/defeat/se"
+     }
+    }
+   },
+   {
+    "id": "raider",
+    "name": "Outpost Raider",
+    "expedition": "outpost",
+    "atlas": "creatures",
+    "animations": {
+     "idle": {
+      "se": "creature-raider/idle/se"
+     },
+     "walk": {
+      "se": "creature-raider/walk/se"
+     },
+     "attack": {
+      "se": "creature-raider/attack/se"
+     },
+     "hit": {
+      "se": "creature-raider/hit/se"
+     },
+     "defend": {
+      "se": "creature-raider/defend/se"
+     },
+     "evade": {
+      "se": "creature-raider/evade/se"
+     },
+     "defeat": {
+      "se": "creature-raider/defeat/se"
+     }
+    }
+   },
+   {
+    "id": "rock-troll",
+    "name": "Rock Troll",
+    "expedition": "mountain",
+    "atlas": "creatures",
+    "animations": {
+     "idle": {
+      "se": "creature-rock-troll/idle/se"
+     },
+     "walk": {
+      "se": "creature-rock-troll/walk/se"
+     },
+     "attack": {
+      "se": "creature-rock-troll/attack/se"
+     },
+     "hit": {
+      "se": "creature-rock-troll/hit/se"
+     },
+     "defend": {
+      "se": "creature-rock-troll/defend/se"
+     },
+     "evade": {
+      "se": "creature-rock-troll/evade/se"
+     },
+     "defeat": {
+      "se": "creature-rock-troll/defeat/se"
+     }
+    }
+   }
+  ]
+ },
+ "effects": {
+  "hit": "effect-hit",
+  "critical": "effect-critical",
+  "defend": "effect-defend",
+  "evade": "effect-evade",
+  "defeat": "effect-defeat",
+  "victory": "effect-victory",
+  "dust": "effect-dust",
+  "arrow": "effect-arrow"
+ },
+ "icons": {
+  "money": "money",
+  "renown": "renown",
+  "stamina": "stamina",
+  "xp": "xp",
+  "level": "level",
+  "hp": "hp",
+  "training": "training",
+  "rest": "rest",
+  "expedition": "expedition",
+  "arena": "arena",
+  "tournament": "tournament",
+  "market": "market",
+  "schedule": "schedule",
+  "clock": "clock",
+  "inventory": "inventory",
+  "salvage": "salvage",
+  "morning": "morning",
+  "afternoon": "afternoon",
+  "evening": "evening",
+  "sword": "sword",
+  "axe": "axe",
+  "spear": "spear",
+  "bow": "bow",
+  "shield": "shield",
+  "armor-light": "armor-light",
+  "armor-heavy": "armor-heavy",
+  "hood": "hood",
+  "helmet": "helmet",
+  "boots-light": "boots-light",
+  "boots-heavy": "boots-heavy",
+  "berserker": "berserker",
+  "guardian": "guardian",
+  "duelist": "duelist",
+  "bronze": "bronze",
+  "silver": "silver",
+  "gold": "gold",
+  "champion": "champion"
+ },
+ "maps": [
+  {
+   "id": "camp",
+   "data": "camp/map.json",
+   "tilesAtlas": "camp",
+   "propsAtlas": "camp-props"
+  },
+  {
+   "id": "woodland",
+   "data": "expeditions/woodland-map.json",
+   "tilesAtlas": "woodland",
+   "propsAtlas": "woodland"
+  },
+  {
+   "id": "outpost",
+   "data": "expeditions/outpost-map.json",
+   "tilesAtlas": "outpost",
+   "propsAtlas": "outpost"
+  },
+  {
+   "id": "mountain",
+   "data": "expeditions/mountain-map.json",
+   "tilesAtlas": "mountain",
+   "propsAtlas": "mountain"
+  }
+ ],
+ "provenance": [
+  {
+   "file": "actors/creatures.json",
+   "sha256": "1e5f4bc5fe0594c682457389c8a20a2c9ae552fbcbbe2fbdf93fe5e2f0cd91b6",
+   "bytes": 17057,
+   "source": "generated",
+   "generator": "assets/source/generators/creatures.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "actors/creatures.png",
+   "sha256": "d369e01e3c5651088382fd42b4f1f5f85596a9d5475f3a80cdc6a31fb036a2bb",
+   "bytes": 21040,
+   "source": "generated",
+   "generator": "assets/source/generators/creatures.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "actors/gladiators.json",
+   "sha256": "067467e3b7b4c0f351dde0aac21f7c611c907e8b46297d9f9aceb4714e5baf09",
+   "bytes": 210442,
+   "source": "generated",
+   "generator": "assets/source/generators/gladiator.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "actors/gladiators.png",
+   "sha256": "fab3eb11a24fa2077f4f2bfcdc3173e88688c8db93a7a3feac9ffad7c5d50ced",
+   "bytes": 122674,
+   "source": "generated",
+   "generator": "assets/source/generators/gladiator.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "actors/npcs.json",
+   "sha256": "314cede9e96d471254544bb78e5b78c49f6814d64061cf32784c50fcc86a5dff",
+   "bytes": 37520,
+   "source": "generated",
+   "generator": "assets/source/generators/npcs.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "actors/npcs.png",
+   "sha256": "f589925d0b311158fcc0d8be345367803095a544de6b832c95935fc561499ac3",
+   "bytes": 35889,
+   "source": "generated",
+   "generator": "assets/source/generators/npcs.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "camp/map.json",
+   "sha256": "cc5a8861da2f0d7ed171de399c947e6e9ce4148dbe71f43552b2b5cb4fd3751e",
+   "bytes": 101245,
+   "source": "generated",
+   "generator": "assets/source/generators/maps.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "camp/props.json",
+   "sha256": "c045d3b4e0cf9cb8b5060e316f0df3e4fcaedc76387ec749262ba7692a09b230",
+   "bytes": 17815,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "camp/props.png",
+   "sha256": "354e8a47825fbdb8982616781d49b1363b5f34034d9845d3baea5bcc35e45820",
+   "bytes": 29312,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "camp/tiles.json",
+   "sha256": "1c1ba3ffd4c57c205108b74805068581c4d6a98a1ba716c45124958d175bdfd8",
+   "bytes": 7632,
+   "source": "generated",
+   "generator": "assets/source/generators/tiles.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "camp/tiles.png",
+   "sha256": "4a7b8f6f2dafb29a6b737e83a1239eaf2a5c4b841e9c1b661606565e570fd3b6",
+   "bytes": 11251,
+   "source": "generated",
+   "generator": "assets/source/generators/tiles.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "effects/combat.json",
+   "sha256": "01a42a6b24dc90103f89d783b3de5d89c84065484e4b7ef809e93f0d8894846c",
+   "bytes": 5818,
+   "source": "generated",
+   "generator": "assets/source/generators/effects.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "effects/combat.png",
+   "sha256": "24a3bf121083d7be89c13c68388f097dd9063633b9e7624c0ef2dbce740f7a42",
+   "bytes": 2602,
+   "source": "generated",
+   "generator": "assets/source/generators/effects.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/mountain-map.json",
+   "sha256": "46e9b250b8872686be658ecbf795c429398bc6a344dcd85aba68d586272821a2",
+   "bytes": 53275,
+   "source": "generated",
+   "generator": "assets/source/generators/maps.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/mountain.json",
+   "sha256": "272e19a4ab93a0dd7401b57e12519da687a30a2f04b6a96ef3018793379e81f8",
+   "bytes": 12261,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/mountain.png",
+   "sha256": "d337f3b45455ca043662023eb8a43849ecdb01482890a0c0a4f142a4521e5c82",
+   "bytes": 14252,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/outpost-map.json",
+   "sha256": "96c97b13a3efc3d61caa4c9bf6662a0b9163631fabf391788ef6ef1625fc386e",
+   "bytes": 46499,
+   "source": "generated",
+   "generator": "assets/source/generators/maps.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/outpost.json",
+   "sha256": "923ffde5d7c37a7f049566a9d603ecdcade0b616e80cddb291b762e05820329a",
+   "bytes": 13786,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/outpost.png",
+   "sha256": "77e64f01c5d176f743f4b06eab750f74acf11343088f0043689a83e94b22fb51",
+   "bytes": 13877,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/woodland-map.json",
+   "sha256": "caa914b7be0b57403e4438354789898592ed7c23de7c12424d9b128a0d23f319",
+   "bytes": 60764,
+   "source": "generated",
+   "generator": "assets/source/generators/maps.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/woodland.json",
+   "sha256": "6b5367fd93131da87fe3bddbced96f567e15942bce44f7b83cc8a8e52e01f171",
+   "bytes": 12888,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "expeditions/woodland.png",
+   "sha256": "12029727ada5adb9cb0dc28b7d28cd5858d49ad4492c97dc60dc8ecea65c44fb",
+   "bytes": 16685,
+   "source": "generated",
+   "generator": "assets/source/generators/props.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "ui/icons.json",
+   "sha256": "710a501a8111d43ddbfc9840044fb28fd93afeda0b2000ecae51651344a7cd44",
+   "bytes": 7793,
+   "source": "generated",
+   "generator": "assets/source/generators/effects.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  },
+  {
+   "file": "ui/icons.png",
+   "sha256": "d5a35f5d74c5af72d9049d3afc5281ac2fd6d43c6be59a1aef5d0810ee5c8620",
+   "bytes": 2559,
+   "source": "generated",
+   "generator": "assets/source/generators/effects.mjs",
+   "command": "node assets/source/build-assets.mjs",
+   "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+  }
+ ]
+}

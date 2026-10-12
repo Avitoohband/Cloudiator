@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudiator Asset Gallery</title>
+<style>
+  :root { --bg: #17131c; --panel: #241d2b; --ink: #f4e8cb; --muted: #b5a07a; --accent: #22a39d; --line: #3a3140; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 10px; color: var(--accent); }
+  nav a { color: var(--muted); margin-right: 12px; }
+  section { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; text-align: center; }
+  .card span { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; margin: 0 auto; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 12px; }
+  label { color: var(--muted); }
+  select, input { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
+  .map-wrap { overflow: auto; max-height: 80vh; border: 1px solid var(--line); background: #1c3f24; }
+  .error { color: #ef6450; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cloudiator asset gallery</h1>
+  <nav><a href="#gladiator">Gladiator</a><a href="#actions">All actions</a><a href="#npcs">NPCs</a><a href="#creatures">Creatures</a><a href="#effects">Effects</a><a href="#icons">Icons</a><a href="#maps">Maps</a></nav>
+  <span id="status" class="muted">Loading manifest…</span>
+</header>
+
+<section id="gladiator">
+  <h2>Layered gladiator</h2>
+  <div class="controls" id="glad-controls"></div>
+  <div class="row"><div class="card"><canvas id="glad-canvas" width="64" height="64"></canvas><span id="glad-label"></span></div></div>
+</section>
+<section id="actions"><h2>Every gladiator animation (current loadout, 3x)</h2><div class="row" id="action-grid"></div></section>
+<section id="npcs"><h2>Camp NPCs</h2><div class="row" id="npc-grid"></div></section>
+<section id="creatures"><h2>Expedition creatures</h2><div class="row" id="creature-grid"></div></section>
+<section id="effects"><h2>Combat effects</h2><div class="row" id="effect-grid"></div></section>
+<section id="icons"><h2>Interface icons (3x)</h2><div class="row" id="icon-grid"></div></section>
+<section id="maps"><h2>Maps</h2><div class="controls"><label>Map <select id="map-select"></select></label><label><input type="checkbox" id="map-actors" checked> sample actors</label><label>Scale <select id="map-scale"><option>0.5</option><option selected>1</option><option>2</option></select></label></div><div class="map-wrap"><canvas id="map-canvas"></canvas></div></section>
+
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  const fail = e => { status.textContent = `Failed: ${e.message}`; status.className = 'error'; throw e; };
+  const manifest = await fetch('manifest.json').then(r => r.json()).catch(fail);
+  const atlases = {};
+  await Promise.all(Object.entries(manifest.atlases).map(async ([key, def]) => {
+    const [frames, img] = await Promise.all([
+      fetch(def.data).then(r => r.json()),
+      new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = def.image; }),
+    ]);
+    atlases[key] = { img, frames: frames.frames };
+  })).catch(fail);
+  const maps = Object.fromEntries(await Promise.all(manifest.maps.map(async m => [m.id, await fetch(m.data).then(r => r.json())])).catch(fail));
+  status.textContent = `${Object.keys(manifest.atlases).length} atlases · ${Object.keys(manifest.animations).length} animations · ${manifest.provenance.length} files`;
+
+  const tintCache = new Map();
+  function frameImage(atlasKey, name, tint) {
+    const id = `${atlasKey}|${name}|${tint ?? ''}`;
+    if (tintCache.has(id)) return tintCache.get(id);
+    const a = atlases[atlasKey];
+    const f = a.frames[name];
+    if (!f) throw new Error(`missing frame ${atlasKey}:${name}`);
+    const c = document.createElement('canvas');
+    c.width = f.frame.w; c.height = f.frame.h;
+    const g = c.getContext('2d');
+    g.drawImage(a.img, f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
+    if (tint) {
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = tint; g.fillRect(0, 0, c.width, c.height);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(a.img, f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
+    }
+    const out = { canvas: c, anchor: f.anchor };
+    tintCache.set(id, out);
+    return out;
+  }
+  function blitFrame(g, atlasKey, name, x, y, scale, { flip = false, tint } = {}) {
+    const { canvas, anchor } = frameImage(atlasKey, name, tint);
+    g.save();
+    g.imageSmoothingEnabled = false;
+    g.translate(Math.round(x), Math.round(y));
+    if (flip) g.scale(-1, 1);
+    g.drawImage(canvas, -anchor.x * scale, -anchor.y * scale, canvas.width * scale, canvas.height * scale);
+    g.restore();
+  }
+
+  // ---- shared clock
+  const players = [];
+  function frameAt(anim, t) {
+    const total = anim.durationsMs.reduce((s, d) => s + d, 0);
+    let local = anim.loop ? t % total : Math.min(t % (total + 600), total - 1);
+    for (let i = 0; i < anim.frames.length; i += 1) { if (local < anim.durationsMs[i]) return i; local -= anim.durationsMs[i]; }
+    return anim.frames.length - 1;
+  }
+  const loop = now => { for (const p of players) p(now); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+
+  // ---- gladiator controls
+  const glad = manifest.actors.gladiator;
+  const state = {
+    action: 'idle', dir: 'se', speed: 1,
+    layers: new Set(['body', 'cloth', 'hair', 'weapon-sword', 'offhand-shield', 'held']),
+    cloth: '#22a39d', hair: '#a8693a',
+  };
+  const controls = document.getElementById('glad-controls');
+  const actionNames = Object.keys(glad.animations);
+  controls.innerHTML = `
+    <label>Action <select id="c-action">${actionNames.map(a => `<option>${a}</option>`).join('')}</select></label>
+    <label>Direction <select id="c-dir"><option>se</option><option>sw</option><option>ne</option><option>nw</option></select></label>
+    <label>Speed <select id="c-speed"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option></select></label>
+    <label>Cloth <input type="color" id="c-cloth" value="${state.cloth}"></label>
+    <label>Hair <input type="color" id="c-hair" value="${state.hair}"></label>
+    ${glad.layers.map(l => `<label><input type="checkbox" data-layer="${l.id}" ${state.layers.has(l.id) ? 'checked' : ''}> ${l.id}</label>`).join('')}`;
+  controls.addEventListener('input', e => {
+    const t = e.target;
+    if (t.id === 'c-action') state.action = t.value;
+    if (t.id === 'c-dir') state.dir = t.value;
+    if (t.id === 'c-speed') state.speed = Number(t.value);
+    if (t.id === 'c-cloth') state.cloth = t.value;
+    if (t.id === 'c-hair') state.hair = t.value;
+    if (t.dataset.layer) { if (t.checked) state.layers.add(t.dataset.layer); else state.layers.delete(t.dataset.layer); }
+  });
+  function drawGladiator(g, action, dir, t, x, y, scale) {
+    const d = manifest.directions[dir];
+    const key = glad.animations[action][d.source] ?? glad.animations[action].se;
+    const flip = glad.animations[action][d.source] ? d.flipX : dir === 'sw' || dir === 'nw';
+    const anim = manifest.animations[key];
+    const frame = anim.frames[frameAt(anim, t)].replace(/^body\//, '');
+    for (const layer of glad.layers) {
+      if (!state.layers.has(layer.id)) continue;
+      const tint = layer.id === 'cloth' ? state.cloth : layer.id === 'hair' ? state.hair : undefined;
+      blitFrame(g, glad.atlas, `${layer.id}/${frame}`, x, y, scale, { flip, tint });
+    }
+    return anim;
+  }
+  const big = document.getElementById('glad-canvas');
+  big.width = 64 * 6; big.height = 64 * 6;
+  const bg = big.getContext('2d');
+  const label = document.getElementById('glad-label');
+  players.push(now => {
+    bg.fillStyle = '#e6bd78'; bg.fillRect(0, 0, big.width, big.height);
+    const anim = drawGladiator(bg, state.action, state.dir, now * state.speed, glad.anchor.x * 6, glad.anchor.y * 6, 6);
+    label.textContent = `${state.action} · ${state.dir} · ${anim.frames.length} frames · ${anim.loop ? 'loop' : 'once'}`;
+  });
+
+  // ---- every action
+  const grid = document.getElementById('action-grid');
+  for (const action of actionNames) for (const dir of ['se', 'sw', ...(glad.animations[action].ne ? ['ne', 'nw'] : [])]) {
+    const card = document.createElement('div'); card.className = 'card';
+    const c = document.createElement('canvas'); c.width = 192; c.height = 192;
+    card.append(c, Object.assign(document.createElement('span'), { textContent: `${action} ${dir}` }));
+    grid.append(card);
+    const g = c.getContext('2d');
+    players.push(now => { g.fillStyle = '#e6bd78'; g.fillRect(0, 0, 192, 192); drawGladiator(g, action, dir, now * state.speed, 96, 174, 3); });
+  }
+
+  // ---- npcs, creatures, effects
+  function animCard(container, title, anim, atlasKey, scale, flip = false, bgColor = '#76b44c') {
+    const f0 = atlases[atlasKey].frames[anim.frames[0]].frame;
+    const card = document.createElement('div'); card.className = 'card';
+    const c = document.createElement('canvas'); c.width = f0.w * scale; c.height = f0.h * scale;
+    card.append(c, Object.assign(document.createElement('span'), { textContent: title }));
+    container.append(card);
+    const g = c.getContext('2d');
+    players.push(now => {
+      g.fillStyle = bgColor; g.fillRect(0, 0, c.width, c.height);
+      const name = anim.frames[frameAt(anim, now * state.speed)];
+      const f = atlases[atlasKey].frames[name];
+      blitFrame(g, atlasKey, name, (flip ? f.frame.w - f.anchor.x : f.anchor.x) * scale, f.anchor.y * scale, scale, { flip });
+    });
+  }
+  for (const npc of manifest.actors.npcs) for (const [action, dirs] of Object.entries(npc.animations)) for (const dir of Object.keys(dirs)) {
+    animCard(document.getElementById('npc-grid'), `${npc.name} · ${action} ${dir}`, manifest.animations[dirs[dir]], npc.atlas, 3);
+  }
+  for (const cr of manifest.actors.creatures) for (const [action, dirs] of Object.entries(cr.animations)) {
+    animCard(document.getElementById('creature-grid'), `${cr.name} · ${action}`, manifest.animations[dirs.se], cr.atlas, 3, true, cr.expedition === 'mountain' ? '#d2dce9' : cr.expedition === 'outpost' ? '#cc9d58' : '#4e8d3b');
+  }
+  for (const [id, key] of Object.entries(manifest.effects)) animCard(document.getElementById('effect-grid'), id, { ...manifest.animations[key], loop: true }, 'effects', 3, false, '#2e2433');
+  for (const [id, frame] of Object.entries(manifest.icons)) {
+    const card = document.createElement('div'); card.className = 'card';
+    const c = document.createElement('canvas'); c.width = 48; c.height = 48;
+    card.append(c, Object.assign(document.createElement('span'), { textContent: id }));
+    document.getElementById('icon-grid').append(card);
+    blitFrame(c.getContext('2d'), 'icons', frame, 24, 24, 3);
+  }
+
+  // ---- maps
+  const sel = document.getElementById('map-select');
+  sel.innerHTML = manifest.maps.map(m => `<option>${m.id}</option>`).join('');
+  const mapCanvas = document.getElementById('map-canvas');
+  const actorsBox = document.getElementById('map-actors');
+  const scaleBox = document.getElementById('map-scale');
+  function renderMap(t) {
+    const map = maps[sel.value];
+    const scale = Number(scaleBox.value);
+    const w = (map.width + map.height) * 32 + 64;
+    const h = (map.width + map.height) * 16 + 200;
+    if (mapCanvas.width !== w * scale) { mapCanvas.width = w * scale; mapCanvas.height = h * scale; }
+    const g = mapCanvas.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = '#1c3f24'; g.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+    const ox = map.height * 32 + 32;
+    const oy = 120;
+    const S = (x, y) => [(ox + (x - y) * 32) * scale, (oy + (x + y) * 16) * scale];
+    for (let y = 0; y < map.height; y += 1) for (let x = 0; x < map.width; x += 1) {
+      const [sx, sy] = S(x, y);
+      blitFrame(g, map.tilesAtlas, map.groundFrames[map.ground[y * map.width + x]], sx, sy, scale);
+    }
+    const items = map.props.map(p => {
+      const [sx, sy] = S(p.x, p.y);
+      const anim = p.animation ? manifest.animations[`prop-${map.propsAtlas}-${p.animation}`] : null;
+      const frame = anim ? anim.frames[frameAt(anim, t)] : p.frame;
+      const depth = p.layer === 'floor' ? -1e9 + sy : p.layer === 'foreground' ? 1e9 + sy : sy + p.sortY * scale;
+      return { depth, draw: () => blitFrame(g, map.propsAtlas, frame, sx, sy, scale) };
+    });
+    if (actorsBox.checked) {
+      const actionFor = { weights: 'weights', practice: 'practice', spar: 'spar', sit: 'sit', eat: 'eat', sleep: 'sleep', 'arena-ring': 'spar', 'arena-staging': 'idle', browse: 'idle', depart: 'walk', gate: 'idle' };
+      let n = 0;
+      for (const zone of map.zones) for (const s of zone.stations) {
+        const [sx, sy] = S(s.x + 0.5, s.y + 0.5);
+        if (s.npc) {
+          const npc = manifest.actors.npcs.find(x => x.id === s.npc);
+          const anim = manifest.animations[npc.animations[s.kind.startsWith('merchant') ? 'tend' : 'idle'].se];
+          items.push({ depth: sy, draw: () => blitFrame(g, npc.atlas, anim.frames[frameAt(anim, t)], sx, sy, scale, { flip: s.facing === 'sw' }) });
+          continue;
+        }
+        const action = actionFor[s.kind];
+        if (!action) continue;
+        const offset = n * 377;
+        n += 1;
+        items.push({ depth: sy, draw: () => drawGladiator(g, action, s.facing, t + offset, sx, sy, scale) });
+      }
+      if (map.expedition) {
+        const cr = manifest.actors.creatures.find(c => c.expedition === map.id);
+        for (const e of map.expedition.encounters) {
+          const [px, py] = S(e.x + 0.5, e.y + 0.5);
+          const [ex, ey] = S(e.enemyX + 0.5, e.enemyY + 0.5);
+          items.push({ depth: py, draw: () => drawGladiator(g, 'attack', 'se', t + e.index * 500, px, py, scale) });
+          const anim = manifest.animations[cr.animations.idle.se];
+          items.push({ depth: ey, draw: () => blitFrame(g, cr.atlas, anim.frames[frameAt(anim, t)], ex, ey, scale, { flip: true }) });
+        }
+      }
+    }
+    items.sort((a, b) => a.depth - b.depth).forEach(i => i.draw());
+  }
+  let last = 0;
+  players.push(now => { if (now - last > 120) { last = now; renderMap(now * state.speed); } });
+})();
+</script>
+</body>
+</html>

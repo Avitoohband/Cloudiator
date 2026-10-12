@@ -27,6 +27,7 @@ function GameShell() {
   const [bridge] = useState(createSceneBridge);
   const [panel, setPanel] = useState<Panel>('Schedule');
   const [previewError, setPreviewError] = useState(false);
+  const [sampleReplays, setSampleReplays] = useState<readonly { activityId: string; label: string }[]>([]);
   const session = useSession();
   const [gateway] = useState(createLiveGateway);
   const [liveOwner, setLiveOwner] = useState<{ account: string; value: OwnerState | null } | null>(null);
@@ -66,7 +67,7 @@ function GameShell() {
     let active = true;
     if (fixture) {
       import('../../lib/api/fixture-gateway')
-        .then(({ createFixtureGateway }) => { const fixtureGateway = createFixtureGateway(); return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
+        .then(({ createFixtureGateway, FIXTURE_REPLAYS }) => { if (active) setSampleReplays(FIXTURE_REPLAYS); const fixtureGateway = createFixtureGateway(); return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
         .then(([ownerData, worldData]) => { if (active) { setOwner(ownerData); setWorld(withDemoCrowd(worldData)); } })
         .catch(() => { if (active) setPreviewError(true); });
     }
@@ -125,6 +126,10 @@ function GameShell() {
         </>}
         {signOutError && <p role="alert">Sign-out could not be completed. Please try again.</p>}
         {fixture && !owner && <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
+        {fixture && sampleReplays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
+          <p className="eyebrow">SAMPLE REPLAYS</p>
+          <ul>{sampleReplays.map(r => <li key={r.activityId}><Link href={`/replay/?mode=fixture&activity=${r.activityId}`}>{r.label}</Link></li>)}</ul>
+        </nav>}
       </aside>
       <section className="management" aria-label="Gladiator management">
         <nav className="panel-nav" aria-label="Management panels">

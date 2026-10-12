@@ -1,0 +1,154 @@
+{
+  "battleId": "fixture-woodland-encounter-2",
+  "rulesVersion": "v1",
+  "participants": [
+    {
+      "id": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "name": "Aster",
+      "classId": "guardian",
+      "stance": "balanced",
+      "attributes": {
+        "strength": 8,
+        "agility": 7,
+        "vitality": 8.4,
+        "endurance": 7.35,
+        "precision": 5
+      },
+      "maxHealth": 134,
+      "initialHealth": 130,
+      "armor": 5,
+      "weaponDamage": 8,
+      "attackIntervalMs": 1308,
+      "efficiencyBasisPoints": 10000,
+      "equipmentSilhouettes": [
+        "axe:1:common",
+        "round-shield:1:common",
+        "light-armor:1:common"
+      ]
+    },
+    {
+      "id": "creature:timber-wolf:2",
+      "gladiatorId": null,
+      "name": "Timber Wolf",
+      "classId": null,
+      "stance": "balanced",
+      "attributes": {
+        "strength": 4,
+        "agility": 4,
+        "vitality": 3,
+        "endurance": 4,
+        "precision": 4
+      },
+      "maxHealth": 35,
+      "initialHealth": 35,
+      "armor": 0,
+      "weaponDamage": 6,
+      "attackIntervalMs": 1100,
+      "efficiencyBasisPoints": 10000,
+      "equipmentSilhouettes": []
+    }
+  ],
+  "events": [
+    {
+      "kind": "attack",
+      "sequence": 0,
+      "elapsedMs": 1100,
+      "attackerId": "creature:timber-wolf:2",
+      "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "hit": true,
+      "critical": false,
+      "damage": 5,
+      "defend": false,
+      "evade": false,
+      "healthBefore": 130,
+      "healthAfter": 125
+    },
+    {
+      "kind": "attack",
+      "sequence": 1,
+      "elapsedMs": 1308,
+      "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "defenderId": "creature:timber-wolf:2",
+      "hit": true,
+      "critical": false,
+      "damage": 12,
+      "defend": false,
+      "evade": false,
+      "healthBefore": 35,
+      "healthAfter": 23
+    },
+    {
+      "kind": "attack",
+      "sequence": 2,
+      "elapsedMs": 2200,
+      "attackerId": "creature:timber-wolf:2",
+      "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "hit": true,
+      "critical": false,
+      "damage": 5,
+      "defend": false,
+      "evade": false,
+      "healthBefore": 125,
+      "healthAfter": 120
+    },
+    {
+      "kind": "attack",
+      "sequence": 3,
+      "elapsedMs": 2616,
+      "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "defenderId": "creature:timber-wolf:2",
+      "hit": true,
+      "critical": false,
+      "damage": 12,
+      "defend": false,
+      "evade": false,
+      "healthBefore": 23,
+      "healthAfter": 11
+    },
+    {
+      "kind": "attack",
+      "sequence": 4,
+      "elapsedMs": 3300,
+      "attackerId": "creature:timber-wolf:2",
+      "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "hit": true,
+      "critical": false,
+      "damage": 5,
+      "defend": false,
+      "evade": false,
+      "healthBefore": 120,
+      "healthAfter": 115
+    },
+    {
+      "kind": "attack",
+      "sequence": 5,
+      "elapsedMs": 3924,
+      "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "defenderId": "creature:timber-wolf:2",
+      "hit": true,
+      "critical": false,
+      "damage": 12,
+      "defend": false,
+      "evade": false,
+      "healthBefore": 11,
+      "healthAfter": 0
+    },
+    {
+      "kind": "victory",
+      "sequence": 6,
+      "elapsedMs": 3924,
+      "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "loserId": "creature:timber-wolf:2",
+      "reason": "defeat"
+    }
+  ],
+  "durationMs": 3924,
+  "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+  "victoryReason": "defeat",
+  "finalHp": [
+    115,
+    0
+  ],
+  "tieBreakReason": null
+}

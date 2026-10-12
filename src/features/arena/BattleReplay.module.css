@@ -1,0 +1,267 @@
+.player {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.header h1 {
+  font-family: Georgia, serif;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  margin: 0;
+}
+
+.header p {
+  margin-bottom: 0.3rem;
+}
+
+.encounters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.encounters button,
+.controls button {
+  min-height: 44px;
+  padding: 0 0.95rem;
+  color: var(--ink);
+  background: #1b2336;
+  border: 1px solid #6b5a3a;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.encounters button[aria-pressed='true'],
+.controls button[aria-pressed='true'] {
+  color: #1a1423;
+  background: var(--gold);
+  border-color: #ffe48f;
+}
+
+.encounters button:hover,
+.controls button:hover {
+  border-color: var(--gold);
+}
+
+.health {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1.25rem;
+}
+
+.right {
+  text-align: right;
+}
+
+.name {
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.kind {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.4rem;
+  color: #d6cbe8;
+  background: #352f49;
+  border: 1px solid #685b80;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  vertical-align: middle;
+}
+
+.meter {
+  position: relative;
+  height: 22px;
+  margin-top: 0.3rem;
+  background: #2a1d23;
+  border: 1px solid #6b4040;
+  overflow: hidden;
+}
+
+.right .meter .fill {
+  right: 0;
+  left: auto;
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(#5fbf6e, #3d8a4c);
+}
+
+.hpText {
+  position: relative;
+  display: block;
+  padding: 0 0.5rem;
+  font: 700 0.8rem/22px system-ui, sans-serif;
+  color: #ffffff;
+  text-shadow: 0 1px 2px #000, 0 0 2px #000;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.seek {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.seek input {
+  width: 100%;
+  accent-color: var(--gold);
+  min-height: 28px;
+}
+
+.hint {
+  margin: -0.4rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.card {
+  min-width: 0;
+  padding: 1.1rem 1.2rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.card h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0.6rem;
+}
+
+.logCard {
+  grid-column: 1 / -1;
+}
+
+.verdict {
+  margin-bottom: 0.25rem;
+  color: var(--gold);
+  font: 700 1.35rem Georgia, serif;
+}
+
+.note {
+  margin: 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.rewards ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.rewards li {
+  font-weight: 650;
+}
+
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.table thead th:first-child {
+  width: 34%;
+}
+
+.caption {
+  text-align: left;
+  color: var(--muted);
+  font-size: 0.72rem;
+  padding-bottom: 0.4rem;
+}
+
+.table th,
+.table td {
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.table tbody th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.log {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 0 0 1.9rem;
+  font-size: 0.82rem;
+}
+
+.log li {
+  padding: 0.2rem 0.4rem;
+  border-left: 3px solid transparent;
+}
+
+.log li.current {
+  background: #2c2a40;
+  border-left-color: var(--gold);
+}
+
+.critical {
+  color: #ffe48f;
+}
+
+.evade {
+  color: #c9d3e6;
+}
+
+.defend {
+  color: #b9e6f5;
+}
+
+.victory {
+  color: #9fe0a9;
+  font-weight: 700;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.saved {
+  max-width: 720px;
+}
+
+.saved h1 {
+  font-family: Georgia, serif;
+}
+
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .controls button {
+    flex: 1 1 calc(50% - 0.45rem);
+  }
+}

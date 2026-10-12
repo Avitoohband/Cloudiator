@@ -31,6 +31,7 @@ manifest's projection, anchors and depth rule, including wide-prop slices.
 | `effects.png`, `icons.png` | Eight combat effects and 37 interface icons. |
 | `map-camp.png` | Living camp with sample gladiators at their stations, NPCs at stalls and gate. |
 | `map-woodland.png`, `map-outpost.png`, `map-mountain.png` | Expedition routes with three encounters each, showing the creature assigned to each encounter. |
+| `closeups.png` | Task 14 close-up battle view at the in-game 3× scale: the arena (a sword strike landing, hit burst on the defender), woodland (an evade from a wolf's lunge), outpost (a shield guard against a raider) and mountain (victory over a fallen troll, with circling stars). |
 | `depth-probe-camp.png` | A gladiator on every walkable tile directly in front of and behind each wide prop, and on every walkable tile on either side of the arena ring. Front ones draw over the prop or wall, back ones under it. |
 
 The live gallery (`public/assets/gallery.html`) plays every loop at the real frame durations,
@@ -137,6 +138,27 @@ replay, this lane) accepts it only when:
 3. Two fighters face each other (SE and SW), stay fully inside the frame for every action, and
    effects land on the defender.
 4. It stays readable at 360px wide; desktop and mobile screenshots are recorded with the report.
+
+## Task 14 delivered: close-up battle view (2026-10-12)
+
+The four criteria under "Deferred to Task 14" are met as follows. Task 14's report has the full record.
+
+1. **Backdrop.** `assets/source/generators/closeups.mjs` paints the arena close-up:
+   - a sand floor with a raked fighting circle;
+   - a stone podium wall whose base curves up towards the centre, like the far side of a ring;
+   - team banners and braziers on the wall;
+   - crowd stands under a striped awning;
+   - a dark, calm editor's box behind the fighters, so their heads stay readable against it.
+
+   It also paints a woodland clearing, a ruined outpost and a mountain snowfield for expedition encounters. `build-assets.mjs` packs all four into `battle/closeups.png` (atlas `closeups`, kind `backdrop`) and describes them in `manifest.closeups`. Both files have provenance records, and `--check` covers them. `tests/assets` checks the size and anchor, full opacity, the sand floor, the wall arc, the crowd and banner colours, and that all four differ.
+2. **Fighters.** They reuse the gladiator and creature atlases with the camp's layers and multiply tints (the same player looks the same in camp and in a replay). Scale is exactly 3×: the backdrop, fighters and effects share one art-pixel grid, with nearest-neighbour rendering.
+3. **Placement.** The left fighter faces se and the right one is mirrored to face sw. Every frame of every combat animation, of every gladiator layer and creature, stays inside stages from 320 to 960 px wide (`tests/domain/battle-stage.test.ts`). The browser suite checks the drawn scene at every logged moment of two fixture fights. Hit, critical, guard and evade effects land on the defender. The defeated fighter gets circling stars over its head; the winner gets a sparkle.
+4. **360 px.** Desktop and mobile screenshots, including a 360 px-wide phone, are in `docs/implementation/task-14-evidence/`.
+
+Observations from the review image and screenshots:
+- At 3× the desktop stage shows the whole 960×384 backdrop, so the fighters are small within it. On a phone the stage crops to the fighters' surroundings.
+- The expedition close-ups are simpler paintings than the arena. The mountain peaks carry diagonal strata.
+- The head position of a fallen fighter (for the stars) is a per-kind offset: humanoids fall backwards, wolves forwards. It is not measured from the art.
 
 ## Known limitations
 

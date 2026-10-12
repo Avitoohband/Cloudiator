@@ -1,0 +1,2 @@
+# Replay fixture logs are compared byte for byte with a fresh engine run; never convert line endings.
+*.json -text

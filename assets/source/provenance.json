@@ -128,6 +128,40 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
+      "file": "battle/closeups.json",
+      "sha256": "61dcc6a4b5783ca7bf47ab90506951aa94090242293fd3fddef7cde1c8f5179d",
+      "bytes": 1038,
+      "source": "generated",
+      "generator": "assets/source/generators/closeups.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
+      "command": "node assets/source/build-assets.mjs",
+      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+    },
+    {
+      "file": "battle/closeups.png",
+      "sha256": "41cd16a63b8fec474259034664db69582da7e29f6294b500f526eed7f88e146a",
+      "bytes": 20075,
+      "source": "generated",
+      "generator": "assets/source/generators/closeups.mjs",
+      "inputs": [
+        "assets/source/build-assets.mjs",
+        "assets/source/tools/atlas.mjs",
+        "assets/source/tools/canvas.mjs",
+        "assets/source/tools/palette.mjs",
+        "assets/source/tools/png.mjs",
+        "assets/source/tools/random.mjs"
+      ],
+      "command": "node assets/source/build-assets.mjs",
+      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
+    },
+    {
       "file": "camp/map.json",
       "sha256": "979d02e6f2557772f7e73bdc8c8431609abb91f8909985b1f6b698db1ad683a6",
       "bytes": 105226,

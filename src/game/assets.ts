@@ -11,6 +11,7 @@ import outpostAtlas from '../../public/assets/expeditions/outpost.json';
 import mountainAtlas from '../../public/assets/expeditions/mountain.json';
 import effectsAtlas from '../../public/assets/effects/combat.json';
 import iconsAtlas from '../../public/assets/ui/icons.json';
+import closeupsAtlas from '../../public/assets/battle/closeups.json';
 import campMap from '../../public/assets/camp/map.json';
 import woodlandMap from '../../public/assets/expeditions/woodland-map.json';
 import outpostMap from '../../public/assets/expeditions/outpost-map.json';
@@ -31,7 +32,8 @@ export type PropMeta = {
   light?: { radius: number; color: string };
 };
 export type FrameRect = { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number; meta?: PropMeta };
-export type AtlasKind = 'actor' | 'tiles' | 'props' | 'environment' | 'effects' | 'icons';
+export type AtlasKind = 'actor' | 'tiles' | 'props' | 'environment' | 'effects' | 'icons' | 'backdrop';
+export type CloseupTheme = 'arena' | 'woodland' | 'outpost' | 'mountain';
 export type AtlasDef = { key: string; image: string; data: string; width: number; height: number; kind: AtlasKind; frames: Record<string, FrameRect> };
 export type AnimationDef = { atlas: string; frames: string[]; durationsMs: number[]; loop: boolean };
 export type DirectionalAnimation = { se: string; ne?: string };
@@ -93,6 +95,16 @@ export type AssetManifest = {
     encounterCreatures: Record<Exclude<MapId, 'camp'>, [string, string, string]>;
   };
   effects: Record<EffectId, string>;
+  /** Side-on close-up fight view: backdrops (in art pixels) drawn at an integer scale behind two fighters. */
+  closeups: {
+    atlas: string; width: number; height: number; scale: number;
+    /** Floor row where both fighters' feet stand. */
+    groundY: number;
+    /** Feet x of the left (facing se) and the right (facing sw) fighter. */
+    fighterX: [number, number];
+    backdrops: Record<CloseupTheme, string>;
+    notes: string;
+  };
   /** Catalog template id (prefix of 'sword:1:common') to gladiator layer id; null when not drawn. */
   equipmentLayers: Record<string, string | null>;
   depthRule: string;
@@ -114,7 +126,7 @@ export const ATLAS_DATA: Record<string, unknown> = {
   'actors/gladiators.json': gladiatorsAtlas, 'actors/npcs.json': npcsAtlas, 'actors/creatures.json': creaturesAtlas,
   'camp/tiles.json': campTilesAtlas, 'camp/props.json': campPropsAtlas,
   'expeditions/woodland.json': woodlandAtlas, 'expeditions/outpost.json': outpostAtlas, 'expeditions/mountain.json': mountainAtlas,
-  'effects/combat.json': effectsAtlas, 'ui/icons.json': iconsAtlas,
+  'effects/combat.json': effectsAtlas, 'ui/icons.json': iconsAtlas, 'battle/closeups.json': closeupsAtlas,
 };
 const MAP_DATA: Record<string, unknown> = {
   'camp/map.json': campMap, 'expeditions/woodland-map.json': woodlandMap,

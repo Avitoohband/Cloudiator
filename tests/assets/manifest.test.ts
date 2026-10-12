@@ -399,3 +399,67 @@ describe('camp and expedition maps', () => {
     }
   });
 });
+
+describe('close-up battle backdrops', () => {
+  const closeups = manifest.closeups;
+  const ids = ['arena', 'woodland', 'outpost', 'mountain'] as const;
+  const names = new Map(Object.entries(manifest.palette).map(([name, hex]) => [hex.toLowerCase(), name]));
+  /** Palette name of every pixel of a backdrop, row by row. */
+  function backdrop(id: (typeof ids)[number]) {
+    const px = framePixels(closeups.atlas, closeups.backdrops[id]);
+    const at = (x: number, y: number) => {
+      const i = (y * closeups.width + x) * 4;
+      return px[i + 3] === 0 ? null : names.get(`#${[px[i], px[i + 1], px[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')}`) ?? '?';
+    };
+    return { px, at };
+  }
+
+  it('ships an arena close-up and one per expedition, sized and anchored for the integer 3x stage', () => {
+    expect(Object.keys(closeups.backdrops).sort()).toEqual([...ids].sort());
+    expect(closeups.scale).toBe(3);
+    for (const id of ids) {
+      const f = manifest.atlases[closeups.atlas].frames[closeups.backdrops[id]];
+      expect([f.w, f.h, f.anchorX, f.anchorY], id).toEqual([closeups.width, closeups.height, closeups.width / 2, closeups.groundY]);
+    }
+    // Wide enough to fill a 960px stage, with the fighters standing either side of the centre.
+    expect(closeups.width * closeups.scale).toBeGreaterThanOrEqual(960);
+    const [left, right] = closeups.fighterX;
+    expect(left).toBeLessThan(closeups.width / 2);
+    expect(left + right).toBe(closeups.width);
+  });
+
+  it('paints every backdrop pixel opaque so nothing shows through the stage', () => {
+    for (const id of ids) expect(opaqueCount(backdrop(id).px), id).toBe(closeups.width * closeups.height);
+  });
+
+  it('draws the arena as a sand floor in front of a curved wall with banners and a crowd above it', () => {
+    const { at } = backdrop('arena');
+    const { width, groundY, height } = closeups;
+    let sand = 0;
+    for (let y = groundY - 12; y < height; y += 1) for (let x = 0; x < width; x += 1) if (/^sand/.test(at(x, y) ?? '')) sand += 1;
+    expect(sand / ((height - groundY + 12) * width)).toBeGreaterThan(0.85);
+    // The wall's base is the lowest stone pixel of each column above the floor; it curves up towards the centre.
+    const base = (x: number) => { for (let y = groundY - 1; y >= 0; y -= 1) if (/^stone/.test(at(x, y) ?? '')) return y; return -1; };
+    for (let x = 0; x < width; x += 8) expect(base(x), `wall at column ${x}`).toBeGreaterThan(0);
+    expect(base(8) - base(width / 2)).toBeGreaterThanOrEqual(4);
+    expect(base(width - 8) - base(width / 2)).toBeGreaterThanOrEqual(4);
+    const above = new Set<string>();
+    for (let y = 0; y < base(width / 2) - 20; y += 1) for (let x = 0; x < width; x += 1) above.add(at(x, y) ?? '');
+    // Spectators in several cloth colours with visible faces, and banners in team colours.
+    expect(['teal2', 'crimson2', 'gold2', 'violet2', 'water2', 'grass2'].filter(c => above.has(c)).length).toBeGreaterThanOrEqual(5);
+    expect([...above].some(c => /^(skin|dskin)/.test(c))).toBe(true);
+    const wall = new Set<string>();
+    for (let x = 0; x < width; x += 1) for (let y = base(x) - 24; y <= base(x); y += 1) wall.add(at(x, y) ?? '');
+    for (const banner of ['crimson2', 'teal2', 'gold2']) expect(wall, banner).toContain(banner);
+  });
+
+  it('keeps every close-up distinct', () => {
+    for (const [i, a] of ids.entries()) for (const b of ids.slice(i + 1)) {
+      const pa = backdrop(a).px;
+      const pb = backdrop(b).px;
+      let differ = 0;
+      for (let k = 0; k < pa.length; k += 4) if (pa[k] !== pb[k] || pa[k + 1] !== pb[k + 1] || pa[k + 2] !== pb[k + 2]) differ += 1;
+      expect(differ / (pa.length / 4), `${a} vs ${b}`).toBeGreaterThan(0.5);
+    }
+  });
+});

@@ -134,3 +134,10 @@ progress::-moz-progress-bar { background: #7dbfa2; }
 .build-comparison section { background: #111b2d; padding: 1rem; }
 .build-comparison dl div { display: flex; justify-content: space-between; text-transform: capitalize; }
 .build-points { display: grid; grid-template-columns: repeat(auto-fit,minmax(115px,1fr)); gap: .8rem; }
+.back-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .9rem; color: var(--gold); border: 1px solid #6b5a3a; font-size: .85rem; font-weight: 700; }
+.replay-page { max-width: 1008px; margin: auto; padding: 1.5rem 1.5rem 2rem; }
+.sample-replays { border-top: 1px solid var(--line); margin-top: 1.25rem; padding-top: 1rem; }
+.sample-replays ul { margin: 0; padding-left: 1.1rem; font-size: .82rem; }
+.sample-replays li { margin: .35rem 0; }
+.sample-replays a { color: #b9e6f5; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 540px) { .replay-page { padding: 1rem; } }

@@ -4,11 +4,12 @@
 // so the static build never touches WebGL. Unmounting removes the scene's bridge listeners
 // synchronously and destroys the game.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import type { Game } from 'phaser';
 import type { WorldSnapshot } from '@contracts/reads';
 import type { Point } from './iso';
 import type { SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
+import { prefersReducedMotion, supportsWebGL } from './webgl';
+import { startGame } from './phaser-game';
 import styles from './GameViewport.module.css';
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'unavailable'; message: string };
@@ -31,20 +32,6 @@ export type CampTestHook = {
 declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
-
-function supportsWebGL(): boolean {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-    // Release the probe context at once; browsers cap live WebGL contexts per page.
-    gl?.getExtension('WEBGL_lose_context')?.loseContext();
-    return !!gl;
-  } catch {
-    return false;
-  }
-}
-
-const prefersReducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 export function GameViewport({ world, bridge, focusGladiatorId = null }: { world: WorldSnapshot | null; bridge: SceneBridge; focusGladiatorId?: string | null }) {
   const host = useRef<HTMLDivElement>(null);
@@ -83,13 +70,13 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
   useEffect(() => {
     let cancelled = false;
     let failed = false;
-    let game: Game | null = null;
+    let game: ReturnType<typeof startGame> | null = null;
     const fail = (reason: 'webgl' | 'assets' | 'error', message: string) => {
       if (cancelled || failed) return;
       failed = true;
       setStatus({ kind: 'unavailable', message });
       handle.current?.dispose();
-      game?.destroy(true);
+      game?.destroy();
       game = null;
       // Deferred so panels that subscribe in their own effects (which run after ours) still hear it.
       setTimeout(() => { if (!cancelled) bridge.emit('scene-unavailable', { reason, message }); }, 0);
@@ -115,7 +102,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
         onError: (reason, message) => fail(reason, reason === 'assets' ? `The camp art could not load (${message}). Management panels still work.` : `The camp view stopped: ${message}`),
       });
       handle.current = created.handle;
-      game = new P.Game({
+      game = startGame(P, {
         type: P.WEBGL,
         parent: host.current,
         // Crisp pixels at every zoom step, without the uneven texels of nearest sampling at fractional scales.
@@ -149,7 +136,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
       cancelled = true;
       handle.current?.dispose();
       handle.current = null;
-      game?.destroy(true);
+      game?.destroy();
       game = null;
       if (window.__cloudiatorCamp) delete window.__cloudiatorCamp;
     };

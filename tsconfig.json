@@ -47,6 +47,7 @@
   "exclude": [
     "node_modules",
     "supabase/functions/game-command/index.ts",
+    "supabase/functions/game-worker/index.ts",
     "tests/backend/edge.deno.ts"
   ]
 }

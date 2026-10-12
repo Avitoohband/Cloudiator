@@ -6,6 +6,7 @@ import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { buildChangeFee, validateBuild, validateCreationAllocation } from '../domain/build.ts';
 import { deriveStats } from '../domain/stats.ts';
+import type { CoordinatorReport, JobKind, JobLease } from '../domain/types.ts';
 
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
 export type PlanningCommand = Extract<GameCommand, { kind: 'queue-build' | 'cancel-build' | 'edit-schedule' }>;
@@ -76,3 +77,37 @@ export function createDatabase(client: SupabaseClient) {
   };
 }
 export type CommandDatabase = ReturnType<typeof createDatabase>;
+
+/** Fenced job RPC results. `replayed` marks an idempotent retry of an already-committed outcome. */
+export type JobOutcome = { ok: true; replayed?: boolean; newGrants?: number; receiptId?: string; [key: string]: unknown }
+  | { ok: false; code: 'conflict' | 'invalid' | 'not-found' | 'processing' };
+export type RenewOutcome = { ok: true; expiresAtMs: number } | { ok: false; code: 'conflict' | 'not-found' };
+/** Service-role RPC port used only by the private game-worker; every call is fenced by its lease token in SQL. */
+export type WorkerDatabase = {
+  coordinate(): Promise<CoordinatorReport>;
+  claim(workerId: string, kind: JobKind, limit: number): Promise<JobLease[]>;
+  renew(jobId: string, token: string): Promise<RenewOutcome>;
+  complete(jobId: string, token: string, result: unknown): Promise<JobOutcome>;
+  settle(activityId: string, token: string): Promise<JobOutcome>;
+  fail(jobId: string, token: string, code: string): Promise<JobOutcome>;
+};
+/** Versioned executors keyed by the job's persisted rules version. Settlement is SQL-side and never an executor. */
+export type JobExecutor = (job: JobLease) => unknown | Promise<unknown>;
+export type ExecutorRegistry = Readonly<Record<string, Partial<Record<Exclude<JobKind, 'settlement'>, JobExecutor>>>>;
+export type WorkerDependencies = { database: WorkerDatabase; workerId: string; executors?: ExecutorRegistry; now?: () => number };
+export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
+  async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    const { data, error } = await client.rpc(name, args);
+    // Never forward driver/provider messages: they can carry connection details.
+    if (error) throw new Error('worker-database-unavailable');
+    return data as T;
+  }
+  return {
+    coordinate: () => rpc('coordinate_work', {}),
+    claim: (workerId, kind, limit) => rpc('claim_jobs', { worker_id: workerId, kind, batch_limit: limit }),
+    renew: (jobId, token) => rpc('renew_job', { job_id: jobId, lease_token: token }),
+    complete: (jobId, token, result) => rpc('complete_job', { job_id: jobId, lease_token: token, result }),
+    settle: (activityId, token) => rpc('settle_activity', { activity_id: activityId, lease_token: token }),
+    fail: (jobId, token, code) => rpc('fail_job', { job_id: jobId, lease_token: token, failure_code: code }),
+  };
+}

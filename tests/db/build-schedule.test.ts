@@ -185,7 +185,10 @@ describe('schedule revisions and pending reservations', () => {
     const command = build(state);
     const results = await Promise.all([send(owner.token, command), send(owner.token, command), send(owner.token, { ...command, operationId: randomUUID() })]);
     expect(results[0]).toEqual(results[1]);
-    expect(results.filter(r => r.code === 'conflict').length).toBeLessThanOrEqual(1);
+    // Either operation may take the account lock first: exactly one of the two distinct operations commits, and both
+    // copies of the first operation share its single receipt (two conflicts when the other operation won first).
+    expect([results[0].ok, results[2].ok].sort()).toEqual([false, true]);
+    expect(results.filter(r => r.code === 'conflict').length).toBe(results[0].ok ? 1 : 2);
     expect((await owner.state()).reservedFees.money).toBe(200);
     expect(await send(owner.token, { ...command, stance: 'defensive' })).toMatchObject({ ok: false, code: 'conflict' });
     expect(await sql`select count(*)::int as n from public.reservations where gladiator_id=${owner.gid} and status='held'`).toEqual([{ n: 1 }]);

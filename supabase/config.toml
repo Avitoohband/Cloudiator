@@ -37,3 +37,6 @@ enable_signup = false
 # Command verification additionally requires a verified Google identity, even locally.
 [functions.game-command]
 verify_jwt = true
+# The handler checks an explicit server-only worker secret; JWTs and publishable keys are not authorization.
+[functions.game-worker]
+verify_jwt = false

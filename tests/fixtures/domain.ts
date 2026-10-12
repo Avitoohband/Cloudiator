@@ -22,7 +22,7 @@ export const ownerFixture: OwnerState = {
 export const worldFixture: WorldSnapshot = {
   revision: 'fixture-1', serverNowMs: 1791592800000, slotIndex: 373248,
   actors: [{ gladiatorId: ownerFixture.gladiatorId, name: 'Aster', classId: 'guardian',
-    equipmentSilhouettes: [], league: 'bronze', level: 1, phase: 'morning', location: 'Practice yard',
+    equipmentSilhouettes: [], league: 'bronze', level: 1, phase: 'morning', location: 'training',
     activityId: ownerFixture.currentActivity!.id, activityStatus: 'active',
     startsAtMs: 1791590400000, endsAtMs: 1791595200000, visibleStage: null }],
 };

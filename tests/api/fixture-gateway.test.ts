@@ -27,6 +27,7 @@ test('fixture public actors omit private owner management state', async () => {
   expect(world.actors).toHaveLength(1);
   const actor = world.actors[0];
   expect(actor.name).toBe('Aster');
+  expect(actor.location).toBe('training');
   for (const field of ['ownerId', 'wallets', 'inventory', 'schedule', 'seed', 'encounterPlan']) {
     expect(actor).not.toHaveProperty(field);
   }

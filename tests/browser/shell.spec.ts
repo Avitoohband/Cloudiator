@@ -15,11 +15,15 @@ test('management shell labels local fixture data and exposes an accessible sched
   await page.screenshot({ path: testInfo.outputPath('fixture-shell.png'), fullPage: true });
 });
 
-test('normal entry makes unavailable authentication explicit without pretending to save progress', async ({ page }, testInfo) => {
+test('normal entry exposes Google sign-in with an explicit configuration state', async ({ page }, testInfo) => {
   await page.goto('/game/');
   await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeDisabled();
-  await expect(page.getByText('Google sign-in is not connected yet.')).toBeVisible();
+  if (production) {
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeDisabled();
+    await expect(page.getByText('Google sign-in is unavailable until the project is configured.')).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeEnabled();
+  }
   await expect(page.getByText('Fixture mode — progress is not saved online')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('normal-shell.png'), fullPage: true });
 });
@@ -30,4 +34,13 @@ test('production refuses fixture mode even when requested in the URL', async ({ 
   await expect(page.getByText('Fixture preview is unavailable in this build.')).toBeVisible();
   await expect(page.getByText('Fixture mode — progress is not saved online')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
+});
+
+test('static callback safely handles a canceled OAuth return without an application server', async ({ page }) => {
+  test.skip(!production, 'Checks the exported fixed callback route.');
+  await page.goto('/auth/callback/?error=access_denied&error_description=Untrusted%20text&next=https://example.invalid/');
+  await expect(page.locator('p[role=alert]')).toContainText('was canceled');
+  await expect(page.getByText('Untrusted text')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Return to the camp' })).toHaveAttribute('href', '/game/');
+  await expect(page).toHaveURL(/\/auth\/callback\/$/);
 });

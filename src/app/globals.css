@@ -109,3 +109,19 @@ progress::-moz-progress-bar { background: #7dbfa2; }
   .game-footer { flex-direction: column; gap: .3rem; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
+.creation-form { border-top: 1px solid var(--line); padding-top: 1rem; }
+.creation-form fieldset { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
+.creation-form legend { font-weight: 700; margin-bottom: .5rem; }
+.creation-form label { display: block; font-size: .85rem; }
+.creation-form input:not([type="radio"]) { width: 100%; min-width: 0; color: var(--ink); background: #111b2d; border: 1px solid var(--line); padding: .6rem; font: inherit; min-height: 44px; }
+.creation-form input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.creation-form .class-options label { display: flex; align-items: center; min-height: 44px; gap: .5rem; }
+.creation-form .point-options label { display: grid; grid-template-columns: minmax(0, 1fr) 65px; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+.creation-preview { background: #111b2d; padding: .8rem; }
+.creation-preview h4 { margin: 0 0 .5rem; }
+.creation-preview dl { margin: 0; }
+.creation-preview dl div { display: flex; flex-wrap: wrap; justify-content: space-between; font-size: .8rem; gap: .5rem; }
+.creation-preview dd { margin: 0; font-weight: 700; color: var(--gold); }
+.creation-preview p { margin: .7rem 0 0; }
+.form-error { color: #ffd0bb; }
+.signout-button { color: var(--ink); background: var(--panel); border: 1px solid var(--line); min-height: 44px; padding: .5rem; font-size: .8rem; }

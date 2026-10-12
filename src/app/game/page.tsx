@@ -9,6 +9,8 @@ import { createLiveGateway, GatewayReadError } from '../../lib/api/gateway';
 import { signOut, useSession } from '../../lib/api/session';
 import { SignIn } from '../../features/auth/SignIn';
 import { CreateCharacter } from '../../features/character/CreateCharacter';
+import { SchedulePanel } from '../../features/schedule/SchedulePanel';
+import { BuildPanel } from '../../features/build/BuildPanel';
 
 const panels = ['Schedule', 'Gladiator', 'Inventory', 'Marketplace', 'Standings', 'Tournaments', 'Results'] as const;
 type Panel = typeof panels[number];
@@ -68,6 +70,12 @@ function GameShell() {
 
   const visibleOwner = fixture ? owner : session.status === 'signed-in' && liveOwner?.account === session.userId ? liveOwner.value : null;
   const noCharacter = session.status === 'signed-in' && liveOwner?.account === session.userId && liveOwner.value === null;
+  async function refreshPlanning() {
+    const account = session.userId;
+    const request = ++ownerReadRevision.current;
+    const value = await gateway.owner();
+    if (account && request === ownerReadRevision.current) setLiveOwner({ account, value });
+  }
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
@@ -118,7 +126,9 @@ function GameShell() {
           {panels.map((name) => <button key={name} aria-pressed={panel === name} aria-controls="management-panel" onClick={() => setPanel(name)}>{name}</button>)}
         </nav>
         <div id="management-panel" className="panel-content">
-          {panel === 'Schedule' ? <>
+          {!fixture && visibleOwner && panel === 'Schedule' ? <SchedulePanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
+            : !fixture && visibleOwner && panel === 'Gladiator' ? <BuildPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
+              : panel === 'Schedule' ? <>
             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>
             <div className="schedule-grid">{(['morning', 'afternoon', 'evening'] as Phase[]).map((phase, index) => {

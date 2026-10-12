@@ -2,7 +2,7 @@ import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId,
 import type { ActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
 
 export type BuildView = { version: number; classId: ClassId; stance: Stance; allocations: Attributes; equipment: Equipment };
-export type PendingBuildView = { build: BuildView; effectiveSlotIndex: number; reservedMoney: number; operationId: string };
+export type PendingBuildView = { build: BuildView; effectiveSlotIndex: number; reservedMoney: number; reservedItemIds: string[]; operationId: string };
 export type ItemInstance = {
   id: string; ownerId: GladiatorId; catalogId: string; catalogVersion: string;
   tier: 1 | 5 | 10; rarity: ItemRarity; stats: ItemStats; quantity: number;
@@ -19,6 +19,8 @@ export type CurrentActivity = {
 export type OwnerState = {
   gladiatorId: GladiatorId; name: string;
   currentBuild: BuildView; pendingBuild: PendingBuildView | null;
+  /** Monotonic queue/replace/cancel revision; currentBuild.version changes only on activation. */
+  buildVersion: number;
   schedule: Schedule; scheduleVersion: number;
   wallets: { money: number; renown: number }; reservedFees: { money: number; renown: number };
   inventory: ItemInstance[]; inventoryCapacity: number;

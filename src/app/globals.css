@@ -125,3 +125,12 @@ progress::-moz-progress-bar { background: #7dbfa2; }
 .creation-preview p { margin: .7rem 0 0; }
 .form-error { color: #ffd0bb; }
 .signout-button { color: var(--ink); background: var(--panel); border: 1px solid var(--line); min-height: 44px; padding: .5rem; font-size: .8rem; }
+.planning-form label { display: block; margin: .6rem 0; text-transform: capitalize; }
+.planning-form select, .planning-form input { display: block; width: 100%; min-width: 0; min-height: 44px; padding: .5rem; margin-top: .3rem; color: var(--ink); background: #111b2d; border: 1px solid var(--line); font: inherit; }
+.planning-form button { min-height: 44px; padding: .6rem 1rem; }
+.planning-form fieldset { min-width: 0; border: 1px solid var(--line); margin: 1rem 0; padding: 1rem; }
+.planning-form :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.build-comparison { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,250px),1fr)); gap: 1rem; }
+.build-comparison section { background: #111b2d; padding: 1rem; }
+.build-comparison dl div { display: flex; justify-content: space-between; text-transform: capitalize; }
+.build-points { display: grid; grid-template-columns: repeat(auto-fit,minmax(115px,1fr)); gap: .8rem; }

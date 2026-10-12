@@ -23,7 +23,7 @@ Tasks 1–6, 11 and 12 passed independent specification and quality review.
   - fixes the last Task 12 Minor;
   - re-verifies all suites.
 - M01 and M02 are committed and immutable.
-- **Next: Task 7** (ordered boundaries, Training/Rest, fenced job recovery). Claude starts it from the plan, Codex's saved brief `.superpowers/sdd/2026-10-11-gladiator-arena-implementation/task-7-brief.md`, and Codex's uncommitted Task 7 files, all read-only.
+- **Next: Task 7** (ordered boundaries, Training/Rest, fenced job recovery). Claude starts it from the plan and from Codex's saved brief, which is ignored and exists only in Codex's checkout: `C:\Avi\Studies\Projects\Cloudiator\.superpowers\sdd6-10-11-gladiator-arena-implementation	ask-7-brief.md`. Codex's uncommitted Task 7 files in that same checkout are also used, all read-only.
 - Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.
@@ -121,7 +121,7 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - `npm test`: 219 passed.
 - `npm run typecheck`: tsc, frozen Deno check and Deno test all pass.
 - `npm run test:db`: 26 passed.
-- `npm run build` and `npm run verify:static`: 3 routes, 69 assets, no forbidden material.
+- `npm run build` and `npm run verify:static`: 3 routes, 69 assets, no forbidden material. The 69 assets include two lazy chunks that the fixture-only camp import makes Turbopack emit: Phaser, about 1.37 MB, and the atlas data, about 0.73 MB. The production `game/index.html` never loads them, so they cost only deploy size. Task 13 will load them in live mode.
 - Development Playwright, desktop and mobile: 63 passed, 5 skipped. This includes the shell, identity, planning and camp suites.
 - Isolated production gate (`CLOUDIATOR_BROWSER_TEST=true` build, `verify:static -- .next/browser-test`, `PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test` with shell and camp): 6 passed. The rest are skipped by design: the camp is fixture-only, plus the 2 shell skips.
 - A broader production run, which also included the identity and planning suites, failed 7 tests. Those suites need the development-only test identity transport and are not part of the production gate (Task 5 report). That run is excluded from evidence.

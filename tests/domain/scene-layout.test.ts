@@ -391,8 +391,9 @@ describe('scene bridge', () => {
   });
 
   it('drops a refusal queued by a scene that is disposed before it is sent', async () => {
-    // Unmount and remount on one bridge: the old scene refuses a follow, is disposed, and a replacement
-    // may accept a follow before microtasks drain. The old scene's queued null must never arrive.
+    // On unmount the old scene can be disposed with a refusal still queued. If that null arrived, it
+    // would cancel a follow that a replacement scene on the same bridge had just accepted. This pins
+    // the guard: a disposed scene sends nothing.
     const bridge = createSceneBridge();
     const P = { Scene: class { constructor(_config: unknown) {} } } as unknown as typeof import('phaser');
     const old = createCampScene(P, { manifest, atlasData: {}, assetBase: '/assets/', world: null, bridge, now: () => 0, onReady() {}, onError() {} });

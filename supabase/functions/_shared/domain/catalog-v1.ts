@@ -1,4 +1,4 @@
-import { freezeDomain, type CatalogItem, type Expedition, type EquipmentSlot } from './types.ts';
+import { freezeDomain, type CatalogItem, type Expedition, type EquipmentSlot, type SalvageEntry } from './types.ts';
 import { RULES_V1 } from './rules-v1.ts';
 
 const templates: { id: string; name: string; slot: EquipmentSlot; hands: 0 | 1 | 2;
@@ -49,5 +49,9 @@ const expeditions: Record<'woodland' | 'outpost' | 'mountain', Expedition> = {
     enemy: { name: 'Dangerous creature', maxHp: 140, damage: 18, intervalMs: 1000, armor: 0, stance: 'balanced',
       attributes: { strength: 20, agility: 16, vitality: 14, endurance: 16, precision: 16 } } },
 };
-/** Variant IDs: template:tier:rarity, or template:tier:renown. */
-export const CATALOG_V1 = freezeDomain({ version: 'v1', items, expeditions });
+/** The single stackable expedition material: no equipment slot, sold to NPCs per unit, stacked up to the rules limit. */
+const salvage: SalvageEntry = { id: 'salvage', name: 'Salvage', tier: 1, rarity: 'common', binding: 'tradable',
+  stats: { damage: 0, armor: 0, weight: 0, intervalMs: 0, attributes: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 } },
+  stackLimit: RULES_V1.inventory.salvageStack, npcSellValue: RULES_V1.inventory.salvageSellValue };
+/** Variant IDs: template:tier:rarity, or template:tier:renown. Salvage is separate from equipment items. */
+export const CATALOG_V1 = freezeDomain({ version: 'v1', items, expeditions, salvage });

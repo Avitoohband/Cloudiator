@@ -22,6 +22,14 @@ function scan(directory: string) {
 test('scanner accepts a complete clean static export', () => {
   expect(scan(exportedSite()).status).toBe(0);
 });
+
+test('production config rejects the explicitly test-only identity key', () => {
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', '-e', "import('./next.config.ts')"], {
+    encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser_test_only' },
+  });
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('Test identity transport cannot be included in a production export');
+});
 test('scanner refuses a missing fixed route', () => {
   const directory = exportedSite();
   rmSync(join(directory, 'game/index.html'));

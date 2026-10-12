@@ -1,10 +1,14 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { OwnerState } from '@contracts/reads';
 import type { Phase } from '@contracts/commands';
+import { createLiveGateway, GatewayReadError } from '../../lib/api/gateway';
+import { signOut, useSession } from '../../lib/api/session';
+import { SignIn } from '../../features/auth/SignIn';
+import { CreateCharacter } from '../../features/character/CreateCharacter';
 
 const panels = ['Schedule', 'Gladiator', 'Inventory', 'Marketplace', 'Standings', 'Tournaments', 'Results'] as const;
 type Panel = typeof panels[number];
@@ -16,6 +20,40 @@ function GameShell() {
   const [owner, setOwner] = useState<OwnerState | null>(null);
   const [panel, setPanel] = useState<Panel>('Schedule');
   const [previewError, setPreviewError] = useState(false);
+  const session = useSession();
+  const [gateway] = useState(createLiveGateway);
+  const [liveOwner, setLiveOwner] = useState<{ account: string; value: OwnerState | null } | null>(null);
+  const [ownerError, setOwnerError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [signOutError, setSignOutError] = useState(false);
+  const ownerReadRevision = useRef(0);
+
+  useEffect(() => {
+    if (fixture || session.status !== 'signed-in' || !session.userId) {
+      ownerReadRevision.current++;
+      setLiveOwner(null); setOwnerError(false);
+      return;
+    }
+    const account = session.userId;
+    let active = true;
+    async function load() {
+      const request = ++ownerReadRevision.current;
+      setOwnerError(false);
+      try {
+        const value = await gateway.owner();
+        if (active && request === ownerReadRevision.current) setLiveOwner({ account, value });
+      } catch (error) {
+        if (!active || request !== ownerReadRevision.current) return;
+        if (error instanceof GatewayReadError && error.code === 'not-found') setLiveOwner({ account, value: null });
+        else { setLiveOwner(null); setOwnerError(true); }
+      }
+    }
+    const refresh = () => { if (document.visibilityState === 'visible') void load(); };
+    void load();
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { active = false; window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [fixture, gateway, session.status, session.userId, reload]);
 
   useEffect(() => {
     let active = true;
@@ -28,11 +66,14 @@ function GameShell() {
     return () => { active = false; };
   }, [fixture]);
 
-  const visibleOwner = fixture ? owner : null;
+  const visibleOwner = fixture ? owner : session.status === 'signed-in' && liveOwner?.account === session.userId ? liveOwner.value : null;
+  const noCharacter = session.status === 'signed-in' && liveOwner?.account === session.userId && liveOwner.value === null;
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
-      <div className="world-status"><span className="status-dot" aria-hidden="true" />{fixture ? 'LOCAL PREVIEW' : 'CAMP UNDER CONSTRUCTION'}</div>
+      <div className="world-status"><span className="status-dot" aria-hidden="true" />{fixture ? 'LOCAL PREVIEW' : 'CAMP UNDER CONSTRUCTION'}
+        {!fixture && session.status === 'signed-in' && <button className="signout-button" onClick={() => { setSignOutError(false); void signOut().catch(() => setSignOutError(true)); }}>Sign out</button>}
+      </div>
     </header>
     {fixture && <p className="fixture-banner" role="status">Fixture mode — progress is not saved online</p>}
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
@@ -51,19 +92,25 @@ function GameShell() {
           <div><strong>Afternoon</strong><span>80 minutes</span></div>
           <div><strong>Evening</strong><span>80 minutes</span></div>
         </div>
-        <p className="muted world-note">{fixture ? 'Sample activity and balances. The preview clock does not advance.' : 'World time and activity will appear after sign-in is connected.'}</p>
+        <p className="muted world-note">{fixture ? 'Sample activity and balances. The preview clock does not advance.' : visibleOwner ? 'The shared world view is under construction. Your character is saved online.' : 'Sign in with Google to create a gladiator. The shared world view is under construction.'}</p>
       </section>
       <aside className="fighter-card" aria-labelledby="fighter-heading">
         <p className="eyebrow">YOUR GLADIATOR</p>
         <h2 id="fighter-heading">{visibleOwner?.name ?? 'A legend awaits'}</h2>
-        <p className="fighter-class">{visibleOwner ? `${visibleOwner.currentBuild.classId} · Level ${visibleOwner.progression.level} · Bronze league` : 'One fighter. Your choices.'}</p>
+        <p className="fighter-class">{visibleOwner ? `${visibleOwner.currentBuild.classId} · Level ${visibleOwner.progression.level} · ${visibleOwner.progression.league} league` : 'One fighter. Your choices.'}</p>
         {visibleOwner ? <>
-          <div className="activity-box"><span className="eyebrow">SAMPLE ACTIVITY</span><p>{visibleOwner.currentActivity?.label ?? 'At camp'}</p></div>
+          <div className="activity-box"><span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span><p>{visibleOwner.currentActivity?.label ?? 'At camp'}</p></div>
           <label className="stamina-label" htmlFor="stamina">Stamina <span>{visibleOwner.stamina.current} / {visibleOwner.stamina.maximum}</span></label>
           <progress id="stamina" value={visibleOwner.stamina.current} max={visibleOwner.stamina.maximum} />
           <dl className="wallets"><div><dt>Money</dt><dd>{visibleOwner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{visibleOwner.wallets.renown}</dd></div></dl>
-          <p className="muted">Local sample character. No account is signed in.</p>
-        </> : <div className="welcome"><h3>Your story starts here</h3><p>Manage one gladiator and make a plan for each shared game day.</p><button className="primary-button" disabled>Continue with Google</button><p className="muted">Google sign-in is not connected yet.</p></div>}
+          <p className="muted">{fixture ? 'Local sample character. No account is signed in.' : 'Your first full activity begins at the next shared slot boundary.'}</p>
+        </> : !fixture && <>
+          {session.status === 'loading' ? <p role="status">Checking your session…</p> : session.status !== 'signed-in' ? <SignIn available={session.status === 'signed-out'} />
+            : ownerError ? <><p role="alert">Your character could not be loaded. Please retry before creating a gladiator.</p><button onClick={() => setReload(value => value + 1)}>Retry owner load</button></>
+              : !noCharacter ? <p role="status">Loading your gladiator…</p> : null}
+          {(noCharacter || session.status === 'signed-out' || session.status === 'unavailable') && <CreateCharacter key={session.userId ?? 'signed-out'} gateway={gateway} onCreated={value => { ownerReadRevision.current++; if (session.userId) setLiveOwner({ account: session.userId, value }); }} />}
+        </>}
+        {signOutError && <p role="alert">Sign-out could not be completed. Please try again.</p>}
         {fixture && !owner && <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
       </aside>
       <section className="management" aria-label="Gladiator management">
@@ -72,15 +119,15 @@ function GameShell() {
         </nav>
         <div id="management-panel" className="panel-content">
           {panel === 'Schedule' ? <>
-            <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? 'Sample plan' : 'Preview only'}</span></div>
+            <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>
             <div className="schedule-grid">{(['morning', 'afternoon', 'evening'] as Phase[]).map((phase, index) => {
               const choice = visibleOwner?.schedule[phase];
               const title = choice ? choice.kind === 'expedition' ? 'Expedition' : choice.kind : 'Awaiting character';
-              return <article className={`schedule-slot slot-${index}`} key={phase}><span className="eyebrow">{phase}</span><h3>{title}</h3><p>{choice?.kind === 'expedition' ? 'Woodland Path' : choice?.kind === 'training' ? 'Practice yard' : choice?.kind === 'rest' ? 'Recover stamina' : 'Sign-in is not connected'}</p><span className="slot-duration">80-minute slot</span></article>;
+              return <article className={`schedule-slot slot-${index}`} key={phase}><span className="eyebrow">{phase}</span><h3>{title}</h3><p>{choice?.kind === 'expedition' ? 'Woodland Path' : choice?.kind === 'training' ? 'Practice yard' : choice?.kind === 'rest' ? 'Recover stamina' : 'Create your gladiator to begin'}</p><span className="slot-duration">80-minute slot</span></article>;
             })}</div>
-            <p className="panel-notice">This preview cannot save schedule changes.</p>
-          </> : <><p className="eyebrow">MANAGEMENT</p><h2>{panel}</h2><p className="panel-notice">{panel} is not available in this build. Online play is not connected yet.</p></>}
+            <p className="panel-notice">{fixture ? 'This preview cannot save schedule changes.' : 'Schedule editing is not available in this build.'}</p>
+          </> : <><p className="eyebrow">MANAGEMENT</p><h2>{panel}</h2><p className="panel-notice">{panel} is not available in this build.</p></>}
         </div>
       </section>
     </main>

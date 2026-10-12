@@ -7,7 +7,7 @@ export default function Home() {
     <h1>A life beyond<br /><em>the arena.</em></h1>
     <p className="lead">Plan your days. Forge your fighter. Follow a shared fantasy world, one adventure at a time.</p>
     <Link className="primary-link" href="/game/">Enter the camp <span aria-hidden="true">→</span></Link>
-    <p className="muted">The camp is under construction. Online play is not connected yet.</p>
+    <p className="muted">Sign in with Google and create your gladiator. The shared camp is under construction.</p>
     <div className="landing-cards">
       <article><span className="card-number">01</span><h2>Choose your path</h2><p>A berserker, guardian, or duelist. Your weapon. Your style.</p></article>
       <article><span className="card-number">02</span><h2>Make every day count</h2><p>Training, expeditions, arena battles, and well-earned rest.</p></article>

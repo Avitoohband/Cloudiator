@@ -28,9 +28,11 @@ export type OwnerState = {
   currentActivity: CurrentActivity | null;
 };
 /** Whitelisted public projection: never spread an OwnerState into this shape. */
+export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena' | 'tournament' | 'expedition:woodland' | 'expedition:outpost' | 'expedition:mountain';
+export type EquipmentSilhouette = 'weapon-sword' | 'weapon-axe' | 'weapon-spear' | 'weapon-bow' | 'offhand-shield' | 'armor-light' | 'armor-heavy' | 'head-hood' | 'head-helmet' | 'feet-light' | 'feet-heavy';
 export type PublicActor = {
-  gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: string[];
-  league: LeagueId; level: number; phase: Phase; location: string;
+  gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: EquipmentSilhouette[];
+  league: LeagueId; level: number; phase: Phase; location: CampLocation;
   activityId: ActivityId | null; activityStatus: CurrentActivity['status'] | 'idle';
   startsAtMs: number | null; endsAtMs: number | null; visibleStage: RevealedStage | null;
 };

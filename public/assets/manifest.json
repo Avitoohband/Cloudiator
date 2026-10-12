@@ -2647,8 +2647,8 @@
   },
   {
    "file": "actors/creatures.png",
-   "sha256": "2e12db675934269a2dc3eaa80d1244f974cee2d984e48f5324869063d0497359",
-   "bytes": 46861,
+   "sha256": "7fb9aafcfbc924f5066edbe8c38e4d084eee21fb76aec00a2a61b7ff7e38997a",
+   "bytes": 46790,
    "source": "generated",
    "generator": "assets/source/generators/creatures.mjs",
    "inputs": [
@@ -2687,8 +2687,8 @@
   },
   {
    "file": "actors/gladiators.png",
-   "sha256": "efb9952383968f8af06bfb6754d00297457248d856bf2e54a62c6e9094d3cb1e",
-   "bytes": 133330,
+   "sha256": "9f4d3fdfb9ef429548dd7bd06d7eef4cd8c607430ee4b2828d6c32e4fee54450",
+   "bytes": 133315,
    "source": "generated",
    "generator": "assets/source/generators/gladiator.mjs",
    "inputs": [

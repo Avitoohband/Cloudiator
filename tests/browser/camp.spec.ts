@@ -7,6 +7,7 @@ import { locationKind } from '../../src/game/actors';
 import { NPC_ROUTINES, npcPostTiles, planNpcPosition } from '../../src/game/npcs';
 import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
+import { createDemoWorld } from '../../src/game/demo-world';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -103,10 +104,32 @@ test.describe('living isometric camp', () => {
     expect((await campState(page)).actors.some(a => a.id === ownerId)).toBe(false);
     await expect(find).toBeDisabled();
     await expect(follow).toBeDisabled();
-    // The scene refuses a follow it cannot apply, and the toggle reflects what the scene did.
+    // The scene refuses a follow it cannot apply, and the toggle reflects what the scene did,
+    // even once the owner comes back.
     await page.evaluate(id => window.__cloudiatorCamp!.emit('follow-character', { gladiatorId: id }), ownerId);
     expect((await campState(page)).following).toBeNull();
+    await page.evaluate(id => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, actors: world.actors.map(a => (a.gladiatorId === id ? { ...a, location: 'training' as const } : a)) });
+    }, ownerId);
+    await expect(follow).toBeEnabled();
     await expect(follow).toHaveAttribute('aria-pressed', 'false');
+    expect((await campState(page)).following).toBeNull();
+  });
+
+  test('draws a full 50-gladiator camp, each on its own tile', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' }); // arrivals take their places at once
+    await openCamp(page);
+    const serverNowMs = await page.evaluate(() => window.__cloudiatorCamp!.world()!.serverNowMs);
+    const full = createDemoWorld(serverNowMs, 50, 0);
+    await page.evaluate(world => window.__cloudiatorCamp!.setWorld(world), full);
+    const state = await campState(page);
+    expect(state.players).toBe(50);
+    expect(state.away).toBe(0);
+    const players = state.actors.filter(a => a.kind === 'player');
+    expect(players.every(a => !a.walking)).toBe(true);
+    expect(new Set(players.map(a => `${Math.floor(a.x)},${Math.floor(a.y)}`)).size).toBe(50);
   });
 
   test('keeps the camera inside the map after panning far beyond its edges', async ({ page }) => {
@@ -148,8 +171,9 @@ test.describe('living isometric camp', () => {
     await page.mouse.wheel(120, 0); // horizontal scroll never zooms
     await nextFrames(page);
     expect(await zoom()).toBeCloseTo(1, 5);
-    for (let i = 0; i < 8; i += 1) await page.mouse.wheel(0, -12); // small trackpad deltas accumulate
-    await nextFrames(page);
+    // Small trackpad deltas accumulate. Phaser handles wheel events as they arrive, so the checks
+    // read the camera at once and stay well inside the 250 ms gesture window.
+    for (let i = 0; i < 8; i += 1) await page.mouse.wheel(0, -12);
     expect(await zoom()).toBeCloseTo(1, 5);
     await page.mouse.wheel(0, -12);
     await nextFrames(page);

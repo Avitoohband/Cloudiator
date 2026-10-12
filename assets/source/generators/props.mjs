@@ -335,7 +335,7 @@ function gateArch() {
   const { c, m, g } = P;
   // Seated between the pillars' inner faces, below their braziers.
   const a = up(g(0.5, -0.15), 44);
-  const b = up(g(0.5, 3), 44); // ends at the near pillar's hidden face, never over its top
+  const b = up(g(0.5, 3), 44); // ends at the near pillar's hidden face; at 1x it just meets the top corner
   c.stamp(m().polygon([a, b, add(b, [0, 7]), add(a, [0, 7])]), planks('wood1', 'wood2', 'wood3', 7));
   const mid = lerp(a, b, 0.5);
   c.stamp(m().polygon([add(mid, [-9, 8]), add(mid, [9, 8]), add(mid, [9, 30]), add(mid, [0, 25]), add(mid, [-9, 30])]), shade('teal1', 'teal2', 'teal3'));

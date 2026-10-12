@@ -121,8 +121,8 @@ The second scoped re-review confirmed the rest, and found that the arena fix was
 | Arena claims in this document were not backed | Important | Fixed with the above. The depth probe now shows inside walkers fully over the back wall. |
 | One-tile props tied with neighbouring actors | Minor | Fixed. `TIE_BIAS` now applies to one-tile props in both depth files, with a test. |
 | `manifest.depthRule` and the asset README were stale | Minor | Fixed. Both now describe explicit slices, the per-column rule and the bias. |
-| The border test skipped the second-to-last row; 7 frames (heavy armour lying down, the dropped axe) lost their bottom outline | Minor | Fixed. The test checks all four inner edges. Lying bodies sit 2px higher, and the dropped axe is lifted so its head stays whole. |
-| The gate beam's near end overdrew the near pillar's top | Minor | Fixed. It ends at that pillar's hidden face. |
+| The border test skipped the second-to-last row; 7 frames (heavy armour lying down, the dropped axe) lost their bottom outline | Minor | Fixed. The test checks all four inner edges. Lying bodies sit 1px higher (bare bodies still rest on the ground line, at row 58), and the dropped axe is lifted so its head stays whole. |
+| The gate beam's near end overdrew the near pillar's top | Minor | Improved: the beam now ends at that pillar's hidden face, which halves the overlap. At 1× it just meets the pillar's top corner; accepted as cosmetic in the third re-review. |
 | The troll's dropped club was hidden under its body | Minor | Fixed. Dropped creature tools lie along the front of the fallen body. |
 
 ## Deferred to Task 14: close-up battle view

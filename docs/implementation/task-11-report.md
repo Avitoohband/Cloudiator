@@ -94,7 +94,7 @@ No shared files or dependencies were changed. The PNG codec is a small zlib-base
 ## Verification (2026-10-12, worktree at `ddb9bec`)
 
 ```text
-npm test                                      10 files, 217 passed (tests/assets 33)
+npm test                                      10 files, 218 passed (tests/assets 33)
 npm run typecheck                             tsc clean; Deno check and Deno test 1 passed
 node assets/source/build-assets.mjs --check   assets up to date (26 files)
 node assets/source/tools/review-sheets.mjs    13 images; committed copies match

@@ -55,7 +55,6 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
   const frozenAt = useRef<number | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [following, setFollowing] = useState(false);
-  const [ownerInCamp, setOwnerInCamp] = useState(false);
   const statusId = useId();
 
   useEffect(() => { focus.current = focusGladiatorId; }, [focusGladiatorId]);
@@ -77,7 +76,9 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
 
   useEffect(() => bridge.on('follow-character', ({ gladiatorId }) => setFollowing(!!gladiatorId && gladiatorId === focus.current)), [bridge]);
   // Find and Follow only make sense while the owner is drawn in camp (not away, not before the scene is ready).
-  useEffect(() => bridge.on('roster', ({ inCamp }) => setOwnerInCamp(!!focus.current && inCamp.includes(focus.current))), [bridge]);
+  const [inCamp, setInCamp] = useState<readonly string[]>([]);
+  useEffect(() => bridge.on('roster', roster => setInCamp(roster.inCamp)), [bridge]);
+  const ownerInCamp = !!focusGladiatorId && inCamp.includes(focusGladiatorId);
 
   useEffect(() => {
     let cancelled = false;

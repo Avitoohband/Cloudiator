@@ -48,7 +48,7 @@ Status: **DONE_WITH_CONCERNS**. Implemented, fixed after independent review, and
 - The camera always stays inside the map bounds. It opens on the owner's gladiator, given by `focusGladiatorId`.
 - The **Find** and **Follow** buttons centre on and follow the owner. They are disabled while the owner is not in camp.
 - A press becomes a drag only after 6px, so a jittery click keeps a follow going. Dragging ends a follow.
-- The scene answers any follow it cannot apply, so the toggle's `aria-pressed` always matches what the scene is doing.
+- The scene answers any follow it cannot apply, after every listener has seen the request, so the toggle's `aria-pressed` always matches what the scene is doing.
 - Ctrl, Meta and Alt shortcuts are left to the browser.
 
 **Depth and occlusion**
@@ -71,7 +71,7 @@ Status: **DONE_WITH_CONCERNS**. Implemented, fixed after independent review, and
 - The fps targets themselves are Task 23.
 
 **Failure paths**
-- Without WebGL, failed art, or a runtime error in `update()`: the viewport shows a readable fallback, management panels stay usable, and `scene-unavailable` is emitted once, deferred so that panels subscribed later still hear it.
+- Without WebGL, failed art, or a runtime error in `update()`: the viewport shows a readable fallback, management panels stay usable, and `scene-unavailable` is emitted once. It is deferred, so panels mounting in the same commit still hear it.
 - The WebGL probe context is released.
 
 **Lifecycle**
@@ -122,18 +122,19 @@ No shared files, dependencies or configs were changed.
 ## Verification (2026-10-12, final commit plus the R2 page change)
 
 ```text
-npm test                         10 files, 217 passed (scene-layout 31, assets 33)
+npm test                         10 files, 218 passed (scene-layout 32, assets 33)
 npm run typecheck                tsc clean; Deno check and Deno test 1 passed
 npm run build                    compiled; static routes /, /_not-found, /auth/callback, /game
 npm run verify:static            3 fixed routes; 69 assets scanned; no forbidden backend material
 node assets/source/build-assets.mjs --check   assets up to date (26 files)
 npx playwright test -c <private config, port 3200, repo env>
-                                 55 passed, 5 skipped. Camp: 16 tests x desktop and mobile = 31 passed
+                                 57 passed, 5 skipped. Camp: 17 tests x desktop and mobile = 33 passed
                                  plus the desktop-only pinch skip. Codex's shell and identity suites are included.
 ```
 
 The camp browser tests check real behaviour:
 - each gladiator's zone and tile bounds for its location, and no gladiator on an NPC post;
+- a full 50-gladiator camp, each gladiator on its own tile;
 - opening on the owner, and Find, Follow and drag;
 - camera bounds;
 - fixed zoom steps from the buttons, keys and wheel, with browser shortcuts left alone;
@@ -161,7 +162,7 @@ Evidence screenshots are committed in `docs/implementation/task-12-evidence/`:
 - The 60 fps desktop and 30 fps mobile targets are unmeasured (Task 23).
 - `assets.ts` inlines every atlas and map JSON (about 50 KB gzip in total, of which the camp is about 31 KB). Splitting it per scene is left for Tasks 14 and 15, when those scenes load.
 - The expedition-gate click target has no bridge event yet; Task 15 adds one with the expedition view.
-- Diagonal steps move at the same world speed as straight ones, so they look about 37% slower on screen (isometric projection).
+- Every step moves at the same world speed, so on screen (isometric projection) grid diagonals look different from straight steps: (1,1) steps look about 37% slower and (1,−1) steps about 26% faster.
 - Before Task 13 wires up the live world:
   - the scene clock re-anchors on every snapshot (live mode should use the shared sync clock);
   - `scene-unavailable` is an event only, so a panel that mounts later needs a status query.

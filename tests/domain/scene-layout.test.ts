@@ -379,6 +379,17 @@ describe('scene bridge', () => {
     expect(bridge.listenerCount()).toBe(0);
   });
 
+  it('answers a refused follow after the request, so later subscribers end on the true state', async () => {
+    const bridge = createSceneBridge();
+    const P = { Scene: class { constructor(_config: unknown) {} } } as unknown as typeof import('phaser');
+    createCampScene(P, { manifest, atlasData: {}, assetBase: '/assets/', world: null, bridge, now: () => 0, onReady() {}, onError() {} });
+    const seen: (string | null)[] = [];
+    bridge.on('follow-character', ({ gladiatorId }) => seen.push(gladiatorId));
+    bridge.emit('follow-character', { gladiatorId: 'g1' }); // the scene is not ready, so it cannot follow
+    await Promise.resolve();
+    expect(seen).toEqual(['g1', null]);
+  });
+
   it('supports every scene event the plan names', () => {
     const bridge = createSceneBridge();
     const seen: string[] = [];

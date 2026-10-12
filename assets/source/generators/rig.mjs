@@ -86,8 +86,8 @@ export function skeleton(rawPose, view, scale = 1) {
   } else {
     const lowest = Math.max(p.nearAnkle[1] + 1.5 * s, p.farAnkle[1] + 1.5 * s, p.head[1] + DIMS.headRy * s, p.neck[1] + 2 * s, p.nearHand[1] + 1.5 * s, p.farHand[1] + 1.5 * s);
     const lowestLegs = Math.max(p.nearAnkle[1], p.farAnkle[1]) + 1.5 * s;
-    // Lying bodies sit 2px higher so heavy-armour bulk keeps clear of the frame's bottom border.
-    dy = GROUND - (pose.rotate ? lowest + 2 : lowestLegs);
+    // Lying bodies sit 1px higher so heavy-armour bulk keeps clear of the frame's bottom border.
+    dy = GROUND - (pose.rotate ? lowest + 1 : lowestLegs);
   }
   dy -= pose.air;
   let dx = ANCHOR.x + pose.shiftX;

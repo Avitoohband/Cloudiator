@@ -645,7 +645,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   }
 
   function dragged(pointer: PhaserNS.Input.Pointer): boolean {
-    return P.Math.Distance.Between(pointer.downX, pointer.downY, pointer.upX, pointer.upY) > 6;
+    return P.Math.Distance.Between(pointer.downX, pointer.downY, pointer.upX, pointer.upY) > DRAG_THRESHOLD;
   }
 
   const scene = new CampScene();
@@ -677,8 +677,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         following = applied;
         if (applied) selected = applied;
       }
-      // Answer a refused request with what was applied, so UI toggles never show a follow that is not happening.
-      if (gladiatorId && !applied) deps.bridge.emit('follow-character', { gladiatorId: null });
+      // Answer a refused request with what was applied, so UI toggles never show a follow that is not
+      // happening. The answer waits until every listener has seen the request, and is dropped if a
+      // later request was accepted meanwhile.
+      if (gladiatorId && !applied) queueMicrotask(() => { if (!following) deps.bridge.emit('follow-character', { gladiatorId: null }); });
     }),
   ];
 

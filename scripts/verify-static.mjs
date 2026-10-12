@@ -3,7 +3,7 @@ import { join, relative, resolve } from 'node:path';
 
 const root = resolve(process.argv[2] ?? 'out');
 const failures = [];
-for (const route of ['index.html', 'game/index.html', 'auth/callback/index.html']) {
+for (const route of ['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html']) {
   if (!existsSync(join(root, route))) failures.push(`Missing fixed route: ${route}`);
 }
 const forbidden = [
@@ -33,5 +33,5 @@ if (failures.length) {
   console.error(failures.join('\n'));
   process.exitCode = 1;
 } else {
-  console.log(`Static export verified: 3 fixed routes; ${scanned} assets scanned; no forbidden backend material.`);
+  console.log(`Static export verified: 4 fixed routes; ${scanned} assets scanned; no forbidden backend material.`);
 }

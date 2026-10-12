@@ -16,6 +16,7 @@ import { renderTileset } from './generators/tiles.mjs';
 import { PROP_ANIMATIONS, arenaSegment, renderCampProps, renderExpeditionProps } from './generators/props.mjs';
 import { CAMP, arenaSegmentAnchors, buildCamp, buildExpedition } from './generators/maps.mjs';
 import { renderEffects, renderIcons } from './generators/effects.mjs';
+import { CLOSEUP, CLOSEUP_THEMES, renderCloseups } from './generators/closeups.mjs';
 import { ATTACK_VARIANTS, CREATURE_ACTIONS, REQUIRED_ACTIONS, WALK_TILES_PER_SECOND } from './generators/poses.mjs';
 import { ANCHOR } from './generators/rig.mjs';
 
@@ -102,6 +103,9 @@ Object.assign(animations, effects.animations);
 const icons = renderIcons();
 addAtlas('icons', 'ui/icons.png', icons.frames, 'icons', src('generators/effects.mjs'), { columns: 12 });
 
+// ----------------------------------------------------------------- close-up battle backdrops
+addAtlas('closeups', 'battle/closeups.png', renderCloseups(), 'backdrop', src('generators/closeups.mjs'), { columns: 1 });
+
 // ----------------------------------------------------------------- manifest
 const actionMap = (prefix, actions, ne) => Object.fromEntries(actions.map(a => [a, {
   se: `${prefix}/${a}/se`, ...(ne.includes(a) ? { ne: `${prefix}/${a}/ne` } : {}),
@@ -151,6 +155,12 @@ const manifest = {
   },
   depthRule: 'actors: depth = screen y of the feet. floor props: under all actors. foreground props: over all actors. props with explicit slices (arena wall segments): each slice draws its column range at anchor screen y + slice.depthOffset. other object props one tile wide: depth = anchor screen y + sortY - 0.5. wider object props: drawn as 32px vertical slices, each at the screen y of the footprint front edge under the slice centre - 0.5. The 0.5 bias means actors win ties. Implemented by drawSlices in src/game/depth.ts.',
   effects: effects.effects,
+  /** Side-on close-up fight view (reference panel A): a backdrop drawn at an integer scale behind two fighters. */
+  closeups: {
+    atlas: 'closeups', width: CLOSEUP.width, height: CLOSEUP.height, scale: CLOSEUP.scale, groundY: CLOSEUP.groundY, fighterX: CLOSEUP.fighterX,
+    backdrops: Object.fromEntries(CLOSEUP_THEMES.map(theme => [theme, theme])),
+    notes: 'Fighters stand on floor row groundY at fighterX (left faces se, right faces sw). Draw the backdrop, fighters and effects at the same integer scale so art pixels share one grid.',
+  },
   icons: icons.icons,
   maps: [
     { id: 'camp', data: 'camp/map.json', tilesAtlas: 'camp', propsAtlas: 'camp-props' },

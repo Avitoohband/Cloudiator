@@ -115,10 +115,15 @@ function pick<T>(options: [T, number][], roll: number): T {
   return options[options.length - 1][0];
 }
 
+/** A player's colours, from their gladiator id alone, so they look the same in camp and in replays. */
+export function tintFor(gladiatorId: string): ActorRoutine['tint'] {
+  const look = hashString(gladiatorId);
+  return { skin: SKIN_TINTS[(look >>> 11) % SKIN_TINTS.length], cloth: CLOTH_TINTS[look % CLOTH_TINTS.length], hair: HAIR_TINTS[(look >>> 5) % HAIR_TINTS.length] };
+}
+
 export function planActorRoutine(actor: PublicActor, slotIndex: number): ActorRoutine {
   const kind = locationKind(actor.location);
   const seed = hashString(`${actor.gladiatorId}/${slotIndex}`);
-  const look = hashString(actor.gladiatorId);
   const variants = VARIANTS[kind];
   return {
     gladiatorId: actor.gladiatorId,
@@ -126,7 +131,7 @@ export function planActorRoutine(actor: PublicActor, slotIndex: number): ActorRo
     zone: ZONE_FOR[kind],
     variant: variants.length ? pick(variants, seed >>> 8) : null,
     offsetMs: seed % 12_007,
-    tint: { skin: SKIN_TINTS[(look >>> 11) % SKIN_TINTS.length], cloth: CLOTH_TINTS[look % CLOTH_TINTS.length], hair: HAIR_TINTS[(look >>> 5) % HAIR_TINTS.length] },
+    tint: tintFor(actor.gladiatorId),
     layers: layersFor(actor.equipmentSilhouettes),
   };
 }

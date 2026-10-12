@@ -9,7 +9,7 @@ afterEach(() => { for (const directory of directories.splice(0)) rmSync(director
 function exportedSite(content = '<main>Cloudiator</main>') {
   const directory = mkdtempSync(join(tmpdir(), 'cloudiator-static-'));
   directories.push(directory);
-  for (const route of ['', 'game', 'auth/callback']) {
+  for (const route of ['', 'game', 'auth/callback', 'replay']) {
     mkdirSync(join(directory, route), { recursive: true });
     writeFileSync(join(directory, route, 'index.html'), content);
   }
@@ -33,6 +33,11 @@ test('production config rejects the explicitly test-only identity key', () => {
 test('scanner refuses a missing fixed route', () => {
   const directory = exportedSite();
   rmSync(join(directory, 'game/index.html'));
+  expect(scan(directory).status).toBe(1);
+});
+test('scanner refuses an export without the fixed replay page', () => {
+  const directory = exportedSite();
+  rmSync(join(directory, 'replay/index.html'));
   expect(scan(directory).status).toBe(1);
 });
 test('scanner accepts framework navigation seed references without private string inputs', () => {

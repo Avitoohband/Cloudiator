@@ -90,3 +90,50 @@ for (const id of ['camp', 'woodland', 'outpost', 'mountain']) {
   execFileSync(process.execPath, [join(HERE, 'render-map.mjs'), id, join(OUT, `map-${id}.png`), '1', '--actors'], { stdio: 'inherit' });
 }
 execFileSync(process.execPath, [join(HERE, 'render-map.mjs'), 'camp', join(OUT, 'depth-probe-camp.png'), '1', '--depth-probe'], { stdio: 'inherit' });
+
+// ----------------------------------------------------------------- close-up battle view (Task 14)
+// One panel per close-up backdrop, with fighters at the manifest's stand positions (left faces se,
+// right is mirrored to face sw) and effects where the replay stage places them, shown at the
+// in-game integer 3x scale. Fighters and effects use the same frames and tints as the runtime.
+const cu = manifest.closeups;
+const pose = (layers, tints, action, index) => {
+  const c = new PixelCanvas(64, 64);
+  const name = manifest.animations[g.animations[action].se].frames[index];
+  for (const l of layers) c.blit(tinted(frame(g.atlas, name.replace(/^body\//, `${l}/`)), tints[tintKey.get(l)]), 0, 0);
+  return c;
+};
+const creaturePose = (id, action, index) => {
+  const creature = manifest.actors.creatures.find(c => c.id === id);
+  return frame(creature.atlas, manifest.animations[creature.animations[action].se].frames[index]);
+};
+const effectFrame = (id, index) => frame('effects', manifest.animations[manifest.effects[id]].frames[index]);
+const kit = name => loadouts[name][0];
+const tints = name => { const [skin, cloth, hair] = loadouts[name][1]; return { skin, cloth, hair }; };
+function closeupPanel(theme, left, right, effects) {
+  const c = new PixelCanvas(cu.width, cu.height);
+  c.blit(frame(cu.atlas, cu.backdrops[theme]), 0, 0);
+  c.blit(left, cu.fighterX[0] - 32, cu.groundY - 58);
+  c.blit(right, cu.fighterX[1] - 32, cu.groundY - 58, { flipX: true });
+  for (const [img, x, y, flipX] of effects) c.blit(img, x - 24, y - 24, { flipX });
+  return c;
+}
+const [L, R] = cu.fighterX;
+const body = cu.groundY - 24;
+const panels = [
+  // Arena: a sword strike lands on the spearman, with the hit burst on the defender.
+  closeupPanel('arena', pose(kit('sword-shield'), tints('sword-shield'), 'attack', 2), pose(kit('spear-heavy-helmet'), tints('spear-heavy-helmet'), 'hit', 0),
+    [[effectFrame('hit', 2), R - 4, body, true]]),
+  // Woodland: the gladiator evades a wolf's lunge (the evade puff sits at the feet).
+  closeupPanel('woodland', pose(kit('axe-light-hood'), tints('axe-light-hood'), 'evade', 1), creaturePose('dire-wolf', 'attack', 2),
+    [[effectFrame('evade', 1), L, cu.groundY - 16, false]]),
+  // Outpost: a shield guard against a raider's axe, with the guard arc facing the attacker.
+  closeupPanel('outpost', pose(kit('sword-shield'), tints('sword-shield'), 'defend', 1), creaturePose('raider', 'attack', 2),
+    [[effectFrame('defend', 1), L + 4, body, false]]),
+  // Mountain: the result, a victory raise over a defeated troll with circling stars.
+  closeupPanel('mountain', pose(kit('spear-heavy-helmet'), tints('spear-heavy-helmet'), 'victory', 3), creaturePose('rock-troll', 'defeat', 3),
+    [[effectFrame('victory', 2), L, cu.groundY - 28, false], [effectFrame('defeat', 1), R + 16, cu.groundY - 4, true]]),
+];
+const sheet = new PixelCanvas(cu.width, panels.length * (cu.height + 2) - 2);
+for (let y = 0; y < sheet.height; y += 1) for (let x = 0; x < sheet.width; x += 1) sheet.set(x, y, 'outline');
+panels.forEach((p, i) => sheet.blit(p, 0, i * (cu.height + 2)));
+save('closeups.png', sheet, cu.scale);

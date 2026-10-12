@@ -44,3 +44,43 @@ test('unimplemented fixture reads reject explicitly as unavailable', async () =>
   await expect(gateway.tournament('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.recent()).rejects.toMatchObject({ code: 'unavailable' });
 });
+
+test('fixture timelines reveal the sample battle logs and their saved summaries', async () => {
+  const { REPLAY_FIXTURES, FIXTURE_BATTLE_LOGS } = await import('../fixtures/battles');
+  const gateway = createFixtureGateway();
+  const battles = async (id: string) => (await gateway.timeline(id)).stages.filter(s => s.battleLog).map(s => s.battleLog!.battleId);
+  expect(await battles(REPLAY_FIXTURES.pvp.activityId)).toEqual(['fixture-bout-pvp']);
+  expect(await battles(REPLAY_FIXTURES.npc.activityId)).toEqual(['fixture-bout-npc']);
+  expect(await battles(REPLAY_FIXTURES.tie.activityId)).toEqual(['fixture-bout-tie']);
+  expect(await battles(REPLAY_FIXTURES.expedition.activityId)).toEqual([...REPLAY_FIXTURES.expedition.battleIds]);
+  const pvp = await gateway.timeline(REPLAY_FIXTURES.pvp.activityId);
+  expect(pvp.activityId).toBe(REPLAY_FIXTURES.pvp.activityId);
+  expect(pvp.stages.find(s => s.battleLog)!.battleLog).toEqual(FIXTURE_BATTLE_LOGS.pvp);
+  expect(pvp.summary).toMatchObject({ resolvedKind: 'arena', result: 'victory', rewards: { renown: 10 }, replayExpiry: { state: 'available' } });
+  // A revealed bout whose rewards are not yet credited carries no summary.
+  expect((await gateway.timeline(REPLAY_FIXTURES.tie.activityId)).summary).toBeUndefined();
+  const expired = await gateway.timeline(REPLAY_FIXTURES.expired.activityId);
+  expect(expired.stages.some(s => s.battleLog)).toBe(false);
+  expect(expired.summary).toMatchObject({ result: 'defeat', replayExpiry: { state: 'expired' }, rewards: { renown: 2 } });
+});
+
+test('fixture summaries agree with the logged winners', async () => {
+  const { REPLAY_FIXTURES } = await import('../fixtures/battles');
+  const gateway = createFixtureGateway();
+  for (const key of ['pvp', 'npc', 'expedition'] as const) {
+    const timeline = await gateway.timeline(REPLAY_FIXTURES[key].activityId);
+    const won = timeline.stages.filter(s => s.battleLog).every(s => s.battleLog!.winnerId === s.battleLog!.participants[0].id);
+    expect(timeline.summary!.success, key).toBe(won);
+  }
+});
+
+test('fixture timelines cannot share mutable state with callers', async () => {
+  const { REPLAY_FIXTURES } = await import('../fixtures/battles');
+  const gateway = createFixtureGateway();
+  const first = await gateway.timeline(REPLAY_FIXTURES.pvp.activityId);
+  (first.stages[1].battleLog!.finalHp as unknown as number[])[0] = 999;
+  first.summary!.rewards.renown = 999;
+  const again = await gateway.timeline(REPLAY_FIXTURES.pvp.activityId);
+  expect(again.stages[1].battleLog!.finalHp[0]).not.toBe(999);
+  expect(again.summary!.rewards.renown).toBe(10);
+});

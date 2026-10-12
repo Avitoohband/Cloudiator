@@ -39,6 +39,9 @@ decoded pixels are unchanged. Hashes therefore stay stable across Node versions 
 - `generators/maps.mjs`: camp and expedition layouts, covering zones, stations, walkability, path
   graphs, lights and routes.
 - `generators/effects.mjs`: combat effects and 16×16 icons.
+- `generators/closeups.mjs`: the side-on close-up battle backdrops (Task 14): the arena (sand floor, curved
+  podium wall with banners and braziers, crowd stands, a calm editor's box behind the fighters) and one per
+  expedition (woodland clearing, ruined outpost, mountain snowfield). Each is 320×128 art pixels, shown at 3×.
 - `provenance.json`: generated. It gives the hash, generator and license for every shipped file.
 
 ## Rules the tests enforce
@@ -80,5 +83,9 @@ decoded pixels are unchanged. Hashes therefore stay stable across Node versions 
 - Attack variants: `thrust` for the spear and `shoot` for the bow
   (`actors.gladiator.attackVariants`).
 - Use nearest-neighbour scaling everywhere. Phaser's pixel-art mode covers this.
+- Close-up replays (Task 14): draw a `manifest.closeups` backdrop, the fighters and the effects at the same
+  integer `closeups.scale` (3), so every art pixel sits on one grid. Fighters stand on row `groundY` at
+  `fighterX` (left faces se; right is mirrored to face sw). `src/game/battle-stage.ts` derives every pose,
+  effect and damage label from the revealed battle log.
 - Lighting, sky tint and torch glow come from the scene (Task 12). Animated props reference the
   `prop-<atlas>-torch` and `prop-<atlas>-campfire` animations.

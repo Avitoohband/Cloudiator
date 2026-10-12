@@ -14,7 +14,7 @@ and the tested corrections below support this workflow:
 3. Complete omissions before committing that draft. Keep already committed
    migrations immutable; later corrections belong in a new migration.
 4. Clean-reset/replay the migrations without applying SQL source afterward.
-   Run owning and affected access-denial tests against that artifact, then
+   Compare the replayed database with the source for function bodies/search_path, role ACLs, policies, triggers and invoker-view settings; confirm any re-emitted unchanged function bodies match their previous migration. Run owning and affected access-denial tests against that artifact, then
    lint and advisors. Document actual evidence and remaining limitations.
 
 Task 6's corrected draft passed 26 database/Auth/Edge tests after clean replay.

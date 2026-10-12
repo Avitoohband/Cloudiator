@@ -103,7 +103,7 @@ the same statements.
 Before committing a generated draft, compare it with the tested source for
 grants/revocations, RLS and invoker-view settings, function/trigger dependency
 order, required data backfills, and initialization statements. Complete
-omissions in that draft, then clean-reset/replay the migrations alone and run
+omissions in that draft. If the generator re-emits unchanged functions, confirm their bodies match the previous migration. Then clean-reset/replay the migrations alone and inspect the replayed database: function bodies/search_path, role ACLs, policies, triggers and invoker-view settings. Run
 the owning and affected access-denial tests, lint and advisors. Reapplying
 source after reset is not migration-artifact proof. Never edit an already
 committed migration; generate a new one for subsequent corrections. Follow

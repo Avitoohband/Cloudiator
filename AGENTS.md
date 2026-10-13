@@ -108,3 +108,26 @@ the owning and affected access-denial tests, lint and advisors. Reapplying
 source after reset is not migration-artifact proof. Never edit an already
 committed migration; generate a new one for subsequent corrections. Follow
 the exact local workflow and evidence in [the migration guide](docs/operations/migrations.md).
+
+# Postgres concurrency — persistent project override
+
+Avi approved this supplement on 2026-10-13 for the
+`supabase:supabase-postgres-best-practices` skill's **Concurrency & Locking**
+category. Keep vendor caches unchanged; this project instruction survives
+plugin updates and supplements the short-transaction/queue guidance.
+
+For a time-limited mutation, acquire the established guard locks first, then
+sample current database time with `clock_timestamp()` (or a verified helper
+that uses it). Revalidate the current lease token, status and expiry under the
+lock before accepting new work. A timestamp captured before a lock wait,
+`now()` or `statement_timestamp()` is not a fresh post-wait expiry check.
+Keep immutable committed receipt replay separate from authorizing a new write.
+Return the authoritative renewed expiry to the worker and use that response.
+
+Add a regression that holds the row lock, starts the contender while its lease
+is valid, lets expiry pass before releasing the lock, and proves completion
+and renewal cannot use pre-wait time. Distinguish the observed defect from
+newly tested fixes and migration-only replay evidence. See
+[the lease guide](docs/operations/job-leases.md) for the exact scope and
+verification checklist. Task 9's final verification was still pending when
+this approved guidance was added; do not treat this note as a passed test.

@@ -1,13 +1,13 @@
 # Cloudiator development handoff
 
-Last updated: 2026-10-12, after Codex resumed and received Claude's paused Task 8 handover. Development is in progress.
+Last updated: 2026-10-13, after Task 8 passed independent review. Development is in progress.
 
 ## Authority and repository
 
 - Avi approved the [design](../superpowers/specs/2026-10-11-gladiator-arena-design.md), including proposed launch defaults, and the [24-task implementation plan](../superpowers/plans/2026-10-11-gladiator-arena-implementation.md).
 - Execution method: Superpowers subagent-driven development. A fresh implementer owns each task; an independent reviewer checks specification compliance and code quality before the next task.
 - **Codex is the executing controller again.** Claude took over at 16:05 while Codex was unavailable and paused at about 18:20. Its 22:10 board handover confirms nothing is running there; Codex resumes Task 8 onward, integration, this file, and reviewed feature-branch pushes under Avi's existing authorization. Claude will post before resuming, and ownership will be split again then.
-- Claude works in the worktree `C:\Avi\Studies\Projects\Cloudiator-claude` on `claude/visual-track`, and pushes reviewed checkpoints to `origin/codex/gladiator-arena` as fast-forwards (`git push origin HEAD:codex/gladiator-arena`).
+- Claude used the worktree `C:\Avi\Studies\Projects\Cloudiator-claude` on `claude/visual-track` for its visual/takeover checkpoints. It is currently paused; leave that checkout untouched.
 - Codex works in `C:\Avi\Studies\Projects\Cloudiator` on `codex/gladiator-arena`. Interrupted Task 7 files are preserved in stash `763051847dba6a14c5ef7b6b4169c0cbbf1543f7`; they were not reapplied over completed Task 7. Published checkpoint a04484c was fetched and verified before local work resumed.
 - Repository: https://github.com/Avitoohband/Cloudiator. Avi authorized committing and pushing each completed task with detailed notes so another agent can take over.
 - Push reviewed task checkpoints to this feature branch. Do not force-push or merge into another branch without authorization.
@@ -15,11 +15,11 @@ Last updated: 2026-10-12, after Codex resumed and received Claude's paused Task 
 
 ## Resume here
 
-Tasks 1–7, 11, 12 and 14 passed independent specification and quality review.
+Tasks 1–8, 11, 12 and 14 passed independent specification and quality review.
 - Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`; Claude pushed the first takeover checkpoint at `9b39edc` (Task 6 merged with Tasks 11/12, R2 applied) and the second at `9f2b69d` (Tasks 7 and 14; see the checkpoint sections below).
-- M01–M04 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`.
-- **Next: Task 8** (inventory, loot grants, the two NPC shops), then 9 and 10 in plan order. Codex's saved briefs for Tasks 7–9 are ignored files in Codex's checkout: `C:\Avi\Studies\Projects\Cloudiator\.superpowers\sdd\2026-10-11-gladiator-arena-implementation\task-N-brief.md` (read-only). The controller writes a dispatch addendum per task that overrides their Codex-era controller sections.
-- Task 15 (expedition scenes) can run in parallel in the `Cloudiator-replay` worktree once Task 9 defines the revealed stages; Task 13 waits for Tasks 8 and 10.
+- M01–M05 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`, `20261013065108_inventory_shops`.
+- **Next: Task 9** (private expedition plans, timed reveals and fenced rewards), then Task 10's safe projections/polling. Read the Task 7/8 reports and reviews for actual contracts. Prepared ignored briefs are under `.superpowers/sdd/2026-10-11-gladiator-arena-implementation/`; the controller reconciles each with its exact reviewed prerequisites and base before dispatch.
+- Task 15 needs Task 9's revealed stages; any parallel lane requires declared ownership first. Task 13 waits for Task 10 and consumes the reviewed Inventory/Shop panels.
 - Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.
@@ -39,14 +39,14 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | 11 — Production pixel art and manifest (Claude) | `b739870..8f83ba8` on `claude/visual-track` (`edd78ab`, `6f99f50`, `bc5b4d6`, `3051531`, `e5eb8fc`, `8f83ba8`) | Round 3: spec Pass, quality Pass; [review](task-11-review.md) | Code-generated original art (Avi-approved route): 10 atlases, 1,719 frames, 116 animations, 4 maps; `build-assets --check` deterministic; 33 asset tests. Close-up battle view deferred to Task 14 with acceptance criteria ([report](task-11-report.md)). |
 | 7 — Ordered boundaries, Training/Rest, fenced jobs | `9b39edc..92eec27` (source `0dea40c`, report `5919999`, review fixes `8aa29e5` with M04, report update `92eec27`) | Spec Pass, quality Pass, ready with fixes; scoped re-review of the fixes Pass; [review](task-07-review.md) | 234 units, 61 real DB/Auth/Edge tests on a clean M01–M04 replay (real pg_cron, pg_net and worker HTTP), typecheck incl. both Deno entrypoints, build/static scan, 63 dev browser checks. Expedition/Arena boundaries stall truthfully until Tasks 9/16; hosted scheduling is a Task 24 gate ([report](task-07-report.md)). |
 | 12 — Living isometric camp (Claude) | `bc5b4d6..33016d6` (`c6aeab0`, `3051531`, `ddb9bec`, `e5eb8fc`, `8f83ba8`, fix `33016d6`) | Rounds 2–3: spec Pass, quality Pass; Codex scoped review of `8f83ba8` Pass plus one Minor (fixed in `33016d6`); [review](task-12-review.md) | 33 scene-layout tests; 17 camp browser tests on desktop and mobile; R2 applied at this checkpoint. Task 13 must add the shared sync clock and a scene-availability status ([report](task-12-report.md)). |
-
-Deferred Minor findings to carry into final review: escaped seed signatures in the supplemental static scanner, and conflicting color-variable warnings in the browser harness. Exact evidence and suggested coverage are in the Task 1 review.
-
 | 14 — Battle-log replay (Claude) | `9b39edc..3283feb` on `claude/task-14` (source `344521b`, report `6607017`, review fixes `3283feb`), merged at `9f2b69d` | Spec Pass, quality Pass, visual Pass, ready; [review](task-14-review.md) | Pure replay core, close-up battle scene meeting the four Task 11 criteria, `/replay/?activity=` fixed route, engine-generated fixture logs (PvP, NPC, expedition, tie-break, expired). 296 units, 99 dev browser checks in its worktree. Live replays wait for Task 10's `timeline()` ([report](task-14-report.md)). |
+| 8 — Inventory, rewards planner and NPC shops | `8195ff5..28d1fee` (preserved WIP merge `4be59b3`, source `801eea1`, report `28d1fee`) | Spec compliant; quality Approved; [review](task-08-review.md) | 352 units; all 83 DB tests covered green across final replay runs; 67 affected browser checks/1 skip; production 6/2 skips; TypeScript/Deno; fresh 81-asset scan; M05 replay and 228-entry parity. See [report](task-08-report.md) for exact run split, grants/XP/history/cosmetic contracts and remaining integrations. |
+
+Deferred Minors: the existing browser color warning and expected-diagnostic assertions (Tasks 1/8, Task 23/final triage); Task 6's stale estimated schedule clock (Task 13); Task 14's early-destroy window handlers and unmatched-creature warning (Task 13/final triage). The escaped-seed scanner gap is resolved in the reviewed supplement below.
 
 ## Coordination history (Codex and Claude)
 
-**Current state:** since the 2026-10-12 takeover, Claude owns every task and file, including the shared files and this handoff. The ownership split below is historical. If Codex returns, it should read the board, fetch origin, and re-split the work there before editing.
+**Current state:** Codex resumed after Claude's explicit PAUSED handover and owns remaining work, shared integration files, this handoff and reviewed feature pushes. The split below is historical. Claude will announce before returning; re-split before either lane edits overlapping files.
 
 Avi explicitly authorized communication and parallel development through the [Cloudiator Message Board](https://docs.google.com/document/d/1Fz_MTVcUJkBU52wRuLQCgftMzJtTNn3l6snRQw9RSkM). Claude replied with a layer split, and Codex posted agreement and ownership refinements.
 
@@ -161,14 +161,24 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - Task7 must consume historical schedule_revisions, share advisory-account then character lock order, and call private.apply_pending_build(gid, boundary_slot) after prior settlement/season close and before the new snapshot. OwnerState.buildVersion is the monotonic command revision; currentBuild.version is active identity. Preserve fee/item holds and absolute stamina conservation. See the report for exact interfaces.
 - The authorized local reset did not interrupt the existing Edge service; final real HTTP tests and preview port3000 succeeded. Avi approved the additional Supabase migration-guidance override; AGENTS.md and migrations.md contain the persistent guidance, reconciled with Claude's bccd273 documentation commit.
 
-## Codex resumption and pending Task 8 import
+## Codex resumption and completed Task 8 handover
 
 Claude's 22:10 message confirms PAUSED: no active worker or dev servers3200/3300; it will announce before further edits. Published HEAD is a04484c. Its documentation-only bccd273 is integrated into this controller checkpoint and consolidated with Codex's approved 6848f5f guidance into one AGENTS section, including inspection of the replayed database. Vendor caches remain unchanged.
 
-Task 8 partial source is saved on claude/task-8-wip at 2bed1a3, including unreviewed source commit5637dd5 and its dispatch addendum. The next fresh implementer imports this branch in Codex's checkout, audits the partial tests and code, then completes missing SQL/migration/inventory/shop UI/browser evidence/report. Do not treat the WIP as reviewed or overwrite Claude's clean worktree. Its addendum's old workspace, port, controller and attribution directives are superseded by the new Codex task brief.
+Task 8's original partial source remains on `claude/task-8-wip` at `2bed1a3`, including source `5637dd5` and its historical dispatch addendum. Codex preserved it by normal merge `4be59b3`, audited and completed it. A runtime interruption preserved uncommitted work; a continuation worker finished it without re-importing or resetting. Source `801eea1` and report `28d1fee` passed full fixed-base independent review. Do not restart Task 8 or overwrite Claude's clean checkout; old workspace/port/controller/attribution directives in the original dispatch are historical.
 
 The reviewed scanner supplement has source628e88f, report554c677 and independent review1d66458, with no findings. Owning21/full317 tests and fresh isolated four-route80-asset scan passed. This resolves Task1's escaped-JSON Minor; Task23 is still pending. Full report/review are tracked. No launch or exhaustive secrecy claim.
 
 Task14 final Minor commit3283feb has now received a fresh read-only scoped review. Document-listener cleanup, local dates and reward keys are addressed; early-destroy window handler restoration and unknown creature-prefix warning remain deferred Minors. No new Critical/Important breakage. See task-14-final-delta-review.md and carry both into management integration/final triage. Broad suites were not repeated. Task9 carries Task7 summary whitelist/validation, malformed-hook rollback, dependency and lease-renewal gates; Task13 must combine currentActivity with processedSlotIndex.
 
-Before real Task8 HTTP tests, serve Edge functions from Codex's checkout. The existing runtime is mounted from Claude's paused worktree. Regenerate a local worker secret in Codex's ignored configuration; never copy or print Claude's secret. The restored local fixture preview is session53057, port3000; both camp and canonical replay routes returned200. Keep it separate from test servers and database resets.
+Current local runtime was restored after Docker had stopped. The verified Cloudiator container and Edge functions now use Codex's checkout and its own fresh ignored worker secret; Claude's secret was never copied or printed. At the Task 8 report, Edge session was7337 and fixture preview was72301 on port3000 with HTTP200. These are last-observed sessions, not a guarantee they survive another restart. Keep test ports3100/4173 separate and verify current runtime before later HTTP proof.
+
+### Task 8 reviewed inventory checkpoint — 2026-10-13
+
+- Full review range `8195ff5..28d1fee` includes original contributor WIP and all continuation code. Fresh GPT-6 Astra review: spec compliant, quality Approved, no Critical/Important. One existing harness-noise Minor is carried to Task 23. The reviewer did not repeat suites or migration replay.
+- M05 `20261013065108_inventory_shops.sql` was CLI-generated and completed before commit. Migration-only replay matches tested source across228 metadata entries;39 re-emitted unchanged function bodies match earlier migrations. M01–M04 remain unchanged. Lint is empty; advisors have four INFO unused indexes.
+- Exact DB evidence: full replay run82 passed/1 old-error-text assertion failed; the earlier immutable guard correctly rejected the mutation. Corrected assertion and expanded denial checks then passed36/36 shops/planning cases on the same replayed DB; activities36 and identity11 had passed. All83 are covered green across final runs, not one claimed83-pass rerun. See the report for every command and distinction between inherited and newly observed TDD evidence.
+- Bound banner ownership is separate from the66 equipment offers and60 inventory slots, with no stats/combat/history effect or resale/trade. `OwnerState.ownedCosmetics` is additive. The legacy `peakStrength` is historical legal equipment score only; Task16 owns the combined league index.
+- **Task9:** `prepareGrant(state, grants)` returns baseline/plan/history. `private.apply_inventory_plan(gid, prepared)` writes items/history under common locks and returns ids/overflow/history, or null for stale preparation. It does not credit a wallet, issue a receipt or provide idempotency. Fenced settlement must atomically credit rewards/overflow/XP and retain the permanent guard, retrying changed inventory from the same immutable reward proposal. Preserve Task7 summary whitelist, malformed-hook rollback, dependency and lease-renewal gates.
+- **Task13:** consume InventoryPanel/ShopPanel, bridge camp merchant events, combine currentActivity with processedSlotIndex and use noncombat result states for Training/Rest. **Task16:** promote from level/earned points/history only at boundaries. **Task18:** preserve binding, reservations, held fees, sorted lock order and acquisition history for transfers.
+- Root records the reviewed checkpoint commit separately and verifies the pushed remote SHA before posting it on the board. Hosted OAuth/CORS/scheduling, retention, budgets and physical FPS remain release gates; this is not a public launch.

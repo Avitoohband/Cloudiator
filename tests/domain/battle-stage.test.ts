@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BattleAction, BattleLog, RevealedCombatant } from '@contracts/events';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { decodePng } from '../../assets/source/tools/png.mjs';
@@ -92,6 +92,20 @@ describe('fighter looks', () => {
     }
     expect(find('npc:fallback:1', 'Iron Warden')).toBeNull();
     expect(creatureFor(combatant({ id: 'creature:dire-wolf:1', gladiatorId: 'g' }), manifest.actors.creatures)).toBeNull();
+  });
+
+  it('warns in development whenever a non-gladiator falls back to NPC art, even with a creature id', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const look = (id: string, name: string) => creatureFor(combatant({ id, name, gladiatorId: null }), manifest.actors.creatures);
+      expect(look('creature:timber-wolf:2', 'Timber Wolf')?.id).toBe('timber-wolf');
+      expect(warn).not.toHaveBeenCalled();
+      expect(look('creature:no-such-beast:1', 'Mystery Beast')).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('creature:no-such-beast:1');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('stages arena bouts in the arena and encounters where the creature lives', () => {

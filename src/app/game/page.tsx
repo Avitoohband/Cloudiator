@@ -11,6 +11,7 @@ import { SignIn } from '../../features/auth/SignIn';
 import { CreateCharacter } from '../../features/character/CreateCharacter';
 import { SchedulePanel } from '../../features/schedule/SchedulePanel';
 import { BuildPanel } from '../../features/build/BuildPanel';
+import { InventoryPanel } from '../../features/inventory/InventoryPanel';
 import { GameViewport } from '../../game/GameViewport';
 import { createSceneBridge } from '../../game/bridge';
 import { withDemoCrowd } from '../../game/demo-world';
@@ -138,6 +139,7 @@ function GameShell() {
         <div id="management-panel" className="panel-content">
           {!fixture && visibleOwner && panel === 'Schedule' ? <SchedulePanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
             : !fixture && visibleOwner && panel === 'Gladiator' ? <BuildPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
+              : visibleOwner && panel === 'Inventory' ? <InventoryPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} preview={fixture} />
               : panel === 'Schedule' ? <>
             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>

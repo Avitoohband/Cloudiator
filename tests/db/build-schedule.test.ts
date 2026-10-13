@@ -146,7 +146,8 @@ describe('schedule revisions and pending reservations', () => {
     expect(original).toMatchObject({ ok: true, value: { reservedItemIds: expect.arrayContaining([id]) } });
     expect((await owner.state()).inventory.find(i => i.id === id)?.reservation?.kind).toBe('pending-build');
     await expect(sql`delete from public.item_instances where id=${id}`).rejects.toMatchObject({ message: 'reserved item' });
-    await expect(sql`update public.item_instances set item=jsonb_set(item,'{quantity}','2') where id=${id}`).rejects.toMatchObject({ message: 'reserved item' });
+    // Task 8's immutable equipment-quantity guard runs before the reservation guard.
+    await expect(sql`update public.item_instances set item=jsonb_set(item,'{quantity}','2') where id=${id}`).rejects.toMatchObject({ message: 'immutable item' });
     const next = await owner.state();
     expect(await send(owner.token, { ...build(next), equipment: state.currentBuild.equipment })).toMatchObject({ ok: true });
     expect((await owner.state()).inventory.find(i => i.id === id)?.reservation).toBeNull();

@@ -60,8 +60,12 @@ function validGrant(grant: LootGrant, catalog: Catalog): CatalogItem | 'salvage'
 export function planInventoryGrant(inventory: readonly ItemInstance[], rewards: readonly LootGrant[], catalog: Catalog): InventoryGrantPlan {
   if (!Array.isArray(inventory) || !Array.isArray(rewards)) throw new RangeError('Invalid inventory grant input');
   const stackLimit = catalog.salvage.stackLimit;
+  for (const item of inventory) {
+    if (!Number.isSafeInteger(item.quantity) || item.quantity < 1
+      || item.quantity > (item.catalogId === catalog.salvage.id ? stackLimit : 1)) throw new RangeError('Invalid inventory quantity');
+  }
   let free = Math.max(0, RULES_V1.inventory.capacity - inventory.length);
-  const partial = inventory.filter(item => item.catalogId === catalog.salvage.id && item.catalogVersion === catalog.version && item.quantity < stackLimit)
+  const partial = inventory.filter(item => item.catalogId === catalog.salvage.id && item.catalogVersion === catalog.version && item.quantity < stackLimit && item.reservation === null)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(item => ({ itemId: item.id, room: stackLimit - item.quantity }));
   const added = new Map<string, number>();
   const plan: InventoryGrantPlan = { retained: [], stacked: [], overflow: [], overflowMoney: 0, rejected: [], slotsUsed: 0 };

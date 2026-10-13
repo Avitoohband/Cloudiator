@@ -35,6 +35,8 @@ export type JobKind = 'prepare' | 'simulation' | 'reveal' | 'settlement';
 export type PreparationInput = DeepReadonly<{
   gladiatorId: string; slotIndex: number; rulesVersion: string;
   build: BuildView; items: ItemInstance[]; level: number; earnedPoints: number;
+  /** Historical legal gear-loadout maximum; optional only for jobs frozen before Task 8. */
+  peakStrength?: number;
 }>;
 /** Canonical TypeScript derivation stored by `complete_job`; SQL never re-implements the stats engine. */
 export type PreparationResult = {

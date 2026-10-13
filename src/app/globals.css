@@ -141,3 +141,20 @@ progress::-moz-progress-bar { background: #7dbfa2; }
 .sample-replays li { margin: .35rem 0; }
 .sample-replays a { color: #b9e6f5; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 540px) { .replay-page { padding: 1rem; } }
+
+/* Inventory and the two merchants share compact, responsive item cards. */
+.inventory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.inventory-item { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: #172338; min-width: 0; }
+.inventory-item h3 { margin-top: 0; }
+.inventory-item p { font-size: .9rem; overflow-wrap: anywhere; }
+.inventory-panel button { min-height: 44px; padding: 9px 14px; }
+.inventory-panel input, .inventory-panel select { min-height: 44px; padding: 8px; width: 100%; background: #111c2d; color: #f4ead5; border: 1px solid #65718a; border-radius: 6px; }
+.inventory-panel label { display: grid; gap: 6px; }
+.item-actions, .shop-merchants { display: flex; flex-wrap: wrap; gap: 8px; }
+.shop-merchants button[aria-pressed="true"] { border-color: #ecc677; color: #ecc677; }
+.shop-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
+.shops-panel { margin-top: 32px; padding-top: 20px; border-top: 1px solid #475670; }
+.cosmetic-offer { margin-top: 16px; }
+.inventory-panel dialog { max-width: min(440px, calc(100vw - 32px)); color: #f4ead5; background: #172338; border: 2px solid #ecc677; border-radius: 12px; padding: 24px; }
+.inventory-panel dialog::backdrop { background: #070b17bb; }
+.inventory-panel dialog button { margin: 6px; }

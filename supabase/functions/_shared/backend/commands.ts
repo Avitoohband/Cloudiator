@@ -37,7 +37,8 @@ export function parseCommand(value: unknown): GameCommand | null {
         && exact(value.equipment, ['weapon', 'offHand', 'head', 'body', 'feet']) && Object.values(value.equipment).every(id => id === null || uuid(id)); break;
     case 'cancel-build': valid = shape('expectedVersion') && integer(value.expectedVersion, 1); break;
     case 'buy-shop': valid = shape('catalogId', 'catalogVersion', 'quantity') && typeof value.catalogId === 'string'
-      && Object.hasOwn(CATALOG_V1.items, value.catalogId) && value.catalogVersion === CATALOG_V1.version && integer(value.quantity, 1, 999); break;
+      && (Object.hasOwn(CATALOG_V1.items, value.catalogId) || Object.hasOwn(CATALOG_V1.cosmetics, value.catalogId))
+      && value.catalogVersion === CATALOG_V1.version && integer(value.quantity, 1, 999); break;
     case 'sell-item': case 'discard-item': valid = shape('itemId', 'quantity') && uuid(value.itemId) && integer(value.quantity, 1, 999); break;
     case 'create-listing': valid = shape('itemId', 'price') && uuid(value.itemId) && integer(value.price, 1); break;
     case 'cancel-listing': case 'buy-listing': valid = shape('listingId') && uuid(value.listingId); break;

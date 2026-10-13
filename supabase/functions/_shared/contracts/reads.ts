@@ -24,6 +24,7 @@ export type OwnerState = {
   schedule: Schedule; scheduleVersion: number;
   wallets: { money: number; renown: number }; reservedFees: { money: number; renown: number };
   inventory: ItemInstance[]; inventoryCapacity: number;
+  ownedCosmetics: { catalogId: string; catalogVersion: string; binding: 'bound' }[];
   progression: { level: number; xp: number; earnedAttributePoints: number; unspentAttributePoints: number; league: LeagueId; peakStrength: number; rating: number };
   stamina: { current: number; maximum: number };
   tournamentOptIn: boolean; processedSlotIndex: number;

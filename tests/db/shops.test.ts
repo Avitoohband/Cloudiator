@@ -36,14 +36,17 @@ async function fighter(options: { money?: number; renown?: number; level?: numbe
   const created = await send(owner.token, creation('Shop ' + randomUUID().slice(0, 8)));
   expect(created.ok).toBe(true);
   const gid = created.value!.gladiatorId as string;
-  await sql`update public.wallets set money=${options.money ?? 1000},renown=${options.renown ?? 0} where gladiator_id=${gid}`;
+  await sql`update public.wallets set money=${String(options.money ?? 1000)},renown=${options.renown ?? 0} where gladiator_id=${gid}`;
   if (options.level) await sql`update public.gladiators set level=${options.level} where id=${gid}`;
   const state = async (): Promise<OwnerState> => {
     const { data, error } = await owner.client.from('owner_state').select('state').single();
     expect(error).toBeNull();
     return data!.state;
   };
-  const wallet = async () => (await sql`select money::float8 as money, renown::float8 as renown from public.wallets where gladiator_id=${gid}`)[0];
+  const wallet = async () => {
+    const row = (await sql`select money::text, renown::text from public.wallets where gladiator_id=${gid}`)[0];
+    return { money: Number(row.money), renown: Number(row.renown) };
+  };
   const items = async () => (await sql`select item from public.item_instances where gladiator_id=${gid} order by id`).map(row => row.item as ItemInstance);
   const ledger = async () => sql`select money_delta::float8 as money, renown_delta::float8 as renown, reason, receipt_id::text as receipt
     from public.wallet_ledger where gladiator_id=${gid} and reason<>'creation' order by created_at`;
@@ -104,6 +107,40 @@ const db = {
 };
 
 describe('inventory and NPC shops', () => {
+  it('rolls back acquired items and the receipt when the final wallet write fails', async () => {
+    const owner = await fighter();
+    const command = buy('heavy-armor:1:common');
+    const prepared = prepareShopPurchase(command, await owner.state());
+    await expect(sql.begin(async tx => {
+      await tx.unsafe("create function private.test_shop_failure() returns trigger language plpgsql as $$ begin raise exception 'injected shop failure'; end $$");
+      await tx.unsafe('create trigger test_shop_failure before update on public.wallets for each row execute function private.test_shop_failure()');
+      await tx`select public.buy_shop(${owner.id},${command.operationId},${tx.json({ command, prepared } as never)})`;
+    })).rejects.toThrow('injected shop failure');
+    expect(await owner.items()).toHaveLength(2);
+    expect(await owner.wallet()).toEqual({ money: 1000, renown: 0 });
+    expect(await owner.peak()).toBe(28);
+    expect(await sql`select count(*)::int as n from public.operation_receipts where operation_id=${command.operationId}`).toEqual([{ n: 0 }]);
+    expect(await send(owner.token, command)).toMatchObject({ ok: true });
+  });
+  it('buys one account-bound banner for 50 renown without inventory or strength effects, replaying once', async () => {
+    const owner = await fighter({ renown: 150 });
+    await owner.fill(58);
+    const before = await owner.peak();
+    const command = buy('banner');
+    const result = await send(owner.token, command);
+    expect(result).toMatchObject({ ok: true, value: { cosmeticId: 'banner', renownDebit: 50, bound: true } });
+    expect(await send(owner.token, command)).toEqual(result);
+    expect(await send(owner.token, buy('banner'))).toHaveCode('conflict');
+    expect(await send(owner.token, buy('banner', 2))).toHaveCode('invalid');
+    expect(await owner.wallet()).toEqual({ money: 1000, renown: 100 });
+    expect(await owner.items()).toHaveLength(60);
+    expect(await owner.peak()).toBe(before);
+    expect(await owner.state()).toMatchObject({ ownedCosmetics: [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }] });
+    expect(await owner.ledger()).toHaveLength(1);
+    const other = await fighter();
+    expect((await other.client.from('owned_cosmetics').select('*')).data).toEqual([]);
+    expect((await owner.client.from('owned_cosmetics').delete().eq('gladiator_id', owner.gid)).error).not.toBeNull();
+  });
   beforeAll(async () => {
     await resetIdentity();
     // Commands correctly return processing across a shared boundary; do not start a run in its final two minutes.
@@ -119,6 +156,17 @@ describe('inventory and NPC shops', () => {
       where n.nspname='public' and p.proname in ('buy_shop','sell_item','discard_item') order by p.proname`;
     expect(rows).toEqual(['buy_shop', 'discard_item', 'sell_item'].map(proname => ({ proname, prosecdef: false, proconfig: ['search_path=""'],
       authenticated: false, anon: false, service: true })));
+    const privateFunctions = await sql`select p.proname, p.prosecdef, p.proconfig,
+      has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated, has_function_privilege('anon',p.oid,'EXECUTE') as anon,
+      has_function_privilege('service_role',p.oid,'EXECUTE') as service from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='private' and p.proname in ('apply_inventory_plan','guard_cosmetic','guard_historical_strength','guard_inventory_item','inventory_command') order by p.proname`;
+    expect(privateFunctions).toEqual(['apply_inventory_plan', 'guard_cosmetic', 'guard_historical_strength', 'guard_inventory_item', 'inventory_command']
+      .map(proname => ({ proname, prosecdef: false, proconfig: ['search_path=""'], authenticated: false, anon: false, service: true })));
+    for (const role of ['anon', 'authenticated']) {
+      const [privileges] = await sql`select has_table_privilege(${role},'public.owned_cosmetics','INSERT,UPDATE,DELETE,TRUNCATE') as mutation`;
+      expect(privileges.mutation).toBe(false);
+    }
+    expect((await anonymous.from('owned_cosmetics').select('*')).error).not.toBeNull();
     const owner = await fighter();
     for (const name of ['buy_shop', 'sell_item', 'discard_item']) {
       expect((await owner.client.rpc(name, { actor_id: owner.id, operation_id: randomUUID(), input: {} })).error, name).not.toBeNull();

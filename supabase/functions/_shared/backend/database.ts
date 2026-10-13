@@ -29,12 +29,13 @@ export function prepareBuild(command: Extract<PlanningCommand, { kind: 'queue-bu
 export type InventoryCommand = Extract<GameCommand, { kind: 'buy-shop' | 'sell-item' | 'discard-item' }>;
 export type ShopPurchaseValue = { itemIds: string[]; catalogId: string; catalogVersion: string; quantity: number;
   currency: ShopOffer['currency']; moneyDebit: number; renownDebit: number; bound: boolean; peakStrength: number };
+export type CosmeticPurchaseValue = { cosmeticId: 'banner'; catalogVersion: 'v1'; moneyDebit: 0; renownDebit: number; bound: true };
 export type ItemSaleValue = { itemId: string; quantity: number; remainingQuantity: number; moneyCredit: number };
 export type ItemDiscardValue = { itemId: string; quantity: number; remainingQuantity: number };
-export type InventoryValue = ShopPurchaseValue | ItemSaleValue | ItemDiscardValue;
+export type InventoryValue = ShopPurchaseValue | CosmeticPurchaseValue | ItemSaleValue | ItemDiscardValue;
 /**
  * The locked identity a prepared grant was computed from: each owned item ID with its quantity, plus historical strength.
- * Every other item field is immutable in SQL, so an equal baseline means the canonical plan still describes the inventory.
+ * Stats and origin are immutable in SQL. Reservation changes are checked separately for each changed salvage stack.
  */
 export type InventoryBaseline = { items: Record<string, number>; peakStrength: number };
 /** Backend-only grant envelope applied by `private.apply_inventory_plan`; Task 9 settlement builds the same shape. */
@@ -49,6 +50,10 @@ export function prepareGrant(state: OwnerState, grants: Parameters<typeof planIn
 }
 /** Exact versioned merchant offer and its grant; null for anything the NPC shops do not sell. SQL decides level, funds and capacity under lock. */
 export function prepareShopPurchase(command: Extract<InventoryCommand, { kind: 'buy-shop' }>, state: OwnerState) {
+  if (command.catalogId === CATALOG_V1.cosmetics.banner.id && command.catalogVersion === CATALOG_V1.version) {
+    return { cosmetic: true, offer: { catalogId: command.catalogId, catalogVersion: CATALOG_V1.version,
+      currency: 'renown', unitPrice: CATALOG_V1.cosmetics.banner.renownPrice, requiredLevel: 1 } };
+  }
   const offer = shopOffer(command.catalogId, CATALOG_V1);
   if (!offer || command.catalogVersion !== offer.catalogVersion) return null;
   return { offer, ...prepareGrant(state, [{ catalogId: offer.catalogId, catalogVersion: offer.catalogVersion, quantity: command.quantity,
@@ -75,7 +80,7 @@ export function prepareCreation(command: Creation) {
   // PostgreSQL UUID parameters normalize casing; receipts must use that same identity representation.
   return { command: { ...command, operationId: command.operationId.toLowerCase() },
     starterItems: items.map(({ catalogId, catalogVersion, tier, rarity, stats, binding }) => ({ catalogId, catalogVersion, tier, rarity, stats, binding })),
-    staminaMaximum: deriveStats(build.snapshot, RULES_V1).maxStamina };
+    staminaMaximum: deriveStats(build.snapshot, RULES_V1).maxStamina, peakStrength: historicalGearScore(items, 0) };
 }
 export function createDatabase(client: SupabaseClient) {
   return {

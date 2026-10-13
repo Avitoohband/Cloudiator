@@ -11,7 +11,7 @@ export const ownerFixture: OwnerState = {
   pendingBuild: null, buildVersion: 1,
   schedule: { morning: { kind: 'training' }, afternoon: { kind: 'expedition', expeditionId: 'woodland' }, evening: { kind: 'rest' } },
   scheduleVersion: 1, wallets: { money: 100, renown: 0 }, reservedFees: { money: 0, renown: 0 },
-  inventory: [], inventoryCapacity: 60,
+  inventory: [], inventoryCapacity: 60, ownedCosmetics: [],
   progression: { level: 1, xp: 0, earnedAttributePoints: 10, unspentAttributePoints: 0, league: 'bronze', peakStrength: 0, rating: 1000 },
   stamina: { current: 104, maximum: 104 }, tournamentOptIn: false,
   processedSlotIndex: 373247,

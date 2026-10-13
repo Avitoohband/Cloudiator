@@ -21,6 +21,56 @@ Task 6's corrected draft passed 26 database/Auth/Edge tests after clean replay.
 Task 7 separately verified M01–M04 with 61 tests. These are observed results,
 not verification of an untested future migration or a hosted deployment.
 
+## Task 8 inventory and shops
+
+M05 is **`supabase/migrations/20261013065108_inventory_shops.sql`**, generated on
+2026-10-13 by CLI **2.120.0**, engine `migra`, from the tested reapplicable
+`supabase/sql/04-inventory-shops.sql`. The plan's original M04 alias was already
+occupied by the reviewed Task 7 correction; M01–M04 remain unchanged.
+
+```powershell
+# Verify this container's com.supabase.cli.project label is Cloudiator first.
+Get-Content supabase/sql/04-inventory-shops.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1
+npx supabase db lint --local --schema public,private --fail-on warning
+npx supabase db advisors --local --type all --level info --fail-on warn
+npx supabase db pull inventory_shops --local --schema public,private --yes
+npx supabase migration list --local
+# Complete and inspect the generated draft before this migration-only replay.
+npx supabase db reset --local --no-seed --yes *> .task8-clean-replay.log
+npm run test:db
+```
+
+The draft omitted new-function revocations/grants, complete new-table privilege
+revocations, the owner view's explicit invoker option and starter-history
+backfill. Its three triggers also preceded their private function definitions.
+Before committing, the draft was completed from the tested source and those
+triggers moved after their functions. All **39** re-emitted unchanged function
+bodies match the latest earlier migration exactly. Only `create_gladiator` and
+`boundary_recompute` change existing functions; eight functions are new.
+
+The clean replay succeeded without applying the SQL source afterwards. An exact
+comparison of **228** schema entries matched tested source state to replayed
+state: function bodies/definitions/search paths/security/ACLs, table and view
+ACLs/RLS/options, view definition, policies, triggers and constraints. First full
+DB run: **82 passed, one affected test expected the older reservation error**.
+The new equipment immutability trigger rejects the same illegal quantity change
+first. Updating that specific expectation and adding explicit private-function
+and cosmetic mutation denial assertions produced **36/36** shops/planning tests;
+the 36 activity and 11 identity tests had passed against the same replay. No
+production or migration change was needed after replay. Lint returned no issues;
+advisors returned four INFO unused-index notices only. Full details and the
+distinction between inherited and newly observed evidence are in
+[task-08-report.md](../implementation/task-08-report.md).
+
+Shop RPCs remain backend-only, security invoker, with an empty search path and
+no anonymous/authenticated execution. `private.apply_inventory_plan` applies a
+trusted canonical grant under account/character/wallet/item locks; it does not
+credit money or provide its own replay guard. Task 9 must combine it with XP,
+overflow money, ledger and permanent settlement receipt atomically. The legacy
+`peak_strength` field stores only monotonic historical legal equipment score.
+The 50-renown banner uses separate owner-only, account-bound cosmetic storage,
+consumes no inventory slot and has no combat/history effect.
+
 ## Task 7 review fixes: exhausted-lease sweep, terminal jobs, isolated boundaries
 
 M04 is **`supabase/migrations/20261012143533_task7_review_fixes.sql`**, generated with CLI 2.120.0 (engine `migra`) from the updated reapplicable source `supabase/sql/03-activities-jobs.sql`. M01–M03 are unchanged and remain immutable:

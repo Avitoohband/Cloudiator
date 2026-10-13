@@ -19,6 +19,17 @@ const fullInventory = swords(60);
 const commonSwordLoot = [loot('sword:1:common')];
 
 describe('inventory grants', () => {
+  it('leaves reserved salvage stacks untouched and converts overflow at full capacity', () => {
+    const stack = { ...salvage(998), reservation: { kind: 'listing' as const, referenceId: nextId() } };
+    expect(planInventoryGrant([...swords(59), stack], [loot('salvage', 2)], CATALOG_V1))
+      .toMatchObject({ stacked: [], retained: [], overflowMoney: 20 });
+  });
+
+  it('rejects corrupt stack quantities instead of minting room', () => {
+    for (const quantity of [0, -1, 1.5, 1000, Number.NaN]) {
+      expect(() => planInventoryGrant([salvage(quantity)], [loot('salvage', 2)], CATALOG_V1)).toThrow(RangeError);
+    }
+  });
   it('sells expedition gear that cannot fit at its NPC value', () => {
     expect(planInventoryGrant(fullInventory, commonSwordLoot, CATALOG_V1).overflowMoney).toBe(10);
     expect(planInventoryGrant(fullInventory, commonSwordLoot, CATALOG_V1)).toMatchObject({ retained: [], rejected: [],

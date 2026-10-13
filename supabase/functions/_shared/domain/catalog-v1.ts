@@ -54,4 +54,5 @@ const salvage: SalvageEntry = { id: 'salvage', name: 'Salvage', tier: 1, rarity:
   stats: { damage: 0, armor: 0, weight: 0, intervalMs: 0, attributes: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 } },
   stackLimit: RULES_V1.inventory.salvageStack, npcSellValue: RULES_V1.inventory.salvageSellValue };
 /** Variant IDs: template:tier:rarity, or template:tier:renown. Salvage is separate from equipment items. */
-export const CATALOG_V1 = freezeDomain({ version: 'v1', items, expeditions, salvage });
+export const CATALOG_V1 = freezeDomain({ version: 'v1', items, expeditions, salvage,
+  cosmetics: { banner: { id: 'banner', name: 'Arena banner', binding: 'bound' as const, renownPrice: RULES_V1.shops.bannerRenownPrice } } });

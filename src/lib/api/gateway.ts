@@ -26,7 +26,7 @@ export function createLiveGateway(): GameGateway {
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       const client = getBrowserClient();
       if (!client) return { ok: false, code: 'unavailable' };
-      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build'].includes(input.kind)) return { ok: false, code: 'unavailable' };
+      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item'].includes(input.kind)) return { ok: false, code: 'unavailable' };
       try {
         const { data, error } = await client.auth.getSession();
         if (error || !data.session || (data.session.expires_at ?? 0) * 1000 <= Date.now()) return { ok: false, code: 'unauthenticated' };

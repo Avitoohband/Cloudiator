@@ -158,6 +158,16 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
   beforeEach(() => resetWorld(299));
   afterAll(() => sql.end());
 
+  it('freezes historical gear strength in boundary preparation for later league calculation', async () => {
+    const owner = await fighter();
+    const token = await coordinatorLease();
+    expect(await advance(300, token)).toMatchObject({ phase: 4, wait: 'preparation' });
+    const [job] = await claim('prepare');
+    expect(job.snapshot).toMatchObject({ peakStrength: 28 });
+    await sql`update public.gladiators set peak_strength=40 where id=${owner.gid}`;
+    expect((await sql`select input from private.jobs where id=${job.id}`)[0].input).toMatchObject({ peakStrength: 28 });
+  });
+
   it('exposes only the backend lifecycle RPCs with invoker security', async () => {
     const rows = await sql`select proname, prosecdef from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='public' and proname in ('advance_boundary','claim_jobs','complete_job','settle_activity','renew_job','fail_job','coordinate_work')`;

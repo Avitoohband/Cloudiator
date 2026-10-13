@@ -43,8 +43,10 @@ still determines hit/critical/stance/damage outcomes.
 
 Every trip starts at full HP. Successful non-final encounters carry final HP
 plus `floor(maxHP * .2)`, capped at max HP. Defeat ends encounter generation;
-failure earns no XP/money/loot. A seeded simultaneous-defeat winner with zero
-remaining HP does not continue. Inventory, points and stamina receive no
+failure earns no XP/money/loot. Success follows the canonical combat winner,
+including a seeded simultaneous-defeat winner at zero HP: non-final winners
+receive the same floored 20% healing and continue, and final winners receive
+the full success reward. Inventory, points and stamina receive no
 healing/refill/injury/gear-loss mutation from expedition settlement.
 
 Encounter RNG streams are `${seed}:encounter:1`, `:2`, `:3`; loot has the separate
@@ -269,3 +271,44 @@ The approved persistent migration/lease guidance already covers the observed
 issues; no further substantive skill update is proposed. Vendor caches,
 AGENTS, job-leases guide, other task reports, UI/art/scenes, fixture gateway,
 static scanner and package versions were not changed by this worker.
+
+## Review correction 1 — canonical simultaneous-defeat winner
+
+Fix base: `5dbf34e0ce15f49f72710d7b062787723b5b4722`. Independent review found
+one Important issue: the planner required both the canonical winner ID and
+positive final HP. That extra condition contradicted the unchanged combat
+engine's seeded simultaneous-defeat winner and the specification. The earlier
+report text endorsing that condition was incorrect and is corrected above.
+
+The planner now uses the engine's winner ID alone. Existing non-final healing,
+terminal reward calculation and true-loss behavior apply without a special
+zero-HP exception. This is a correction to the approved rules, not a new
+gameplay rule. SQL, M06, shared wire contracts and runtime services were not
+changed in this fix.
+
+Three fixed-seed regressions use the real canonical engine and a canonical
+tier-1 Common spear against Mountain encounters. With 20 effective Agility,
+both attack intervals are 1000ms, allowing actual simultaneous lethal attacks:
+
+- `tie-21`, Strength allocation 5, Vitality allocation 0: first encounter ends
+  `[0,0]`, with the player the logged seeded winner. The next encounter starts
+  at 20 HP (20% of the player's 100 maximum), and the stage says victory.
+- `tie-252`, Strength allocation 30, Vitality allocation 0: encounters start
+  at `[100,66,23]`; the third ends `[0,0]`, with the player the logged seeded
+  winner. The trip succeeds, returns normally and grants exactly 500 XP,
+  120 money and three salvage. This seed's separate gear-chance draw is above
+  the 40% threshold, so there is no gear reward.
+- `tie-0`, Strength allocation 5, Vitality allocation 0: the enemy is the
+  logged seeded simultaneous-defeat winner. The trip still stops after one
+  encounter, rests at the safe return point and grants no XP/money/loot.
+
+New post-review evidence: the owning expedition suite first produced **two
+meaningful failures and ten passes** with the old condition; both failure
+logs already named the player as canonical winner. After the one-condition
+correction, `npm test -- tests/domain/expedition.test.ts
+tests/domain/combat.test.ts tests/backend/worker.test.ts` passed **75/75**
+across three files. `npm run typecheck` passed TypeScript, both frozen Deno
+entrypoint checks and both Deno runtime tests. No mocks or engine changes
+were used. The earlier 103 DB tests, 258-entry migration parity and static
+export/scan remain the original implementation evidence; they were not rerun
+or relabeled as post-fix results for this planner-only correction.

@@ -54,8 +54,8 @@ export function planExpedition(snapshot: ActivitySnapshot, seed: Seed, rules: Ru
     const battleLog = simulateBattle({ battleId: `${snapshot.activityId}:encounter:${i + 1}`, rulesVersion: rules.version, rules,
       fighters: [{ id: snapshot.gladiatorId, gladiatorId: snapshot.gladiatorId, name: 'Gladiator', snapshot: player, startingHealth: hp },
         { id: `creature:${CREATURES[id][i]}:${i + 1}`, gladiatorId: null, name: enemy.name, snapshot: template }] }, `${seed}:encounter:${i + 1}`);
-    // A simultaneous-defeat tie-break victory still has zero HP: defeat ends the expedition.
-    success = battleLog.winnerId === snapshot.gladiatorId && battleLog.finalHp[0] > 0;
+    // Canonical seeded tie-breaks remain wins, including simultaneous defeat at zero HP.
+    success = battleLog.winnerId === snapshot.gladiatorId;
     encounters.push({ index: i + 1, dependsOn: i === 0 ? null : i, revealOffsetMs: offset, playerStartingHp: hp, battleLog, success });
     stage('encounter', offset, offset + battleLog.durationMs, `Encounter ${i + 1}: ${success ? 'victory' : 'defeat'}`, battleLog);
     if (!success) { stage('return', offset + battleLog.durationMs, rules.clock.slotMs, 'Rest at the safe return point'); break; }

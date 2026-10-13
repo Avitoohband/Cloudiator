@@ -4,7 +4,7 @@ import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { deriveStats } from '../../supabase/functions/_shared/domain/stats.ts';
 import type { ActivitySnapshot, BuildSnapshot } from '../../supabase/functions/_shared/domain/types.ts';
-import { baseFiveBuild } from '../fixtures/domain.ts';
+import { baseFiveBuild, itemFixture } from '../fixtures/domain.ts';
 
 export function expeditionSnapshot(strength = 150, vitality = 30, expeditionId: 'woodland' | 'outpost' | 'mountain' = 'woodland', level = 10): ActivitySnapshot {
   const build: BuildSnapshot = { ...baseFiveBuild, allocations: { strength, agility: 5, vitality, endurance: 5, precision: 5 } };
@@ -15,6 +15,51 @@ export function expeditionSnapshot(strength = 150, vitality = 30, expeditionId: 
       league: 'bronze', rating: 1000, peakStrength: 0, tournamentOptIn: false } };
 }
 describe('private deterministic expedition planning', () => {
+  // Canonical tier-1 spear, 20 effective Agility: 1200 / 1.2 = 1000ms,
+  // matching the Mountain enemy's interval. These fixed seeds produce real
+  // simultaneous lethal attacks in the unchanged combat engine, without mocks.
+  function simultaneousSnapshot(strength: number): ActivitySnapshot {
+    const snapshot = expeditionSnapshot(strength, 0, 'mountain');
+    const build: BuildSnapshot = { ...snapshot.build,
+      allocations: { ...snapshot.build.allocations, agility: 15 },
+      equipment: { ...snapshot.build.equipment, weapon: itemFixture(CATALOG_V1.items['spear:1:common']) } };
+    return { ...snapshot, build, derived: deriveStats(build, RULES_V1) };
+  }
+  it('heals a canonical zero-HP winner after a non-final encounter and continues the trip', () => {
+    const snapshot = simultaneousSnapshot(5), plan = planExpedition(snapshot, 'tie-21', RULES_V1);
+    const first = plan.encounters[0];
+    expect(first.battleLog).toMatchObject({ finalHp: [0, 0], winnerId: snapshot.gladiatorId,
+      victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' });
+    expect(first.battleLog.events.at(-1)).toMatchObject({ kind: 'victory', winnerId: snapshot.gladiatorId });
+    expect(first.success).toBe(true);
+    expect(plan.encounters[1].playerStartingHp).toBe(20); // 20% of canonical 100 max HP.
+    expect(plan.stages.find(s => s.kind === 'encounter')?.label).toBe('Encounter 1: victory');
+    expect(plan.stages.some(s => s.kind === 'exploration')).toBe(true);
+  });
+  it('awards full success rewards when the canonical third-encounter winner has zero HP', () => {
+    const snapshot = simultaneousSnapshot(30), plan = planExpedition(snapshot, 'tie-252', RULES_V1);
+    expect(plan.encounters).toHaveLength(3);
+    expect(plan.encounters.map(e => e.playerStartingHp)).toEqual([100, 66, 23]);
+    expect(plan.encounters[2].battleLog).toMatchObject({ finalHp: [0, 0], winnerId: snapshot.gladiatorId,
+      victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' });
+    expect(plan.encounters.every(e => e.success)).toBe(true);
+    expect(plan.success).toBe(true);
+    expect(plan.rewards).toEqual({ xp: 500, money: 120,
+      loot: [{ catalogId: 'salvage', catalogVersion: 'v1', quantity: 3, origin: 'expedition' }] });
+    expect(plan.stages.some(s => s.kind === 'travel')).toBe(true);
+    expect(plan.stages.some(s => s.label === 'Rest at the safe return point')).toBe(false);
+  });
+  it('still stops and withholds all rewards when the canonical simultaneous-defeat winner is the enemy', () => {
+    const snapshot = simultaneousSnapshot(5), plan = planExpedition(snapshot, 'tie-0', RULES_V1);
+    expect(plan.encounters).toHaveLength(1);
+    expect(plan.encounters[0].battleLog).toMatchObject({ finalHp: [0, 0], winnerId: 'creature:rock-troll:1',
+      victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' });
+    expect(plan.encounters[0].success).toBe(false);
+    expect(plan.success).toBe(false);
+    expect(plan.rewards).toEqual({ xp: 0, money: 0, loot: [] });
+    expect(plan.stages.some(s => s.kind === 'exploration' || s.kind === 'travel')).toBe(false);
+    expect(plan.stages.some(s => s.label === 'Rest at the safe return point')).toBe(true);
+  });
   it('plans complete immutable encounters at 20/40/60 with full initial HP and capped floored recovery', () => {
     const snapshot = expeditionSnapshot(), before = JSON.stringify(snapshot);
     const plan = planExpedition(snapshot, 'success', RULES_V1);

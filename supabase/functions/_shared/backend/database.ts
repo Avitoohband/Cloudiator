@@ -6,7 +6,8 @@ import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { buildChangeFee, validateBuild, validateCreationAllocation } from '../domain/build.ts';
 import { deriveStats } from '../domain/stats.ts';
-import { historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer } from '../domain/inventory.ts';
+import { applyXp, historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer } from '../domain/inventory.ts';
+import type { ExpeditionRewards } from '../domain/expedition.ts';
 import type { InventoryGrantPlan, ShopOffer } from '../domain/inventory.ts';
 import type { CoordinatorReport, JobKind, JobLease } from '../domain/types.ts';
 
@@ -136,7 +137,7 @@ export type CommandDatabase = ReturnType<typeof createDatabase>;
 
 /** Fenced job RPC results. `replayed` marks an idempotent retry of an already-committed outcome. */
 export type JobOutcome = { ok: true; replayed?: boolean; newGrants?: number; receiptId?: string; [key: string]: unknown }
-  | { ok: false; code: 'conflict' | 'invalid' | 'not-found' | 'processing' };
+  | { ok: false; code: 'conflict' | 'invalid' | 'not-found' | 'processing' | 'stale-preparation' };
 export type RenewOutcome = { ok: true; expiresAtMs: number } | { ok: false; code: 'conflict' | 'not-found' };
 /** Service-role RPC port used only by the private game-worker; every call is fenced by its lease token in SQL. */
 export type WorkerDatabase = {
@@ -150,7 +151,7 @@ export type WorkerDatabase = {
 /** Versioned executors keyed by the job's persisted rules version. Settlement is SQL-side and never an executor. */
 export type JobExecutor = (job: JobLease) => unknown | Promise<unknown>;
 export type ExecutorRegistry = Readonly<Record<string, Partial<Record<Exclude<JobKind, 'settlement'>, JobExecutor>>>>;
-export type WorkerDependencies = { database: WorkerDatabase; workerId: string; executors?: ExecutorRegistry; now?: () => number };
+export type WorkerDependencies = { database: WorkerDatabase; workerId: string; executors?: ExecutorRegistry; now?: () => number; cpuNow?: () => number };
 export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
   async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
     const { data, error } = await client.rpc(name, args);
@@ -163,7 +164,24 @@ export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
     claim: (workerId, kind, limit) => rpc('claim_jobs', { worker_id: workerId, kind, batch_limit: limit }),
     renew: (jobId, token) => rpc('renew_job', { job_id: jobId, lease_token: token }),
     complete: (jobId, token, result) => rpc('complete_job', { job_id: jobId, lease_token: token, result }),
-    settle: (activityId, token) => rpc('settle_activity', { activity_id: activityId, lease_token: token }),
+    settle: async (activityId, token) => {
+      // Shopping may change capacity/reservations after planning. Re-read current state while preserving the
+      // immutable reward proposal, then let SQL compare it under the settlement's existing account locks.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const input = await rpc<{ state: OwnerState; rewards: ExpeditionRewards; rulesVersion: string; jobId: string } | null>(
+          'expedition_settlement_input', { activity_id: activityId, lease_token: token });
+        if (!input) return rpc('settle_activity', { activity_id: activityId, lease_token: token });
+        if (input.rulesVersion !== 'v1') throw new Error('unsupported-rules');
+        const baseline = { level: input.state.progression.level, xp: input.state.progression.xp };
+        const prepared = { rewards: input.rewards, grant: prepareGrant(input.state, input.rewards.loot), progressionBaseline: baseline,
+          progression: applyXp(baseline.level, baseline.xp, input.rewards.xp) };
+        const renewed = await rpc<RenewOutcome>('renew_job', { job_id: input.jobId, lease_token: token });
+        if (!renewed.ok) return renewed;
+        const result = await rpc<JobOutcome>('settle_expedition', { activity_id: activityId, lease_token: token, prepared });
+        if (result.ok || result.code !== 'stale-preparation') return result;
+      }
+      return { ok: false, code: 'stale-preparation' };
+    },
     fail: (jobId, token, code) => rpc('fail_job', { job_id: jobId, lease_token: token, failure_code: code }),
   };
 }

@@ -134,6 +134,25 @@ describe('fenced worker orchestration', () => {
     const { database } = port({ settlement: jobs }, () => outcomes.shift()!);
     expect(await runWorker({ database, workerId: 'worker-f' })).toMatchObject({ completed: 1, replayed: 1, conflicts: 1, failed: 0 });
   });
+  it('uses the authoritative renewed expiry and renews again after long execution before completion', async () => {
+    let clock = 1_000;
+    const job = lease('simulation', { expiresAtMs: 2_000 });
+    const { database, calls } = port({ simulation: [job] });
+    database.renew = async (id, token) => { calls.push({ name: 'renew', args: [id, token] }); return { ok: true, expiresAtMs: clock + 120_000 }; };
+    const executors: ExecutorRegistry = { v1: { simulation: observed => {
+      expect(observed.expiresAtMs).toBe(121_000); clock = 100_000; return {};
+    } } };
+    expect(await runWorker({ database, executors, workerId: 'renew', now: () => clock })).toMatchObject({ completed: 1 });
+    expect(calls.filter(c => c.name === 'renew')).toHaveLength(2);
+  });
+  it('stops execution at the two-second compute budget and leaves unprocessed leases reclaimable', async () => {
+    let cpu = 0;
+    const { database, calls } = port({ simulation: [lease('simulation'), lease('simulation')] });
+    const executors: ExecutorRegistry = { v1: { simulation: () => { cpu += 2_001; return {}; } } };
+    const result = await runWorker({ database, executors, workerId: 'budget', cpuNow: () => cpu });
+    expect(result).toMatchObject({ claimed: 2, completed: 1, deferred: 1 });
+    expect(calls.filter(c => c.name === 'complete')).toHaveLength(1);
+  });
   it('still claims and runs due jobs when coordination itself is unavailable', async () => {
     const job = lease('settlement');
     const { database, calls } = port({ settlement: [job] });

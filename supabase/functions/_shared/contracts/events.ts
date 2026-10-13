@@ -3,7 +3,9 @@ import type { ActivityId, Attributes, ClassId, GladiatorId, Stance } from './com
 export type ItemRarity = 'common' | 'uncommon' | 'rare';
 export type ItemStats = { damage: number; armor: number; weight: number; intervalMs: number; attributes: Attributes };
 export type ItemReward = { catalogId: string; catalogVersion: string; tier: 1 | 5 | 10; rarity: ItemRarity; quantity: number };
-export type CreditedRewards = { money: number; renown: number; xp: number; attributePoints: number; items: ItemReward[]; overflowMoney: number };
+/** Owner-only conversion details. Never included in public expedition stages or spectator projections. */
+export type CreditedOverflow = { catalogId: string; catalogVersion: string; quantity: number; unitValue: number; money: number };
+export type CreditedRewards = { money: number; renown: number; xp: number; attributePoints: number; items: ItemReward[]; overflowMoney: number; overflow?: CreditedOverflow[] };
 export type ActivitySummary = {
   activityId: ActivityId;
   resolvedKind: 'training' | 'rest' | 'expedition' | 'arena' | 'tournament';

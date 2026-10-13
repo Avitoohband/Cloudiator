@@ -72,6 +72,8 @@ export type BoundaryReport = {
 export type CoordinatorReport = { ok: boolean; code?: string; busy?: boolean; publishedSlot: number | null; currentSlot?: number; boundaries?: BoundaryReport[] };
 export type WorkerReport = {
   claimed: number; completed: number; replayed: number; failed: number; conflicts: number;
+  /** Claimed but not executed once the invocation compute budget was spent; their leases remain reclaimable. */
+  deferred?: number;
   /** Failures the worker could not record because the fail RPC was unreachable; their leases expire and are reclaimed. */
   unrecorded: number;
   byKind: Record<JobKind, number>; coordination: CoordinatorReport | null;

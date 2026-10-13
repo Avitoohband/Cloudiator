@@ -633,17 +633,16 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect(await boundary).toMatchObject({ phase: 4, wait: 'preparation' });
   });
 
-  it('stops truthfully at integration gates for unsupported Arena and Expedition executors', async () => {
+  it('starts expeditions and retains the unsupported Arena integration gate', async () => {
     const explorer = await fighter({ schedule: { morning: { kind: 'expedition', expeditionId: 'woodland' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
     const token = await coordinatorLease();
-    expect(await runBoundary(300, token)).toMatchObject({ phase: 8, status: 'waiting', wait: 'integration' });
-    expect(await runBoundary(300, token)).toMatchObject({ phase: 8, wait: 'integration' });
-    expect(await activities(explorer.gid)).toEqual([{ slot: 300, requested: 'expedition', resolved_kind: 'expedition', fallback: false, debit: 30, status: 'preparing' }]);
-    expect(await explorer.row()).toMatchObject({ stamina: 104, processed: 299, earned: 10 });
-    expect(await sql`select count(*)::int as n from private.jobs where kind<>'prepare'`).toEqual([{ n: 0 }]);
+    expect(await runBoundary(300, token)).toMatchObject({ phase: 9, status: 'complete' });
+    expect(await runBoundary(300, token)).toMatchObject({ phase: 9, status: 'complete' });
+    expect(await activities(explorer.gid)).toEqual([{ slot: 300, requested: 'expedition', resolved_kind: 'expedition', fallback: false, debit: 30, status: 'active' }]);
+    expect(await explorer.row()).toMatchObject({ stamina: 74, processed: 300, earned: 10 });
+    expect(await sql`select count(*)::int as n from private.jobs where kind<>'prepare'`).toEqual([{ n: 2 }]);
     expect(await sql`select count(*)::int as n from private.settled_slots`).toEqual([{ n: 0 }]);
-    expect((await explorer.state()).currentActivity).toMatchObject({ kind: 'expedition', status: 'queued' });
-
+    expect((await explorer.state()).currentActivity).toMatchObject({ kind: 'expedition', status: 'processing' });
     await resetWorld(299);
     const fighterArena = await fighter({ schedule: { morning: { kind: 'arena' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
     expect(await runBoundary(300)).toMatchObject({ phase: 7, status: 'waiting', wait: 'integration' });

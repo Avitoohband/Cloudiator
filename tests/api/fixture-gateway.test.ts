@@ -84,3 +84,39 @@ test('fixture timelines cannot share mutable state with callers', async () => {
   expect(again.stages[1].battleLog!.finalHp[0]).not.toBe(999);
   expect(again.summary!.rewards.renown).toBe(10);
 });
+
+test('fixture expedition timelines resolve by activity id, and unknown ids stay unavailable', async () => {
+  const { EXPEDITION_FIXTURES, EXPEDITION_FIXTURE_TIMELINES, EXPEDITION_SAMPLES } = await import('../fixtures/expeditions');
+  const { FIXTURE_EXPEDITIONS } = await import('../../src/lib/api/fixture-gateway');
+  const gateway = createFixtureGateway();
+  for (const [key, fixture] of Object.entries(EXPEDITION_FIXTURES)) {
+    const timeline = await gateway.timeline(fixture.activityId);
+    expect(timeline, key).toEqual(EXPEDITION_FIXTURE_TIMELINES[key as keyof typeof EXPEDITION_FIXTURES]);
+    // Callers get their own copy.
+    timeline.stages.length = 0;
+    expect((await gateway.timeline(fixture.activityId)).stages.length, key).toBeGreaterThan(0);
+  }
+  expect(FIXTURE_EXPEDITIONS).toEqual(EXPEDITION_SAMPLES);
+  expect(FIXTURE_EXPEDITIONS.map(e => e.activityId)).toEqual(Object.values(EXPEDITION_FIXTURES).map(e => e.activityId));
+  await expect(gateway.timeline('0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e')).rejects.toMatchObject({ code: 'unavailable' });
+  // The replay samples are still served alongside.
+  const { REPLAY_FIXTURES } = await import('../fixtures/battles');
+  expect((await gateway.timeline(REPLAY_FIXTURES.pvp.activityId)).activityId).toBe(REPLAY_FIXTURES.pvp.activityId);
+});
+
+test('fixture expedition timelines hold every stage; the display clock reveals only those due', async () => {
+  const { EXPEDITION_FIXTURES } = await import('../fixtures/expeditions');
+  const { renderExpeditionStage } = await import('../../src/game/expedition-stage');
+  const gateway = createFixtureGateway();
+  // The gateway has no clock: the outpost run (server time minute 65) already holds its arrival stage.
+  const outpost = await gateway.timeline(EXPEDITION_FIXTURES.outpost.activityId);
+  expect(outpost.stages.some(s => s.revealedAtMs > outpost.serverNowMs)).toBe(true);
+  for (const fixture of Object.values(EXPEDITION_FIXTURES)) {
+    const timeline = await gateway.timeline(fixture.activityId);
+    const state = renderExpeditionStage(timeline, timeline.serverNowMs);
+    const due = timeline.stages.filter(s => s.revealedAtMs <= timeline.serverNowMs).map(s => s.id);
+    expect(state.stages.map(s => s.id), fixture.label).toEqual(due);
+    if (!fixture.owner) expect(timeline.summary, fixture.label).toBeUndefined();
+  }
+  expect(renderExpeditionStage(outpost, outpost.serverNowMs).phase).toBe('safe-return');
+});

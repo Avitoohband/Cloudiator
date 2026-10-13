@@ -1,0 +1,213 @@
+{
+  "activityId": "c9f8eaac-3be8-4d40-9b52-9a0b1c2d3e49",
+  "serverNowMs": 1791593100000,
+  "visibleThroughMs": 1791593100000,
+  "stages": [
+    {
+      "id": "c9f8eaac-3be8-4d40-9b52-9a0b1c2d3e49:0",
+      "kind": "depart",
+      "revealedAtMs": 1791590400000,
+      "startedAtMs": 1791590400000,
+      "endsAtMs": 1791591600000,
+      "label": "Depart for Woodland Path"
+    },
+    {
+      "id": "c9f8eaac-3be8-4d40-9b52-9a0b1c2d3e49:1",
+      "kind": "encounter",
+      "revealedAtMs": 1791591600000,
+      "startedAtMs": 1791591600000,
+      "endsAtMs": 1791591605232,
+      "label": "Encounter 1: victory",
+      "battleLog": {
+        "battleId": "fixture-delayed-encounter-1",
+        "rulesVersion": "v1",
+        "participants": [
+          {
+            "id": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "name": "Aster",
+            "classId": "guardian",
+            "stance": "balanced",
+            "attributes": {
+              "strength": 8,
+              "agility": 7,
+              "vitality": 8.4,
+              "endurance": 7.35,
+              "precision": 5
+            },
+            "maxHealth": 134,
+            "initialHealth": 134,
+            "armor": 5,
+            "weaponDamage": 8,
+            "attackIntervalMs": 1308,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": [
+              "axe:1:common",
+              "round-shield:1:common",
+              "light-armor:1:common"
+            ]
+          },
+          {
+            "id": "creature:dire-wolf:1",
+            "gladiatorId": null,
+            "name": "Wild beast",
+            "classId": null,
+            "stance": "balanced",
+            "attributes": {
+              "strength": 4,
+              "agility": 4,
+              "vitality": 3,
+              "endurance": 4,
+              "precision": 4
+            },
+            "maxHealth": 35,
+            "initialHealth": 35,
+            "armor": 0,
+            "weaponDamage": 6,
+            "attackIntervalMs": 1100,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": []
+          }
+        ],
+        "events": [
+          {
+            "kind": "attack",
+            "sequence": 0,
+            "elapsedMs": 1100,
+            "attackerId": "creature:dire-wolf:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 134,
+            "healthAfter": 134
+          },
+          {
+            "kind": "attack",
+            "sequence": 1,
+            "elapsedMs": 1308,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:dire-wolf:1",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 35,
+            "healthAfter": 35
+          },
+          {
+            "kind": "attack",
+            "sequence": 2,
+            "elapsedMs": 2200,
+            "attackerId": "creature:dire-wolf:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 5,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 134,
+            "healthAfter": 129
+          },
+          {
+            "kind": "attack",
+            "sequence": 3,
+            "elapsedMs": 2616,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:dire-wolf:1",
+            "hit": true,
+            "critical": false,
+            "damage": 12,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 35,
+            "healthAfter": 23
+          },
+          {
+            "kind": "attack",
+            "sequence": 4,
+            "elapsedMs": 3300,
+            "attackerId": "creature:dire-wolf:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": true,
+            "damage": 8,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 129,
+            "healthAfter": 121
+          },
+          {
+            "kind": "attack",
+            "sequence": 5,
+            "elapsedMs": 3924,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:dire-wolf:1",
+            "hit": true,
+            "critical": false,
+            "damage": 12,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 23,
+            "healthAfter": 11
+          },
+          {
+            "kind": "attack",
+            "sequence": 6,
+            "elapsedMs": 4400,
+            "attackerId": "creature:dire-wolf:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 5,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 121,
+            "healthAfter": 116
+          },
+          {
+            "kind": "attack",
+            "sequence": 7,
+            "elapsedMs": 5232,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:dire-wolf:1",
+            "hit": true,
+            "critical": false,
+            "damage": 12,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 11,
+            "healthAfter": 0
+          },
+          {
+            "kind": "victory",
+            "sequence": 8,
+            "elapsedMs": 5232,
+            "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "loserId": "creature:dire-wolf:1",
+            "reason": "defeat"
+          }
+        ],
+        "durationMs": 5232,
+        "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+        "victoryReason": "defeat",
+        "finalHp": [
+          116,
+          0
+        ],
+        "tieBreakReason": null
+      }
+    },
+    {
+      "id": "c9f8eaac-3be8-4d40-9b52-9a0b1c2d3e49:2",
+      "kind": "exploration",
+      "revealedAtMs": 1791591605232,
+      "startedAtMs": 1791591605232,
+      "endsAtMs": 1791592800000,
+      "label": "Recover and continue exploring"
+    }
+  ]
+}

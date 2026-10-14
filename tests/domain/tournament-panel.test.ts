@@ -4,9 +4,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { TournamentView } from '@contracts/reads';
 import { renderTournament } from '@/game/tournament-stage';
 import { RegistrationView, TournamentBracketView, TournamentScheduleView, type BracketModel, type RegistrationModel } from '@/features/tournaments/TournamentPanel';
+import { viewerText } from '@/features/tournaments/tournament-text';
+import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
-import { TOURNAMENT_VIEWS, TOURNAMENTS, type TournamentKey } from '../fixtures/tournaments';
+import { TOURNAMENT_SAMPLE_KEYS, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, TOURNAMENTS, tournamentAsOf, tournamentId, type TournamentKey } from '../fixtures/tournaments';
 
 const MIN = 60_000;
 const noop = () => {};
@@ -98,6 +100,24 @@ describe('tournament bracket', () => {
     expect(words).toContain('You are not entered in this tournament.');
   });
 
+  it('says the viewer advances only after a shown win or bye, and that a due but unpublished result is not published yet', () => {
+    // The opening view was read at minute 5: by minute 25 round 1 is due, but Aster's result is not published.
+    const words = text(bracket('opening', 25));
+    expect(words).toContain('Processing results');
+    expect(words).toContain('Your Quarterfinals result is not published yet. It appears here as soon as it is revealed.');
+    expect(words).not.toContain('You advance');
+    const own = (key: TournamentKey, minute: number, name: keyof typeof ARENA_GLADIATORS) =>
+      viewerText(renderTournament(TOURNAMENT_VIEWS[key], TOURNAMENTS[key].startsAtMs + minute * MIN, { viewerId: ARENA_GLADIATORS[name].id }), true, 'UTC');
+    // A shown win or a bye in every due round: the viewer advances.
+    expect(own('completed', 30, 'varro')).toBe('You advance. Your next bout is revealed at Sat 26 Sept, 18:00 UTC.');
+    expect(own('midway', 30, 'gallus')).toBe('You advance. Your next bout is revealed at Sat 3 Oct, 18:00 UTC.');
+    // The mid-way final is due at minute 60 but unpublished: both finalists wait for it, and nobody advances.
+    expect(own('midway', 65, 'decimus')).toBe('Your Final result is not published yet. It appears here as soon as it is revealed.');
+    expect(own('midway', 65, 'aurelia')).toBe('Your Final result is not published yet. It appears here as soon as it is revealed.');
+    // A round 1 bout is revealed but still being fought: no advance yet.
+    expect(own('completed', 20.1, 'varro')).toBe('Your bout is being fought now.');
+  });
+
   it('shows byes, revealed winners by winnerId and the bouts in progress', () => {
     const r1 = bracket('midway', 30, { round: 1 });
     expect(count(r1, 'advances on a bye')).toBe(3);
@@ -125,6 +145,21 @@ describe('tournament bracket', () => {
     expect(words).toMatch(/Eliminated in the Quarterfinals · spectating/);
   });
 
+  it('nests the inline replay’s headings under the panel’s, while BattleReplay keeps its h1 by default', () => {
+    const final = (v: TournamentView) => v.bouts.find(b => b.round === 3)!;
+    const boutId = final(TOURNAMENT_VIEWS.completed).id;
+    const html = bracket('completed', 85, { replayBoutId: boutId });
+    const headings = [...html.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/g)].map(m => [Number(m[1]), text(m[2]).trim()]);
+    // The card title is an h4 (under the tab's h2 and the Brackets h3); the replay section an h5 inside it.
+    expect(headings).toEqual([[4, 'Bronze tournament'], [5, 'Entrants (8)'], [5, 'Replay · Final, bout 1'], [6, 'Severus vs Varro'],
+      [6, 'Result'], [6, 'Fighters'], [6, 'Combat log']]);
+    const log = final(TOURNAMENT_VIEWS.completed).revealedResult!.battleLog!;
+    const stage = { id: boutId, kind: 'bout' as const, label: 'Tournament · Final', revealedAtMs: 0, startedAtMs: 0, endsAtMs: log.durationMs };
+    const standalone = renderToStaticMarkup(createElement(BattleReplay, { view: { kind: 'replay', selected: 0, summary: null, battles: [{ log, stage }] } }));
+    expect([...standalone.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/g)].map(m => [Number(m[1]), text(m[2]).trim()]))
+      .toEqual([[1, 'Severus vs Varro'], [2, 'Result'], [2, 'Fighters'], [2, 'Combat log']]);
+  });
+
   it('places entrants after settlement and shows rewards only for the viewer’s own placement', () => {
     const words = text(bracket('completed', 85));
     expect(words).toContain('Completed');
@@ -149,5 +184,28 @@ describe('tournament bracket', () => {
     const html = bracket('opening', 5, {}, view);
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+});
+
+describe('fixture samples', () => {
+  it('carry the server time each view was projected at, where each shows what its label says', () => {
+    expect(TOURNAMENT_SAMPLES.map(s => [s.id, s.asOfMs])).toEqual(TOURNAMENT_SAMPLE_KEYS.map(key => [tournamentId(key), tournamentAsOf(key)]));
+    const shown = (key: TournamentKey) => {
+      const sample = TOURNAMENT_SAMPLES.find(s => s.id === tournamentId(key))!;
+      return renderTournament(TOURNAMENT_VIEWS[key], sample.asOfMs, { viewerId: ASTER });
+    };
+    // 'started, before round 1'
+    expect([shown('opening').status, shown('opening').rounds.map(r => r.due)]).toEqual(['active', [false, false, false]]);
+    // 'five entrants with byes, mid-way'
+    expect([shown('midway').status, shown('midway').shape?.byes, shown('midway').rounds.map(r => r.due)]).toEqual(['active', 3, [true, true, false]]);
+    // 'final revealed, placements pending'
+    const late = shown('late');
+    expect([late.status, late.rounds.map(r => r.due && !r.delayed), late.championId !== null, late.placements]).toEqual(['active', [true, true, true], true, []]);
+    // 'completed; you lost in the first round'
+    expect([shown('completed').status, shown('completed').viewer.entrant?.eliminatedInRound, shown('completed').placements.length]).toEqual(['completed', 1, 8]);
+    // 'two entrants, a 0 HP tie-break final', 'one qualifier, regular Arena instead', 'scheduled, entries not yet fixed'
+    expect([shown('pair').status, shown('pair').championId]).toEqual(['completed', ASTER]);
+    expect(shown('insufficient').status).toBe('insufficient-entrants');
+    expect([shown('upcoming').status, shown('upcoming').entrants]).toEqual(['scheduled', []]);
   });
 });

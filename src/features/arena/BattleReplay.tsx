@@ -3,7 +3,7 @@
 // Battle replay panel: the close-up scene, both fighters' health, consistent controls, the
 // fighters' revealed snapshots, the result and a readable combat log. Everything shown comes from
 // the revealed log; rewards come only from the activity summary. Names render as React text.
-import { useCallback, useEffect, useId, useReducer, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useReducer, useRef, useState, type HTMLAttributes, type KeyboardEvent } from 'react';
 import type { ActivitySummary, RevealedCombatant } from '@contracts/events';
 import rawManifest from '../../../public/assets/manifest.json';
 import { createReplayController, replayLines, type ReplayBattle, type ReplayController, type ReplaySpeed, type ReplayView } from '../../game/replay';
@@ -49,20 +49,32 @@ function kindOf(p: RevealedCombatant): string {
   return creatureFor(p, CREATURES) ? 'Creature' : 'NPC opponent';
 }
 
-export function BattleReplay({ view, bridge }: { view: ReplayView; bridge?: SceneBridge }) {
-  if (view.kind === 'summary') return <SavedOutcome summary={view.summary} />;
-  if (view.kind === 'unavailable') return <ReplayUnavailable reason={view.reason} />;
-  return <ReplayBattles battles={view.battles} initial={view.selected} summary={view.summary} bridge={bridge} />;
+export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+/** A heading at `level`; its sections use the next level (at most h6). */
+function Heading({ level, ...props }: { level: HeadingLevel } & HTMLAttributes<HTMLHeadingElement>) {
+  const Tag = `h${level}` as const;
+  return <Tag {...props} />;
+}
+const below = (level: HeadingLevel) => Math.min(6, level + 1) as HeadingLevel;
+
+/**
+ * `headingLevel` places the replay's title (default h1, as on the replay page) under an embedding page's headings;
+ * its Result, Fighters and Combat log sections take the next level.
+ */
+export function BattleReplay({ view, bridge, headingLevel = 1 }: { view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel }) {
+  if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
+  if (view.kind === 'unavailable') return <ReplayUnavailable reason={view.reason} level={headingLevel} />;
+  return <ReplayBattles battles={view.battles} initial={view.selected} summary={view.summary} bridge={bridge} level={headingLevel} />;
 }
 
-function ReplayBattles({ battles, initial, summary, bridge }: { battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; bridge?: SceneBridge }) {
+function ReplayBattles({ battles, initial, summary, bridge, level }: { battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel }) {
   const [selected, setSelected] = useState(initial);
   const battle = battles[selected];
   return <>
     {battles.length > 1 && <div className={styles.encounters} role="group" aria-label="Encounters">
       {battles.map((b, i) => <button key={b.stage.id} type="button" aria-pressed={i === selected} onClick={() => setSelected(i)}>{b.stage.label}</button>)}
     </div>}
-    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} bridge={bridge} />
+    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} bridge={bridge} level={level} />
   </>;
 }
 
@@ -72,7 +84,7 @@ function useController(controller: ReplayController) {
   useEffect(() => controller.subscribe(force), [controller]);
 }
 
-function BattlePlayer({ battle, summary, bridge: external }: { battle: ReplayBattle; summary: ActivitySummary | null; bridge?: SceneBridge }) {
+function BattlePlayer({ battle, summary, bridge: external, level }: { battle: ReplayBattle; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel }) {
   const { log, stage } = battle;
   const [bridge] = useState(() => external ?? createSceneBridge());
   const [controller] = useState(() => createReplayController(log));
@@ -182,7 +194,7 @@ function BattlePlayer({ battle, summary, bridge: external }: { battle: ReplayBat
     <section className={styles.player} aria-labelledby={`${resultId}-title`} onKeyDown={onKeyDown}>
       <header className={styles.header}>
         <p className="eyebrow">{stage.kind === 'encounter' ? `Expedition · ${stage.label}` : stage.label}</p>
-        <h1 id={`${resultId}-title`}>{a.name} vs {b.name}</h1>
+        <Heading level={level} id={`${resultId}-title`}>{a.name} vs {b.name}</Heading>
       </header>
       <BattleViewport log={log} position={position} reducedMotion={reduced} bridge={bridge}
         label={`Close-up of ${a.name} (left) fighting ${b.name} (right). The combat log below describes every action.`} />
@@ -214,7 +226,7 @@ function BattlePlayer({ battle, summary, bridge: external }: { battle: ReplayBat
 
       <div className={styles.columns}>
         <section className={styles.card} role="region" aria-labelledby={resultId}>
-          <h2 id={resultId}>Result</h2>
+          <Heading level={below(level)} id={resultId}>Result</Heading>
           {frame.result && winner && loser ? <div aria-live="polite">
             <p className={styles.verdict}>{winner.name} wins</p>
             <p>{frame.result.victoryReason === 'defeat' ? `${loser.name} is defeated.`
@@ -228,12 +240,12 @@ function BattlePlayer({ battle, summary, bridge: external }: { battle: ReplayBat
         </section>
 
         <section className={styles.card} aria-labelledby={tableId}>
-          <h2 id={tableId}>Fighters</h2>
+          <Heading level={below(level)} id={tableId}>Fighters</Heading>
           <Comparison fighters={log.participants} />
         </section>
 
         <section className={`${styles.card} ${styles.logCard}`} aria-labelledby={logId}>
-          <h2 id={logId}>Combat log</h2>
+          <Heading level={below(level)} id={logId}>Combat log</Heading>
           {sceneMissing && <p className={styles.note}>The animation is unavailable here; the log follows the fight instead.</p>}
           {lines.length === 0 && <p className={styles.note}>The first blow lands at {seconds(log.events[0]?.elapsedMs ?? 0)}.</p>}
           <ol ref={logBox} className={styles.log} aria-label="Combat log">
@@ -286,21 +298,21 @@ function Rewards({ summary, scope }: { summary: ActivitySummary; scope: string }
   </div>;
 }
 
-function SavedOutcome({ summary }: { summary: ActivitySummary }) {
+function SavedOutcome({ summary, level }: { summary: ActivitySummary; level: HeadingLevel }) {
   const id = useId();
   const result = summary.result === 'victory' ? 'Victory' : summary.result === 'defeat' ? 'Defeat' : 'Completed';
   const kind = summary.resolvedKind === 'expedition' ? 'Expedition' : summary.resolvedKind === 'tournament' ? 'Tournament bout' : summary.resolvedKind === 'arena' ? 'Arena bout' : capital(summary.resolvedKind);
   return <section className={`${styles.card} ${styles.saved}`} role="region" aria-labelledby={id}>
     <p className="eyebrow">{kind} · settled {day(summary.settledAtMs)}</p>
-    <h1 id={id}><span className={styles.hidden}>Saved outcome: </span>{result}</h1>
+    <Heading level={level} id={id}><span className={styles.hidden}>Saved outcome: </span>{result}</Heading>
     <p>The animation for this fight is no longer kept. Detailed replays are kept for seven days; the result and the credited rewards stay in your history for 90 days.</p>
     <Rewards summary={summary} scope="Credited rewards" />
   </section>;
 }
 
-function ReplayUnavailable({ reason }: { reason: 'not-revealed' | 'not-found' | 'unavailable' }) {
+function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'not-found' | 'unavailable'; level: HeadingLevel }) {
   return <section className={`${styles.card} ${styles.saved}`}>
-    <h1>This replay is not available</h1>
+    <Heading level={level}>This replay is not available</Heading>
     <p>{reason === 'not-revealed' ? 'The fight has not been revealed yet. Replays appear once the bout is revealed.'
       : reason === 'not-found' ? 'No fight was found for this link.'
         : 'Replays cannot be loaded in this build yet.'}</p>

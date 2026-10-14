@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
-import { TOURNAMENT_KEYS, TOURNAMENTS, type TournamentKey } from '../fixtures/tournament-ids';
+import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
 import { tournamentCampActors } from '../fixtures/tournament-build';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -24,15 +24,18 @@ async function openTournaments(page: Page) {
   await page.getByRole('button', { name: 'Tournaments', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible({ timeout: 45_000 });
 }
-/** The plan's helper: opens a sample tournament with the shared display clock held at a moment of its slot. */
+/**
+ * The plan's helper: opens a sample tournament with the shared display clock held at a moment of its slot. Opening a
+ * sample holds its bracket at the sample's projection time, so the clock is set after the sample is open.
+ */
 const tournamentFlow = {
   async openAt(page: Page, key: TournamentKey, ms: number) {
     if (!(await page.evaluate(() => !!window.__cloudiatorTournaments))) await openTournaments(page);
-    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), ms);
     const id = VIEWS[key].id;
     if ((await page.evaluate(() => window.__cloudiatorTournaments!.state()?.id ?? null)) !== id) {
       await page.getByRole('button', { name: TOURNAMENTS[key].label, exact: true }).click();
     }
+    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), ms);
     await page.waitForFunction(({ id, t }) => {
       const s = window.__cloudiatorTournaments!.state();
       return !!s && s.id === id && Math.abs(s.now - t) < 1;
@@ -97,7 +100,9 @@ test.describe('tournament registration and brackets', () => {
     await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
     await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
     const replay = card(page).getByRole('region', { name: /^Replay · Final, bout 1$/ });
-    await expect(replay.getByRole('heading', { level: 1, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
+    // The replay's title sits under the card's h4 and the replay section's h5; the card has no h1.
+    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
+    await expect(card(page).getByRole('heading', { level: 1 })).toHaveCount(0);
     await page.waitForFunction(() => window.__cloudiatorReplay?.state().battleId === 'tournament:373009:bronze:3:0');
     await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(999_999); });
     await expect(replay.getByRole('region', { name: 'Result' })).toContainText('Varro wins');
@@ -188,6 +193,65 @@ test.describe('tournament registration and brackets', () => {
     await page.waitForFunction(n => window.__cloudiatorTournaments!.reads() > n, reads);
   });
 
+  test('says the owner’s due but unpublished result is not published yet, never that she advances', async ({ page }) => {
+    // The opening view was read at minute 5; at minute 25 round 1 is due but unpublished.
+    await tournamentFlow.openAtMinute(page, 'opening', 25);
+    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+    await expect(card(page)).toContainText('Your Quarterfinals result is not published yet. It appears here as soon as it is revealed.');
+    await expect(card(page)).not.toContainText('You advance');
+    expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
+  });
+
+  test('holds each sample at the server time its view was projected at, so it shows what its label says', async ({ page }) => {
+    await openTournaments(page);
+    const shows: [TournamentKey, string, string][] = [
+      ['opening', 'In progress', 'You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.'],
+      ['midway', 'In progress', 'Next reveal: Final, Sat 3 Oct, 18:20 UTC.'],
+      ['late', 'In progress', 'Every round is revealed. Placements settle at minute 80, Wed 30 Sept, 18:40 UTC.'],
+      ['completed', 'Completed', 'Your placement: 5th. Credited: +7 renown.'],
+      ['pair', 'Completed', 'You are the champion of this tournament!'],
+      ['insufficient', 'Not held: too few entrants', 'that entrant fought regular Arena this slot'],
+      ['upcoming', 'Scheduled', 'Entrants and the bracket are published at the start, Sat 10 Oct, 17:20 UTC.'],
+    ];
+    for (const [key, status, detail] of shows) {
+      await page.getByRole('button', { name: TOURNAMENTS[key].label, exact: true }).click();
+      await expect(card(page).getByRole('status'), key).toHaveText(status);
+      await expect(card(page), key).toContainText(detail);
+      expect((await panelState(page))?.now, key).toBe(tournamentAsOf(key));
+    }
+    // The held sample time stays put (no running clock); the test hook's clock still overrides it.
+    await page.waitForTimeout(1500);
+    expect((await panelState(page))?.now).toBe(tournamentAsOf('upcoming'));
+    await page.getByRole('button', { name: TOURNAMENTS.opening.label, exact: true }).click();
+    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('opening') + 25 * MIN);
+    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+  });
+
+  test('retries a failed first read every 30 s while the tab is visible', async ({ page }) => {
+    await page.clock.install();
+    await openTournaments(page);
+    // The owner has loaded (the panel is keyed by the owner's gladiator), so the panel is not replaced mid-test.
+    await expect(page.getByRole('region', { name: 'Registration' })).toContainText('Automatic entry');
+    await page.evaluate(() => window.__cloudiatorTournaments!.open('tournament:1:bronze'));
+    await expect(page.getByText('Tournament brackets cannot be loaded right now.')).toBeVisible();
+    const reads = () => page.evaluate(() => window.__cloudiatorTournaments!.reads());
+    const first = await reads();
+    await page.clock.fastForward(29_000);
+    expect(await reads()).toBe(first);
+    await page.clock.fastForward(1_500);
+    await expect.poll(reads).toBe(first + 1);
+    await page.clock.fastForward(30_000);
+    await expect.poll(reads).toBe(first + 2);
+    // A hidden tab does not retry; once visible again, the next 30 s tick reads.
+    await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }));
+    await page.clock.fastForward(65_000);
+    expect(await reads()).toBe(first + 2);
+    await page.evaluate(() => { delete (document as { visibilityState?: unknown }).visibilityState; });
+    await page.clock.fastForward(30_000);
+    await expect.poll(reads).toBe(first + 3);
+    await expect(page.getByText('Tournament brackets cannot be loaded right now.')).toBeVisible();
+  });
+
   test('reads the view again when the display clock passes a reveal', async ({ page }) => {
     await tournamentFlow.openAt(page, 'completed', revealOf('completed', 2) - 2000);
     const reads = await page.evaluate(() => window.__cloudiatorTournaments!.reads());
@@ -198,11 +262,12 @@ test.describe('tournament registration and brackets', () => {
 
   test('works by keyboard alone', async ({ page }) => {
     await openTournaments(page);
-    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('pair') + 79 * MIN);
     const sample = page.getByRole('button', { name: TOURNAMENTS.pair.label, exact: true });
     await sample.focus();
     await page.keyboard.press('Enter');
     await expect(card(page)).toContainText('You are the champion of this tournament!');
+    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('pair') + 79 * MIN);
+    await expect(card(page).getByRole('table')).toHaveCount(0);
     await expect(card(page)).toContainText('Both fell at 0 HP; a seeded tie-break decided it.');
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([ASTER]);
     // Past the two remaining sample buttons, Tab reaches the selected round's tab, then the replay button.
@@ -232,8 +297,26 @@ test.describe('tournament registration and brackets', () => {
     expect(await wide()).toBeLessThanOrEqual(0);
     await card(page).getByRole('tab', { name: 'Quarterfinals' }).click();
     await card(page).getByRole('button', { name: /^Watch replay of / }).first().click();
-    await expect(card(page).getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(card(page).getByRole('heading', { level: 6 }).first()).toBeVisible({ timeout: 30_000 });
     expect(await wide()).toBeLessThanOrEqual(0);
+    // Every word in the replay's fighter table stays whole ("Endurance", "Equipment"): no word spans two lines.
+    const fighters = card(page).getByRole('table', { name: 'Fighters at the start of the fight' });
+    await fighters.scrollIntoViewIfNeeded();
+    const split = await fighters.evaluate(table => {
+      const broken: string[] = [];
+      const walker = document.createTreeWalker(table, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if ((node.parentElement?.getBoundingClientRect().width ?? 0) < 2) continue; // visually hidden labels
+        for (const word of (node.textContent ?? '').matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, word.index!);
+          range.setEnd(node, word.index! + word[0].length);
+          if (new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top))).size > 1) broken.push(word[0]);
+        }
+      }
+      return broken;
+    });
+    expect(split).toEqual([]);
     await page.getByRole('region', { name: 'Registration' }).screenshot({ path: testInfo.outputPath('width360-registration.png') });
     await card(page).screenshot({ path: testInfo.outputPath('width360-bracket-replay.png') });
   });
@@ -364,6 +447,29 @@ test.describe('tournament entrants in the camp', () => {
     await page.evaluate(() => window.__cloudiatorCamp!.centerOn(23, 23.5, 1));
     await nextFrames(page);
     await page.screenshot({ path: testInfo.outputPath('camp-tournament-champion.png') });
+  });
+
+  test('marks the champion only once the final has finished in its ring', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openCampTournament(page, 5);
+    for (const minute of [30, 40.1, 41.5]) await freezeCamp(page, startOf('completed') + minute * MIN);
+    const final = VIEWS.completed.bouts.find(b => b.round === 3)!;
+    const duration = final.revealedResult!.battleLog!.durationMs;
+    const varro = ARENA_GLADIATORS.varro.id;
+    const ring = (state: Awaited<ReturnType<typeof campState>>) => state.arena.fights.find(f => f.battleId === final.id)!;
+    // The camp learns the final at its reveal and walks the finalists in before playing it (Task 17's ring rule).
+    await freezeCamp(page, revealOf('completed', 3) + 500);
+    await freezeCamp(page, revealOf('completed', 3) + duration + 1000);
+    let state = await campState(page);
+    // The stage core has decided the final, but its ring is still fighting: no champion tag yet.
+    expect(state.tournament.roles[varro]).toBe('champion');
+    expect(ring(state).status).toBe('fighting');
+    expect(state.actors.filter(a => a.marker === 'Champion')).toEqual([]);
+    // Once the ring has played the final, the champion carries the tag.
+    await freezeCamp(page, ring(state).fightStartMs + duration + 500);
+    state = await campState(page);
+    expect(ring(state).status).toBe('result');
+    expect(state.actors.filter(a => a.marker === 'Champion').map(a => a.id)).toEqual([varro]);
   });
 
   test('walks the eliminated out to their spots and keeps them there across world updates', async ({ page }) => {

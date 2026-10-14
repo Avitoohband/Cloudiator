@@ -690,10 +690,13 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       type Active = { fight: CampFight; slot: RingSlot; status: FightStatus; positionMs: number };
       const active: Active[] = [];
       const sides = new Map<string, Active & { side: 0 | 1 }>();
+      // Fighters whose bout the rings have not finished playing (queued, walking in or fighting).
+      const unfinished = new Set<string>();
       for (const fight of fights) {
         const slot = schedule.get(fight.battleId);
         if (!slot) continue;
         const { status, positionMs } = fightStatus(slot, fight.log.durationMs, now);
+        if (status === 'queued' || status === 'entering' || status === 'fighting') for (const id of fight.fighters) if (id) unfinished.add(id);
         if (status === 'queued' || status === 'done') continue;
         const entry = { fight, slot, status, positionMs };
         active.push(entry);
@@ -717,7 +720,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           v.arena = null;
           if (v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
         }
-        this.placeTournamentEntrant(v, now);
+        this.placeTournamentEntrant(v, now, unfinished.has(v.id));
         // Warm-up animation until the bout is revealed; it grants nothing.
         if (!v.arena && !v.walk && v.placement?.routine.kind === 'arena') {
           const warm = v.startsAtMs != null && now >= v.startsAtMs && now < v.startsAtMs + ARENA_REVEAL_MS;
@@ -820,10 +823,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
 
     /**
      * A tournament entrant out of the rings: an eliminated one walks to its spectator spot and watches the arena; the
-     * others wait at their staging spot; the champion carries a "Champion" tag. A view that is no longer a tournament
+     * others wait at their staging spot; the champion carries a "Champion" tag once its ring has finished the final
+     * (unless `inRing`: a bout of theirs is still queued, walking in or fighting). A view that is no longer a tournament
      * entrant returns to its placement.
      */
-    placeTournamentEntrant(v: ActorView, now: number) {
+    placeTournamentEntrant(v: ActorView, now: number, inRing: boolean) {
       const entrant = v.placement?.routine.kind === 'tournament';
       const seat = entrant && !v.arena ? seats.get(v.id) ?? null : null;
       if (seat && v.spectator !== seat) {
@@ -833,7 +837,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         v.spectator = null;
         if (!v.arena && v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
       }
-      const champion = entrant && tournamentRoles.get(v.id)?.role === 'champion';
+      const champion = entrant && !inRing && tournamentRoles.get(v.id)?.role === 'champion';
       if (champion && !v.marker) {
         v.marker = this.add.text(0, 0, 'Champion', { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color: '#1a1423', backgroundColor: '#f2c66b', padding: { x: 3, y: 1 } })
           .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2);

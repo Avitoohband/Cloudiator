@@ -391,13 +391,21 @@
 
 @media (max-width: 540px) {
   .schedule,
-  .registration,
-  .brackets {
+  .registration {
     padding: 0.75rem 0.6rem;
+  }
+
+  .brackets {
+    padding: 0.75rem 0.35rem;
   }
 
   .card {
     padding: 0.75rem 0.5rem;
+  }
+
+  /* The inline replay runs to the card's edges, so its fighter table keeps whole words in its headers. */
+  .replay {
+    margin-inline: -0.5rem;
   }
 
   .tabs button {

@@ -6,8 +6,12 @@ import {
   tournamentWindowAt, type TournamentStageState,
 } from '@/game/tournament-stage';
 import { countdownText, tournamentTimeText } from '@/features/tournaments/tournament-text';
+import type { ArenaEntrant } from '@domain/arena';
+import { makeFighter } from '@domain/combat';
+import { RULES_V1 } from '@domain/rules-v1';
+import { buildBracket } from '@domain/tournament';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
-import { worldFixture } from '../fixtures/domain';
+import { baseFiveBuild, worldFixture } from '../fixtures/domain';
 import { TOURNAMENT_VIEWS, TOURNAMENTS, tournamentId, type TournamentKey } from '../fixtures/tournaments';
 
 const MIN = 60_000;
@@ -106,6 +110,33 @@ describe('bracket shape and reveal times', () => {
     expect(at('completed', 0).rounds.map(r => r.label)).toEqual(['Quarterfinals', 'Semifinals', 'Final']);
   });
 
+  it('matches the Task 19 bracket frame (reveal times, size, rounds, byes and ids) for 2 to 64 entrants', () => {
+    // The stage core restates the domain's private frame; the real buildBracket is the reference.
+    const fighter = makeFighter(baseFiveBuild, 'arena', RULES_V1);
+    const leagues = ['bronze', 'silver', 'gold', 'champion'] as const;
+    for (let n = 2; n <= 64; n += 1) {
+      const league = leagues[n % leagues.length];
+      const slotIndex = (n % 2 ? S('completed') : S('opening')) / RULES_V1.clock.slotMs;
+      const entrants: ArenaEntrant[] = Array.from({ length: n }, (_, i) => ({
+        gladiatorId: `g-${n}-${i}`, activityId: `a-${n}-${i}`, seasonId: 'season-1', league, slotIndex, rating: 1000, fighter }));
+      const graph = buildBracket(entrants, `cross-check-${n}`);
+      const shape = bracketShape(n)!;
+      expect({ ...shape, id: tournamentIdFor(slotIndex, league) }, `n = ${n}`)
+        .toEqual({ size: graph.size, rounds: graph.rounds, byes: graph.bouts.filter(b => b.bye).length, id: graph.id });
+      expect(roundRevealTimes(graph.startsAtMs, graph.rounds), `n = ${n}`).toEqual(graph.revealAtMs);
+      expect(graph.settlesAtMs - graph.startsAtMs).toBe(TOURNAMENT_DURATION_MS);
+      // A view with these bouts gets the same rounds, bout counts and per-bout reveal times from the core.
+      const state = renderTournament({
+        id: graph.id, league, slotIndex, startsAtMs: graph.startsAtMs, endsAtMs: graph.settlesAtMs, status: 'active',
+        entrants: entrants.map(e => ({ gladiatorId: e.gladiatorId, name: e.gladiatorId, classId: 'guardian' })),
+        bouts: graph.bouts.map(b => ({ id: b.id, round: b.round, position: b.position, parentBoutIds: [...b.parentBoutIds], revealedResult: null })),
+        placements: [],
+      }, graph.startsAtMs);
+      expect(state.rounds.flatMap(r => r.bouts.map(b => [b.id, b.round, b.revealAtMs])), `n = ${n}`)
+        .toEqual(graph.bouts.map(b => [b.id, b.round, b.revealAtMs]));
+    }
+  });
+
   it('shows the entrants and the bracket shape from the start, never before', () => {
     expect(at('opening', -1)).toMatchObject({ status: 'scheduled', entrants: [], rounds: [], shape: null });
     const open = at('opening', 0);
@@ -201,6 +232,35 @@ describe('revealed results', () => {
     const stranger: TournamentView = structuredClone(view('pair'));
     stranger.bouts[0].revealedResult!.winnerId = id('varro');
     expect(renderTournament(stranger, S('pair') + 79 * MIN).rounds[0].bouts[0].winnerId).toBeNull();
+  });
+
+  it('accepts result participants in any order that matches its log’s fighters, and fails closed on anything else', () => {
+    const t = S('completed') + 79 * MIN;
+    const first = view('completed').bouts[0];
+    const log = first.revealedResult!.battleLog!;
+    // The same two gladiators, listed in the other order: still the logged result, sides as the result lists them.
+    const swapped: TournamentView = structuredClone(view('completed'));
+    swapped.bouts[0].revealedResult!.participants.reverse();
+    const shown = renderTournament(swapped, t).rounds[0].bouts[0];
+    expect([shown.status, shown.winnerId]).toEqual(['decided', log.winnerId]);
+    expect(shown.sides.map(s => s!.gladiatorId)).toEqual([...log.participants].reverse().map(p => p.gladiatorId));
+    expect(shown.loserId).toBe(log.participants.find(p => p.id !== log.winnerId)!.gladiatorId);
+    const hidden = (patch: (view: TournamentView) => void) => {
+      const tampered: TournamentView = structuredClone(view('completed'));
+      patch(tampered);
+      return renderTournament(tampered, t).rounds[0].bouts[0];
+    };
+    // A log that names another entrant, the same fighter twice, one fighter, a third one or a repeat is never shown.
+    const other = view('completed').bouts[1].revealedResult!.battleLog!.participants[0];
+    const fighters = (v: TournamentView) => v.bouts[0].revealedResult!.battleLog!.participants as unknown as (typeof other)[];
+    for (const patch of [
+      (v: TournamentView) => { fighters(v)[1] = structuredClone(other); },
+      (v: TournamentView) => { fighters(v)[1] = structuredClone(fighters(v)[0]); },
+      (v: TournamentView) => { fighters(v).pop(); },
+      (v: TournamentView) => { fighters(v).push(structuredClone(other)); },
+      (v: TournamentView) => { fighters(v).push(structuredClone(fighters(v)[0])); },
+      (v: TournamentView) => { v.bouts[0].revealedResult!.participants[1] = structuredClone(v.bouts[1].revealedResult!.participants[0]); },
+    ]) expect(hidden(patch)).toMatchObject({ status: 'delayed', winnerId: null, log: null });
   });
 });
 

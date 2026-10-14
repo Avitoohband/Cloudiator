@@ -11,8 +11,11 @@ export const FIXTURE_REPLAYS: readonly { activityId: string; label: string }[] =
 export const FIXTURE_EXPEDITIONS: readonly { activityId: string; label: string }[] = EXPEDITION_SAMPLES;
 /** Sample Arena activities the fixture game page opens in its Arena card, with each entrant's gladiator. */
 export const FIXTURE_ARENA: readonly { activityId: string; label: string; gladiatorId: string }[] = ARENA_SAMPLES;
-/** Sample tournaments the fixture game page opens in its Tournaments panel (engine-generated public views). */
-export const FIXTURE_TOURNAMENTS: readonly { id: string; label: string }[] = TOURNAMENT_SAMPLES;
+/**
+ * Sample tournaments the fixture game page opens in its Tournaments panel (engine-generated public views), with the
+ * server time each was projected at.
+ */
+export const FIXTURE_TOURNAMENTS: readonly { id: string; label: string; asOfMs: number }[] = TOURNAMENT_SAMPLES;
 const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARENA_TIMELINES };
 /** The owner plus the current slot's Arena entrants, warming up at the fixture time (minute 40). */
 const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS] };

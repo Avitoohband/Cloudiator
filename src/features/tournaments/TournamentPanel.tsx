@@ -25,18 +25,20 @@ import styles from './TournamentPanel.module.css';
 
 /** Reads and the one command the panel uses. */
 export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command'>>;
-export type TournamentSample = { id: string; label: string };
+/** A fixture sample: its view was projected at the server time `asOfMs`, where the preview holds its bracket. */
+export type TournamentSample = { id: string; label: string; asOfMs?: number };
 type OptIn = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
 
 /** Fixture builds only (NEXT_PUBLIC_FIXTURE_ENABLED): browser tests read the open bracket and hold the clock. */
 export type TournamentTestHook = {
   state(): { id: string; now: number; status: string; round: number | null; replay: string | null; roles: Record<string, string | null>; champion: string | null; placements: number } | null;
-  /** Holds the shared display clock (null runs on from there). */
+  /** Holds the shared display clock (null runs on from there); the open sample then follows it instead of its own time. */
   freeze(displayNowMs: number | null): void;
   /** Tournament view reads so far. */
   reads(): number;
   /** Kinds of every command this panel has sent. */
   commands(): string[];
+  /** Opens a tournament as the sample buttons do (a sample is held at its projection time). */
   open(id: string): void;
 };
 declare global {
@@ -204,7 +206,8 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
             <button type="button" onClick={onCloseReplay}>Close replay</button>
           </div>
           <p className="muted">The replay is the recorded bout. Watching it never changes the result.</p>
-          <BattleReplay key={replay.id} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
+          {/* Under the card's h4 and this section's h5: the replay title is an h6 (its sections stay at h6). */}
+          <BattleReplay key={replay.id} headingLevel={6} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
             log: replay.log!,
             stage: { id: replay.id, kind: 'bout', label: `Tournament · ${replayRound.label}`, revealedAtMs: replay.revealAtMs, startedAtMs: replay.revealAtMs, endsAtMs: replay.fightEndsAtMs! },
           }] }} />
@@ -260,6 +263,13 @@ function TournamentCard({ id, reads, clock, now, viewerId, onRead, hook }: {
     return () => { request.current += 1; window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
   }, [read]);
 
+  // A failed first read is asked again every 30 s while the tab is visible (as well as on focus).
+  useEffect(() => {
+    if (!failure || view) return;
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void read(); }, RETRY_MS);
+    return () => window.clearInterval(timer);
+  }, [failure, view, read]);
+
   const state = view ? renderTournament(view, now, { viewerId }) : null;
 
   // A fresh read once the clock passes the start, a round's reveal or the settlement, and every 30 s while results
@@ -308,6 +318,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
 }) {
   const [now, setNow] = useState(() => clock.now());
   const [selected, setSelected] = useState<string | null>(null);
+  /** Fixture only: the opened sample's bracket is held at its projection time until the test hook sets the clock. */
+  const [holding, setHolding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<RegistrationModel['message']>(null);
   const attempt = useRef<OptIn | null>(null);
@@ -327,18 +339,19 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
     return () => window.clearInterval(timer);
   }, [clock]);
   const onRead = useCallback(() => { readCount.current += 1; }, []);
+  const pick = useCallback((next: string) => { cardState.current = null; setSelected(next); setHolding(true); }, []);
 
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED !== 'true') return;
     window.__cloudiatorTournaments = {
       state: () => cardState.current?.() ?? null,
-      freeze: ms => clock.freeze(ms),
+      freeze: ms => { setHolding(false); clock.freeze(ms); },
       reads: () => readCount.current,
       commands: () => [...commandLog.current],
-      open: id => setSelected(id),
+      open: pick,
     };
     return () => { delete window.__cloudiatorTournaments; };
-  }, [clock]);
+  }, [clock, pick]);
 
   async function toggle() {
     if (!owner || sending.current) return;
@@ -373,7 +386,9 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   // Live mode: the owner's league in the running or latest tournament slot.
   const liveId = !fixture && owner ? tournamentIdFor(latestTournament(now).slotIndex, owner.progression.league) : null;
   const id = selected ?? liveId;
-  const pick = (next: string) => { cardState.current = null; setSelected(next); };
+  // A fixture sample is one view projected at one server time (the preview has no server clock), so its bracket is
+  // held there, where it shows what its label says; the schedule and registration keep the running clock.
+  const sampleTime = fixture && holding ? samples.find(s => s.id === id)?.asOfMs ?? null : null;
   return (
     <section className={styles.tournaments} aria-labelledby={titleId}>
       <div className="section-title">
@@ -395,7 +410,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
         )}
         {!id ? <p className="muted">{fixture ? 'Choose a sample tournament to follow its bracket.' : 'Create a gladiator to follow your league’s tournament.'}</p>
           : !reads ? <p className="panel-notice" role="status">Tournament brackets cannot be shown in this build yet.</p>
-            : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={now} viewerId={owner?.gladiatorId ?? null} onRead={onRead} hook={cardState} />}
+            : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null} onRead={onRead} hook={cardState} />}
       </section>
     </section>
   );

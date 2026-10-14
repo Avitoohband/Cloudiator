@@ -4,9 +4,11 @@
   min-width: 0;
 }
 
-.header h1 {
+/* The title is an h1 on the replay page; an embedding page may choose a lower level (headingLevel). */
+.header :is(h1, h2, h3, h4, h5, h6) {
   font-family: Georgia, serif;
   font-size: clamp(1.4rem, 4vw, 2rem);
+  line-height: 1.2;
   margin: 0;
 }
 
@@ -142,8 +144,10 @@
   border: 1px solid var(--line);
 }
 
-.card h2 {
+.card :is(h2, h3, h4, h5, h6) {
   font-size: 1.05rem;
+  line-height: 1.2;
+  margin-top: 0;
   margin-bottom: 0.6rem;
 }
 
@@ -252,7 +256,7 @@
   max-width: 720px;
 }
 
-.saved h1 {
+.saved :is(h1, h2, h3, h4, h5, h6) {
   font-family: Georgia, serif;
 }
 

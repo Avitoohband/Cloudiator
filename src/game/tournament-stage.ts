@@ -163,7 +163,10 @@ function freeze<V>(value: V, shared: ReadonlySet<object>): V {
 }
 
 type Result = NonNullable<TournamentBout['revealedResult']>;
-/** A published result names one entrant for a bye or two for a fight, its winner among them, and a log that agrees. */
+/**
+ * A published result names one entrant for a bye or two for a fight, its winner among them, and a log that agrees: the
+ * same winner and the same two gladiators, in either order (the result's order names the sides).
+ */
 function wellFormed(result: TournamentBout['revealedResult'], entrants: ReadonlySet<string>): result is Result {
   if (!result || typeof result !== 'object' || !Array.isArray(result.participants)) return false;
   const ids = result.participants.map(p => p?.gladiatorId);
@@ -171,8 +174,10 @@ function wellFormed(result: TournamentBout['revealedResult'], entrants: Readonly
   if (ids.length !== count || new Set(ids).size !== count || !ids.every(id => entrants.has(id)) || !ids.includes(result.winnerId)) return false;
   const log = result.battleLog;
   if (result.bye) return log == null;
-  return log == null || (log.winnerId === result.winnerId && Array.isArray(log.participants) && log.participants.length === 2
-    && log.participants.every((p, i) => p.gladiatorId === ids[i]));
+  if (log == null) return true;
+  if (log.winnerId !== result.winnerId || !Array.isArray(log.participants) || log.participants.length !== 2) return false;
+  const logged = log.participants.map(p => p?.gladiatorId);
+  return new Set(logged).size === 2 && logged.every(id => typeof id === 'string' && ids.includes(id));
 }
 
 /** The tournament as the display time shows it. `viewerId` is the signed-in owner's gladiator, if any. */

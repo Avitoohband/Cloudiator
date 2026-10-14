@@ -10,7 +10,7 @@ import late from './tournaments/late.json';
 import completed from './tournaments/completed.json';
 import pair from './tournaments/pair.json';
 import insufficient from './tournaments/insufficient.json';
-import { TOURNAMENT_SAMPLE_KEYS, TOURNAMENTS, tournamentId, type TournamentKey } from './tournament-ids.ts';
+import { TOURNAMENT_SAMPLE_KEYS, TOURNAMENTS, tournamentAsOf, tournamentId, type TournamentKey } from './tournament-ids.ts';
 
 export * from './tournament-ids.ts';
 
@@ -21,5 +21,10 @@ export const TOURNAMENT_VIEWS: Record<TournamentKey, TournamentView> = {
 };
 /** Views by tournament id, as gateway.tournament(id) returns them. */
 export const TOURNAMENT_VIEWS_BY_ID: Record<string, TournamentView> = Object.fromEntries(Object.values(TOURNAMENT_VIEWS).map(v => [v.id, v]));
-/** Tournament samples listed on the fixture game page. */
-export const TOURNAMENT_SAMPLES: { id: string; label: string }[] = TOURNAMENT_SAMPLE_KEYS.map(key => ({ id: tournamentId(key), label: TOURNAMENTS[key].label }));
+/**
+ * Tournament samples listed on the fixture game page, with the server time each view was projected at: the preview
+ * holds a sample's bracket there, so it shows what its label says.
+ */
+export const TOURNAMENT_SAMPLES: { id: string; label: string; asOfMs: number }[] = TOURNAMENT_SAMPLE_KEYS.map(key => ({
+  id: tournamentId(key), label: TOURNAMENTS[key].label, asOfMs: tournamentAsOf(key),
+}));

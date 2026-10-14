@@ -164,8 +164,13 @@ export function viewerText(state: TournamentStageState, hasViewer: boolean, time
     case 'spectating': return `You were eliminated in the ${label(me.eliminatedInRound!)}. You stay in the tournament as a spectator until it ends at ${timeWithUtc(state.endsAtMs, timeZone)}; this slot has no other activity for you.`;
     case 'champion': return 'You are the champion of this tournament!';
     default: {
+      const due = state.rounds.filter(r => r.due);
+      if (!due.length) return `You are entered. Your first bout is revealed at ${timeWithUtc(state.rounds[0].revealAtMs, timeZone)}.`;
+      // "You advance" only after a shown win or bye in every due round; the first due round without one holds the
+      // viewer's unpublished (delayed) result. A waiting entrant has lost no shown bout.
+      const open = due.find(r => !r.bouts.some(b => (b.status === 'decided' || b.status === 'bye') && b.winnerId === me.gladiatorId));
+      if (open) return `Your ${open.label} result is not published yet. It appears here as soon as it is revealed.`;
       const next = state.rounds.find(r => !r.due);
-      if (!state.rounds.some(r => r.due)) return `You are entered. Your first bout is revealed at ${timeWithUtc(state.rounds[0].revealAtMs, timeZone)}.`;
       return next ? `You advance. Your next bout is revealed at ${timeWithUtc(next.revealAtMs, timeZone)}.` : 'You advance. Your next result is being prepared.';
     }
   }

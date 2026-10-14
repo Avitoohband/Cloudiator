@@ -261,3 +261,111 @@ and five new owning test files (projection gateway, read adapters, sync units,
 projection DB, and sync browser). Self-review fixed recent ordering, delayed
 processing, same-account cache invalidation and stale no-character handling;
 no known failing Task 10 check remains.
+
+## Review correction round 1 — delayed next-slot preparation
+
+The full review subsequently found an Important gap in the original delayed
+processing coverage: after the previous slot settled, phase 4 could wait for
+next-slot preparation while the projector continued to show the old completed
+activity. The existing overdue-active regression did not exercise this state.
+This section supersedes the earlier self-review conclusion for that scenario.
+
+- Scoped FIX_BASE: `7f413e50e1f121db99fbdcbb97e71d7f8040fc74`.
+- Corrective source commit: **`a6993848bba55d47cb5bba76f9af7c7e769bce62`**,
+  `fix: retain processing during delayed slot preparation`.
+- New generated M08:
+  **`supabase/migrations/20261014100253_projection_preparation_status.sql`**.
+- Full review BASE remains `62f24ccfc62ce73615819dfad341be20d948ed82`.
+  The controller owns fresh scoped review and push; this report is committed
+  separately from the corrective source.
+
+### Authoritative state and privacy
+
+`world_actors.processed_slot_index` stores the character's published-slot
+checkpoint alongside the safe actor. The projector updates both together;
+it still selects only published activities. The invoker read view compares
+that checkpoint with the slot computed from database statement time. If the
+old activity is completed and the current slot has not published, it returns
+`location: 'camp'`, `activityStatus: 'processing'`, and null `activityId`,
+`startsAtMs`, `endsAtMs`, and `visibleStage`. No next destination, choice,
+preparation input, snapshot, job or private outcome enters that response.
+The completed prior activity remains separately readable through the existing
+authorized timeline and recent-result paths. Publication advances the
+checkpoint and exposes the new activity in the same transaction.
+
+There is no DTO, gateway, read-adapter, sync, renderer or polling-budget change.
+The existing sync controller derives `processing: true` from the corrected
+authoritative actor. World and profile share this view; the database-time slot
+component of the existing revision makes a new boundary observable even before
+another mutation. Completed results inside their already-published slot retain
+their normal completion state. Orientation and overdue-active behavior remain
+covered by the existing tests.
+
+### Meaningful RED and GREEN
+
+The new DB regression uses real Auth accounts, boundary RPCs, canonical
+preparation, job claims and fenced settlement. It settles the previous Rest
+slot, reads through the actual spectator adapters and sync controller, holds
+the next boundary at preparation, then prepares and publishes an Expedition.
+It asserts processing both before and during that pause, a generic profile,
+absence of the unpublished `woodland` destination and private keys, unchanged
+owner checkpoint during the wait, a new active activity after publication,
+and continued readability of the previous completed result.
+
+Before the source fix,
+`npm run test:db -- tests/db/projections.test.ts -t "keeps the next slot processing"`
+failed exactly at the expected state: `Sync.processing` was false and the
+actor still contained the old completed Rest identity/timestamps. One failed,
+five skipped. After applying the corrected reapplicable source to the verified
+local Cloudiator container, all **6/6 projection DB tests passed**.
+
+### Generated migration and replay evidence
+
+CLI discovery confirmed Supabase **2.120.0** and current `db pull --help`.
+`npx supabase db pull projection_preparation_status --local --schema public,private --yes`
+generated M08 from the tested source. Its diff contains the new checkpoint
+column and changes only `private.project_character` and `world_actor_reads`.
+It does not re-emit unchanged functions. The uncommitted draft was completed
+with explicit invoker-view/function ACL preservation and the required
+`refresh_projections()` existing-actor backfill, followed by schema reload.
+Committed M01–M07, including M07 `20261014045856_projections.sql`, are unchanged.
+
+`npx supabase db reset --local --no-seed --yes` replayed M01–M08 successfully.
+No SQL source was applied after that reset. Source/replay comparison matched
+**303/303 entries**: function definitions/body hashes/search paths/security and
+ACLs; table/view ACLs, RLS/options and definitions; policies, triggers and
+constraints; plus the new column's type, nullability and default. Singleton
+revision initialization was also checked. The scratch harness and captures are
+`task10-fix1-schema-check.mjs`, `task10-fix1-source-parity.json` and
+`task10-fix1-replay-parity.json`; they extend the previous schema-query harness.
+
+Fresh verification for this correction:
+
+- `npm run test:db` after migration-only replay: **109/109 tests, six files**,
+  **45.37 seconds**, including all six projection cases and affected identity,
+  planning, activities/jobs, inventory/shop and expedition authorization flows.
+- `npm run typecheck`: TypeScript, both frozen Deno Edge entrypoint checks and
+  the **2/2 Deno runtime tests passed**.
+- `npx supabase db lint --local --schema public,private --fail-on warning`:
+  no schema errors, empty results.
+- `npx supabase db advisors --local --type all --level info --fail-on warn`:
+  **six INFO unused-index notices**, no warnings or errors.
+- Staged source diff check passed after removing one generator trailing blank
+  line. This final whitespace cleanup did not change SQL semantics.
+
+This correction does not rerun or relabel the earlier unit/browser/build/static
+results. Its real DB regression exercises the unchanged sync adapter directly.
+The unrelated Minor initial-world-load offset bias remains explicitly deferred
+to UI/final triage by the controller; no offset code was changed here.
+
+### Correction end state
+
+Only the reapplicable projection source, NEW M08, projection DB test and minimal
+migration-guide entry are in the source commit. The controller's working
+HANDOFF/review files and all Claude-held source remain excluded. No helpers,
+Git reset/stash/branch switch, push, hosted/paid fallback or unrelated feature
+work occurred. The intended local test stack was reset and left running with
+M01–M08; no frontend preview was started for this correction. Local test data
+is disposable. This report and its scratch mirror record the exact fix for
+takeover; independent review, integration and release gates remain controller
+work as previously described.

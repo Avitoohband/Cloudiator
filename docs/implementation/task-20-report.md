@@ -184,6 +184,14 @@ Plan Files list: `src/features/tournaments/TournamentPanel.tsx`, `tests/browser/
 
 Outside that list: `src/game/tournament-stage.ts`, `src/game/tournament-camp.ts`, `src/features/tournaments/TournamentPanel.module.css`, `src/features/tournaments/tournament-text.ts`, `src/game/actors.ts` (one line); the fixture modules and JSON; `tests/domain/tournament-stage`, `tournament-fixtures`, `tournament-panel` and `tournament-camp` tests.
 
+## After merging Task 17's fixes (controller, 2026-10-14)
+
+Merge `b7f38ad` brought Task 17's review fixes into this branch. That pass and its follow-up changed the ring timing. The camp now plays every bout at its real time: a jog walk-in of about 4 s, then the log seeked to `displayNow − bout.startedAtMs`, so the ring, the card and the Tournaments panel reach the result together. Statements earlier in this report about pairs "walking in", a ring "still fighting" after the decision, or the camp playing a bout "from the moment it learns of it" describe the timing before that merge.
+
+- The champion tag now lags the panel only while the final is queued or its pair is still jogging in; `tests/browser/tournament.spec.ts` was adapted for this.
+- Tournament camp fights carry `endsAtMs` equal to the stage core's `fightEndsAtMs`.
+- After the merge: `npm test` 856 passed; typecheck, the asset check, build and `verify:static` passed; the full dev browser suite on port 3200 gave 254 passed, 0 failed, 8 skipped.
+
 ## Limitations and gates
 
 - **Task 19 phase 2:** the views, opt-in RPC, stages and settlement; publish the live lookup of a league's tournament for a slot (this branch assumes the graph id); answer the open questions below.

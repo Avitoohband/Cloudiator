@@ -1,0 +1,301 @@
+.view {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.heading {
+  min-width: 0;
+}
+
+.heading p {
+  margin-bottom: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.header h1,
+.missing h1 {
+  font-family: Georgia, serif;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  margin: 0;
+}
+
+.camp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 88px;
+  min-height: 44px;
+  padding: 0 1rem;
+  color: #1a1423;
+  background: var(--gold);
+  border: 1px solid #ffe48f;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.camp:hover {
+  background: #ffd886;
+}
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  padding: 1.5rem;
+  color: var(--muted);
+  background: var(--panel);
+  border: 2px dashed var(--line);
+  text-align: center;
+}
+
+.now {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 0.75rem 1.25rem;
+  align-items: start;
+}
+
+.phase {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.phase strong {
+  color: var(--gold);
+  font: 700 1.2rem Georgia, serif;
+}
+
+.phase span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.health {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.meter {
+  position: relative;
+  height: 22px;
+  background: #2a1d23;
+  border: 1px solid #6b4040;
+  overflow: hidden;
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(#5fbf6e, #3d8a4c);
+}
+
+.hpText {
+  position: relative;
+  display: block;
+  padding: 0 0.5rem;
+  font: 700 0.8rem/22px system-ui, sans-serif;
+  color: #ffffff;
+  text-shadow: 0 1px 2px #000, 0 0 2px #000;
+}
+
+.note {
+  margin: 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.recovers {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.strip {
+  padding: 0 0.5rem;
+}
+
+.track {
+  position: relative;
+  height: 12px;
+  background: #1b2336;
+  border: 1px solid var(--line);
+}
+
+.trackFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #6b5a3a, var(--gold));
+}
+
+.position {
+  position: absolute;
+  top: -6px;
+  width: 4px;
+  height: 22px;
+  margin-left: -2px;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px #1a1423;
+}
+
+.markers {
+  position: relative;
+  height: 1.3rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.markers li {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.markers li:first-child {
+  transform: none;
+}
+
+.markers li:last-child {
+  transform: translateX(-100%);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.card {
+  min-width: 0;
+  padding: 1.1rem 1.2rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.card h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0.6rem;
+}
+
+.missing {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+}
+
+.missing p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.verdict {
+  margin-bottom: 0.25rem;
+  color: var(--gold);
+  font: 700 1.35rem Georgia, serif;
+}
+
+.rewards {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.rewards li {
+  font-weight: 650;
+}
+
+.log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.log li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  padding: 0.35rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.log time {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.logLabel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.current {
+  background: #2a2a3c;
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.badge {
+  padding: 0 0.4rem;
+  color: #1a1423;
+  background: #8edcf4;
+  font-size: 0.65rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.replay {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  margin-left: auto;
+  padding: 0 0.7rem;
+  color: #b9e6f5;
+  border: 1px solid #4b6f80;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.replay:hover {
+  border-color: #b9e6f5;
+}
+
+@media (max-width: 720px) {
+  .now,
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 420px) {
+  .header {
+    align-items: center;
+  }
+
+  .card {
+    padding: 0.9rem;
+  }
+}

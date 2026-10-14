@@ -53,8 +53,9 @@ export function creatureFor(p: RevealedCombatant, list: readonly Creature[]): Cr
   const name = p.name.trim().toLowerCase();
   const creature = list.find(c => c.id === byId) ?? list.find(c => c.name.toLowerCase() === name) ?? list.find(c => c.id === ENEMY_NAMES[name]) ?? null;
   // A non-gladiator that matches nothing is drawn as an NPC fallback. Producers (Tasks 8 and 9) should
-  // use `creature:<manifest id>` ids so a renamed or new enemy never silently loses its art.
-  if (!creature && !byId && process.env.NODE_ENV !== 'production') console.warn(`battle replay: no creature art for "${p.name}" (${p.id}); drawing an NPC fallback`);
+  // use `creature:<manifest id>` ids so a renamed or new enemy never silently loses its art; an id whose
+  // creature is missing from the manifest warns too.
+  if (!creature && process.env.NODE_ENV !== 'production') console.warn(`battle replay: no creature art for "${p.name}" (${p.id}); drawing an NPC fallback`);
   return creature;
 }
 

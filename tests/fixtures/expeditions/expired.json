@@ -1,0 +1,98 @@
+{
+  "activityId": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a",
+  "serverNowMs": 1791592800000,
+  "visibleThroughMs": 1791592800000,
+  "stages": [
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:0",
+      "kind": "depart",
+      "revealedAtMs": 1790726400000,
+      "startedAtMs": 1790726400000,
+      "endsAtMs": 1790727600000,
+      "label": "Depart for Woodland Path"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:1",
+      "kind": "encounter",
+      "revealedAtMs": 1790727600000,
+      "startedAtMs": 1790727600000,
+      "endsAtMs": 1790727603924,
+      "label": "Encounter 1: victory"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:2",
+      "kind": "exploration",
+      "revealedAtMs": 1790727603924,
+      "startedAtMs": 1790727603924,
+      "endsAtMs": 1790728800000,
+      "label": "Recover and continue exploring"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:3",
+      "kind": "encounter",
+      "revealedAtMs": 1790728800000,
+      "startedAtMs": 1790728800000,
+      "endsAtMs": 1790728803924,
+      "label": "Encounter 2: victory"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:4",
+      "kind": "exploration",
+      "revealedAtMs": 1790728803924,
+      "startedAtMs": 1790728803924,
+      "endsAtMs": 1790730000000,
+      "label": "Recover and continue exploring"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:5",
+      "kind": "encounter",
+      "revealedAtMs": 1790730000000,
+      "startedAtMs": 1790730000000,
+      "endsAtMs": 1790730006540,
+      "label": "Encounter 3: victory"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:6",
+      "kind": "travel",
+      "revealedAtMs": 1790730006540,
+      "startedAtMs": 1790730006540,
+      "endsAtMs": 1790731200000,
+      "label": "Return to camp"
+    },
+    {
+      "id": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a:7",
+      "kind": "return",
+      "revealedAtMs": 1790731200000,
+      "startedAtMs": 1790731200000,
+      "endsAtMs": 1790731200000,
+      "label": "Arrive at camp"
+    }
+  ],
+  "summary": {
+    "activityId": "dafa9bbd-4cf9-4e51-8c63-ab1c2d3e4f5a",
+    "resolvedKind": "expedition",
+    "result": "victory",
+    "success": true,
+    "rewards": {
+      "money": 20,
+      "renown": 0,
+      "xp": 100,
+      "attributePoints": 0,
+      "items": [
+        {
+          "catalogId": "salvage",
+          "catalogVersion": "v1",
+          "tier": 1,
+          "rarity": "common",
+          "quantity": 1
+        }
+      ],
+      "overflowMoney": 0
+    },
+    "receiptId": "fixture-receipt-expired",
+    "settledAtMs": 1790731245000,
+    "replayExpiry": {
+      "state": "expired"
+    }
+  }
+}

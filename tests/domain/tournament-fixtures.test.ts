@@ -23,8 +23,8 @@ import {
   TOURNAMENT_KEYS, TOURNAMENT_LOOKS, TOURNAMENT_SAMPLE_KEYS, TOURNAMENTS, tournamentActivityId, tournamentAsOf, tournamentId,
   tournamentSlotIndex, type TournamentKey,
 } from '../fixtures/tournament-ids.ts';
-import { insufficientView, projectTournament, scheduledView, tournamentCampActors } from '../fixtures/tournament-build.ts';
-import { TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS } from '../fixtures/tournaments.ts';
+import { insufficientView, ownerTimeline, projectTournament, scheduledView, tournamentCampActors } from '../fixtures/tournament-build.ts';
+import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS } from '../fixtures/tournaments.ts';
 import { EQUIPMENT_LAYERS } from '../../src/game/actors.ts';
 
 const DIR = join(__dirname, '..', 'fixtures', 'tournaments');
@@ -223,28 +223,37 @@ describe('tournament fixture views', () => {
     expect(JSON.stringify(TOURNAMENT_VIEWS[key])).toBe(JSON.stringify(generated[key]));
   });
 
-  it('publishes only whitelisted public fields: no seeds, snapshots, ratings, ranks or private outcomes', () => {
-    const allowed = new Set(['id', 'league', 'slotIndex', 'startsAtMs', 'endsAtMs', 'status', 'entrants', 'bouts', 'placements',
-      'gladiatorId', 'name', 'classId', 'round', 'position', 'parentBoutIds', 'revealedResult', 'participants', 'winnerId', 'bye', 'battleLog',
-      'place', 'summary', 'activityId', 'resolvedKind', 'result', 'success', 'rewards', 'money', 'renown', 'xp', 'attributePoints', 'items',
-      'overflowMoney', 'receiptId', 'settledAtMs', 'replayExpiry', 'state', 'expiresAtMs']);
+  it('publishes only whitelisted public fields: no seeds, snapshots, ratings, ranks, rewards, receipts or private outcomes', () => {
+    const allowed = new Set(['id', 'league', 'slotIndex', 'startsAtMs', 'endsAtMs', 'status', 'bracket', 'size', 'rounds', 'slots', 'entrants', 'bouts',
+      'placements', 'gladiatorId', 'name', 'classId', 'round', 'position', 'parentBoutIds', 'revealedResult', 'participants', 'winnerId', 'bye',
+      'battleLog', 'place', 'completion', 'activityId', 'resolvedKind', 'result', 'success', 'settledAtMs', 'replayExpiry', 'state', 'expiresAtMs']);
     for (const key of TOURNAMENT_KEYS) {
       const view = generated[key];
       expect([...keysOutsideLogs(view)].filter(k => !allowed.has(k)), key).toEqual([]);
-      expect(JSON.stringify(view), key).not.toMatch(/seed|"rating|ratingDelta|baseDamage|"efficiency"|"rank"|grant/i);
-      // A participant snapshot appears only inside a revealed battle log, and activity ids only in settled summaries.
+      expect(JSON.stringify(view), key).not.toMatch(/seed|"rating|ratingDelta|baseDamage|"efficiency"|"rank"|grant|rewards|receiptId|renown|"money"/i);
+      // A participant snapshot appears only inside a revealed battle log, and activity ids only in settled public completions.
       for (const bout of view.bouts) expect(JSON.stringify(bout), key).not.toContain('activityId');
     }
   });
 
-  it('reveals each bout only from its round reveal time, and places entrants only once settled', () => {
+  it('publishes the bracket’s seeded first round from the start: every seat in bracket order, null for a bye', () => {
+    for (const key of BRACKET_KEYS) {
+      const graph = graphs[key];
+      expect(generated[key].bracket, key).toEqual({ size: graph.size, rounds: graph.rounds,
+        slots: graph.bouts.filter(b => b.round === 1).flatMap(b => b.placed!) });
+    }
+    expect(generated.midway.bracket!.slots.filter(s => s === null)).toHaveLength(3);
+    expect([generated.upcoming.bracket, generated.insufficient.bracket]).toEqual([null, null]);
+  });
+
+  it('reveals each fought bout only from its round reveal time and each bye from the start, and places entrants only once settled', () => {
     for (const key of BRACKET_KEYS) {
       const graph = graphs[key];
       const view = generated[key];
       const asOf = tournamentAsOf(key);
       expect(view.bouts.map(b => b.id), key).toEqual(graph.bouts.map(b => b.id));
       view.bouts.forEach((bout, i) => {
-        const due = graph.bouts[i].revealAtMs <= asOf;
+        const due = graph.bouts[i].bye ? asOf >= graph.startsAtMs : graph.bouts[i].revealAtMs <= asOf;
         expect(bout.revealedResult !== null, `${key} ${bout.id}`).toBe(due);
         if (bout.revealedResult) {
           expect(bout.revealedResult.winnerId).toBe(graph.bouts[i].result!.winnerId);
@@ -260,21 +269,24 @@ describe('tournament fixture views', () => {
         for (const p of view.placements) expect(p.place, p.gladiatorId).toBe(grants.find(g => g.gladiatorId === p.gladiatorId)!.place);
         const outcomes = tournamentOutcomes(graph);
         for (const p of view.placements) {
+          // Task 10's six safe completion fields only: never rewards, a receipt or a rating change.
           const o = outcomes.find(x => x.gladiatorId === p.gladiatorId)!;
-          expect(p.summary).toMatchObject({ activityId: o.activityId, resolvedKind: 'tournament', result: o.result, success: o.success,
-            rewards: { money: o.rewards.money, renown: o.rewards.renown }, settledAtMs: graph.settlesAtMs });
-          expect(p.summary).not.toHaveProperty('ratingDelta');
+          expect(p.completion).toEqual({ activityId: o.activityId, resolvedKind: 'tournament', result: o.result, success: o.success,
+            settledAtMs: graph.settlesAtMs, replayExpiry: { state: 'available', expiresAtMs: graph.settlesAtMs + 604_800_000 } });
         }
+        // By place, then gladiator id, as the live read orders them.
+        expect(view.placements.map(p => p.gladiatorId)).toEqual([...view.placements].sort((a, b) => a.place - b.place
+          || (a.gladiatorId < b.gladiatorId ? -1 : 1)).map(p => p.gladiatorId));
       }
     }
     // The cases: before round 1, mid-way (two of three rounds), late (every round, no placements yet), completed.
-    const revealedRounds = (key: BracketKey) => [...new Set(generated[key].bouts.filter(b => b.revealedResult).map(b => b.round))];
+    const revealedRounds = (key: BracketKey) => [...new Set(generated[key].bouts.filter(b => b.revealedResult && !b.revealedResult.bye).map(b => b.round))];
     expect(revealedRounds('opening')).toEqual([]);
     expect(revealedRounds('midway')).toEqual([1, 2]);
     expect([revealedRounds('late'), generated.late.placements]).toEqual([[1, 2, 3], []]);
     expect(generated.completed.placements.map(p => p.place)).toEqual([1, 2, 3, 3, 5, 5, 5, 5]);
     expect(generated.pair.placements.map(p => [p.gladiatorId, p.place])).toEqual([[ASTER_ID, 1], [ARENA_GLADIATORS.severus.id, 2]]);
-    // Byes reveal with round 1 and name only the advancing entrant.
+    // Byes, public from the start through the bracket slots, name only the advancing entrant.
     const byes = generated.midway.bouts.filter(b => b.revealedResult?.bye);
     expect(byes).toHaveLength(3);
     for (const bye of byes) expect([bye.revealedResult!.participants.length, bye.revealedResult!.battleLog]).toEqual([1, undefined]);
@@ -295,6 +307,36 @@ describe('tournament fixture views', () => {
     expect(TOURNAMENT_SAMPLES.map(s => s.id)).toEqual(TOURNAMENT_SAMPLE_KEYS.map(tournamentId));
     expect(new Set(TOURNAMENT_SAMPLE_KEYS)).toEqual(new Set(TOURNAMENT_KEYS));
     for (const s of TOURNAMENT_SAMPLES) expect(s.label.length).toBeGreaterThan(10);
+  });
+
+  it('commits the owner’s own settled tournament timelines: its stages and the credited summary no public view carries', () => {
+    const generatedTimelines = Object.fromEntries(BRACKET_KEYS.filter(key => tournamentAsOf(key) >= graphs[key].settlesAtMs
+      && graphs[key].entries.some(e => e.gladiatorId === ASTER_ID)).map(key => {
+      const outcome = tournamentOutcomes(graphs[key]).find(o => o.gladiatorId === ASTER_ID)!;
+      return [outcome.activityId, ownerTimeline(graphs[key], outcome, tournamentAsOf(key))];
+    }));
+    const path = join(DIR, 'owner-timelines.json');
+    const text = `${JSON.stringify(generatedTimelines, null, 2)}\n`;
+    if (UPDATE) writeFileSync(path, text);
+    expect(existsSync(path), 'owner-timelines.json is missing; run with UPDATE_TOURNAMENT_FIXTURES=1').toBe(true);
+    expect(readFileSync(path, 'utf8')).toBe(text);
+    expect(JSON.stringify(TOURNAMENT_OWNER_TIMELINES)).toBe(JSON.stringify(generatedTimelines));
+    // Aster lost her first bout in `completed`: 2 fight renown and 5 for her place; she won the `pair` final.
+    const completed = generatedTimelines[tournamentActivityId('completed', 'aster')];
+    expect(completed.summary).toMatchObject({ resolvedKind: 'tournament', result: 'defeat', success: false,
+      rewards: { money: 0, renown: 7, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 } });
+    expect(completed.stages.map(s => [s.kind, s.label])).toEqual([['staging', 'Tournament staging'],
+      ['bout', 'Quarterfinal: defeat'], ['return', 'Results credited']]);
+    const pair = generatedTimelines[tournamentActivityId('pair', 'aster')];
+    expect(pair.summary).toMatchObject({ result: 'victory', success: true, rewards: { money: 100, renown: 60 } });
+    expect(pair.stages.map(s => s.label)).toEqual(['Tournament staging', 'Final: victory', 'Results credited']);
+    // Each public placement's completion is exactly the safe part of its owner's summary.
+    for (const key of ['completed', 'pair'] as const) {
+      const placement = generated[key].placements.find(p => p.gladiatorId === ASTER_ID)!;
+      const { activityId, resolvedKind, result, success, settledAtMs, replayExpiry } = generatedTimelines[placement.completion.activityId].summary!;
+      expect(placement.completion).toEqual({ activityId, resolvedKind, result, success, settledAtMs, replayExpiry });
+      expect(generatedTimelines[placement.completion.activityId].completion).toEqual(placement.completion);
+    }
   });
 
   it('gives the camp actors the public look the battle logs show', () => {

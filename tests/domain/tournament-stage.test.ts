@@ -12,7 +12,7 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { buildBracket } from '@domain/tournament';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { baseFiveBuild, worldFixture } from '../fixtures/domain';
-import { TOURNAMENT_VIEWS, TOURNAMENTS, tournamentId, type TournamentKey } from '../fixtures/tournaments';
+import { TOURNAMENT_VIEWS, TOURNAMENTS, tournamentActivityId, tournamentId, type TournamentKey } from '../fixtures/tournaments';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -126,14 +126,19 @@ describe('bracket shape and reveal times', () => {
       expect(roundRevealTimes(graph.startsAtMs, graph.rounds), `n = ${n}`).toEqual(graph.revealAtMs);
       expect(graph.settlesAtMs - graph.startsAtMs).toBe(TOURNAMENT_DURATION_MS);
       // A view with these bouts gets the same rounds, bout counts and per-bout reveal times from the core.
+      const slots = graph.bouts.filter(b => b.round === 1).flatMap(b => [...b.placed!]);
       const state = renderTournament({
         id: graph.id, league, slotIndex, startsAtMs: graph.startsAtMs, endsAtMs: graph.settlesAtMs, status: 'active',
+        bracket: { size: graph.size, rounds: graph.rounds, slots },
         entrants: entrants.map(e => ({ gladiatorId: e.gladiatorId, name: e.gladiatorId, classId: 'guardian' })),
         bouts: graph.bouts.map(b => ({ id: b.id, round: b.round, position: b.position, parentBoutIds: [...b.parentBoutIds], revealedResult: null })),
         placements: [],
       }, graph.startsAtMs);
       expect(state.rounds.flatMap(r => r.bouts.map(b => [b.id, b.round, b.revealAtMs])), `n = ${n}`)
         .toEqual(graph.bouts.map(b => [b.id, b.round, b.revealAtMs]));
+      // From the start, round one shows its seeded sides; each bye advances its entrant at once, with no fight.
+      expect(state.rounds[0].bouts.map(b => [b.status, b.sides.map(s => s?.gladiatorId ?? null)]), `n = ${n}`)
+        .toEqual(graph.bouts.filter(b => b.round === 1).map(b => b.bye ? ['bye', [b.result!.winnerId]] : ['preparing', [...b.placed!]]));
     }
   });
 
@@ -157,8 +162,9 @@ describe('revealed results', () => {
     for (const bout of boutsOf(before)) {
       expect([bout.status, bout.winnerId, bout.loserId, bout.log], bout.id).toEqual(['preparing', null, null, null]);
     }
-    // Round 1 has no public pairing before its reveal (the open TournamentView question); later rounds wait on winners.
-    expect(before.rounds[0].bouts.every(b => b.sides.length === 0)).toBe(true);
+    // Round 1 shows its seeded pairings from the start (the bracket slots); later rounds wait on winners.
+    const slots = view('completed').bracket!.slots;
+    expect(before.rounds[0].bouts.map(b => b.sides.map(s => s?.gladiatorId))).toEqual([0, 1, 2, 3].map(p => [slots[2 * p], slots[2 * p + 1]]));
     expect(before.rounds[1].bouts.every(b => b.sides.every(s => s === null))).toBe(true);
     expect(before.championId).toBeNull();
     // From the reveal the bout plays for its logged duration; only then does its winner show, by winnerId.
@@ -182,11 +188,17 @@ describe('revealed results', () => {
     const late = at('opening', 25);
     expect(late.status).toBe('processing');
     expect(late.rounds[0]).toMatchObject({ due: true, delayed: true });
-    expect(late.rounds[0].bouts.every(b => b.status === 'delayed' && b.winnerId === null && b.sides.length === 0)).toBe(true);
+    expect(late.rounds[0].bouts.every(b => b.status === 'delayed' && b.winnerId === null && b.sides.length === 2)).toBe(true);
     expect(late.currentRound).toBe(1);
   });
 
-  it('advances bye receivers at round 1 without a fight, and pairs later rounds from revealed winners', () => {
+  it('advances bye receivers without a fight from the start, and pairs later rounds from revealed winners', () => {
+    // The byes are public from the start through the bracket slots: their entrants advance at once and wait for round 2.
+    const start = at('midway', 0);
+    expect(start.rounds[0].bouts.filter(b => b.status === 'bye').map(b => b.winnerId).sort())
+      .toEqual(view('midway').bracket!.slots.filter((_, i, all) => all[i ^ 1] === null).sort());
+    expect(start.rounds[1].bouts.flatMap(b => b.sides).filter(s => s !== null)).toHaveLength(3);
+    expect(start.entrants.every(e => e.role === 'waiting')).toBe(true);
     const state = at('midway', 45);
     expect(state.status).toBe('active');
     const round1 = state.rounds[0].bouts;
@@ -284,6 +296,27 @@ describe('entrant roles', () => {
 });
 
 describe('special views and placements', () => {
+  it('fails closed on a malformed bracket: no seeded sides, and byes only from their published results', () => {
+    const t = S('midway') + 5 * MIN;
+    for (const patch of [
+      (v: TournamentView) => { v.bracket!.slots.pop(); },
+      (v: TournamentView) => { v.bracket!.slots[0] = 'stranger'; },
+      (v: TournamentView) => { v.bracket!.slots[2] = v.bracket!.slots[0]; },
+      (v: TournamentView) => { v.bracket!.slots[2] = null; v.bracket!.slots[3] = null; },
+      (v: TournamentView) => { v.bracket!.size = 16; },
+    ]) {
+      const tampered: TournamentView = structuredClone(view('midway'));
+      patch(tampered);
+      const round1 = renderTournament(tampered, t).rounds[0].bouts;
+      expect(round1.every(b => b.status === 'preparing' && b.sides.length === 0)).toBe(true);
+    }
+    // A published round-one result whose fighters are not the seeded pair is never shown.
+    const swapped: TournamentView = structuredClone(view('completed'));
+    const [a, b, c] = swapped.bracket!.slots;
+    swapped.bracket!.slots.splice(0, 3, c, b, a);
+    expect(renderTournament(swapped, S('completed') + 79 * MIN).rounds[0].bouts[0]).toMatchObject({ status: 'delayed', winnerId: null });
+  });
+
   it('explains a slot with too few entrants and a scheduled tournament without a bracket', () => {
     const fallback = at('insufficient', 30);
     expect(fallback).toMatchObject({ status: 'insufficient-entrants', shape: null, rounds: [], placements: [], championId: null });
@@ -302,10 +335,10 @@ describe('special views and placements', () => {
     expect(after.status).toBe('completed');
     expect(after.placements.map(p => [p.name, p.place])).toEqual([['Varro', 1], ['Severus', 2], ['Cassia', 3], ['Decimus', 3],
       ['Aster', 5], ['Aurelia', 5], ['Bellator', 5], ['Corvina', 5]]);
-    expect(after.viewer.placement).toMatchObject({ place: 5, summary: { rewards: { money: 0, renown: 7 } } });
-    // Nobody else's rewards or receipts reach the state.
-    const others = JSON.stringify({ ...after, viewer: null });
-    expect(others).not.toMatch(/renown|money|receiptId|rewards/);
+    // The viewer's own place and activity, whose credited summary the owner reads from its own timeline; the public view
+    // carries no reward or receipt for anyone.
+    expect(after.viewer.placement).toEqual({ place: 5, activityId: tournamentActivityId('completed', 'aster') });
+    expect(JSON.stringify(after)).not.toMatch(/renown|money|receiptId|rewards/);
     expect(renderTournament(view('completed'), end).viewer.placement).toBeNull();
     // A late view (final revealed, not yet settled) shows no placements, and processing once minute 80 passes.
     expect(at('late', 79).placements).toEqual([]);
@@ -336,8 +369,7 @@ describe('purity', () => {
     const state = first[8];
     expect(Object.isFrozen(state) && Object.isFrozen(state.rounds) && Object.isFrozen(state.rounds[0].bouts[0]) && Object.isFrozen(state.entrants[0])
       && Object.isFrozen(state.placements) && Object.isFrozen(state.viewer.placement)).toBe(true);
-    // The summary is a copy; the revealed logs are shared by reference and never frozen here.
-    expect(state.viewer.placement!.summary).not.toBe(input.placements[4].summary);
+    // The revealed logs are shared by reference and never frozen here.
     expect(state.rounds[0].bouts[0].log).toBe(input.bouts[0].revealedResult!.battleLog);
     expect([now, random, perf].map(spy => spy.mock.calls.length)).toEqual([0, 0, 0]);
   });

@@ -1050,6 +1050,62 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         } finally { release(); await blocker; await response; contender.release(); }
       });
 
+    it('takes every member’s account lock before phase 8 anchors a battle job to side 0, so an owner command holding side 0’s lock cannot deadlock it', async () => {
+      // Two entrants; the higher gladiator id gets the stronger build, so matchArena puts it on side 0 and phase 8, which
+      // walks members in gladiator order, reaches the lower-id side 1 first. Side 1's call creates the battle's job
+      // anchored to side 0, whose foreign keys take KEY SHARE locks on side 0's gladiator and activity rows.
+      const x = await fighter(), y = await fighter();
+      const [low, high] = x.gid < y.gid ? [x, y] : [y, x];
+      const allocations = BUILDS.strong.allocations, allocated = Object.values(allocations).reduce((sum, value) => sum + value, 0);
+      await sql`update public.builds set current_build=jsonb_set(jsonb_set(current_build,'{allocations}',${sql.json(allocations)}),'{classId}',${sql.json(BUILDS.strong.classId)})
+        where gladiator_id=${high.gid}`;
+      await sql`update public.gladiators set earned_points=${allocated},unspent_points=0 where id=${high.gid}`;
+      const token = await coordinatorLease();
+      await toPairing(300, token);
+      await completePairings();
+      const [row] = await assignments();
+      expect([row.kind, row.assignment.sides.map(s => s.gladiatorId)]).toEqual(['human', [high.gid, low.gid]]);
+      // Session B is an owner command of side 0: it holds side 0's account lock, then asks for its gladiator row.
+      let locked!: (pid: number) => void, release!: () => void;
+      const ready = new Promise<number>(resolve => { locked = resolve; });
+      const hold = new Promise<void>(resolve => { release = resolve; });
+      const command = sql.begin(async tx => {
+        await tx`select pg_advisory_xact_lock(hashtextextended(${high.id}::text,0))`;
+        const [{ pid }] = await tx`select pg_backend_pid() as pid`;
+        locked(pid); await hold;
+        await tx`set local lock_timeout='3s'`;
+        return (await tx`select id from public.gladiators where id=${high.gid} for update`).length;
+      });
+      const commandPid = await ready;
+      const contender = await sql.reserve();
+      let boundary: Promise<{ r: Record<string, unknown> }[]> | undefined;
+      try {
+        const [{ pid }] = await contender`select pg_backend_pid() as pid`;
+        // Session A: the boundary's phase 8. It must wait for side 0's account lock, held by B.
+        boundary = contender`select public.advance_boundary(300,${token}) as r`.execute() as unknown as Promise<{ r: Record<string, unknown> }[]>;
+        // A failure is asserted below; this only keeps an early rejection from being reported as unhandled.
+        boundary.catch(() => undefined);
+        let waiting = false;
+        for (let n = 0; n < 200 && !waiting; n++) {
+          waiting = (await sql`select ${commandPid}::int = any(pg_blocking_pids(${pid})) as waiting`)[0].waiting;
+          if (!waiting) await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        expect(waiting).toBe(true);
+        // B now asks for side 0's gladiator row. It succeeds and commits, and A then completes: no 40P01 either side.
+        release();
+        expect(await command).toBe(1);
+        expect((await boundary)[0].r).toMatchObject({ ok: true, phase: 9, status: 'complete' });
+      } finally {
+        release();
+        await command.catch(() => undefined);
+        await boundary?.catch(() => undefined);
+        contender.release();
+      }
+      expect(await sql`select count(*)::int as n from private.jobs where dedupe_key=${`arena:${row.battle_id}`}`).toEqual([{ n: 1 }]);
+      expect(await sql`select debited, status from public.activities where slot_index=300 order by gladiator_id`)
+        .toEqual([{ debited: true, status: 'active' }, { debited: true, status: 'active' }]);
+    });
+
     it('publishes each Arena stage only when it is due under database time, naming no opponent before minute 60', async () => {
       const a = await fighter(), b = await fighter();
       const S = 300 * SLOT, rollback = new Error('rollback-only');

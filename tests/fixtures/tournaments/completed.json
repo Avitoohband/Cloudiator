@@ -5,6 +5,20 @@
   "startsAtMs": 1790443200000,
   "endsAtMs": 1790448000000,
   "status": "completed",
+  "bracket": {
+    "size": 8,
+    "rounds": 3,
+    "slots": [
+      "ffa45e4d-fea4-4cba-9da4-5b27fca45994",
+      "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+      "6e365f72-6f36-4105-9c36-5c4c6d365ddf",
+      "077aba8f-067a-48fc-997a-bdb5087abc22",
+      "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
+      "4064a4cd-3f64-433a-9e64-a1a73d64a014",
+      "fcba4bc4-fdba-4d57-9eba-4eeaffba507d",
+      "0d5f8471-d919-428f-9ab7-058c95821757"
+    ]
+  },
   "entrants": [
     {
       "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
@@ -3956,20 +3970,11 @@
     {
       "gladiatorId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
       "place": 1,
-      "summary": {
+      "completion": {
         "activityId": "e99dc598-ea9d-472b-9b9d-c8beec9dca51",
         "resolvedKind": "tournament",
         "result": "victory",
         "success": true,
-        "rewards": {
-          "money": 100,
-          "renown": 80,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "c3c98f1d-c2c9-4d8a-91c9-8bf7c0c98a64",
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",
@@ -3980,20 +3985,11 @@
     {
       "gladiatorId": "077aba8f-067a-48fc-997a-bdb5087abc22",
       "place": 2,
-      "summary": {
+      "completion": {
         "activityId": "aee1171f-ade1-458c-90e1-1a45afe118b2",
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "rewards": {
-          "money": 60,
-          "renown": 52,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "b894692c-b994-4abf-9a94-6c52bb946de5",
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",
@@ -4004,20 +4000,11 @@
     {
       "gladiatorId": "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
       "place": 3,
-      "summary": {
+      "completion": {
         "activityId": "ae393d28-af39-4ebb-9039-404eb13941e1",
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "rewards": {
-          "money": 30,
-          "renown": 27,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "2dc518ad-2cc5-471a-9bc5-15872ac513f4",
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",
@@ -4028,20 +4015,11 @@
     {
       "gladiatorId": "fcba4bc4-fdba-4d57-9eba-4eeaffba507d",
       "place": 3,
-      "summary": {
+      "completion": {
         "activityId": "99fc1174-9afc-4307-9bfc-149a9cfc162d",
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "rewards": {
-          "money": 30,
-          "renown": 27,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "f3279348-f427-44db-9527-966ef6279801",
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",
@@ -4052,44 +4030,11 @@
     {
       "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
       "place": 5,
-      "summary": {
+      "completion": {
         "activityId": "2e9d9d39-2d9d-4ba6-9c9d-9a132b9d9880",
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "rewards": {
-          "money": 0,
-          "renown": 7,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "cc7c5430-cd7c-45c3-9e7c-5756cf7c58e9",
-        "settledAtMs": 1790448000000,
-        "replayExpiry": {
-          "state": "available",
-          "expiresAtMs": 1791052800000
-        }
-      }
-    },
-    {
-      "gladiatorId": "ffa45e4d-fea4-4cba-9da4-5b27fca45994",
-      "place": 5,
-      "summary": {
-        "activityId": "59b2ea3d-58b2-48aa-97b2-e71756b2e584",
-        "resolvedKind": "tournament",
-        "result": "defeat",
-        "success": false,
-        "rewards": {
-          "money": 0,
-          "renown": 7,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "681b4db3-671b-4c20-9a1b-50d9691b4f46",
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",
@@ -4100,20 +4045,11 @@
     {
       "gladiatorId": "4064a4cd-3f64-433a-9e64-a1a73d64a014",
       "place": 5,
-      "summary": {
+      "completion": {
         "activityId": "c65fa69d-c55f-450a-945f-a377c35fa1e4",
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "rewards": {
-          "money": 0,
-          "renown": 7,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "091c902e-0a1c-41c1-971c-8d08081c8e9b",
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",
@@ -4124,20 +4060,26 @@
     {
       "gladiatorId": "6e365f72-6f36-4105-9c36-5c4c6d365ddf",
       "place": 5,
-      "summary": {
+      "completion": {
         "activityId": "015d52e2-025d-4475-9f5d-4fbc005d514f",
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "rewards": {
-          "money": 0,
-          "renown": 7,
-          "xp": 0,
-          "attributePoints": 0,
-          "items": [],
-          "overflowMoney": 0
-        },
-        "receiptId": "b99f4e12-ba9f-4fa5-979f-4aecb89f4c7f",
+        "settledAtMs": 1790448000000,
+        "replayExpiry": {
+          "state": "available",
+          "expiresAtMs": 1791052800000
+        }
+      }
+    },
+    {
+      "gladiatorId": "ffa45e4d-fea4-4cba-9da4-5b27fca45994",
+      "place": 5,
+      "completion": {
+        "activityId": "59b2ea3d-58b2-48aa-97b2-e71756b2e584",
+        "resolvedKind": "tournament",
+        "result": "defeat",
+        "success": false,
         "settledAtMs": 1790448000000,
         "replayExpiry": {
           "state": "available",

@@ -2,7 +2,7 @@ import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } fr
 import type { RevealedTimeline } from '@contracts/events';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
-import { GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings } from './reads';
+import { GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings, readTournament } from './reads';
 export { GatewayReadError } from './reads';
 
 export interface GameGateway {
@@ -55,7 +55,9 @@ export function createLiveGateway(): GameGateway {
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       const client = getBrowserClient();
       if (!client) return { ok: false, code: 'unavailable' };
-      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item'].includes(input.kind)) return { ok: false, code: 'unavailable' };
+      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'set-tournament-opt-in'].includes(input.kind)) {
+        return { ok: false, code: 'unavailable' };
+      }
       try {
         const { data, error } = await client.auth.getSession();
         if (error || !data.session || (data.session.expires_at ?? 0) * 1000 <= Date.now()) return { ok: false, code: 'unauthenticated' };
@@ -77,6 +79,7 @@ export function createLiveGateway(): GameGateway {
     timeline: id => read(client => readTimeline(client, id)), profile: id => read(client => readProfile(client, id)),
     recent: cursor => read(client => readRecent(client, cursor)),
     standings: (league, cursor) => read(client => readStandings(client, league, cursor)),
-    market: unavailable, tournament: unavailable,
+    tournament: id => read(client => readTournament(client, id)),
+    market: unavailable,
   };
 }

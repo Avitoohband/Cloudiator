@@ -6,9 +6,11 @@
 // entrant's role, placements after settlement and, for completed bouts, an inline close-up replay of the revealed log
 // (tournament bouts have no activity id in the public view, so no /replay/ link). The only command it sends is
 // `set-tournament-opt-in`, when the owner toggles the box; the box always shows the owner's saved setting. Names render
-// as React text, and nobody's rewards show except the viewer's own placement.
+// as React text. The public view carries nobody's rewards: once settled, the viewer's own credited rewards are read from
+// its own activity timeline (owner-only under RLS), never from the bracket.
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { GameCommand } from '@contracts/commands';
+import type { ActivitySummary } from '@contracts/events';
 import type { OwnerState, TournamentView } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
@@ -23,8 +25,8 @@ import {
 } from './tournament-text';
 import styles from './TournamentPanel.module.css';
 
-/** Reads and the one command the panel uses. */
-export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command'>>;
+/** Reads and the one command the panel uses; `timeline` reads the viewer's own credited summary once it has a place. */
+export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command' | 'timeline'>>;
 /** A fixture sample: its view was projected at the server time `asOfMs`, where the preview holds its bracket. */
 export type TournamentSample = { id: string; label: string; asOfMs?: number };
 type OptIn = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
@@ -109,6 +111,8 @@ export type BracketModel = {
   replayBoutId: string | null;
   /** The signed-in owner's gladiator, if any. */
   viewerId?: string | null;
+  /** The viewer's own credited summary for its placement, from its own timeline (null until read). */
+  credited?: ActivitySummary | null;
   timeZone?: string;
 };
 
@@ -166,7 +170,9 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
       <p className={styles.status} role="status">{statusText(state.status)}</p>
       <p className={styles.detail}>{statusDetail(state, timeZone)}</p>
       {own && <p className={styles.own}>{own}</p>}
-      {state.viewer.placement && <p className={styles.own}>Your placement: {ordinal(state.viewer.placement.place)}. Credited: {creditedText(state.viewer.placement.summary)}.</p>}
+      {state.viewer.placement && (
+        <p className={styles.own}>Your placement: {ordinal(state.viewer.placement.place)}.{model.credited ? ` Credited: ${creditedText(model.credited)}.` : ''}</p>
+      )}
       {champion && <p className={styles.champion} data-champion-id={champion.gladiatorId}>Champion: {champion.name}</p>}
       {state.shape && <p className={styles.shape}>{shapeText(state.shape)}</p>}
 
@@ -193,7 +199,6 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
           <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${round.round}`} className={styles.panel}>
             <p className={styles.roundStatus}>{roundStatus(round)}</p>
             {roundNote(round, timeZone) && <p className="muted">{roundNote(round, timeZone)}</p>}
-            {round.round === 1 && !round.bouts.some(b => b.sides.length) && <p className="muted">Pairings are revealed with the round; the bracket’s shape is public from the start.</p>}
             <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} onWatch={onWatch} />)}</ul>
           </div>
         </section>
@@ -238,6 +243,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, onRead, hook }: {
   const [failure, setFailure] = useState<'unavailable' | 'not-found' | null>(null);
   const [round, setRound] = useState<number | null>(null);
   const [replay, setReplay] = useState<string | null>(null);
+  const [credited, setCredited] = useState<{ activityId: string; summary: ActivitySummary } | null>(null);
   const request = useRef(0);
   const lastRead = useRef(-Infinity);
 
@@ -272,6 +278,17 @@ function TournamentCard({ id, reads, clock, now, viewerId, onRead, hook }: {
 
   const state = view ? renderTournament(view, now, { viewerId }) : null;
 
+  // Once the viewer has a place, its own credited rewards come from its own activity timeline (owner-only under RLS).
+  const placed = state?.viewer.placement?.activityId ?? null;
+  useEffect(() => {
+    if (!placed || !reads.timeline || credited?.activityId === placed) return;
+    let current = true;
+    reads.timeline(placed).then(timeline => {
+      if (current && timeline.summary?.activityId === placed) setCredited({ activityId: placed, summary: timeline.summary });
+    }, () => undefined);
+    return () => { current = false; };
+  }, [placed, reads, credited]);
+
   // A fresh read once the clock passes the start, a round's reveal or the settlement, and every 30 s while results
   // are due but missing. Marks are recomputed after every render, so a clock moved back and forward reads again.
   const pending = useRef<number[]>([]);
@@ -298,14 +315,15 @@ function TournamentCard({ id, reads, clock, now, viewerId, onRead, hook }: {
     return <p className={styles.detail} role="status">{failure === 'not-found' ? 'No tournament matches this selection.' : 'Tournament brackets cannot be loaded right now. Only revealed results are ever shown.'}</p>;
   }
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
-  return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, viewerId }}
+  return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, viewerId,
+    credited: credited && credited.activityId === placed ? credited.summary : null }}
     onRound={setRound} onWatch={setReplay} onCloseReplay={() => setReplay(null)} />;
 }
 
 /**
  * The Tournaments tab. In fixture mode it opens sample tournaments; otherwise the owner's league tournament of the
- * running or latest tournament slot (`tournamentIdFor`; an open contract question until Task 19 phase 2 publishes the
- * lookup). Without a reader it says brackets cannot be shown yet.
+ * running or latest tournament slot (`tournamentIdFor`, Task 19's lookup id `tournament:<slot>:<league>`). Without a
+ * reader it says brackets cannot be shown yet.
  */
 export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh }: {
   reads: TournamentReads | null;

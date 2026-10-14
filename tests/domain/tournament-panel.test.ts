@@ -8,7 +8,10 @@ import { viewerText } from '@/features/tournaments/tournament-text';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
-import { TOURNAMENT_SAMPLE_KEYS, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, TOURNAMENTS, tournamentAsOf, tournamentId, type TournamentKey } from '../fixtures/tournaments';
+import {
+  TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLE_KEYS, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, TOURNAMENTS, tournamentActivityId, tournamentAsOf, tournamentId,
+  type TournamentKey,
+} from '../fixtures/tournaments';
 
 const MIN = 60_000;
 const noop = () => {};
@@ -83,7 +86,11 @@ describe('tournament bracket', () => {
     expect(words).toContain('8-slot bracket · 3 rounds · 0 byes');
     expect(words).toContain('Entrants (8)');
     for (const name of ['Aster', 'Bellator', 'Cassia', 'Corvina', 'Nerva', 'Severus', 'Titus', 'Varro']) expect(words).toContain(name);
-    expect(words).toContain('Pairings are revealed with the round');
+    // The seeded first round is public from the start: every bout names its pair, with no result.
+    const named = (id: string | null) => TOURNAMENT_VIEWS.opening.entrants.find(e => e.gladiatorId === id)!.name;
+    const slots = TOURNAMENT_VIEWS.opening.bracket!.slots;
+    for (let p = 0; p < 4; p += 1) expect(words).toContain(`Bout ${p + 1} ${named(slots[2 * p])} vs ${named(slots[2 * p + 1])}`);
+    expect(words).not.toMatch(/To be revealed|Pairings are revealed/);
     expect(words).toContain('You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.');
     // Rounds are tabs; the round in play is selected.
     expect(html).toContain('role="tablist"');
@@ -116,6 +123,10 @@ describe('tournament bracket', () => {
     expect(own('midway', 65, 'aurelia')).toBe('Your Final result is not published yet. It appears here as soon as it is revealed.');
     // A round 1 bout is revealed but still being fought: no advance yet.
     expect(own('completed', 20.1, 'varro')).toBe('Your bout is being fought now.');
+    // A bye receiver knows from the start that its first bout comes in round 2.
+    const bye = TOURNAMENT_VIEWS.midway.bracket!.slots.find((id, i, all) => id !== null && all[i ^ 1] === null)!;
+    expect(viewerText(renderTournament(TOURNAMENT_VIEWS.midway, TOURNAMENTS.midway.startsAtMs + 5 * MIN, { viewerId: bye }), true, 'UTC'))
+      .toBe('You are entered with a bye in the Quarterfinals. Your first bout is revealed at Sat 3 Oct, 18:00 UTC.');
   });
 
   it('shows byes, revealed winners by winnerId and the bouts in progress', () => {
@@ -160,8 +171,12 @@ describe('tournament bracket', () => {
       .toEqual([[1, 'Severus vs Varro'], [2, 'Result'], [2, 'Fighters'], [2, 'Combat log']]);
   });
 
-  it('places entrants after settlement and shows rewards only for the viewer’s own placement', () => {
-    const words = text(bracket('completed', 85));
+  it('places entrants after settlement and shows rewards only for the viewer’s own placement, from its own timeline', () => {
+    // No credited summary yet (the owner's timeline is read separately): the place only.
+    expect(text(bracket('completed', 85))).toContain('Your placement: 5th.');
+    expect(text(bracket('completed', 85))).not.toContain('Credited');
+    const credited = TOURNAMENT_OWNER_TIMELINES[tournamentActivityId('completed', 'aster')].summary!;
+    const words = text(bracket('completed', 85, { credited }));
     expect(words).toContain('Completed');
     expect(words).toContain('Champion: Varro');
     expect(words).toMatch(/Place Gladiator 1 Varro 2 Severus 3 Cassia 3 Decimus 5 Aster 5 Aurelia 5 Bellator 5 Corvina/);

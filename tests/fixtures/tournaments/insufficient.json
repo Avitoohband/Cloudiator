@@ -5,6 +5,7 @@
   "startsAtMs": 1789838400000,
   "endsAtMs": 1789843200000,
   "status": "insufficient-entrants",
+  "bracket": null,
   "entrants": [
     {
       "gladiatorId": "97e3c504-98e3-4697-99e3-c82a9ae3c9bd",

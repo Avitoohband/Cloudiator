@@ -20,9 +20,13 @@
 -- 3. Lock order of a side's settlement: account, character, wallet, sorted items, then that side's own league-season
 --    rating row (a dependent row of its character), activity and job; time is sampled after all of them. Phase 4 takes
 --    account, character, rating row. A side never locks the opponent's account or rows, so the two sides settle
---    independently. Phase 8 creates the battle's simulation job under whichever side's account lock comes first; its
---    foreign keys take KEY SHARE locks on the first side's gladiator and activity rows. No cycle: a command holding that
---    gladiator row waits for no lock the boundary holds, and nothing locks a preparing activity.
+--    independently. Phase 8 creates the battle's one simulation job, anchored to side 0, in whichever side's call comes
+--    first; its foreign keys take KEY SHARE locks on side 0's gladiator and activity rows. Corrected by Task 19 phase 2b
+--    (10-tournament-results.sql exception 1): this file's phase 8 took those KEY SHARE locks before it held side 0's
+--    account lock, so an owner command of side 0 that held that lock and then asked for its gladiator row FOR UPDATE
+--    deadlocked with the boundary (40P01, reproduced by the regression in tests/db/arena.test.ts). Since that fix phase 8
+--    takes every member's account lock, in gladiator order, before any debit or job insert, so these KEY SHARE locks are
+--    taken only while the boundary already holds side 0's account lock, and no cycle remains.
 -- 4. Stage publication. The warm-up (ordinal 0) is due at the slot start S, so the boundary writes it at phase 8, which
 --    runs at or after S. The bout (ordinal 1) is written by the side's own reveal job at S + 60 min. The zero-length return
 --    (ordinal 2) is written by the side's settlement in the transaction that credits it, at or after S + 80 min, so

@@ -1,14 +1,17 @@
 // Projects private Task 19 tournament graphs to the public TournamentView a server would return at a given time, and
-// builds the camp actors of a fixture tournament. It imports no JSON and no engine code (domain types only), so
-// browser specs can use it; tests/domain/tournament-fixtures.test.ts runs the real domain and commits the views.
+// builds the camp actors of a fixture tournament and the owner's own tournament timeline. It imports no JSON and no
+// engine code (domain types only), so browser specs can use it; tests/domain/tournament-fixtures.test.ts runs the real
+// domain and commits the views and timelines.
 //
-// The projection is an explicit whitelist, never a spread of the graph: no seeds (the graph holds none), no fighter
-// snapshots, ratings, seeded ranks or private outcomes. Entrants are listed in a neutral public order (by name), not
-// in the private seeded rank order. A bout's result appears only once its round's reveal time has passed (byes at
-// round 1's time, as the Task 19 phase 1 report proposes), with the logged winner; participants of a future round stay
-// hidden inside the null result. Placements appear only once the tournament is settled at minute 80.
+// The projection is an explicit whitelist, never a spread of the graph, and mirrors Task 19 phase 2b's public rows: no
+// seeds (the graph holds none), fighter snapshots, ratings, private outcomes, rewards or receipts. Entrants are listed
+// in a neutral public order (by name). From the start the bracket carries its size, rounds and seeded first-round slots,
+// so the byes are public then too; a fought bout's result appears only once its round's reveal time has passed, with
+// the logged winner, and participants of a future round stay hidden inside the null result. Placements (public place
+// and Task 10's six safe completion fields) appear only once the tournament is settled at minute 80; an owner reads its
+// own rewards from its own activity timeline.
 import type { TournamentGraph, TournamentOutcome } from '../../supabase/functions/_shared/domain/tournament.ts';
-import type { BattleLog } from '../../supabase/functions/_shared/contracts/events.ts';
+import type { ActivitySummary, BattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events.ts';
 import type { PublicActor, TournamentBout, TournamentEntrant, TournamentView } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { ARENA_GLADIATORS, fixtureUuid } from './arena-ids.ts';
 import {
@@ -34,13 +37,19 @@ const frame = (key: TournamentKey) => {
 
 /** A tournament before its cutoff: no entrants, bracket or placements are known yet. */
 export function scheduledView(key: TournamentKey): TournamentView {
-  return { ...frame(key), status: 'scheduled', entrants: [], bouts: [], placements: [] };
+  return { ...frame(key), status: 'scheduled', bracket: null, entrants: [], bouts: [], placements: [] };
 }
 
 /** A league with fewer than two qualifiers: no bracket; its entrants ran regular Arena in the same slot. */
 export function insufficientView(key: TournamentKey): TournamentView {
   const entrants = TOURNAMENTS[key].entrants.map(g => ARENA_GLADIATORS[g].id);
-  return { ...frame(key), status: 'insufficient-entrants', entrants: publicEntrants(entrants), bouts: [], placements: [] };
+  return { ...frame(key), status: 'insufficient-entrants', bracket: null, entrants: publicEntrants(entrants), bouts: [], placements: [] };
+}
+
+/** Task 10's six safe fields of an entrant's settled tournament activity, as its public completion shows them. */
+function completionOf(graph: TournamentGraph, o: TournamentOutcome): PublicActivitySummary {
+  return { activityId: o.activityId, resolvedKind: 'tournament', result: o.result, success: o.success, settledAtMs: graph.settlesAtMs,
+    replayExpiry: { state: 'available', expiresAtMs: graph.settlesAtMs + REPLAY_KEPT_MS } };
 }
 
 /**
@@ -54,8 +63,10 @@ export function projectTournament(graph: TournamentGraph, outcomes: readonly Tou
     if (!e) throw new Error(`unknown entrant ${id}`);
     return { gladiatorId: e.gladiatorId, name: e.name, classId: e.classId };
   };
+  const started = asOfMs >= graph.startsAtMs;
   const bouts: TournamentBout[] = graph.bouts.map(bout => {
-    const result = bout.result !== null && asOfMs >= bout.revealAtMs ? bout.result : null;
+    // A bye is public from the start (the bracket slots); a fought result from its round's reveal time.
+    const result = bout.result !== null && (bout.bye ? started : asOfMs >= bout.revealAtMs) ? bout.result : null;
     let revealedResult: TournamentBout['revealedResult'] = null;
     if (result && bout.bye) revealedResult = { participants: [entrant(result.winnerId)], winnerId: result.winnerId, bye: true };
     else if (result) {
@@ -65,24 +76,45 @@ export function projectTournament(graph: TournamentGraph, outcomes: readonly Tou
     return { id: bout.id, round: bout.round, position: bout.position, parentBoutIds: [...bout.parentBoutIds], revealedResult };
   });
   const settled = outcomes !== null && asOfMs >= graph.settlesAtMs;
-  const name = (id: string) => entrant(id).name;
   const placements: TournamentView['placements'] = !settled ? [] : [...outcomes]
-    .sort((a, b) => a.place - b.place || (name(a.gladiatorId) < name(b.gladiatorId) ? -1 : 1))
-    .map(o => ({
-      gladiatorId: o.gladiatorId, place: o.place,
-      // ActivitySummary is the current contract; no rating, rank or placement grant leaves the private outcome.
-      summary: {
-        activityId: o.activityId, resolvedKind: 'tournament', result: o.result, success: o.success,
-        rewards: { money: o.rewards.money, renown: o.rewards.renown, xp: o.rewards.xp, attributePoints: o.rewards.attributePoints, items: [], overflowMoney: o.rewards.overflowMoney },
-        receiptId: fixtureUuid(`tournament-receipt-${graph.id}-${o.gladiatorId}`), settledAtMs: graph.settlesAtMs,
-        replayExpiry: { state: 'available', expiresAtMs: graph.settlesAtMs + REPLAY_KEPT_MS },
-      },
-    }));
+    .sort((a, b) => a.place - b.place || (a.gladiatorId < b.gladiatorId ? -1 : 1))
+    .map(o => ({ gladiatorId: o.gladiatorId, place: o.place, completion: completionOf(graph, o) }));
   return {
     id: graph.id, league: graph.league, slotIndex: graph.slotIndex, startsAtMs: graph.startsAtMs, endsAtMs: graph.settlesAtMs,
-    status: asOfMs < graph.startsAtMs ? 'scheduled' : settled ? 'completed' : asOfMs < graph.settlesAtMs ? 'active' : 'processing',
+    status: !started ? 'scheduled' : settled ? 'completed' : asOfMs < graph.settlesAtMs ? 'active' : 'processing',
+    bracket: started ? { size: graph.size, rounds: graph.rounds, slots: graph.bouts.filter(b => b.round === 1).flatMap(b => [...b.placed!]) } : null,
     entrants, bouts, placements,
   };
+}
+
+const roundLabel = (round: number, rounds: number) =>
+  round === rounds ? 'Final' : round === rounds - 1 ? 'Semifinal' : round === rounds - 2 ? 'Quarterfinal' : `Round ${round}`;
+/**
+ * One entrant's own settled tournament timeline at server time `asOfMs`, as Task 19 phase 2b publishes it: staging from
+ * the start until its first fought bout's reveal, one stage per fought bout at its round's reveal with the shared log and
+ * its own label, and the zero-length return when credited; plus its owner-only summary (rewards, receipt, rating change)
+ * and the public completion.
+ */
+export function ownerTimeline(graph: TournamentGraph, o: TournamentOutcome, asOfMs: number): RevealedTimeline {
+  const id = o.gladiatorId, activityId = o.activityId;
+  const fought = graph.bouts.filter(b => !b.bye && b.result !== null && (b.result.winnerId === id || b.result.loserId === id));
+  const bye = graph.bouts.some(b => b.bye && b.result?.winnerId === id);
+  const stages: RevealedStage[] = [
+    { id: `${activityId}:0`, kind: 'staging', revealedAtMs: graph.startsAtMs, startedAtMs: graph.startsAtMs,
+      endsAtMs: graph.revealAtMs[bye ? 1 : 0], label: 'Tournament staging' },
+    ...fought.map((b): RevealedStage => ({ id: `${activityId}:${b.round}`, kind: 'bout', revealedAtMs: b.revealAtMs, startedAtMs: b.revealAtMs,
+      endsAtMs: b.revealAtMs + b.result!.log!.durationMs, label: `${roundLabel(b.round, graph.rounds)}: ${b.result!.winnerId === id ? 'victory' : 'defeat'}`,
+      battleLog: structuredClone(b.result!.log) as BattleLog })),
+    { id: `${activityId}:${graph.rounds + 1}`, kind: 'return', revealedAtMs: graph.settlesAtMs, startedAtMs: graph.settlesAtMs,
+      endsAtMs: graph.settlesAtMs, label: 'Results credited' },
+  ];
+  const completion = completionOf(graph, o);
+  const summary: ActivitySummary = { activityId, resolvedKind: 'tournament', result: o.result, success: o.success,
+    rewards: { money: o.rewards.money, renown: o.rewards.renown, xp: o.rewards.xp, attributePoints: o.rewards.attributePoints, items: [],
+      overflowMoney: o.rewards.overflowMoney },
+    receiptId: fixtureUuid(`tournament-receipt-${graph.id}-${id}`), settledAtMs: graph.settlesAtMs, replayExpiry: completion.replayExpiry,
+    ratingDelta: o.ratingDelta };
+  return { activityId, serverNowMs: asOfMs, visibleThroughMs: asOfMs, stages, summary, completion };
 }
 
 /** The tournament's entrants as public camp actors in the arena during its slot (location `tournament`). */

@@ -1,6 +1,43 @@
 # Local identity backend and migrations
 
-## Task 19 phase 2a: tournament entry, brackets and bout jobs
+## Task 19 phase 2b: tournament results, reveals, settlement and the public view
+
+M12 is `supabase/migrations/20261014174629_tournament_results.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull tournament_results --local --schema public,private --yes` from the tested `supabase/sql/10-tournament-results.sql`.
+M01–M11 are unchanged. It also carries the Task 16 phase-8 lock-order fix (`private.boundary_start` takes every member's
+account lock, in gladiator order, before any debit or job insert).
+
+The draft needed three completions before commit:
+- It only added table grants. Source-equivalent revokes on `public.tournament_views`, `public.tournament_bout_results`,
+  `public.tournament_placements` and `private.tournament_results` now precede them (without them the new public tables would
+  inherit the platform's default client privileges).
+- It omitted every function ACL: the source's revoke/grant pair is appended, so the new and changed functions keep backend
+  `EXECUTE` only.
+- A provenance header and `notify pgrst` were added. No backfill or initialization is needed: the four tables are new, and no
+  tournament exists before this migration ships.
+
+It re-emits no unchanged function. The changed existing functions are `boundary_start`, `boundary_published`,
+`prepare_activity_jobs`, `accept_job_result`, `settle_rewards` and `settle_activity_core`; the new ones are
+`publish_tournaments`, `valid_tournament_outcomes`, `accept_tournament_result`, `tournament_settlement_failure` and
+`tournament_rewards`. Its triggers reference the existing `private.guard_frozen()` and `private.projection_changed()`.
+
+**Release (Task 24).** Ship M11, M12 and the worker in one release step, then check that no `prepare`, `pair`, `simulation`,
+`reveal` or `settlement` job is in operator state. An older worker returns a final bout without `outcomes`, which M12 refuses
+(the job then fails into operator state); M11 alone cannot complete a tournament bout at all.
+
+**Retention (Task 22).** Prune `public.tournament_bout_results` and `public.tournament_placements` before their
+`public.tournament_views` row, that row before its pairing job, `private.tournament_results` before its tournament and its
+final bout job, and placements before their activities (foreign keys). Bout logs in stages and public results follow the
+seven-day replay rule.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M12, with no source applied afterwards.
+- The schema fingerprint (863 lines, the same coverage as M11's) matched the tested source exactly, and was identical again
+  after the tests, so every test-only stand-in was removed.
+- `npm run test:db` passed **170/170** in eight files on the replay, with the Edge container's start time unchanged across the
+  run.
+- Lint is empty. Advisors, run after that test run, report four INFO unused-index notices, none on the new tables, and no
+  warnings or errors. `migration list --local` shows M01–M12.
 
 M11 is `supabase/migrations/20261014160257_tournaments.sql`, generated with CLI 2.120.0 (engine `migra`) by
 `db pull tournaments --local --schema public,private --yes` from the tested `supabase/sql/09-tournaments.sql`.

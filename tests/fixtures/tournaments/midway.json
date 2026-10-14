@@ -5,6 +5,20 @@
   "startsAtMs": 1791048000000,
   "endsAtMs": 1791052800000,
   "status": "active",
+  "bracket": {
+    "size": 8,
+    "rounds": 3,
+    "slots": [
+      "5810c364-5910-44f7-9a10-c68a5b10c81d",
+      null,
+      "fcba4bc4-fdba-4d57-9eba-4eeaffba507d",
+      "933dbdff-923d-4c6c-953d-c125943dbf92",
+      "313d10ed-303d-4f5a-9f3d-0dc72e3d0c34",
+      null,
+      "ffa45e4d-fea4-4cba-9da4-5b27fca45994",
+      null
+    ]
+  },
   "entrants": [
     {
       "gladiatorId": "ffa45e4d-fea4-4cba-9da4-5b27fca45994",

@@ -165,7 +165,12 @@ export function viewerText(state: TournamentStageState, hasViewer: boolean, time
     case 'champion': return 'You are the champion of this tournament!';
     default: {
       const due = state.rounds.filter(r => r.due);
-      if (!due.length) return `You are entered. Your first bout is revealed at ${timeWithUtc(state.rounds[0].revealAtMs, timeZone)}.`;
+      if (!due.length) {
+        // A bye is public from the start: its receiver's first bout comes a round later.
+        const bye = state.rounds[0].bouts.some(b => b.status === 'bye' && b.winnerId === me.gladiatorId);
+        return bye ? `You are entered with a bye in the ${state.rounds[0].label}. Your first bout is revealed at ${timeWithUtc(state.rounds[1].revealAtMs, timeZone)}.`
+          : `You are entered. Your first bout is revealed at ${timeWithUtc(state.rounds[0].revealAtMs, timeZone)}.`;
+      }
       // "You advance" only after a shown win or bye in every due round; the first due round without one holds the
       // viewer's unpublished (delayed) result. A waiting entrant has lost no shown bout.
       const open = due.find(r => !r.bouts.some(b => (b.status === 'decided' || b.status === 'bye') && b.winnerId === me.gladiatorId));

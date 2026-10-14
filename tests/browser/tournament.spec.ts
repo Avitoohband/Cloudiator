@@ -69,9 +69,13 @@ test.describe('tournament registration and brackets', () => {
     await expect(page.getByText('Result preparing')).toBeVisible();
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
     await expect(page.getByLabel('Automatically enter tournaments')).not.toBeChecked();
-    // Entrants and the bracket shape are public from the start; the pairing waits for the round.
+    // Entrants, the bracket shape and the seeded first round are public from the start; the results wait for the round.
     await expect(card(page)).toContainText('8-slot bracket · 3 rounds · 0 byes');
     await expect(card(page).getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
+    const named = (id: string | null) => VIEWS.opening.entrants.find(e => e.gladiatorId === id)!.name;
+    const slots = VIEWS.opening.bracket!.slots;
+    for (let p = 0; p < 4; p += 1) await expect(card(page).getByRole('tabpanel')).toContainText(`${named(slots[2 * p])} vs ${named(slots[2 * p + 1])}`);
+    await expect(card(page)).not.toContainText('Pairings are revealed');
     await expect(card(page)).toContainText('You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.');
     await expect(card(page).getByRole('button', { name: /Watch replay/ })).toHaveCount(0);
     // Even a view holding every result shows none before its round's reveal time.

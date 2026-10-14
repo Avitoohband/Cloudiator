@@ -6,8 +6,8 @@ import { planExpedition } from '../domain/expedition.ts';
 import { makeFighter, simulateBattle } from '../domain/combat.ts';
 import { arenaNpcName, arenaOutcomes, estimateArenaStrength, leagueFor, makeFallback, matchArena, nonEmpty } from '../domain/arena.ts';
 import type { ArenaAssignment, ArenaEntrant, ArenaOutcome, PairingHistory } from '../domain/arena.ts';
-import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout } from '../domain/tournament.ts';
-import type { OptInRevision, TournamentCandidate, TournamentGraph, TournamentRoute } from '../domain/tournament.ts';
+import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout, tournamentOutcomes } from '../domain/tournament.ts';
+import type { OptInRevision, TournamentCandidate, TournamentGraph, TournamentOutcome, TournamentRoute } from '../domain/tournament.ts';
 import { slotAt } from '../domain/clock.ts';
 import type { ActivityChoice, LeagueId } from '../contracts/commands.ts';
 import type { BattleLog } from '../contracts/events.ts';
@@ -173,14 +173,20 @@ export function simulateArenaV1(input: ArenaSimulationInput, seed: Seed): ArenaS
  * its participants, which depend on earlier results, nor its seed, which the job itself carries.
  */
 export type TournamentBoutInput = DeepReadonly<{ kind: 'tournament-bout'; tournamentId: string; boutId: string }>;
-/** One simulated bout. `log.battleId` is the bout id; 2b's fenced acceptance validates and stores it once. */
-export type TournamentBoutResult = { boutId: string; log: BattleLog };
+/**
+ * One simulated bout. `log.battleId` is the bout id; the fenced acceptance validates and stores it once. The final also
+ * carries `outcomes`: `tournamentOutcomes` of the graph it completes, one per entrant in rank order (placements, fight
+ * renown, round-ordered ratings), which acceptance checks against the stored results and freezes for each entrant's
+ * settlement at minute 80. Every earlier bout has no `outcomes` key.
+ */
+export type TournamentBoutResult = { boutId: string; log: BattleLog; outcomes?: TournamentOutcome[] };
 /**
  * Canonical v1 tournament bout: the stored graph read under the job's current lease (`public.tournament_bout_input`)
  * is rebuilt and checked by `readyBouts` (its `checkGraph` refuses stub or altered stored logs); the bout must be ready,
  * so a child fights its parents' stored winners. `runBout` simulates it from the frozen entries at full health under the
  * bout's own one-way seed, labelled with the frozen names, and `recordBout` applies the full log fence before the worker
- * completes the job. A bye, an unready, resolved or unknown bout, a refused read or missing name fails closed.
+ * completes the job. The final, which completes the graph, also returns every entrant's `tournamentOutcomes`. A bye, an
+ * unready, resolved or unknown bout, a refused read or missing name fails closed.
  */
 export function simulateTournamentBoutV1(input: TournamentBoutInput, read: TournamentBoutRead, seed: Seed): TournamentBoutResult {
   if (!input || typeof input !== 'object' || Object.keys(input).length !== 3 || input.kind !== 'tournament-bout'
@@ -194,8 +200,9 @@ export function simulateTournamentBoutV1(input: TournamentBoutInput, read: Tourn
     const named = (id: string) => !!names && typeof names === 'object' && Object.hasOwn(names, id) && nonEmpty(names[id]);
     if (!job || !job.sides.every(side => named(side.gladiatorId))) throw new RangeError('The tournament bout is not ready');
     const log = runBout(job, seed, names);
-    recordBout(graph, job.boutId, log);
-    return { boutId: job.boutId, log };
+    const recorded = recordBout(graph, job.boutId, log);
+    if (job.round !== graph.rounds) return { boutId: job.boutId, log };
+    return { boutId: job.boutId, log, outcomes: [...tournamentOutcomes(recorded)] };
   } catch {
     throw new WorkerFailure('invalid-input');
   }

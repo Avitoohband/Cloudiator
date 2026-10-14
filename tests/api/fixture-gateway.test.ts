@@ -173,6 +173,12 @@ test('fixture tournaments serve each sample view by id as a copy; unknown ids st
     expect(await gateway.tournament(view.id), key).toEqual(view);
   }
   await expect(gateway.tournament('tournament:1:bronze')).rejects.toMatchObject({ code: 'unavailable' });
+  // The owner's own settled tournament activity: its timeline carries its credited summary, which no public view carries.
+  const { TOURNAMENT_OWNER_TIMELINES, tournamentActivityId } = await import('../fixtures/tournaments');
+  const own = tournamentActivityId('completed', 'aster');
+  expect(await gateway.timeline(own)).toEqual(TOURNAMENT_OWNER_TIMELINES[own]);
+  expect((await gateway.timeline(own)).summary).toMatchObject({ resolvedKind: 'tournament', rewards: { money: 0, renown: 7 } });
+  expect((await gateway.tournament(tournamentId('completed'))).placements.find(p => p.completion.activityId === own)).toBeTruthy();
   // The opt-in command is refused like every fixture command, and the owner's flag stays off.
   const result = await gateway.command({ kind: 'set-tournament-opt-in', operationId: '5d1f0b9e-8a43-4b55-9c7e-2f6a1d3c4b5e', enabled: true });
   expect(result).toEqual({ ok: false, code: 'unavailable' });

@@ -9,17 +9,20 @@
 // up to the millisecond as in Task 19, so a reveal is never early. A bout's result shows only when the view carries a
 // well-formed `revealedResult` AND the display clock has reached its round's reveal time; a fought bout then plays for
 // its logged duration ("fighting") before its winner shows. The winner is always `winnerId` (a seeded tie-break with
-// both fighters at 0 HP included); health never decides it. Byes advance their entrant at round 1 without a fight.
-// Before a round reveals its bouts read "Result preparing"; a due round without published results is "delayed"
-// (the tournament shows as processing), never an invented result. Round 1 pairings are not in the public view before
-// their reveal (the open TournamentView contract question), so only later rounds name sides early, from the winners
-// already shown. Nothing here computes a result, rating or reward, and no Phaser, React, clock or randomness is used.
+// both fighters at 0 HP included); health never decides it. The bracket's seeded first round is public from the start
+// (`TournamentView.bracket.slots`, Task 19 phase 2b): round 1 names its sides from the start, a bye advances its entrant
+// at once without a fight, and a published round-1 result must be exactly its seeded pair. A malformed bracket fails
+// closed: no seeded sides, and byes only from their published results once round 1 is due. Before a round reveals its
+// bouts read "Result preparing"; a due round without published results is "delayed" (the tournament shows as
+// processing), never an invented result; later rounds name sides from the winners already shown. Nothing here computes
+// a result, rating or reward, and no Phaser, React, clock or randomness is used.
 import type { LeagueId } from '@contracts/commands';
-import type { ActivitySummary, BattleLog } from '@contracts/events';
+import type { BattleLog } from '@contracts/events';
 import type { TournamentBout, TournamentEntrant, TournamentView } from '@contracts/reads';
 import { slotAt } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import { isTournamentSlot } from '@domain/tournament';
+import { tournamentLookupId } from '../lib/api/reads';
 
 /** One tournament lasts one 80-minute slot; its rewards settle at the end. */
 export const TOURNAMENT_DURATION_MS = RULES_V1.tournament.durationMs;
@@ -75,9 +78,9 @@ export function bracketShape(entrants: number): BracketShape | null {
   return { size, rounds, byes: size - entrants };
 }
 
-/** The id of a league's tournament in a slot: the Task 19 graph id, `tournament:<slot>:<league>`. */
+/** The id of a league's tournament in a slot: the reads layer's lookup id (Task 19's graph id, `tournament:<slot>:<league>`). */
 export function tournamentIdFor(slotIndex: number, league: LeagueId): string {
-  return `tournament:${slotIndex}:${league}`;
+  return tournamentLookupId(slotIndex, league);
 }
 
 const roundLabel = (round: number, rounds: number) =>
@@ -147,8 +150,11 @@ export type TournamentStageState = {
   readonly championId: string | null;
   /** Only once settled (status `completed`): place and public identity, never anyone's rewards. */
   readonly placements: readonly TournamentPlacementState[];
-  /** The viewer's own entry and, once settled, only their own credited summary. */
-  readonly viewer: { readonly entrant: TournamentEntrantState | null; readonly placement: { readonly place: number; readonly summary: ActivitySummary } | null };
+  /**
+   * The viewer's own entry and, once settled, its own place and tournament activity, whose credited summary only the
+   * owner can read (its own timeline).
+   */
+  readonly viewer: { readonly entrant: TournamentEntrantState | null; readonly placement: { readonly place: number; readonly activityId: string } | null };
   /** Display times after now when a fresh read may reveal more: the start, each round's reveal and the settlement. */
   readonly revealMarks: readonly number[];
 };
@@ -180,6 +186,23 @@ function wellFormed(result: TournamentBout['revealedResult'], entrants: Readonly
   return new Set(logged).size === 2 && logged.every(id => typeof id === 'string' && ids.includes(id));
 }
 
+/**
+ * The seeded first-round seats when the view's bracket is well formed for its entrants: one seat per bracket position,
+ * each an entrant at most once or null, every pair holding at least one entrant, and the shape the entrant count implies.
+ */
+function seededSeats(view: TournamentView, ids: ReadonlySet<string>, shape: BracketShape | null): (string | null)[] | null {
+  const bracket = view.bracket;
+  if (!shape || !bracket || typeof bracket !== 'object' || bracket.size !== shape.size || bracket.rounds !== shape.rounds
+    || !Array.isArray(bracket.slots) || bracket.slots.length !== shape.size) return null;
+  const seen = new Set<string>();
+  for (const [i, seat] of bracket.slots.entries()) {
+    if (seat === null) { if (bracket.slots[i ^ 1] === null) return null; continue; }
+    if (typeof seat !== 'string' || !ids.has(seat) || seen.has(seat)) return null;
+    seen.add(seat);
+  }
+  return seen.size === ids.size ? [...bracket.slots] : null;
+}
+
 /** The tournament as the display time shows it. `viewerId` is the signed-in owner's gladiator, if any. */
 export function renderTournament(view: TournamentView, displayNowMs: number, options: { viewerId?: string | null } = {}): TournamentStageState {
   const t = displayNowMs;
@@ -195,6 +218,7 @@ export function renderTournament(view: TournamentView, displayNowMs: number, opt
   const fullShape = insufficient ? null : bracketShape(all.length);
   const shape = started ? fullShape : null;
   const reveals = fullShape ? roundRevealTimes(view.startsAtMs, fullShape.rounds) : [];
+  const seats = seededSeats(view, ids, fullShape);
 
   const shown = new Map<string, string>();
   const shared = new Set<object>();
@@ -203,9 +227,18 @@ export function renderTournament(view: TournamentView, displayNowMs: number, opt
     const due = t >= revealAtMs;
     const bouts = (Array.isArray(view.bouts) ? view.bouts : []).filter(b => b.round === round).sort((a, b) => a.position - b.position).map((bout): TournamentBoutState => {
       const base = { id: bout.id, round, position: bout.position, revealAtMs };
-      const result = due && wellFormed(bout.revealedResult, ids) ? bout.revealedResult! : null;
+      const pair = round === 1 && seats ? [seats[2 * bout.position], seats[2 * bout.position + 1]] : null;
+      const seated = pair?.filter((id): id is string => id !== null) ?? null;
+      if (seated?.length === 1) {
+        // A bye is public from the start: its entrant advances at once, with no fight.
+        shown.set(bout.id, seated[0]);
+        return { ...base, status: 'bye', sides: [copy(seated[0])], winnerId: seated[0], loserId: null, log: null, fightEndsAtMs: null, elapsedMs: null };
+      }
+      const published = due && wellFormed(bout.revealedResult, ids) ? bout.revealedResult! : null;
+      // A published round-1 result must be exactly its seeded pair (and a bye there, when seeded, is never a fight).
+      const result = published && (!seated || (!published.bye && published.participants.every(p => seated.includes(p.gladiatorId)))) ? published : null;
       if (!result) {
-        const sides = round === 1 ? [] : bout.parentBoutIds.map(parent => (shown.has(parent) ? copy(shown.get(parent)!) : null));
+        const sides = round === 1 ? (seated ? seated.map(copy) : []) : bout.parentBoutIds.map(parent => (shown.has(parent) ? copy(shown.get(parent)!) : null));
         return { ...base, status: due ? 'delayed' : 'preparing', sides, winnerId: null, loserId: null, log: null, fightEndsAtMs: null, elapsedMs: null };
       }
       const sides = result.participants.map(p => copy(p.gladiatorId));
@@ -256,7 +289,8 @@ export function renderTournament(view: TournamentView, displayNowMs: number, opt
     status, shape, entrants, rounds,
     currentRound: shape ? Math.max(1, ...rounds.filter(r => r.due).map(r => r.round)) : null,
     championId, placements,
-    viewer: { entrant: entrants.find(e => e.gladiatorId === viewerId) ?? null, placement: own ? { place: own.place, summary: structuredClone(own.summary) } : null },
+    viewer: { entrant: entrants.find(e => e.gladiatorId === viewerId) ?? null,
+      placement: own && typeof own.completion?.activityId === 'string' ? { place: own.place, activityId: own.completion.activityId } : null },
     revealMarks,
   }, shared);
 }

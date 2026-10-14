@@ -1,7 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
-import type { RevealedTimeline } from '@contracts/events';
-import type { OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, StandingsPage, WorldSnapshot } from '@contracts/reads';
+import type { PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type {
+  OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView,
+  WorldSnapshot,
+} from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
 
 export class GatewayReadError extends Error {
@@ -108,4 +111,70 @@ export async function readStandings(client: SupabaseClient, league: LeagueId, cu
   });
   return { league, seasonId: String(season), archived: false, rows: page,
     nextCursor: page.length === STANDINGS_PAGE ? `${season}:${page.at(-1)!.rank}` : null };
+}
+
+const TOURNAMENT_ID = /^tournament:(\d{1,15}):(bronze|silver|gold|champion)$/;
+const PAGE = 50;
+/** The lookup id of a league's tournament in a slot: Task 19's graph id, `tournament:<slot>:<league>`. */
+export function tournamentLookupId(slotIndex: number, league: LeagueId): string {
+  if (!Number.isSafeInteger(slotIndex) || slotIndex < 0 || !LEAGUES.includes(league)) throw new RangeError('Invalid tournament lookup');
+  return `tournament:${slotIndex}:${league}`;
+}
+type TournamentRow = { id: string; slot_index: number; league: LeagueId; starts_at_ms: number; ends_at_ms: number; status: 'active' | 'insufficient-entrants';
+  entrants: TournamentEntrant[]; bracket: TournamentView['bracket']; bouts: Omit<TournamentBout, 'revealedResult'>[]; reveal_at_ms: number[] };
+type PlacementRow = { gladiator_id: string; activity_id: string; place: number };
+const byName = (a: TournamentEntrant, b: TournamentEntrant) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.gladiatorId < b.gladiatorId ? -1 : 1);
+/**
+ * One league tournament from Task 19's public rows (RLS enforces database time on every result): the frame, its entrants
+ * (by name, never in the private seeded order), the bracket's seeded first round from the start, each bout's result only
+ * once it is due, and the placements, with their public completion only, once every entrant has settled. Its status is
+ * `processing` while a due result or the settlement is missing, so a delay is never shown as a result. Results and
+ * placements are read in pages of at most 50. Never rewards, receipts, ratings or seeds.
+ */
+export async function readTournament(client: SupabaseClient, id: string): Promise<TournamentView> {
+  if (typeof id !== 'string' || !TOURNAMENT_ID.test(id)) throw new GatewayReadError('not-found');
+  const clock = await readRevision(client);
+  const row = checked<TournamentRow>(await client.from('tournament_views')
+    .select('id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms').eq('id', id).maybeSingle());
+  const results = new Map<string, TournamentBout['revealedResult']>();
+  for (let ordinal = -1; ;) {
+    const rows = checked(await client.from('tournament_bout_results').select('bout_id,ordinal,result').eq('tournament_id', id)
+      .lte('reveal_at_ms', clock.serverNowMs).gt('ordinal', ordinal).order('ordinal').limit(PAGE));
+    for (const r of rows) results.set(r.bout_id, r.result);
+    if (rows.length < PAGE) break;
+    ordinal = rows.at(-1)!.ordinal;
+  }
+  const entrants = [...row.entrants].map(e => ({ gladiatorId: e.gladiatorId, name: e.name, classId: e.classId })).sort(byName);
+  const bouts: TournamentBout[] = row.bouts.map(b => ({ id: b.id, round: b.round, position: b.position, parentBoutIds: [...b.parentBoutIds],
+    revealedResult: results.get(b.id) ?? null }));
+  let placements: TournamentPlacement[] = [];
+  if (row.status === 'active') {
+    const placed: PlacementRow[] = [];
+    for (let cursor: string | null = null; ;) {
+      let query = client.from('tournament_placements').select('gladiator_id,activity_id,place').eq('tournament_id', id).order('gladiator_id').limit(PAGE);
+      if (cursor) query = query.gt('gladiator_id', cursor);
+      const rows = checked(await query) as PlacementRow[];
+      placed.push(...rows);
+      if (rows.length < PAGE) break;
+      cursor = rows.at(-1)!.gladiator_id;
+    }
+    // Placements show only once every entrant has settled, each with its public completion.
+    if (placed.length > 0 && placed.length === entrants.length) {
+      const completions = new Map<string, PublicActivitySummary>();
+      for (let start = 0; start < placed.length; start += PAGE) {
+        const rows = checked(await client.from('recent_results').select('activity_id,summary')
+          .in('activity_id', placed.slice(start, start + PAGE).map(p => p.activity_id)).lte('reveal_at_ms', clock.serverNowMs));
+        for (const r of rows) completions.set(r.activity_id, r.summary);
+      }
+      if (placed.every(p => completions.has(p.activity_id))) {
+        placements = placed.map(p => ({ gladiatorId: p.gladiator_id, place: Number(p.place), completion: completions.get(p.activity_id)! }))
+          .sort((a, b) => a.place - b.place || (a.gladiatorId < b.gladiatorId ? -1 : 1));
+      }
+    }
+  }
+  const dueMissing = bouts.some(b => b.revealedResult === null && Number(row.reveal_at_ms[b.round - 1]) <= clock.serverNowMs);
+  const status: TournamentView['status'] = row.status === 'insufficient-entrants' ? 'insufficient-entrants' : placements.length > 0 ? 'completed'
+    : clock.serverNowMs >= Number(row.ends_at_ms) || dueMissing ? 'processing' : 'active';
+  return { id: row.id, league: row.league, slotIndex: Number(row.slot_index), startsAtMs: Number(row.starts_at_ms), endsAtMs: Number(row.ends_at_ms),
+    status, bracket: row.bracket, entrants, bouts, placements };
 }

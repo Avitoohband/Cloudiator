@@ -42,12 +42,18 @@
 --    tournament activity, charged once at the frozen tournament cost, under the coordinator lease without account locks,
 --    as phase 6 resolves preparing activities.
 -- 9. Lock order of a pairing completion with a bracket: as 07-arena.sql exception 3, complete_job locks the pairing job
---    row, then the entry rows' foreign keys take KEY SHARE locks on entrant activity and gladiator rows (job before
---    activity). No cycle: nothing locks those preparing activities while phase 7 waits for that job.
+--    row, then the entry rows' foreign keys take KEY SHARE locks on the entrants' activity rows and gladiator rows (job
+--    before activity and character). No cycle: nothing locks those preparing activities while phase 7 waits for that job,
+--    and the completion takes no account lock. An owner command that holds its account lock and its gladiator row FOR
+--    UPDATE makes the completion wait for that command's commit, or waits itself for the completion's commit; neither then
+--    waits for anything the other holds (the command locks no job row, the completion no account or advisory lock), so the
+--    wait is one-way and ends at the first commit. (Phase 8's own Arena KEY SHARE order is corrected separately, by
+--    10-tournament-results.sql exception 1.)
 -- 10. Bout rows are immutable except their result, which phase 2b's fence writes once (null to a value); byes carry
 --     theirs from the start.
--- Phase 2a limit: complete_job accepts no bout result yet (accept_job_result reaches no tournament branch), so a claimed
--- bout cannot complete and a tournament activity cannot settle (settle_rewards fails closed). Ship with phase 2b.
+-- Phase 2a limit, lifted by phase 2b (10-tournament-results.sql): complete_job accepted no bout result (accept_job_result
+-- reached no tournament branch), so a claimed bout could not complete and a tournament activity could not settle
+-- (settle_rewards failed closed). M11 ships only with phase 2b's migration.
 -- Inherited (Tasks 7/9/16): the exhausted-lease sweep may lock expired jobs before the coordinator row; unchanged here.
 begin;
 

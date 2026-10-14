@@ -1,5 +1,5 @@
 import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
-import type { ActivitySummary, PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
+import type { PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
 
 export type BuildView = { version: number; classId: ClassId; stance: Stance; allocations: Attributes; equipment: Equipment };
 export type PendingBuildView = { build: BuildView; effectiveSlotIndex: number; reservedMoney: number; reservedItemIds: string[]; operationId: string };
@@ -61,11 +61,24 @@ export type TournamentBout = {
   /** Null means not revealed, including participants in future rounds. */
   revealedResult: { participants: TournamentEntrant[]; winnerId: GladiatorId; bye: boolean; battleLog?: BattleLog } | null;
 };
+/**
+ * The bracket's shape and its seeded first round, public from the start (no result): `slots` has `size` seats in bracket
+ * order, round-one bout p seating `slots[2p]` against `slots[2p + 1]`; `null` is an empty seat, a bye for the other.
+ */
+export type TournamentBracket = { size: number; rounds: number; slots: (GladiatorId | null)[] };
+/**
+ * One settled entrant's public place, with Task 10's safe completion fields only. Never rewards or receipts: an owner reads
+ * its own rewards from its own activity timeline (`completion.activityId`), under RLS.
+ */
+export type TournamentPlacement = { gladiatorId: GladiatorId; place: number; completion: PublicActivitySummary };
 export type TournamentView = {
   id: string; league: LeagueId; slotIndex: number; startsAtMs: number; endsAtMs: number;
   status: 'scheduled' | 'active' | 'processing' | 'completed' | 'insufficient-entrants';
+  /** Null before the start and for a league below the minimum. */
+  bracket: TournamentBracket | null;
   entrants: TournamentEntrant[]; bouts: TournamentBout[];
-  placements: { gladiatorId: GladiatorId; place: number; summary: ActivitySummary }[];
+  /** Empty until every entrant has settled at minute 80. */
+  placements: TournamentPlacement[];
 };
 export type ResultRow = { gladiatorId: GladiatorId; name: string; summary: PublicActivitySummary };
 export type ResultsPage = CursorPage<ResultRow>;

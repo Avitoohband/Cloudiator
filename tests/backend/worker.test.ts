@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_EXECUTORS, handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput, PairingResult, TournamentBoutResult } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ExecutorRegistry, JobOutcome, TournamentBoutRead, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
-import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout } from '../../supabase/functions/_shared/domain/tournament.ts';
+import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout, tournamentOutcomes } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
 import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import type { ActivitySnapshot, Attributes, JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
@@ -356,6 +356,23 @@ describe('tournament bout executor (Task 19)', () => {
     for (const [name, job, response] of cases) await expect(execute(job, response), name).rejects.toThrow(invalid);
     await expect(execute(boutLease(ready.boutId), read({ ...graph, rulesVersion: 'v2' } as TournamentGraph)))
       .rejects.toThrow(expect.objectContaining({ code: 'unsupported-rules' }));
+  });
+
+  it('completes the final with every entrant’s outcome from the graph it completes, and an earlier bout with none', async () => {
+    // Every bout but the final is recorded under its own seed; the final is then the one ready bout.
+    let stored = graph;
+    for (let jobs = readyBouts(stored); jobs.some(j => j.round < stored.rounds); jobs = readyBouts(stored)) {
+      for (const job of jobs.filter(j => j.round < stored.rounds)) stored = recordBout(stored, job.boutId, runBout(job, `seed-${job.boutId}`, names));
+    }
+    const [final] = readyBouts(stored);
+    expect([final.boutId, final.round]).toEqual([id(3, 0), stored.rounds]);
+    const { result } = await execute(boutLease(final.boutId, 'final-seed'), read(stored));
+    const log = runBout(final, 'final-seed', names);
+    // The outcomes are the domain's settlement of the completed bracket: placements, fight renown and round-ordered Elo.
+    expect(result).toEqual({ boutId: final.boutId, log, outcomes: tournamentOutcomes(recordBout(stored, final.boutId, log)) });
+    expect(result.outcomes!.map(o => o.gladiatorId)).toEqual(graph.entries.map(e => e.gladiatorId));
+    const semifinal = readyBouts(graph).find(b => b.round === 2)!;
+    expect(Object.keys((await execute(boutLease(semifinal.boutId), read())).result).sort()).toEqual(['boutId', 'log']);
   });
 
   it('runs inside runWorker as one bounded combat job that completes with the bout id and its log', async () => {

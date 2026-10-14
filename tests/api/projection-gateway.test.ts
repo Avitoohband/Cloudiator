@@ -49,4 +49,34 @@ describe('live projection session guards', () => {
     // The latest-season probe reads the indexed projection table; the ranked page reads the public view.
     expect(paths).toEqual(['/rest/v1/arena_standings','/rest/v1/arena_standing_reads']);
   });
+  it('serves the live tournament read through the account-guarded Data API reads', async () => {
+    const paths: string[] = [];
+    const row = { id: 'tournament:301:gold', slot_index: 301, league: 'gold', starts_at_ms: 1_444_800_000, ends_at_ms: 1_449_600_000,
+      status: 'insufficient-entrants', entrants: [{ gladiatorId: 'g9', name: 'Valeria', classId: 'guardian' }], bracket: null, bouts: [], reveal_at_ms: [] };
+    const client=createClient('http://127.0.0.1:54321','test-key',{auth:{persistSession:false},global:{fetch:async input=>{
+      const url=new URL(String(input));paths.push(url.pathname);
+      const table=url.pathname.split('/').at(-1);
+      const body=table==='world_revision'?{revision:'1',server_now_ms:1_450_000_000,slot_index:302}:table==='tournament_views'?row:[];
+      return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
+    }}});
+    vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first'} as Session},error:null});holder.client=client;
+    expect(await createLiveGateway().tournament('tournament:301:gold')).toEqual({ id: 'tournament:301:gold', league: 'gold', slotIndex: 301,
+      startsAtMs: 1_444_800_000, endsAtMs: 1_449_600_000, status: 'insufficient-entrants', bracket: null, entrants: row.entrants, bouts: [], placements: [] });
+    expect(paths).toEqual(['/rest/v1/world_revision','/rest/v1/tournament_views','/rest/v1/tournament_bout_results']);
+  });
+  it('sends the automatic-entry command to the authenticated command endpoint', async () => {
+    const client=createClient('http://127.0.0.1:54321','test-key',{auth:{persistSession:false}});holder.client=client;
+    vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first',
+      expires_at:Math.floor(Date.now()/1000)+3600} as Session},error:null});
+    const sent: unknown[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ ok: true, receiptId: 'r1', value: { enabled: true, receivedAtMs: 1 } }), { status: 200 });
+    });
+    try {
+      const command = { kind: 'set-tournament-opt-in' as const, operationId: 'd43f7844-52e0-4302-b8e4-740035047765', enabled: true };
+      expect(await createLiveGateway().command(command)).toEqual({ ok: true, receiptId: 'r1', value: { enabled: true, receivedAtMs: 1 } });
+      expect(sent).toEqual([command]);
+    } finally { vi.unstubAllGlobals(); }
+  });
 });

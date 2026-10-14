@@ -25,14 +25,15 @@ export type ExpeditionPhase = 'depart' | 'exploration' | 'encounter' | 'safe-ret
 /**
  * Where the gladiator is: it left `from` `walkedMs` ago (display time) for `to`, and does `then` once it
  * arrives. The scene walks the map path between the two points at the actors' walking speed and holds
- * at `to`. `segment` is the index of `from` in JOURNEY (the route segment being walked).
+ * at `to`. `segment` is the index of `from` in JOURNEY (the route segment being walked). `leave` means
+ * the expedition has arrived at camp: the gladiator leaves the scene from `to`, `walkedMs` ago.
  */
 export type RouteProgress = {
   readonly segment: number;
   readonly from: JourneyPoint;
   readonly to: JourneyPoint;
   readonly walkedMs: number;
-  readonly then: 'search' | 'wait' | 'fight' | 'rest';
+  readonly then: 'search' | 'wait' | 'fight' | 'rest' | 'leave';
 };
 
 export type VisibleStage = {
@@ -131,12 +132,16 @@ const segmentOf = (from: JourneyPoint) => Math.max(0, JOURNEY.indexOf(from as (t
  * travelling home after the last one all follow one pattern: finish the result poses at the encounter,
  * walk to the next search spot and search there, then walk on and wait at the next encounter spot (or
  * the route's end) shortly before it is due. A fight happens at its encounter spot; after a defeat the
- * gladiator walks back to the safe point and rests there.
+ * gladiator walks back to the safe point and rests there. Once the expedition arrives at camp, the
+ * gladiator leaves the scene from where it waited (the trail's end) or rested (the safe point).
  */
 function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToCurrent: RevealedStage[], encounterOf: Map<RevealedStage, number>, failed: boolean): RouteProgress {
   const go = (from: JourneyPoint, to: JourneyPoint, since: number, then: RouteProgress['then']): RouteProgress =>
     ({ segment: segmentOf(from), from, to, walkedMs: Math.max(0, t - since), then });
-  if (current.final) return failed ? go('safe', 'safe', stage.startedAtMs, 'rest') : go('end', 'end', stage.startedAtMs, 'wait');
+  if (current.final) {
+    const at: JourneyPoint = failed ? 'safe' : 'end';
+    return go(at, at, stage.startedAtMs, 'leave');
+  }
   const last = [...upToCurrent].reverse().find(s => s.kind === 'encounter');
   const n = last ? encounterOf.get(last)! : 0;
   const here: JourneyPoint = n ? point(`encounter-${n}`) : 'start';
@@ -154,8 +159,9 @@ function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToC
 export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: number): ExpeditionSceneState {
   const t = displayNowMs;
   const revealed = timeline.stages.filter(stage => stage.revealedAtMs <= t);
-  const kept = timeline.summary?.replayExpiry.state !== 'expired';
   const summary = timeline.summary && timeline.summary.settledAtMs <= t ? structuredClone(timeline.summary) : null;
+  // Replay expiry, like everything else in the summary, counts only once the summary is settled.
+  const kept = summary?.replayExpiry.state !== 'expired';
 
   let encounters = 0;
   const encounterOf = new Map<RevealedStage, number>();

@@ -2,9 +2,11 @@
 // stays importable during the static build. Every frame it reads the stage state for the display clock
 // (src/game/expedition-stage.ts) and only draws it: the gladiator walks the map route, searches, waits,
 // fights a revealed encounter (its battle log, seeked with the replay controller and staged by
-// battle-stage) or rests at the safe point. It never reveals a stage, simulates a fight or settles
-// anything. The map follows the camp's conventions: baked ground, depth-sliced props (src/game/depth.ts)
-// and buildings that fade while their opaque pixels hide the gladiator.
+// battle-stage) or rests at the safe point; once the expedition is back at camp it leaves the scene.
+// It never reveals a stage, simulates a fight or settles anything. The map follows the camp's
+// conventions: baked ground, depth-sliced props (src/game/depth.ts) and buildings that fade while their
+// opaque pixels hide the gladiator. A hidden tab draws nothing; on return the scene shows the current
+// display time directly.
 import type * as PhaserNS from 'phaser';
 import type { AnimationDef, AssetManifest, Direction, MapData } from './assets';
 import type { SceneBridge } from './bridge';
@@ -39,6 +41,8 @@ export type ExpeditionSceneDeps = {
   reducedMotion?: boolean;
   onReady: () => void;
   onError: (reason: 'assets' | 'error', message: string) => void;
+  /** Called with true when the expedition is back at camp and the gladiator leaves the scene, and with false if a later state undoes that. */
+  onReturned?: (returned: boolean) => void;
 };
 
 export type ExpeditionDebugState = {
@@ -50,9 +54,11 @@ export type ExpeditionDebugState = {
   displayNowMs: number | null;
   phase: string | null;
   following: boolean;
+  /** The expedition is back at camp and the gladiator leaves (or has left) the scene. */
+  returned: boolean;
   camera: { centerX: number; centerY: number; zoom: number; worldView: Rect; bounds: Rect };
   gladiator: { x: number; y: number; action: string; animation: string; frames: string[]; layers: string[]; tint: GladiatorLook['tint']; facing: Direction;
-    depth: number; screenX: number; screenY: number; scaleX: number; visible: boolean; walking: boolean } | null;
+    depth: number; screenX: number; screenY: number; scaleX: number; visible: boolean; alpha: number; labelVisible: boolean; walking: boolean } | null;
   creature: { id: string; creatureId: string; x: number; y: number; frame: string; depth: number; alpha: number; scaleX: number; visible: boolean } | null;
   battle: { battleId: string; positionMs: number } | null;
   effects: { effect: string; frameName: string; target: 0 | 1; x: number; y: number; visible: boolean }[];
@@ -76,6 +82,8 @@ const DEFAULT_ZOOM = ZOOM_STEP ** 2;
 const FADED_ALPHA = 0.45;
 /** A defeated (or victorious) creature fades this long after the result poses. */
 const CREATURE_FADE_MS = 1500;
+/** Back at camp, the gladiator fades out of the scene over this long (at once with reduced motion). */
+const HERO_LEAVE_MS = 1500;
 const WHEEL_STEP = 100;
 const WHEEL_LINE = 40;
 const WHEEL_IDLE_MS = 250;
@@ -124,8 +132,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   const labelPool: Text[] = [];
   const labelInfo: { text: string }[] = [];
   let battleView: BattleView | null = null;
-  let last: { state: ExpeditionSceneState | null; pose: GladiatorPose | null; animation: string; frames: string[]; flip: boolean; creatureAlpha: number; positionMs: number | null } =
-    { state: null, pose: null, animation: '', frames: [], flip: false, creatureAlpha: 0, positionMs: null };
+  let last: { state: ExpeditionSceneState | null; pose: GladiatorPose | null; animation: string; frames: string[]; flip: boolean; creatureAlpha: number; positionMs: number | null; returned: boolean } =
+    { state: null, pose: null, animation: '', frames: [], flip: false, creatureAlpha: 0, positionMs: null, returned: false };
 
   class ExpeditionScene extends P.Scene {
     constructor() { super({ key: 'expedition' }); }
@@ -329,7 +337,9 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
     }
 
     update() {
-      if (!ready || failed || disposed) return;
+      // A hidden tab draws nothing (Phaser keeps its loop running when only the visibility state says
+      // hidden); the first frame back reads the current display time, so nothing catches up.
+      if (!ready || failed || disposed || document.visibilityState === 'hidden') return;
       try {
         this.tick(false);
       } catch (error) {
@@ -349,9 +359,13 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       const route = state?.route ?? null;
       const pose = route ? gladiatorPose(journey, route, speed) : null;
       last.pose = pose;
+      // Back at camp: the gladiator leaves the scene where it waited or rested, fading out.
+      const returned = route?.then === 'leave';
+      const presence = !route ? 0 : !returned ? 1 : reducedMotion ? 0 : Math.max(0, 1 - route.walkedMs / HERO_LEAVE_MS);
+      if (returned !== last.returned) { last.returned = returned; deps.onReturned?.(returned); }
       if (!hero) return;
-      hero.container.setVisible(!!pose);
-      hero.label.setVisible(!!pose);
+      hero.container.setVisible(!!pose && presence > 0).setAlpha(presence);
+      hero.label.setVisible(!!pose && presence > 0).setAlpha(presence);
       const battle = state?.battle ?? null;
       const fighting = !!pose && pose.action === 'fight' && !!battle && route?.from === `encounter-${battle.encounter}`;
       const staged = battle ? this.stageBattle(battle, fighting) : null;
@@ -375,7 +389,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         hero.label.setText(look.name).setPosition(hero.container.x, feet.y - 46);
         if (following) this.follow(feet, snap);
       }
-      this.updateOccluders(pose ? worldToScreen(pose.x, pose.y) : null);
+      // Props fade only for a gladiator still in the scene.
+      this.updateOccluders(pose && presence > 0 ? worldToScreen(pose.x, pose.y) : null);
     }
 
     setHeroFrames(animation: string, frames: string[], flip: boolean) {
@@ -537,13 +552,14 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         displayNowMs: last.state?.displayNowMs ?? null,
         phase: last.state?.phase ?? null,
         following,
+        returned: last.returned,
         camera: cam
           ? { centerX: cam.midPoint.x, centerY: cam.midPoint.y, zoom: cam.zoom, worldView: { x: cam.worldView.x, y: cam.worldView.y, width: cam.worldView.width, height: cam.worldView.height }, bounds }
           : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds },
         gladiator: hero && pose ? {
           x: pose.x, y: pose.y, action: pose.action, animation: last.animation, frames: [...last.frames], layers: hero.layers.map(l => l.id), tint: { ...look.tint },
           facing: pose.facing, depth: hero.container.depth, screenX: hero.container.x, screenY: hero.container.y, scaleX: hero.container.scaleX,
-          visible: hero.container.visible, walking: pose.walking,
+          visible: hero.container.visible, alpha: hero.container.alpha, labelVisible: hero.label.visible, walking: pose.walking,
         } : null,
         creature: creature && battleView ? {
           id: battleView.plan.log.participants[1].id, creatureId: creature.creatureId,

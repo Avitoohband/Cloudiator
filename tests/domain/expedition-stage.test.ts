@@ -69,7 +69,23 @@ describe('expedition minute table', () => {
       }
       const arrived = at(t, 80);
       expect(arrived).toMatchObject({ complete: true, outcome: 'failure' });
-      expect(arrived.route).toMatchObject({ from: 'safe', to: 'safe', then: 'rest' });
+      // Back at camp: the gladiator leaves the scene from the safe point where it rested.
+      expect(arrived.route).toMatchObject({ from: 'safe', to: 'safe', then: 'leave' });
+    }
+  });
+
+  it('has the gladiator leave the scene once it arrives at camp, from where it last was', () => {
+    for (const t of [T.woodland, T.laststand, T.spectator, T.outpost, T.mountain]) {
+      const arrival = t.stages.at(-1)!;
+      const failed = t.stages.some(s => s.kind === 'return' && s.endsAtMs > s.startedAtMs);
+      const from = failed ? 'safe' : 'end';
+      // Just before arrival it still waits at the trail's end or rests at the safe point.
+      expect(renderExpeditionStage(t, arrival.startedAtMs - 1).route).toMatchObject({ to: from, then: failed ? 'rest' : 'wait' });
+      for (const after of [0, 1_000, 5 * MIN]) {
+        const s = renderExpeditionStage(t, arrival.startedAtMs + after);
+        expect(s.phase === 'arrived' || s.phase === 'settled', t.activityId).toBe(true);
+        expect(s.route).toEqual({ segment: from === 'end' ? JOURNEY.indexOf('end') : 0, from, to: from, walkedMs: after, then: 'leave' });
+      }
     }
   });
 });
@@ -166,7 +182,7 @@ describe('the logged winner decides each encounter (Task 9 rule)', () => {
     expect(at(t, 79)).toMatchObject({ phase: 'returning', route: { from: 'encounter-3', to: 'search-4', then: 'search' } });
     expect(at(t, 79.5)).toMatchObject({ phase: 'returning', route: { to: 'end', then: 'wait' } });
     // Before the summary is visible the result comes from the revealed encounters alone.
-    expect(at(t, 80)).toMatchObject({ phase: 'arrived', complete: true, outcome: 'success', summary: null, route: { from: 'end', to: 'end' } });
+    expect(at(t, 80)).toMatchObject({ phase: 'arrived', complete: true, outcome: 'success', summary: null, route: { from: 'end', to: 'end', then: 'leave' } });
     expect(renderExpeditionStage(t, t.summary!.settledAtMs)).toMatchObject({ phase: 'settled', outcome: 'success', summary: { success: true, result: 'victory' } });
   });
 
@@ -233,7 +249,18 @@ describe('replays and the summary', () => {
     expect(replays(at(T.expired, 85))).toEqual([]);
     const expired: RevealedTimeline = { ...t, summary: { ...t.summary!, replayExpiry: { state: 'expired' } } };
     expect(replays(at(expired, 85))).toEqual([]);
-    expect(replays(at(expired, 39))).toEqual([]);
+  });
+
+  it('reads replay expiry only from a summary that is settled by the display time', () => {
+    // The timeline already holds a summary whose replays expired, but it settles only at minute 80.75:
+    // before then it does not exist for the state, so it cannot hide the replays either.
+    const t: RevealedTimeline = { ...T.woodland, summary: { ...T.woodland.summary!, replayExpiry: { state: 'expired' } } };
+    const replays = (s: ExpeditionSceneState) => s.stages.filter(x => x.replay).map(x => x.encounter);
+    expect(at(t, 39)).toMatchObject({ summary: null });
+    expect(replays(at(t, 39))).toEqual([1]);
+    expect(replays(at(t, 80))).toEqual([1, 2, 3]);
+    expect(replays(renderExpeditionStage(t, t.summary!.settledAtMs - 1))).toEqual([1, 2, 3]);
+    expect(replays(renderExpeditionStage(t, t.summary!.settledAtMs))).toEqual([]);
   });
 
   it('takes the result and rewards only from the timeline summary, once it is settled', () => {
@@ -279,7 +306,7 @@ describe('journey and progress', () => {
     expect(renderExpeditionStage(t, s + 40 * MIN - 10_000).route).toMatchObject({ segment: 3, from: 'search-2', to: 'encounter-2', then: 'wait' });
     expect(at(t, 70).route).toMatchObject({ segment: 6, from: 'encounter-3', to: 'search-4', then: 'search' });
     expect(at(t, 80 - 0.5).route).toMatchObject({ segment: 7, from: 'search-4', to: 'end', then: 'wait' });
-    expect(at(t, 85).route).toMatchObject({ from: 'end', to: 'end', then: 'wait' });
+    expect(at(t, 85).route).toMatchObject({ from: 'end', to: 'end', walkedMs: 5 * MIN, then: 'leave' });
     const lost = encounterStage(T.outpost, 2);
     expect(renderExpeditionStage(T.outpost, lost.endsAtMs + REPLAY_OUTRO_MS + 4_000).route).toEqual({ segment: 4, from: 'encounter-2', to: 'safe', walkedMs: 4_000, then: 'rest' });
   });

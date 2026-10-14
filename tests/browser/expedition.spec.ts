@@ -298,8 +298,157 @@ test.describe('followable expedition scenes', () => {
     await expeditionFlow.hold(page, 'laststand', 80.2);
     await expect(result(page)).toContainText('Success');
     await expect(result(page)).toContainText('Processing results');
-    expect(await expeditionFlow.state(page)).toMatchObject({ outcome: 'success', route: { from: 'end', to: 'end' } });
+    expect(await expeditionFlow.state(page)).toMatchObject({ outcome: 'success', route: { from: 'end', to: 'end', then: 'leave' } });
     await expect(page.getByText(/without rewards|after a defeat/)).toHaveCount(0);
+  });
+
+  test('names the encounter the shown health comes from, and notes the recovery after a non-final win', async ({ page }) => {
+    const meter = () => page.getByRole('meter', { name: 'Gladiator health' });
+    const recovers = () => page.getByText('Health recovers before the next encounter.');
+    await expeditionFlow.open(page, 'tiebreak');
+    const [first, second] = encounterStages('tiebreak');
+    // Exploring after the zero-HP tie-break win: the 0 is the health after encounter 1, not the health now.
+    await expeditionFlow.holdAt(page, first.endsAtMs + OUTRO_MS + 1_000);
+    await expect(page.getByText('Health after the first encounter', { exact: true })).toBeVisible();
+    await expect(meter()).toHaveAttribute('aria-valuenow', '0');
+    await expect(meter()).toHaveAttribute('aria-valuetext', `0 of ${first.battleLog!.participants[0].maxHealth} health after the first encounter`);
+    await expect(recovers()).toBeVisible();
+    await expeditionFlow.hold(page, 'tiebreak', 39.9);
+    await expect(page.getByText('Health after the first encounter', { exact: true })).toBeVisible();
+    await expect(recovers()).toBeVisible();
+    // During encounter 2 the meter follows that fight; the note is gone. Encounter 2 is lost: nothing recovers.
+    await expeditionFlow.holdAt(page, second.startedAtMs + 500);
+    await expect(page.getByText('Health during the second encounter', { exact: true })).toBeVisible();
+    await expect(recovers()).toHaveCount(0);
+    await expeditionFlow.holdAt(page, second.endsAtMs + 1_000);
+    await expect(page.getByText('Health after the second encounter', { exact: true })).toBeVisible();
+    await expect(recovers()).toHaveCount(0);
+    // A won final encounter has no next encounter to recover for.
+    await expeditionFlow.open(page, 'woodland', 59);
+    await expect(page.getByText('Health after the second encounter', { exact: true })).toBeVisible();
+    await expect(recovers()).toBeVisible();
+    await expeditionFlow.hold(page, 'woodland', 70);
+    await expect(page.getByText('Health after the third encounter', { exact: true })).toBeVisible();
+    await expect(recovers()).toHaveCount(0);
+    // The qualifier never adds a second "Encounter N" text to the page.
+    await expeditionFlow.hold(page, 'woodland', 39);
+    await expect(page.getByText('Encounter 1')).toHaveCount(1);
+  });
+
+  test('has the gladiator leave the scene once the expedition is back at camp, and says so in the scene', async ({ page }, testInfo) => {
+    const banner = () => page.getByText('Returned to camp', { exact: true });
+    for (const key of ['woodland', 'outpost'] as const) {
+      const journey = journeyMap(MAPS[EXPEDITION_FIXTURES[key].expedition]);
+      const arrival = TIMELINES[key].stages.at(-1)!.startedAtMs;
+      const where = key === 'woodland' ? journey.points.end : journey.points.safe;
+      await expeditionFlow.open(page, key, 79);
+      await expeditionFlow.sceneReady(page);
+      // Just before arrival it is in full view where it waited (the trail's end) or rested (the safe point).
+      await expeditionFlow.holdAt(page, arrival - 1_000);
+      let d = await expeditionFlow.scene(page);
+      expect(d.returned, key).toBe(false);
+      expect(d.gladiator, key).toMatchObject({ x: where.x + 0.5, y: where.y + 0.5, visible: true, alpha: 1, labelVisible: true });
+      await expect(banner()).toHaveCount(0);
+      // Arriving, it fades out where it stood...
+      await expeditionFlow.holdAt(page, arrival + 750);
+      d = await expeditionFlow.scene(page);
+      expect(d.returned, key).toBe(true);
+      expect(d.gladiator!.alpha, key).toBeGreaterThan(0.2);
+      expect(d.gladiator!.alpha, key).toBeLessThan(0.8);
+      // ...and is gone: the scene says it returned, in agreement with the text.
+      await expeditionFlow.holdAt(page, arrival + 5_000);
+      d = await expeditionFlow.scene(page);
+      expect(d.gladiator, key).toMatchObject({ visible: false, alpha: 0, labelVisible: false });
+      // Nothing is left for a prop to hide, so nothing stays faded.
+      expect(d.faded, key).toEqual([]);
+      await expect(banner()).toBeVisible();
+      await expect(phase(page)).toContainText(key === 'woodland' ? 'Back at camp' : 'Back at camp after a defeat');
+    }
+    await expeditionFlow.open(page, 'woodland', 85);
+    await expeditionFlow.sceneReady(page);
+    await expect(banner()).toBeVisible();
+    expect((await expeditionFlow.scene(page)).gladiator).toMatchObject({ visible: false });
+    await expeditionFlow.settle(page);
+    await page.screenshot({ path: testInfo.outputPath('expedition-woodland-returned-to-camp.png') });
+    // Mid-journey there is nothing to say.
+    await expeditionFlow.open(page, 'woodland', 40);
+    await expeditionFlow.sceneReady(page);
+    await expect(banner()).toHaveCount(0);
+    expect((await expeditionFlow.scene(page)).returned).toBe(false);
+  });
+
+  test('pauses the scene while the tab is hidden and shows the current moment when it returns', async ({ page }) => {
+    const setHidden = (hidden: boolean) => page.evaluate(h => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') });
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
+    const reads = () => page.evaluate(() => window.__cloudiatorExpedition!.reads());
+    // Minute 5: walking from the start to the first search spot, so every frame moves the gladiator.
+    await expeditionFlow.open(page, 'woodland', 5);
+    await expeditionFlow.sceneReady(page);
+    await page.waitForTimeout(300);
+    const moving = (await expeditionFlow.scene(page)).displayNowMs!;
+    await nextFrames(page);
+    expect((await expeditionFlow.scene(page)).displayNowMs!).toBeGreaterThan(moving);
+    await setHidden(true);
+    await nextFrames(page);
+    const paused = await expeditionFlow.scene(page);
+    const readsHidden = await reads();
+    await page.waitForTimeout(800);
+    const still = await expeditionFlow.scene(page);
+    expect(still.displayNowMs).toBe(paused.displayNowMs);
+    expect(still.gladiator).toEqual(paused.gladiator);
+    expect(still.camera).toEqual(paused.camera);
+    expect(await reads()).toBe(readsHidden);
+    // Back in view: one refresh, and the scene jumps to the current display time instead of resuming where it paused.
+    await setHidden(false);
+    await expect.poll(async () => (await expeditionFlow.scene(page)).displayNowMs! - paused.displayNowMs!, { timeout: 5_000 }).toBeGreaterThan(800);
+    await expect.poll(reads, { timeout: 5_000 }).toBe(readsHidden + 1);
+    const d = await expeditionFlow.scene(page);
+    const s = await expeditionFlow.state(page);
+    expect(Math.abs(s.displayNowMs - d.displayNowMs!)).toBeLessThan(500);
+    const pose = gladiatorPose(journeyMap(MAPS.woodland), renderExpeditionStage(TIMELINES.woodland, d.displayNowMs!).route!, SPEED);
+    expect(Math.hypot(d.gladiator!.x - pose.x, d.gladiator!.y - pose.y)).toBeLessThan(0.01);
+  });
+
+  test('re-reads every 30 seconds while a due stage or the owner\'s summary is awaited, and stops once it arrives', async ({ page }) => {
+    const reads = () => page.evaluate(() => window.__cloudiatorExpedition!.reads());
+    // A held display clock ticks four times a second; give it a few ticks before counting.
+    const readsAt = async (ms: number) => { await expeditionFlow.holdAt(page, ms); await page.waitForTimeout(700); return reads(); };
+    // Preparing (encounter 2 is overdue): at most one read per 30 s of display time, for as long as it lasts.
+    await expeditionFlow.open(page, 'delayed', 45);
+    const t0 = startOf('delayed') + 46 * MIN;
+    const r0 = await readsAt(t0);
+    for (const s of [10, 20, 29.5]) expect(await readsAt(t0 + s * 1000), `+${s} s`).toBe(r0);
+    expect(await readsAt(t0 + 30_000)).toBe(r0 + 1);
+    expect(await readsAt(t0 + 45_000)).toBe(r0 + 1);
+    expect(await readsAt(t0 + 60_000)).toBe(r0 + 2);
+    expect(await readsAt(t0 + 89_500)).toBe(r0 + 2);
+    // Preparing before anything is revealed, then the departure appears: the reads stop.
+    const s0 = startOf('woodland');
+    await expeditionFlow.open(page, 'woodland', 1);
+    const r1 = await readsAt(s0 - 2 * MIN);
+    expect((await expeditionFlow.state(page)).phase).toBe('preparing');
+    expect(await readsAt(s0 - 2 * MIN + 29_500)).toBe(r1);
+    expect(await readsAt(s0 - 2 * MIN + 30_000)).toBe(r1 + 1);
+    expect(await readsAt(s0 + 1_000)).toBe(r1 + 1);
+    expect((await expeditionFlow.state(page)).phase).toBe('depart');
+    for (const s of [31, 61, 91]) expect(await readsAt(s0 + s * 1000), `departed +${s} s`).toBe(r1 + 1);
+    // The owner's summary is awaited after minute 80 ("Processing results"): reads every 30 s until it is settled.
+    const settled = TIMELINES.woodland.summary!.settledAtMs;
+    await expeditionFlow.open(page, 'woodland', 80);
+    await expect(result(page)).toContainText('Processing results');
+    const r2 = await readsAt(s0 + 80 * MIN);
+    expect(await readsAt(s0 + 80 * MIN + 29_500)).toBe(r2);
+    expect(await readsAt(s0 + 80 * MIN + 30_000)).toBe(r2 + 1);
+    expect(await readsAt(settled)).toBe(r2 + 1);
+    await expect(result(page)).not.toContainText('Processing results');
+    for (const s of [30, 60, 90]) expect(await readsAt(settled + s * 1000), `settled +${s} s`).toBe(r2 + 1);
+    // A spectator never waits for a summary, so nothing is re-read after its arrival.
+    await expeditionFlow.open(page, 'spectator', 85);
+    const r3 = await readsAt(startOf('spectator') + 85 * MIN);
+    for (const s of [30, 60, 90]) expect(await readsAt(startOf('spectator') + 85 * MIN + s * 1000), `spectator +${s} s`).toBe(r3);
   });
 
   test('follows the gladiator by default and pans freely after a drag', async ({ page }) => {
@@ -360,6 +509,10 @@ test.describe('followable expedition scenes', () => {
     const feet = worldToScreen(d.gladiator!.x, d.gladiator!.y);
     expect(Math.hypot(d.camera.centerX - feet.x, d.camera.centerY - (feet.y - 24))).toBeLessThan(1);
     await expect(phase(page)).toContainText('Exploring');
+    // Back at camp, the gladiator leaves the scene at once instead of fading.
+    await expeditionFlow.holdAt(page, TIMELINES.woodland.stages.at(-1)!.startedAtMs + 100);
+    expect((await expeditionFlow.scene(page))).toMatchObject({ returned: true, gladiator: { visible: false, alpha: 0, labelVisible: false } });
+    await expect(page.getByText('Returned to camp', { exact: true })).toBeVisible();
   });
 
   test('fades the creature after the result poses without reduced motion', async ({ page }) => {
@@ -386,6 +539,9 @@ test.describe('followable expedition scenes', () => {
     await expect(page.getByRole('meter', { name: 'Expedition progress' })).toHaveAttribute('aria-valuenow', '80');
     await expect(logItems(page)).toHaveCount(TIMELINES.woodland.stages.length);
     await expect(result(page)).toContainText('Success');
+    // No scene, so no scene banner: the phase text alone says the gladiator is back.
+    await expect(page.getByText('Returned to camp', { exact: true })).toHaveCount(0);
+    await expect(phase(page)).toContainText('Back at camp');
     await expect(page.getByRole('link', { name: 'Camp', exact: true })).toHaveAttribute('href', '/game/?mode=fixture');
   });
 
@@ -493,7 +649,8 @@ test.describe('followable expedition scenes', () => {
       expect(byId.get(p.id)!.slices.map(s => [s.left, s.width, s.depth]), p.id).toEqual(expected.map(s => [s.left, s.width, worldToScreen(p.x, p.y).y + s.depthOffset]));
     }
     const fight = encounterStages('woodland')[0];
-    for (const minute of [1, 5, 19.5, 30, 39.5, 45, 70, 79.5, 85]) {
+    // Up to the arrival at minute 80, after which the gladiator has left the scene.
+    for (const minute of [1, 5, 19.5, 30, 39.5, 45, 70, 79.5, 80 - 1 / 60]) {
       await expeditionFlow.hold(page, 'woodland', minute);
       const d = await expeditionFlow.scene(page);
       const pose = gladiatorPose(journey, renderExpeditionStage(TIMELINES.woodland, d.displayNowMs!).route!, SPEED);
@@ -524,9 +681,11 @@ test.describe('followable expedition scenes', () => {
       slices: drawSlices(oak, { w: f.frame.w, anchorX: f.anchorPx.x }).map(s => ({ x0: anchor.x + s.left, x1: anchor.x + s.left + s.width, depth: anchor.y + s.depthOffset })) };
     const end = journey.points.end;
     expect(hidesActor(image, (x, y) => png.rgba[((f.frame.y + y) * png.width + f.frame.x + x) * 4 + 3], worldToScreen(end.x + 0.5, end.y + 0.5))).toBe(true);
-    await expeditionFlow.hold(page, 'woodland', 85);
-    const at85 = await expeditionFlow.scene(page);
-    expect(at85.faded).toContain(oak.id);
+    // A second before the arrival the gladiator waits there, behind the faded oak.
+    await expeditionFlow.hold(page, 'woodland', 80 - 1 / 60);
+    const waiting = await expeditionFlow.scene(page);
+    expect(waiting.gladiator).toMatchObject({ x: end.x + 0.5, y: end.y + 0.5, visible: true });
+    expect(waiting.faded).toContain(oak.id);
     expect((await page.evaluate(() => window.__cloudiatorExpeditionScene!.props())).find(p => p.id === oak.id)!.alpha).toBeLessThan(1);
     await expeditionFlow.settle(page);
     await page.screenshot({ path: testInfo.outputPath('expedition-woodland-arrival-behind-oak.png') });

@@ -123,6 +123,11 @@
   font-size: 0.8rem;
 }
 
+.recovers {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 .strip {
   padding: 0 0.5rem;
 }

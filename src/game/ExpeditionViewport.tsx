@@ -3,7 +3,8 @@
 // React host for the expedition scene. Phaser, the asset package and the scene load lazily in the
 // browser. The scene draws the stage state it reads every frame; it keeps no clock of its own. If WebGL
 // or the art is missing, the host shows a note, and the progress strip, log and result keep working
-// because they are React. Unmounting removes the scene's bridge listeners and destroys the game.
+// because they are React. Once the scene's gladiator has left for camp, a banner over the scene says
+// so. Unmounting removes the scene's bridge listeners and destroys the game.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { SceneBridge } from './bridge';
 import type { ExpeditionSceneState } from './expedition-stage';
@@ -37,6 +38,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
   const reduced = useRef(reducedMotion);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [following, setFollowing] = useState(true);
+  const [returned, setReturned] = useState(false);
   const statusId = useId();
 
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -49,6 +51,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
     let failed = false;
     let game: ReturnType<typeof startGame> | null = null;
     setFollowing(true);
+    setReturned(false);
     const fail = (reason: 'webgl' | 'assets' | 'error', message: string) => {
       if (cancelled || failed) return;
       failed = true;
@@ -77,6 +80,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
         bridge,
         reducedMotion: reduced.current,
         onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },
+        onReturned: next => { if (!cancelled) setReturned(next); },
         onError: (reason, message) => fail(reason, reason === 'assets'
           ? `The expedition art could not load (${message}). The progress, the activity log and the result below still work.`
           : `The animated expedition stopped: ${message}. The progress, the activity log and the result below still work.`),
@@ -139,6 +143,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
         // Phaser cancels the default pointerdown, so focus the host ourselves for the arrow keys.
         onPointerDown={() => host.current?.focus({ preventScroll: true })}
       />
+      {status.kind === 'ready' && returned && <p className={styles.returned}>Returned to camp</p>}
       {!unavailable && (
         <div className={styles.controls} role="group" aria-label="Camera controls">
           <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'in' })} aria-label="Zoom in">+</button>

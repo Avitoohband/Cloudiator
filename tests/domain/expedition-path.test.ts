@@ -73,6 +73,9 @@ describe('expedition journey on the map', () => {
     expect(rest(REST_PATTERN.sitMs + 1_000)).toBe('sleep');
     expect(rest(REST_PATTERN.sitMs + REST_PATTERN.sleepMs + 1_000)).toBe('sit');
     expect(gladiatorPose(j, route('encounter-2', 'safe', arrive + 1_000, 'rest'), SPEED)).toMatchObject({ x: j.points.safe.x + 0.5, y: j.points.safe.y + 0.5 });
+    // Leaving the scene once back at camp: standing where it waited or rested; the scene fades it out.
+    expect(gladiatorPose(j, route('end', 'end', 1_000, 'leave'), SPEED)).toMatchObject({ x: j.points.end.x + 0.5, y: j.points.end.y + 0.5, action: 'idle', walking: false });
+    expect(gladiatorPose(j, route('safe', 'safe', 1_000, 'leave'), SPEED)).toMatchObject({ x: j.points.safe.x + 0.5, y: j.points.safe.y + 0.5, action: 'idle', walking: false });
   });
 
   it('turns a fixture state into a pose on its map for every minute of each run', () => {

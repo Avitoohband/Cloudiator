@@ -46,6 +46,10 @@ declare global {
 const ENVIRONMENTS: ExpeditionEnvironment[] = ['woodland', 'outpost', 'mountain'];
 const MARKERS = [0, 20, 40, 60, 80];
 const TICK_MS = 250;
+/** Spec 10.5's poll interval, used while a due stage or the owner's summary is awaited. */
+const POLL_MS = 30_000;
+/** Encounter numbers in words: a health or phase text never repeats a log line's "Encounter N". */
+const ORDINALS = ['first', 'second', 'third'];
 let activeLoops = 0;
 
 const clockTime = (ms: number) => new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(ms);
@@ -85,7 +89,7 @@ function phaseText(state: ExpeditionSceneState, expedition: string): { title: st
     case 'depart': return { title: 'Setting out', detail: `Travelling the ${expedition} and searching the trail.` };
     case 'exploration': return { title: 'Exploring', detail: 'Searching the trail and waiting for whatever comes next.' };
     case 'encounter': return { title: 'Fighting', detail: 'The revealed battle plays in the scene. Its result shows when it ends.' };
-    case 'safe-return': return { title: 'Returning without rewards', detail: `Defeated${lost ? ` in the ${['first', 'second', 'third'][lost - 1]} encounter` : ''}. Resting at the safe return point until the slot ends, with all gear kept.` };
+    case 'safe-return': return { title: 'Returning without rewards', detail: `Defeated${lost ? ` in the ${ORDINALS[lost - 1]} encounter` : ''}. Resting at the safe return point until the slot ends, with all gear kept.` };
     case 'returning': return { title: 'Returning to camp', detail: 'All three encounters cleared. Heading back along the trail.' };
     case 'preparing': return state.stages.length
       ? { title: 'Preparing', detail: 'The next stage has not been published yet. It appears here as soon as it is revealed.' }
@@ -96,23 +100,36 @@ function phaseText(state: ExpeditionSceneState, expedition: string): { title: st
   }
 }
 
+/** The logged health, named by the encounter it comes from; the server's recovery is never computed here. */
+function healthText(state: ExpeditionSceneState): { label: string; recovers: boolean } {
+  if (!state.hp) return { label: 'Health', recovers: false };
+  const fight = state.stages.find(s => s.encounter === state.hp!.encounter);
+  const which = ORDINALS[state.hp.encounter - 1] ?? `number ${state.hp.encounter}`;
+  return {
+    label: `Health ${fight?.inProgress ? 'during' : 'after'} the ${which} encounter`,
+    // After a won non-final encounter the server heals the gladiator before the next one.
+    recovers: fight?.outcome === 'victory' && state.hp.encounter < ORDINALS.length,
+  };
+}
+
 /**
- * Timeline reads. Task 10 replaces this with the shared sync controller: one read on entry, one each time
- * the display clock passes a reveal mark (the current stage's end and each 20-minute mark, at most once
- * per mark, see `passMarks`), and one when the tab regains focus. A failed later read keeps the last
- * revealed timeline.
+ * Timeline reads. Task 10 replaces this with the shared sync controller: one read on entry, the reads
+ * `readDue` asks for while the tab is visible, and one when the tab regains focus. `onRead` hears every
+ * read. A failed later read keeps the last revealed timeline.
  */
-function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (timeline: RevealedTimeline) => void) {
+function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (timeline: RevealedTimeline) => void, onRead: () => void) {
   const [timeline, setTimeline] = useState<RevealedTimeline | null>(null);
   const [failure, setFailure] = useState<'unavailable' | 'not-found' | null>(null);
   const count = useRef(0);
   const request = useRef(0);
   const first = useRef(onFirst);
+  const heard = useRef(onRead);
   const loaded = useRef(false);
-  useEffect(() => { first.current = onFirst; }, [onFirst]);
+  useEffect(() => { first.current = onFirst; heard.current = onRead; }, [onFirst, onRead]);
   const read = useCallback(async () => {
     const mine = ++request.current;
     count.current += 1;
+    heard.current();
     try {
       const next = await reads.timeline(activityId);
       if (mine !== request.current) return;
@@ -137,12 +154,25 @@ function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (
   return { timeline, failure, read, count };
 }
 
-/** Marks the reveal times the display clock has passed; true when a fresh timeline read is due (once per mark). */
-function passMarks(marks: { pending: number[]; done: Set<number> }, state: ExpeditionSceneState): boolean {
-  const passed = marks.pending.filter(mark => mark <= state.displayNowMs && !marks.done.has(mark));
-  for (const mark of passed) marks.done.add(mark);
-  marks.pending = expeditionRevealMarks(state);
-  return passed.length > 0;
+type ReadSchedule = { pending: number[]; done: Set<number>; lastReadMs: number | null };
+
+/**
+ * When the display clock (ticking only while the tab is visible) next needs a fresh timeline read; the
+ * one swappable piece Task 10's sync controller replaces. True once for each reveal mark passed (the
+ * current stage's end and each 20-minute mark), and, while a due stage is unpublished (Preparing) or
+ * the owner's summary is awaited (Processing results), whenever POLL_MS have passed since the last read
+ * of any kind. Those polls stop as soon as the stage or the summary is there. A spectator never waits
+ * for a summary.
+ */
+function readDue(schedule: ReadSchedule, state: ExpeditionSceneState, owner: boolean): boolean {
+  const t = state.displayNowMs;
+  const passed = schedule.pending.filter(mark => mark <= t && !schedule.done.has(mark));
+  for (const mark of passed) schedule.done.add(mark);
+  schedule.pending = expeditionRevealMarks(state);
+  // The entry read happened just before the first tick; a held fixture clock may also move back.
+  if (schedule.lastReadMs === null || schedule.lastReadMs > t) schedule.lastReadMs = t;
+  const waiting = state.phase === 'preparing' || (owner && state.awaitingSummary);
+  return passed.length > 0 || (waiting && t - schedule.lastReadMs >= POLL_MS);
 }
 
 /** Shown for a missing, malformed or unreadable expedition: nothing is drawn or read further. */
@@ -177,13 +207,16 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
     const start = startMinute !== null && departure !== undefined ? departure + startMinute * 60_000 : timeline.serverNowMs;
     clock.current = { anchorMs: start, at: performance.now(), frozen: null };
   }, [startMinute]);
-  const { timeline, failure, read, count } = useTimelineReads(reads, activityId, anchor);
+  const schedule = useRef<ReadSchedule>({ pending: [], done: new Set(), lastReadMs: null });
+  // Every read (entry, schedule or focus) restarts the poll interval at the display time it was made.
+  const onRead = useCallback(() => { schedule.current.lastReadMs = clock.current ? now() : null; }, [now]);
+  const { timeline, failure, read, count } = useTimelineReads(reads, activityId, anchor, onRead);
   const timelineRef = useRef(timeline);
+  const ownerRef = useRef(false);
   const [displayMs, setDisplayMs] = useState<number | null>(null);
   const [world, setWorld] = useState<{ actors: readonly PublicActor[] } | null>(null);
   const [ownerState, setOwnerState] = useState<{ id: string; name: string } | null>(null);
   const [reduced, setReduced] = useState(prefersReducedMotion);
-  const marks = useRef<{ pending: number[]; done: Set<number> }>({ pending: [], done: new Set() });
   const titleId = useId();
   const resultId = useId();
   const logId = useId();
@@ -223,7 +256,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
       if (document.visibilityState !== 'visible' || !timelineRef.current || !clock.current) return;
       const t = now();
       setDisplayMs(t);
-      if (passMarks(marks.current, renderExpeditionStage(timelineRef.current, t))) void read();
+      if (readDue(schedule.current, renderExpeditionStage(timelineRef.current, t), ownerRef.current)) void read();
     };
     const timer = window.setInterval(tick, TICK_MS);
     return () => { window.clearInterval(timer); activeLoops -= 1; };
@@ -238,6 +271,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   // Only the owner's timeline carries a summary (counted once it is due, like every stage); otherwise
   // compare the owner's id with the expedition's. Before either is known, nobody is named.
   const owner = !!state?.summary || (!!ownerState && ownerState.id === gladiatorId);
+  useEffect(() => { ownerRef.current = owner; }, [owner]);
   const name = byActivity?.name ?? byId?.name ?? (owner ? ownerState?.name ?? null : null);
   const silhouettes = (byActivity?.equipmentSilhouettes ?? state?.gladiator?.equipmentSilhouettes ?? []).join('|');
   const look = useMemo<GladiatorLook>(() => ({
@@ -278,6 +312,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   const campHref = fixture ? '/game/?mode=fixture' : '/game/';
   const expedition = environment ? CATALOG_V1.expeditions[environment].name : 'Expedition';
   const text = phaseText(state, expedition);
+  const health = healthText(state);
   const progress = state.progress;
   const minute = Math.floor(progress?.minute ?? 0);
   const replayHref = (stage: VisibleStage) => `/replay/?${fixture ? 'mode=fixture&' : ''}activity=${encodeURIComponent(activityId)}&stage=${encodeURIComponent(stage.id)}`;
@@ -304,12 +339,13 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
           <span>{text.detail}</span>
         </div>
         <div className={styles.health}>
-          <span className={styles.label}>Health</span>
+          <span className={styles.label}>{health.label}</span>
           {state.hp ? <div className={styles.meter} role="meter" aria-label="Gladiator health" aria-valuemin={0} aria-valuemax={state.hp.max} aria-valuenow={state.hp.current}
-            aria-valuetext={`${state.hp.current} of ${state.hp.max} health`}>
+            aria-valuetext={`${state.hp.current} of ${state.hp.max} ${health.label.toLowerCase()}`}>
             <span className={styles.fill} style={{ width: `${(100 * state.hp.current) / state.hp.max}%` }} />
             <span className={styles.hpText}>{state.hp.current} / {state.hp.max}</span>
           </div> : <span className={styles.note}>{encounters ? 'Not kept for this expedition' : 'Full at departure'}</span>}
+          {health.recovers && <span className={styles.recovers}>Health recovers before the next encounter.</span>}
         </div>
       </div>
 

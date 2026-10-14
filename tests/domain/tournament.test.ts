@@ -1,15 +1,31 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyTournamentRatings, buildBracket, isTournamentSlot, partitionTournament, placementGrants, readyBouts, recordBout, runBout,
   tournamentOutcomes, type BoutJob, type SlotWindow, type TournamentCandidate, type TournamentGraph } from '@domain/tournament.ts';
-import { matchArena, type ArenaEntrant } from '@domain/arena.ts';
+import { matchArena, RETAINED_RULES, type ArenaEntrant } from '@domain/arena.ts';
 import { CATALOG_V1 } from '@domain/catalog-v1.ts';
 import { slotAt } from '@domain/clock.ts';
 import { makeFighter, simulateBattle } from '@domain/combat.ts';
 import { RULES_V1 } from '@domain/rules-v1.ts';
 import type { LeagueId } from '@contracts/commands.ts';
 import type { BattleLog } from '@contracts/events.ts';
-import type { Attributes, BattleParticipant, BuildSnapshot, EquipmentSlot, ItemInstance } from '@domain/types.ts';
+import type { Attributes, BattleParticipant, BuildSnapshot, EquipmentSlot, ItemInstance, Rules } from '@domain/types.ts';
 import { baseFiveBuild, itemFixture } from '../fixtures/domain.ts';
+
+/**
+ * A second retained rules version, added to Arena's registry for this suite only (production retains v1 alone). It
+ * changes values the tournament reads from its inputs' rules: Elo K and floor, fight renown, tournament days, the
+ * minimum entrant count and placement bonuses. Combat is unchanged, so v1 fighters stay valid under it.
+ */
+const CUSTOM = vi.hoisted(() => 'v1-custom');
+vi.mock('@domain/arena.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('@domain/arena.ts')>();
+  const { RULES_V1: v1 } = await import('@domain/rules-v1.ts');
+  const custom: Rules = { ...v1, version: CUSTOM, rating: { ...v1.rating, k: 32, minimum: 100 },
+    arena: { ...v1.arena, humanWinRenown: 7, humanLossRenown: 1 },
+    tournament: { ...v1.tournament, utcWeekdays: [3], minimumEntrants: 3, placements: { winner: { money: 90, renown: 40 },
+      runnerUp: { money: 50, renown: 20 }, semifinal: { money: 20, renown: 10 }, other: { money: 1, renown: 3 } } } };
+  return { ...actual, RETAINED_RULES: Object.freeze({ ...actual.RETAINED_RULES, [CUSTOM]: custom }) };
+});
 
 const MINUTE = 60_000;
 const SLOT_MS = RULES_V1.clock.slotMs;
@@ -38,6 +54,55 @@ const candidate = (gladiatorId: string, patch: Partial<TournamentCandidate> = {}
   optIn: [{ enabled: true, receivedAtMs: WEDNESDAY - 60 * MINUTE }], ...patch });
 const routeOf = (partition: ReturnType<typeof partitionTournament>, gladiatorId: string) =>
   partition.routes.find(r => r.gladiatorId === gladiatorId);
+/** The starter build frozen under the suite's custom retained rules. */
+const customFighter = { ...starter, rulesVersion: CUSTOM };
+const customEntrant = (gladiatorId: string, patch: Partial<ArenaEntrant> = {}) => entrant(gladiatorId, { fighter: customFighter, ...patch });
+
+describe('retained rules', () => {
+  it('reads retained rules from the Arena registry, not a second copy', () => {
+    expect(RETAINED_RULES[CUSTOM].version).toBe(CUSTOM);
+    const graph = buildBracket(['c1', 'c2', 'c3'].map(id => customEntrant(id)), 'registry');
+    expect(graph.rulesVersion).toBe(CUSTOM);
+    expect(graph.entries.every(e => e.fighter.rulesVersion === CUSTOM)).toBe(true);
+    // A version neither registry retains still fails closed.
+    expect(() => buildBracket(['u1', 'u2', 'u3'].map(id => entrant(id, { fighter: { ...starter, rulesVersion: 'v2' } })), 'registry'))
+      .toThrow(RangeError);
+  });
+  it('settles ratings, fight renown and placements with the graph rules', () => {
+    // Four entrants at the custom floor 100. K 32 gains 16 per equal bout and every loser is clamped at 100, where the
+    // default v1 Elo (K 24, floor 0) would give 124 for the champion and 88 for each first-round loser.
+    const done = play(buildBracket(['c1', 'c2', 'c3', 'c4'].map(id => customEntrant(id, { rating: 100 })), 'custom-elo'));
+    expect(applyTournamentRatings(done).bouts.map(b => [b.round, b.winnerBefore, b.winnerAfter, b.loserBefore, b.loserAfter]))
+      .toEqual([[1, 100, 116, 100, 100], [1, 100, 116, 100, 100], [2, 116, 132, 116, 100]]);
+    // Fight renown 7 a win and 1 a loss, plus the custom placements.
+    expect(tournamentOutcomes(done).map(o => [o.place, o.ratingAfter, o.rewards.money, o.rewards.renown]).sort((a, b) => a[0] - b[0]))
+      .toEqual([[1, 132, 90, 54], [2, 100, 50, 28], [3, 100, 20, 11], [3, 100, 20, 11]]);
+  });
+  it('partitions with the candidates rules: tournament days, minimum entrants and rating floor', () => {
+    const custom = (id: string, patch: Partial<TournamentCandidate> = {}, entrantPatch: Partial<ArenaEntrant> = {}) =>
+      candidate(id, patch, { fighter: customFighter, ...entrantPatch });
+    const wednesday = slotAt(WEDNESDAY);
+    const two = partitionTournament(wednesday, [custom('c1'), custom('c2')]);
+    expect(two.brackets).toEqual([]);
+    expect(two.routes.map(r => [r.route, r.reason])).toEqual([['arena', 'too-few-entrants'], ['arena', 'too-few-entrants']]);
+    expect(partitionTournament(wednesday, [custom('c1'), custom('c2'), custom('c3')]).brackets.map(b => b.entrants.length)).toEqual([3]);
+    // Saturday is not a tournament day under these rules.
+    const saturday = slotAt(SATURDAY);
+    const weekend = partitionTournament(saturday, ['c1', 'c2', 'c3'].map(id => custom(id, {}, { slotIndex: saturday.index })));
+    expect(weekend.tournamentSlot).toBe(false);
+    expect(weekend.routes.every(r => r.route === 'arena' && r.reason === 'not-tournament-slot')).toBe(true);
+    expect(() => partitionTournament(wednesday, [custom('c1', {}, { rating: 99 })])).toThrow(RangeError);
+    expect(() => partitionTournament(wednesday, [custom('c1'), custom('c2'), candidate('v1')])).toThrow(/share one rules version/);
+  });
+  it('builds brackets with the entrants rules and detects slots with the rules it is given, defaulting to v1', () => {
+    expect(() => buildBracket(['c1', 'c2'].map(id => customEntrant(id)), 'custom')).toThrow(RangeError);
+    expect(() => buildBracket(['c1', 'c2', 'c3'].map(id => customEntrant(id, { slotIndex: SATURDAY / SLOT_MS })), 'custom')).toThrow(RangeError);
+    expect(() => buildBracket(['c1', 'c2', 'c3'].map(id => customEntrant(id, { rating: 99 })), 'custom')).toThrow(RangeError);
+    expect(isTournamentSlot(slotAt(SATURDAY), RETAINED_RULES[CUSTOM])).toBe(false);
+    expect(isTournamentSlot(slotAt(WEDNESDAY), RETAINED_RULES[CUSTOM])).toBe(true);
+    expect(isTournamentSlot(slotAt(SATURDAY))).toBe(true);
+  });
+});
 
 describe('tournament slot detection', () => {
   const originalTz = process.env.TZ;
@@ -173,6 +238,15 @@ describe('tournament eligibility', () => {
     expect(routeOf(partition, 'a')).toMatchObject({ route: 'tournament', staminaDebit: 30 });
     expect(routeOf(partition, 'mid')).toMatchObject({ route: 'arena', reason: 'insufficient-stamina', staminaDebit: 25 });
   });
+  it('sends a candidate that cannot afford Arena to Rest even when the tournament costs less, as boundary step 6 does', () => {
+    const costs = { arena: 30, tournament: 25 };
+    const partition = partitionTournament(wednesday, [candidate('a', { costs }), candidate('b', { costs }),
+      candidate('cheap', { costs, stamina: 27 })]);
+    expect(routeOf(partition, 'cheap')).toMatchObject({ route: 'rest', reason: 'insufficient-stamina', staminaDebit: 0 });
+    expect(ids(partition.brackets[0].entrants)).toEqual(['a', 'b']);
+    expect(routeOf(partition, 'a')).toMatchObject({ route: 'tournament', staminaDebit: 25 });
+    expect(partition.arena).toEqual([]);
+  });
   it('ignores characters without Arena scheduled for the phase', () => {
     const partition = partitionTournament(wednesday, [candidate('a'), candidate('b'), candidate('trainer', { choice: { kind: 'training' } }),
       candidate('explorer', { choice: { kind: 'expedition', expeditionId: 'woodland' } })]);
@@ -280,11 +354,14 @@ describe('seeded single-elimination bracket', () => {
     ]);
     expect(buildBracket(roster(2, { league: 'gold' }), 'ids').id).toBe(`tournament:${SLOT}:gold`);
   });
-  it('derives one distinct private seed per bout, stable for the tournament seed', () => {
-    const graph = buildBracket(roster(9), 'private');
-    expect(new Set(graph.bouts.map(b => b.seed)).size).toBe(graph.bouts.length);
-    expect(buildBracket(roster(9), 'private').bouts.map(b => b.seed)).toEqual(graph.bouts.map(b => b.seed));
-    expect(buildBracket(roster(9), 'other').bouts.map(b => b.seed)).not.toEqual(graph.bouts.map(b => b.seed));
+  it('derives no bout seed: neither the graph nor its jobs carry the tournament seed or a seed derived from it', () => {
+    const graph = buildBracket(roster(9), 'tournament-secret');
+    expect(graph.bouts.some(b => 'seed' in b)).toBe(false);
+    expect(JSON.stringify(graph)).not.toContain('tournament-secret');
+    const jobs = readyBouts(graph);
+    expect(jobs.length).toBeGreaterThan(0);
+    expect(jobs.some(j => 'seed' in j)).toBe(false);
+    expect(JSON.stringify(jobs)).not.toContain('tournament-secret');
   });
   it.each([
     // Round r of R reveals at 80 × r / (R + 1) minutes, rounded up to the next whole millisecond; settlement at minute 80.
@@ -346,10 +423,15 @@ describe('seeded single-elimination bracket', () => {
   });
 });
 
+/**
+ * A per-bout seed as phase 2 storage supplies it (there a one-way SHA-256 derivation stored with the bout row). Tests
+ * only need distinct, stable seeds per bout.
+ */
+const boutSeed = (job: BoutJob, salt = 'bout') => `${salt}:${job.boutId}`;
 /** Runs every ready bout, one job at a time, until none remain: the phase 2 job graph without a database. */
 function play(graph: TournamentGraph): TournamentGraph {
   for (let jobs = readyBouts(graph); jobs.length > 0; jobs = readyBouts(graph)) {
-    for (const job of jobs) graph = recordBout(graph, job.boutId, runBout(job));
+    for (const job of jobs) graph = recordBout(graph, job.boutId, runBout(job, boutSeed(job)));
   }
   return graph;
 }
@@ -370,14 +452,15 @@ describe('bout jobs and results', () => {
     let graph = buildBracket(roster(5), 'ready');
     const id = graph.id;
     // Ranks 4-5 fight in round 1; ranks 2 and 3 both had byes, so their semifinal is ready immediately.
+    const run = (job: BoutJob) => runBout(job, boutSeed(job));
     expect(readyBouts(graph).map(j => j.boutId)).toEqual([`${id}:1:1`, `${id}:2:1`]);
-    graph = recordBout(graph, `${id}:1:1`, runBout(readyBouts(graph)[0]));
+    graph = recordBout(graph, `${id}:1:1`, run(readyBouts(graph)[0]));
     expect(readyBouts(graph).map(j => j.boutId)).toEqual([`${id}:2:0`, `${id}:2:1`]);
-    graph = recordBout(graph, `${id}:2:1`, runBout(readyBouts(graph)[1]));
+    graph = recordBout(graph, `${id}:2:1`, run(readyBouts(graph)[1]));
     expect(readyBouts(graph).map(j => j.boutId)).toEqual([`${id}:2:0`]);
-    graph = recordBout(graph, `${id}:2:0`, runBout(readyBouts(graph)[0]));
+    graph = recordBout(graph, `${id}:2:0`, run(readyBouts(graph)[0]));
     expect(readyBouts(graph).map(j => j.boutId)).toEqual([`${id}:3:0`]);
-    graph = recordBout(graph, `${id}:3:0`, runBout(readyBouts(graph)[0]));
+    graph = recordBout(graph, `${id}:3:0`, run(readyBouts(graph)[0]));
     expect(readyBouts(graph)).toEqual([]);
   });
   it('gives a two-person bracket exactly one bout', () => {
@@ -387,40 +470,48 @@ describe('bout jobs and results', () => {
     expect(job.parentBoutIds).toEqual([]);
     expect(readyBouts(play(graph))).toEqual([]);
   });
-  it('builds each job from the frozen snapshots, the private bout seed and the reveal time', () => {
+  it('builds each job from the frozen snapshots and the reveal time, with no seed', () => {
     const graph = buildBracket(roster(4), 'job');
     const [job] = readyBouts(graph);
     const bout = byId(graph, job.boutId);
     const entry = (gid: string) => graph.entries.find(e => e.gladiatorId === gid)!;
     expect(job).toEqual({ tournamentId: graph.id, boutId: bout.id, battleId: bout.battleId, round: 1, position: 0, parentBoutIds: [],
-      rulesVersion: 'v1', seed: bout.seed, revealAtMs: graph.revealAtMs[0],
+      rulesVersion: 'v1', revealAtMs: graph.revealAtMs[0],
       sides: bout.placed!.map(gid => ({ gladiatorId: gid, activityId: entry(gid!).activityId, fighter: entry(gid!).fighter })) });
     expect(Object.isFrozen(job)).toBe(true);
   });
-  it('replays a retried job identically from the same seed and snapshots', () => {
+  it('simulates a bout only from the bout seed phase 2 supplies', () => {
+    const [job] = readyBouts(buildBracket(roster(4), 'supplied'));
+    expect(runBout(job, 'bout-seed-a')).toEqual(reseeded(job, 'bout-seed-a'));
+    expect(runBout(job, 'bout-seed-b').events).not.toEqual(runBout(job, 'bout-seed-a').events);
+    expect(() => runBout(job, '')).toThrow(RangeError);
+    expect(() => (runBout as (job: BoutJob) => BattleLog)(job)).toThrow(RangeError);
+  });
+  it('replays a retried job identically from the same bout seed and snapshots', () => {
     const [job] = readyBouts(buildBracket(roster(4), 'retry'));
-    expect(runBout(job)).toEqual(runBout(job));
-    expect(runBout(job)).toEqual(runBout(readyBouts(buildBracket(roster(4), 'retry'))[0]));
+    expect(runBout(job, 'retry-seed')).toEqual(runBout(job, 'retry-seed'));
+    expect(runBout(job, 'retry-seed')).toEqual(runBout(readyBouts(buildBracket(roster(4), 'retry'))[0], 'retry-seed'));
   });
   it('labels participants with the supplied names without changing the bout', () => {
     const [job] = readyBouts(buildBracket(roster(2), 'names'));
-    const named = runBout(job, { [job.sides[0].gladiatorId]: 'Aster', [job.sides[1].gladiatorId]: 'Brin' });
-    const plain = runBout(job);
+    const named = runBout(job, 'names-seed', { [job.sides[0].gladiatorId]: 'Aster', [job.sides[1].gladiatorId]: 'Brin' });
+    const plain = runBout(job, 'names-seed');
     expect(named.participants.map(p => p.name)).toEqual(['Aster', 'Brin']);
     expect(plain.participants.map(p => p.name)).toEqual(['Gladiator', 'Gladiator']);
     expect(named.events).toEqual(plain.events);
     expect(named.winnerId).toBe(plain.winnerId);
   });
   it('starts every bout at full health with the initial snapshot, even after a 0-HP win', () => {
-    // A seed whose first semifinal ends in a simultaneous defeat: its seeded winner advances at 0 HP.
-    let graph: TournamentGraph | null = null, tie: BattleLog | null = null;
+    // A bout seed whose first semifinal ends in a simultaneous defeat: its seeded winner advances at 0 HP.
+    let graph = buildBracket(['m1', 'm2', 'm3', 'm4'].map(id => entrant(id, { fighter: mirror })), 'health');
+    const [first] = readyBouts(graph);
+    let tie: BattleLog | null = null;
     for (let n = 0; n < 2000 && !tie; n += 1) {
-      const candidateGraph = buildBracket(['m1', 'm2', 'm3', 'm4'].map(id => entrant(id, { fighter: mirror })), `health-${n}`);
-      const log = runBout(readyBouts(candidateGraph)[0]);
-      if (log.tieBreakReason === 'simultaneous-defeat') { graph = candidateGraph; tie = log; }
+      const log = runBout(first, `health-${n}`);
+      if (log.tieBreakReason === 'simultaneous-defeat') tie = log;
     }
     expect(tie?.finalHp).toEqual([0, 0]);
-    graph = play(graph!);
+    graph = play(recordBout(graph, first.boutId, tie!));
     expect(graph.bouts[0].result).toMatchObject({ winnerId: tie!.winnerId });
     const finalLog = byId(graph, `${graph.id}:2:0`).result!.log!;
     expect(finalLog.participants.map(p => p.id)).toContain(tie!.winnerId);
@@ -452,7 +543,7 @@ describe('bout jobs and results', () => {
   it('records a result as a new frozen graph and replays the same result idempotently', () => {
     const graph = buildBracket(roster(2), 'record');
     const [job] = readyBouts(graph);
-    const log = runBout(job);
+    const log = runBout(job, boutSeed(job));
     const recorded = recordBout(graph, job.boutId, log);
     expect(graph.bouts[0].result).toBeNull();
     expect(Object.isFrozen(recorded) && Object.isFrozen(recorded.bouts[0].result)).toBe(true);
@@ -468,7 +559,7 @@ describe('bout jobs and results', () => {
   it('does not keep or freeze the caller log', () => {
     const graph = buildBracket(roster(2), 'copy');
     const [job] = readyBouts(graph);
-    const log = structuredClone(runBout(job)) as BattleLog;
+    const log = structuredClone(runBout(job, boutSeed(job))) as BattleLog;
     const recorded = recordBout(graph, job.boutId, log);
     expect(Object.isFrozen(log)).toBe(false);
     (log as { durationMs: number }).durationMs = -1;
@@ -478,7 +569,7 @@ describe('bout jobs and results', () => {
     const graph = buildBracket(roster(5), 'fence');
     const id = graph.id;
     const [job] = readyBouts(graph);
-    const log = runBout(job);
+    const log = runBout(job, boutSeed(job));
     const participant = (i: 0 | 1, patch: object) => ({ ...log, participants: log.participants.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
     it.each([
       ['an unknown bout', `${id}:9:9`, log],
@@ -491,6 +582,8 @@ describe('bout jobs and results', () => {
       ['a foreign participant', job.boutId, participant(0, { id: 'g99', gladiatorId: 'g99' })],
       ['reduced starting health', job.boutId, participant(1, { initialHealth: log.participants[1].maxHealth - 1 })],
       ['another build', job.boutId, participant(0, { maxHealth: log.participants[0].maxHealth + 10, initialHealth: log.participants[0].maxHealth + 10 })],
+      ['another efficiency (5000 bp)', job.boutId, participant(0, { efficiencyBasisPoints: 5000 })],
+      ['foreign equipment silhouettes', job.boutId, participant(1, { equipmentSilhouettes: ['great-axe:9:legendary'] })],
       ['a missing log', job.boutId, null],
     ])('rejects %s', (_name, bout, wrong) => {
       expect(() => recordBout(graph, bout, wrong as BattleLog)).toThrow(RangeError);
@@ -510,13 +603,30 @@ describe('bout jobs and results', () => {
       ['an early settlement time', { ...graph, settlesAtMs: graph.settlesAtMs - 1 }],
       ['reordered entries', { ...graph, entries: [graph.entries[1], graph.entries[0], ...graph.entries.slice(2)] }],
       ['an unknown rules version', { ...graph, rulesVersion: 'v2' }],
-      ['an empty bout seed', bouts((_, i) => (i === 1 ? { seed: '' } : {}))],
       ['a corrupt fighter', { ...graph, entries: graph.entries.map((e, i) => (i === 0 ? { ...e, fighter: { ...e.fighter, maxHealth: 0 } } : e)) }],
       ['a result for an unready bout', bouts((_, i) => (i === 6 ? { result: { winnerId: 'g00', loserId: 'g01', log: null } } : {}))],
       ['null', null],
     ])('rejects %s', (_name, tampered) => {
       expect(() => readyBouts(tampered as TournamentGraph)).toThrow(RangeError);
     });
+  });
+  it('applies the recordBout log checks to every stored result before settlement', () => {
+    const done = play(buildBracket(roster(5), 'stored'));
+    const withLogs = (log: (bout: TournamentGraph['bouts'][number]) => unknown) => ({ ...done,
+      bouts: done.bouts.map(b => (b.bye ? b : { ...b, result: { ...b.result!, log: log(b) } })) }) as TournamentGraph;
+    // Stub logs carrying only the battle id and the winner.
+    const stubs = withLogs(b => ({ battleId: b.battleId, winnerId: b.result!.winnerId }));
+    // One real stored log altered after recording: its first combatant revealed at half efficiency.
+    const finalId = `${done.id}:3:0`;
+    const altered = withLogs(b => (b.id !== finalId ? b.result!.log : { ...b.result!.log!,
+      participants: b.result!.log!.participants.map((p, i) => (i === 0 ? { ...p, efficiencyBasisPoints: 5000 } : p)) }));
+    for (const graph of [stubs, altered]) {
+      expect(() => tournamentOutcomes(graph)).toThrow(RangeError);
+      expect(() => placementGrants(graph)).toThrow(RangeError);
+      expect(() => applyTournamentRatings(graph)).toThrow(RangeError);
+      expect(() => readyBouts(graph)).toThrow(RangeError);
+    }
+    expect(tournamentOutcomes(withLogs(b => b.result!.log))).toEqual(tournamentOutcomes(done));
   });
 });
 
@@ -588,7 +698,7 @@ describe('round-ordered tournament ratings', () => {
     const graph = buildBracket(roster(5), 'unfinished');
     expect(() => applyTournamentRatings(graph)).toThrow(RangeError);
     const first = readyBouts(graph)[0];
-    expect(() => applyTournamentRatings(recordBout(graph, first.boutId, runBout(first)))).toThrow(RangeError);
+    expect(() => applyTournamentRatings(recordBout(graph, first.boutId, runBout(first, boutSeed(first))))).toThrow(RangeError);
   });
 });
 
@@ -634,19 +744,37 @@ describe('placement grants and settlement outcomes', () => {
     expect(outcomes.map(o => o.gladiatorId)).toEqual(done.entries.map(e => e.gladiatorId));
     for (const outcome of outcomes) {
       const grant = grants.get(outcome.gladiatorId)!, rating = ratings.get(outcome.gladiatorId)!;
-      const wins = outcome.bouts.filter(b => !b.bye && b.won).length, losses = outcome.bouts.filter(b => !b.won).length;
-      expect(outcome.bouts.filter(b => !b.bye).map(b => b.renown)).toEqual(outcome.bouts.filter(b => !b.bye).map(b => (b.won ? 10 : 2)));
-      expect(outcome).toMatchObject({ activityId: `activity-${outcome.gladiatorId}`, place: grant.place, placement: grant,
+      const wins = outcome.bouts.filter(b => b.kind === 'win').length, losses = outcome.bouts.filter(b => b.kind === 'loss').length;
+      expect(outcome.bouts.map(b => b.renown)).toEqual(outcome.bouts.map(b => ({ bye: 0, win: 10, loss: 2 })[b.kind]));
+      expect(outcome).toMatchObject({ activityId: `activity-${outcome.gladiatorId}`, place: grant.place, placement: grant, wins, losses,
         result: grant.place === 1 ? 'victory' : 'defeat', success: grant.place === 1,
         rewards: { ...noRewards, money: grant.money, renown: 10 * wins + 2 * losses + grant.renown },
         ratingBefore: rating.before, ratingAfter: rating.after, ratingDelta: rating.delta });
       expect(losses).toBe(grant.place === 1 ? 0 : 1);
       expect(outcome.bouts.reduce((sum, b) => sum + b.ratingDelta, 0)).toBe(rating.delta);
     }
-    // Byes give no win renown and no rating change.
-    const byes = outcomes.flatMap(o => o.bouts.filter(b => b.bye));
+    // Byes are their own kind: no win, no renown and no rating change.
+    const byes = outcomes.flatMap(o => o.bouts.filter(b => b.kind === 'bye'));
     expect(byes).toHaveLength(3);
-    expect(byes.every(b => b.won && b.renown === 0 && b.ratingDelta === 0)).toBe(true);
+    expect(byes.every(b => b.renown === 0 && b.ratingDelta === 0)).toBe(true);
+    // Human bouts for standings and the five-human-bout season rule: the 4 fought bouts, once per side, never a bye.
+    expect(outcomes.reduce((sum, o) => sum + o.wins, 0)).toBe(4);
+    expect(outcomes.reduce((sum, o) => sum + o.wins + o.losses, 0)).toBe(8);
+  });
+  it('never counts a bye as a win, whether its receiver later wins or loses', () => {
+    const graph = buildBracket(roster(3), 'bye-kind');
+    const top = atRank(graph, 1);
+    for (const topWins of [false, true]) {
+      const done = playWith(graph, job => (job.round === 1 ? job.sides[0].gladiatorId
+        : topWins ? top : job.sides.find(s => s.gladiatorId !== top)!.gladiatorId));
+      const outcome = tournamentOutcomes(done).find(o => o.gladiatorId === top)!;
+      expect(outcome.bouts.map(b => [b.round, b.kind, b.renown])).toEqual([[1, 'bye', 0], [2, topWins ? 'win' : 'loss', topWins ? 10 : 2]]);
+      expect(outcome.bouts[0].ratingDelta).toBe(0);
+      expect([outcome.wins, outcome.losses]).toEqual(topWins ? [1, 0] : [0, 1]);
+      expect(outcome).toMatchObject(topWins
+        ? { place: 1, result: 'victory', success: true, rewards: { money: 100, renown: 60 } }
+        : { place: 2, result: 'defeat', success: false, rewards: { money: 60, renown: 32 } });
+    }
   });
   it('settles a 0-HP seeded winner as the winner', () => {
     const graph = buildBracket(['m1', 'm2'].map(id => entrant(id, { fighter: mirror })), 'zero-settle');
@@ -684,7 +812,7 @@ const tournamentHarness = {
       staminaDebited: [...debited.values()].reduce((sum, debit) => sum + debit, 0),
       bracketWinners: outcomes.filter(o => o.place === 1).length,
       ratedBouts: graphs.reduce((sum, g) => sum + applyTournamentRatings(g).bouts.length, 0) + regular.filter(a => a.kind === 'human').length,
-      byeRenown: outcomes.flatMap(o => o.bouts).filter(b => b.bye).reduce((sum, b) => sum + b.renown, 0),
+      byeRenown: outcomes.flatMap(o => o.bouts).filter(b => b.kind === 'bye').reduce((sum, b) => sum + b.renown, 0),
     };
   },
 };

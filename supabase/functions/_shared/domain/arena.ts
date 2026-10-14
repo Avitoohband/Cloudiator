@@ -6,8 +6,8 @@ import { criticalProbability, decimal, type Fraction, fractionValue, hitProbabil
 import { RULES_V1 } from './rules-v1.ts';
 import { seededRandom } from './random.ts';
 
-/** Retained rules by version. A fighter frozen under an unknown version fails closed. */
-const RETAINED_RULES: Readonly<Record<string, Rules>> = Object.freeze({ [RULES_V1.version]: RULES_V1 });
+/** Retained rules by version (also the tournament's registry). A fighter frozen under an unknown version fails closed. */
+export const RETAINED_RULES: Readonly<Record<string, Rules>> = Object.freeze({ [RULES_V1.version]: RULES_V1 });
 
 function rulesFor(fighter: FighterSnapshot): Rules {
   const version = fighter?.rulesVersion;
@@ -25,7 +25,7 @@ function sharedRules(fighters: readonly FighterSnapshot[]): Rules {
 }
 
 /** Spec §8.1 league order, lowest first. */
-const LEAGUES: readonly LeagueId[] = Object.freeze(['bronze', 'silver', 'gold', 'champion']);
+export const LEAGUES: readonly LeagueId[] = Object.freeze(['bronze', 'silver', 'gold', 'champion']);
 
 /**
  * Spec §8.1 placement: `2 × level + floor(earned points / 5) + floor(historical gear / 10)`, then the thresholds
@@ -169,10 +169,12 @@ export type ArenaAssignment = DeepReadonly<
   | (AssignmentScope & { kind: 'human'; sides: [ArenaSide, ArenaSide] })
   | (AssignmentScope & { kind: 'npc'; sides: [ArenaSide]; opponent: { id: string; snapshot: FighterSnapshot } })>;
 
-const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+/** A non-empty string identifier. */
+export const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const compareIds = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const pairKey = (a: string, b: string) => JSON.stringify(a < b ? [a, b] : [b, a]);
-function copyFighter(f: FighterSnapshot): FighterSnapshot {
+/** A whitelisted, unfrozen field-by-field copy of a fighter snapshot. It does not validate; callers validate first. */
+export function copyFighter(f: FighterSnapshot): FighterSnapshot {
   const a = f.attributes;
   return { rulesVersion: f.rulesVersion, classId: f.classId, stance: f.stance,
     attributes: { strength: a.strength, agility: a.agility, vitality: a.vitality, endurance: a.endurance, precision: a.precision },

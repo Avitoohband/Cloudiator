@@ -1,6 +1,6 @@
 import type { ActivityChoice, LeagueId } from '../contracts/commands.ts';
 import type { BattleLog, CreditedRewards } from '../contracts/events.ts';
-import { applyRatingDelta, type ArenaEntrant } from './arena.ts';
+import { applyRatingDelta, copyFighter, LEAGUES, nonEmpty, RETAINED_RULES, type ArenaEntrant } from './arena.ts';
 import type { DeepReadonly, FighterSnapshot, Rules, Seed, SlotWindow } from './types.ts';
 import { freezeDomain } from './types.ts';
 import { slotAt } from './clock.ts';
@@ -11,36 +11,37 @@ import { seededRandom } from './random.ts';
 /** Task 2's canonical slot window (`types.ts`), re-exported beside the tournament functions; not a second definition. */
 export type { SlotWindow };
 
-/** Retained rules by version. A fighter or graph frozen under an unknown version fails closed. */
-const RETAINED_RULES: Readonly<Record<string, Rules>> = Object.freeze({ [RULES_V1.version]: RULES_V1 });
-/** Spec §8.1 league order, lowest first. */
-const LEAGUES: readonly LeagueId[] = Object.freeze(['bronze', 'silver', 'gold', 'champion']);
 const CHOICES: readonly string[] = Object.freeze(['training', 'rest', 'arena', 'expedition']);
 
-const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
+/** Arena's retained rules registry: a fighter or graph frozen under an unknown version fails closed. */
 function rulesFor(version: unknown): Rules {
   if (typeof version !== 'string' || !Object.hasOwn(RETAINED_RULES, version)) throw new RangeError('Unknown tournament rules version');
   return RETAINED_RULES[version];
 }
-function copyFighter(f: FighterSnapshot): FighterSnapshot {
+/** Arena's whitelisted fighter copy, after validating the snapshot under its own retained rules. */
+function validCopy(f: FighterSnapshot): FighterSnapshot {
   let valid = false;
   try { valid = validFighter(f, rulesFor(f?.rulesVersion)); } catch { valid = false; }
   if (!valid) throw new RangeError('Invalid tournament fighter snapshot');
-  const a = f.attributes;
-  return { rulesVersion: f.rulesVersion, classId: f.classId, stance: f.stance,
-    attributes: { strength: a.strength, agility: a.agility, vitality: a.vitality, endurance: a.endurance, precision: a.precision },
-    maxHealth: f.maxHealth, armor: f.armor, weaponDamage: f.weaponDamage, baseDamage: f.baseDamage,
-    attackIntervalMs: f.attackIntervalMs, efficiency: f.efficiency, equipmentSilhouettes: [...f.equipmentSilhouettes] };
+  return copyFighter(f);
 }
-/** A validated whitelisted copy of one frozen league entrant of `slotIndex` and `seasonId`. */
-function copyEntrant(e: ArenaEntrant, slotIndex: number, seasonId: unknown): ArenaEntrant {
+/** The one retained rules version of a non-empty set of input fighters. Mixed or unknown versions fail closed. */
+function sharedRules(fighters: readonly (FighterSnapshot | null | undefined)[]): Rules {
+  const versions = new Set(fighters.map(fighter => fighter?.rulesVersion));
+  if (versions.size !== 1) throw new RangeError('Tournament entrants must share one rules version');
+  return rulesFor([...versions][0]);
+}
+/** A validated whitelisted copy of one frozen league entrant of `slotIndex` and `seasonId`, under the shared `rules`. */
+function copyEntrant(e: ArenaEntrant, slotIndex: number, seasonId: unknown, rules: Rules): ArenaEntrant {
   if (!e || typeof e !== 'object' || !nonEmpty(e.gladiatorId) || !nonEmpty(e.activityId) || !nonEmpty(e.seasonId)
     || e.seasonId !== seasonId || !LEAGUES.includes(e.league) || e.slotIndex !== slotIndex
-    || !count(e.rating) || e.rating < RULES_V1.rating.minimum) throw new RangeError('Invalid tournament entrant');
+    || !count(e.rating) || e.rating < rules.rating.minimum || e.fighter?.rulesVersion !== rules.version) {
+    throw new RangeError('Invalid tournament entrant');
+  }
   return { gladiatorId: e.gladiatorId, activityId: e.activityId, seasonId: e.seasonId, league: e.league,
-    slotIndex: e.slotIndex, rating: e.rating, fighter: copyFighter(e.fighter) };
+    slotIndex: e.slotIndex, rating: e.rating, fighter: validCopy(e.fighter) };
 }
 
 const DAY_MS = 86_400_000;
@@ -60,11 +61,12 @@ function canonicalSlot(slot: SlotWindow): SlotWindow {
 /**
  * Spec §8.2 fixed times: a tournament slot is the 80-minute afternoon slot starting Wednesday or Saturday at 17:20 UTC.
  * Pure UTC epoch arithmetic on the slot start (no `Date`, local time zone or daylight saving), so local clock changes
- * never move a tournament. Every 17:20 UTC start is an afternoon, because a 24-hour day holds 18 slots.
+ * never move a tournament. Every 17:20 UTC start is an afternoon, because a 24-hour day holds 18 slots. The days and time
+ * come from `rules` (default v1); the partition and the bracket pass their entrants' retained rules.
  */
-export function isTournamentSlot(slot: SlotWindow): boolean {
+export function isTournamentSlot(slot: SlotWindow, rules: Rules = RULES_V1): boolean {
   const { startMs } = canonicalSlot(slot);
-  const { utcWeekdays, hourUtc, minuteUtc } = RULES_V1.tournament;
+  const { utcWeekdays, hourUtc, minuteUtc } = rules.tournament;
   const day = Math.floor(startMs / DAY_MS);
   return utcWeekdays.includes((day + EPOCH_WEEKDAY) % 7) && startMs - day * DAY_MS === (hourUtc * 60 + minuteUtc) * MINUTE_MS;
 }
@@ -122,18 +124,20 @@ function optedInAt(revisions: readonly OptInRevision[], cutoffMs: number): boole
 /**
  * Spec §8.2 eligibility at a common slot cutoff. On a tournament slot, a candidate enters its league's bracket when it
  * has Arena scheduled for the phase, was opted in before the cutoff and has stamina for both the requested Arena activity
- * (checked first, as boundary step 6 does) and the tournament. A league with at least two such entrants gets a bracket;
- * otherwise they run regular Arena, exactly once, with every other affordable Arena entrant (NPC fallback included).
- * No cross-league brackets. Any malformed candidate fails closed with a `RangeError`.
+ * (checked first, as boundary step 6 does) and the tournament. A league with at least the minimum entrants (v1: two)
+ * gets a bracket; otherwise they run regular Arena, exactly once, with every other affordable Arena entrant (NPC
+ * fallback included). No cross-league brackets. Days, time and minimum come from the candidates' one shared retained
+ * rules version (v1 when there are no candidates). Any malformed candidate fails closed with a `RangeError`.
  */
 export function partitionTournament(slot: SlotWindow, candidates: readonly TournamentCandidate[]): TournamentPartition {
-  const tournamentSlot = isTournamentSlot(slot);
   if (!Array.isArray(candidates)) throw new RangeError('Invalid tournament candidates');
+  const rules = candidates.length > 0 ? sharedRules(candidates.map(c => c?.entrant?.fighter)) : RULES_V1;
+  const tournamentSlot = isTournamentSlot(slot, rules);
   const season = candidates[0]?.entrant?.seasonId;
   const ids = new Set<string>(), activities = new Set<string>();
   const decided = candidates.map(c => {
     if (!c || typeof c !== 'object') throw new RangeError('Invalid tournament candidate');
-    const entrant = copyEntrant(c.entrant, slot.index, season);
+    const entrant = copyEntrant(c.entrant, slot.index, season, rules);
     if (ids.has(entrant.gladiatorId) || activities.has(entrant.activityId)) throw new RangeError('Duplicate tournament candidate');
     ids.add(entrant.gladiatorId);
     activities.add(entrant.activityId);
@@ -147,7 +151,7 @@ export function partitionTournament(slot: SlotWindow, candidates: readonly Tourn
     return { entrant, arena, affordsArena, optedIn, eligible, costs: { arena: c.costs.arena, tournament: c.costs.tournament } };
   });
   const bracketLeagues = new Set(LEAGUES.filter(league =>
-    decided.filter(d => d.eligible && d.entrant.league === league).length >= RULES_V1.tournament.minimumEntrants));
+    decided.filter(d => d.eligible && d.entrant.league === league).length >= rules.tournament.minimumEntrants));
   const routes: TournamentRoute[] = decided.map(d => {
     const base = { gladiatorId: d.entrant.gladiatorId, activityId: d.entrant.activityId, league: d.entrant.league };
     if (!d.arena) return { ...base, route: 'other', reason: 'not-arena', staminaDebit: 0 };
@@ -179,15 +183,15 @@ export type BracketBout = DeepReadonly<{
   /** Round 1: the two placed entrant ids, `null` marking an empty bracket slot. Later rounds: `null`. */
   placed: [string | null, string | null] | null;
   bye: boolean;
-  /** Private per-bout simulation seed, derived from the tournament seed; never a public read. */
-  seed: Seed;
   revealAtMs: number;
   result: BoutResult | null;
 }>;
 /**
  * The private tournament graph of one league and slot: frozen entries in seeded order, every bout (round-major,
- * position order) with stable ids, parents, byes, private seeds, reveal times and private results. Public reads
- * (`TournamentView`) must be explicit projections of it, never a spread.
+ * position order) with stable ids, parents, byes, reveal times and private results. Public reads (`TournamentView`)
+ * must be explicit projections of it, never a spread. It holds no bout seed: each fought bout's private seed is a
+ * one-way value phase 2 stores with the bout row and passes to `runBout`, so nothing here lets one bout's revealed log
+ * predict another bout's seed.
  */
 export type TournamentGraph = DeepReadonly<{
   id: string; seasonId: string; league: LeagueId; slotIndex: number; rulesVersion: string;
@@ -236,35 +240,37 @@ function frame(slotIndex: number, league: LeagueId, ranked: readonly string[], r
 }
 
 /**
- * Spec §8.2 bracket for one league's eligible entrants (at least two) on a tournament slot: seeded random placement into
- * the next power-of-two single-elimination bracket. Ranks follow a per-entrant seeded key (then id), so the result
- * does not depend on input order; ranks 1 … (size − n) meet an empty slot in standard bracket positions, so no bout has
- * two byes and no NPC is ever added. Byes resolve at once with no battle. Every bout uses the entrants' frozen initial
- * snapshots at full health. Bout ids `tournament:<slot>:<league>:<round>:<position>` are stable for any seed.
+ * Spec §8.2 bracket for one league's eligible entrants (at least the minimum, v1: two) on a tournament slot: seeded
+ * random placement into the next power-of-two single-elimination bracket. Ranks follow a per-entrant seeded key (then
+ * id), so the result does not depend on input order; ranks 1 … (size − n) meet an empty slot in standard bracket
+ * positions, so no bout has two byes and no NPC is ever added. Byes resolve at once with no battle. Every bout uses the
+ * entrants' frozen initial snapshots at full health. Bout ids `tournament:<slot>:<league>:<round>:<position>` are
+ * stable for any seed. Days, minimum, rating floor, clock and reveal schedule come from the entrants' one shared
+ * retained rules version, which the graph records.
  */
 export function buildBracket(entries: readonly ArenaEntrant[], seed: Seed): TournamentGraph {
-  if (!Array.isArray(entries) || entries.length < RULES_V1.tournament.minimumEntrants || !nonEmpty(seed)) {
-    throw new RangeError('A tournament needs at least two entrants and a private seed');
+  if (!Array.isArray(entries) || entries.length === 0 || !nonEmpty(seed)) {
+    throw new RangeError('A tournament needs entrants and a private seed');
   }
+  const rules = sharedRules(entries.map(entry => entry?.fighter));
+  if (entries.length < rules.tournament.minimumEntrants) throw new RangeError('A tournament needs the minimum number of entrants');
   const first = entries[0];
   const slotIndex = first?.slotIndex;
-  if (!count(slotIndex) || !isTournamentSlot(slotAt(slotIndex * RULES_V1.clock.slotMs))) throw new RangeError('Not a tournament slot');
+  if (!count(slotIndex) || !isTournamentSlot(slotAt(slotIndex * rules.clock.slotMs), rules)) throw new RangeError('Not a tournament slot');
   const ids = new Set<string>(), activities = new Set<string>();
   const copies = entries.map(entry => {
-    const copy = copyEntrant(entry, slotIndex, first.seasonId);
-    if (copy.league !== first.league || copy.fighter.rulesVersion !== first.fighter.rulesVersion
-      || ids.has(copy.gladiatorId) || activities.has(copy.activityId)) throw new RangeError('Invalid tournament entrant');
+    const copy = copyEntrant(entry, slotIndex, first.seasonId, rules);
+    if (copy.league !== first.league || ids.has(copy.gladiatorId) || activities.has(copy.activityId)) throw new RangeError('Invalid tournament entrant');
     ids.add(copy.gladiatorId);
     activities.add(copy.activityId);
     return { copy, key: seededRandom(`${seed}:tournament:${copy.gladiatorId}`)() };
   });
   copies.sort((a, b) => a.key - b.key || (a.copy.gladiatorId < b.copy.gladiatorId ? -1 : 1));
-  const rules = rulesFor(first.fighter.rulesVersion);
   const { bouts, ...shape } = frame(slotIndex, first.league, copies.map(c => c.copy.gladiatorId), rules);
   return freezeDomain({ ...shape, seasonId: first.seasonId, league: first.league, slotIndex, rulesVersion: rules.version,
     entries: copies.map(({ copy }, i) => ({ gladiatorId: copy.gladiatorId, activityId: copy.activityId, rating: copy.rating,
       fighter: copy.fighter, rank: i + 1 })),
-    bouts: bouts.map(bout => ({ ...bout, seed: `${seed}:bout:${bout.round}:${bout.position}`,
+    bouts: bouts.map(bout => ({ ...bout,
       result: bout.bye ? { winnerId: bout.placed!.find(entrant => entrant !== null)!, loserId: null, log: null } : null })) });
 }
 
@@ -280,21 +286,23 @@ const winnersOf = (graph: TournamentGraph) =>
 
 /**
  * Fails closed unless a stored graph is internally consistent: retained rules, valid frozen entries in rank order, and
- * every bout matching the frame those ranks imply (ids, parents, placement, byes, reveal times), with a private seed and
- * results only where both entrants are known and the winner is one of them. A bye's result is its placed entrant.
+ * every bout matching the frame those ranks imply (ids, parents, placement, byes, reveal times), with results only where
+ * both entrants are known, the winner is one of them and the stored log passes `recordBout`'s checks. A bye's result is
+ * its placed entrant.
  */
 function checkGraph(graph: TournamentGraph): void {
   const fail = (): never => { throw new RangeError('Invalid tournament graph'); };
   if (!graph || typeof graph !== 'object' || !Array.isArray(graph.entries) || !Array.isArray(graph.bouts)) fail();
-  let rules: Rules = RULES_V1;
-  try { rules = rulesFor(graph.rulesVersion); } catch { fail(); }
+  let rules: Rules;
+  try { rules = rulesFor(graph.rulesVersion); } catch { return fail(); }
   if (graph.entries.length < rules.tournament.minimumEntrants || !count(graph.slotIndex) || !LEAGUES.includes(graph.league)
     || !nonEmpty(graph.seasonId)) fail();
   const ids = new Set<string>(), activities = new Set<string>();
   graph.entries.forEach((entry, i) => {
     if (!entry || !nonEmpty(entry.gladiatorId) || !nonEmpty(entry.activityId) || ids.has(entry.gladiatorId)
-      || activities.has(entry.activityId) || !count(entry.rating) || entry.rank !== i + 1 || entry.fighter?.rulesVersion !== graph.rulesVersion) fail();
-    try { copyFighter(entry.fighter); } catch { fail(); }
+      || activities.has(entry.activityId) || !count(entry.rating) || entry.rating < rules.rating.minimum || entry.rank !== i + 1
+      || entry.fighter?.rulesVersion !== graph.rulesVersion) fail();
+    try { validCopy(entry.fighter); } catch { fail(); }
     ids.add(entry.gladiatorId);
     activities.add(entry.activityId);
   });
@@ -307,16 +315,17 @@ function checkGraph(graph: TournamentGraph): void {
     const s = expected.bouts[i];
     if (!bout || bout.id !== s.id || bout.battleId !== s.battleId || bout.round !== s.round || bout.position !== s.position
       || !sameList(bout.parentBoutIds, s.parentBoutIds) || !sameList(bout.placed, s.placed) || bout.bye !== s.bye
-      || bout.revealAtMs !== s.revealAtMs || !nonEmpty(bout.seed)) fail();
+      || bout.revealAtMs !== s.revealAtMs) fail();
     const result = bout.result;
     if (result === null) { if (s.bye) fail(); return; }
     if (!result || typeof result !== 'object') fail();
     if (s.bye) {
       if (result.winnerId !== s.placed!.find(id => id !== null) || result.loserId !== null || result.log !== null) fail();
     } else {
+      // A stored result passes the same log checks as `recordBout`, so a graph with stub or altered logs never settles.
       const sides = sidesOf(s, winners);
       if (!sides || !sides.includes(result.winnerId) || result.loserId !== sides.find(id => id !== result.winnerId)
-        || result.log?.battleId !== bout.battleId || result.log?.winnerId !== result.winnerId) fail();
+        || !logBelongs(graph, s, sides, result.log) || result.log?.winnerId !== result.winnerId) fail();
     }
     winners.set(bout.id, result.winnerId);
   });
@@ -325,12 +334,13 @@ function checkGraph(graph: TournamentGraph): void {
 /** One bout entrant: identity, activity and the frozen initial snapshot it fights with in every round. */
 export type BoutSide = DeepReadonly<{ gladiatorId: string; activityId: string; fighter: FighterSnapshot }>;
 /**
- * One bounded simulation job: a single fought bout whose parents are resolved. Retries reuse the same private seed and
- * snapshots, so `runBout` reproduces the same log; participants start at full health.
+ * One bounded simulation job: a single fought bout whose parents are resolved. It carries no seed: phase 2 supplies the
+ * bout's own stored one-way seed to `runBout`. Retries reuse that seed and these snapshots, so they reproduce the same
+ * log; participants start at full health.
  */
 export type BoutJob = DeepReadonly<{
   tournamentId: string; boutId: string; battleId: string; round: number; position: number; parentBoutIds: string[];
-  rulesVersion: string; seed: Seed; revealAtMs: number;
+  rulesVersion: string; revealAtMs: number;
   sides: [BoutSide, BoutSide];
 }>;
 
@@ -347,23 +357,24 @@ export function readyBouts(graph: TournamentGraph): BoutJob[] {
     if (!sides) return [];
     const side = (id: string): BoutSide => ({ gladiatorId: id, activityId: entries.get(id)!.activityId, fighter: entries.get(id)!.fighter });
     return [freezeDomain({ tournamentId: graph.id, boutId: bout.id, battleId: bout.battleId, round: bout.round, position: bout.position,
-      parentBoutIds: [...bout.parentBoutIds], rulesVersion: graph.rulesVersion, seed: bout.seed, revealAtMs: bout.revealAtMs,
+      parentBoutIds: [...bout.parentBoutIds], rulesVersion: graph.rulesVersion, revealAtMs: bout.revealAtMs,
       sides: [side(sides[0]), side(sides[1])] as [BoutSide, BoutSide] })];
   });
 }
 
 /**
- * Simulates one bout job with the canonical engine under its retained rules and private seed. Both participants
- * start at full health (no `startingHealth`); their battle ids are their gladiator ids. `names` only labels the log
- * (default `Gladiator`, as for expeditions); it never changes the outcome.
+ * Simulates one bout job with the canonical engine under its retained rules and `seed`, the bout's own private seed as
+ * phase 2 storage supplies it (a one-way derivation per bout, never derived here from a shared tournament seed). Both
+ * participants start at full health (no `startingHealth`); their battle ids are their gladiator ids. `names` only
+ * labels the log (default `Gladiator`, as for expeditions); it never changes the outcome.
  */
-export function runBout(job: BoutJob, names: Readonly<Record<string, string>> = {}): BattleLog {
+export function runBout(job: BoutJob, seed: Seed, names: Readonly<Record<string, string>> = {}): BattleLog {
   const rules = rulesFor(job?.rulesVersion);
   const sides = job.sides;
-  if (!Array.isArray(sides) || sides.length !== 2 || !nonEmpty(job.battleId) || !nonEmpty(job.seed)) throw new RangeError('Invalid bout job');
+  if (!Array.isArray(sides) || sides.length !== 2 || !nonEmpty(job.battleId) || !nonEmpty(seed)) throw new RangeError('Invalid bout job');
   const name = (id: string) => (names !== null && typeof names === 'object' && Object.hasOwn(names, id) && nonEmpty(names[id]) ? names[id] : 'Gladiator');
   const participant = (side: BoutSide) => ({ id: side.gladiatorId, gladiatorId: side.gladiatorId, name: name(side.gladiatorId), snapshot: side.fighter });
-  return simulateBattle({ battleId: job.battleId, rulesVersion: rules.version, rules, fighters: [participant(sides[0]), participant(sides[1])] }, job.seed);
+  return simulateBattle({ battleId: job.battleId, rulesVersion: rules.version, rules, fighters: [participant(sides[0]), participant(sides[1])] }, seed);
 }
 
 /** Canonical JSON (sorted object keys), so a stored log replays equal whatever key order its storage returns. */
@@ -371,11 +382,28 @@ function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) => (v !== null && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v));
 }
-/** A revealed combatant fought as `id` with that entrant's frozen snapshot, from full health. */
+/**
+ * A revealed combatant fought as `id` with that entrant's frozen snapshot, from full health: every snapshot field the
+ * engine reveals, including efficiency in basis points (the engine's `round(efficiency × 10,000)`) and the visible
+ * equipment silhouettes in order.
+ */
 function sameCombatant(p: BattleLog['participants'][number] | undefined, id: string, f: FighterSnapshot): boolean {
   return !!p && p.id === id && p.gladiatorId === id && p.classId === f.classId && p.stance === f.stance
     && p.maxHealth === f.maxHealth && p.initialHealth === f.maxHealth && p.armor === f.armor && p.weaponDamage === f.weaponDamage
-    && p.attackIntervalMs === f.attackIntervalMs && canonical(p.attributes) === canonical(f.attributes);
+    && p.attackIntervalMs === f.attackIntervalMs && canonical(p.attributes) === canonical(f.attributes)
+    && p.efficiencyBasisPoints === Math.round(f.efficiency * 10_000) && sameList(p.equipmentSilhouettes, f.equipmentSilhouettes);
+}
+/**
+ * The log checks shared by `recordBout` and every stored result (`checkGraph`): this bout's battle under the graph's
+ * rules, exactly the two known entrants in job order on their frozen snapshots at full health, and a winner among them.
+ */
+function logBelongs(graph: TournamentGraph, bout: Skeleton, sides: readonly [string, string], log: unknown): boolean {
+  const l = log as BattleLog | null;
+  const fighter = (id: string) => graph.entries.find(entry => entry.gladiatorId === id)?.fighter;
+  return !!l && typeof l === 'object' && l.battleId === bout.battleId && l.rulesVersion === graph.rulesVersion
+    && Array.isArray(l.participants) && l.participants.length === 2
+    && sides.every((id, i) => { const f = fighter(id); return !!f && sameCombatant(l.participants[i], id, f); })
+    && sides.includes(l.winnerId);
 }
 
 /**
@@ -391,12 +419,7 @@ export function recordBout(graph: TournamentGraph, boutId: string, log: BattleLo
   if (!bout || bout.bye) throw new RangeError('Not a fought tournament bout');
   const sides = sidesOf(bout, winnersOf(graph));
   if (!sides) throw new RangeError('Tournament bout is not ready');
-  const fighter = (id: string) => graph.entries.find(entry => entry.gladiatorId === id)!.fighter;
-  if (!log || typeof log !== 'object' || log.battleId !== bout.battleId || log.rulesVersion !== graph.rulesVersion
-    || !Array.isArray(log.participants) || log.participants.length !== 2
-    || !sides.every((id, i) => sameCombatant(log.participants[i], id, fighter(id))) || !sides.includes(log.winnerId)) {
-    throw new RangeError('Battle log does not belong to the tournament bout');
-  }
+  if (!logBelongs(graph, bout, sides, log)) throw new RangeError('Battle log does not belong to the tournament bout');
   if (bout.result !== null) {
     if (canonical(bout.result.log) === canonical(log)) return graph;
     throw new RangeError('Tournament bout already has a different result');
@@ -424,12 +447,14 @@ export type TournamentRatings = DeepReadonly<{
 }>;
 
 /**
- * Spec §8.1 tournament ratings for a completed bracket: human bouts apply Elo (`applyRatingDelta`, clamped at zero) in
- * round order, each round starting from the ratings updated by earlier rounds. Bouts of one round involve distinct
- * players, so their order within the round does not matter. Byes are not bouts and never change a rating.
+ * Spec §8.1 tournament ratings for a completed bracket: human bouts apply Elo (`applyRatingDelta` under the graph's
+ * retained rules, clamped at their floor, v1: zero) in round order, each round starting from the ratings updated by
+ * earlier rounds. Bouts of one round involve distinct players, so their order within the round does not matter. Byes
+ * are not bouts and never change a rating.
  */
 export function applyTournamentRatings(graph: TournamentGraph): TournamentRatings {
   const fought = completedBouts(graph);
+  const rules = rulesFor(graph.rulesVersion);
   const current = new Map(graph.entries.map(entry => [entry.gladiatorId, entry.rating]));
   const bouts: RatedBout[] = [];
   for (let round = 1; round <= graph.rounds; round += 1) {
@@ -438,7 +463,7 @@ export function applyTournamentRatings(graph: TournamentGraph): TournamentRating
     if (new Set(players).size !== players.length) throw new RangeError('A player appears twice in one tournament round');
     for (const { bout, winnerId, loserId } of inRound) {
       const winnerBefore = current.get(winnerId)!, loserBefore = current.get(loserId)!;
-      const update = applyRatingDelta(winnerBefore, loserBefore);
+      const update = applyRatingDelta(winnerBefore, loserBefore, rules);
       current.set(winnerId, update.winner);
       current.set(loserId, update.loser);
       bouts.push({ boutId: bout.id, round, winnerId, loserId, winnerBefore, winnerAfter: update.winner, loserBefore, loserAfter: update.loser });
@@ -450,7 +475,8 @@ export function applyTournamentRatings(graph: TournamentGraph): TournamentRating
 
 /**
  * One immutable placement reward, additional to fight renown. Its id `<tournament id>:placement:<gladiator id>` is the
- * single grant identity phase 2 settles at most once.
+ * single grant identity; phase 2 carries it inside the entrant activity's one settlement outcome and receipt, which
+ * settle at most once (no second grant guard).
  */
 export type RewardGrant = DeepReadonly<{
   id: string; tournamentId: string; gladiatorId: string; activityId: string;
@@ -483,16 +509,22 @@ export function placementGrants(graph: TournamentGraph): RewardGrant[] {
   return grants.sort((a, b) => a.place - b.place || a.rank - b.rank).map(({ rank: _rank, ...grant }) => freezeDomain(grant));
 }
 
-/** One entrant's part in one bout: a bye is a renown-free, rating-free advance; a fought bout earns fight renown. */
-export type EntrantBout = DeepReadonly<{ boutId: string; round: number; bye: boolean; won: boolean; renown: number; ratingDelta: number }>;
+/**
+ * One entrant's part in one bout. A `bye` is a renown-free, rating-free advance and is never a win; only fought bouts
+ * are a human `win` or `loss`, earning fight renown and a rating change.
+ */
+export type EntrantBout = DeepReadonly<{ boutId: string; round: number; kind: 'bye' | 'win' | 'loss'; renown: number; ratingDelta: number }>;
 /**
  * One entrant's complete tournament settlement, for its single activity of the slot: fight renown (10 a win, 2 a loss,
  * nothing for a bye) plus its placement grant, the round-ordered rating change, and `victory` only for the winner.
- * Never XP, attribute points or items. An eliminated entrant keeps this one activity until settlement at minute 80.
+ * `wins` and `losses` count fought human bouts only, never byes: they are the standings counters and the human bouts
+ * of the five-bout season rule. Never XP, attribute points or items. An eliminated entrant keeps this one activity
+ * until settlement at minute 80.
  */
 export type TournamentOutcome = DeepReadonly<{
   gladiatorId: string; activityId: string; place: number; result: 'victory' | 'defeat'; success: boolean;
   bouts: EntrantBout[];
+  wins: number; losses: number;
   placement: RewardGrant;
   rewards: CreditedRewards;
   ratingBefore: number; ratingAfter: number; ratingDelta: number;
@@ -510,16 +542,17 @@ export function tournamentOutcomes(graph: TournamentGraph): TournamentOutcome[] 
     const id = entry.gladiatorId;
     const bouts = graph.bouts.flatMap((bout): EntrantBout[] => {
       const result = bout.result!;
-      if (bout.bye) return result.winnerId === id ? [{ boutId: bout.id, round: bout.round, bye: true, won: true, renown: 0, ratingDelta: 0 }] : [];
+      if (bout.bye) return result.winnerId === id ? [{ boutId: bout.id, round: bout.round, kind: 'bye', renown: 0, ratingDelta: 0 }] : [];
       if (result.winnerId !== id && result.loserId !== id) return [];
       const won = result.winnerId === id;
-      return [{ boutId: bout.id, round: bout.round, bye: false, won, renown: won ? humanWinRenown : humanLossRenown,
+      return [{ boutId: bout.id, round: bout.round, kind: won ? 'win' : 'loss', renown: won ? humanWinRenown : humanLossRenown,
         ratingDelta: deltaOf.get(`${bout.id}:${id}`)! }];
     });
     const placement = grants.get(id)!, rating = ratingOf.get(id)!;
     const fightRenown = bouts.reduce((sum, bout) => sum + bout.renown, 0);
     return freezeDomain({ gladiatorId: id, activityId: entry.activityId, place: placement.place,
-      result: placement.place === 1 ? 'victory' as const : 'defeat' as const, success: placement.place === 1, bouts, placement,
+      result: placement.place === 1 ? 'victory' as const : 'defeat' as const, success: placement.place === 1, bouts,
+      wins: bouts.filter(bout => bout.kind === 'win').length, losses: bouts.filter(bout => bout.kind === 'loss').length, placement,
       rewards: { money: placement.money, renown: fightRenown + placement.renown, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 },
       ratingBefore: rating.before, ratingAfter: rating.after, ratingDelta: rating.delta });
   });

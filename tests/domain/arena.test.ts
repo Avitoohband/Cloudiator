@@ -222,6 +222,13 @@ describe('arena strength estimate', () => {
     expect(estimateArenaStrength(precise)).toBe(808.89);
     // The same exact half cent at a 1 s interval: 100 × 10 × .77 × 1.0505.
     expect(estimateArenaStrength({ ...tuned(100, 10), attributes: { ...reference.attributes, precision: 17 } })).toBe(808.89);
+    // Precision 40 carries error in both engine probabilities (hit .885, critical .17), so each normalisation is needed.
+    expect(hitProbability(40, RULES_V1.leagues.referenceAgility, RULES_V1)).toBe(0.8849999999999999);
+    expect(criticalProbability(40, RULES_V1)).toBe(0.16999999999999998);
+    // 60 × 10 × .885 × (1 + .5 × .17) = 576.135 exactly, so 576.14; either raw probability alone gives 576.13.
+    const doubleError = { ...tuned(60, 10), attributes: { ...reference.attributes, precision: 40 } };
+    expect(doubleError).toMatchObject({ stance: 'balanced', efficiency: 1, attackIntervalMs: 1000 });
+    expect(estimateArenaStrength(doubleError)).toBe(576.14);
   });
   it("leaves the estimate unchanged by the fighter's own armor (the reference target's armor is 0)", () => {
     const body = item('heavy-armor:1:renown');

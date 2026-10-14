@@ -387,8 +387,10 @@ pg_net, with a test-only database clock that is restored and verified.
 
 - **Phase 2a alone stalls the world** after the first tournament slot with an opted-in pair (see the status). That is the
   expected 2a boundary; nothing is credited or invented.
-- **Ranks are trusted** (decision 3). A malfunctioning worker could store a structurally valid bracket with other ranks;
-  only the seeded order is unchecked by SQL.
+- **What SQL trusts** (decision 3, corrected by the review). Like header exception 1, SQL trusts the worker's seeded rank
+  order, its tournament-slot decision, the opt-in and eligibility routing (including stamina against the tournament cost)
+  and the reason codes. It re-derives and checks everything else: the bracket frame, the frozen fighters and ratings, the
+  Rest routes against step 6, and that every Arena request is routed exactly once.
 - **Task 16 lock order (derived, not tested or observed).** Task 16 creates an Arena battle's simulation job, anchored to
   side 0, under whichever side's account lock phase 8 takes first. Its foreign key takes a KEY SHARE lock on side 0's
   gladiator row before phase 8 takes side 0's account lock. A planning or shop command by side 0's owner arriving in

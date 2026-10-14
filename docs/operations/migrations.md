@@ -23,8 +23,9 @@ A first draft, `20261014160119_tournaments.sql`, was discarded before commit wit
 and exact-file removal. It re-emitted `private.planning_now_ms()`: an interrupted RED run had left a test-only clock
 stand-in installed, and the manual restore had used M02's text through Git Bash `sed`, which dropped the carriage returns
 that the replayed definition (last written by M05) keeps. The function was restored byte for byte from M05 with Node, and
-the regenerated draft re-emits nothing unchanged. Restore a stand-in from the `pg_get_functiondef` text captured before it
-was installed, never from a migration through `sed`.
+the regenerated draft re-emits nothing unchanged. The fix used here was to restore the stand-in from the
+`pg_get_functiondef` text captured before it was installed, not from a migration through `sed`. Making that a standing rule
+is a proposal awaiting Avi's approval (2026-10-14); it is not yet approved guidance.
 
 **Release (Task 24).** Ship M11 with the Task 19 worker and with phase 2b, never alone. In phase 2a a tournament bout job
 can be claimed but not completed (`complete_job` has no tournament acceptance yet), so the real worker fails it into operator

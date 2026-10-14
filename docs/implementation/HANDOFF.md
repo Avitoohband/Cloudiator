@@ -1,25 +1,25 @@
 # Cloudiator development handoff
 
-Last updated: 2026-10-14, after reviewed Task10 and Task15 integration. Claude remains paused. The two selected bounded checkpoints are complete.
+Last updated: 2026-10-14, after Codex's full handover to Claude and Claude's first integration checkpoint (Tasks 17 and 20, Tasks 16 and 19 phase 1). Development is in progress.
 
 ## Authority and repository
 
 - Avi approved the [design](../superpowers/specs/2026-10-11-gladiator-arena-design.md), including proposed launch defaults, and the [24-task implementation plan](../superpowers/plans/2026-10-11-gladiator-arena-implementation.md).
 - Execution method: Superpowers subagent-driven development. A fresh implementer owns each task; an independent reviewer checks specification compliance and code quality before the next task.
-- **Codex remains the executing controller.** Claude's paused handover allowed Codex to finish Task 8. Claude announced resumption at19:10 IDT; Codex acknowledged the original parallel split on the board. Codex owns backend/release work, this handoff, integration and all reviewed feature pushes. Claude now owns Tasks13/15/16/17/19/20; its Task15 checkpoint also includes the two Task14 Minor fixes. Codex owns10/18/21/22/23/24 and integration/HANDOFF/pushes.
-- Claude uses `C:\Avi\Studies\Projects\Cloudiator-claude` on `claude/visual-track`. Leave that checkout untouched; consume its declared reviewed checkpoints through serialized integration. Claude never pushes the integration branch in this resumed split.
-- Codex works in `C:\Avi\Studies\Projects\Cloudiator` on `codex/gladiator-arena`. Interrupted Task 7 files are preserved in stash `763051847dba6a14c5ef7b6b4169c0cbbf1543f7`; they were not reapplied over completed Task 7. Published checkpoint a04484c was fetched and verified before local work resumed.
+- **Claude is the executing controller.** On 2026-10-14 Avi told Codex to hand all remaining work to Claude. Codex posted the full handover on the board, and Claude acknowledged it at 10:45 IDT. Claude owns Tasks 13 and 16–24, integration, this file and the reviewed feature-branch pushes. Codex is finished; do not wait for it.
+- Claude works in its own worktrees: `C:\Avi\Studies\Projects\Cloudiator-claude` (integration, Playwright port 3200), `Cloudiator-replay` (port 3300) and `Cloudiator-arena`. It pushes from them as fast-forwards to `origin/codex/gladiator-arena`.
+- The root checkout `C:\Avi\Studies\Projects\Cloudiator` (Codex's) was left clean at `b83d7e3` and stays untouched. Its interrupted Task 7 files remain in stash `763051847dba6a14c5ef7b6b4169c0cbbf1543f7`.
 - Repository: https://github.com/Avitoohband/Cloudiator. Avi authorized committing and pushing each completed task with detailed notes so another agent can take over.
 - Push reviewed task checkpoints to this feature branch. Do not force-push or merge into another branch without authorization.
 - Branch starting point: `2261fb77ff38ecba5678e2f70446c593d2cdade7`.
 
 ## Resume here
 
-Tasks 1–10, 11, 12, 14 and 15 passed independent specification and quality review (14 of 24 tasks).
+Tasks 1–12, 14, 15, 17 and 20 passed independent specification and quality review (16 of 24 tasks). Tasks 17 and 20 are complete on fixtures; their live data waits for Task 16/19 phase 2 and Task 13. The pure domain of Tasks 16 and 19 (phase 1) is reviewed; their backend (phase 2) remains.
 - Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`; Claude pushed the first takeover checkpoint at `9b39edc` (Task 6 merged with Tasks 11/12, R2 applied) and the second at `9f2b69d` (Tasks 7 and 14; see the checkpoint sections below).
 - M01–M08 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`, `20261013065108_inventory_shops`, `20261013125213_expeditions`, `20261014045856_projections`, `20261014100253_projection_preparation_status`.
-- **Next ownership:** Claude13 management/sync and its16 Arena backend after resumption. Codex next feature is18 marketplace, divided into bounded items; this session did not open it. Read the Task7/8/9/10 reports and reviews for actual contracts. Prepared ignored briefs are under `.superpowers/sdd/2026-10-11-gladiator-arena-implementation/`; the controller reconciles each with its exact reviewed prerequisites and base before dispatch.
-- Task 15 needs Task 9's revealed stages; any parallel lane requires declared ownership first. Task 13 waits for Task 10 and consumes the reviewed Inventory/Shop panels.
+- **Next (Claude, in small checkpoints):** Task 16 phase 2 (SQL source, a new migration after M08, the pairing job and boundary hook, the per-battle simulation job, settlement through a prepared input, public Arena stages and standings rows, DB tests), then Task 19 phase 2, then Task 13, then Tasks 18, 21, 22, 23 and 24. Read `task-16-phase-1-report.md` and `task-19-phase-1-report.md` for the agreed phase 2 plans.
+- Task 13 consumes the reviewed Inventory/Shop, Arena/Standings and Tournament panels and mounts Task 10's sync controller.
 - Do not reimplement completed tasks.
 
 Every completed task has a tracked `task-NN-report.md` with changes, interfaces, commands/results, limitations, and file-map adjustments, plus a `task-NN-review.md` containing the review verdict and any fixes. Read those before changing dependent code. The plan remains the task queue; the design binds exact behavior.
@@ -44,12 +44,15 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | 9 — Timed expeditions and fenced rewards | `05b1ea0..545a82d` (source `e96e0f1`, report `5dbf34e`, fix `545a82d`) | One Important corrected; scoped review Approved; [review](task-09-review.md) | 103 DB/Auth/HTTP +4 focused privacy/token cases, 297 affected units, 258-entry M06 parity, fresh81-asset scan; fix2RED→75 focused passes and TS/Deno. See [report](task-09-report.md) for distinct runs and remaining read-model/hosted gates. |
 | 10 — Safe projections and revision polling | `62f24cc..8b4464e` (source `36fd2b4`, report `7f413e5`, fix `a699384`, correction report `8b4464e`) | One Important corrected; scoped review Approved; [review](task-10-review.md) | Final M01–M08 replay109 DB/Auth/Edge and303 parity; earlier376 units plus final12 focused,22 browser, compile/static81. See [report](task-10-report.md) for distinct runs and deferred offset/UI/hosted gates. |
 | 15 — Followable expedition scenes (Claude) | `05b1ea0..59e0db7`, root merge `930c2c7` | Full/scoped spec, quality and visual Pass; [review](task-15-review.md) | Claude399 units,153 dev browser passes/7 skips; root combined74 focused units, TS/Deno, fresh5-route90-asset scan and repo-config production8 passes/118 expected skips. [Integration evidence](task-15-integration.md) records distinct runs and UI/hosted gates. |
+| 17 — Arena staging, selection and standings (Claude) | `708688b..26acc23` on `claude/task-17` (brief `95eb764`, source `98284aa`, report `88e2e58`, approved shared edits `1f01531`, fixes `e3392fb`/`ff01dba`, follow-up `6df1b78`/`f429c83`, review `26acc23`) | Three rounds: spec, quality and visual Pass; [review](task-17-review.md) | 453 units; 172 dev browser passes on port 3300. Camp rings play each bout at its real time, after a ~4 s jog walk-in; Arena card and standings. Live reads wait for Task 10/16 wiring ([report](task-17-report.md), integration checklist). |
+| 20 — Tournament countdown, brackets and camp roles (Claude) | `08998e6..7182196` on `claude/task-20` (source `c1ff143`, report `b67a06c`, fixes `ffc1e2f`/`2cafdeb`, Task 17 merge `b7f38ad`, shared guard `b48ce1f`, review `7182196`) | Full review: spec Fail (2 Important) then fixed; scoped re-review spec, quality and visual Pass; [review](task-20-review.md) | 856 units; 256 dev browser passes / 0 failures on the combined branch. Role-safe `TournamentView` placements, round-1 placement field and the opt-in RPC are Task 19 phase 2 gates ([report](task-20-report.md)). |
+| 16 and 19 — phase 1 only (Claude) | `claude/task-16` `fc4832b` (arena.ts), `claude/task-19` `be28376` (tournament.ts) | Spec and quality Pass; [16 review](task-16-phase-1-review.md), [19 review](task-19-phase-1-review.md) | Pure domain only: league placement, strength estimate, pairing, NPC fallback, Elo, bracket, placements. Avi chose to keep the spec's strongest-first pairing (odd-league NPC note). Phase 2 is not started. |
 
 Deferred Minors: the existing browser color warning and expected-diagnostic assertions (Tasks 1/8, Task 23/final triage); Task 6's stale estimated schedule clock (Task 13); Task15's safe-point leave pose/encounter-count/test-title Minors and Task10's initial-load clock-offset bias (Task13/final triage). Task14's two remaining Minors are resolved in reviewed708688b and the Task15 integration. The escaped-seed scanner gap is resolved in the reviewed supplement below.
 
 ## Coordination history (Codex and Claude)
 
-**Current state:** Claude's19:10 resumption and Codex's board ACK restore the split below. Codex retains10/18/21/22/23/24 and integration/HANDOFF/pushes; Claude retains13/15/16/17/19/20. Claude is paused; its reviewed15 checkpoint is ready for serialized integration. Task9 is reviewed; Task10 begins in the backend/read-model lane. Claude's Task15 consumes the existing stage contract in its own checkout and does not use the shared database. Shared edits still require exact ownership approval and serialized integration.
+**Current state:** Codex handed all remaining work to Claude on 2026-10-14 (Avi's instruction). The split history below is kept for the record only.
 
 Avi explicitly authorized communication and parallel development through the [Cloudiator Message Board](https://docs.google.com/document/d/1Fz_MTVcUJkBU52wRuLQCgftMzJtTNn3l6snRQw9RSkM). Claude replied with a layer split, and Codex posted agreement and ownership refinements.
 
@@ -147,6 +150,29 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - `npm run build` and `npm run verify:static`: 4 fixed routes (`/replay` added), 81 assets, no forbidden material.
 - Development Playwright, desktop and mobile: 99 passed, 5 skipped (shell, identity, planning, camp, replay).
 - Isolated production gate (shell and camp against `.next/browser-test`): 6 passed; the rest skip by design.
+
+### Claude integration checkpoint after the full handover — 2026-10-14
+
+**What it contains**
+- Origin `b83d7e3` (Codex's reviewed Tasks 10 and 15) merged into `claude/task-20` as `eeaf606`, with no conflicts.
+- `claude/task-20` combines Claude's reviewed work: Task 17, Task 20, and the Task 16 and 19 phase 1 domain. Task 15 is the same `59e0db7` Codex integrated, so it is not duplicated.
+- `938c34d`: Avi's approved build and browser output separation override, in `AGENTS.md` and `docs/operations/verification-gates.md`.
+- `3bd7e63`: the Arena fixture test accepts Task 10's nullable `combatStrength`.
+- `d25f2f0`: `planning.spec.ts` gets the production skip that `identity.spec.ts` and `inventory.spec.ts` already have, because it uses the same development-only identity transport. Without it, a full static run reported 6 infrastructure failures.
+
+**Runtime**
+- Codex's root `functions serve` process (serving the root checkout with Codex's secret) was stopped.
+- A clean `db reset --local --no-seed --yes` replayed M01–M08.
+- Edge is now served from `Cloudiator-claude` with its own ignored `.env.edge.local`.
+- No root files were touched.
+
+**Verification, in the order of `docs/operations/verification-gates.md`**
+- `npm test`: 867 passed. `npm run typecheck`: tsc, both frozen Deno entrypoints and the Deno runtime tests.
+- `npm run test:db`: 109 passed on the clean M01–M08 replay.
+- `npm run build` and `npm run verify:static`: 5 fixed routes, 91 assets, no forbidden material.
+- Development Playwright on port 3200, desktop and mobile: 258 passed, 8 skipped.
+- Isolated production gate (`.next/browser-test`, run after the development run): 14 passed, 252 skipped by design.
+- One infrastructure fault happened during this checkpoint. A first gate run had a type error, and its failed builds left a stale `out/` that the static scan read. After the fix, every build-dependent step was rerun in order; the numbers above come from that rerun.
 
 ### Task5 integration notes
 

@@ -43,7 +43,7 @@ Date: 2026-10-14. Reviewers: two fresh Claude reviewer subagents, read-only on t
 
 **Rulings on the implementer's eleven decisions:** all accepted. Pairing is strongest first; integer-hundredths comparison; window S − 18..S − 1; one seeded key per entrant; fallback flooring, no class and the player's `weaponDamage`; battle ids; frozen ratings. Decisions 8–10 are real phase 2 design issues, now in the plan: a fenced pairing job per slot and league from `boundary_pair`; an executor discriminator; a season epoch with Task 21. Decision 11 stays with the Task 14/17 owner.
 
-**Balance note, raised with Avi:** under the spec's greedy rule, the weakest entrant in a stable, odd-sized league keeps getting the NPC. That could cost them the five human bouts needed for season rewards. This comes from the spec; the pairing order is unchanged pending Avi's decision.
+**Balance note, raised with Avi:** under the spec's greedy rule, the weakest entrant in a stable, odd-sized league keeps getting the NPC. That could cost them the five human bouts needed for season rewards. This comes from the spec. **Avi decided on 2026-10-14 to keep the spec rule for launch (option A)** and record it as a known balance issue; rotating the NPC bout (option B) can come later.
 
 ## Round 2: scoped re-review (`61b3e7b..bec7ad2`)
 
@@ -70,5 +70,4 @@ Date: 2026-10-14. Reviewers: two fresh Claude reviewer subagents, read-only on t
 - The fighter and NPC comparison target, and the seed derivation: design points, not built.
 - The season epoch: agree with Codex (Task 21).
 - The pairing round trip against the 2-minute target at 50 characters.
-- The balance decision from Avi.
 - A second local Supabase stack, agreed with Codex before any DB work.

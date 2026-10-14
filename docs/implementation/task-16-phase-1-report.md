@@ -1,6 +1,6 @@
 # Task 16 phase 1 report: pure Arena domain
 
-Status: **DONE**. The pure domain module and its unit tests are complete and verified. An independent review found specification Pass and code quality Pass, ready to merge with fixes; those fixes are applied and verified below. Phase 2 (database, worker, settlement, projections) is still to do. Its plan, now including the reviewer's rulings, is at the end. One balance question that comes from the spec is open with Avi (see "Balance note"). Two phase-2 design points are also open, neither built nor tested: the fighter and NPC template comparison target for pairing acceptance (phase 2 item 6) and the battle-seed derivation (item 7).
+Status: **DONE**. The pure domain module and its unit tests are complete and verified. An independent review found specification Pass and code quality Pass, ready to merge with fixes; those fixes are applied and verified below. Phase 2 (database, worker, settlement, projections) is still to do. Its plan, now including the reviewer's rulings, is at the end. Avi decided the balance question that comes from the spec on 2026-10-14: keep the spec rule (see "Balance note"). Two phase-2 design points are also open, neither built nor tested: the fighter and NPC template comparison target for pairing acceptance (phase 2 item 6) and the battle-seed derivation (item 7).
 
 - Date: 2026-10-14. Worktree `C:\Avi\Studies\Projects\Cloudiator-arena`, branch `claude/task-16`.
 - Task base: **`62f24cc`**, Codex's reviewed Task 9 checkpoint. Branch start: `b8ac1ce`, the controller brief.
@@ -195,7 +195,7 @@ Nothing extra was staged.
 
 ## Balance note
 
-This is raised with Avi by the controller. The pairing order is unchanged pending his decision.
+**Decision (Avi, 2026-10-14): option A, keep the spec rule for launch** and record the effect below as a known balance issue. The alternative (B), rotating the NPC bout to the entrant with the most recent human bouts, was declined for now and can be added later if players report it. The pairing order stays strongest first.
 
 - The spec's greedy rule (§8.1) pairs from the top of the sorted list, and phase 1 sorts strongest first (decision 1).
 - Take a league whose roster and strengths stay stable and whose entrant count is odd. The weakest entrant is left over in every such slot and gets the NPC.

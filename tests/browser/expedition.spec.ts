@@ -304,7 +304,7 @@ test.describe('followable expedition scenes', () => {
 
   test('names the encounter the shown health comes from, and notes the recovery after a non-final win', async ({ page }) => {
     const meter = () => page.getByRole('meter', { name: 'Gladiator health' });
-    const recovers = () => page.getByText('Health recovers before the next encounter.');
+    const recovers = () => page.getByText('Some health recovers before the next encounter.');
     await expeditionFlow.open(page, 'tiebreak');
     const [first, second] = encounterStages('tiebreak');
     // Exploring after the zero-HP tie-break win: the 0 is the health after encounter 1, not the health now.

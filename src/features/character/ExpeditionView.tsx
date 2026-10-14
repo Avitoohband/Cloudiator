@@ -345,7 +345,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
             <span className={styles.fill} style={{ width: `${(100 * state.hp.current) / state.hp.max}%` }} />
             <span className={styles.hpText}>{state.hp.current} / {state.hp.max}</span>
           </div> : <span className={styles.note}>{encounters ? 'Not kept for this expedition' : 'Full at departure'}</span>}
-          {health.recovers && <span className={styles.recovers}>Health recovers before the next encounter.</span>}
+          {health.recovers && <span className={styles.recovers}>Some health recovers before the next encounter.</span>}
         </div>
       </div>
 

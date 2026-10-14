@@ -1,6 +1,6 @@
 # Cloudiator development handoff
 
-Last updated: 2026-10-14, after Task10 scoped correction approval. Claude is paused with reviewed Task15 ready. This session completes bounded10/15 checkpoints.
+Last updated: 2026-10-14, after reviewed Task10 and Task15 integration. Claude remains paused. The two selected bounded checkpoints are complete.
 
 ## Authority and repository
 
@@ -15,10 +15,10 @@ Last updated: 2026-10-14, after Task10 scoped correction approval. Claude is pau
 
 ## Resume here
 
-Tasks 1–10, 11, 12 and 14 passed independent specification and quality review (13 of 24 tasks).
+Tasks 1–10, 11, 12, 14 and 15 passed independent specification and quality review (14 of 24 tasks).
 - Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`; Claude pushed the first takeover checkpoint at `9b39edc` (Task 6 merged with Tasks 11/12, R2 applied) and the second at `9f2b69d` (Tasks 7 and 14; see the checkpoint sections below).
 - M01–M08 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`, `20261013065108_inventory_shops`, `20261013125213_expeditions`, `20261014045856_projections`, `20261014100253_projection_preparation_status`.
-- **Next: integrate reviewed Task15**, then Claude13 management/sync and its16 Arena backend. Codex next feature is18 marketplace, divided into bounded items. Read the Task7/8/9/10 reports and reviews for actual contracts. Prepared ignored briefs are under `.superpowers/sdd/2026-10-11-gladiator-arena-implementation/`; the controller reconciles each with its exact reviewed prerequisites and base before dispatch.
+- **Next ownership:** Claude13 management/sync and its16 Arena backend after resumption. Codex next feature is18 marketplace, divided into bounded items; this session did not open it. Read the Task7/8/9/10 reports and reviews for actual contracts. Prepared ignored briefs are under `.superpowers/sdd/2026-10-11-gladiator-arena-implementation/`; the controller reconciles each with its exact reviewed prerequisites and base before dispatch.
 - Task 15 needs Task 9's revealed stages; any parallel lane requires declared ownership first. Task 13 waits for Task 10 and consumes the reviewed Inventory/Shop panels.
 - Do not reimplement completed tasks.
 
@@ -43,8 +43,9 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | 8 — Inventory, rewards planner and NPC shops | `8195ff5..28d1fee` (preserved WIP merge `4be59b3`, source `801eea1`, report `28d1fee`) | Spec compliant; quality Approved; [review](task-08-review.md) | 352 units; all 83 DB tests covered green across final replay runs; 67 affected browser checks/1 skip; production 6/2 skips; TypeScript/Deno; fresh 81-asset scan; M05 replay and 228-entry parity. See [report](task-08-report.md) for exact run split, grants/XP/history/cosmetic contracts and remaining integrations. |
 | 9 — Timed expeditions and fenced rewards | `05b1ea0..545a82d` (source `e96e0f1`, report `5dbf34e`, fix `545a82d`) | One Important corrected; scoped review Approved; [review](task-09-review.md) | 103 DB/Auth/HTTP +4 focused privacy/token cases, 297 affected units, 258-entry M06 parity, fresh81-asset scan; fix2RED→75 focused passes and TS/Deno. See [report](task-09-report.md) for distinct runs and remaining read-model/hosted gates. |
 | 10 — Safe projections and revision polling | `62f24cc..8b4464e` (source `36fd2b4`, report `7f413e5`, fix `a699384`, correction report `8b4464e`) | One Important corrected; scoped review Approved; [review](task-10-review.md) | Final M01–M08 replay109 DB/Auth/Edge and303 parity; earlier376 units plus final12 focused,22 browser, compile/static81. See [report](task-10-report.md) for distinct runs and deferred offset/UI/hosted gates. |
+| 15 — Followable expedition scenes (Claude) | `05b1ea0..59e0db7`, root merge `930c2c7` | Full/scoped spec, quality and visual Pass; [review](task-15-review.md) | Claude399 units,153 dev browser passes/7 skips; root combined74 focused units, TS/Deno, fresh5-route90-asset scan and repo-config production8 passes/118 expected skips. [Integration evidence](task-15-integration.md) records distinct runs and UI/hosted gates. |
 
-Deferred Minors: the existing browser color warning and expected-diagnostic assertions (Tasks 1/8, Task 23/final triage); Task 6's stale estimated schedule clock (Task 13); Task 14's early-destroy window handlers and unmatched-creature warning (Task 13/final triage). The escaped-seed scanner gap is resolved in the reviewed supplement below.
+Deferred Minors: the existing browser color warning and expected-diagnostic assertions (Tasks 1/8, Task 23/final triage); Task 6's stale estimated schedule clock (Task 13); Task15's safe-point leave pose/encounter-count/test-title Minors and Task10's initial-load clock-offset bias (Task13/final triage). Task14's two remaining Minors are resolved in reviewed708688b and the Task15 integration. The escaped-seed scanner gap is resolved in the reviewed supplement below.
 
 ## Coordination history (Codex and Claude)
 
@@ -229,7 +230,7 @@ within the five-hour session limit. Codex posted the question and ACKed the new
 feature split; that message does not revoke Avi's pause of Claude.
 
 - **Task10 completed:** source36fd2b4/report7f413e5, fix a699384/report8b4464e. Full review found one Important; scoped review7f413e5..8b4464e approves the correction. Final M08 replay109 DB/Auth/Edge checks and303 schema entries matched; no frontend contract change. A generic processing actor conceals unpublished details and retains prior history. Offset Minor remains deferred. See tracked report/review.
-- **Next bounded item:** integrate reviewed Task15 on `claude/task-15`, head59e0db7055f4144035a5a8e897e764597441c307, base05b1ea0. Scope matches the approved53 scene/shared/evidence paths. Existing full and scoped independent reviews approve; the final wording Minor is fixed. Run its requested production gate with repository Playwright configuration after a clean serialized merge. Keep existing Task10 contracts/backend untouched.
+- **Task15 integrated:** reviewed head59e0db7, normal root merge930c2c7 after Task10 checkpoint54beafb. Scope matches approved53 paths. Fresh combined74 owning tests, TypeScript/Deno,5-route90-asset scan and repo-config production8 passes/118 expected skips all passed. Existing Task10 contracts/backend remain intact. See task-15-integration.md; no partial Claude competition phases were imported.
 - **New ownership:** Claude13/15/16/17/19/20; Codex10/18/21/22/23/24 plus integration, this handoff and reviewed pushes. Root16/19 work was preparation only; no competing backend implementation exists.
 - **Claude paused checkpoints:**15 READY59e0db7;16 domain phase1fc4832b;19 domain phase1be28376;17 reviewedff01dba with follow-up polish not started;20b67a06c unreviewed. Domain phases are not completed full tasks. All Claude worktrees were clean/committed at its09:02 board note. Do not reset, reimplement or merge unreviewed phases as complete.
 - **Future isolated Claude backend:** approved after its resumption, project labelCloudiator-claude and ports+1000, own volumes/secret, local config changes not committed; no root stack changes. Arena SQL migration generation waits for reviewed10 integration. Existing worktreeCloudiator-arena contains16 phase1; no root worktree is created.
@@ -257,3 +258,17 @@ into scenes/results. Existing replay in-progress labels and Task15 interim poll
 replacement remain explicit integration gates. M08 fix uses the existing DTO
 and no renderer edits. Full source/DB, corrected migration replay, compile and
 browser/static results are distinct runs in the report, not one aggregate claim.
+
+### This bounded session closes here
+
+Published Task10 checkpoint54beafb includes full/scoped review and exact source/
+migration evidence. Task15 merge930c2c7 and its integration documentation form
+the second checkpoint. All remaining work has declared ownership and explicit
+prerequisites; another agent can resume from these records without rerunning
+completed tasks or resetting Claude's saved lanes. Small next Codex items should
+come from18's marketplace plan, not another full feature mixed into this session.
+
+No live Google/hosted public game is claimed. Task13 scene synchronization,
+competition backends/UI, marketplace, season ordering, retention and release
+proof remain. Claude is paused, and the board asks it for the smallest remaining
+Codex items when it returns. No new dev server or automation was started.

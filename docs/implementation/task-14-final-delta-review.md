@@ -28,3 +28,13 @@ integration and final whole-branch triage. They do not enter the blocking fix
 loop under the SDD Minor rule. Task14's independent full spec/quality/visual
 approval remains recorded separately; this scoped review does not claim all
 five final fixes were completed. Keep these findings visible before release.
+
+## Subsequent resolution — 2026-10-14
+
+Both remaining Minors were corrected in Claude's `708688b`, included in reviewed
+Task15 head `59e0db7` and root merge `930c2c7`. The independent full Task15 review
+explicitly verifies their meaningful regressions and resolution. Root's combined
+74-test integration run includes the Phaser lifecycle and battle-stage warning
+tests. See [Task15 review](task-15-review.md) and
+[integration evidence](task-15-integration.md). The original partial verdict
+above remains historical; these two findings are now resolved, not deferred.

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_EXECUTORS, handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
-import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput } from '../../supabase/functions/_shared/backend/jobs.ts';
-import type { ExecutorRegistry, JobOutcome, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput, PairingResult, TournamentBoutResult } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { ExecutorRegistry, JobOutcome, TournamentBoutRead, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout } from '../../supabase/functions/_shared/domain/tournament.ts';
+import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
+import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import type { ActivitySnapshot, Attributes, JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
@@ -35,6 +38,7 @@ function port(queues: Partial<Record<JobKind, JobLease[]>>, outcome: (call: stri
     complete: async (id, token, result) => { calls.push({ name: 'complete', args: [id, token, result] }); return outcome('complete'); },
     settle: async (id, token) => { calls.push({ name: 'settle', args: [id, token] }); return outcome('settle'); },
     fail: async (id, token, code) => { calls.push({ name: 'fail', args: [id, token, code] }); return { ok: true }; },
+    tournamentBoutInput: async (id, token) => { calls.push({ name: 'tournamentBoutInput', args: [id, token] }); return { ok: false, code: 'not-found' }; },
   };
   return { database, calls };
 }
@@ -208,6 +212,159 @@ describe('regular Arena simulation executor', () => {
       costs: prepared.costs, trainingPoints: 1, starting: { stamina: { current: 100, maximum: 100 }, level: 1, xp: 0, earnedPoints: 10,
         unspentPoints: 10, league: 'bronze', rating: 1000, peakStrength: 0, tournamentOptIn: false } };
     expect(DEFAULT_EXECUTORS.v1.simulation!(lease('simulation', { snapshot, seed: 'trip' }))).toEqual(planExpedition(snapshot, 'trip', RULES_V1));
+  });
+});
+
+/** Task 19 fixtures: slot 301 starts Saturday 1970-01-17 at 17:20 UTC, a tournament slot under v1. */
+const TOURNAMENT_SLOT = 301;
+const tournamentFighter = (strength: number) => prepareActivityV1(preparation({ earnedPoints: 40,
+  build: { ...preparation().build, allocations: { strength, agility: 2, vitality: 2, endurance: 0, precision: 2 } } })).arenaFighter;
+const tournamentEntrant = (id: string, strength: number, slotIndex = TOURNAMENT_SLOT) => ({ gladiatorId: id, activityId: `activity-${id}`,
+  seasonId: '0', league: 'bronze' as const, slotIndex, rating: 1000, fighter: tournamentFighter(strength) });
+
+describe('tournament partition inside the per-league pairing executor (Task 19)', () => {
+  const SLOT_MS = RULES_V1.clock.slotMs;
+  const candidate = (id: string, enabled: boolean, stamina = 104, slotIndex = TOURNAMENT_SLOT) => ({ gladiatorId: id,
+    choice: { kind: 'arena' as const }, stamina, costs: { arena: 25, tournament: 25 }, optIn: [{ enabled, receivedAtMs: slotIndex * SLOT_MS - 1 }] });
+  /** Five opted-in entrants, one opted-out entrant (f) and one Arena request that boundary step 6 replaced with Rest (g). */
+  const input = (slotIndex = TOURNAMENT_SLOT, optedIn = ['a', 'b', 'c', 'd', 'e']): PairingInput => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    return { slotIndex, league: 'bronze', seasonId: '0', rulesVersion: 'v1', historyFromSlot: slotIndex - 18, recent: [],
+      entrants: ids.map((id, i) => tournamentEntrant(id, i, slotIndex)),
+      tournament: { bracketSeed: 'bracket-seed', rested: [tournamentEntrant('g', 3, slotIndex)],
+        candidates: [...ids.map(id => candidate(id, optedIn.includes(id), 104, slotIndex)), candidate('g', true, 10, slotIndex)] } };
+  };
+  const pair = (snapshot: unknown, seed = 'pair-seed') => DEFAULT_EXECUTORS.v1.pair!(lease('pair', { snapshot: snapshot as PairingInput, seed, gladiatorId: null })) as PairingResult;
+  const domainCandidates = (value: PairingInput) => value.tournament!.candidates.map(c => ({ ...c,
+    entrant: [...value.entrants, ...value.tournament!.rested].find(e => e.gladiatorId === c.gladiatorId)! }));
+
+  it('partitions the league, builds its bracket under the placement seed and pairs every other Arena entrant exactly once', () => {
+    expect(isTournamentSlot(slotAt(TOURNAMENT_SLOT * SLOT_MS))).toBe(true);
+    const value = input();
+    const result = pair(value);
+    const partition = partitionTournament(slotAt(TOURNAMENT_SLOT * SLOT_MS), domainCandidates(value));
+    expect(partition.brackets.map(b => [b.league, b.entrants.map(e => e.gladiatorId)])).toEqual([['bronze', ['a', 'b', 'c', 'd', 'e']]]);
+    const bracket = buildBracket(partition.brackets[0].entrants, 'bracket-seed');
+    expect(result).toEqual({ assignments: matchArena(partition.arena, [], 'pair-seed'), tournament: { routes: partition.routes, bracket } });
+    expect(result.tournament!.routes.map(r => [r.gladiatorId, r.route, r.reason, r.staminaDebit])).toEqual([
+      ['a', 'tournament', 'bracket', 25], ['b', 'tournament', 'bracket', 25], ['c', 'tournament', 'bracket', 25], ['d', 'tournament', 'bracket', 25],
+      ['e', 'tournament', 'bracket', 25], ['f', 'arena', 'opted-out', 25], ['g', 'rest', 'insufficient-stamina', 0]]);
+    // The opted-out entrant fights regular Arena (here its NPC fallback); the bracket entrants and the Rest fallback never do.
+    expect(result.assignments.flatMap(a => a.sides.map(s => s.gladiatorId))).toEqual(['f']);
+    // The placement comes from its own seed, never the matcher's.
+    expect(buildBracket(partition.brackets[0].entrants, 'pair-seed').entries.map(e => e.gladiatorId))
+      .not.toEqual(bracket.entries.map(e => e.gladiatorId));
+    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+
+  it('sends a league below the minimum, or any slot that is not a tournament slot, to regular Arena exactly once', () => {
+    const lone = input(TOURNAMENT_SLOT, ['a']);
+    const alone = pair(lone);
+    expect(alone.tournament!.bracket).toBeNull();
+    expect(alone.tournament!.routes.filter(r => r.route === 'arena').map(r => [r.gladiatorId, r.reason])).toEqual([
+      ['a', 'too-few-entrants'], ['b', 'opted-out'], ['c', 'opted-out'], ['d', 'opted-out'], ['e', 'opted-out'], ['f', 'opted-out']]);
+    expect(alone.assignments).toEqual(matchArena(lone.entrants, [], 'pair-seed'));
+    const regular = input(300);
+    const result = pair(regular);
+    expect(isTournamentSlot(slotAt(300 * SLOT_MS))).toBe(false);
+    expect(result.tournament!.bracket).toBeNull();
+    expect(result.tournament!.routes.map(r => r.reason)).toEqual([...Array(6).fill('not-tournament-slot'), 'insufficient-stamina']);
+    expect(result.assignments).toEqual(matchArena(regular.entrants, [], 'pair-seed'));
+  });
+
+  it('fails a tournament pairing input closed: no candidates on a tournament slot, unmatched candidates, a reused seed or malformed values', () => {
+    const invalid = expect.objectContaining({ code: 'invalid-input' });
+    const valid = input();
+    const tournament = valid.tournament!;
+    const run = (snapshot: unknown, seed?: string) => () => pair(snapshot, seed);
+    // A tournament slot must partition, or its bracket would silently become regular Arena.
+    expect(run({ ...valid, tournament: undefined })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, candidates: tournament.candidates.slice(1) } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, candidates: [...tournament.candidates, tournament.candidates[0]] } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, candidates: [...tournament.candidates.slice(1), { ...tournament.candidates[0], gladiatorId: 'x' }] } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, rested: [...tournament.rested, valid.entrants[0]] } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, rested: [{ ...tournament.rested[0], league: 'silver' }] } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, bracketSeed: '' } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, bracketSeed: 'pair-seed' } }, 'pair-seed')).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, candidates: [{ ...tournament.candidates[0], stamina: -1 }, ...tournament.candidates.slice(1)] } })).toThrow(invalid);
+    expect(run({ ...valid, tournament: { ...tournament, candidates: [{ ...tournament.candidates[0], optIn: null }, ...tournament.candidates.slice(1)] } })).toThrow(invalid);
+    expect(run(valid)).not.toThrow();
+  });
+});
+
+describe('tournament bout executor (Task 19)', () => {
+  const entrants = ['a', 'b', 'c', 'd', 'e'].map((id, i) => tournamentEntrant(id, i));
+  const graph = buildBracket(entrants, 'bracket-seed');
+  const names = Object.fromEntries(entrants.map(e => [e.gladiatorId, `Name ${e.gladiatorId}`]));
+  const read = (stored: TournamentGraph = graph, overrides: Partial<{ names: Record<string, string> }> = {}): TournamentBoutRead =>
+    ({ ok: true, graph: JSON.parse(JSON.stringify(stored)), names, ...overrides });
+  const boutLease = (boutId: string, seed = 'bout-seed', extra: Record<string, unknown> = {}) =>
+    lease('simulation', { snapshot: { kind: 'tournament-bout', tournamentId: graph.id, boutId, ...extra } as never, seed });
+  /** Runs the v1 simulation executor with a port whose fenced read answers `response`. */
+  async function execute(job: JobLease, response: TournamentBoutRead) {
+    const { database, calls } = port({});
+    database.tournamentBoutInput = async (id, token) => { calls.push({ name: 'tournamentBoutInput', args: [id, token] }); return response; };
+    const result = await DEFAULT_EXECUTORS.v1.simulation!(job, { database }) as TournamentBoutResult;
+    return { result, calls };
+  }
+  const id = (round: number, position: number) => `${graph.id}:${round}:${position}`;
+
+  it('reads its bout under the lease, then simulates it once from the frozen entries with the bout’s own seed', async () => {
+    // Five entrants in eight slots: ranks 1, 2 and 3 have byes, so round 1 fights only 4 v 5 and round 2 pairs the bye winners 2 and 3 at once.
+    expect(readyBouts(graph).map(b => b.boutId)).toEqual([id(1, 1), id(2, 1)]);
+    const ready = readyBouts(graph)[0];
+    const job = boutLease(ready.boutId);
+    const { result, calls } = await execute(job, read());
+    expect(calls).toEqual([{ name: 'tournamentBoutInput', args: [job.id, job.token] }]);
+    expect(result).toEqual({ boutId: ready.boutId, log: runBout(ready, 'bout-seed', names) });
+    expect(result.log.participants.map(p => [p.id, p.name, p.initialHealth === p.maxHealth])).toEqual(
+      ready.sides.map(side => [side.gladiatorId, names[side.gladiatorId], true]));
+    // A retry reuses the same seed and frozen entries and reproduces the log; another seed is another bout.
+    expect((await execute(boutLease(ready.boutId), read())).result).toEqual(result);
+    expect((await execute(boutLease(ready.boutId, 'other-seed'), read())).result.log).not.toEqual(result.log);
+  });
+
+  it('fights a child bout between its parents’ stored winners: two byes at once, a fought parent once its result is recorded', async () => {
+    const ranked = graph.entries.map(e => e.gladiatorId);
+    const byes = await execute(boutLease(id(2, 1)), read());
+    expect(byes.result.log.participants.map(p => p.gladiatorId)).toEqual([ranked[1], ranked[2]]);
+    const invalid = expect.objectContaining({ code: 'invalid-input' });
+    // Its fought parent is unresolved, so the child is not ready yet.
+    await expect(execute(boutLease(id(2, 0)), read())).rejects.toThrow(invalid);
+    const parent = readyBouts(graph)[0];
+    const recorded = recordBout(graph, parent.boutId, runBout(parent, 'parent-seed', names));
+    const child = await execute(boutLease(id(2, 0)), read(recorded));
+    expect(child.result.log.participants.map(p => p.gladiatorId)).toEqual([ranked[0], recorded.bouts.find(b => b.id === parent.boutId)!.result!.winnerId]);
+  });
+
+  it('fails closed on a bye, a resolved or unknown bout, a refused read, a tampered graph, a missing name or other rules', async () => {
+    const invalid = expect.objectContaining({ code: 'invalid-input' });
+    const ready = readyBouts(graph)[0];
+    const recorded = recordBout(graph, ready.boutId, runBout(ready, 'bout-seed', names));
+    const stub = JSON.parse(JSON.stringify(recorded)) as { bouts: { id: string; result: { log: unknown } | null }[] };
+    stub.bouts.find(b => b.id === ready.boutId)!.result!.log = { battleId: ready.boutId, winnerId: ready.sides[0].gladiatorId };
+    const cases: [string, JobLease, TournamentBoutRead][] = [
+      ['a bye', boutLease(id(1, 0)), read()],
+      ['an already resolved bout', boutLease(ready.boutId), read(recorded)],
+      ['an unknown bout', boutLease(`${graph.id}:9:0`), read()],
+      ['another tournament', boutLease(ready.boutId), read({ ...graph, id: 'tournament:301:silver' } as TournamentGraph)],
+      ['a refused read', boutLease(ready.boutId), { ok: false, code: 'conflict' }],
+      ['a stub stored log', boutLease(id(2, 0)), read(stub as unknown as TournamentGraph)],
+      ['a missing name', boutLease(ready.boutId), read(graph, { names: { [ready.sides[0].gladiatorId]: 'Only one' } })],
+      ['an extra input key', boutLease(ready.boutId, 'bout-seed', { sides: [] }), read()],
+    ];
+    for (const [name, job, response] of cases) await expect(execute(job, response), name).rejects.toThrow(invalid);
+    await expect(execute(boutLease(ready.boutId), read({ ...graph, rulesVersion: 'v2' } as TournamentGraph)))
+      .rejects.toThrow(expect.objectContaining({ code: 'unsupported-rules' }));
+  });
+
+  it('runs inside runWorker as one bounded combat job that completes with the bout id and its log', async () => {
+    const ready = readyBouts(graph)[0];
+    const job = boutLease(ready.boutId);
+    const { database, calls } = port({ simulation: [job] });
+    database.tournamentBoutInput = async (jobId, token) => { calls.push({ name: 'tournamentBoutInput', args: [jobId, token] }); return read(); };
+    expect(await runWorker({ database, workerId: 'worker-bout' })).toMatchObject({ claimed: 1, completed: 1, failed: 0, byKind: { simulation: 1 } });
+    expect(calls.find(c => c.name === 'complete')?.args).toEqual([job.id, job.token, { boutId: ready.boutId, log: runBout(ready, 'bout-seed', names) }]);
   });
 });
 

@@ -9,6 +9,7 @@ import { deriveStats } from '../domain/stats.ts';
 import { applyXp, historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer } from '../domain/inventory.ts';
 import type { ExpeditionRewards } from '../domain/expedition.ts';
 import type { InventoryGrantPlan, ShopOffer } from '../domain/inventory.ts';
+import type { TournamentGraph } from '../domain/tournament.ts';
 import type { CoordinatorReport, JobKind, JobLease } from '../domain/types.ts';
 
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
@@ -66,6 +67,9 @@ export function prepareItemSale(command: Extract<InventoryCommand, { kind: 'sell
   const unitValue = item ? npcSaleValue(item, CATALOG_V1) : null;
   return item && unitValue !== null ? { catalogId: item.catalogId, catalogVersion: item.catalogVersion, unitValue } : null;
 }
+export type OptInCommand = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
+/** The saved automatic-entry setting and the database time it was received (Task 19). */
+export type OptInValue = { enabled: boolean; receivedAtMs: number };
 export type CreationValue = { gladiatorId: string };
 /** Server-computed catalog rolls and derived values; never accepted by the HTTP parser. */
 export function prepareCreation(command: Creation) {
@@ -124,6 +128,13 @@ export function createDatabase(client: SupabaseClient) {
       if (error) throw new Error('inventory-unavailable');
       return data as CommandResult<InventoryValue>;
     },
+    /** Task 19: the automatic tournament entry flag. SQL replays receipts first and answers `processing` while the world is behind. */
+    async setTournamentOptIn(actor: Actor, original: OptInCommand): Promise<CommandResult<OptInValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase() };
+      const { data, error } = await client.rpc('set_tournament_opt_in', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
+      if (error) throw new Error('opt-in-unavailable');
+      return data as CommandResult<OptInValue>;
+    },
     /** Future build commands must use this actor-scoped inventory, never a player-supplied owned list. */
     async loadOwnedInventory(actor: Actor): Promise<ItemInstance[]> {
       // The owner aggregate contains all 60 items in one row; a base-table read is capped at 50 by the Data API.
@@ -140,6 +151,13 @@ export type CommandDatabase = ReturnType<typeof createDatabase>;
 export type JobOutcome = { ok: true; replayed?: boolean; newGrants?: number; receiptId?: string; [key: string]: unknown }
   | { ok: false; code: 'conflict' | 'invalid' | 'not-found' | 'processing' | 'stale-preparation' | 'operator' };
 export type RenewOutcome = { ok: true; expiresAtMs: number } | { ok: false; code: 'conflict' | 'not-found' };
+/**
+ * `public.tournament_bout_input` (Task 19): under the bout job's current lease (locked first, then checked against
+ * database time sampled after the lock) the stored tournament graph, every stored bout result and the frozen entrant
+ * names; never a seed. Otherwise the fence's refusal.
+ */
+export type TournamentBoutRead = { ok: true; graph: TournamentGraph; names: Readonly<Record<string, string>> }
+  | { ok: false; code: 'invalid' | 'not-found' | 'conflict' | 'processing' };
 /** Service-role RPC port used only by the private game-worker; every call is fenced by its lease token in SQL. */
 export type WorkerDatabase = {
   coordinate(): Promise<CoordinatorReport>;
@@ -148,9 +166,12 @@ export type WorkerDatabase = {
   complete(jobId: string, token: string, result: unknown): Promise<JobOutcome>;
   settle(activityId: string, token: string): Promise<JobOutcome>;
   fail(jobId: string, token: string, code: string): Promise<JobOutcome>;
+  tournamentBoutInput(jobId: string, token: string): Promise<TournamentBoutRead>;
 };
+/** The fenced reads an executor may make for its own claimed job (a tournament bout reads its parents' stored winners). */
+export type ExecutorIo = { database: Pick<WorkerDatabase, 'tournamentBoutInput'> };
 /** Versioned executors keyed by the job's persisted rules version. Settlement is SQL-side and never an executor. */
-export type JobExecutor = (job: JobLease) => unknown | Promise<unknown>;
+export type JobExecutor = (job: JobLease, io?: ExecutorIo) => unknown | Promise<unknown>;
 export type ExecutorRegistry = Readonly<Record<string, Partial<Record<Exclude<JobKind, 'settlement'>, JobExecutor>>>>;
 export type WorkerDependencies = { database: WorkerDatabase; workerId: string; executors?: ExecutorRegistry; now?: () => number; cpuNow?: () => number };
 export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
@@ -184,5 +205,6 @@ export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
       return { ok: false, code: 'stale-preparation' };
     },
     fail: (jobId, token, code) => rpc('fail_job', { job_id: jobId, lease_token: token, failure_code: code }),
+    tournamentBoutInput: (jobId, token) => rpc('tournament_bout_input', { job_id: jobId, lease_token: token }),
   };
 }

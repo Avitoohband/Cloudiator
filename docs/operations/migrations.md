@@ -1,5 +1,48 @@
 # Local identity backend and migrations
 
+## Task 19 phase 2a: tournament entry, brackets and bout jobs
+
+M11 is `supabase/migrations/20261014160257_tournaments.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull tournaments --local --schema public,private --yes` from the tested `supabase/sql/09-tournaments.sql`.
+M01–M10 are unchanged.
+
+The draft needed three completions before commit:
+- It only added table grants. Source-equivalent revokes on `private.tournaments`, `private.tournament_entries` and
+  `private.tournament_bouts` now precede them.
+- It omitted every function ACL: the source's revoke/grant pair is appended, so the new and changed functions keep backend
+  `EXECUTE` only.
+- A provenance header and `notify pgrst` were added. No backfill or initialization is needed: the tables are new, and a
+  pairing input frozen before M11 keeps its regular path in `accept_pairing`.
+
+It re-emits no unchanged function. The changed existing functions are `pairing_input`, `boundary_pair`, `accept_pairing`,
+`activity_executor_ready` and `prepare_activity_jobs`; the new ones are `public.set_tournament_opt_in`,
+`public.tournament_bout_input`, `private.valid_bracket`, `private.tournament_graph` and `private.guard_tournament_bout`.
+Its triggers follow their functions.
+
+A first draft, `20261014160119_tournaments.sql`, was discarded before commit with local `migration repair --status reverted`
+and exact-file removal. It re-emitted `private.planning_now_ms()`: an interrupted RED run had left a test-only clock
+stand-in installed, and the manual restore had used M02's text through Git Bash `sed`, which dropped the carriage returns
+that the replayed definition (last written by M05) keeps. The function was restored byte for byte from M05 with Node, and
+the regenerated draft re-emits nothing unchanged. Restore a stand-in from the `pg_get_functiondef` text captured before it
+was installed, never from a migration through `sed`.
+
+**Release (Task 24).** Ship M11 with the Task 19 worker and with phase 2b, never alone. In phase 2a a tournament bout job
+can be claimed but not completed (`complete_job` has no tournament acceptance yet), so the real worker fails it into operator
+state and the boundary after a tournament slot waits. A pairing job frozen before M11 on a tournament slot fails closed in the
+new worker (`invalid-input`); check that no `pair` or `simulation` job is in operator state after the release.
+
+**Retention (Task 22).** Prune bout rows and entries before their tournament, tournaments before their pairing job, entries
+before their activities, and bout jobs (anchored to the rank-1 entry's activity) before that activity (foreign keys).
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M11, with no source applied afterwards.
+- The schema fingerprint (752 entries, 772 lines, the same coverage as M10's) matched the tested source exactly, and was
+  identical again after the tests.
+- `npm run test:db` passed **151/151** in eight files on the replay, with the Edge container's start time unchanged across
+  the run. One earlier replay run also passed 151/151, but the Edge container was recreated as it ended, so it does not count.
+- Lint is empty. Advisors report 25 INFO unused-index notices on the freshly reset database (two on the new foreign-key
+  indexes `tournament_entries_gladiator_idx` and `tournaments_rules_idx`), and no warnings or errors.
+
 ## Task 16 phase 2b: Arena bouts, settlement, stages and standings
 
 M10 is `supabase/migrations/20261014131209_arena_bouts.sql`, generated with CLI 2.120.0 (engine `migra`) by

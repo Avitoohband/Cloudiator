@@ -5,7 +5,8 @@ const operationId = '8d2f0216-c41a-4056-89aa-8f0c1da612e0';
 const create = { kind: 'create-character', operationId, name: 'Avi Fighter', classId: 'guardian',
   allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } };
 const deps: CommandDependencies = { allowedOrigins: ['http://127.0.0.1:3000'], verifyActor: async () => ({ userId: operationId }),
-  database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }) } };
+  database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }),
+    setTournamentOptIn: async () => ({ ok: false, code: 'unavailable' }) } };
 function req(body: unknown, origin = 'http://127.0.0.1:3000') { return new Request('http://local', { method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) }); }
 
@@ -13,7 +14,8 @@ it('rejects missing identity before any command executes', async () => {
   const response = await handleCommand(new Request('http://local', { method: 'POST', body: '{}' }), {
     allowedOrigins: ['http://127.0.0.1:3000'],
     verifyActor: async () => { throw new Error('unauthenticated'); },
-    database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); } },
+    database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); },
+      setTournamentOptIn: async () => { throw new Error('must not execute'); } },
   });
   expect(response.status).toBe(401);
   expect(await response.json()).toEqual({ ok: false, code: 'unauthenticated' });
@@ -85,4 +87,26 @@ it('routes item commands to the inventory transaction with the verified actor an
   expect(calls).toEqual(commands.map(command => ({ actor: { userId: operationId }, command })));
   const marketplace = await handleCommand(req({ kind: 'cancel-listing', operationId, listingId: operationId }), routed);
   expect(await marketplace.json()).toEqual({ ok: false, code: 'unavailable' });
+});
+
+it('routes the tournament opt-in to its own transaction with the verified actor and the parsed command only', async () => {
+  const calls: unknown[] = [];
+  const results = [{ ok: true as const, receiptId: operationId, value: { enabled: true, receivedAtMs: 7 } },
+    { ok: false as const, code: 'processing' as const, retryAfterMs: 1000 }];
+  const routed = { ...deps, database: { ...deps.database,
+    plan: async () => { throw new Error('the opt-in must not reach planning'); },
+    inventory: async () => { throw new Error('the opt-in must not reach the inventory'); },
+    setTournamentOptIn: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return results.shift()!; } } };
+  const command = { kind: 'set-tournament-opt-in', operationId, enabled: true };
+  const saved = await handleCommand(req(command), routed);
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toEqual({ ok: true, receiptId: operationId, value: { enabled: true, receivedAtMs: 7 } });
+  // Behind the world clock the transaction answers processing, a retryable conflict.
+  const behind = await handleCommand(req(command), routed);
+  expect(behind.status).toBe(409);
+  expect(await behind.json()).toEqual({ ok: false, code: 'processing', retryAfterMs: 1000 });
+  expect(calls).toEqual([{ actor: { userId: operationId }, command }, { actor: { userId: operationId }, command }]);
+  // Extra authority never reaches the transaction.
+  expect((await handleCommand(req({ ...command, gladiatorId: operationId }), routed)).status).toBe(400);
+  expect(calls).toHaveLength(2);
 });

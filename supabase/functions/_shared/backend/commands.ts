@@ -1,6 +1,6 @@
 import type { GameCommand, Attributes } from '../contracts/commands.ts';
 import type { Actor } from './auth.ts';
-import type { CommandDatabase, InventoryCommand, PlanningCommand } from './database.ts';
+import type { CommandDatabase, InventoryCommand, OptInCommand, PlanningCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
@@ -51,7 +51,7 @@ const PLANNING_KINDS: readonly string[] = ['edit-schedule', 'queue-build', 'canc
 const INVENTORY_KINDS: readonly string[] = ['buy-shop', 'sell-item', 'discard-item'];
 export type CommandDependencies = {
   verifyActor(request: Request): Promise<Actor>;
-  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory'>;
+  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'setTournamentOptIn'>;
   allowedOrigins: readonly string[];
 };
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
@@ -75,10 +75,11 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, 'create-character'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, 'create-character', 'set-tournament-opt-in'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
     const result = command.kind === 'create-character' ? await deps.database.createGladiator(actor, command)
-      : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)
-        : await deps.database.plan(actor, command as PlanningCommand);
+      : command.kind === 'set-tournament-opt-in' ? await deps.database.setTournamentOptIn(actor, command as OptInCommand)
+        : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)
+          : await deps.database.plan(actor, command as PlanningCommand);
     return jsonResponse(result, result.ok ? 200 : statusFor(result.code), origin);
   } catch { return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin); }
 }

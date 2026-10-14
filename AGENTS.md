@@ -154,3 +154,29 @@ newly tested fixes and migration-only replay evidence. See
 [the lease guide](docs/operations/job-leases.md) for the exact scope and
 verification checklist. Task 9's final verification was still pending when
 this approved guidance was added; do not treat this note as a passed test.
+
+# Build and browser output separation — persistent project override
+
+Avi approved this override on 2026-10-14 for the Superpowers
+`verification-before-completion` skill's **The Gate Function**. Keep vendor
+caches unchanged; this project instruction survives plugin updates and
+supplements the skill's run-the-full-command-before-claiming rule.
+
+A Next.js build or export and a browser check must never share an output
+directory at the same time. Either give them separate, non-overlapping output
+directories, or run them one after the other in the same worktree. The
+Playwright dev server and the isolated production build both use
+`.next/browser-test` (`CLOUDIATOR_BROWSER_TEST=true` in `next.config.ts`), so
+a build started while a development browser run is active deletes the dev
+server's `.next/browser-test/dev` output underneath it.
+
+Observed 2026-10-14 (Codex, Task 15 integration): a build during a browser
+run removed `.next/browser-test/dev` and caused 12 infrastructure failures.
+A serialized 22-case rerun then passed, and the root build-then-browser
+production gate passed 8 cases. Infrastructure failures caused by overlapping
+output are not product evidence: rerun serialized before reporting.
+
+Follow the exact gate order in
+[the verification gate guide](docs/operations/verification-gates.md). Separate
+worktrees each have their own `.next` and may run in parallel on their own
+Playwright ports.

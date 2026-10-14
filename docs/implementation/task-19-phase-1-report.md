@@ -4,7 +4,9 @@ Status: **DONE_WITH_CONCERNS**. The pure tournament module and its unit tests ar
 
 The concerns are two open points:
 - A public-contract question for Codex and Task 20; see "Public projection". The controller raises it.
-- A new, unruled recommendation in phase 2 item 4: give the public bracket placement its own one-way seed.
+- Phase 2 items 5 and 6 depend on Task 16's two open phase-2 design points: the fighter and NPC comparison target, and the seed derivation.
+
+The controller **ACCEPTED** the recommendation in phase 2 item 4: the public bracket placement gets its own one-way SHA-256 placement seed, not the matcher's seed.
 
 - Date: 2026-10-14. Worktree `C:\Avi\Studies\Projects\Cloudiator-claude`, branch `claude/task-19`.
 - Task base: **`61b3e7b`**, the head of `claude/task-16` at the time. Branch start: `427158e`, the controller brief.
@@ -348,27 +350,34 @@ This plan starts from Task 16's corrected phase 2 plan ([task-16-phase-1-report.
 
      No entrant can be in both a bracket and regular Arena, and SQL restates none of these rules.
    - Candidates are every activity of that slot and league whose frozen choice is Arena, built from `activity_snapshots`:
-     - the entrant fighter is the arena fighter frozen by canonical TypeScript (Task 16 item 6);
+     - the entrant fighter is the arena fighter frozen by canonical TypeScript (Task 16 item 6, an open design point; see item 5);
      - the rating is the league-season row (Task 16 item 5);
      - the choice, the starting stamina and the snapshot costs;
      - the opt-in input from item 3.
    - **Rest.** Boundary step 6 has already resolved unaffordable Arena activities to Rest. Phase 2 asserts that the partition's `rest` routes are exactly step 6's fallback set, with debit 0, rather than recomputing or re-resolving them. The phase 1 pin shows the domain agrees with step 6 even when the tournament is cheaper than Arena.
    - Bracket activities become `resolved_kind = 'tournament'` with `stamina_debit = costs.tournament`, debited once at phase 8.
-   - **Recommended, not yet ruled:** pass `buildBracket` its own one-way placement seed (for example SHA-256 of the job seed and `':bracket'`, computed by SQL into the job input), not the seed `matchArena` uses.
+   - The pairing job creates no bout job; its accepted graph is stored as the frame and bout rows (item 1). At phase 8, once `private.activity_executor_ready('tournament')` is true, the tournament branch of `private.prepare_activity_jobs` creates the bout jobs and each entrant's reveal and settlement jobs (item 7). Until then, `boundary_start` returns `'integration'`.
+   - **Placement seed (controller ACCEPTED).** Pass `buildBracket` its own one-way placement seed, not the seed `matchArena` uses. SQL computes it into the job input as SHA-256 of the job seed and `':bracket'`, for example `encode(extensions.digest(<pairing job seed> || ':bracket', 'sha256'), 'hex')`.
      - The placement is public at start.
-     - FNV-1a steps can be inverted over a known suffix. A placement brute-forced back to the job seed's 32-bit hash state could therefore expose the matcher's seeded tie-break keys.
+     - With one shared seed, both key strings would begin with `${seed}:` (`${seed}:tournament:<id>` for the bracket, `${seed}:arena:<id>` for the matcher). `seededRandom`'s FNV-1a would then reach the same 32-bit state after that prefix for both. Nothing needs inverting: an observer can try all 2^32 prefix states, keep those that reproduce the published placement, and continue them over `arena:<id>` to compute the matcher's seeded tie-break keys.
 5. **Accepting the pairing result (ruling f).** `complete_job` accepts the TypeScript-built bracket only if all three hold:
    - every eligible entrant of that slot and league appears exactly once across the bracket entries, the regular-Arena assignments and the Rest routes, with the same slot, season and league;
-   - each entry's fighter equals the TypeScript-frozen value from preparation (Task 16 item 6), and its rating equals the frozen league-season row;
+   - each entry's fighter equals its TypeScript-frozen comparison target, and its rating equals the frozen league-season row.
+     - **Depends on an open Task 16 phase-2 design point (item 6, not built or tested): the fighter and NPC comparison target.** This check, and item 4's candidate fighter, use whatever target Task 16 settles. Its example, an arena fighter frozen with the snapshot at phase 4 preparation, is not yet a ruling. A bracket never adds an NPC, so Task 19 needs only the fighter half;
    - the graph passes `checkGraph`. The worker runs it, through `readyBouts`, on the built graph before completing. Every bout executor and the settlement run it again on the stored graph. SQL checks the stored frame's cheap structural invariants (bout count `size − 1`, unique ids, parents, byes) but restates no bracket rule.
 6. **Bout seeds (ruling b; review fix M2).**
-   - Each fought bout gets a private one-way seed, computed by SQL when the bout row is written, as Task 16 item 7 does for battles. For example: `encode(extensions.digest(<pairing job seed> || ':' || boutId, 'sha256'), 'hex')`.
+   - Each fought bout gets a private one-way seed, computed by SQL when the bout row is written.
+   - **Depends on an open Task 16 phase-2 design point (item 7, not built or tested): the seed derivation.** The bout seed follows the derivation Task 16 settles for battle seeds. Its example, applied to a bout, is `encode(extensions.digest(<pairing job seed> || ':' || boutId, 'sha256'), 'hex')`.
    - It is stored on the bout row, and the bout's simulation job carries it in `jobs.seed`, so a retry reuses it.
    - The SQL header records the exception to the per-activity seed rule (`03-activities-jobs.sql:249-250`): a tournament bout job carries its bout's seed, not its anchor activity's.
    - The domain never derives a bout seed. The worker calls `runBout(job, jobSeed, names)`.
 7. **Bout jobs, anchoring and child input (ruling c).**
    - **Jobs.** One `simulation` job per fought bout, with dedupe key `tournament-bout:<boutId>` and the combat batch limit of 5. No job simulates more than one bout, and byes need no job.
-   - **Dependencies.** All bout jobs are created up front. A child bout job depends on its fought parents' jobs through `private.job_dependencies`, so it cannot be claimed before both parents' results are committed.
+   - **Dependencies.** All bout jobs are created up front, at preparation (below). A child bout job depends on its fought parents' jobs through `private.job_dependencies`, so it cannot be claimed before both parents' results are committed.
+   - **Executor flag and preparation.** `private.activity_executor_ready('tournament')` must return true; its current definition is `05-expeditions.sql:48`. Without that flag, `private.boundary_start` keeps returning `'integration'` for any slot with a preparing tournament activity, before any debit (`03-activities-jobs.sql:403-404`). With it, `boundary_start` calls `private.prepare_activity_jobs(uuid)` for each entrant activity under that entrant's account and character lock (`03-activities-jobs.sql:409-412`). Its new tournament branch (current definition `05-expeditions.sql:51`, which rejects every kind but Training, Rest and Expedition) creates:
+     - every bout job of the entrant's tournament, idempotently by dedupe key (`on conflict (dedupe_key) do nothing`). The first entrant prepared creates them from the stored bout rows, with the anchor below and each bout's seed (item 6); later entrants and retries add none;
+     - this entrant's own reveal jobs (item 9) and settlement job (item 10), which keep the activity seed;
+     - their dependencies in `private.job_dependencies`, each `on conflict do nothing`: each child bout job on its fought parents' jobs, the reveal jobs on the bout jobs they reveal, and the settlement job on every bout job and this activity's reveal jobs.
    - **Anchor (chosen).** Every bout job of a tournament is anchored to the tournament's rank-1 entry (its `gladiator_id` and `activity_id`):
      - The anchor is known when the graph is stored and stays stable across retries.
      - It needs no relaxation beyond Task 16's, which stays limited to `pair` jobs.
@@ -384,7 +393,8 @@ This plan starts from Task 16's corrected phase 2 plan ([task-16-phase-1-report.
 8. **Result fence.** This is a tournament branch of `private.accept_job_result`, reached from `complete_job`, which already locks first, samples post-lock time and verifies the token, status and expiry.
    - It validates the log against the bout with `recordBout`'s identity checks: battle id, rules version, participants and their `gladiatorId` in job order, full health and a winner among them. `private.safe_battle_log` shapes it.
    - It then compare-and-sets the bout row: null to result, or an identical idempotent replay; anything else is a conflict.
-   - It never publishes a private result before its reveal.
+   - **Worker fence first (defence in depth).** SQL checks only the log's identity, and the bout row is write-once. A log built from a wrong snapshot would pass, be stored permanently, and fail only later, when a child bout's or the settlement's `checkGraph` refuses it, into operator state. The executor therefore runs `recordBout(graph, boutId, log)` on the rebuilt graph before it calls `complete_job`. The full fence, including each participant against its frozen snapshot, then runs before the store. If `recordBout` throws, the executor does not complete the job.
+   - The branch never publishes a private result before its reveal.
    - **PairingHistory (ruling d).** Human tournament bouts count, one row per fought bout and never a bye, coordinated with Task 16. The rows can be written in the same transaction, or read by Task 16's history query from the stored bout rows.
 9. **Reveals and stages.**
    - Publish only due events.
@@ -395,18 +405,27 @@ This plan starts from Task 16's corrected phase 2 plan ([task-16-phase-1-report.
    - An eliminated entrant stays in the tournament activity until minute 80 and never opens another activity in the slot.
    - Bump the Task 10 revision on reveals.
 10. **Settlement (rulings e and g).** Each entrant activity's settlement job at minute 80 depends on every bout job and that activity's reveal jobs.
-    - **Outcome.** The worker loads the complete stored graph through a fenced read and runs `tournamentOutcomes`. Its `checkGraph` refuses stub or altered stored logs (review fix M4). The worker settles this activity's outcome, `{rewards, result, success, replayExpiry, ratingDelta}`, through `private.settle_rewards(uuid)`. `ratingDelta` is the applied total.
+    - **Route: Task 16 item 9's prepared-input alternative. Not yet built or tested.** `private.settle_rewards(uuid)` (`03-activities-jobs.sql:270`, called for every non-expedition kind from `private.settle_activity_core` at `05-expeditions.sql:392`) is a private SQL function that takes only the activity id. A TypeScript `tournamentOutcomes` result cannot reach it, so settlement follows the expedition pattern:
+      1. **Input.** The worker calls a backend-only fenced read, `public.tournament_settlement_input(activity_id, lease_token)`, shaped like `public.expedition_settlement_input` (`05-expeditions.sql:255`). It locks the settlement job row first, samples `private.planning_now_ms()` after the lock, and checks the current token, `leased` status and unexpired lease (the AGENTS.md concurrency override). It returns the stored frame, the entries with their frozen names and every stored bout result.
+      2. **Outcome.** The worker rebuilds the graph and runs `tournamentOutcomes`. Its `checkGraph` refuses stub or altered stored logs (review fix M4). The prepared value is this activity's outcome only: `{rewards, result, success, replayExpiry, ratingDelta}`, where `ratingDelta` is the applied total, plus its `placement` grant, `ratingBefore` and `ratingAfter`.
+      3. **Prepared settlement.** The worker passes it to a prepared-settlement RPC, for example `public.settle_tournament(activity_id, lease_token, prepared)`. Like `public.settle_expedition` (`05-expeditions.sql:412`), it calls `private.settle_activity_core(activity_id, lease_token, prepared)`, which gains a tournament branch beside its expedition branch (`05-expeditions.sql:386-392`).
+    - **SQL checks under the settlement lock.** By then `settle_activity_core` holds the common order (account advisory lock, then character, wallet, sorted items, activity and settlement job) and has checked the lease after the lock. The tournament branch fails closed unless:
+      - the outcome has the whitelisted shape (`private.safe_settlement`, `05-expeditions.sql:82`) and a well-formed placement grant;
+      - the grant id is `<tournamentId>:placement:<gladiatorId>` for this activity's own stored tournament and gladiator, and the grant's `activityId` is this activity. `safe_settlement` drops fields it does not whitelist, so the branch keeps the checked grant id with the receipt explicitly;
+      - this entrant's own frozen rating, from its stored entry, equals both the outcome's `ratingBefore` and its own live league-season rating row (ruling e, below).
+
+      SQL restates no bracket, placement or Elo rule.
     - **Grant identity (g).** The placement grant id travels inside that activity's single settlement outcome and receipt:
       - one settlement per activity;
       - one receipt per activity;
       - one `wallet_ledger` row per receipt (`receipt_id uuid unique`), combining fight renown with placement money and renown.
 
       There is no new unique grant table and no second grant guard alongside M06's settlement path (`settle_activity_core` and its `private.settled_slots` receipt).
-    - **Ratings (e).** Each side settles alone, under its own account lock and the common order (Task 16 item 9, one side at a time).
-      - Under that lock, assert that the entry's frozen rating equals the entrant's own live league-season rating row. Otherwise fail closed to operator state.
+    - **Ratings (e).** Each entrant settles alone, under its own account lock and the common order (Task 16 item 9, one side at a time).
+      - Under that lock, compare only this entrant's own frozen rating with its own live league-season rating row, never another entrant's. Earlier entrants' settlements have already moved their own rows, so checking theirs would fail every later settlement. A mismatch fails closed to operator state.
       - Write the round-ordered `ratingAfter`. It is a pure function of the frozen ratings and the stored results, so no cross-account lock is needed.
     - **Counters.** Standings use `outcome.wins` and `outcome.losses`. The five-human-bout season rule uses `wins + losses`. Byes never count (review fix M5).
-    - **Tests.** Cover simultaneous settlement retries and the malformed-hook rollback.
+    - **Tests.** Cover simultaneous settlement retries and the malformed-hook rollback, and refuse a prepared outcome with a malformed shape or a grant id for another entrant or tournament.
 11. **Projection.** Build `TournamentView` as described under "Public projection". This covers the role-safe placements DTO, empty placements until settlement and the `insufficient-entrants` status. The start-of-tournament pairings and byes wait for the M7 contract ruling.
 12. **DB tests in `tests/db/tournaments.test.ts`:**
     - the Step 1 table through real SQL and jobs, for 0, 1, 2, 3, 5 and 50 entrants in each league;
@@ -417,11 +436,13 @@ This plan starts from Task 16's corrected phase 2 plan ([task-16-phase-1-report.
     - a child bout reading its parents' winners through the fence;
     - a lease retry with the same bout seed;
     - distinct per-bout seeds;
+    - the bracket placement uses the derived SHA-256 placement seed, not the matcher's seed, and access to the placement seed is denied;
     - full HP per bout;
     - placement counts and amounts, and the two-person bracket;
     - frozen builds and names after a mid-tournament build change or rename;
     - rejection of a pairing result that omits, duplicates or alters an entrant or fighter;
     - a frozen/live rating mismatch going to operator state;
+    - a later entrant settling after earlier entrants have already moved their own rating rows, because each compares only its own frozen rating;
     - a stub or altered stored log refused at settlement;
     - access denial for the graph, bout seeds and unrevealed results;
     - stage due-ness and empty placements before minute 80;

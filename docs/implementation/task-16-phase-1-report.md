@@ -1,6 +1,6 @@
 # Task 16 phase 1 report: pure Arena domain
 
-Status: **DONE**. The pure domain module and its unit tests are complete and verified. An independent review found specification Pass and code quality Pass, ready to merge with fixes; those fixes are applied and verified below. Phase 2 (database, worker, settlement, projections) is still to do. Its plan, now including the reviewer's rulings, is at the end. One balance question that comes from the spec is open with Avi (see "Balance note").
+Status: **DONE**. The pure domain module and its unit tests are complete and verified. An independent review found specification Pass and code quality Pass, ready to merge with fixes; those fixes are applied and verified below. Phase 2 (database, worker, settlement, projections) is still to do. Its plan, now including the reviewer's rulings, is at the end. One balance question that comes from the spec is open with Avi (see "Balance note"). Two phase-2 design points are also open, neither built nor tested: the fighter and NPC template comparison target for pairing acceptance (phase 2 item 6) and the battle-seed derivation (item 7).
 
 - Date: 2026-10-14. Worktree `C:\Avi\Studies\Projects\Cloudiator-arena`, branch `claude/task-16`.
 - Task base: **`62f24cc`**, Codex's reviewed Task 9 checkpoint. Branch start: `b8ac1ce`, the controller brief.
@@ -230,7 +230,7 @@ The reviewer's Important finding I1 corrected the earlier version of this list. 
    - Placement must never decrease. Entering a new league starts that league-season rating at 1000 and keeps the old record.
 5. **Ratings model and visible strength.**
    - Rating rows: one per `(character, league, season)`, starting at 1000, with a floor of 0. Human win and loss counters feed `StandingRow`; NPC bouts are excluded.
-   - Reconcile `public.gladiators`' single `rating` and `league` columns (`supabase/sql/01-identity.sql:18`, frozen into the snapshot's `starting` at `03-activities-jobs.sql:381`) with those rows.
+   - Reconcile `public.gladiators`' single `rating` and `league` columns (`supabase/sql/01-identity.sql:18` for `league` and `:20` for `rating`, frozen into the snapshot's `starting` at `03-activities-jobs.sql:380`) with those rows.
    - Decide:
      - whether the columns become a cache of the current league-season row or are replaced;
      - which value the snapshot freezes as `starting.rating`;
@@ -250,16 +250,20 @@ The reviewer's Important finding I1 corrected the earlier version of this list. 
      - every entrant of that slot and league appears exactly once, with the same slot, season and league;
      - each fighter, and each NPC template, equals a recomputation from its frozen snapshot.
 
-     SQL must not restate `makeFighter`, so the comparison target must itself come from canonical TypeScript. For example, the phase 4 preparation could freeze an additive arena fighter with the snapshot.
+     **Open phase-2 design point (not built or tested): the comparison target.** SQL must not restate `makeFighter` or `makeFallback`, so the target for both the fighter and the NPC template must itself come from canonical TypeScript. For example, the phase 4 preparation could freeze an additive arena fighter with the snapshot, together with its `makeFallback(arenaFighter)` NPC template, and acceptance compares the pairing result with both frozen values; or the NPC template is checked against another value frozen by TypeScript.
    - **Storage.** Write immutable `private.arena_assignments` rows, one per battle, with no client grants and `guard_frozen`. Each row includes the battle seed (item 7).
    - **Schema work this needs:**
      - add `'pair'` to the `private.jobs.kind` check constraint;
      - relax `jobs.gladiator_id NOT NULL` for per-league jobs, keeping its foreign key for non-null values, with a check that only pairing jobs may omit it;
      - extend `JobKind`, `WorkerReport.byKind`, and the coordinator's dispatch counts and claim caps (`03-activities-jobs.sql:543,714`, `05-expeditions.sql:302,431`), deciding whether pairing counts as simple or combat work;
+     - add `'pair'` to `public.claim_jobs`' kind whitelist (`03-activities-jobs.sql:538`, `05-expeditions.sql:298`);
+     - give `public.complete_job`'s kind branch (`05-expeditions.sql:341-344`) its own `'pair'` case; otherwise a pairing result falls into `private.accept_job_result`;
+     - add `'pair'` to `runWorker`'s claim order (`supabase/functions/_shared/backend/jobs.ts:110` claims settlement, prepare, then reveal as simple work; `:119-120` claims simulations only when no simple job was claimed), matching the simple-or-combat decision;
+     - if `boundary_pair` introduces a new wait value, add it to `boundaries_wait_reason_check` (`03-activities-jobs.sql:81`);
      - add a `v1` registry entry for the pairing executor.
    - **Timing.** Measure the extra pairing round trip (insert, dispatch, claim, complete, adopt) against the two-minute boundary target at 50 characters (§10.4).
 7. **One simulation per battle, under a private battle seed.**
-   - **Seed.** Each assignment stores a private per-battle seed derived from the pairing job's seed and `battleId`. For example, `encode(extensions.digest(<pairing seed> || ':' || battleId, 'sha256'), 'hex')`, computed by SQL when the assignment is written, so a retry reproduces it.
+   - **Seed.** Each assignment stores a private per-battle seed derived from the pairing job's seed and `battleId`. **Open phase-2 design point (not built or tested): the derivation.** For example, `encode(extensions.digest(<pairing seed> || ':' || battleId, 'sha256'), 'hex')`, computed by SQL when the assignment is written, so a retry reproduces it.
    - **Job.** Exactly one simulation job per battle:
      - dedupe key `arena:<battleId>`;
      - anchored to the first side's activity (`sides[0]`'s `activity_id` and `gladiator_id`);
@@ -285,8 +289,14 @@ The reviewer's Important finding I1 corrected the earlier version of this list. 
      - `ratingDelta` = the applied change;
      - NPC bouts give `ratingDelta: 0`;
      - the winner is decided by `winnerId`.
+   - **How `arenaOutcomes` reaches settlement.** `private.settle_rewards(uuid)` (`03-activities-jobs.sql:270`, called for every non-expedition kind at `05-expeditions.sql:392`) is SQL-only, so the TypeScript `arenaOutcomes` cannot run inside it. For example:
+     - the Arena simulation executor returns the log plus both outcomes, `arenaOutcomes(assignment, log)`;
+     - `private.accept_job_result` validates their shape, renown, winner and before-ratings against the assignment, and stores them with the frozen log;
+     - each side's `settle_rewards` reads its own stored outcome.
+
+     The alternative is a `settle_expedition`-style prepared input: the worker reads a settlement input (as `public.expedition_settlement_input` at `05-expeditions.sql:255`), computes that side's outcome in TypeScript, and passes it to a prepared-settlement RPC (as `public.settle_expedition(uuid,uuid,jsonb)` at `05-expeditions.sql:412`, called from `supabase/functions/_shared/backend/database.ts:180`), which SQL checks under the settlement lock. Neither route is built or tested.
    - **Locking.** Each side may settle on its own, under its own account lock and the common order: account advisory lock, then character, wallet and sorted items, then activity, then job. Its new rating depends only on the frozen pair ratings, so no cross-account lock is needed.
-   - **Rating check.** Under that lock, assert that the frozen ratings in the assignment equal the live rating rows. If they differ, fail closed to operator state rather than using either value.
+   - **Rating check.** Under its own lock, each side compares only its own frozen rating in the assignment with its own live league-season rating row, never the opponent's. The first settlement of a human bout moves that side's row, so checking both sides would make the second settlement fail. If a side's own values differ, fail closed to operator state rather than using either value.
    - **Tests.** Cover simultaneous settlement retries of both sides and the malformed-hook rollback.
 10. **Public Arena stage sequence** (mirrored by Task 17):
     - stage 0, `staging`: revealed at S, ending S + 60 min, label `Warming up`;

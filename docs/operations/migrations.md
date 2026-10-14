@@ -20,9 +20,10 @@ It re-emits no unchanged function. The changed existing functions are `activity_
 frozen log and both outcomes per battle) and `public.arena_standings` (the public standings projection), with the invoker
 view `public.arena_standing_reads`.
 
-**Release (Task 24).** Ship M09, M10 and the worker in one release step, then check that no `pair` or `simulation` job is in
-operator state. The new worker fails a pairing input without `historyFromSlot` (written only by M10) closed, and an older
-worker cannot simulate an Arena bout (its simulation executor is the expedition planner).
+**Release (Task 24).** Ship M09, M10 and the worker in one release step, then check that no `prepare`, `pair` or `simulation`
+job is in operator state. M09 rejects an older worker's preparations (phase 2a), the new worker fails a pairing input without
+`historyFromSlot` (written only by M10) closed, and an older worker cannot simulate an Arena bout (its simulation executor is
+the expedition planner).
 
 **Retention (Task 22).** Prune `private.arena_results` before its assignment and its simulation job, stages before their
 activities, and assignment sides before their activities (foreign keys). `public.arena_standings` follows its gladiator.

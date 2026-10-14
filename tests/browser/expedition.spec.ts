@@ -87,6 +87,8 @@ test.describe('followable expedition scenes', () => {
   test('walks the minute table for a success and for a defeat in each encounter', async ({ page }) => {
     const minutes = [19, 20, 39, 40, 59, 60, 79, 80];
     await expeditionFlow.open(page, 'woodland', 10);
+    // Before any revealed log names whose journey this is, the header claims nobody.
+    await expect(page.locator('main p.eyebrow').first()).toHaveText('EXPEDITION');
     const success: Record<number, [string, number]> = { 19: ['depart', 1], 20: ['encounter', 2], 39: ['exploration', 3], 40: ['encounter', 4], 59: ['exploration', 5], 60: ['encounter', 6], 79: ['returning', 7], 80: ['arrived', 8] };
     for (const minute of minutes) {
       await expeditionFlow.hold(page, 'woodland', minute);

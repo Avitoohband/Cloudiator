@@ -235,8 +235,9 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   const gladiatorId = byActivity?.gladiatorId ?? state?.gladiator?.id ?? null;
   const byId = gladiatorId ? world?.actors.find(a => a.gladiatorId === gladiatorId) ?? null : null;
   const environment = environmentOf(timeline, byActivity);
-  // Only the owner's timeline carries a summary; otherwise compare the owner's id with the expedition's.
-  const owner = !!timeline?.summary || (!!ownerState && ownerState.id === gladiatorId);
+  // Only the owner's timeline carries a summary (counted once it is due, like every stage); otherwise
+  // compare the owner's id with the expedition's. Before either is known, nobody is named.
+  const owner = !!state?.summary || (!!ownerState && ownerState.id === gladiatorId);
   const name = byActivity?.name ?? byId?.name ?? (owner ? ownerState?.name ?? null : null);
   const silhouettes = (byActivity?.equipmentSilhouettes ?? state?.gladiator?.equipmentSilhouettes ?? []).join('|');
   const look = useMemo<GladiatorLook>(() => ({
@@ -282,11 +283,12 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   const replayHref = (stage: VisibleStage) => `/replay/?${fixture ? 'mode=fixture&' : ''}activity=${encodeURIComponent(activityId)}&stage=${encodeURIComponent(stage.id)}`;
   const summary = state.summary;
   const encounters = state.stages.some(s => s.encounter !== null);
+  const who = name ?? (owner ? 'Your gladiator' : gladiatorId ? "Another gladiator's journey" : null);
   return (
     <section className={styles.view} aria-labelledby={titleId}>
       <header className={styles.header}>
         <div className={styles.heading}>
-          <p className="eyebrow">EXPEDITION · {name ?? (owner ? 'Your gladiator' : "Another gladiator's journey")}</p>
+          <p className="eyebrow">{who ? `EXPEDITION · ${who}` : 'EXPEDITION'}</p>
           <h1 id={titleId}>{expedition}</h1>
         </div>
         <Link className={styles.camp} href={campHref}>Camp</Link>

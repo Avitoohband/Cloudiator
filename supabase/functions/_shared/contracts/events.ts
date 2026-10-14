@@ -18,6 +18,9 @@ export type ActivitySummary = {
   ratingDelta?: number;
 };
 
+/** Safe completed result for spectators. Reward and receipt details remain owner-only. */
+export type PublicActivitySummary = Pick<ActivitySummary, 'activityId' | 'resolvedKind' | 'result' | 'success' | 'settledAtMs' | 'replayExpiry'>;
+
 /** These snapshots appear only inside an already-revealed battle log. */
 export type RevealedCombatant = {
   id: string;
@@ -61,5 +64,5 @@ export type RevealedStage = {
 };
 export type RevealedTimeline = {
   activityId: ActivityId; serverNowMs: number; visibleThroughMs: number;
-  stages: RevealedStage[]; summary?: ActivitySummary;
+  stages: RevealedStage[]; summary?: ActivitySummary; completion?: PublicActivitySummary;
 };

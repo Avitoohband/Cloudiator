@@ -1,5 +1,27 @@
 # Local identity backend and migrations
 
+## Task 10 safe projection migration
+
+M07 is `supabase/migrations/20261014045856_projections.sql`, generated with
+CLI 2.120.0 `db pull projections --local --schema public,private --yes` from
+the tested `supabase/sql/06-projections.sql`. M01–M06 remain immutable.
+The uncommitted draft needed private functions before their triggers,
+explicit table/view/function ACLs, `security_invoker` view options, the
+singleton revision row, and an existing-character projection backfill.
+The only redefined pre-existing function is `private.boundary_published(bigint)`.
+
+Clean `db reset --local --no-seed --yes` replay passed without reapplying
+SQL source. All 302 schema entries matched the source snapshot, including
+function bodies/search paths/ACLs, table/view ACLs and invoker settings,
+RLS policies, triggers and constraints. The replayed database passed the
+107 owning/affected DB/Auth/Edge tests; the expanded final projection suite
+passed five cases. Lint and warning/error advisors were clear. Full evidence
+and query contracts are in [Task 10's report](../implementation/task-10-report.md).
+
+For the approved local Docker startup diagnosis and recovery procedure,
+see [local runtime operations](local-runtime.md). Startup repair is separate
+from migration and test evidence; never print credential-bearing status output.
+
 ## Required generated-artifact review
 
 The persistent Supabase skill override in [AGENTS.md](../../AGENTS.md) was

@@ -2,8 +2,12 @@ import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } fr
 import type { RevealedTimeline } from '@contracts/events';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
+import { GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent } from './reads';
+export { GatewayReadError } from './reads';
 
 export interface GameGateway {
+  /** Session identity changes invalidate pending reads and synchronized caches. */
+  subscribeSession?(listener: () => void): () => void;
   command<T>(input: GameCommand): Promise<CommandResult<T>>;
   owner(): Promise<OwnerState>;
   world(): Promise<WorldSnapshot>;
@@ -11,18 +15,43 @@ export interface GameGateway {
   timeline(id: ActivityId): Promise<RevealedTimeline>;
   profile(id: GladiatorId): Promise<PublicProfile>;
   market(cursor?: string): Promise<MarketPage>;
-  standings(league: LeagueId): Promise<StandingsPage>;
+  standings(league: LeagueId, cursor?: string): Promise<StandingsPage>;
   tournament(id: string): Promise<TournamentView>;
   recent(cursor?: string): Promise<ResultsPage>;
 }
 
-export class GatewayReadError extends Error {
-  constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
-}
-/** Small Task 5 owner adapter. Public projections/polling remain Task 10. */
+/** Authenticated Data API reads; the server enforces ownership and reveal authorization. */
 export function createLiveGateway(): GameGateway {
   const unavailable = async (): Promise<never> => { throw new GatewayReadError('unavailable'); };
+  let epoch = 0;
+  async function read<T>(load: (client: NonNullable<ReturnType<typeof getBrowserClient>>) => Promise<T>): Promise<T> {
+    const client = getBrowserClient();
+    if (!client) throw new GatewayReadError('unavailable');
+    const ticket = epoch;
+    try {
+      const before = await client.auth.getSession();
+      if (before.error || !before.data.session) throw new GatewayReadError('unauthenticated');
+      // Check identity even when the query returned not-found: an old account's absence is not creation authority.
+      const result = await load(client).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
+      const after = await client.auth.getSession();
+      if (ticket !== epoch || after.error || !after.data.session || before.data.session.user.id !== after.data.session.user.id) throw new GatewayReadError('unauthenticated');
+      if (!result.ok) throw result.error;
+      return result.value;
+    } catch (error) { throw error instanceof GatewayReadError ? error : new GatewayReadError('unavailable'); }
+  }
   return {
+    subscribeSession(listener) {
+      const client = getBrowserClient();
+      if (!client) return () => {};
+      let account: string | null | undefined;
+      const { data } = client.auth.onAuthStateChange((event, session) => {
+        const next = session?.user.id ?? null;
+        if (event === 'INITIAL_SESSION') { account = next; return; }
+        if (next === account) return;
+        account = next; epoch++; listener();
+      });
+      return () => data.subscription.unsubscribe();
+    },
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       const client = getBrowserClient();
       if (!client) return { ok: false, code: 'unavailable' };
@@ -44,20 +73,9 @@ export function createLiveGateway(): GameGateway {
         return { ok: false, code: 'unavailable' };
       } catch { return { ok: false, code: 'unavailable' }; }
     },
-    async owner() {
-      const client = getBrowserClient();
-      if (!client) throw new GatewayReadError('unavailable');
-      try {
-        const session = await client.auth.getSession();
-        if (session.error || !session.data.session || (session.data.session.expires_at ?? 0) * 1000 <= Date.now()) throw new GatewayReadError('unauthenticated');
-        const { data, error } = await client.from('owner_state').select('state').maybeSingle();
-        if (error) throw new GatewayReadError(error.code === 'PGRST301' || error.code === '42501' ? 'unauthenticated' : 'unavailable');
-        if (data === null) throw new GatewayReadError('not-found');
-        if (!data.state || typeof data.state !== 'object') throw new GatewayReadError('unavailable');
-        return data.state as OwnerState;
-      } catch (error) { throw error instanceof GatewayReadError ? error : new GatewayReadError('unavailable'); }
-    },
-    world: unavailable, revision: unavailable, timeline: unavailable, profile: unavailable,
-    market: unavailable, standings: unavailable, tournament: unavailable, recent: unavailable,
+    owner: () => read(readOwner), world: () => read(readWorld), revision: () => read(readRevision),
+    timeline: id => read(client => readTimeline(client, id)), profile: id => read(client => readProfile(client, id)),
+    recent: cursor => read(client => readRecent(client, cursor)),
+    market: unavailable, standings: unavailable, tournament: unavailable,
   };
 }

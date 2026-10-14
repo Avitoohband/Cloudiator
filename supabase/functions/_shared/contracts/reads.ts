@@ -1,5 +1,5 @@
 import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
-import type { ActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
+import type { ActivitySummary, PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
 
 export type BuildView = { version: number; classId: ClassId; stance: Stance; allocations: Attributes; equipment: Equipment };
 export type PendingBuildView = { build: BuildView; effectiveSlotIndex: number; reservedMoney: number; reservedItemIds: string[]; operationId: string };
@@ -41,7 +41,7 @@ export type PublicActor = {
 };
 export type RevisionState = { revision: string; serverNowMs: number; slotIndex: number };
 export type WorldSnapshot = RevisionState & { actors: PublicActor[] };
-export type PublicProfile = { actor: PublicActor; combatStrength: number; rating: number; prestige: string[] };
+export type PublicProfile = { actor: PublicActor; combatStrength: number | null; rating: number; prestige: string[] };
 /** Producers enforce <= 50 rows. Cursors are opaque strings. */
 export type CursorPage<T> = { rows: T[]; nextCursor: string | null };
 export type MarketListing = {
@@ -67,5 +67,5 @@ export type TournamentView = {
   entrants: TournamentEntrant[]; bouts: TournamentBout[];
   placements: { gladiatorId: GladiatorId; place: number; summary: ActivitySummary }[];
 };
-export type ResultRow = { gladiatorId: GladiatorId; name: string; summary: ActivitySummary };
+export type ResultRow = { gladiatorId: GladiatorId; name: string; summary: PublicActivitySummary };
 export type ResultsPage = CursorPage<ResultRow>;

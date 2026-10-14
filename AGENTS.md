@@ -131,6 +131,11 @@ the owning and affected access-denial tests, lint and advisors. Reapplying
 source after reset is not migration-artifact proof. Never edit an already
 committed migration; generate a new one for subsequent corrections. Follow
 the exact local workflow and evidence in [the migration guide](docs/operations/migrations.md).
+Avi approved one more rule on 2026-10-14: restore any test-only function
+stand-in from the `pg_get_functiondef` text captured before it was installed,
+never by replaying a migration or source statement through a shell tool that
+may rewrite line endings, and verify byte equality afterwards; otherwise the
+next generated draft can re-emit an unchanged function.
 
 # Postgres concurrency — persistent project override
 

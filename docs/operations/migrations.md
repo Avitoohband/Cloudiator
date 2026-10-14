@@ -61,8 +61,11 @@ and exact-file removal. It re-emitted `private.planning_now_ms()`: an interrupte
 stand-in installed, and the manual restore had used M02's text through Git Bash `sed`, which dropped the carriage returns
 that the replayed definition (last written by M05) keeps. The function was restored byte for byte from M05 with Node, and
 the regenerated draft re-emits nothing unchanged. The fix used here was to restore the stand-in from the
-`pg_get_functiondef` text captured before it was installed, not from a migration through `sed`. Making that a standing rule
-is a proposal awaiting Avi's approval (2026-10-14); it is not yet approved guidance.
+`pg_get_functiondef` text captured before it was installed, not from a migration through `sed`. **Avi approved this as a
+standing rule on 2026-10-14:** restore every test-only function stand-in from the `pg_get_functiondef` text captured before
+it was installed, never by replaying a migration or source statement through a shell tool that may rewrite line endings,
+and verify byte equality with the captured text afterwards. Observed once (Git Bash `sed` dropped carriage returns, so
+`db pull` re-emitted an unchanged function); the byte-exact restore was tested in Task 19 phases 2a and 2b.
 
 **Release (Task 24).** Ship M11 with the Task 19 worker and with phase 2b, never alone. In phase 2a a tournament bout job
 can be claimed but not completed (`complete_job` has no tournament acceptance yet), so the real worker fails it into operator

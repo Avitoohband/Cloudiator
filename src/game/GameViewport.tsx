@@ -2,15 +2,24 @@
 
 // React host for the Phaser camp. Phaser and the asset package load lazily in the browser,
 // so the static build never touches WebGL. Unmounting removes the scene's bridge listeners
-// synchronously and destroys the game.
+// synchronously and destroys the game. With a timeline reader, the host also reads the
+// timelines of Arena entrants once their bouts are due (src/game/arena-layout.ts), so the
+// camp can stage revealed fights, and lists those fights as keyboard buttons.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { WorldSnapshot } from '@contracts/reads';
+import type { RevealedTimeline } from '@contracts/events';
+import type { GameGateway } from '../lib/api/gateway';
 import type { Point } from './iso';
-import type { SceneBridge, SceneEventName, SceneEvents } from './bridge';
+import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
+import { arenaReadsDue, type ArenaRead } from './arena-layout';
+import { createDisplayClock, type DisplayClock } from './display-clock';
 import { prefersReducedMotion, supportsWebGL } from './webgl';
 import { startGame } from './phaser-game';
 import styles from './GameViewport.module.css';
+
+/** How often the host checks for due Arena timeline reads (display ms pass in real time). */
+const ARENA_CHECK_MS = 1000;
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'unavailable'; message: string };
 
@@ -28,20 +37,37 @@ export type CampTestHook = {
   setWorld(world: WorldSnapshot): void;
   /** Stops the scene clock at a server time (null resumes it) for deterministic captures. */
   freezeClock(serverNowMs: number | null): void;
+  /** Arena timeline reads so far, and the activities whose timelines the camp holds. */
+  arenaReads(): number;
+  arenaTimelines(): string[];
+  /** Hands Arena timelines straight to the scene, as completed reads would (scene tests without a reader). */
+  setArenaTimelines(timelines: Record<string, RevealedTimeline>): void;
 };
 declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
 
-export function GameViewport({ world, bridge, focusGladiatorId = null }: { world: WorldSnapshot | null; bridge: SceneBridge; focusGladiatorId?: string | null }) {
+export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null }: {
+  world: WorldSnapshot | null;
+  bridge: SceneBridge;
+  focusGladiatorId?: string | null;
+  /** The page's display clock, shared with its panels; the viewport keeps its own when none is given. */
+  clock?: DisplayClock;
+  /** Reads Arena entrants' timelines so revealed bouts can be staged; without it the arena only warms up. */
+  timelines?: Pick<GameGateway, 'timeline'> | null;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
   const latestWorld = useRef(world);
   const focus = useRef(focusGladiatorId);
-  const clock = useRef({ serverNowMs: world?.serverNowMs ?? 0, at: 0 });
-  const frozenAt = useRef<number | null>(null);
+  const [ownClock] = useState(() => createDisplayClock());
+  const clock = useRef<DisplayClock>(sharedClock ?? ownClock);
+  useEffect(() => { clock.current = sharedClock ?? ownClock; }, [ownClock, sharedClock]);
+  const arenaTimelines = useRef(new Map<string, RevealedTimeline>());
+  const arenaReadCount = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [following, setFollowing] = useState(false);
+  const [fights, setFights] = useState<ArenaFightSummary[]>([]);
   const statusId = useId();
 
   useEffect(() => { focus.current = focusGladiatorId; }, [focusGladiatorId]);
@@ -49,9 +75,43 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
   useEffect(() => {
     latestWorld.current = world;
     if (!world) return;
-    clock.current = { serverNowMs: world.serverNowMs, at: performance.now() };
+    clock.current.sync(world.serverNowMs);
     handle.current?.setWorld(world);
   }, [world]);
+
+  // Arena timelines: read once an entrant's bout is due, retried while it is missing; paused in hidden tabs.
+  useEffect(() => {
+    if (!timelines) return;
+    let alive = true;
+    const known = new Map<string, ArenaRead>();
+    const inFlight = new Set<string>();
+    const check = () => {
+      const current = latestWorld.current;
+      if (!current || document.visibilityState !== 'visible') return;
+      const now = clock.current.now();
+      const batch: Promise<unknown>[] = [];
+      for (const activityId of arenaReadsDue(current.actors, known, now)) {
+        if (inFlight.has(activityId)) continue;
+        inFlight.add(activityId);
+        known.set(activityId, { readAtMs: now, hasBout: false });
+        arenaReadCount.current += 1;
+        batch.push(timelines.timeline(activityId).then(timeline => {
+          if (!alive) return;
+          clock.current.sync(timeline.serverNowMs);
+          const at = clock.current.now();
+          known.set(activityId, { readAtMs: at, hasBout: timeline.stages.some(s => s.kind === 'bout' && s.revealedAtMs <= at) });
+          arenaTimelines.current.set(activityId, timeline);
+        }, () => {}).finally(() => inFlight.delete(activityId)));
+      }
+      // Reads due together land together, so bouts revealed at the same minute are scheduled as one wave.
+      if (batch.length) void Promise.all(batch).then(() => { if (alive) handle.current?.setTimelines(new Map(arenaTimelines.current)); });
+    };
+    check();
+    const timer = window.setInterval(check, ARENA_CHECK_MS);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [timelines]);
+
+  useEffect(() => bridge.on('arena-fights', ({ fights: next }) => setFights(next)), [bridge]);
 
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -85,7 +145,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
       fail('webgl', 'The animated camp needs WebGL, which this browser does not provide. Management panels still work.');
       return () => { cancelled = true; };
     }
-    if (clock.current.at === 0) clock.current = { serverNowMs: latestWorld.current?.serverNowMs ?? Date.now(), at: performance.now() };
+    if (latestWorld.current) clock.current.sync(latestWorld.current.serverNowMs);
     (async () => {
       const [P, assets, campScene] = await Promise.all([import('phaser'), import('./assets'), import('./camp-scene')]);
       if (cancelled || !host.current) return;
@@ -97,11 +157,12 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
         bridge,
         focusId: () => focus.current,
         reducedMotion: prefersReducedMotion(),
-        now: () => frozenAt.current ?? clock.current.serverNowMs + (performance.now() - clock.current.at),
+        now: () => clock.current.now(),
         onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },
         onError: (reason, message) => fail(reason, reason === 'assets' ? `The camp art could not load (${message}). Management panels still work.` : `The camp view stopped: ${message}`),
       });
       handle.current = created.handle;
+      created.handle.setTimelines(new Map(arenaTimelines.current));
       game = startGame(P, {
         type: P.WEBGL,
         parent: host.current,
@@ -125,9 +186,12 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
           screenOf: id => handle.current?.screenOf(id) ?? null,
           world: () => latestWorld.current,
           setWorld: next => { latestWorld.current = next; handle.current?.setWorld(next); },
-          freezeClock: ms => {
-            if (ms === null && frozenAt.current !== null) clock.current = { serverNowMs: frozenAt.current, at: performance.now() };
-            frozenAt.current = ms;
+          freezeClock: ms => clock.current.freeze(ms),
+          arenaReads: () => arenaReadCount.current,
+          arenaTimelines: () => [...arenaTimelines.current.keys()],
+          setArenaTimelines: next => {
+            for (const [id, timeline] of Object.entries(next)) arenaTimelines.current.set(id, timeline);
+            handle.current?.setTimelines(new Map(arenaTimelines.current));
           },
         };
       }
@@ -183,6 +247,21 @@ export function GameViewport({ world, bridge, focusGladiatorId = null }: { world
               >Follow</button>
             </>
           )}
+        </div>
+      )}
+      {!unavailable && fights.length > 0 && (
+        <div className={styles.fights} role="group" aria-label="Arena bouts in the rings">
+          {fights.map(f => (
+            <button
+              key={f.battleId}
+              type="button"
+              onClick={() => {
+                const [entrant] = f.sides;
+                if (entrant.gladiatorId) bridge.emit('find-character', { gladiatorId: entrant.gladiatorId });
+                bridge.emit('open-arena', { activityId: entrant.activityId, gladiatorId: entrant.gladiatorId });
+              }}
+            >{f.sides[0].name} vs {f.sides[1].name}{f.sides[1].npc ? ' (NPC)' : ''}</button>
+          ))}
         </div>
       )}
       <p id={statusId} className={unavailable ? styles.fallback : styles.status} role="status">

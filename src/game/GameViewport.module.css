@@ -52,6 +52,37 @@
   outline-offset: 1px;
 }
 
+/* Keyboard and touch equivalents of clicking a fighting pair in the arena. */
+.fights {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 10px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  pointer-events: none;
+}
+
+.fights button {
+  flex: none;
+  min-height: 40px;
+  font: 600 13px/1.1 system-ui, sans-serif;
+  color: #f4e8cb;
+  background: #241d2bdd;
+  border: 1px solid #b5a07a;
+  border-radius: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.fights button:focus-visible {
+  outline: 3px solid #ffe48f;
+  outline-offset: 1px;
+}
+
 .status {
   position: absolute;
   left: 12px;

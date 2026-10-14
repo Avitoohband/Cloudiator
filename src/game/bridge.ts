@@ -15,7 +15,18 @@ export type SceneEvents = {
   roster: { inCamp: string[]; away: { gladiatorId: string; name: string; location: string }[] };
   /** Scene to UI: the camp view could not start (no WebGL or failed assets). */
   'scene-unavailable': { reason: 'webgl' | 'assets' | 'error'; message: string };
+  /** Scene or keyboard UI to the page: open the Arena card for an entrant's activity (an NPC opens its entrant's). */
+  'open-arena': { activityId: string; gladiatorId: string | null };
+  /** Scene to UI: the revealed bouts in the arena's sparring rings now, for keyboard selection. Names are public. */
+  'arena-fights': { fights: ArenaFightSummary[] };
 };
+export type ArenaFightSummary = {
+  battleId: string;
+  /** In participant order; an NPC side has no gladiator and opens its entrant's activity. */
+  sides: [ArenaFightSide, ArenaFightSide];
+  status: 'entering' | 'fighting' | 'result';
+};
+export type ArenaFightSide = { gladiatorId: string | null; name: string; activityId: string; npc: boolean };
 export type SceneEventName = keyof SceneEvents;
 export type Listener<E extends SceneEventName> = (payload: SceneEvents[E]) => void;
 

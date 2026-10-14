@@ -55,7 +55,8 @@ const ZONE_FOR: Record<RoutineKind, ZoneId | null> = {
 const VARIANTS: Record<RoutineKind, [Variant, number][]> = {
   training: [['weights', 40], ['practice', 35], ['spar', 25]],
   rest: [['sit', 35], ['eat', 30], ['sleep', 35]],
-  arena: [['arena-staging', 60], ['arena-ring', 40]],
+  // Regular Arena entrants warm up in staging; a revealed bout moves its real pair into a ring (src/game/arena-layout.ts).
+  arena: [['arena-staging', 1]],
   tournament: [['arena-staging', 75], ['arena-ring', 25]],
   away: [],
   orientation: [['browse', 1]],
@@ -152,13 +153,17 @@ function stationMatches(station: MapStation, variant: Variant): boolean {
   return station.kind === variant;
 }
 
-/** Free walkable tiles of a zone, excluding NPC posts and, for the arena, everything outside the wall. */
+/**
+ * Free walkable tiles of a zone, excluding NPC posts and, for the arena, everything outside the wall and the
+ * sparring-ring tiles, which stay free for revealed bouts.
+ */
 function freeTiles(map: MapData, zoneId: ZoneId, taken: Set<string>): { x: number; y: number }[] {
   const zone = map.zones.find(z => z.id === zoneId)!;
+  const rings = zoneId === 'arena' ? new Set(zone.stations.filter(s => s.kind === 'arena-ring').map(s => `${s.x},${s.y}`)) : null;
   const tiles: { x: number; y: number }[] = [];
   const { x: bx, y: by, w, h } = zone.bounds;
   for (let y = by; y < by + h; y += 1) for (let x = bx; x < bx + w; x += 1) {
-    if (map.walkable[y]?.[x] !== '1' || taken.has(`${x},${y}`)) continue;
+    if (map.walkable[y]?.[x] !== '1' || taken.has(`${x},${y}`) || rings?.has(`${x},${y}`)) continue;
     if (zoneId === 'arena' && map.arena && Math.hypot(x + 0.5 - map.arena.centre[0], y + 0.5 - map.arena.centre[1]) > map.arena.radius - 1.1) continue;
     tiles.push({ x, y });
   }

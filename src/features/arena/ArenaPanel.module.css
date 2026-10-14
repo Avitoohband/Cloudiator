@@ -1,0 +1,175 @@
+.panel {
+  border-top: 1px solid var(--line);
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  min-width: 0;
+}
+
+.title {
+  font-family: Georgia, serif;
+  font-size: 1.15rem;
+  margin: 0 0 0.6rem;
+}
+
+.samples ul {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pick {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.35rem 0.75rem;
+  text-align: left;
+  color: var(--ink);
+  background: #141c2c;
+  border: 1px solid #4b5872;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.pick[aria-pressed='true'] {
+  border-color: var(--gold);
+  background: #2b2a2c;
+}
+
+.pick:hover {
+  border-color: var(--gold);
+}
+
+.card {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: #141c2c;
+  border: 1px solid #4b5872;
+  border-left: 3px solid var(--gold);
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.header h3 {
+  font-family: Georgia, serif;
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.header .eyebrow,
+.header p {
+  margin-bottom: 0.25rem;
+}
+
+.close {
+  flex: none;
+  min-height: 44px;
+  padding: 0 0.8rem;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid #4b5872;
+  font-size: 0.75rem;
+}
+
+.phase {
+  margin: 0;
+  font-weight: 750;
+  font-size: 1rem;
+  color: var(--gold);
+}
+
+.detail {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.opponent {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.opponent dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.opponent dd {
+  margin: 0;
+  font-weight: 650;
+}
+
+.npc {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.8rem;
+  color: #1a1423;
+  background: #c9d3da;
+  border: 1px solid #8394a1;
+}
+
+.result p {
+  margin: 0 0 0.25rem;
+  font-size: 0.82rem;
+}
+
+.result .victory,
+.result .defeat {
+  font-family: Georgia, serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.victory {
+  color: #9fe0b8;
+}
+
+.defeat {
+  color: #f0a39b;
+}
+
+.credited ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.actions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.actions p {
+  margin: 0;
+}
+
+.watch {
+  min-height: 44px;
+  padding: 0 1rem;
+  color: #222536;
+  background: var(--gold);
+  border: 1px solid #ffdf97;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.watch:disabled {
+  color: var(--muted);
+  background: #1b2336;
+  border-color: #4b5872;
+}

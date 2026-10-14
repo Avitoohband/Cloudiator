@@ -31,7 +31,8 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
   const startsAtMs = slotIndex * SLOT_MS;
   const actors: PublicActor[] = Array.from({ length: count }, (_, i) => {
     const h = hashString(`demo-${i}`);
-    const location = i < inCamp ? CAMP_LOCATIONS[i % CAMP_LOCATIONS.length] : AWAY_LOCATIONS[(i - inCamp) % AWAY_LOCATIONS.length];
+    // A stride coprime with 50 spreads even a small crowd over every camp zone (all 50 still use each once).
+    const location = i < inCamp ? CAMP_LOCATIONS[(i * 7) % CAMP_LOCATIONS.length] : AWAY_LOCATIONS[(i - inCamp) % AWAY_LOCATIONS.length];
     return {
       gladiatorId: demoUuid(`demo-gladiator-${i}`),
       name: NAMES[i % NAMES.length],
@@ -51,8 +52,16 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
   return { revision: `demo-${slotIndex}`, serverNowMs, slotIndex, actors };
 }
 
-/** Fixture previews only: surround the real fixture actor with a demo crowd, keeping the world within its 50 public rows (43 in camp, 6 away). */
-export function withDemoCrowd(world: WorldSnapshot, inCamp = 43, away = 6): WorldSnapshot {
-  const crowd = createDemoWorld(world.serverNowMs, inCamp, away).actors.filter(a => !world.actors.some(b => b.gladiatorId === a.gladiatorId));
+/**
+ * Fixture previews only: surround the fixture actors with a demo crowd, filling the world to its 50 public rows
+ * (6 of them away). When the fixture world has its own Arena entrants (with timelines), the crowd trains or rests
+ * instead, so every Arena entrant in the preview has a real timeline to read.
+ */
+export function withDemoCrowd(world: WorldSnapshot, away = 6, rows = 50): WorldSnapshot {
+  const inCamp = Math.max(0, rows - away - world.actors.length);
+  const arena = world.actors.some(a => a.location === 'arena');
+  const crowd = createDemoWorld(world.serverNowMs, inCamp, away).actors
+    .filter(a => !world.actors.some(b => b.gladiatorId === a.gladiatorId))
+    .map((a, i): PublicActor => (arena && a.location === 'arena' ? { ...a, location: i % 2 ? 'rest' : 'training' } : a));
   return { ...world, actors: [...world.actors, ...crowd] };
 }

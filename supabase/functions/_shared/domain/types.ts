@@ -29,8 +29,9 @@ export type Seed = string;
 /** Resolved activity kinds; tournament is assigned by the Task 19 pairing hook, never requested directly. */
 export type ActivityKind = 'training' | 'rest' | 'expedition' | 'arena' | 'tournament';
 export type ActivityCosts = Record<ActivityKind, number>;
-/** Durable job categories: boundary preparation, private simulation, timed reveal and terminal settlement. */
-export type JobKind = 'prepare' | 'simulation' | 'reveal' | 'settlement';
+/** Durable job categories: boundary preparation, per-league Arena pairing, private simulation, timed reveal and terminal
+ * settlement. A `pair` job belongs to one slot and league, not to one gladiator, and is claimed as simple work. */
+export type JobKind = 'prepare' | 'pair' | 'simulation' | 'reveal' | 'settlement';
 /** Frozen cutoff inputs for the boundary recompute phase; written by SQL, read only by a trusted worker. */
 export type PreparationInput = DeepReadonly<{
   gladiatorId: string; slotIndex: number; rulesVersion: string;
@@ -42,6 +43,10 @@ export type PreparationInput = DeepReadonly<{
 export type PreparationResult = {
   rulesVersion: string; snapshot: BuildSnapshot; derived: DerivedStats;
   staminaMaximum: number; costs: ActivityCosts; trainingPoints: number;
+  /** Task 16: league placement from level, every earned point (banked too) and historical gear, never the current loadout. */
+  league: LeagueId;
+  /** Task 16: the frozen `makeFighter(snapshot, 'arena', rules)`, its `makeFallback` NPC template and its visible strength. */
+  arenaFighter: FighterSnapshot; npcTemplate: FighterSnapshot; arenaStrength: number;
 };
 /** Private, frozen at one historical boundary; never an owner/public read DTO. Executors (Tasks 9/16/19) consume it. */
 export type ActivitySnapshot = DeepReadonly<{
@@ -55,17 +60,20 @@ export type ActivitySnapshot = DeepReadonly<{
 }>;
 export type SettlementInput = DeepReadonly<{ activityId: string; gladiatorId: string; slotIndex: number; resolvedKind: ActivityKind; endsAtMs: number }>;
 export type JobInput = PreparationInput | SettlementInput | ActivitySnapshot | DeepReadonly<Record<string, unknown>>;
-/** A claimed fenced lease. `snapshot` is the job's immutable input; seed and rules version never change across retries. */
+/** A claimed fenced lease. `snapshot` is the job's immutable input; seed and rules version never change across retries.
+ * Only a per-league `pair` job has no gladiator. */
 export type JobLease<Input = JobInput> = DeepReadonly<{
   id: string; token: string; expiresAtMs: number; kind: JobKind;
-  activityId: string | null; gladiatorId: string; slotIndex: number;
+  activityId: string | null; gladiatorId: string | null; slotIndex: number;
   snapshot: Input; seed: Seed; rulesVersion: string; attempt: number;
 }>;
 /** Coordinator results returned by `advance_boundary`/`coordinate_work`; no seeds, snapshots or tokens.
  * A boundary isolated by `coordinate_work` after an exception reports `{ok:false, code:'boundary-failed', slotIndex, sqlstate}`. */
 export type BoundaryReport = {
   ok: boolean; code?: string; slotIndex?: number; phase?: number;
-  status?: 'complete' | 'waiting'; wait?: 'settlement' | 'extension' | 'preparation' | 'integration' | 'operator' | 'straggler'; replayed?: boolean;
+  status?: 'complete' | 'waiting';
+  /** `pairing`: an Arena pairing job of the slot is unfinished. `epoch`: no season epoch covers the slot (Task 16). */
+  wait?: 'settlement' | 'extension' | 'preparation' | 'pairing' | 'epoch' | 'integration' | 'operator' | 'straggler'; replayed?: boolean;
   sqlstate?: string;
 };
 /** `code:'coordinator-unavailable'` is the worker's own report when the coordination RPC itself could not be reached. */

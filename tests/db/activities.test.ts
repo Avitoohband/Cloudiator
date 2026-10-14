@@ -493,7 +493,8 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     // Test-only stand-in for a future rules module: canonical v1 derivation with a reduced capacity.
     const executors = { ...DEFAULT_EXECUTORS, v2: { prepare: (job: JobLease) => {
       const derived = prepareActivityV1({ ...(job.snapshot as PreparationInput), rulesVersion: 'v1' });
-      return { ...derived, rulesVersion: 'v2', staminaMaximum: 80, snapshot: { ...derived.snapshot, rulesVersion: 'v2' } };
+      return { ...derived, rulesVersion: 'v2', staminaMaximum: 80, snapshot: { ...derived.snapshot, rulesVersion: 'v2' },
+        arenaFighter: { ...derived.arenaFighter, rulesVersion: 'v2' }, npcTemplate: { ...derived.npcTemplate, rulesVersion: 'v2' } };
     } } };
     for (let round = 0; round < 3 && (await advance(301, token)).status !== 'complete'; round++) {
       await runWorker({ database: historicalPort(301, token), workerId: randomUUID(), executors });
@@ -633,7 +634,7 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect(await boundary).toMatchObject({ phase: 4, wait: 'preparation' });
   });
 
-  it('starts expeditions and retains the unsupported Arena integration gate', async () => {
+  it('starts expeditions and retains the unsupported Arena integration gate after pairing', async () => {
     const explorer = await fighter({ schedule: { morning: { kind: 'expedition', expeditionId: 'woodland' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
     const token = await coordinatorLease();
     expect(await runBoundary(300, token)).toMatchObject({ phase: 9, status: 'complete' });
@@ -645,7 +646,8 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect((await explorer.state()).currentActivity).toMatchObject({ kind: 'expedition', status: 'processing' });
     await resetWorld(299);
     const fighterArena = await fighter({ schedule: { morning: { kind: 'arena' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
-    expect(await runBoundary(300)).toMatchObject({ phase: 7, status: 'waiting', wait: 'integration' });
+    // Task 16 phase 2a pairs the entrant at phase 7; with no Arena executor yet, phase 8 still stalls before any debit.
+    expect(await runBoundary(300)).toMatchObject({ phase: 8, status: 'waiting', wait: 'integration' });
     expect(await fighterArena.row()).toMatchObject({ stamina: 104, processed: 299 });
 
     await resetWorld(299);

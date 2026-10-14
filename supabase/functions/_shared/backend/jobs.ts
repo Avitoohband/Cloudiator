@@ -3,7 +3,11 @@ import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
 import { freezeDomain } from '../domain/types.ts';
 import { planExpedition } from '../domain/expedition.ts';
-import type { ActivitySnapshot } from '../domain/types.ts';
+import { makeFighter } from '../domain/combat.ts';
+import { estimateArenaStrength, leagueFor, makeFallback, matchArena } from '../domain/arena.ts';
+import type { ArenaAssignment, ArenaEntrant, PairingHistory } from '../domain/arena.ts';
+import type { LeagueId } from '../contracts/commands.ts';
+import type { ActivitySnapshot, DeepReadonly, FighterSnapshot, Seed } from '../domain/types.ts';
 import type { ActivityCosts, ActivityKind, BuildInput, CoordinatorReport, ItemInstance, JobKind, JobLease, PreparationInput, PreparationResult, WorkerReport } from '../domain/types.ts';
 import type { ExecutorRegistry, JobOutcome, WorkerDependencies } from './database.ts';
 
@@ -17,7 +21,11 @@ export class WorkerFailure extends Error {
 }
 
 const ACTIVITY_KINDS: readonly ActivityKind[] = ['training', 'rest', 'expedition', 'arena', 'tournament'];
-/** Canonical v1 boundary recompute: legal build snapshot, derived stats and versioned stamina costs. */
+/**
+ * Canonical v1 boundary recompute: legal build snapshot, derived stats and versioned stamina costs. Task 16 adds the
+ * frozen arena fighter, its NPC fallback template, its visible strength estimate and the league placement, so SQL
+ * compares pairing results with these values instead of restating makeFighter, makeFallback or leagueFor.
+ */
 export function prepareActivityV1(input: PreparationInput): PreparationResult {
   if (!input || typeof input !== 'object' || !input.build || !Array.isArray(input.items)) throw new WorkerFailure('invalid-input');
   if (input.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
@@ -27,26 +35,48 @@ export function prepareActivityV1(input: PreparationInput): PreparationResult {
   if (!validation.ok) throw new WorkerFailure('invalid-build');
   const derived = deriveStats(validation.snapshot, RULES_V1);
   const costs = Object.fromEntries(ACTIVITY_KINDS.map(kind => [kind, activityCost(RULES_V1.activityStamina[kind], derived.overload)])) as ActivityCosts;
+  const arenaFighter = makeFighter(validation.snapshot, 'arena', RULES_V1);
   return { rulesVersion: RULES_V1.version, snapshot: structuredClone(validation.snapshot) as PreparationResult['snapshot'], derived,
-    staminaMaximum: derived.maxStamina, costs, trainingPoints: RULES_V1.progression.trainingPoints };
+    staminaMaximum: derived.maxStamina, costs, trainingPoints: RULES_V1.progression.trainingPoints,
+    // A job frozen before Task 8 has no gear history. SQL never lowers a placement, so 0 can only delay a promotion.
+    league: leagueFor(input.level, input.earnedPoints, input.peakStrength ?? 0, RULES_V1),
+    arenaFighter: structuredClone(arenaFighter) as FighterSnapshot, npcTemplate: structuredClone(makeFallback(arenaFighter)) as FighterSnapshot,
+    arenaStrength: estimateArenaStrength(arenaFighter) };
+}
+
+/** One slot and league's frozen regular-Arena entrants, written by `private.boundary_pair` at phase 7 (Task 16). */
+export type PairingInput = DeepReadonly<{
+  slotIndex: number; league: LeagueId; seasonId: string; rulesVersion: string;
+  entrants: ArenaEntrant[]; recent: PairingHistory[];
+}>;
+export type PairingResult = { assignments: ArenaAssignment[] };
+/** Canonical v1 pairing: spec §8.1 `matchArena` on the frozen entrants and history, under the pairing job's private seed. */
+export function pairArenaV1(input: PairingInput, seed: Seed): PairingResult {
+  if (!input || typeof input !== 'object' || !Array.isArray(input.entrants) || !Array.isArray(input.recent)) throw new WorkerFailure('invalid-input');
+  if (input.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
+  // One job pairs exactly one slot, season and league; a mixed input is corrupt rather than a cross-league pairing.
+  if (input.entrants.some(entrant => !entrant || entrant.league !== input.league || entrant.slotIndex !== input.slotIndex
+    || entrant.seasonId !== input.seasonId)) throw new WorkerFailure('invalid-input');
+  return { assignments: matchArena(input.entrants, input.recent, seed) };
 }
 
 /** Keep every retained rules version registered: a job always runs with the version persisted on it. */
 export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({
   v1: Object.freeze({ prepare: (job: JobLease) => prepareActivityV1(job.snapshot as PreparationInput),
+    pair: (job: JobLease) => pairArenaV1(job.snapshot as PairingInput, job.seed),
     simulation: (job: JobLease) => planExpedition(job.snapshot as ActivitySnapshot, job.seed, RULES_V1),
     // SQL selects the immutable stage by ordinal; no worker-supplied stage payload is trusted here.
     reveal: () => ({}) }),
 });
 
-/** One bounded invocation: settle, then prepare, then reveal (≤20 simple), or else ≤5 combat simulations. */
+/** One bounded invocation: settle, then prepare, then pair, then reveal (≤20 simple), or else ≤5 combat simulations. */
 export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport> {
   const executors = deps.executors ?? DEFAULT_EXECUTORS;
   const now = deps.now ?? Date.now;
   const cpuNow = deps.cpuNow ?? (() => performance.now());
   let computeMs = 0;
   const report: WorkerReport = { claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0, unrecorded: 0,
-    byKind: { prepare: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null };
+    byKind: { prepare: 0, pair: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null };
   const record = (outcome: JobOutcome) => {
     if (!outcome.ok) report.conflicts += 1;
     else if (outcome.replayed) report.replayed += 1;
@@ -107,7 +137,9 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
   }
   report.coordination = await coordinate();
   let simple = WORKER_LIMITS.simple;
-  for (const kind of ['settlement', 'prepare', 'reveal'] as const satisfies readonly JobKind[]) {
+  // Pairing follows preparation: completed preparations release a boundary's phases 5–7, whose pairing jobs this same
+  // invocation can then claim before any reveal.
+  for (const kind of ['settlement', 'prepare', 'pair', 'reveal'] as const satisfies readonly JobKind[]) {
     if (simple <= 0 || computeMs >= WORKER_LIMITS.cpuMs) break;
     const jobs = await deps.database.claim(deps.workerId, kind, simple);
     if (!jobs.length) continue;

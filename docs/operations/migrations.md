@@ -1,5 +1,44 @@
 # Local identity backend and migrations
 
+## Task 16 phase 2a: Arena placement, ratings and pairing
+
+M09 is `supabase/migrations/20261014113448_arena.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull arena --local --schema public,private --yes` from the tested `supabase/sql/07-arena.sql`.
+M01–M08 are unchanged.
+
+The draft needed three completions before commit:
+- It created the `guard_league` trigger before `private.guard_league()`; the trigger now follows its function.
+- It only added table grants. Source-equivalent revokes on the four new private tables now precede the grants.
+- It omitted every function ACL, so the new private functions would have lacked the backend `EXECUTE` that
+  `complete_job` and the boundary phases need. The source's revoke/grant pair is appended.
+
+It re-emits no unchanged function. The changed existing functions are `claim_jobs`, `complete_job`, `guard_job`,
+`valid_preparation`, `boundary_recompute_leagues` and `boundary_pair`; the new ones are `season_index`, `league_rank`,
+`guard_league`, `guard_arena_rating`, `pairing_input` and `accept_pairing`. No backfill or initialization is needed:
+the season epoch is deliberately left unset, and phase 4 creates each character's league-season rating row at its
+first boundary.
+
+**Season epoch.** `private.season_epoch` holds one immutable row: the slot of the first launch boundary. Without it,
+any boundary with members waits at phase 4 with `wait:'epoch'`. **Task 24 must set it at launch.** The DB test fixture
+(`resetIdentity`) sets it to slot 0. A developer using the local stack outside the tests sets it once:
+
+```powershell
+'insert into private.season_epoch(epoch_slot) values(0);' | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1
+```
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M09, with no source applied afterwards.
+- A fingerprint of 625 schema entries matched the tested source exactly. It covers function definitions,
+  search paths, security, volatility and ACLs; table and view ACLs, RLS and options; policies, triggers, constraints,
+  columns and indexes; the cron job and the seed rows.
+- The replayed database passed `npm run test:db`: **124/124** in seven files. That includes the 15 Arena cases and
+  their real pg_net dispatch to the Edge worker.
+- The fingerprint was identical again after the tests, so the test-only triggers and stand-ins were all removed.
+- Lint is empty. Advisors report six INFO unused-index notices, none on the new tables, and no warnings or errors.
+- The first replay run had one infrastructure fault: the background `functions serve` recreated the Edge container
+  one second into the run, and one Edge HTTP case could not connect. A rerun with the container stable throughout
+  passed 124/124. Details are in the [phase 2a report](../implementation/task-16-phase-2a-report.md).
+
 ## Task 10 delayed-preparation correction
 
 M08 is `supabase/migrations/20261014100253_projection_preparation_status.sql`,

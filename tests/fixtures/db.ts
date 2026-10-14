@@ -33,6 +33,11 @@ export async function resetIdentity() {
   // No schema creation here: missing schema must produce an honest RED result.
   await sql`truncate public.gladiators cascade`;
   await sql`truncate private.command_attempts`;
+  // Local and test databases set the launch season epoch explicitly (Task 16). It is immutable once set, so a local
+  // database with any other epoch would place historical test slots outside a season.
+  await sql`insert into private.season_epoch(singleton,epoch_slot) values(true,0) on conflict(singleton) do nothing`;
+  const [{ epoch }] = await sql`select epoch_slot::int as epoch from private.season_epoch`;
+  if (epoch !== 0) throw new Error('Local tests require the season epoch at slot 0');
 }
 export const creation = (name = 'Avi Fighter', operationId: string = randomUUID()) => ({ kind: 'create-character' as const, operationId, name, classId: 'guardian' as const,
   allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } });

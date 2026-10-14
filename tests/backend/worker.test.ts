@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
+import { DEFAULT_EXECUTORS, handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { PairingInput } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ExecutorRegistry, JobOutcome, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
-import type { JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
+import type { Attributes, JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
+import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { makeFighter } from '../../supabase/functions/_shared/domain/combat.ts';
+import { estimateArenaStrength, makeFallback, matchArena } from '../../supabase/functions/_shared/domain/arena.ts';
 import { itemFixture } from '../fixtures/domain.ts';
 
 const SECRET = 'unit-worker-secret-0123456789abcdef0123456789';
@@ -65,6 +69,52 @@ describe('canonical v1 activity preparation', () => {
       .toThrow(expect.objectContaining({ code: 'invalid-build' }));
     expect(() => prepareActivityV1(preparation({ rulesVersion: 'v2' }))).toThrow(expect.objectContaining({ code: 'unsupported-rules' }));
   });
+  it('freezes the arena fighter, its NPC template, the visible strength and the league from the canonical domain', () => {
+    const result = prepareActivityV1(preparation({ peakStrength: 28 }));
+    const fighter = makeFighter(result.snapshot, 'arena', RULES_V1);
+    expect(result.arenaFighter).toEqual(fighter);
+    expect(result.npcTemplate).toEqual(makeFallback(fighter));
+    expect(result.arenaStrength).toBe(estimateArenaStrength(fighter));
+    // Unarmed berserker: 100 HP × 2.75 × .71 hit × 1.0325 critical × 1000 / 952 ms = 211.759…
+    expect(result.arenaStrength).toBe(211.76);
+    expect(result.league).toBe('bronze');
+  });
+  it('places banked earned points and historical gear, never the current loadout', () => {
+    // 2 × 1 + floor(105 / 5) + floor(28 / 10) = 25: Silver with every extra point still banked.
+    expect(prepareActivityV1(preparation({ earnedPoints: 105, peakStrength: 28 })).league).toBe('silver');
+    // An unarmed current build keeps the Gold placement of its 560 history: 2 + 2 + 56 = 60.
+    const weak = prepareActivityV1(preparation({ peakStrength: 560 }));
+    expect(weak.league).toBe('gold');
+    expect(weak.arenaStrength).toBe(211.76);
+  });
+});
+
+describe('regular Arena pairing executor', () => {
+  const fighterFor = (allocations: Attributes) => prepareActivityV1(preparation({ earnedPoints: 40,
+    build: { ...preparation().build, allocations } })).arenaFighter;
+  const entrant = (id: string, allocations: Attributes, rating = 1000) => ({ gladiatorId: id, activityId: `activity-${id}`, seasonId: '0',
+    league: 'bronze' as const, slotIndex: 300, rating, fighter: fighterFor(allocations) });
+  const input = (): PairingInput => ({ slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v1', entrants: [
+    entrant('a', { strength: 6, agility: 2, vitality: 4, endurance: 0, precision: 2 }),
+    entrant('b', { strength: 4, agility: 2, vitality: 2, endurance: 0, precision: 2 }, 1040),
+    entrant('c', { strength: 2, agility: 2, vitality: 2, endurance: 0, precision: 2 })],
+    recent: [{ slotIndex: 299, gladiatorIds: ['a', 'b'] }] });
+  it('pairs one league’s frozen entrants with matchArena under the job’s own private seed', () => {
+    const job = lease('pair', { snapshot: input(), seed: 'pair-seed', gladiatorId: null });
+    const result = DEFAULT_EXECUTORS.v1.pair!(job);
+    expect(result).toEqual({ assignments: matchArena(input().entrants, input().recent, 'pair-seed') });
+    expect((result as { assignments: unknown[] }).assignments).toHaveLength(2);
+  });
+  it('fails a malformed, mixed or unknown-rules pairing input closed with sanitized codes', () => {
+    const run = (snapshot: unknown) => () => DEFAULT_EXECUTORS.v1.pair!(lease('pair', { snapshot: snapshot as PairingInput, gladiatorId: null }));
+    const valid = input();
+    expect(run({ ...valid, entrants: null })).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+    expect(run({ ...valid, recent: undefined })).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+    expect(run({ ...valid, entrants: [{ ...valid.entrants[0], league: 'silver' }, ...valid.entrants.slice(1)] })).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+    expect(run({ ...valid, entrants: [{ ...valid.entrants[0], slotIndex: 301 }] })).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+    expect(run({ ...valid, entrants: [{ ...valid.entrants[0], seasonId: '1' }] })).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+    expect(run({ ...valid, rulesVersion: 'v2' })).toThrow(expect.objectContaining({ code: 'unsupported-rules' }));
+  });
 });
 
 describe('fenced worker orchestration', () => {
@@ -79,6 +129,17 @@ describe('fenced worker orchestration', () => {
     expect(calls.filter(c => c.name === 'settle')).toHaveLength(12);
     expect(calls.filter(c => c.name === 'complete')).toHaveLength(8);
     expect(calls.filter(c => c.name === 'coordinate').length).toBeGreaterThanOrEqual(3);
+  });
+  it('claims pairing as simple work after preparation and before reveals, within one twenty-job budget', async () => {
+    const pairing: PairingInput = { slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v1', recent: [], entrants: [
+      { gladiatorId: 'solo', activityId: 'activity-solo', seasonId: '0', league: 'bronze', slotIndex: 300, rating: 1000,
+        fighter: prepareActivityV1(preparation()).arenaFighter }] };
+    const { database, calls } = port({ prepare: [lease('prepare')], pair: [lease('pair', { snapshot: pairing, gladiatorId: null })], reveal: [lease('reveal')] });
+    const report = await runWorker({ database, workerId: 'worker-p' });
+    expect(calls.filter(c => c.name === 'claim').map(c => c.args.slice(1))).toEqual([['settlement', 20], ['prepare', 20], ['pair', 19], ['reveal', 18]]);
+    expect(report).toMatchObject({ claimed: 3, completed: 3, failed: 0, byKind: { prepare: 1, pair: 1, reveal: 1, simulation: 0 } });
+    const completedPair = calls.find(c => c.name === 'complete' && (c.args[2] as { assignments?: unknown }).assignments);
+    expect(completedPair?.args[2]).toMatchObject({ assignments: [{ kind: 'npc', battleId: 'arena:300:solo:npc' }] });
   });
   it('processes at most five combat jobs only when no simple work exists', async () => {
     const simulations = Array.from({ length: 9 }, () => lease('simulation'));
@@ -177,7 +238,7 @@ describe('fenced worker orchestration', () => {
 
 describe('private worker HTTP boundary', () => {
   const run = async () => ({ claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0, unrecorded: 0,
-    byKind: { prepare: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null });
+    byKind: { prepare: 0, pair: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null });
   it('rejects missing, publishable and near-miss credentials before any database work', async () => {
     for (const authorization of [undefined, 'Bearer publishable-key', `Bearer ${SECRET}x`, SECRET, `Bearer ${SECRET.slice(0, -1)}`]) {
       const response = await handleWorker(post(authorization), { secret: SECRET, run: async () => { throw new Error('must not run'); } });

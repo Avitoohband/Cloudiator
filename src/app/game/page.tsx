@@ -138,7 +138,9 @@ function GameShell() {
           <p className="eyebrow">SAMPLE REPLAYS</p>
           <ul>{sampleReplays.map(r => <li key={r.activityId}><Link href={`/replay/?mode=fixture&activity=${r.activityId}`}>{r.label}</Link></li>)}</ul>
         </nav>}
-        {visibleOwner && <ArenaPanel bridge={bridge} reads={reads} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />}
+        {/* The live Arena timeline read is not built yet (Task 10): without a reader the card says so, and keeps
+            "cannot be loaded right now" for real read failures. Pass the live gateway once that read lands. */}
+        {visibleOwner && <ArenaPanel bridge={bridge} reads={fixture ? reads : null} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />}
       </aside>
       <section className="management" aria-label="Gladiator management">
         <nav className="panel-nav" aria-label="Management panels">

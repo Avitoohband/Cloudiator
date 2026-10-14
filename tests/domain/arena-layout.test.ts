@@ -7,7 +7,7 @@ import { layoutCamp } from '@/game/actors';
 import { REPLAY_OUTRO_MS } from '@/game/replay';
 import { ARENA_REVEAL_MS, ARENA_SLOT_MS, renderArenaStage } from '@/game/arena-stage';
 import {
-  ARENA_ENTRY_MS, ARENA_RESULT_HOLD_MS, arenaFightButton, arenaRings, arenaReadsDue, campArenaFights, fightStatus, ringTiles, scheduleArenaRings,
+  ARENA_ENTRY_MS, ARENA_GATE, ARENA_JOG_PACE, ARENA_RESULT_HOLD_MS, arenaFightButton, arenaRings, arenaReadsDue, campArenaFights, fightStatus, ringTiles, scheduleArenaRings,
   type CampFight, type RingSlot,
 } from '@/game/arena-layout';
 import type { ArenaFightSummary } from '@/game/bridge';
@@ -47,17 +47,25 @@ describe('arena sparring rings', () => {
     expect(ringTiles(camp)).toEqual(tiles);
   });
 
-  it('gives every arena tile time to walk into any ring before its camp bout starts', () => {
+  it('gives every arena tile and the arena gate time to jog into any ring before its camp bout starts, with little slack', () => {
     const grid = gridFromMap(camp);
-    const speed = manifest.actors.gladiator.walk.tilesPerSecond;
+    // Pairs jog in at three times the manifest walk (about 3 tiles/s); the walk back to staging keeps the walking pace.
+    const jog = manifest.actors.gladiator.walk.tilesPerSecond * ARENA_JOG_PACE;
+    expect(jog).toBeGreaterThanOrEqual(2.5);
+    expect(jog).toBeLessThanOrEqual(3.5);
     const zone = camp.zones.find(z => z.id === 'arena')!;
-    let longest = 0;
+    const starts = [ARENA_GATE];
     for (let y = zone.bounds.y; y < zone.bounds.y + zone.bounds.h; y += 1) for (let x = zone.bounds.x; x < zone.bounds.x + zone.bounds.w; x += 1) {
       if (camp.walkable[y][x] !== '1' || Math.hypot(x + 0.5 - camp.arena!.centre[0], y + 0.5 - camp.arena!.centre[1]) > camp.arena!.radius - 1.1) continue;
-      for (const ring of rings) for (const p of [ring.a, ring.b]) longest = Math.max(longest, pathLength(findPath(grid, { x, y }, p)!));
+      starts.push({ x, y });
     }
+    let longest = 0;
+    for (const from of starts) for (const ring of rings) for (const p of [ring.a, ring.b]) longest = Math.max(longest, pathLength(findPath(grid, from, p)!));
     expect(longest).toBeGreaterThan(5);
-    expect((longest / speed) * 1000).toBeLessThan(ARENA_ENTRY_MS);
+    const jogMs = (longest / jog) * 1000;
+    expect(jogMs).toBeLessThan(ARENA_ENTRY_MS);
+    // The ring plays each bout at its real time from the arrival, so a loose walk-in bound would hide the bout.
+    expect(ARENA_ENTRY_MS - jogMs).toBeLessThan(1000);
   });
 
   it('keeps arena entrants in staging before any bout is known, never paired and never on a ring tile', () => {
@@ -216,6 +224,39 @@ describe('ring schedule', () => {
         expect(fightStatus(slot, duration, end).status).toBe('result');
         expect(card(end)).not.toBeNull();
       }
+    }
+  });
+
+  it('changes ring and card over together at the bout stage’s end, even when it differs from the log’s duration', () => {
+    const bellator = ARENA_WORLD_ACTORS.find(a => a.name === 'Bellator')!;
+    const pair = ARENA_WORLD_ACTORS.filter(a => a.name === 'Bellator' || a.name === 'Corvina');
+    for (const shift of [-1500, 1500]) {
+      const timeline: RevealedTimeline = structuredClone(ARENA_TIMELINES[bellator.activityId!]);
+      const stage = timeline.stages.find(s => s.kind === 'bout')!;
+      stage.endsAtMs += shift;
+      const end = stage.endsAtMs;
+      const [fight] = fightsAt(S + 61 * MIN, pair, new Map([[bellator.activityId!, timeline]]));
+      const duration = fight.log.durationMs;
+      expect(end - fight.startedAtMs - duration).toBe(shift);
+      expect(fight.endsAtMs).toBe(end);
+      const slot = scheduleArenaRings([fight], 6).get(fight.battleId)!;
+      expect(slot.boutEndsAtMs).toBe(end);
+      expect(slot.leaveAtMs).toBe(Math.max(slot.fightStartMs, end + REPLAY_OUTRO_MS) + ARENA_RESULT_HOLD_MS);
+      const card = (t: number) => renderArenaStage(timeline, t, { entrantId: bellator.gladiatorId }).result;
+      for (let t = fight.startedAtMs; t <= slot.leaveAtMs + 1000; t += 250) {
+        for (const arrived of [false, true]) {
+          const { status, positionMs } = fightStatus(slot, duration, t, arrived);
+          // A fighting ring never reaches the logged result poses, and a ring showing the result never fights on.
+          if (status === 'fighting') expect([card(t), positionMs < duration], `${shift}: ${t - fight.startedAtMs} ms`).toEqual([null, true]);
+          if (status === 'result') expect([card(t) !== null, positionMs >= duration], `${shift}: ${t - fight.startedAtMs} ms`).toEqual([true, true]);
+        }
+      }
+      expect([fightStatus(slot, duration, end - 1, true).status, card(end - 1)]).toEqual(['fighting', null]);
+      expect(fightStatus(slot, duration, end, true)).toEqual({ status: 'result', positionMs: duration });
+      expect(card(end)).not.toBeNull();
+      // The replay outro runs from the stage's end.
+      expect(fightStatus(slot, duration, end + 1000, true).positionMs).toBe(duration + 1000);
+      expect(fightStatus(slot, duration, slot.leaveAtMs - 1, true).positionMs).toBe(duration + REPLAY_OUTRO_MS);
     }
   });
 

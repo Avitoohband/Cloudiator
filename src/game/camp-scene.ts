@@ -1,7 +1,7 @@
 // The living isometric camp. Phaser is injected (loaded lazily in the browser) so this
 // module stays importable during the static build. The scene only renders public world
 // state; it never decides outcomes or rewards. Arena entrants warm up in staging; a revealed
-// bout (from the entrants' timelines) walks its pair into a sparring ring and plays the
+// bout (from the entrants' timelines) jogs its pair into a sparring ring and plays the
 // battle log there, seeked to the display time (src/game/arena-layout.ts, battle-stage.ts).
 import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor } from '@contracts/reads';
@@ -9,7 +9,9 @@ import type { RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
 import { layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
-import { arenaRings, campArenaFights, fightStatus, scheduleArenaRings, type ArenaRing, type CampFight, type FightStatus, type RingSlot } from './arena-layout';
+import {
+  ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, scheduleArenaRings, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
+} from './arena-layout';
 import { LABEL_BASE, NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageFrame, type StageLayout, type StagePlan } from './battle-stage';
 import { NPC_ROUTINES, facingFor, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
 import { clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
@@ -93,7 +95,7 @@ export type CampDebugState = {
 };
 export type CampDebugFight = {
   battleId: string; ring: number; status: FightStatus; positionMs: number; fighters: [string | null, string | null];
-  boutStartMs: number; enterAtMs: number; fightStartMs: number; leaveAtMs: number; npc: string | null;
+  boutStartMs: number; boutEndsAtMs: number; enterAtMs: number; fightStartMs: number; leaveAtMs: number; npc: string | null;
 };
 export type PropDebug = { id: string; frame: string; x: number; y: number; occludes: boolean; slices: { left: number; width: number; depth: number }[]; alpha: number };
 
@@ -111,12 +113,10 @@ const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', cri
 /** Nameplates sit this far over the feet, and an NPC tag this far when its nameplate shows too (art px). */
 const PLATE_LIFT = 46;
 const TAG_LIFT = 58;
-/** Fight damage labels keep this gap over the highest nameplate or NPC tag of their pair. */
+/** Fight damage labels keep this gap over their target's nameplate or NPC tag. */
 const LABEL_GAP = 3;
 /** Arena fights are re-derived this often (display ms), and whenever new data arrives. */
 const ARENA_REFRESH_MS = 1000;
-/** NPC fallback opponents walk in and out through the arena gate, inside the wall. */
-const ARENA_GATE: TilePoint = { x: 27, y: 27 };
 
 type Pose = { x: number; y: number; depth: number; flip: boolean; body: string };
 type ActorView = {
@@ -132,7 +132,8 @@ type ActorView = {
   action: string;
   facing: Direction;
   offsetMs: number;
-  walk: { path: TilePoint[]; startedAt: number; then: { action: ActionId; facing: Direction }; remove?: boolean } | null;
+  /** `pace` multiplies the manifest walk speed and the walk loop's frame rate (3 for a jog into an Arena ring). */
+  walk: { path: TilePoint[]; startedAt: number; then: { action: ActionId; facing: Direction }; remove?: boolean; pace: number } | null;
   placement: Placement | null;
   location: string | null;
   npcRoutine?: NpcRoutine;
@@ -143,8 +144,8 @@ type ActorView = {
   /** Public activity and slot start (arena entrants warm up until minute 60). */
   activityId?: string | null;
   startsAtMs?: number | null;
-  /** The ring side this view stands on while its revealed bout is on. */
-  arena?: { key: string; battleId: string } | null;
+  /** The ring side and spot this view stands on while its revealed bout is on. */
+  arena?: { key: string; battleId: string; spot: RingSpot } | null;
   /** A fight pose from the battle log, drawn instead of the routine frame. */
   pose?: Pose | null;
   /** NPC fallback opponents carry a small always-visible "NPC" tag. */
@@ -235,6 +236,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   // The ring fights last told to the UI, and their statuses.
   let emittedIds: string[] = [];
   let emittedStatus: FightStatus[] = [];
+  // Bouts whose ring window has ended, this frame.
+  const finished = new Set<string>();
 
   class CampScene extends P.Scene {
     constructor() { super({ key: 'camp' }); }
@@ -460,7 +463,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (!existing) {
           const v = this.createPlayer(actor, placement);
           views.set(actor.gladiatorId, v);
-          if (!initial) this.walkTo(v, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing }, GATE);
+          if (!initial) this.walkTo(v, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing }, { from: GATE });
           continue;
         }
         if (lookKey(placement) !== existing.look) this.restyle(existing, placement);
@@ -479,7 +482,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       for (const [id, v] of views) {
         if (v.kind !== 'player' || seen.has(id)) continue;
         const leaving = layout.away.some(a => a.gladiatorId === id);
-        if (leaving && !initial) this.walkTo(v, GATE, now, { action: 'idle', facing: 'se' }, undefined, true);
+        if (leaving && !initial) this.walkTo(v, GATE, now, { action: 'idle', facing: 'se' }, { remove: true });
         else this.removeView(v);
       }
       awayCount = layout.away.length;
@@ -493,7 +496,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       });
     }
 
-    walkTo(v: ActorView, to: TilePoint, now: number, then: { action: ActionId; facing: Direction }, from?: TilePoint, remove = false) {
+    walkTo(v: ActorView, to: TilePoint, now: number, then: { action: ActionId; facing: Direction }, options: { from?: TilePoint; remove?: boolean; pace?: number } = {}) {
+      const { from, remove = false, pace = 1 } = options;
       const start = from ?? { x: Math.floor(v.x), y: Math.floor(v.y) };
       const path = reducedMotion ? null : findPath(grid, start, to);
       if (!path) {
@@ -502,7 +506,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         v.x = to.x + 0.5; v.y = to.y + 0.5; v.action = then.action; v.facing = then.facing;
         return;
       }
-      v.walk = { path, startedAt: now, then, remove };
+      v.walk = { path, startedAt: now, then, remove, pace };
       if (from) { v.x = from.x + 0.5; v.y = from.y + 0.5; }
     }
 
@@ -611,7 +615,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           const p = reducedMotion ? stillNpc(v.npcRoutine) : planNpcPosition(v.npcRoutine, map, now, walkTilesPerSecond);
           v.x = p.x; v.y = p.y; v.action = p.action; v.facing = p.facing;
         } else if (v.walk) {
-          const walked = (now - v.walk.startedAt) * WALK_SPEED;
+          const walked = (now - v.walk.startedAt) * WALK_SPEED * v.walk.pace;
           const p = pointAlong(v.walk.path, walked);
           v.x = p.x; v.y = p.y;
           v.facing = facingFor(p.dx, p.dy, v.facing);
@@ -668,7 +672,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     /**
-     * Arena: each revealed bout of two entrants in camp (or an entrant and its NPC fallback) walks into its ring,
+     * Arena: each revealed bout of two entrants in camp (or an entrant and its NPC fallback) jogs into its ring,
      * plays the battle log at the bout's real time once both stand there (so it ends when the Arena card shows the
      * result), holds the result and walks back to staging. Everyone else in the arena warms up until minute 60,
      * then waits in staging.
@@ -693,10 +697,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       type Active = { fight: CampFight; slot: RingSlot; status: FightStatus; positionMs: number };
       const active: Active[] = [];
       const sides = new Map<string, Active & { side: 0 | 1 }>();
+      finished.clear();
       for (const fight of fights) {
         const slot = schedule.get(fight.battleId);
         if (!slot) continue;
         const { status, positionMs } = statusOf(fight, slot, now);
+        if (status === 'done') finished.add(fight.battleId);
         if (status === 'queued' || status === 'done') continue;
         const entry = { fight, slot, status, positionMs };
         active.push(entry);
@@ -712,11 +718,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           const spot = mine.side === 0 ? r.a : r.b;
           const key = `${mine.fight.battleId}:${mine.side}`;
           if (v.arena?.key !== key) {
-            v.arena = { key, battleId: mine.fight.battleId };
-            if (mine.status === 'entering') this.walkTo(v, spot, now, { action: 'idle', facing: spot.facing });
+            v.arena = { key, battleId: mine.fight.battleId, spot };
+            if (mine.status === 'entering') this.walkTo(v, spot, now, { action: 'idle', facing: spot.facing }, { pace: ARENA_JOG_PACE });
             else this.standAt(v, spot, 'idle', spot.facing);
           }
         } else if (v.arena) {
+          // The clock carried the bout past its end while this fighter was still jogging in (a hidden tab coming
+          // back, a late read): it starts back from its ring spot, where the fight and result were due.
+          if (v.walk && finished.has(v.arena.battleId)) this.standAt(v, v.arena.spot, 'idle', v.arena.spot.facing);
           v.arena = null;
           if (v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
         }
@@ -736,16 +745,17 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (npcFighters.has(fight.battleId)) continue;
         const r = rings[slot.ring];
         const spot = side === 0 ? r.a : r.b;
-        const npc = this.createArenaNpc(fight, side);
-        if (status === 'entering') this.walkTo(npc, spot, now, { action: 'idle', facing: spot.facing }, ARENA_GATE);
+        const npc = this.createArenaNpc(fight, side, spot);
+        if (status === 'entering') this.walkTo(npc, spot, now, { action: 'idle', facing: spot.facing }, { from: ARENA_GATE, pace: ARENA_JOG_PACE });
         else this.standAt(npc, spot, 'idle', spot.facing);
       }
       for (const [battleId, npc] of [...npcFighters]) {
         if (npcSeen.has(battleId)) continue;
         npcFighters.delete(battleId);
         npc.pose = null;
+        if (npc.walk && npc.arena && finished.has(battleId)) this.standAt(npc, npc.arena.spot, 'idle', npc.arena.spot.facing);
         npc.arena = null;
-        this.walkTo(npc, ARENA_GATE, now, { action: 'idle', facing: 'se' }, undefined, true);
+        this.walkTo(npc, ARENA_GATE, now, { action: 'idle', facing: 'se' }, { remove: true });
       }
 
       // Fights: poses, effects and (for the focused fight only) damage labels, all from the logs at the bout's real
@@ -782,14 +792,15 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           effects += 1;
         }
         if (!focus || !fight.fighters.includes(focus) || !frame.labels.length) continue;
-        // Labels rise from above the pair's highest nameplate or NPC tag (the two stand level), never over one.
-        const top = Math.min(plateTop(fight, 0, feet[0].y), plateTop(fight, 1, feet[1].y)) - LABEL_GAP;
         for (const l of frame.labels) {
+          // Each label starts just above its own target's nameplate (and NPC tag), never over one, and rises as in the
+          // replay only as far as the room under a nameplate or tag drawn above it (a fighter in the ring behind).
+          const base = plateTop(fight, l.target, feet[l.target].y) - LABEL_GAP;
           const text = labelPool[labels] ?? (labelPool[labels] = this.add.text(0, 0, '', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '10px', stroke: '#1a1423', strokeThickness: 3 })
             .setOrigin(0.5, 1).setResolution(2).setDepth(2_000_003));
           if (text.text !== l.text) text.setText(l.text);
-          const rise = feet[l.target].y - LABEL_BASE - l.y;
-          text.setColor(LABEL_COLORS[l.kind]).setPosition(l.x, top - rise).setAlpha(l.alpha).setVisible(true);
+          const rise = Math.min(feet[l.target].y - LABEL_BASE - l.y, headroom(l.x, text.displayWidth, base - text.displayHeight));
+          text.setColor(LABEL_COLORS[l.kind]).setPosition(l.x, base - rise).setAlpha(l.alpha).setVisible(true);
           labelBattle[labels] = fight.battleId;
           labelTarget[labels] = l.target;
           labels += 1;
@@ -823,7 +834,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     /** An NPC fallback opponent: the entrant's mirrored gear in the neutral NPC grey, with an "NPC" tag. */
-    createArenaNpc(fight: CampFight, side: 0 | 1): ActorView {
+    createArenaNpc(fight: CampFight, side: 0 | 1, spot: RingSpot): ActorView {
       const p = fight.log.participants[side];
       const id = `arena-npc:${fight.battleId}`;
       const old = views.get(id);
@@ -846,7 +857,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       const v: ActorView = {
         id, kind: 'arena-npc', name: p.name, container, layers, look: '', label: this.makeLabel(p.name).setColor('#c9d3da'),
         x: ARENA_GATE.x + 0.5, y: ARENA_GATE.y + 0.5, action: 'idle', facing: 'sw', offsetMs: 0, walk: null, placement: null, location: 'arena',
-        frame: '', flip: null, depth: NaN, activityId: fight.activities[side], startsAtMs: null, arena: { key: `${fight.battleId}:${side}`, battleId: fight.battleId }, pose: null, marker,
+        frame: '', flip: null, depth: NaN, activityId: fight.activities[side], startsAtMs: null, arena: { key: `${fight.battleId}:${side}`, battleId: fight.battleId, spot }, pose: null, marker,
       };
       views.set(id, v);
       npcFighters.set(fight.battleId, v);
@@ -913,7 +924,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     deps.bridge.emit('follow-character', { gladiatorId: null });
   }
 
-  /** A fight's status now: the walk-in ends early once both fighters stand on their ring spots. */
+  /** A fight's status now: the jog-in ends early once both fighters stand on their ring spots. */
   function statusOf(fight: CampFight, slot: RingSlot, now: number) {
     return fightStatus(slot, fight.log.durationMs, now, pairArrived(fight, slot));
   }
@@ -938,6 +949,23 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     return v.marker ? Math.min(plate, feetY - TAG_LIFT - v.marker.displayHeight) : plate;
   }
 
+  /**
+   * How far a damage label (centred at `x`, `width` wide, its top at `top`) can rise before it meets a nameplate or
+   * NPC tag shown above it in its column, from where they were drawn last frame (bottom-centre origin).
+   */
+  function headroom(x: number, width: number, top: number): number {
+    let room = Infinity;
+    for (const v of views.values()) {
+      room = Math.min(room, roomUnder(v.label, x, width, top));
+      if (v.marker) room = Math.min(room, roomUnder(v.marker, x, width, top));
+    }
+    return room;
+  }
+
+  function roomUnder(t: PhaserNS.GameObjects.Text, x: number, width: number, top: number): number {
+    return t.visible && t.y <= top && Math.abs(t.x - x) < (t.displayWidth + width) / 2 ? top - t.y : Infinity;
+  }
+
   /** Arena debug state, built only when a test asks: the ring windows and what the rings drew last frame. */
   function arenaDebugState(now: number): CampDebugState['arena'] {
     const box = (t: PhaserNS.GameObjects.Text) => { const b = t.getBounds(); return { x: b.x, y: b.y, width: b.width, height: b.height }; };
@@ -952,7 +980,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const { status, positionMs } = statusOf(fight, slot, now);
         const npc = fight.fighters.includes(null) ? `arena-npc:${fight.battleId}` : null;
         return [{ battleId: fight.battleId, ring: slot.ring, status, positionMs, fighters: [fight.fighters[0], fight.fighters[1]] as [string | null, string | null],
-          boutStartMs: slot.boutStartMs, enterAtMs: slot.enterAtMs, fightStartMs: slot.fightStartMs, leaveAtMs: slot.leaveAtMs, npc }];
+          boutStartMs: slot.boutStartMs, boutEndsAtMs: slot.boutEndsAtMs, enterAtMs: slot.enterAtMs, fightStartMs: slot.fightStartMs, leaveAtMs: slot.leaveAtMs, npc }];
       }),
       effects,
       labels,
@@ -977,7 +1005,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
     const dirs = gladiator.animations[v.action as ActionId] ?? gladiator.animations.idle;
     const anim = manifest.animations[back && dirs.ne ? dirs.ne : dirs.se];
-    const frame = anim.frames[frameIndex(anim, now + v.offsetMs)];
+    // A jog steps through the walk loop as much faster as it moves.
+    const at = v.walk && v.walk.pace !== 1 ? v.walk.startedAt + (now - v.walk.startedAt) * v.walk.pace : now;
+    const frame = anim.frames[frameIndex(anim, at + v.offsetMs)];
     return { frame: frame.slice(frame.indexOf('/') + 1), flip };
   }
 

@@ -305,6 +305,127 @@ test.describe('arena staging and sparring rings in the camp', () => {
     state = await campState(page);
     for (const id of fight.fighters.filter((x): x is string => !!x)) expect(state.actors.find(a => a.id === id)!.walking, 'walking back to staging').toBe(true);
   });
+
+  test('jogs pairs into their rings at three times the walking pace with a quicker step, and walks them back at the normal pace', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openArena(page, 59);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.reducedMotion === false);
+    const start = S + 60 * MIN;
+    await freezeAt(page, start);
+    const entering = (await campState(page)).arena.fights.filter(f => f.status === 'entering');
+    expect(entering.length).toBe(6);
+    const sideIds = (f: (typeof entering)[number]) => [f.fighters[0] ?? f.npc!, f.fighters[1] ?? f.npc!];
+    /** Straight-line tiles per second over 300 ms (a lower bound of the path speed) and walk-frame changes over 240 ms. */
+    async function pace(ids: string[], t0: number) {
+      await freezeAt(page, t0);
+      const before = await campState(page);
+      const frames = await page.evaluate(({ ids, t0 }) => {
+        const hook = window.__cloudiatorCamp!;
+        const seen: Record<string, string[]> = {};
+        for (let t = t0; t < t0 + 240; t += 10) {
+          hook.freezeClock(t);
+          const state = hook.state()!;
+          for (const id of ids) (seen[id] ??= []).push(state.actors.find(a => a.id === id)!.frame);
+        }
+        return seen;
+      }, { ids, t0 });
+      await freezeAt(page, t0 + 300);
+      const after = await campState(page);
+      return ids.flatMap(id => {
+        const [a, b] = [before.actors.find(x => x.id === id)!, after.actors.find(x => x.id === id)!];
+        if (!a.walking || !b.walking) return [];
+        const changes = frames[id].filter((frame, i) => i > 0 && frame !== frames[id][i - 1]).length;
+        return [{ name: a.name, speed: Math.hypot(b.x - a.x, b.y - a.y) / 0.3, changes, walk: frames[id].every(f => f.startsWith('walk/')) }];
+      });
+    }
+    const jog = await pace(entering.flatMap(sideIds), start + 200);
+    expect(jog.length, 'fighters still jogging in').toBeGreaterThanOrEqual(8);
+    for (const w of jog) {
+      expect(w.walk, `${w.name} plays the walk loop`).toBe(true);
+      expect(w.speed, `${w.name} jogs in`).toBeGreaterThan(2.2);
+      expect(w.speed, `${w.name} jogs in`).toBeLessThan(3.05);
+      // Six 120 ms frames at three times the rate: about six changes in 240 ms (two at the walking rate).
+      expect(w.changes, `${w.name} steps quicker`).toBeGreaterThanOrEqual(5);
+    }
+    // Into the rings (stepping the clock through the jog), then back to staging after the first result.
+    for (let t = start; t <= entering[0].fightStartMs; t += 250) await freezeAt(page, t);
+    const fight = entering[0];
+    const back = await pace(sideIds(fight), fight.leaveAtMs + 200);
+    expect(back.length, 'both fighters walk back').toBe(2);
+    for (const w of back) {
+      expect(w.walk, `${w.name} plays the walk loop`).toBe(true);
+      expect(w.speed, `${w.name} walks back`).toBeGreaterThan(0.5);
+      expect(w.speed, `${w.name} walks back`).toBeLessThan(1.05);
+      expect(w.changes, `${w.name} steps at the walking rate`).toBeLessThanOrEqual(3);
+    }
+  });
+
+  test('puts a fighter still walking in on its ring spot once its bout is over, so it walks back from the ring', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openArena(page, 59);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.reducedMotion === false);
+    await freezeAt(page, S + 60 * MIN);
+    const entering = (await campState(page)).arena.fights.filter(f => f.status === 'entering');
+    expect(entering.length).toBe(6);
+    await freezeAt(page, S + 60 * MIN + 500);
+    let state = await campState(page);
+    const sides = entering.flatMap(f => ([0, 1] as const).map(side => ({ fight: f, side, id: f.fighters[side] ?? f.npc! })));
+    const midway = sides.filter(({ id }) => { const a = state.actors.find(x => x.id === id)!; return a.walking && !ringAt(a.x, a.y); });
+    expect(midway.length, 'fighters still on their way in').toBeGreaterThanOrEqual(8);
+    // The display clock jumps past every bout's end with no frame in between (a hidden tab coming back, or a late
+    // timeline read), so the walk-in never finished on screen.
+    await freezeAt(page, Math.max(...entering.map(f => f.leaveAtMs)));
+    state = await campState(page);
+    for (const { fight, side, id } of midway) {
+      const a = state.actors.find(x => x.id === id)!;
+      expect(state.arena.fights.find(f => f.battleId === fight.battleId)!.status).toBe('done');
+      expect([a.walking, ringAt(a.x, a.y)?.id ?? null], `${a.name} starts back from its ring spot`).toEqual([true, `arena-ring-${fight.ring}-${side === 0 ? 'a' : 'b'}`]);
+    }
+  });
+
+  test('keeps each fight’s damage labels clear of every nameplate in the six-fight view', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' }); // the pairs stand in their rings at once
+    await openArena(page, 60);
+    const inRings = (await campState(page)).arena.fights.filter(f => f.status !== 'queued');
+    expect(inRings).toHaveLength(6);
+    const crossings: string[] = [];
+    let seen = 0;
+    for (const motion of ['reduce', 'no-preference'] as const) {
+      await page.emulateMedia({ reducedMotion: motion });
+      await page.waitForFunction(m => window.__cloudiatorCamp!.state()!.reducedMotion === (m === 'reduce'), motion);
+      for (const fight of inRings) {
+        const bout = (Object.keys(ARENA_BOUTS) as ArenaBoutKey[]).find(k => arenaBattleId(k) === fight.battleId)!;
+        const gladiator = (fight.fighters[0] ?? fight.fighters[1])!;
+        await page.evaluate(id => window.__cloudiatorCamp!.emit('find-character', { gladiatorId: id }), gladiator);
+        // The six-fight view (the evidence capture), where every fighter's nameplate shows.
+        await page.evaluate(() => window.__cloudiatorCamp!.centerOn(23, 22.5, 2));
+        const found = await page.evaluate(async ({ battleId, from, to }) => {
+          const hook = window.__cloudiatorCamp!;
+          const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const hit = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+            a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+          const out: string[] = [];
+          let labels = 0;
+          for (let t = from; t < to; t += 100) {
+            hook.freezeClock(t);
+            await frame();
+            const state = hook.state()!;
+            for (const label of state.arena.labels.filter(l => l.battleId === battleId)) {
+              labels += 1;
+              for (const a of state.actors) for (const plate of a.plates) if (hit(label.box, plate)) out.push(`${label.text} over ${a.name} at ${t - from} ms`);
+            }
+          }
+          return { out, labels };
+        }, { battleId: fight.battleId, from: fight.boutStartMs + 500, to: fight.boutStartMs + LOGS[bout].durationMs });
+        seen += found.labels;
+        crossings.push(...found.out.map(x => `${motion} ${bout}: ${x}`));
+      }
+    }
+    expect(seen).toBeGreaterThan(100);
+    expect(crossings).toEqual([]);
+  });
 });
 
 
@@ -510,6 +631,29 @@ test.describe('the Arena card and league standings', () => {
       if (motion === 'reduce') await page.screenshot({ path: testInfo.outputPath('arena-card-opened-from-camp.png') });
     });
   }
+
+  test('leaves the page where it is when a camp bout opens a card that is already in view (desktop)', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'The desktop layout shows the card beside the camp.');
+    await page.emulateMedia({ reducedMotion: 'reduce' }); // a scroll would be an instant jump
+    await page.goto('/game/?mode=fixture');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN + 12_000);
+    const selection = { activityId: arenaActivityId('bellator'), gladiatorId: ARENA_GLADIATORS.bellator.id };
+    await page.evaluate(next => window.__cloudiatorArena!.open(next), selection);
+    const heading = card(page).getByRole('heading', { name: 'Bellator' });
+    await expect(card(page).getByRole('status')).toHaveText('Bout in progress');
+    // Scroll so the whole card shows below the top of the view, as when a player reads it beside the camp.
+    await card(page).evaluate(el => { const r = el.getBoundingClientRect(); window.scrollTo(0, window.scrollY + r.top - Math.max(40, (window.innerHeight - r.height) / 2)); });
+    const box = () => card(page).evaluate(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, view: window.innerHeight, scrollY: window.scrollY }; });
+    const before = await box();
+    expect(before.top, 'the card starts below the top of the view').toBeGreaterThan(20);
+    expect(before.bottom, 'the whole card is in view').toBeLessThanOrEqual(before.view);
+    // The event a fighter click or a bout button sends.
+    await page.evaluate(next => window.__cloudiatorCamp!.emit('open-arena', next), selection);
+    await expect(heading).toBeFocused();
+    await nextFrames(page);
+    expect((await box()).scrollY, 'the page did not scroll').toBe(before.scrollY);
+  });
 
   test('ends the ring fight when its card shows the result, never before', async ({ page }) => {
     await page.goto('/game/?mode=fixture');

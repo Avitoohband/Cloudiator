@@ -16,7 +16,7 @@ import type { SceneBridge } from '../../game/bridge';
 import type { DisplayClock } from '../../game/display-clock';
 import { ARENA_RETRY_MS } from '../../game/arena-layout';
 import { ARENA_REVEAL_MS, arenaRevealMarks, renderArenaStage, type ArenaStageState } from '../../game/arena-stage';
-import { NO_INJURY, NPC_DISCLOSURE, REVEAL_MINUTE, SLOT_MINUTES, className, creditedLines, phaseDetail, phaseTitle, replayHref, resultText } from './arena-text';
+import { NO_INJURY, NPC_DISCLOSURE, REVEAL_MINUTE, SLOT_MINUTES, arenaUnavailableText, className, creditedLines, phaseDetail, phaseTitle, replayHref, resultText } from './arena-text';
 import styles from './ArenaPanel.module.css';
 
 /** Reads the card makes: the activity's timeline and, once revealed, the opponent's public profile. */
@@ -188,13 +188,13 @@ function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixtur
   } : null;
 
   // Opened from the camp (a fighter or a bout button), the card may sit far below the view: once its heading has
-  // rendered, scroll the card's top into view and move the focus to the heading. Reduced motion jumps instead of
-  // scrolling smoothly.
+  // rendered, scroll the card into view by the shortest way (a card already in view stays put, and so does the camp)
+  // and move the focus to the heading. Reduced motion jumps instead of scrolling smoothly.
   useEffect(() => {
     if (!focusRequest || focused.current === focusRequest || !heading.current) return;
     focused.current = focusRequest;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    (heading.current.closest('article') ?? heading.current).scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    (heading.current.closest('article') ?? heading.current).scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' });
     heading.current.focus({ preventScroll: true });
   });
 
@@ -209,7 +209,7 @@ function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixtur
   if (failure && !timeline) {
     return <article className={styles.card}>
       <header className={styles.header}><h3 ref={heading} tabIndex={-1}>This Arena bout is not available</h3><button type="button" className={styles.close} onClick={onClose}>Close</button></header>
-      <p className={styles.detail}>{failure === 'not-found' ? 'No Arena activity matches this selection.' : 'Arena activity cannot be loaded right now. Only revealed stages are ever shown.'}</p>
+      <p className={styles.detail}>{arenaUnavailableText(failure)}</p>
     </article>;
   }
   if (!state) return <p role="status" className={styles.detail}>Loading the Arena bout…</p>;
@@ -218,7 +218,8 @@ function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixtur
 
 /**
  * The page's Arena section: opens the card from camp selections (bridge `open-arena`), for the owner's own Arena
- * activity, and from the fixture samples. Without a reader it says that Arena activity cannot be shown yet.
+ * activity, and from the fixture samples. Without a reader (the live game until Task 10's timeline read lands) it says
+ * that the card is not available in this build yet; a real read failure keeps the temporary "right now" message.
  */
 export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, samples = [] }: {
   bridge: SceneBridge;
@@ -265,7 +266,7 @@ export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, sample
         </nav>
       )}
       {!selection ? <p className="muted">Select a gladiator in the arena, or one of its bout buttons, to follow that bout here.</p>
-        : !reads ? <p className={styles.detail} role="status">Arena activity cannot be shown in this build yet.</p>
+        : !reads ? <p className={styles.detail} role="status">{arenaUnavailableText('build')}</p>
           : <ArenaCard key={selection.activityId} selection={selection} focusRequest={selection.focus} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
             onClose={() => setSelection(null)} onRead={onRead} hook={cardState} />}
     </section>

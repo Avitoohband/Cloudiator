@@ -5,7 +5,7 @@ import type { StandingRow } from '@contracts/reads';
 import { renderArenaStage, ARENA_SLOT_MS } from '@/game/arena-stage';
 import { ArenaCardView, type ArenaCardModel } from '@/features/arena/ArenaPanel';
 import { StandingsView, type StandingsModel } from '@/features/arena/StandingsPanel';
-import { NO_INJURY, NPC_DISCLOSURE, creditedLines, replayHref, resultText } from '@/features/arena/arena-text';
+import { NO_INJURY, NPC_DISCLOSURE, arenaUnavailableText, creditedLines, replayHref, resultText } from '@/features/arena/arena-text';
 import { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId, arenaStandingsPage, type ArenaActivityKey } from '../fixtures/arena';
 import { worldFixture } from '../fixtures/domain';
 
@@ -122,6 +122,15 @@ describe('Arena card', () => {
     const summary = ARENA_TIMELINES[arenaActivityId('ownerHumanLoss')].summary!;
     expect(creditedLines(summary)).toEqual(['+2 renown', 'Rating −13']);
     expect(creditedLines({ ...summary, ratingDelta: 0 })).toEqual(['+2 renown', 'Rating unchanged']);
+  });
+
+  it('tells a build without the Arena read apart from a read that failed or found nothing', () => {
+    // The live game until Task 10's timeline read lands: no reader, so nothing to retry.
+    expect(arenaUnavailableText('build')).toBe('The Arena card is not available in this build yet.');
+    // A real read failure stays a temporary, retryable message.
+    expect(arenaUnavailableText('unavailable')).toBe('Arena activity cannot be loaded right now. Only revealed stages are ever shown.');
+    expect(arenaUnavailableText('unavailable')).not.toContain('build');
+    expect(arenaUnavailableText('not-found')).toBe('No Arena activity matches this selection.');
   });
 });
 

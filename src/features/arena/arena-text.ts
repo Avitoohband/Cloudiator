@@ -46,6 +46,16 @@ export function phaseDetail(state: ArenaStageState, owner: boolean, revealAt: st
   }
 }
 
+/**
+ * Why the card cannot show an activity: the build has no Arena read yet (the live game until Task 10's timeline read
+ * lands), the read found no activity, or a real read failed (temporary; the card reads again on focus).
+ */
+export function arenaUnavailableText(reason: 'build' | 'not-found' | 'unavailable'): string {
+  return reason === 'build' ? 'The Arena card is not available in this build yet.'
+    : reason === 'not-found' ? 'No Arena activity matches this selection.'
+      : 'Arena activity cannot be loaded right now. Only revealed stages are ever shown.';
+}
+
 /** "Victory" or "Defeat", with how the logged winner won. The winner is always the logged winnerId. */
 export function resultText(result: ArenaResult, names: { entrant: string; opponent: string }): { title: string; detail: string } {
   const winner = result.outcome === 'victory' ? names.entrant : names.opponent;

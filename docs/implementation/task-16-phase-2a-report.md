@@ -148,6 +148,7 @@ The DB RED above was only "missing schema", so each SQL rule was then proven by 
 | Mutation | Owning test | Observed failure |
 | --- | --- | --- |
 | M1: placement takes the computed league (no max) | never lowers a placement | `advance_boundary: league placement decrease` (the guard trigger, a second defence) |
+| M2 | (not recorded; the numbering skipped it) | — |
 | M3: a new league row inherits the old rating | promotes from banked points | rating 1040, expected 1000 |
 | M4: history window S − 19 | preceding 18 slots | `recent` also held the S − 19 bouts |
 | M5: no fighter equality check | omits, duplicates or alters | "an altered fighter" was accepted |
@@ -333,12 +334,25 @@ Environment notes:
    - both sides reveal the same log, and exactly one is credited the win;
    - stages appear only when due;
    - the malformed-hook rollback;
-   - the 2-minute target re-measured with simulation included.
-9. **Retention (Task 22):** prune assignments and their sides before their pairing jobs (FK).
-10. **Deployment (Task 24):**
-    - Set `private.season_epoch` at launch, or every boundary with members waits with `epoch`.
-    - Deploy the worker before or together with M09. The new `valid_preparation` refuses preparations without the
-      four additive fields, so an old worker's result would be rejected and retried into operator state.
+   - the 2-minute target re-measured with simulation included;
+   - plan item 12's gear-history and respec cases (sold, unequipped and renown gear history; respec and banked points;
+     promotion only at a boundary), driven through real Task 8 acquisitions instead of operator SQL;
+   - add `pairing_input` to the access-denial list (its ACL is service_role only; the review checked it).
+9. **Fail-closed history window (review Minor 4):** carry the history lower bound in `PairingInput` and have the
+   versioned executor assert `historyFromSlot <= slotIndex - rules.matchmaking.recentPairingSlots`; note in the SQL
+   header that the season length 504 restates `RULES_V1.seasons.durationSlots`.
+10. **Tournament bouts in history (Task 19):** `pairing_input` reads only `pair` assignments today. Task 19 phase 2 must
+    add its human tournament bouts, one row per bout (plan item 6).
+11. **Retention (Task 22):** prune assignment sides before their activities and assignments before their pairing jobs
+    (foreign keys).
+12. **Deployment (Task 24), corrected by the review:**
+    - Set `private.season_epoch` at launch, **no later than the first boundary with members that the coordinator will
+      process** (its first run starts at the minimum `processed_slot_index`). Boundaries run strictly in order, so a
+      late epoch stalls every later boundary at phase 4 with `epoch`, and the row is immutable (`guard_frozen`). Verify
+      with `select min(processed_slot_index) from public.gladiators;` before the insert.
+    - Apply M09 and deploy the worker **in one release step**, then check that no `prepare` job is in operator state.
+      Neither order alone is safe: a new worker before M09 aborts each run on `claim_jobs` (`invalid claim`, self-healing
+      once M09 lands); M09 before the new worker rejects old preparations into operator state (`resume_operator_job`).
 
 ## Skill upkeep
 

@@ -19,7 +19,10 @@ the season epoch is deliberately left unset, and phase 4 creates each character'
 first boundary.
 
 **Season epoch.** `private.season_epoch` holds one immutable row: the slot of the first launch boundary. Without it,
-any boundary with members waits at phase 4 with `wait:'epoch'`. **Task 24 must set it at launch.** The DB test fixture
+any boundary with members waits at phase 4 with `wait:'epoch'`. **Task 24 must set it at launch**, no later than the
+first boundary with members the coordinator will process (check `select min(processed_slot_index) from
+public.gladiators;` first): boundaries run in order and the row is immutable, so a late epoch stalls every later
+boundary. The DB test fixture
 (`resetIdentity`) sets it to slot 0. A developer using the local stack outside the tests sets it once:
 
 ```powershell

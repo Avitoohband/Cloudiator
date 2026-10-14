@@ -56,6 +56,8 @@ async function planningFlow(context: BrowserContext) {
   return { commands, loseNext: () => { lose = true; }, processing: (value: boolean) => { processing = value; }, conflictNext: () => { conflict = true; } };
 }
 
+test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.'); });
+
 test('queues, confirms and cancels pending builds without optimistic current replacement', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');

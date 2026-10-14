@@ -246,7 +246,7 @@ describe('arena fixture timelines', () => {
       const row = ARENA_STANDINGS[profile.actor.league].find(r => r.gladiatorId === g.id)!;
       expect(row, g.name).toBeDefined();
       expect(profile.rating).toBe(row.rating);
-      expect(Number.isSafeInteger(profile.combatStrength) && profile.combatStrength > 0).toBe(true);
+      expect(profile.combatStrength !== null && Number.isSafeInteger(profile.combatStrength) && profile.combatStrength > 0).toBe(true);
     }
     expect(ARENA_PROFILES[ownerFixture.gladiatorId].rating).toBe(ARENA_OWNER.progression.rating);
     expect(ARENA_PROFILES[ownerFixture.gladiatorId].actor.league).toBe(ARENA_OWNER.progression.league);

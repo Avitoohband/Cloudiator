@@ -305,5 +305,3 @@ Rate-limit creation and command endpoints, validate finite integer inputs and ca
 | Replay expired | Show summarized outcome and rewards; clearly identify that animation is no longer retained |
 
 Persist operational logs for job identity, attempts, duration, CPU measurements where available, and failures, with no tokens or provider secrets. Expose an owner-operated health view/CLI report for overdue jobs, stalled checkpoints, and resource usage; do not add another player-facing admin flow.
-
-

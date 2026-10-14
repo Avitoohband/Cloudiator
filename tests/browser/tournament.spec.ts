@@ -4,6 +4,7 @@ import type { PublicActor, TournamentView } from '../../supabase/functions/_shar
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
 import { tournamentCampActors } from '../fixtures/tournament-build';
+import { forbidRemote } from './remote';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -47,22 +48,23 @@ const tournamentFlow = {
   /** Winner ids shown anywhere visible on the page. */
   visibleWinnerIds: (page: Page) => page.locator('[data-winner-id]:visible').evaluateAll(els => [...new Set(els.map(e => e.getAttribute('data-winner-id')!))]),
 };
-/** Collects any Supabase, Edge or other non-local request (fixture mode must make none). */
-function forbidRemote(page: Page) {
-  const seen: string[] = [];
-  page.on('request', request => {
-    const url = request.url();
-    if (/54321|supabase|\/functions\/v1\/|\/rest\/v1\//.test(url) || !/^(http:\/\/127\.0\.0\.1:3200|data:|blob:)/.test(url)) seen.push(url);
-  });
-  return seen;
-}
+
+test('the request guard accepts the test origin on any dev port and still flags Supabase', () => {
+  for (const origin of ['http://127.0.0.1:3100', 'http://127.0.0.1:3200', 'http://127.0.0.1:4173']) {
+    const handlers: ((request: { url(): string }) => void)[] = [];
+    const page = { on: (_event: string, handler: (request: { url(): string }) => void) => { handlers.push(handler); } } as unknown as Page;
+    const seen = forbidRemote(page, origin);
+    for (const url of [`${origin}/_next/static/chunks/app.js`, `${origin}/game/?mode=fixture`, 'data:image/png;base64,AAAA', 'http://127.0.0.1:54321/rest/v1/x']) handlers.forEach(h => h({ url: () => url }));
+    expect(seen, origin).toEqual(['http://127.0.0.1:54321/rest/v1/x']);
+  }
+});
 
 test.describe('tournament registration and brackets', () => {
   test.skip(production, 'The tournament samples need the fixture preview, which production exports never include.');
   test.use({ timezoneId: 'UTC' });
 
-  test('keeps every future result hidden before round 1 (plan Step 1)', async ({ page }, testInfo) => {
-    const remote = forbidRemote(page);
+  test('keeps every future result hidden before round 1 (plan Step 1)', async ({ page, baseURL }, testInfo) => {
+    const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openBeforeRound(page, 1);
     await expect(page.getByText('Result preparing')).toBeVisible();
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
@@ -80,8 +82,8 @@ test.describe('tournament registration and brackets', () => {
     expect(remote).toEqual([]);
   });
 
-  test('reveals each round on the display clock, shows the owner’s loss and spectating, and replays a completed bout inline', async ({ page }, testInfo) => {
-    const remote = forbidRemote(page);
+  test('reveals each round on the display clock, shows the owner’s loss and spectating, and replays a completed bout inline', async ({ page, baseURL }, testInfo) => {
+    const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openAtMinute(page, 'completed', 20 + 5 / 60);
     await expect(card(page).getByText('Bout in progress')).toHaveCount(4);
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
@@ -143,8 +145,8 @@ test.describe('tournament registration and brackets', () => {
     await card(page).screenshot({ path: testInfo.outputPath('tournament-byes-midway.png') });
   });
 
-  test('says a toggle after the cutoff applies to the next tournament, and the preview keeps the box unchanged', async ({ page }) => {
-    const remote = forbidRemote(page);
+  test('says a toggle after the cutoff applies to the next tournament, and the preview keeps the box unchanged', async ({ page, baseURL }) => {
+    const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openAtMinute(page, 'opening', 5);
     const registration = page.getByRole('region', { name: 'Registration' });
     await expect(registration).toContainText('Entries for the tournament running now were fixed at its 17:20 UTC cutoff.');

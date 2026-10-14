@@ -6,6 +6,7 @@ import { ARENA_ACTIVITIES, ARENA_BOUTS, ARENA_GLADIATORS, arenaActivityId, arena
 import { buildArenaFixtures } from '../fixtures/arena-build';
 import { worldFixture } from '../fixtures/domain';
 import { worldToScreen } from '../../src/game/iso';
+import { forbidRemote, remoteRequest } from './remote';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -459,21 +460,6 @@ const arenaFlow = {
     }, minute * MIN);
   },
 };
-/** A command, Supabase or other request that leaves the test's own origin (the page's `baseURL`). */
-function remoteRequest(url: string, origin: string): boolean {
-  if (/54321|supabase|\/functions\/v1\/|\/rest\/v1\//.test(url)) return true;
-  if (url.startsWith('data:') || url.startsWith('blob:')) return false;
-  return new URL(url).origin !== new URL(origin).origin;
-}
-/** Fails the test on any command, Supabase or other non-local request. */
-function forbidRemote(page: Page, baseURL: string | undefined) {
-  if (!baseURL) throw new Error('forbidRemote needs the test baseURL');
-  const seen: string[] = [];
-  page.on('request', request => {
-    if (remoteRequest(request.url(), baseURL)) seen.push(request.url());
-  });
-  return seen;
-}
 
 test('flags only requests that leave the test origin or reach Supabase, on any dev port', () => {
   for (const origin of ['http://127.0.0.1:3100', 'http://127.0.0.1:3300', 'http://127.0.0.1:4173']) {

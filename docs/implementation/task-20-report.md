@@ -1,6 +1,6 @@
 # Task 20 implementation report: tournament countdown, brackets and visible camp roles
 
-Status: **DONE_WITH_CONCERNS** (concerns at the end: the open `TournamentView` questions and the Task 17 port gate). Everything in the dispatch is implemented, tested and committed in this branch; nothing was pushed or merged.
+Status: **DONE_WITH_CONCERNS** (concerns at the end: the open `TournamentView` questions; the Task 17 port gate was cleared by the merge `b7f38ad` and the shared request guard). Everything in the dispatch is implemented, tested and committed in this branch; nothing was pushed or merged.
 
 - Date: 2026-10-14, Asia/Jerusalem. Owner: Claude (fresh implementer; the controller reviews and integrates).
 - Branch: `claude/task-20`, worktree `C:\Avi\Studies\Projects\Cloudiator-claude`. Task base `7a173b8` (Tasks 15, 16/19 phase 1 and 17 merged); branch head before this work `08998e6` (the controller brief).
@@ -188,7 +188,7 @@ Outside that list: `src/game/tournament-stage.ts`, `src/game/tournament-camp.ts`
 
 Merge `b7f38ad` brought Task 17's review fixes into this branch. That pass and its follow-up changed the ring timing. The camp now plays every bout at its real time: a jog walk-in of about 4 s, then the log seeked to `displayNow − bout.startedAtMs`, so the ring, the card and the Tournaments panel reach the result together. Statements earlier in this report about pairs "walking in", a ring "still fighting" after the decision, or the camp playing a bout "from the moment it learns of it" describe the timing before that merge.
 
-- The champion tag now lags the panel only while the final is queued or its pair is still jogging in; `tests/browser/tournament.spec.ts` was adapted for this.
+- The champion tag lags the panel while the final is queued or its pair is still jogging in, and otherwise by up to about 1 s (`ARENA_REFRESH_MS`); it never appears early. `tests/browser/tournament.spec.ts` was adapted for this.
 - Tournament camp fights carry `endsAtMs` equal to the stage core's `fightEndsAtMs`.
 - After the merge: `npm test` 856 passed; typecheck, the asset check, build and `verify:static` passed; the full dev browser suite on port 3200 gave 254 passed, 0 failed, 8 skipped.
 
@@ -208,12 +208,18 @@ Merge `b7f38ad` brought Task 17's review fixes into this branch. That pass and i
 - **Server time on the view.** `TournamentView` has no `serverNowMs`, so a client cannot tell a stale view from a delayed round; the panel re-reads at marks and every 30 s while processing.
 - **Tournament id lookup** (above) and whether placement summaries carry entrants' activity ids.
 
+## Integration checklist (for Codex)
+
+- Live readers: the Tournaments tab gets the live gateway for the opt-in command, whose `tournament()` read is the `unavailable` stub. Live mode therefore says brackets "cannot be loaded right now" and retries every 30 s. When Task 10 or Task 19 phase 2 builds the read, it works as is. Until then, consider the Task 17 pattern: a separate bracket reader that is null in live mode, so the panel says "not available in this build yet".
+- Deferred minors: forget `tournamentViews` entries whose entrants left the world (`GameViewport.tsx`, like Task 17's `forgetLeft`); add a browser test that a tournament ring and the panel change over at the same moment; remove the unreachable "You advance. Your next result is being prepared." branch (`tournament-text.ts`).
+- Run the isolated production gate with the repo's `playwright.config.ts`.
+
 ## Concerns
 
-- `arena.spec.ts` keeps its 6 port-3300 page failures on this branch until the controller merges Task 17's fix; nothing here touches that spec.
+- Resolved: the 6 `arena.spec.ts` port-3300 failures are gone since the merge `b7f38ad`. The final re-review found the same hard-coded-port guard in `tournament.spec.ts`. Both specs now use one shared guard, `tests/browser/remote.ts`, which takes the test's `baseURL`. A new guard test failed on the old code for a 3100 origin.
 - The open `TournamentView` questions above (round 1 pairing, role-safe placements, no server time, the id lookup) are recorded, not decided; no contract changed.
 - The plan's Step 2 RED for the browser suite and the camp tests' RED were not observed as written (both specs followed the code); the unit cycles, the observed browser failures and the behavioural mutations above stand in for them.
-- After a clock jump or a late read, the camp plays a tournament bout from the moment it learns of it (Task 17's ring rule); the panel always shows the logged times. Since the fix pass the camp's champion tag waits for the ring, so it can follow the panel's "Champion" by the walk-in time or more.
+- Superseded by the merge `b7f38ad`: the camp now plays every bout at its real time (see "After merging Task 17's fixes"). The champion tag waits for the ring, so it can follow the panel while the final is queued or its pair is still jogging in, and otherwise by up to about 1 s (roles are recomputed once a second).
 - Fix 5's cross-check passed on the existing core, so its RED is the three mutations, not a failing first run.
 - Fix 6's first browser run failed for a test reason (the panel was remounted when the owner loaded under the installed fake clock); the test now waits for the owner, and its behavioural RED was then observed with the interval disabled.
 

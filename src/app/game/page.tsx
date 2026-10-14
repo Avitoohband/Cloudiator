@@ -145,9 +145,8 @@ function GameShell() {
           <p className="eyebrow">SAMPLE EXPEDITIONS</p>
           <ul>{sampleExpeditions.map(e => <li key={e.activityId}><Link href={`/expedition/?mode=fixture&activity=${e.activityId}`}>{e.label}</Link></li>)}</ul>
         </nav>}
-        {/* The live Arena timeline read is not built yet (Task 10): without a reader the card says so, and keeps
-            "cannot be loaded right now" for real read failures. Pass the live gateway once that read lands. */}
-        {visibleOwner && <ArenaPanel bridge={bridge} reads={fixture ? reads : null} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />}
+        {/* Live mode reads the owner's Arena timeline and opponent profile through the live gateway (Tasks 10/16). */}
+        {visibleOwner && <ArenaPanel bridge={bridge} reads={reads} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />}
       </aside>
       <section className="management" aria-label="Gladiator management">
         <nav className="panel-nav" aria-label="Management panels">
@@ -157,9 +156,8 @@ function GameShell() {
           {!fixture && visibleOwner && panel === 'Schedule' ? <SchedulePanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
             : !fixture && visibleOwner && panel === 'Gladiator' ? <BuildPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
               : visibleOwner && panel === 'Inventory' ? <InventoryPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} preview={fixture} />
-              // The live standings read is not built yet (Task 10): without a reader the panel says so, and keeps
-              // "could not be loaded right now, try again" for real read failures.
-              : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={fixture ? reads : null} owner={visibleOwner} clock={clock} />
+              // Live mode reads the paginated league standings through the live gateway (Task 16).
+              : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} />
               : panel === 'Tournaments' ? <TournamentPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} fixture={fixture} samples={sampleTournaments} refresh={fixture ? undefined : refreshPlanning} />
               : panel === 'Schedule' ? <>
             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>

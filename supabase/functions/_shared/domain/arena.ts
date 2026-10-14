@@ -144,6 +144,17 @@ function fallbackOf(fighter: FighterSnapshot, rules: Rules): FighterSnapshot {
     efficiency: fighter.efficiency, equipmentSilhouettes: [...fighter.equipmentSilhouettes] });
 }
 
+const NPC_NAMES: Readonly<Record<LeagueId, string>> = Object.freeze({
+  bronze: 'Bronze Sentinel', silver: 'Silver Sentinel', gold: 'Gold Sentinel', champion: 'Champion Sentinel' });
+/**
+ * The server-controlled display name of a league's NPC fallback opponent in its battle log. Presentation only: views
+ * identify the NPC by its null `gladiatorId`, never by this name or by parsing its participant id.
+ */
+export function arenaNpcName(league: LeagueId): string {
+  if (!Object.hasOwn(NPC_NAMES, league)) throw new RangeError('Unknown arena league');
+  return NPC_NAMES[league];
+}
+
 /** One regular-Arena entrant, frozen at the slot cutoff before pairing (spec §4.1 step 7). */
 export type ArenaEntrant = DeepReadonly<{
   gladiatorId: string;

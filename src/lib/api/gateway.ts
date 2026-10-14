@@ -2,7 +2,7 @@ import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } fr
 import type { RevealedTimeline } from '@contracts/events';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
-import { GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent } from './reads';
+import { GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings } from './reads';
 export { GatewayReadError } from './reads';
 
 export interface GameGateway {
@@ -76,6 +76,7 @@ export function createLiveGateway(): GameGateway {
     owner: () => read(readOwner), world: () => read(readWorld), revision: () => read(readRevision),
     timeline: id => read(client => readTimeline(client, id)), profile: id => read(client => readProfile(client, id)),
     recent: cursor => read(client => readRecent(client, cursor)),
-    market: unavailable, standings: unavailable, tournament: unavailable,
+    standings: (league, cursor) => read(client => readStandings(client, league, cursor)),
+    market: unavailable, tournament: unavailable,
   };
 }

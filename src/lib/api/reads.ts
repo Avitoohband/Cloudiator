@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActivityId, GladiatorId } from '@contracts/commands';
+import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
 import type { RevealedTimeline } from '@contracts/events';
-import type { OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, WorldSnapshot } from '@contracts/reads';
+import type { OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, StandingsPage, WorldSnapshot } from '@contracts/reads';
+import { RULES_V1 } from '@domain/rules-v1';
 
 export class GatewayReadError extends Error {
   constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
@@ -72,4 +73,37 @@ export async function readRecent(client: SupabaseClient, cursor?: string): Promi
   const rows = checked(await query);
   return { rows: rows.map(row => ({ gladiatorId: row.gladiator_id, name: row.name, summary: row.summary })),
     nextCursor: rows.length === 50 ? `${rows.at(-1)!.reveal_at_ms}:${rows.at(-1)!.activity_id}` : null };
+}
+const LEAGUES: readonly string[] = ['bronze', 'silver', 'gold', 'champion'];
+const STANDINGS_PAGE = 50;
+type StandingRead = { gladiator_id: string; name: string; rating: number; human_wins: number; human_losses: number; rank: number; promoted: boolean };
+/**
+ * One league's current-season standings (spec §8.3 order: rating, human wins, fewer human losses, stable id), ranked by
+ * the public invoker view over Task 16's standings projection. The current season is the latest one with rows; a
+ * cursor `season:rank` keeps later pages in its season and starts after its rank. At most 50 rows per page. Only
+ * public standing fields exist in the view; reward eligibility uses the versioned five-human-bout threshold.
+ */
+export async function readStandings(client: SupabaseClient, league: LeagueId, cursor?: string): Promise<StandingsPage> {
+  if (!LEAGUES.includes(league)) throw new GatewayReadError('unavailable');
+  let season: number | null = null, after = 0;
+  if (cursor !== undefined) {
+    const match = /^(\d{1,15}):(\d{1,15})$/.exec(cursor);
+    if (!match) throw new GatewayReadError('unavailable');
+    season = Number(match[1]); after = Number(match[2]);
+  } else {
+    const latest = checked(await client.from('arena_standing_reads').select('season_index').order('season_index', { ascending: false }).limit(1));
+    if (latest.length) season = Number(latest[0].season_index);
+  }
+  if (season === null) return { league, seasonId: '', archived: false, rows: [], nextCursor: null };
+  // The Data API caps a response at 50 rows (config max_rows), so a full page is what signals a possible next page.
+  const rows = checked(await client.from('arena_standing_reads').select('gladiator_id,name,rating,human_wins,human_losses,rank,promoted')
+    .eq('league', league).eq('season_index', season).gt('rank', after).order('rank').limit(STANDINGS_PAGE)) as StandingRead[];
+  const page = rows.slice(0, STANDINGS_PAGE).map(row => {
+    const humanWins = Number(row.human_wins), humanLosses = Number(row.human_losses);
+    return { rank: Number(row.rank), gladiatorId: row.gladiator_id, name: row.name, rating: Number(row.rating), humanWins, humanLosses,
+      promoted: row.promoted === true, inactive: humanWins + humanLosses === 0,
+      rewardEligible: humanWins + humanLosses >= RULES_V1.seasons.minimumHumanBouts };
+  });
+  return { league, seasonId: String(season), archived: false, rows: page,
+    nextCursor: page.length === STANDINGS_PAGE ? `${season}:${page.at(-1)!.rank}` : null };
 }

@@ -35,4 +35,17 @@ describe('live projection session guards', () => {
     callback('SIGNED_IN',{...session,user:{id:'second'} as Session['user']});expect(changed).toHaveBeenCalledTimes(1);
     callback('SIGNED_OUT',null);expect(changed).toHaveBeenCalledTimes(2);remove();expect(unsubscribe).toHaveBeenCalledOnce();
   });
+  it('serves live league standings through the account-guarded Data API read', async () => {
+    const paths: string[] = [];
+    const client=createClient('http://127.0.0.1:54321','test-key',{auth:{persistSession:false},global:{fetch:async input=>{
+      const url=new URL(String(input));paths.push(url.pathname);
+      const body=url.searchParams.get('select')==='season_index'?[{season_index:2}]
+        :[{gladiator_id:'g1',name:'Aster',rating:1012,human_wins:1,human_losses:0,rank:1,promoted:false}];
+      return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
+    }}});
+    vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first'} as Session},error:null});holder.client=client;
+    expect(await createLiveGateway().standings('bronze')).toEqual({league:'bronze',seasonId:'2',archived:false,nextCursor:null,
+      rows:[{rank:1,gladiatorId:'g1',name:'Aster',rating:1012,humanWins:1,humanLosses:0,promoted:false,inactive:false,rewardEligible:false}]});
+    expect(paths.every(path=>path==='/rest/v1/arena_standing_reads')).toBe(true);
+  });
 });

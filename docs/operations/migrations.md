@@ -1,5 +1,45 @@
 # Local identity backend and migrations
 
+## Task 16 phase 2b: Arena bouts, settlement, stages and standings
+
+M10 is `supabase/migrations/20261014131209_arena_bouts.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull arena_bouts --local --schema public,private --yes` from the tested `supabase/sql/08-arena-bouts.sql`.
+M01–M09 are unchanged.
+
+The draft needed five completions before commit:
+- The `arena_standing_reads` view lacked `security_invoker=true` and every grant; both are restored from the source.
+- It only added table grants. Source-equivalent revokes on `public.arena_standings` and `private.arena_results` now precede them.
+- It omitted every function ACL: the source's revoke/grant pair is appended, so the three new private functions get the
+  backend `EXECUTE` that `complete_job` and settlement need.
+- It omitted the standings backfill: `select public.refresh_projections();` publishes every existing rating record.
+- A provenance header and `notify pgrst` were added.
+
+It re-emits no unchanged function. The changed existing functions are `activity_executor_ready`, `prepare_activity_jobs`,
+`accept_job_result`, `settle_rewards`, `settle_activity_core`, `pairing_input` and `project_character`; the new ones are
+`accept_arena_result`, `arena_settlement_failure` and `arena_rewards`. The new tables are `private.arena_results` (one
+frozen log and both outcomes per battle) and `public.arena_standings` (the public standings projection), with the invoker
+view `public.arena_standing_reads`.
+
+**Release (Task 24).** Ship M09, M10 and the worker in one release step, then check that no `pair` or `simulation` job is in
+operator state. The new worker fails a pairing input without `historyFromSlot` (written only by M10) closed, and an older
+worker cannot simulate an Arena bout (its simulation executor is the expedition planner).
+
+**Retention (Task 22).** Prune `private.arena_results` before its assignment and its simulation job, stages before their
+activities, and assignment sides before their activities (foreign keys). `public.arena_standings` follows its gladiator.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M10, with no source applied afterwards.
+- The schema fingerprint (667 entries, 687 lines: function definitions, search paths, security, volatility and ACLs; table
+  and view ACLs, RLS, options and definitions; policies, triggers, constraints, columns, indexes, the cron job and the seed
+  rows) matched the tested source exactly, and was identical again after the tests.
+- `npm run test:db` passed **137/137** in seven files on the replay, with the Edge container's start time unchanged across
+  the run. Two earlier replay runs also passed 137/137 but had an Edge recreation during the run, so they do not count.
+- Lint is empty. Advisors report four INFO unused-index notices, none on the new tables, and no warnings or errors.
+- Observed with those recreations: the background `functions serve` logged `File change detected … (WRITE)` and restarted
+  the runtime for Edge source files whose content `git status` showed unchanged, while host tools (vitest, `tsc`, `deno
+  check`) were reading them. This is an observation, not a confirmed cause or a tested fix. Details are in the
+  [Task 16 report](../implementation/task-16-report.md).
+
 ## Task 16 phase 2a: Arena placement, ratings and pairing
 
 M09 is `supabase/migrations/20261014113448_arena.sql`, generated with CLI 2.120.0 (engine `migra`) by

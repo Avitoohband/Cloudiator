@@ -3,11 +3,12 @@ import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
 import { freezeDomain } from '../domain/types.ts';
 import { planExpedition } from '../domain/expedition.ts';
-import { makeFighter } from '../domain/combat.ts';
-import { estimateArenaStrength, leagueFor, makeFallback, matchArena } from '../domain/arena.ts';
-import type { ArenaAssignment, ArenaEntrant, PairingHistory } from '../domain/arena.ts';
+import { makeFighter, simulateBattle } from '../domain/combat.ts';
+import { arenaNpcName, arenaOutcomes, estimateArenaStrength, leagueFor, makeFallback, matchArena, nonEmpty } from '../domain/arena.ts';
+import type { ArenaAssignment, ArenaEntrant, ArenaOutcome, PairingHistory } from '../domain/arena.ts';
 import type { LeagueId } from '../contracts/commands.ts';
-import type { ActivitySnapshot, DeepReadonly, FighterSnapshot, Seed } from '../domain/types.ts';
+import type { BattleLog } from '../contracts/events.ts';
+import type { ActivitySnapshot, BattleParticipant, DeepReadonly, FighterSnapshot, Seed } from '../domain/types.ts';
 import type { ActivityCosts, ActivityKind, BuildInput, CoordinatorReport, ItemInstance, JobKind, JobLease, PreparationInput, PreparationResult, WorkerReport } from '../domain/types.ts';
 import type { ExecutorRegistry, JobOutcome, WorkerDependencies } from './database.ts';
 
@@ -47,6 +48,8 @@ export function prepareActivityV1(input: PreparationInput): PreparationResult {
 /** One slot and league's frozen regular-Arena entrants, written by `private.boundary_pair` at phase 7 (Task 16). */
 export type PairingInput = DeepReadonly<{
   slotIndex: number; league: LeagueId; seasonId: string; rulesVersion: string;
+  /** The earliest slot SQL searched for human bouts (S − 18 in v1); the executor fails closed on a narrower window. */
+  historyFromSlot: number;
   entrants: ArenaEntrant[]; recent: PairingHistory[];
 }>;
 export type PairingResult = { assignments: ArenaAssignment[] };
@@ -57,14 +60,74 @@ export function pairArenaV1(input: PairingInput, seed: Seed): PairingResult {
   // One job pairs exactly one slot, season and league; a mixed input is corrupt rather than a cross-league pairing.
   if (input.entrants.some(entrant => !entrant || entrant.league !== input.league || entrant.slotIndex !== input.slotIndex
     || entrant.seasonId !== input.seasonId)) throw new WorkerFailure('invalid-input');
+  // SQL bounds the history it passes; a window shorter than this version's own would silently drop counted bouts.
+  if (!Number.isSafeInteger(input.historyFromSlot) || !Number.isSafeInteger(input.slotIndex)
+    || input.historyFromSlot > input.slotIndex - RULES_V1.matchmaking.recentPairingSlots) throw new WorkerFailure('invalid-input');
   return { assignments: matchArena(input.entrants, input.recent, seed) };
+}
+
+/**
+ * The one regular-Arena simulation of a battle, written by `private.prepare_activity_jobs` at phase 8 (Task 16). Its job
+ * carries the battle's private seed, not an activity seed. `assignment` is the immutable frozen assignment: the only
+ * source of fighters and of the NPC template. `names` are the human sides' public names in side order. `revealAtMs`
+ * restates the minute-60 reveal that SQL schedules; the executor checks it against these rules.
+ */
+export type ArenaSimulationInput = DeepReadonly<{
+  kind: 'arena'; battleId: string; slotIndex: number; rulesVersion: string; startsAtMs: number; revealAtMs: number;
+  assignment: ArenaAssignment; names: string[];
+}>;
+/** The bout's log and each side's outcome in assignment order, validated and frozen once by `private.accept_arena_result`. */
+export type ArenaSimulationResult = { battleId: string; log: BattleLog; outcomes: ArenaOutcome[] };
+/**
+ * Canonical v1 regular bout: one `simulateBattle` of the frozen assignment under the battle seed, then `arenaOutcomes`.
+ * Fighters are never rebuilt from stored build snapshots (JSONB reorders equipment keys, which would change the logged
+ * silhouette order). A human participant's id is its gladiatorId; the NPC is `opponent.id` with a null gladiatorId.
+ */
+export function simulateArenaV1(input: ArenaSimulationInput, seed: Seed): ArenaSimulationResult {
+  if (!input || typeof input !== 'object') throw new WorkerFailure('invalid-input');
+  if (input.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
+  const { assignment, names } = input;
+  if (!assignment || typeof assignment !== 'object' || !Array.isArray(assignment.sides) || !Array.isArray(names)
+    || assignment.battleId !== input.battleId || assignment.slotIndex !== input.slotIndex || !Number.isSafeInteger(input.slotIndex)
+    || input.startsAtMs !== input.slotIndex * RULES_V1.clock.slotMs || input.revealAtMs !== input.startsAtMs + RULES_V1.arena.revealAfterMs
+    || names.length !== assignment.sides.length || !names.every(nonEmpty)) throw new WorkerFailure('invalid-input');
+  const human = (index: number): BattleParticipant => {
+    const side = assignment.sides[index];
+    return { id: side.gladiatorId, gladiatorId: side.gladiatorId, name: names[index], snapshot: side.fighter };
+  };
+  try {
+    const fighters: [BattleParticipant, BattleParticipant] = assignment.kind === 'human' && assignment.sides.length === 2 ? [human(0), human(1)]
+      : assignment.kind === 'npc' && assignment.sides.length === 1
+        ? [human(0), { id: assignment.opponent.id, gladiatorId: null, name: arenaNpcName(assignment.league), snapshot: assignment.opponent.snapshot }]
+        : (() => { throw new RangeError('Unknown arena assignment'); })();
+    const log = simulateBattle({ battleId: assignment.battleId, rulesVersion: RULES_V1.version, rules: RULES_V1, fighters }, seed);
+    return { battleId: assignment.battleId, log, outcomes: arenaOutcomes(assignment, log) };
+  } catch {
+    throw new WorkerFailure('invalid-input');
+  }
+}
+
+/**
+ * `v1.simulation` dispatches on an explicit discriminator. An Arena input carries `kind: 'arena'`; an expedition job's
+ * input is its activity snapshot, which has no `kind` and whose choice is an expedition. Anything else is unsupported.
+ */
+function simulateV1(job: JobLease): unknown {
+  const input: unknown = job.snapshot;
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    if (Object.hasOwn(input, 'kind')) {
+      if ((input as { kind?: unknown }).kind === 'arena') return simulateArenaV1(input as ArenaSimulationInput, job.seed);
+    } else if ((input as { choice?: { kind?: unknown } }).choice?.kind === 'expedition') {
+      return planExpedition(input as ActivitySnapshot, job.seed, RULES_V1);
+    }
+  }
+  throw new WorkerFailure('unsupported-executor');
 }
 
 /** Keep every retained rules version registered: a job always runs with the version persisted on it. */
 export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({
   v1: Object.freeze({ prepare: (job: JobLease) => prepareActivityV1(job.snapshot as PreparationInput),
     pair: (job: JobLease) => pairArenaV1(job.snapshot as PairingInput, job.seed),
-    simulation: (job: JobLease) => planExpedition(job.snapshot as ActivitySnapshot, job.seed, RULES_V1),
+    simulation: simulateV1,
     // SQL selects the immutable stage by ordinal; no worker-supplied stage payload is trusted here.
     reveal: () => ({}) }),
 });
@@ -113,7 +176,10 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
       if (!await renewIfNeeded()) return;
       if (job.kind === 'settlement') {
         if (!job.activityId) throw new WorkerFailure('invalid-input');
-        record(await deps.database.settle(job.activityId, job.token));
+        const settled = await deps.database.settle(job.activityId, job.token);
+        // The database itself retained the job for operator action (an Arena rating mismatch): a recorded failure.
+        if (!settled.ok && settled.code === 'operator') { report.failed += 1; return; }
+        record(settled);
         return;
       }
       const began = cpuNow();

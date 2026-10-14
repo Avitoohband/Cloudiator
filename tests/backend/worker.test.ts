@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_EXECUTORS, handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
-import type { PairingInput } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ExecutorRegistry, JobOutcome, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
-import type { Attributes, JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
+import type { ActivitySnapshot, Attributes, JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
-import { makeFighter } from '../../supabase/functions/_shared/domain/combat.ts';
-import { estimateArenaStrength, makeFallback, matchArena } from '../../supabase/functions/_shared/domain/arena.ts';
+import { makeFighter, simulateBattle } from '../../supabase/functions/_shared/domain/combat.ts';
+import { planExpedition } from '../../supabase/functions/_shared/domain/expedition.ts';
+import { arenaNpcName, arenaOutcomes, estimateArenaStrength, makeFallback, matchArena } from '../../supabase/functions/_shared/domain/arena.ts';
+import type { ArenaAssignment } from '../../supabase/functions/_shared/domain/arena.ts';
 import { itemFixture } from '../fixtures/domain.ts';
 
 const SECRET = 'unit-worker-secret-0123456789abcdef0123456789';
@@ -94,7 +96,7 @@ describe('regular Arena pairing executor', () => {
     build: { ...preparation().build, allocations } })).arenaFighter;
   const entrant = (id: string, allocations: Attributes, rating = 1000) => ({ gladiatorId: id, activityId: `activity-${id}`, seasonId: '0',
     league: 'bronze' as const, slotIndex: 300, rating, fighter: fighterFor(allocations) });
-  const input = (): PairingInput => ({ slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v1', entrants: [
+  const input = (): PairingInput => ({ slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v1', historyFromSlot: 282, entrants: [
     entrant('a', { strength: 6, agility: 2, vitality: 4, endurance: 0, precision: 2 }),
     entrant('b', { strength: 4, agility: 2, vitality: 2, endurance: 0, precision: 2 }, 1040),
     entrant('c', { strength: 2, agility: 2, vitality: 2, endurance: 0, precision: 2 })],
@@ -115,6 +117,98 @@ describe('regular Arena pairing executor', () => {
     expect(run({ ...valid, entrants: [{ ...valid.entrants[0], seasonId: '1' }] })).toThrow(expect.objectContaining({ code: 'invalid-input' }));
     expect(run({ ...valid, rulesVersion: 'v2' })).toThrow(expect.objectContaining({ code: 'unsupported-rules' }));
   });
+  it('fails closed when SQL passed a history window narrower than the versioned rules window', () => {
+    const run = (snapshot: unknown) => () => DEFAULT_EXECUTORS.v1.pair!(lease('pair', { snapshot: snapshot as PairingInput, gladiatorId: null }));
+    const invalid = expect.objectContaining({ code: 'invalid-input' });
+    // v1 counts slots S − 18 … S − 1, so the bound SQL used must reach back at least to S − 18.
+    expect(run({ ...input(), historyFromSlot: 283 })).toThrow(invalid);
+    expect(run({ ...input(), historyFromSlot: undefined })).toThrow(invalid);
+    expect(run({ ...input(), historyFromSlot: 282.5 })).toThrow(invalid);
+    expect(run({ ...input(), historyFromSlot: 282 })).not.toThrow();
+    expect(run({ ...input(), historyFromSlot: 200 })).not.toThrow();
+  });
+});
+
+describe('regular Arena simulation executor', () => {
+  const SLOT_MS = RULES_V1.clock.slotMs;
+  const zero: Attributes = { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 };
+  const fighter = prepareActivityV1(preparation({ earnedPoints: 40, build: { ...preparation().build, allocations: { ...zero, strength: 6, vitality: 4, precision: 2 } } })).arenaFighter;
+  const entrant = (id: string) => ({ gladiatorId: id, activityId: `activity-${id}`, seasonId: '0', league: 'bronze' as const, slotIndex: 300, rating: 1000, fighter });
+  const [human] = matchArena([entrant('a'), entrant('b')], [], 'pair-seed');
+  const [npc] = matchArena([entrant('solo')], [], 'pair-seed');
+  const input = (assignment: ArenaAssignment, overrides: Record<string, unknown> = {}): ArenaSimulationInput => ({ kind: 'arena', battleId: assignment.battleId,
+    slotIndex: 300, rulesVersion: 'v1', startsAtMs: 300 * SLOT_MS, revealAtMs: 300 * SLOT_MS + RULES_V1.arena.revealAfterMs, assignment,
+    names: assignment.sides.map(side => `Name ${side.gladiatorId}`), ...overrides }) as ArenaSimulationInput;
+  const run = (snapshot: unknown, seed = 'battle-seed') =>
+    DEFAULT_EXECUTORS.v1.simulation!(lease('simulation', { snapshot: snapshot as ArenaSimulationInput, seed })) as ArenaSimulationResult;
+
+  it('runs one simulateBattle from the frozen fighters and returns the log with both sides’ outcomes', () => {
+    expect(human.kind).toBe('human');
+    const result = run(input(human));
+    const log = simulateBattle({ battleId: human.battleId, rulesVersion: 'v1', rules: RULES_V1, fighters: human.sides.map(side =>
+      ({ id: side.gladiatorId, gladiatorId: side.gladiatorId, name: `Name ${side.gladiatorId}`, snapshot: side.fighter })) as never }, 'battle-seed');
+    expect(result).toEqual({ battleId: human.battleId, log, outcomes: arenaOutcomes(human, log) });
+    // A human participant is logged with its own gladiatorId, in assignment order, and exactly one side wins.
+    expect(log.participants.map(p => [p.id, p.gladiatorId])).toEqual(human.sides.map(side => [side.gladiatorId, side.gladiatorId]));
+    expect(result.outcomes.filter(o => o.result === 'victory')).toHaveLength(1);
+    expect(run(input(human))).toEqual(result);
+  });
+
+  it('logs the NPC fallback as npc:<entrant> with a null gladiatorId and its frozen template', () => {
+    expect(npc.kind).toBe('npc');
+    const result = run(input(npc));
+    const [entrantLog, npcLog] = result.log.participants;
+    expect(entrantLog).toMatchObject({ id: 'solo', gladiatorId: 'solo', name: 'Name solo', maxHealth: fighter.maxHealth });
+    if (npc.kind !== 'npc') throw new Error('expected an NPC assignment');
+    expect(npcLog).toMatchObject({ id: 'npc:solo', gladiatorId: null, name: arenaNpcName('bronze'), classId: null, stance: 'balanced',
+      maxHealth: npc.opponent.snapshot.maxHealth, attackIntervalMs: npc.opponent.snapshot.attackIntervalMs });
+    expect(result.outcomes).toEqual(arenaOutcomes(npc, result.log));
+    expect(result.outcomes[0]).toMatchObject({ ratingDelta: 0, ratingAfter: 1000,
+      rewards: { renown: result.log.winnerId === 'solo' ? 3 : 0, money: 0, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 } });
+    expect(['Bronze Sentinel', 'Silver Sentinel', 'Gold Sentinel', 'Champion Sentinel'])
+      .toEqual((['bronze', 'silver', 'gold', 'champion'] as const).map(arenaNpcName));
+  });
+
+  it('simulates the frozen fighter exactly as stored, never a recomputation from a build', () => {
+    // A fighter read back from JSONB keeps its own silhouette order; the bout must carry that order unchanged.
+    const frozen = structuredClone(human) as unknown as { sides: { fighter: { equipmentSilhouettes: string[] } }[] };
+    frozen.sides[0].fighter.equipmentSilhouettes = ['light-armor:1:common', 'sword:1:common'];
+    expect(run(input(frozen as unknown as ArenaAssignment)).log.participants[0].equipmentSilhouettes).toEqual(['light-armor:1:common', 'sword:1:common']);
+  });
+
+  it('fails a malformed, mismatched or unknown-rules Arena input closed with sanitized codes', () => {
+    const invalid = expect.objectContaining({ code: 'invalid-input' });
+    expect(() => run(input(human, { battleId: 'arena:300:forged' }))).toThrow(invalid);
+    expect(() => run(input(human, { slotIndex: 301 }))).toThrow(invalid);
+    expect(() => run(input(human, { names: ['Only one'] }))).toThrow(invalid);
+    expect(() => run(input(human, { names: ['', 'Name b'] }))).toThrow(invalid);
+    // SQL restates the minute-60 reveal; the versioned executor checks it against its own rules.
+    expect(() => run(input(human, { revealAtMs: 300 * SLOT_MS + RULES_V1.arena.revealAfterMs - 1 }))).toThrow(invalid);
+    expect(() => run(input(human, { startsAtMs: 301 * SLOT_MS, revealAtMs: 301 * SLOT_MS + RULES_V1.arena.revealAfterMs }))).toThrow(invalid);
+    expect(() => run(input(human, { assignment: null }))).toThrow(invalid);
+    const broken = structuredClone(human) as unknown as { sides: { fighter: { maxHealth: number } }[] };
+    broken.sides[1].fighter.maxHealth = 0;
+    expect(() => run(input(broken as unknown as ArenaAssignment))).toThrow(invalid);
+    expect(() => run(input(human, { rulesVersion: 'v2' }))).toThrow(expect.objectContaining({ code: 'unsupported-rules' }));
+  });
+
+  it('dispatches simulations on an explicit kind and fails an unknown kind with unsupported-executor', async () => {
+    const unknown = [{ kind: 'tournament' }, { kind: 'expedition' }, { choice: { kind: 'training' } }, {}, null]
+      .map(snapshot => lease('simulation', { snapshot: snapshot as never }));
+    const { database, calls } = port({ simulation: unknown });
+    const report = await runWorker({ database, workerId: 'worker-k' });
+    expect(calls.filter(c => c.name === 'fail').map(c => c.args[2])).toEqual(Array(5).fill('unsupported-executor'));
+    expect(report).toMatchObject({ failed: 5, completed: 0 });
+  });
+
+  it('keeps an expedition simulation, whose input is its activity snapshot, on the expedition planner', () => {
+    const prepared = prepareActivityV1(preparation());
+    const snapshot: ActivitySnapshot = { activityId: 'activity-trip', gladiatorId: gid, slotIndex: 300, rulesVersion: 'v1', cutoffMs: 300 * SLOT_MS,
+      choice: { kind: 'expedition', expeditionId: 'woodland' }, scheduleVersion: 1, build: prepared.snapshot, derived: prepared.derived,
+      costs: prepared.costs, trainingPoints: 1, starting: { stamina: { current: 100, maximum: 100 }, level: 1, xp: 0, earnedPoints: 10,
+        unspentPoints: 10, league: 'bronze', rating: 1000, peakStrength: 0, tournamentOptIn: false } };
+    expect(DEFAULT_EXECUTORS.v1.simulation!(lease('simulation', { snapshot, seed: 'trip' }))).toEqual(planExpedition(snapshot, 'trip', RULES_V1));
+  });
 });
 
 describe('fenced worker orchestration', () => {
@@ -131,7 +225,7 @@ describe('fenced worker orchestration', () => {
     expect(calls.filter(c => c.name === 'coordinate').length).toBeGreaterThanOrEqual(3);
   });
   it('claims pairing as simple work after preparation and before reveals, within one twenty-job budget', async () => {
-    const pairing: PairingInput = { slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v1', recent: [], entrants: [
+    const pairing: PairingInput = { slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v1', historyFromSlot: 282, recent: [], entrants: [
       { gladiatorId: 'solo', activityId: 'activity-solo', seasonId: '0', league: 'bronze', slotIndex: 300, rating: 1000,
         fighter: prepareActivityV1(preparation()).arenaFighter }] };
     const { database, calls } = port({ prepare: [lease('prepare')], pair: [lease('pair', { snapshot: pairing, gladiatorId: null })], reveal: [lease('reveal')] });
@@ -227,6 +321,13 @@ describe('fenced worker orchestration', () => {
     const { database } = port({ prepare: [job] });
     database.fail = async () => { throw new Error('worker-database-unavailable'); };
     expect(await runWorker({ database, workerId: 'worker-i' })).toMatchObject({ claimed: 1, failed: 0, unrecorded: 1, completed: 0 });
+  });
+  it('counts a settlement the database retained for operator action as failed, never as a grant or a conflict', async () => {
+    const job = lease('settlement');
+    const { database, calls } = port({ settlement: [job] }, () => ({ ok: false, code: 'operator' }));
+    expect(await runWorker({ database, workerId: 'worker-o' })).toMatchObject({ claimed: 1, failed: 1, conflicts: 0, completed: 0 });
+    // The database already retained the job; the worker no longer owns a lease it could fail.
+    expect(calls.filter(c => c.name === 'fail')).toEqual([]);
   });
   it('fails a job whose prepared result the database rejects as invalid', async () => {
     const job = lease('prepare');

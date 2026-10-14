@@ -634,7 +634,7 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect(await boundary).toMatchObject({ phase: 4, wait: 'preparation' });
   });
 
-  it('starts expeditions and retains the unsupported Arena integration gate after pairing', async () => {
+  it('starts expeditions and Arena entrants once their executors exist, and an unaffordable Arena falls back to Rest', async () => {
     const explorer = await fighter({ schedule: { morning: { kind: 'expedition', expeditionId: 'woodland' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
     const token = await coordinatorLease();
     expect(await runBoundary(300, token)).toMatchObject({ phase: 9, status: 'complete' });
@@ -646,9 +646,10 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect((await explorer.state()).currentActivity).toMatchObject({ kind: 'expedition', status: 'processing' });
     await resetWorld(299);
     const fighterArena = await fighter({ schedule: { morning: { kind: 'arena' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
-    // Task 16 phase 2a pairs the entrant at phase 7; with no Arena executor yet, phase 8 still stalls before any debit.
-    expect(await runBoundary(300)).toMatchObject({ phase: 8, status: 'waiting', wait: 'integration' });
-    expect(await fighterArena.row()).toMatchObject({ stamina: 104, processed: 299 });
+    // Task 16 pairs the entrant at phase 7 and, since phase 2b, starts its bout at phase 8 with one debit.
+    expect(await runBoundary(300)).toMatchObject({ phase: 9, status: 'complete' });
+    expect(await fighterArena.row()).toMatchObject({ stamina: 79, processed: 300 });
+    expect(await activities(fighterArena.gid)).toEqual([{ slot: 300, requested: 'arena', resolved_kind: 'arena', fallback: false, debit: 25, status: 'active' }]);
 
     await resetWorld(299);
     const tired = await fighter({ stamina: 10, schedule: { morning: { kind: 'arena' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });

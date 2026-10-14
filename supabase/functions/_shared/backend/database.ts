@@ -135,9 +135,10 @@ export function createDatabase(client: SupabaseClient) {
 }
 export type CommandDatabase = ReturnType<typeof createDatabase>;
 
-/** Fenced job RPC results. `replayed` marks an idempotent retry of an already-committed outcome. */
+/** Fenced job RPC results. `replayed` marks an idempotent retry of an already-committed outcome. `operator`: settlement
+ * found an inconsistency (an Arena side's frozen rating differs from its live row) and retained the job for operator action. */
 export type JobOutcome = { ok: true; replayed?: boolean; newGrants?: number; receiptId?: string; [key: string]: unknown }
-  | { ok: false; code: 'conflict' | 'invalid' | 'not-found' | 'processing' | 'stale-preparation' };
+  | { ok: false; code: 'conflict' | 'invalid' | 'not-found' | 'processing' | 'stale-preparation' | 'operator' };
 export type RenewOutcome = { ok: true; expiresAtMs: number } | { ok: false; code: 'conflict' | 'not-found' };
 /** Service-role RPC port used only by the private game-worker; every call is fenced by its lease token in SQL. */
 export type WorkerDatabase = {

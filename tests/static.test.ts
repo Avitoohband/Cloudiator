@@ -9,7 +9,7 @@ afterEach(() => { for (const directory of directories.splice(0)) rmSync(director
 function exportedSite(content = '<main>Cloudiator</main>') {
   const directory = mkdtempSync(join(tmpdir(), 'cloudiator-static-'));
   directories.push(directory);
-  for (const route of ['', 'game', 'auth/callback', 'replay']) {
+  for (const route of ['', 'game', 'auth/callback', 'replay', 'expedition']) {
     mkdirSync(join(directory, route), { recursive: true });
     writeFileSync(join(directory, route, 'index.html'), content);
   }
@@ -39,6 +39,13 @@ test('scanner refuses an export without the fixed replay page', () => {
   const directory = exportedSite();
   rmSync(join(directory, 'replay/index.html'));
   expect(scan(directory).status).toBe(1);
+});
+test('scanner refuses an export without the fixed expedition page', () => {
+  const directory = exportedSite();
+  rmSync(join(directory, 'expedition/index.html'));
+  const result = scan(directory);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Missing fixed route: expedition/index.html');
 });
 test('scanner accepts framework navigation seed references without private string inputs', () => {
   expect(scan(exportedSite('previousTree:i,url:t,nextUrl:r,seed:n; exitStatus:2,url:n,seed:null')).status).toBe(0);

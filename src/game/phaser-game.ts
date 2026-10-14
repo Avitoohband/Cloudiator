@@ -16,6 +16,13 @@ export function startGame(P: typeof PhaserNS, config: PhaserNS.Types.Core.GameCo
   const before = { blur: window.onblur, focus: window.onfocus };
   let installed: { blur: typeof window.onblur; focus: typeof window.onfocus } | null = null;
   const postBoot = config.callbacks?.postBoot;
+  // Give back the window handlers only if nobody replaced Phaser's since.
+  const restoreWindowHandlers = () => {
+    if (!installed) return;
+    if (window.onblur === installed.blur) window.onblur = before.blur;
+    if (window.onfocus === installed.focus) window.onfocus = before.focus;
+    installed = null;
+  };
   const captureNextVisibilityListener = () => {
     const add = document.addEventListener;
     const restore = () => {
@@ -30,8 +37,12 @@ export function startGame(P: typeof PhaserNS, config: PhaserNS.Types.Core.GameCo
         // Start-up can finish after an unmount (destroy during texture boot): drop the listener at once.
         if (destroyed) document.removeEventListener(type, listener, options);
         else captured.push([type, listener, options]);
-        // VisibilityHandler sets the window handlers right after this call, within the same tick.
-        queueMicrotask(() => { if (!destroyed) installed = { blur: window.onblur, focus: window.onfocus }; });
+        // VisibilityHandler sets the window handlers right after this call, within the same tick; after
+        // an early destroy they are put back as soon as they are known.
+        queueMicrotask(() => {
+          installed = { blur: window.onblur, focus: window.onfocus };
+          if (destroyed) restoreWindowHandlers();
+        });
       }
       return result;
     } as typeof add;
@@ -47,12 +58,7 @@ export function startGame(P: typeof PhaserNS, config: PhaserNS.Types.Core.GameCo
       destroyed = true;
       game.destroy(true);
       for (const [type, listener, options] of captured.splice(0)) document.removeEventListener(type, listener, options);
-      // Give back the window handlers only if nobody replaced Phaser's since.
-      if (installed) {
-        if (window.onblur === installed.blur) window.onblur = before.blur;
-        if (window.onfocus === installed.focus) window.onfocus = before.focus;
-        installed = null;
-      }
+      restoreWindowHandlers();
     },
   };
 }

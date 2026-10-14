@@ -29,6 +29,7 @@ function GameShell() {
   const [panel, setPanel] = useState<Panel>('Schedule');
   const [previewError, setPreviewError] = useState(false);
   const [sampleReplays, setSampleReplays] = useState<readonly { activityId: string; label: string }[]>([]);
+  const [sampleExpeditions, setSampleExpeditions] = useState<readonly { activityId: string; label: string }[]>([]);
   const session = useSession();
   const [gateway] = useState(createLiveGateway);
   const [liveOwner, setLiveOwner] = useState<{ account: string; value: OwnerState | null } | null>(null);
@@ -68,7 +69,7 @@ function GameShell() {
     let active = true;
     if (fixture) {
       import('../../lib/api/fixture-gateway')
-        .then(({ createFixtureGateway, FIXTURE_REPLAYS }) => { if (active) setSampleReplays(FIXTURE_REPLAYS); const fixtureGateway = createFixtureGateway(); return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
+        .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS }) => { if (active) { setSampleReplays(FIXTURE_REPLAYS); setSampleExpeditions(FIXTURE_EXPEDITIONS); } const fixtureGateway = createFixtureGateway(); return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
         .then(([ownerData, worldData]) => { if (active) { setOwner(ownerData); setWorld(withDemoCrowd(worldData)); } })
         .catch(() => { if (active) setPreviewError(true); });
     }
@@ -130,6 +131,10 @@ function GameShell() {
         {fixture && sampleReplays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
           <p className="eyebrow">SAMPLE REPLAYS</p>
           <ul>{sampleReplays.map(r => <li key={r.activityId}><Link href={`/replay/?mode=fixture&activity=${r.activityId}`}>{r.label}</Link></li>)}</ul>
+        </nav>}
+        {fixture && sampleExpeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
+          <p className="eyebrow">SAMPLE EXPEDITIONS</p>
+          <ul>{sampleExpeditions.map(e => <li key={e.activityId}><Link href={`/expedition/?mode=fixture&activity=${e.activityId}`}>{e.label}</Link></li>)}</ul>
         </nav>}
       </aside>
       <section className="management" aria-label="Gladiator management">

@@ -88,6 +88,29 @@ advisors and clean reset/replay remain separate required checks.
 Keep status output, gateway configuration and credential-bearing files out of
 diagnostic output. Record commands and sanitized results, never key values.
 
+## Windows Docker startup — approved local guidance
+
+Avi approved this extension on 2026-10-14 for **Supabase CLI**. Before retrying
+local Supabase startup, distinguish a stopped daemon from a failed Docker
+Desktop startup. Inspect the bounded diagnostic fields in Docker's
+`backend.error.json`; never print raw settings, credentials or status output.
+
+Observed on Docker Desktop4.94.0: Windows error1920 while renaming an orphaned
+`docker-secrets-engine/engine.sock` prevented startup. After the documented
+Docker force-stop confirmed no Desktop/backend processes, metadata proved its
+parent contained only one zero-byte AF_UNIX reparse-point socket. Preserving
+that exact directory under a fresh sibling backup name and launching Desktop
+hidden restored Engine29.8.2. The backup remains intact; no database volume,
+VM disk, settings or credentials were deleted or reset.
+
+Use this recovery only for the matching diagnostic and verified socket-only
+directory. Verify resolved paths and stopped processes before renaming; never
+overwrite a backup, follow a socket/reparse target or broaden to AppData/VM
+directories. Confirm daemon availability, then verify the intended local
+Cloudiator stack before resuming tests. An unknown error or directory contents
+requires further diagnosis. See [local runtime recovery](docs/operations/local-runtime.md)
+for the exact guards, observed evidence and limits; vendor caches are unchanged.
+
 ## Generated migration completion — approved local guidance
 
 Avi approved this extension on 2026-10-12 for **Making and Committing Schema

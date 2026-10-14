@@ -57,7 +57,8 @@ const VARIANTS: Record<RoutineKind, [Variant, number][]> = {
   rest: [['sit', 35], ['eat', 30], ['sleep', 35]],
   // Regular Arena entrants warm up in staging; a revealed bout moves its real pair into a ring (src/game/arena-layout.ts).
   arena: [['arena-staging', 1]],
-  tournament: [['arena-staging', 75], ['arena-ring', 25]],
+  // Tournament entrants wait in staging too; their revealed bouts and spectating come from src/game/tournament-camp.ts.
+  tournament: [['arena-staging', 1]],
   away: [],
   orientation: [['browse', 1]],
   idle: [['browse', 1]],

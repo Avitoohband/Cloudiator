@@ -3,13 +3,16 @@
 // state; it never decides outcomes or rewards. Arena entrants warm up in staging; a revealed
 // bout (from the entrants' timelines) walks its pair into a sparring ring and plays the
 // battle log there, seeked to the display time (src/game/arena-layout.ts, battle-stage.ts).
+// Tournament entrants wait in staging, fight their revealed bouts in the same rings and, once
+// eliminated, watch from spectator spots outside the arena wall (src/game/tournament-camp.ts).
 import type * as PhaserNS from 'phaser';
-import type { WorldSnapshot, PublicActor } from '@contracts/reads';
+import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/reads';
 import type { RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
 import { layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import { arenaRings, campArenaFights, fightStatus, scheduleArenaRings, type ArenaRing, type CampFight, type FightStatus, type RingSlot } from './arena-layout';
+import { assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, spectatorSpots, type CampTournamentRole, type SpectatorSpot } from './tournament-camp';
 import { NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageLayout, type StagePlan } from './battle-stage';
 import { NPC_ROUTINES, facingFor, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
 import { clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
@@ -43,6 +46,8 @@ export type CampSceneHandle = {
   setWorld(world: WorldSnapshot): void;
   /** Revealed timelines of Arena entrants by activity id; only stages revealed by the display time are used. */
   setTimelines(timelines: ReadonlyMap<string, RevealedTimeline>): void;
+  /** Public tournament views by id, for the entrants' waiting, fighting and spectating roles. */
+  setTournaments(views: ReadonlyMap<string, TournamentView>): void;
   setReducedMotion(reduced: boolean): void;
   /** Removes the scene's bridge listeners. Idempotent; also runs when the game destroys the scene. */
   dispose(): void;
@@ -81,6 +86,8 @@ export type CampDebugState = {
   lighting: { overlayColor: number; overlayAlpha: number; torchAlpha: number };
   /** Revealed bouts the camp knows, with their ring window and what each shows now. */
   arena: { fights: CampDebugFight[]; effects: { effect: string; battleId: string; target: 0 | 1 }[]; labels: string[] };
+  /** Tournament entrants' roles in camp, the champion and who stands at a spectator spot. */
+  tournament: { roles: Record<string, CampTournamentRole['role']>; champion: string | null; spectators: string[] };
 };
 export type CampDebugFight = {
   battleId: string; ring: number; status: FightStatus; positionMs: number; fighters: [string | null, string | null];
@@ -135,8 +142,10 @@ type ActorView = {
   arena?: { key: string; battleId: string } | null;
   /** A fight pose from the battle log, drawn instead of the routine frame. */
   pose?: Pose | null;
-  /** NPC fallback opponents carry a small always-visible "NPC" tag. */
+  /** NPC fallback opponents carry a small always-visible "NPC" tag; a tournament champion a "Champion" tag. */
   marker?: PhaserNS.GameObjects.Text;
+  /** The spectator spot an eliminated tournament entrant stands at. */
+  spectator?: SpectatorSpot | null;
 };
 
 type PropGroup = Omit<PlacedImage, 'slices'> & {
@@ -215,6 +224,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   const labelPool: PhaserNS.GameObjects.Text[] = [];
   let arenaDebug: CampDebugState['arena'] = { fights: [], effects: [], labels: [] };
   let fightsSignature = '';
+  // Tournaments: entrants' views, the bouts among the fights above, roles and spectator spots outside the wall.
+  let tournaments: ReadonlyMap<string, TournamentView> = new Map();
+  let tournamentBattles = new Set<string>();
+  let tournamentRoles = new Map<string, CampTournamentRole>();
+  let seats = new Map<string, SpectatorSpot>();
+  const spots = spectatorSpots(map, reserved);
 
   class CampScene extends P.Scene {
     constructor() { super({ key: 'camp' }); }
@@ -449,8 +464,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         existing.offsetMs = placement.routine.offsetMs;
         existing.activityId = actor.activityId;
         existing.startsAtMs = actor.startsAtMs;
-        // A fighter in a ring stays there; it walks to its new staging spot when its bout is over.
-        if (existing.arena) continue;
+        // A fighter in a ring stays there; it walks to its new staging spot when its bout is over. A spectator
+        // stays at its spot while its tournament runs (updateArena moves it).
+        if (existing.arena || existing.spectator) continue;
         const target = existing.walk ? existing.walk.path[existing.walk.path.length - 1] : { x: Math.floor(existing.x), y: Math.floor(existing.y) };
         if (target.x !== placement.x || target.y !== placement.y) this.walkTo(existing, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing });
         else if (existing.walk) existing.walk.then = { action: placement.action, facing: placement.facing };
@@ -657,7 +673,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         arenaDirty = false;
         arenaComputedAt = now;
         const inCamp = (world?.actors ?? []).filter(a => views.get(a.gladiatorId)?.kind === 'player');
-        const next = campArenaFights(inCamp, timelines, now);
+        const tournamentFights = campTournamentFights(inCamp, tournaments, now);
+        tournamentBattles = new Set(tournamentFights.map(f => f.battleId));
+        tournamentRoles = campTournamentRoles(inCamp, tournaments, now);
+        seats = assignSpectators([...tournamentRoles].filter(([, r]) => r.role === 'spectating').map(([gladiatorId, r]) => ({ gladiatorId, eliminatedInRound: r.eliminatedInRound })), spots);
+        const next = mergeCampFights(campArenaFights(inCamp, timelines, now), tournamentFights);
         const key = next.map(f => f.battleId).join('|');
         if (key !== fightsKey) {
           fightsKey = key;
@@ -697,6 +717,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           v.arena = null;
           if (v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
         }
+        this.placeTournamentEntrant(v, now);
         // Warm-up animation until the bout is revealed; it grants nothing.
         if (!v.arena && !v.walk && v.placement?.routine.kind === 'arena') {
           const warm = v.startsAtMs != null && now >= v.startsAtMs && now < v.startsAtMs + ARENA_REVEAL_MS;
@@ -779,8 +800,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         effects: debugEffects,
         labels: debugLabels,
       };
-      // Tell the UI which bouts are in the rings, for keyboard selection; only when that changes.
-      const summaries: ArenaFightSummary[] = active.map(({ fight, status }) => ({
+      // Tell the UI which Arena bouts are in the rings, for keyboard selection; only when that changes. Tournament
+      // bouts are followed in the Tournaments panel instead (they have no Arena card).
+      const summaries: ArenaFightSummary[] = active.filter(({ fight }) => !tournamentBattles.has(fight.battleId)).map(({ fight, status }) => ({
         battleId: fight.battleId,
         status: status as ArenaFightSummary['status'],
         sides: ([0, 1] as const).map(side => {
@@ -793,6 +815,31 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       if (signature !== fightsSignature) {
         fightsSignature = signature;
         deps.bridge.emit('arena-fights', { fights: summaries });
+      }
+    }
+
+    /**
+     * A tournament entrant out of the rings: an eliminated one walks to its spectator spot and watches the arena; the
+     * others wait at their staging spot; the champion carries a "Champion" tag. A view that is no longer a tournament
+     * entrant returns to its placement.
+     */
+    placeTournamentEntrant(v: ActorView, now: number) {
+      const entrant = v.placement?.routine.kind === 'tournament';
+      const seat = entrant && !v.arena ? seats.get(v.id) ?? null : null;
+      if (seat && v.spectator !== seat) {
+        v.spectator = seat;
+        this.walkTo(v, seat, now, { action: 'idle', facing: seat.facing });
+      } else if (!seat && v.spectator) {
+        v.spectator = null;
+        if (!v.arena && v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
+      }
+      const champion = entrant && tournamentRoles.get(v.id)?.role === 'champion';
+      if (champion && !v.marker) {
+        v.marker = this.add.text(0, 0, 'Champion', { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color: '#1a1423', backgroundColor: '#f2c66b', padding: { x: 3, y: 1 } })
+          .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2);
+      } else if (!champion && v.marker) {
+        v.marker.destroy();
+        v.marker = undefined;
       }
     }
 
@@ -969,6 +1016,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       timelines = next;
       arenaDirty = true;
     },
+    setTournaments(next) {
+      tournaments = next;
+      arenaDirty = true;
+    },
     setReducedMotion(reduced) {
       reducedMotion = reduced;
     },
@@ -998,6 +1049,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         faded: [...faded].map(g => g.id),
         lighting: { overlayColor: overlay?.fillColor ?? 0, overlayAlpha: overlay?.fillAlpha ?? 0, torchAlpha: lights[0]?.image.alpha ?? 0 },
         arena: arenaDebug,
+        tournament: {
+          roles: Object.fromEntries([...tournamentRoles].map(([id, r]) => [id, r.role])),
+          champion: [...tournamentRoles].find(([, r]) => r.role === 'champion')?.[0] ?? null,
+          spectators: [...views.values()].filter(v => v.spectator).map(v => v.id),
+        },
       };
     },
     props() {

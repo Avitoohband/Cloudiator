@@ -155,3 +155,23 @@ test('fixture standings page each league at most 50 rows, and profiles carry the
   first.rows[0].rating = -1;
   expect((await gateway.standings('bronze')).rows[0].rating).not.toBe(-1);
 });
+
+test('fixture tournaments serve each sample view by id as a copy; unknown ids stay unavailable', async () => {
+  const { TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, tournamentId } = await import('../fixtures/tournaments');
+  const { FIXTURE_TOURNAMENTS } = await import('../../src/lib/api/fixture-gateway');
+  const gateway = createFixtureGateway();
+  expect(FIXTURE_TOURNAMENTS).toEqual(TOURNAMENT_SAMPLES);
+  for (const [key, view] of Object.entries(TOURNAMENT_VIEWS)) {
+    const read = await gateway.tournament(tournamentId(key as keyof typeof TOURNAMENT_VIEWS));
+    expect(read, key).toEqual(view);
+    // Callers get their own copy.
+    read.entrants.length = 0;
+    read.placements.length = 0;
+    expect(await gateway.tournament(view.id), key).toEqual(view);
+  }
+  await expect(gateway.tournament('tournament:1:bronze')).rejects.toMatchObject({ code: 'unavailable' });
+  // The opt-in command is refused like every fixture command, and the owner's flag stays off.
+  const result = await gateway.command({ kind: 'set-tournament-opt-in', operationId: '5d1f0b9e-8a43-4b55-9c7e-2f6a1d3c4b5e', enabled: true });
+  expect(result).toEqual({ ok: false, code: 'unavailable' });
+  expect((await gateway.owner()).tournamentOptIn).toBe(false);
+});

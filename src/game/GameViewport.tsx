@@ -4,15 +4,18 @@
 // so the static build never touches WebGL. Unmounting removes the scene's bridge listeners
 // synchronously and destroys the game. With a timeline reader, the host also reads the
 // timelines of Arena entrants once their bouts are due (src/game/arena-layout.ts), so the
-// camp can stage revealed fights, and lists those fights as keyboard buttons.
+// camp can stage revealed fights, and lists those fights as keyboard buttons. With a tournament
+// reader it reads the tournaments of entrants in camp during their slot (src/game/tournament-camp.ts),
+// so they wait, fight and spectate by the revealed bracket.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import type { WorldSnapshot } from '@contracts/reads';
+import type { TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { RevealedTimeline } from '@contracts/events';
 import type { GameGateway } from '../lib/api/gateway';
 import type { Point } from './iso';
 import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
 import { arenaReadsDue, type ArenaRead } from './arena-layout';
+import { tournamentReadsDue, type TournamentRead } from './tournament-camp';
 import { createDisplayClock, type DisplayClock } from './display-clock';
 import { prefersReducedMotion, supportsWebGL } from './webgl';
 import { startGame } from './phaser-game';
@@ -42,12 +45,15 @@ export type CampTestHook = {
   arenaTimelines(): string[];
   /** Hands Arena timelines straight to the scene, as completed reads would (scene tests without a reader). */
   setArenaTimelines(timelines: Record<string, RevealedTimeline>): void;
+  /** Tournament view reads so far, and handing views straight to the scene (scene tests without a reader). */
+  tournamentReads(): number;
+  setTournaments(views: TournamentView[]): void;
 };
 declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
 
-export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null }: {
+export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null }: {
   world: WorldSnapshot | null;
   bridge: SceneBridge;
   focusGladiatorId?: string | null;
@@ -55,6 +61,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   clock?: DisplayClock;
   /** Reads Arena entrants' timelines so revealed bouts can be staged; without it the arena only warms up. */
   timelines?: Pick<GameGateway, 'timeline'> | null;
+  /** Reads tournament views so camp entrants take their roles; without it they wait in staging. */
+  tournaments?: Pick<GameGateway, 'tournament'> | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
@@ -65,6 +73,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   useEffect(() => { clock.current = sharedClock ?? ownClock; }, [ownClock, sharedClock]);
   const arenaTimelines = useRef(new Map<string, RevealedTimeline>());
   const arenaReadCount = useRef(0);
+  const tournamentViews = useRef(new Map<string, TournamentView>());
+  const tournamentReadCount = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [following, setFollowing] = useState(false);
   const [fights, setFights] = useState<ArenaFightSummary[]>([]);
@@ -110,6 +120,35 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
     const timer = window.setInterval(check, ARENA_CHECK_MS);
     return () => { alive = false; window.clearInterval(timer); };
   }, [timelines]);
+
+  // Tournament views: read once an entrant is in camp during its slot, again after each reveal mark, and every 30 s
+  // while a read failed or a due round is unpublished; paused in hidden tabs.
+  useEffect(() => {
+    if (!tournaments) return;
+    let alive = true;
+    const known = new Map<string, TournamentRead>();
+    const inFlight = new Set<string>();
+    const check = () => {
+      const current = latestWorld.current;
+      if (!current || document.visibilityState !== 'visible') return;
+      const now = clock.current.now();
+      for (const id of tournamentReadsDue(current.actors, known, now)) {
+        if (inFlight.has(id)) continue;
+        inFlight.add(id);
+        known.set(id, { readAtMs: now, view: known.get(id)?.view ?? null });
+        tournamentReadCount.current += 1;
+        tournaments.tournament(id).then(view => {
+          if (!alive) return;
+          known.set(id, { readAtMs: clock.current.now(), view });
+          tournamentViews.current.set(id, view);
+          handle.current?.setTournaments(new Map(tournamentViews.current));
+        }, () => {}).finally(() => inFlight.delete(id));
+      }
+    };
+    check();
+    const timer = window.setInterval(check, ARENA_CHECK_MS);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [tournaments]);
 
   useEffect(() => bridge.on('arena-fights', ({ fights: next }) => setFights(next)), [bridge]);
 
@@ -163,6 +202,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       });
       handle.current = created.handle;
       created.handle.setTimelines(new Map(arenaTimelines.current));
+      created.handle.setTournaments(new Map(tournamentViews.current));
       game = startGame(P, {
         type: P.WEBGL,
         parent: host.current,
@@ -192,6 +232,11 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
           setArenaTimelines: next => {
             for (const [id, timeline] of Object.entries(next)) arenaTimelines.current.set(id, timeline);
             handle.current?.setTimelines(new Map(arenaTimelines.current));
+          },
+          tournamentReads: () => tournamentReadCount.current,
+          setTournaments: views => {
+            for (const view of views) tournamentViews.current.set(view.id, view);
+            handle.current?.setTournaments(new Map(tournamentViews.current));
           },
         };
       }

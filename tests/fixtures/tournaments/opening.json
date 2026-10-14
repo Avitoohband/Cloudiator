@@ -1,0 +1,111 @@
+{
+  "id": "tournament:373207:bronze",
+  "league": "bronze",
+  "slotIndex": 373207,
+  "startsAtMs": 1791393600000,
+  "endsAtMs": 1791398400000,
+  "status": "active",
+  "entrants": [
+    {
+      "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
+      "name": "Aster",
+      "classId": "guardian"
+    },
+    {
+      "gladiatorId": "4064a4cd-3f64-433a-9e64-a1a73d64a014",
+      "name": "Bellator",
+      "classId": "berserker"
+    },
+    {
+      "gladiatorId": "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+      "name": "Cassia",
+      "classId": "duelist"
+    },
+    {
+      "gladiatorId": "6e365f72-6f36-4105-9c36-5c4c6d365ddf",
+      "name": "Corvina",
+      "classId": "duelist"
+    },
+    {
+      "gladiatorId": "4fe11c86-50e1-4e19-9de1-19604ee11af3",
+      "name": "Nerva",
+      "classId": "duelist"
+    },
+    {
+      "gladiatorId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+      "name": "Severus",
+      "classId": "guardian"
+    },
+    {
+      "gladiatorId": "88cd4ee7-87cd-4d54-9acd-520d89cd507a",
+      "name": "Titus",
+      "classId": "guardian"
+    },
+    {
+      "gladiatorId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
+      "name": "Varro",
+      "classId": "berserker"
+    }
+  ],
+  "bouts": [
+    {
+      "id": "tournament:373207:bronze:1:0",
+      "round": 1,
+      "position": 0,
+      "parentBoutIds": [],
+      "revealedResult": null
+    },
+    {
+      "id": "tournament:373207:bronze:1:1",
+      "round": 1,
+      "position": 1,
+      "parentBoutIds": [],
+      "revealedResult": null
+    },
+    {
+      "id": "tournament:373207:bronze:1:2",
+      "round": 1,
+      "position": 2,
+      "parentBoutIds": [],
+      "revealedResult": null
+    },
+    {
+      "id": "tournament:373207:bronze:1:3",
+      "round": 1,
+      "position": 3,
+      "parentBoutIds": [],
+      "revealedResult": null
+    },
+    {
+      "id": "tournament:373207:bronze:2:0",
+      "round": 2,
+      "position": 0,
+      "parentBoutIds": [
+        "tournament:373207:bronze:1:0",
+        "tournament:373207:bronze:1:1"
+      ],
+      "revealedResult": null
+    },
+    {
+      "id": "tournament:373207:bronze:2:1",
+      "round": 2,
+      "position": 1,
+      "parentBoutIds": [
+        "tournament:373207:bronze:1:2",
+        "tournament:373207:bronze:1:3"
+      ],
+      "revealedResult": null
+    },
+    {
+      "id": "tournament:373207:bronze:3:0",
+      "round": 3,
+      "position": 0,
+      "parentBoutIds": [
+        "tournament:373207:bronze:2:0",
+        "tournament:373207:bronze:2:1"
+      ],
+      "revealedResult": null
+    }
+  ],
+  "placements": []
+}

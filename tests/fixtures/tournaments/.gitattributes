@@ -1,0 +1,2 @@
+# Tournament fixture views are compared byte for byte with a fresh domain run; never convert line endings.
+*.json -text

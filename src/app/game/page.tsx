@@ -14,6 +14,7 @@ import { BuildPanel } from '../../features/build/BuildPanel';
 import { InventoryPanel } from '../../features/inventory/InventoryPanel';
 import { ArenaPanel, type ArenaSample } from '../../features/arena/ArenaPanel';
 import { StandingsPanel } from '../../features/arena/StandingsPanel';
+import { TournamentPanel, type TournamentSample } from '../../features/tournaments/TournamentPanel';
 import { GameViewport } from '../../game/GameViewport';
 import { createSceneBridge } from '../../game/bridge';
 import { createDisplayClock } from '../../game/display-clock';
@@ -34,6 +35,7 @@ function GameShell() {
   const [sampleReplays, setSampleReplays] = useState<readonly { activityId: string; label: string }[]>([]);
   const [sampleExpeditions, setSampleExpeditions] = useState<readonly { activityId: string; label: string }[]>([]);
   const [sampleArena, setSampleArena] = useState<readonly ArenaSample[]>([]);
+  const [sampleTournaments, setSampleTournaments] = useState<readonly TournamentSample[]>([]);
   const [fixtureReads, setFixtureReads] = useState<GameGateway | null>(null);
   const [clock] = useState(createDisplayClock);
   const session = useSession();
@@ -75,7 +77,7 @@ function GameShell() {
     let active = true;
     if (fixture) {
       import('../../lib/api/fixture-gateway')
-        .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_ARENA }) => { const fixtureGateway = createFixtureGateway(); if (active) { setSampleReplays(FIXTURE_REPLAYS); setSampleExpeditions(FIXTURE_EXPEDITIONS); setSampleArena(FIXTURE_ARENA); setFixtureReads(fixtureGateway); } return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
+        .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_ARENA, FIXTURE_TOURNAMENTS }) => { const fixtureGateway = createFixtureGateway(); if (active) { setSampleReplays(FIXTURE_REPLAYS); setSampleExpeditions(FIXTURE_EXPEDITIONS); setSampleArena(FIXTURE_ARENA); setSampleTournaments(FIXTURE_TOURNAMENTS); setFixtureReads(fixtureGateway); } return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
         .then(([ownerData, worldData]) => { if (active) { setOwner(ownerData); setWorld(withDemoCrowd(worldData)); } })
         .catch(() => { if (active) setPreviewError(true); });
     }
@@ -103,7 +105,7 @@ function GameShell() {
     <main id="main" className="dashboard">
       <section className="camp-area" aria-labelledby="camp-heading">
         <div className="section-title"><div><p className="eyebrow">THE SHARED WORLD</p><h1 id="camp-heading">Hearthstone Camp</h1></div><span className="tag">{fixture ? 'Preview' : 'Coming soon'}</span></div>
-        {fixture ? <GameViewport world={world} bridge={bridge} focusGladiatorId={owner?.gladiatorId ?? null} clock={clock} timelines={fixtureReads} /> : <div className="scene-placeholder">
+        {fixture ? <GameViewport world={world} bridge={bridge} focusGladiatorId={owner?.gladiatorId ?? null} clock={clock} timelines={fixtureReads} tournaments={fixtureReads} /> : <div className="scene-placeholder">
           <div className="scene-label">CAMP VIEW</div>
           <h2>Your world is taking shape.</h2>
           <p>The living camp and its fighters will appear here.<br />Management stays available alongside the world.</p>
@@ -154,6 +156,7 @@ function GameShell() {
             : !fixture && visibleOwner && panel === 'Gladiator' ? <BuildPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
               : visibleOwner && panel === 'Inventory' ? <InventoryPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} preview={fixture} />
               : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} />
+              : panel === 'Tournaments' ? <TournamentPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} fixture={fixture} samples={sampleTournaments} refresh={fixture ? undefined : refreshPlanning} />
               : panel === 'Schedule' ? <>
             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>

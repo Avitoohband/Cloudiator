@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RevealedTimeline } from '@contracts/events';
-import type { PublicActor } from '@contracts/reads';
-import { ARENA_REVEAL_MS, ARENA_SLOT_MS, arenaRevealMarks, arenaStageOfActor, renderArenaStage, type ArenaStageState } from '@/game/arena-stage';
+import { ARENA_REVEAL_MS, ARENA_SLOT_MS, arenaRevealMarks, renderArenaStage, type ArenaStageState } from '@/game/arena-stage';
 import {
-  ARENA_ACTIVITIES, ARENA_BATTLE_LOGS, ARENA_GLADIATORS, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaActivityId, arenaBattleId, type ArenaActivityKey,
+  ARENA_ACTIVITIES, ARENA_BATTLE_LOGS, ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId, arenaBattleId, type ArenaActivityKey,
 } from '../fixtures/arena';
 import { worldFixture } from '../fixtures/domain';
 
@@ -134,18 +133,17 @@ describe('arena stage audiences', () => {
     expect(at('ownerHumanWin', 79).stages).toHaveLength(2);
   });
 
-  it('reads the phase from a public actor whose visible stage has no battle log', () => {
-    const actor = ARENA_WORLD_ACTORS.find(a => a.name === 'Bellator')!;
-    expect(arenaStageOfActor(actor, NOW)).toMatchObject({ phase: 'warming-up', startMs: SLOT_START, opponent: null, replay: null });
-    const { battleLog: _log, ...bout } = timeline('bellator').stages[1];
-    const revealed: PublicActor = { ...actor, visibleStage: bout };
-    const running = arenaStageOfActor(revealed, bout.startedAtMs + 1000);
-    expect(running).toMatchObject({ phase: 'bout', opponent: null, result: null, replay: { activityId: actor.activityId, stageId: bout.id } });
-    expect(running.stages[0].label).toBe('Bout in progress');
-    const done = arenaStageOfActor(revealed, bout.endsAtMs);
-    expect(done).toMatchObject({ phase: 'completed', result: { outcome: 'victory' } });
-    expect(arenaStageOfActor({ ...actor, visibleStage: null }, SLOT_START + 61 * MIN).phase).toBe('preparing');
-    expect(arenaStageOfActor({ ...actor, activityId: null, visibleStage: null }, NOW).replay).toBeNull();
+  it('names no outcome for a bout stage without a log, even after it ends: the outcome comes only from winnerId', () => {
+    const noLog: RevealedTimeline = structuredClone(timeline('bellator'));
+    delete noLog.stages[1].battleLog;
+    const bout = noLog.stages[1];
+    const running = renderArenaStage(noLog, bout.startedAtMs + 1000, { entrantId: entrantOf('bellator') });
+    expect(running).toMatchObject({ phase: 'bout', opponent: null, result: null, replay: { activityId: noLog.activityId, stageId: bout.id } });
+    expect(running.stages[1].label).toBe('Bout in progress');
+    const done = renderArenaStage(noLog, bout.endsAtMs, { entrantId: entrantOf('bellator') });
+    expect(done).toMatchObject({ phase: 'completed', entrant: null, opponent: null, result: null, bout: { battleId: null, log: null, finished: true } });
+    // Nothing visible yet and no known slot start: preparing, with no slot minute.
+    expect(renderArenaStage({ ...noLog, stages: [] }, NOW)).toMatchObject({ phase: 'preparing', startMs: null, minute: null, bout: null });
   });
 });
 

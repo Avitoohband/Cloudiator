@@ -50,6 +50,7 @@
   gap: 0.6rem;
   min-width: 0;
   overflow-wrap: anywhere;
+  scroll-margin-top: 0.75rem;
 }
 
 .header {
@@ -63,6 +64,16 @@
   font-family: Georgia, serif;
   font-size: 1.2rem;
   margin: 0;
+}
+
+/* The heading takes the focus when a camp bout opens the card; keyboard users see where it went. */
+.header h3:focus {
+  outline: none;
+}
+
+.header h3:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
 }
 
 .header .eyebrow,

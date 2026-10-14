@@ -18,7 +18,7 @@ function card(key: ArenaActivityKey, minute: number, overrides: Partial<ArenaCar
   const { gladiator, slotsAgo, owner } = ARENA_ACTIVITIES[key];
   const entrantId = ARENA_GLADIATORS[gladiator].id;
   const state = renderArenaStage(ARENA_TIMELINES[arenaActivityId(key)], SLOT_START - slotsAgo * ARENA_SLOT_MS + minute * MIN, { entrantId, owner });
-  const opponent = state.opponent ? { name: state.opponent.name, className: state.opponent.npc ? 'NPC fallback' : 'Berserker', rating: state.opponent.npc ? null : 1052 } : null;
+  const opponent = state.opponent ? { name: state.opponent.name, className: state.opponent.npc ? 'NPC fallback' : 'Berserker', rating: state.opponent.npc ? null : 1027 } : null;
   const model: ArenaCardModel = { state, owner, entrantName: ARENA_GLADIATORS[gladiator].name, opponent, fixture: true, ...overrides };
   return renderToStaticMarkup(createElement(ArenaCardView, { model, onWatch: noop, onClose: noop }));
 }
@@ -47,7 +47,7 @@ describe('Arena card', () => {
   it('shows the human opponent with class and current rating, the result after the bout, and credits only at minute 80', () => {
     const before = text(card('ownerHumanWin', 79));
     expect(before).toContain('Varro');
-    expect(before).toContain('Current rating 1052');
+    expect(before).toContain('Current rating 1027');
     expect(before).toContain('Victory');
     expect(before).toContain('Varro was defeated.');
     expect(before).toContain('Rewards and any rating change are credited at minute 80.');
@@ -93,6 +93,17 @@ describe('Arena card', () => {
     expect(text(card('ownerDelayed', 85))).toContain('Processing results');
   });
 
+  it('never claims that minute 60 has passed while the slot start is unknown', () => {
+    const state = renderArenaStage({ ...ARENA_TIMELINES[arenaActivityId('ownerDelayed')], stages: [] }, NOW, { entrantId: ARENA_GLADIATORS.aster.id, owner: true });
+    expect(state).toMatchObject({ phase: 'preparing', startMs: null, minute: null });
+    const html = text(renderToStaticMarkup(createElement(ArenaCardView, { model: { state, owner: true, entrantName: 'Aster', opponent: null, fixture: true }, onWatch: noop })));
+    expect(html).toContain('Preparing');
+    expect(html).toContain('has not been published yet');
+    expect(html).not.toMatch(/Minute 60 has passed|MINUTE \d/);
+    // With a known start, the late bout still says so.
+    expect(text(card('ownerDelayed', 65))).toContain('Minute 60 has passed');
+  });
+
   it('renders names as text', () => {
     const html = card('ownerHumanWin', 80, { entrantName: '<img src=x onerror=alert(1)>' });
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
@@ -118,9 +129,9 @@ describe('Arena standings', () => {
   const page = arenaStandingsPage('bronze');
   const base: StandingsModel = {
     league: 'bronze', rows: page.rows, nextCursor: page.nextCursor, seasonId: page.seasonId, archived: false, status: 'ready',
-    ownerId: ARENA_GLADIATORS.aster.id, own: { name: 'Aster', league: 'bronze', rating: 1000, renown: 0, combatStrength: 412 },
+    ownerId: ARENA_GLADIATORS.aster.id, own: { name: 'Aster', league: 'bronze', rating: 1015, renown: 25, combatStrength: 412 },
   };
-  const view = (model: Partial<StandingsModel> = {}) => renderToStaticMarkup(createElement(StandingsView, { model: { ...base, ...model }, onLeague: noop, onMore: noop }));
+  const view = (model: Partial<StandingsModel> = {}) => renderToStaticMarkup(createElement(StandingsView, { model: { ...base, ...model }, onLeague: noop, onMore: noop, onRetry: noop }));
 
   it('shows a page of at most 50 rows with rating, human wins and losses, markers and a More button', () => {
     const html = view();
@@ -136,7 +147,7 @@ describe('Arena standings', () => {
   });
 
   it('shows the owner’s rating, renown and current combat strength separately, or not available', () => {
-    expect(text(view())).toMatch(/Your standing League Bronze Rating 1000 Renown 0 Current combat strength 412/);
+    expect(text(view())).toMatch(/Your standing League Bronze Rating 1015 Renown 25 Current combat strength 412/);
     expect(text(view({ own: { ...base.own!, combatStrength: null } }))).toContain('Current combat strength not available');
     expect(view({ own: null })).not.toContain('Your standing');
   });
@@ -150,6 +161,19 @@ describe('Arena standings', () => {
   it('says when a league is empty or standings cannot be read', () => {
     expect(text(view({ league: 'champion', rows: [], nextCursor: null }))).toContain('No standings in the Champion league yet.');
     expect(text(view({ rows: [], status: 'unavailable', nextCursor: null }))).toContain('Standings are not available in this build yet.');
+  });
+
+  it('tells a temporary read failure apart from a build without standings, and offers a retry', () => {
+    const failed = view({ rows: [], status: 'failed', nextCursor: null });
+    expect(text(failed)).toContain('The standings could not be loaded right now.');
+    expect(failed).toMatch(/<button[^>]*>Try again<\/button>/);
+    expect(failed).not.toContain('not available in this build');
+    // A failed refresh keeps the rows already shown and says they may be out of date.
+    const stale = view({ status: 'failed' });
+    expect(stale.match(/<tr/g)!.length - 1).toBe(50);
+    expect(text(stale)).toContain('The latest standings could not be loaded; these rows may be out of date.');
+    expect(stale).toMatch(/<button[^>]*>Try again<\/button>/);
+    expect(view({ rows: [], status: 'unavailable', nextCursor: null })).not.toContain('Try again');
   });
 
   it('renders names as text', () => {

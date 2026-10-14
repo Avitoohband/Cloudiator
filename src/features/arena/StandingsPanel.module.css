@@ -140,6 +140,23 @@
   border-color: #4b5872;
 }
 
+/* A read failure that can be retried (not a build without standings). */
+.failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #8a5a3a;
+  background: #2a1f1c;
+  font-size: 0.85rem;
+}
+
+.failed p {
+  margin: 0;
+}
+
+.failed button,
 .more {
   justify-self: start;
   min-height: 44px;

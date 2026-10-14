@@ -1,3 +1,9 @@
+.frame {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .viewport {
   position: relative;
   height: clamp(340px, 60vh, 620px);
@@ -52,30 +58,27 @@
   outline-offset: 1px;
 }
 
-/* Keyboard and touch equivalents of clicking a fighting pair in the arena. */
+/* Keyboard and touch equivalents of clicking a fighting pair in the arena, below the camp view. */
 .fights {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 10px;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  pointer-events: none;
+  min-width: 0;
 }
 
 .fights button {
-  flex: none;
+  flex: 0 1 auto;
+  max-width: 100%;
   min-height: 40px;
   font: 600 13px/1.1 system-ui, sans-serif;
   color: #f4e8cb;
-  background: #241d2bdd;
+  background: #241d2b;
   border: 1px solid #b5a07a;
   border-radius: 6px;
-  padding: 0 10px;
+  padding: 4px 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
   cursor: pointer;
-  pointer-events: auto;
 }
 
 .fights button:focus-visible {

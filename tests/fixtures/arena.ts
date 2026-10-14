@@ -19,7 +19,7 @@ import type { ArenaBoutKey } from './arena-ids.ts';
 import { buildArenaFixtures } from './arena-build.ts';
 
 export * from './arena-ids.ts';
-export { ARENA_BOUT_RATINGS, ARENA_SAMPLES, ARENA_STANDINGS, arenaStandingsPage, buildArenaFixtures } from './arena-build.ts';
+export { ARENA_BOUT_RATINGS, ARENA_OWNER, ARENA_SAMPLES, ARENA_STANDINGS, arenaStandingsPage, buildArenaFixtures } from './arena-build.ts';
 
 const log = (json: unknown) => json as BattleLog;
 export const ARENA_BATTLE_LOGS: Record<ArenaBoutKey, BattleLog> = {

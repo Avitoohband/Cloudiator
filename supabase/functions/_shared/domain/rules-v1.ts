@@ -32,7 +32,8 @@ export const RULES_V1 = freezeDomain({
     gearDamageWeight: 4, gearArmorWeight: 2, referenceAgility: 5 },
   matchmaking: { maximumStrengthRatio: 2, recentPairingSlots: 18 },
   rating: { initial: 1000, k: 24, expectationScale: 400, minimum: 0 },
-  tournament: { utcWeekdays: [3, 6], hourUtc: 17, minuteUtc: 20, minimumEntrants: 2,
+  // durationMs: one 80-minute slot; round r of R reveals at durationMs × r / (R + 1) and every reward settles at durationMs.
+  tournament: { utcWeekdays: [3, 6], hourUtc: 17, minuteUtc: 20, minimumEntrants: 2, durationMs: 4_800_000,
     placements: { winner: { money: 100, renown: 50 }, runnerUp: { money: 60, renown: 30 }, semifinal: { money: 30, renown: 15 }, other: { money: 0, renown: 5 } } },
   seasons: { durationSlots: 504, durationMs: 2_419_200_000, minimumHumanBouts: 5,
     placements: [{ money: 500, renown: 100, title: 'champion', badge: 'gold' }, { money: 300, renown: 60, title: null, badge: 'silver' }, { money: 200, renown: 40, title: null, badge: 'bronze' }] },

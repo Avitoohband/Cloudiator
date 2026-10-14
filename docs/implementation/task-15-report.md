@@ -56,7 +56,7 @@ Status: **DONE_WITH_CONCERNS**. Implemented and verified; the independent review
   - Ownership means a summary is visible in the state (only once `settledAtMs` has passed), or `owner().gladiatorId` equals the expedition's gladiator id.
   - Before either is known (a fixture before its first encounter), the header reads just `EXPEDITION`.
   - `world()` and `owner()` are read once, after the timeline exists. In live mode today, neither runs.
-- **Reads.** The view reads the timeline on entry, once per reveal mark passed (`passMarks`), and on focus or visibility. A later failed read keeps the last timeline. The display clock never runs backwards, and a server ahead of it moves it forward.
+- **Reads.** The view reads the timeline on entry, once per reveal mark passed (`passMarks`, now `readDue` with a 30-second poll; see "Review fix pass"), and on focus or visibility. A later failed read keeps the last timeline. The display clock never runs backwards, and a server ahead of it moves it forward.
 - **What it never does.** The view never sends a command. All names and labels are React text.
 
 **Route** (`src/app/expedition/page.tsx`, approved shared edit): a fixed page copying the replay pattern (`Suspense` with `useSearchParams`).
@@ -142,8 +142,8 @@ The evidence these edits require is under "Commands and results" and "Evidence".
 **Ambiguities resolved.**
 1. **Summary timing.** The fixture timeline holds every stage and summary. A summary counts only once its `settledAtMs` has passed on the display clock, so a fixture can never show results early.
 2. **Owner or spectator.** The state cannot know who is watching, so the view decides (see "Identity" above). The expired fixture has no logs; its summary makes it the owner's.
-3. **Health between encounters.** It shows the last log's `finalHp`, which is 0 after a tie-break win. The next encounter's log then shows the server's healed `initialHealth`. Showing the heal earlier would mean computing it in the browser.
-4. **After minute 80.** The scene leaves the gladiator waiting at the trail's end (the way back to camp), while the text says "Back at camp".
+3. **Health between encounters.** It shows the last log's `finalHp`, which is 0 after a tie-break win. The next encounter's log then shows the server's healed `initialHealth`. Showing the heal earlier would mean computing it in the browser. *Review fix pass:* the label now names the encounter the value comes from, with a static recovery note; still no computed heal.
+4. **After minute 80.** The scene leaves the gladiator waiting at the trail's end (the way back to camp), while the text says "Back at camp". *Superseded by the review fix pass:* the gladiator now leaves the scene and the scene shows "Returned to camp".
 5. **A defeat's creature.** After the result poses, the creature fades out whether it won or lost.
 6. **Text uniqueness.** Phase titles never contain "Encounter N", so the plan's `getByText('Encounter 1')` and `'Returning without rewards'` assertions each match exactly one element.
 7. **Production gate harness.** The dispatch allows Playwright only through `pw-claude.config.mjs`. That config therefore gained a static mode: with `PLAYWRIGHT_STATIC=true` it serves `PLAYWRIGHT_STATIC_ROOT` on port 3200 through a private copy of `scripts/serve-static.mjs` (`node_modules/.cache/serve-static-3200.mjs`). This replaces the repository config's port 4173. Both files are ignored local tooling.
@@ -268,12 +268,12 @@ In the export, "Sample expeditions" appears only as the game page's JSX `aria-la
 | `mobile-expedition-tiebreak-victory-at-0hp.png` | The same on a Pixel 7 |
 | `desktop-expedition-delayed-preparing.png` | Preparing at minute 45: waiting at encounter 2's tile, no creature |
 | `desktop-expedition-spectator.png` | Another gladiator's journey: "Gladiator" asleep at the safe point, no rewards |
-| `desktop-expedition-woodland-arrival-behind-oak.png` | The trail's end at minute 85: the oak in front of the gladiator faded; evening light |
+| `desktop-expedition-woodland-arrival-behind-oak.png` | The trail's end at minute 85: the oak in front of the gladiator faded; evening light (refreshed in the review fix pass: one second before arrival, because the gladiator has left by minute 85) |
 | `desktop-expedition-woodland-settled.png` | Full page: Success, credited rewards from the summary, retention note, the full log with Watch replay links |
 | `width360-expedition-mountain-encounter.png` | A 360 px screen, full page during Mountain encounter 3 |
 | `production-expedition-fixture-refused.png` | The exported route refusing `mode=fixture&minute=39` |
 
-The small "N" in development screenshots is the Next.js development indicator. The development screenshots come from the `b31136b` run. The `7c2ee9b` fix changes only the header before identity is known, which no screenshot captures. The production screenshot comes from the final `7c2ee9b` gate.
+The small "N" in development screenshots is the Next.js development indicator. The development screenshots come from the `b31136b` run. The `7c2ee9b` fix changes only the header before identity is known, which no screenshot captures. The production screenshot comes from the final `7c2ee9b` gate. The review fix pass refreshed every development screenshot above (see that section); the production one is unchanged.
 
 ## Files
 
@@ -296,12 +296,12 @@ The small "N" in development screenshots is the Next.js development indicator. T
 - **Fixtures hold every stage.** The fixture gateway has no clock, so each fixture timeline contains its future stages and summary. Only the pure core's `revealedAtMs` and `settledAtMs` rules hide them. Server-side reveal filtering is Task 10's.
   - A side effect: a fixture replay opened from the view lists every encounter in that fixture timeline, including encounters not yet due on the expedition's display clock. With real published timelines, only due stages exist.
 - **Live mode** shows the unavailable state until Task 10 provides `timeline()` and `world()`.
-- **Refetch cadence.** The dispatch rule refetches at the marks and on focus only. A stage published late, while Preparing shows, appears at the next 20-minute mark or on focus, not at once. Task 10's 30-second revision poll closes this.
+- **Refetch cadence.** The dispatch rule refetches at the marks and on focus only. A stage published late, while Preparing shows, appears at the next 20-minute mark or on focus, not at once. Task 10's 30-second revision poll closes this. *Closed in the review fix pass by an interim 30-second poll while Preparing or awaiting the owner's summary.*
 - **The world fixture is unchanged.** Fixture expeditions therefore never match an actor by activity, so the look comes from the first log.
   - The owner's name comes from the world actor with the log's gladiator id, or from `owner()`. Before the first revealed log, the fixture view cannot tell the owner from a spectator, so it names nobody.
   - Before the first encounter is revealed, the owner's gladiator draws in default gear (a fixture-only effect).
 - **Scene approximations.**
-  - At minute 80 and later, the gladiator stays at the trail's end in the scene.
+  - At minute 80 and later, the gladiator stays at the trail's end in the scene. *Fixed in the review fix pass: it leaves the scene.*
   - A creature that won also fades after the result poses.
   - Follow glides at a fixed 0.12 per frame.
   - Fps targets remain Task 23.
@@ -314,9 +314,114 @@ The small "N" in development screenshots is the Next.js development indicator. T
 - **Task 10.**
   - Implement live `timeline(id)` (only due stages, `reveal_at <= database time`), `world()` and `owner()` for this page.
   - Keep the owner/spectator split: no summary on another owner's timeline.
-  - Replace `useTimelineReads` and `passMarks` in `ExpeditionView.tsx` with the shared sync controller (revision poll, hidden-tab pause, focus refresh).
+  - Replace `useTimelineReads` and `readDue` (formerly `passMarks`) in `ExpeditionView.tsx` with the shared sync controller (revision poll, hidden-tab pause, focus refresh).
   - Decide whether the view should use `visibleThroughMs`.
 - **Task 13.**
   - Open `/expedition/?activity=<id>` from the camp roster or character card (`view-expedition`), and emit `return-camp` if the camp needs it.
   - Give the camp's away indicator a link here.
   - Use the shared live sync clock and the scene-availability status for late panels.
+
+## Review fix pass
+
+Status: **DONE**. The independent review found spec, quality and visual Pass, ready to merge, with Minors only. The controller chose five Minors to fix now; each was fixed test-first.
+
+- Date: 2026-10-14, Asia/Jerusalem. A fresh implementer, same worktree and branch, on top of `2a102b4`.
+- Commits:
+  - `fa27a50`: `fix: apply Task 15 review Minors` (source and tests);
+  - the commit that adds this section and the refreshed evidence.
+- Not changed, as instructed: the replay page's behaviour (`src/game/replay.ts`) and the default zoom. Both remain later gates.
+- Nothing was pushed or merged. No Supabase command was run. `HANDOFF.md` is untouched. Playwright ran only through `node_modules/.cache/pw-claude.config.mjs` on port 3200.
+
+### What changed
+
+| # | Minor | Change | Files |
+| --- | --- | --- | --- |
+| 1 | After arrival, the text says the gladiator is back at camp, but the scene still shows it on the trail or at the safe point. | **Core.** `RouteProgress.then` gains `'leave'`. Once the final `Arrive at camp` stage is current, the route is `{ from: X, to: X, then: 'leave' }`, where X is `end` after a success and `safe` after a defeat; `walkedMs` counts from the arrival.<br>**Scene.** The gladiator and its name label fade out over 1.5 s (`HERO_LEAVE_MS`); with reduced motion they disappear at once. Props no longer fade for a gladiator who has left. A new `onReturned` callback tells the viewport.<br>**Viewport.** A "Returned to camp" banner appears over the scene, but only while the scene is ready (never in a WebGL or art fallback). It fades in through CSS, with no animation under reduced motion.<br>**Debug hook (fixture-only).** New fields `returned`, `gladiator.alpha` and `gladiator.labelVisible`. | `src/game/expedition-stage.ts`, `expedition-scene.ts`, `ExpeditionViewport.tsx`, `ExpeditionViewport.module.css` |
+| 2 | Health reads 0 while exploring after a tie-break win. | **Label.** The health label now says which encounter the value comes from: "Health during/after the first/second/third encounter", taken from `hp.encounter` and whether that stage is still in progress. The meter's `aria-valuetext` says the same.<br>**Note.** After a won encounter 1 or 2, a static note reads "Health recovers before the next encounter." No heal is computed.<br>**Ordinal words.** The label uses "first, second, third" rather than "encounter 1". Playwright's `getByText` matches a case-insensitive substring by default, so "Health after encounter 1" would also match the plan's `getByText('Encounter 1')`. That would break the text-uniqueness rule (ambiguity 6). | `src/features/character/ExpeditionView.tsx`, `ExpeditionView.module.css` |
+| 3 | No hidden-tab test for this scene. | **Test.** A hidden/visible test modelled on the one in `replay.spec.ts`.<br>**Defect found.** The scene kept drawing while hidden. The cause is Phaser 4.2.1's `HIDDEN` handler, `Game.onHidden` → `TimeStep.pause()`, which only records the pause time. The animation-frame loop and `update()` keep running whenever the browser keeps delivering frames.<br>**Fix.** `update()` now returns early while `document.visibilityState === 'hidden'`. The first frame back reads the current display time. | `src/game/expedition-scene.ts` |
+| 4 | `kept` reads the ungated summary. | `kept` now comes from the `settledAtMs`-gated summary, like every other summary field. | `src/game/expedition-stage.ts` |
+| 5 | The interim re-read cadence can stall for up to 20 minutes. | **Function.** `passMarks` became `readDue(schedule, state, owner)`. It is still the one small function Task 10's sync controller replaces, and it keeps the mark reads.<br>**Poll.** While the tab is visible and the phase is `preparing`, or the owner's summary is awaited (`owner && awaitingSummary`), a read is due once `POLL_MS` (30 s, spec 10.5) of display time have passed since the last read.<br>**Restart.** Every read restarts the interval: entry, schedule or focus/visibility. `useTimelineReads` reports reads through a new `onRead` callback. The first tick after entry starts the interval, and a fixture clock held back in time restarts it.<br>**Owner.** Ownership reaches the tick through `ownerRef`. A spectator never polls for a summary.<br>**Hidden tab.** The tick already returns early while hidden, so polling pauses. | `src/features/character/ExpeditionView.tsx` |
+
+### RED and GREEN
+
+1. **Arrival.**
+   - New unit test "has the gladiator leave the scene once it arrives at camp, from where it last was". RED: `then: "wait"` where `"leave"` was expected. Three existing assertions were updated to `then: 'leave'` and failed the same way (minute table after a defeat, `laststand` at minute 80, the journey at minute 85).
+   - New browser test "has the gladiator leave the scene once the expedition is back at camp, and says so in the scene". RED: `returned` was `undefined`.
+   - The reduced-motion test's new arrival check failed too: the gladiator was still shown.
+   - GREEN, for the Woodland success and the Outpost defeat:
+     - 1 s before arrival: in full view at the trail's end or the safe point;
+     - 0.75 s after: alpha between 0.2 and 0.8, `returned: true`;
+     - 5 s after: invisible, label hidden, no prop faded, "Returned to camp" visible;
+     - the phase still reads "Back at camp" or "Back at camp after a defeat";
+     - mid-journey: no banner;
+     - reduced motion: hidden 0.1 s after arrival;
+     - without WebGL: no banner, and "Back at camp" in the text.
+   - Two `expedition-path` assertions (a `leave` route poses idle at its point) passed at once, because `gladiatorPose` already treated other arrival actions as idle. They guard that behaviour; they were not a RED.
+2. **Health.** New browser test "names the encounter the shown health comes from, and notes the recovery after a non-final win".
+   - RED: "Health after the first encounter" was not found.
+   - GREEN:
+     - `tiebreak` after encounter 1: 0/100, labelled "after the first encounter", with the note (also at minute 39.9);
+     - during encounter 2: "during the second encounter", no note;
+     - after the encounter 2 defeat: "after the second encounter", no note;
+     - Woodland at minute 59: "after the second encounter" with the note;
+     - Woodland at minute 70: "after the third encounter", no note;
+     - `getByText('Encounter 1')` still matches exactly one element at minute 39.
+3. **Hidden tab.** New browser test "pauses the scene while the tab is hidden and shows the current moment when it returns". It opens Woodland at minute 5, while the gladiator walks.
+   - RED: while hidden, the scene's `displayNowMs` moved from …100855.6 to …101666.9 (811 ms). This confirmed the scene did not pause.
+   - GREEN while hidden: `displayNowMs`, the gladiator debug state and the camera stay identical for 800 ms, with no read.
+   - GREEN once visible again: exactly one refresh. The scene then jumps more than 800 ms ahead, to within 500 ms of the view's clock, with the pose that `gladiatorPose` gives for that time.
+4. **`kept`.** New unit test "reads replay expiry only from a summary that is settled by the display time". It uses a Woodland timeline whose summary says the replays expired.
+   - RED: minute 39 gave `[]` where `[1]` was expected.
+   - GREEN: `[1]` at minute 39, `[1, 2, 3]` at minute 80 and at `settledAtMs - 1`, and `[]` at `settledAtMs`.
+   - The old assertion `replays(at(expired, 39)) = []` encoded the ungated read, so it was removed.
+5. **Cadence.** New browser test "re-reads every 30 seconds while a due stage or the owner's summary is awaited, and stops once it arrives". It uses the fixture clock: `freeze` through the debug hook, 0.7 s of ticks per step.
+   - RED: in the `delayed` fixture at +30 s, the count stayed at 2 where 3 was expected.
+   - GREEN, `delayed`, Preparing from minute 46:00: no read at +10, +20 or +29.5 s. One read each at +30 s and +60 s, none at +45 or +89.5 s.
+   - GREEN, Woodland held 2 minutes before departure (Preparing, nothing revealed): one read at +30 s. When the departure appears, the reads stop: none at +31, +61 or +91 s.
+   - GREEN, the owner's Woodland at minute 80 (Processing results): one read at 80:30. None once the summary settles at 80:45, nor 30, 60 or 90 s later.
+   - GREEN, spectator at minute 85: no read over 90 s.
+
+### Commands and results (final source, `fa27a50`)
+
+```text
+npm test                                        20 files, 399 passed (was 397: +2 stage tests)
+npm run typecheck                               tsc clean; Deno check; Deno test 2 passed
+node assets/source/build-assets.mjs --check     assets up to date (28 files); no art changed
+npm run build                                   static: /, /_not-found, /auth/callback, /expedition, /game, /replay
+npm run verify:static                           Static export verified: 5 fixed routes; 90 assets scanned; no forbidden backend material.
+grep -rlE <fixture data> out/                   0 files: expedition activity ids, fixture-receipt, creature:dire-wolf:1, Varro, Aster,
+                                                "Recover and continue exploring", light-boots:1:uncommon, the fixture gateway's text
+npx playwright test -c node_modules/.cache/pw-claude.config.mjs          (dev, port 3200, desktop + mobile)
+                                                153 passed, 7 skipped (the same expected skips); expedition.spec 23 tests x 2 projects
+CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true npm run build
+npm run verify:static -- .next/browser-test     5 fixed routes; 90 assets; no forbidden backend material; same fixture greps 0 files
+PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test -c node_modules/.cache/pw-claude.config.mjs
+  tests/browser/shell.spec.ts tests/browser/camp.spec.ts tests/browser/replay.spec.ts tests/browser/expedition.spec.ts
+                                                8 passed, 118 skipped (fixture-only suites)
+git diff --check / git diff --cached --check    clean
+```
+
+The new UI strings "Returned to camp" and "Health recovers before the next encounter." appear in one exported JavaScript chunk, as view copy. No fixture data appears.
+
+### Evidence refreshed (`docs/implementation/task-15-evidence/`)
+
+Every development screenshot was replaced from the final `fa27a50` dev run, because the health label appears in all of them. The production screenshot is unchanged.
+
+| File | Shows now |
+| --- | --- |
+| `desktop-expedition-woodland-returned-to-camp.png` (new) | Minute 85: the gladiator gone, "Returned to camp" over the scene, "Back at camp", health after the third encounter |
+| `mobile-expedition-woodland-returned-to-camp.png` (new) | The same on a Pixel 7 |
+| `desktop-expedition-woodland-settled.png` | Full page at settlement: the banner over an empty trail's end, Success, credited rewards, the full log |
+| `desktop-expedition-woodland-arrival-behind-oak.png` | One second before arrival: the waiting gladiator behind the faded oak, "Returning to camp" |
+| `desktop-expedition-tiebreak-victory-at-0hp.png`, `mobile-…` | Exploring after the tie-break: "Health after the first encounter 0 / 100" and the recovery note |
+| `desktop-expedition-woodland-minute-39.png` | Searching at spot 2; health after the first encounter with the note |
+| `desktop-expedition-outpost-minute-65-safe-point.png` | Returning without rewards; "Health after the second encounter 0 / 155", no note |
+| `desktop-expedition-delayed-preparing.png`, `desktop-expedition-spectator.png` | As before, with the qualified health label |
+| `desktop-expedition-{woodland-encounter-1,outpost-encounter-2,mountain-encounter-2}.png`, `width360-expedition-mountain-encounter.png` | The fights, with "Health during the … encounter" |
+
+### Notes and remaining limitations
+
+- **Banner as DOM text.** The "Returned to camp" banner is DOM text over the canvas, not drawn by Phaser. It stays crisp at every zoom step and uses the app's type. Without a scene, the phase text alone says the gladiator is back.
+- **Display-time polls.** The interim poll counts display time, which runs in real time while the tab is visible. In live mode, a read that finds the server clock ahead moves the display clock forward. While a stage is still awaited, that can make the next tick's poll due at once: one extra read, after which the interval restarts. Live reads stay unavailable until Task 10.
+- **Fixture summaries.** As before, a fixture's summary "arrives" when the display clock passes `settledAtMs`. The extra reads return the same full fixture timeline.
+- **Unchanged later gates.** The replay page's behaviour and the default zoom, as instructed.

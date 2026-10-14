@@ -5,15 +5,17 @@ domain) and phase 2a (schema, placement, ratings, pairing) passed independent re
 standings) passed its independent review (spec Pass, quality Pass, ready with fixes); the review fixes are in
 [Review fixes](#review-fixes-i1-m1-m2). At the real one-minute cron cadence a steady-state 50-entrant boundary now publishes
 at about 61 s when the rolling dispatch window has cleared. When the window still counts the previous tick, it publishes at
-about 121 s. Above 40 characters the current budget and batch limits cannot avoid that (see
-[Timing](#timing-50-entrants-one-minute-cron-cadence)); it is recorded for Task 23. Hosted proof, retention and the
+about 121 s. The current worker misses that case above 40 characters. At 50 the boundary needs exactly the 100 settlement
+and preparation jobs the window allows, so only a worker change with zero slack could in principle reach about 61 s; above
+50 characters no worker change can (see [Timing](#timing-50-entrants-one-minute-cron-cadence), corrected in the
+[re-review](#re-review-fixes)). A robust fix needs a policy decision, recorded for Task 23. Hosted proof, retention and the
 tournament and season tasks remain later gates.
 
 | Phase | Scope | Branch and commits | Review |
 | --- | --- | --- | --- |
 | 1 | Pure Arena domain: `leagueFor`, `estimateArenaStrength`, `makeFallback`, `matchArena`, `ratingDelta`, `applyRatingDelta`, `arenaOutcomes` | `claude/task-16`: feature `270deb9`, report `61b3e7b`, review fixes `a60eeb2`/`bec7ad2`, Minors `c30d854`/`b3c3238` | Spec Pass, quality Pass ([review](task-16-phase-1-review.md)) |
 | 2a | Season epoch, league placement at phase 4, rating rows, visible combat strength, fenced pairing at phase 7, M09 | `claude/task-16-p2`: brief `cd73b1e`, feature `6e8fd57`, report `430aec3`, review record `d3797e7` | Spec Pass, quality Pass ([review](task-16-phase-2a-review.md)) |
-| 2b | One simulation per battle, worker executor, fenced acceptance, settlement one side at a time, public stages, standings, live UI wiring, M10 | `claude/task-16-p2`: base `d3797e7`, brief `1d6a482`, feature **`31cfdaa`**, report `deda395`, review fixes **`337f38d`**, this update | Spec Pass, quality Pass, ready with fixes (I1, M1, M2); fixes below |
+| 2b | One simulation per battle, worker executor, fenced acceptance, settlement one side at a time, public stages, standings, live UI wiring, M10 | `claude/task-16-p2`: base `d3797e7`, brief `1d6a482`, feature **`31cfdaa`**, report `deda395`, review fixes **`337f38d`**/`a1c6732`, re-review fix **`cf325d1`**, this update | Spec Pass, quality Pass, ready with fixes (I1, M1, M2); fixes and re-review fixes below |
 
 - Date: 2026-10-14. Worktree `C:\Avi\Studies\Projects\Cloudiator-claude`. Phase 2b base: **`d3797e7`** (pushed).
 - Phase 2b scope: [task-16-phase-2b-dispatch.md](task-16-phase-2b-dispatch.md), the 2a report's "What phase 2b must do" with its
@@ -22,7 +24,8 @@ tournament and season tasks remain later gates.
   **`supabase/migrations/20261014131209_arena_bouts.sql`** (2b). M01–M08 are unchanged.
 - Not done, by instruction: no push or merge, no `HANDOFF.md` edit, no subagents, no downloads. No other checkout was opened
   and no hosted project was touched. No key, credential or status output was printed; CLI, reset and test output is in
-  ignored `.task16-2b-*.log` files, and the review-fix runs in ignored `.task16-fix-*.log` files.
+  ignored `.task16-2b-*.log` files, the review-fix runs in ignored `.task16-fix-*.log` files and the re-review runs in
+  ignored `.task16-rr-*.log` files.
 
 ## Phases 1 and 2a (summary)
 
@@ -43,13 +46,13 @@ interfaces, decisions and evidence. In short:
 | --- | --- |
 | `supabase/sql/08-arena-bouts.sql` | New reapplicable source; its header lists the eight accepted exceptions. |
 | `supabase/migrations/20261014131209_arena_bouts.sql` | M10, CLI-generated and completed (see "Migration"). |
-| `supabase/functions/_shared/backend/jobs.ts` | `ArenaSimulationInput`, `ArenaSimulationResult`, `simulateArenaV1`; the explicit simulation discriminator; `PairingInput.historyFromSlot` and its fail-closed check; an operator-retained settlement counts as failed. Review fix I1: `runWorker` claims the pairing jobs its own coordination released after its simple loop. |
+| `supabase/functions/_shared/backend/jobs.ts` | `ArenaSimulationInput`, `ArenaSimulationResult`, `simulateArenaV1`; the explicit simulation discriminator; `PairingInput.historyFromSlot` and its fail-closed check; an operator-retained settlement counts as failed. Review fix I1: `runWorker` claims the pairing jobs its own coordination released after its simple loop; since the re-review, one at a time with the CPU budget checked before each claim. |
 | `supabase/functions/_shared/backend/database.ts` | `JobOutcome` gains the `operator` code. |
 | `supabase/functions/_shared/domain/arena.ts` | Additive `arenaNpcName(league)`. |
 | `src/lib/api/reads.ts`, `src/lib/api/gateway.ts` | `readStandings` and the live `standings(league, cursor?)`. Review fix M2: the latest-season probe reads `public.arena_standings`. |
 | `src/app/game/page.tsx` | The Arena card and the Standings panel receive the live gateway in live mode; fixture mode is unchanged. |
-| `tests/db/arena.test.ts` | 13 new DB cases (28 in all); five 2a expectations updated (see "Affected existing tests"). Review fix I1: the timing case now runs at the one-minute cron cadence. |
-| `tests/backend/worker.test.ts` | 10 new unit cases (2 from review fix I1); the pairing inputs gain `historyFromSlot`. |
+| `tests/db/arena.test.ts` | 13 new DB cases (28 in all); five 2a expectations updated (see "Affected existing tests"). Review fix I1: the timing case now runs at the one-minute cron cadence. Re-review: its held-window comment no longer counts the pairing jobs as simple work. |
+| `tests/backend/worker.test.ts` | 13 new unit cases (2 from review fix I1, 3 from the re-review); the pairing inputs gain `historyFromSlot`. |
 | `tests/reads.test.ts`, `tests/api/projection-gateway.test.ts` | 3 new unit cases for the standings read; review fix M2 updates their probe path. |
 | `tests/browser/arena-live.spec.ts` | New live-mode spec: the live panels get a reader. Its fake backend answers the M2 probe path. |
 | `tests/db/activities.test.ts` | One affected expectation: Arena now starts at phase 8. |
@@ -76,9 +79,9 @@ interfaces, decisions and evidence. In short:
 - **`pairArenaV1`** now requires `historyFromSlot <= slotIndex − rules.matchmaking.recentPairingSlots` (`invalid-input`
   otherwise, also when it is missing).
 - **`runWorker`**: a settlement answered `{ok:false, code:'operator'}` counts as `failed` and is not failed again. After its
-  simple loop, if its latest coordination left a boundary waiting on `pairing`, it claims up to `WORKER_LIMITS.combat` (5)
-  pairing jobs within the CPU budget, then coordinates again (review fix I1). Simulations still run only in an invocation
-  without simple work.
+  simple loop, if its latest coordination left a boundary waiting on `pairing`, it claims pairing jobs one at a time, at most
+  `WORKER_LIMITS.combat` (5), checking the CPU budget before each claim, then coordinates again (review fix I1, re-review).
+  Simulations still run only in an invocation without simple work.
 - **`readStandings(client, league, cursor?)`** returns a `StandingsPage` of the latest season with rows: at most 50 rows,
   ranked by the view, `nextCursor` `season:rank` when a page is full, `archived: false`. The latest season is the highest
   `season_index` in `public.arena_standings`, read through its index (review fix M2). `inactive` means no human bout in
@@ -221,6 +224,8 @@ used pre-wait time; the correction samples after every lock.
 - **Unit:** the Arena executor (log and outcomes, NPC identity and name, frozen silhouette order kept, fail-closed inputs),
   the discriminator (five unknown inputs → `unsupported-executor`), expedition dispatch unchanged, the history bound and the
   operator outcome; the pairing claim after a spent simple budget, and none once the CPU budget is spent (review fix I1);
+  the CPU check before each pairing claim, the five-job cap, and no claim when the final coordination waits on anything
+  but pairing (re-review);
   the standings read (pages, cursor, flags, malformed input, empty world, the probe on `arena_standings`) and the live
   gateway read.
 - **Timing at the one-minute cron cadence** (review fix I1): "times consecutive 50-entrant Arena boundaries at the one-minute
@@ -270,13 +275,20 @@ committed 2b worker published a steady-state boundary only at the third tick, ab
 - All times below are database time from the slot's cutoff (`slot × 4 800 000`). This is the local stack, not hosted
   evidence (Task 23).
 
-**After the fix.** Four passing runs: three single-case runs plus the full DB suite, each with the Edge start time
-unchanged. A fifth single-case run passed but its log kept no measurement.
+**After the fix.** The ranges cover seven passing runs, each with the Edge start time unchanged:
+- four of `337f38d` (three single-case runs plus the full DB suite); a fifth single-case run passed, but its log kept no
+  measurement;
+- three of the re-review change `cf325d1`, which claims the pairing jobs one at a time (two single-case runs plus the full
+  DB suite). One further `cf325d1` full-suite run passed but is not counted, because the Edge container was recreated as it
+  ended.
+
+The re-review's own run of `337f38d` measured 0.41, 0.49 and 0.50 s for cold P's preparation, pairing and publication. That
+run is included in the cold-P ranges only. The cold first boundary varies most; the cause of its spread was not investigated.
 
 | Boundary | Previous slot settled | Preparations done | Pairing done | Published | All 25 bouts simulated | Reveal margin |
 | --- | --- | --- | --- | --- | --- | --- |
-| P, cold | — | 0.11 s | 0.19 s | 0.20 s | 60.09 s | 3 540 s |
-| P + 1, steady, window cleared | 1.04–1.09 s | 61.00–61.09 s | 61.06–61.15 s | **61.07–61.16 s** | 120.95–121.05 s | 3 479 s |
+| P, cold | — | 0.11–0.41 s | 0.19–0.49 s | 0.20–0.50 s | 60.08–60.09 s | 3 540 s |
+| P + 1, steady, window cleared | 1.04–1.15 s | 61.00–61.09 s | 61.06–61.15 s | **61.07–61.16 s** | 120.95–121.05 s | 3 479 s |
 | P + 2, steady, window held | 1.09–1.14 s | 120.96–121.02 s | 121.02–121.08 s | **121.02–121.08 s** | 240.96–241.04 s | 3 359 s |
 
 The dispatch log was the same in every run. Each invocation is listed by the jobs it ran.
@@ -310,22 +322,38 @@ In every boundary the 10-job invocation finished first. The invocation that comp
 ("pair 2").
 
 **The fix** is TypeScript only (no SQL, no migration). After its simple loop, `runWorker` claims the pairing jobs its own
-latest coordination released (`wait: 'pairing'`). It takes at most `WORKER_LIMITS.combat` (5) within the CPU budget; a
-slot has at most one pairing job per league, so four. The dispatch budget and both batch limits are unchanged. An
-invocation can now run at most 20 simple jobs plus 5 pairing jobs.
+latest coordination released (`wait: 'pairing'`). Since the re-review (`cf325d1`) it claims them one at a time, at most
+`WORKER_LIMITS.combat` (5), and checks the CPU budget before each claim. A spent budget therefore leaves the next pairing
+job pending for another invocation, instead of leased and deferred until its lease expires. A slot has at most one pairing
+job per league, so four.
 
-**Why the held-window case cannot meet 120 s within these limits.**
-- A steady-state 50-entrant Arena boundary must run at least 102 simple jobs before it publishes: 50 settlements, then 50
-  preparations, then one pairing job per league (2 here).
+**Batch limits.** The `WORKER_LIMITS` constants and the dispatch budget are unchanged. An invocation can nevertheless now
+run up to 25 simple-kind jobs: 20 in its simple loop, plus up to 5 pairing jobs after it. Spec §10.4 proposes "five combat
+jobs or 20 simple reward/state jobs per invocation". The controller accepted this interpretation on 2026-10-14, because
+pairing jobs are cheap, the extra claim is bounded at 5, and it runs only right after the invocation's own coordination
+released them.
+
+**The held-window case.** *Correction (re-review).* This section first said the boundary needs at least 102 simple jobs
+while two ticks can run only 100, "however the worker orders the work". That counted the 2 pairing jobs against the 20-job
+simple cap, which the fix had moved outside it. The `337f38d` commit message keeps the old wording; this section replaces
+it.
+- With the fix, a steady-state 50-entrant Arena boundary must run 100 settlement and preparation jobs before it publishes:
+  50 settlements, then 50 preparations. Its pairing jobs (one per league, 2 here) run outside the simple cap.
 - Only two ticks fall before 120 s. When the second tick's dispatch is sampled less than 60 000 ms after the first one's,
-  the window still counts the first tick's 3 invocations. Both ticks together then dispatch at most 5 invocations of 20
-  simple jobs, so 100 jobs.
-- Publication therefore falls to the third tick, at about 120 s plus that tick's processing (measured 121.0–121.1 s),
-  however the worker orders the work.
-- Derived, not measured: the same arithmetic applies to any steady-state boundary of more than 40 characters, whatever
-  their activities. Up to 40, the cutoff tick needs at most 2 invocations, which leaves the next tick 3.
-- Meeting 120 s in this case needs a budget, batch-limit or cadence decision. None is made here (see Remaining gates,
-  Task 23).
+  the window still counts the first tick's 3 invocations. Both ticks together then dispatch 5 invocations of 20 simple
+  jobs: exactly the 100 the boundary needs, with no slack.
+- It still misses at 50 because the global settlement barrier fragments the cutoff tick. That tick's 3 invocations have 60
+  slots for 50 settlements. The spare 10 cannot run preparations: preparation jobs exist only after the last settlement
+  commits, and by then the 10-job invocation has exited. The second tick's 2 invocations run 40 of the 50 preparations, so
+  publication falls to the third tick (measured 121.0–121.1 s).
+- Derived, not measured: with the current worker, a steady-state boundary like this one (a settlement and a preparation
+  per character) misses the held case above 40 characters. Up to 40, the cutoff tick needs at most 2 invocations, which
+  leaves the next tick 3.
+- Derived, not measured: a worker-side change could in principle reach about 61 s at 50 characters, with zero slack. For
+  example, the invocation with spare budget could wait a bounded time for the barrier. Only above 50 characters (2N > 100
+  for N characters) is the held case arithmetically impossible within these limits.
+- Meeting 120 s robustly in this case therefore needs a budget, batch-limit or cadence decision. None is made here (see
+  Remaining gates, Task 23).
 
 The bouts need only be simulated before the minute-60 reveal. They are, with a measured margin of at least 3 359 s (P + 2).
 
@@ -339,6 +367,23 @@ The bouts need only be simulated before the minute-60 reveal. They are, with a m
 
 The new CPU-budget unit case ("claims no pairing beyond the simple budget once the compute budget is spent") passes both
 before and after the fix; it is a guard, not a RED test.
+
+## Re-review fixes
+
+A scoped re-review of the timing fix (`337f38d`, `a1c6732`) found one Important and four Minor or Nit items. Code and tests
+are in **`cf325d1`**; this update holds the report changes.
+
+| Finding | Fix | Evidence |
+| --- | --- | --- |
+| **Important**: the held-window rationale counted the 2 pairing jobs against the 20-job simple cap. | Restated under [Timing](#timing-50-entrants-one-minute-cron-cadence): 100 settlement and preparation jobs, exactly 5 × 20; the miss at 50 comes from the settlement barrier; a zero-slack worker change could in principle reach about 61 s at 50; only above 50 characters is the case impossible. The status, Task 23 and HANDOFF notes follow. The `337f38d` message is unchanged. | Text, checked against the dispatch log and `private.dispatch_workers()`. |
+| **Minor**: assess "count the budget per scheduled minute". | Assessed under Task 23 below. | Text, derived; not measured. |
+| **Minor**: batch-limit wording. | Stated plainly under "Batch limits": up to 25 simple-kind jobs per invocation, and the controller's acceptance on 2026-10-14. | Text. |
+| **Minor**: claiming 5 pairing jobs at once after the simple loop could strand a leased pairing job until its lease expired once the CPU budget was spent. | `runWorker` claims pairing jobs one at a time, at most 5, and checks the CPU budget before each claim. | Unit RED: 3 failed / 32 passed. The new CPU case saw `['pair', 5]` where one `['pair', 1]` was due; the cap case saw one claim of 5; the updated release case expected single claims. GREEN 35/35. |
+| **Minor**: no negative test for the post-loop claim. | New case: nothing is claimed after the loop while the final coordination waits on `preparation`, although a pairing and a simulation job are claimable. | A guard: it passes before and after the change. |
+| **Nit**: cold-P times given as single values. | Ranges 0.11–0.41, 0.19–0.49 and 0.20–0.50 s, including the re-review's 0.41/0.49/0.50 s run. | Three new measured runs (above). |
+
+The DB timing case's held-window comment, which made the same miscount, was corrected in `cf325d1`; its assertions are
+unchanged.
 
 ## Migration
 
@@ -387,6 +432,24 @@ No SQL changed, so there is no new migration or replay. The local stack stayed a
 | Isolated production gate (same commands as above) | Build and scan clean (5 routes, 91 assets); **14 passed, 254 skipped** by design. |
 | `git diff --check`, `git diff --cached --check` | Clean. |
 
+### Re-review gate (before committing `cf325d1`)
+
+No SQL changed, so there is no new migration or replay. The local stack stayed at M01–M10, and its Edge runtime served
+this worktree; the served `jobs.ts` was checked for the new code before the DB runs.
+
+| Command | Result |
+| --- | --- |
+| `npm test` | **888 passed**, 36 files (885 + the 3 new worker cases). |
+| `npm run typecheck` | Exit 0: `tsc` clean, frozen Deno check of both functions, 2 Deno runtime tests passed. |
+| `npm run test:db` | **137/137** in seven files, Edge start time unchanged across the run. An earlier run also passed 137/137, but the Edge container was recreated as it ended, so it is discarded. Two further single-case timing runs passed, Edge stable. |
+| `node assets/source/build-assets.mjs --check` | Up to date (28 files). |
+| `npm run build`, then `npm run verify:static` | 5 fixed routes, 91 assets, no forbidden backend material. |
+| Development browser suite (`pw-claude.config.mjs`, port 3200) | **260 passed, 8 skipped**. No dev server was left on 3200. |
+| `git diff --check`, `git diff --cached --check` | Clean. |
+
+The isolated production gate was not rerun: the change is to the worker only, and the controller's gate list for the
+re-review did not include it.
+
 ## Environment notes
 
 - **Edge recreations.** Three DB runs saw the Edge container recreated a few seconds after they started. The background
@@ -403,6 +466,10 @@ No SQL changed, so there is no new migration or replay. The local stack stayed a
   recreation followed a host `tsc` run. The second followed the expected hot reload after `jobs.ts` changed; the served
   file was checked for the new code before the GREEN runs. Vitest 5 shows `console.info` output only for failing tests,
   so the measured runs used `--silent=false`.
+- **Re-review runs.** The expected hot reload followed the `jobs.ts` edit, before any DB run. The first full DB run passed,
+  but `docker inspect` right after it found no running container, and a few seconds later a new start time about 1 s
+  after the run's last output. Nothing else ran in the worktree at the time; the cause is not known. That run was
+  discarded under the database-test rule and the suite was rerun, Edge stable.
 
 ## Remaining gates
 
@@ -420,17 +487,32 @@ No SQL changed, so there is no new migration or replay. The local stack stayed a
   - A steady-state 50-entrant Arena boundary publishes at **61.07–61.16 s** when the rolling dispatch window has cleared.
   - It publishes at **121.02–121.08 s** when the window still counts the previous tick. Which case occurs depends on
     sub-second cron start and coordination timing.
-  - The second case misses the 120 s target. No change within 5 invocations per rolling minute and 20 simple jobs per
-    invocation can meet it: the boundary needs at least 102 simple jobs before 120 s, and the two ticks can run at most 100.
-  - By the same arithmetic (derived, not measured), this applies to any steady-state boundary of more than 40 characters.
+  - The second case misses the 120 s target. Before 120 s it needs 100 settlement and preparation jobs, exactly the 5 × 20
+    the rolling window allows. The settlement barrier leaves 10 of the cutoff tick's 60 slots unusable, so the current
+    worker runs 90 of them by then (50 settlements, 40 preparations). The pairing jobs run outside the simple cap.
+  - Derived, not measured: with the current worker this applies above 40 characters. A worker change, for example a
+    bounded wait for the barrier in the invocation with spare budget, could in principle reach about 61 s at 50 with zero
+    slack. Above 50 characters (2N > 100) no worker change can, within these limits.
   - Bouts finish by 241 s, with at least 3 359 s left before the minute-60 reveal. A tick simulates at most 25 bouts (five
     invocations of five), so a slot with more battles needs more ticks.
   - The options are recorded, not chosen:
-    - count the budget per scheduled minute instead of per rolling 60 s (still at most five per cron minute, but up to ten
-      inside a 60 s span that straddles a minute edge);
-    - raise the simple batch limit after measuring CPU (spec §10.4 now allows only lowering it);
-    - run fewer simple jobs per boundary;
-    - a sub-minute cron cadence under the same rolling budget (the spec says every minute).
+    - **Count the budget per scheduled minute** instead of per rolling 60 s. Assessment (derived, not measured):
+      - It would fix the held case for up to 100 characters: the tick after the cutoff tick falls in the next calendar
+        minute and can dispatch up to 5 invocations.
+      - It does not raise the monthly ceiling. Each cron run still dispatches at most 5 worker invocations, about 216 000
+        in a 30-day month (5 × 1 440 × 30), under the spec's 300 000 internal budget and the 500 000 free-plan limit.
+      - It matches spec §10.4's "dispatch up to five worker invocations" at each one-minute run.
+      - Its costs: bursts of up to 10 invocations within 60 s across a minute edge, and a new migration for
+        `private.dispatch_workers()`.
+      - The current timing test cannot verify it. Its held schedule (cutoff + 0 ms and + 59 999 ms) puts both ticks in
+        one calendar minute, because the cutoff is minute-aligned. Verifying it needs realistic offsets, for example
+        + 300 ms and + 60 250 ms: 59 950 ms apart, so held under the rolling window but in separate calendar minutes.
+      - Task 23 should measure the hosted `dispatch_log` spacing. Dispatch time is sampled with `clock_timestamp()` after
+        `coordinate_work()` in the same tick. A cutoff tick whose coordination takes longer than the next tick's therefore
+        leaves the window held, so the held case may be common.
+    - Raise the simple batch limit after measuring CPU (spec §10.4 now allows only lowering it).
+    - Run fewer simple jobs per boundary.
+    - A sub-minute cron cadence under the same rolling budget (the spec says every minute).
   - Hosted pg_net latency and Edge cold starts add to each tick's processing time; locally that is about 1 s per wave.
 - **Task 24 (deployment):** set `private.season_epoch` at launch, no later than the first boundary with members the
   coordinator will process (`select min(processed_slot_index) from public.gladiators;`). Ship M09, M10 and the worker in
@@ -450,12 +532,14 @@ No SQL changed, so there is no new migration or replay. The local stack stayed a
 - **Balance:** the weakest entrant of a stable odd league keeps getting the NPC (Avi's option A, phase 1).
 - **Deferred Minors carried:** Task 17 review Minor 1 (labels on a clamped target with real logs) and Task 10's initial
   clock-offset bias; Task 17's two-reads-per-human-pair Minor (M7) could use a pairing hint later.
-- **Timing limit (review I1), recorded for Task 23.** When the rolling dispatch window still counts the previous tick, a
-  steady-state boundary of more than 40 characters publishes at about 121 s, which misses the 120 s target. The budget was
-  not changed. Details are under Timing and Task 23.
-- **Pairing claim scope.** The claim after the simple loop raises an invocation's maximum from 20 to 25 jobs (20 simple
-  plus 5 pairing), within the unchanged CPU check. It fires only when the invocation's own latest coordination reports
-  `wait: 'pairing'`.
+- **Timing limit (review I1, corrected in the re-review), recorded for Task 23.** When the rolling dispatch window still
+  counts the previous tick, the current worker publishes a steady-state boundary of more than 40 characters at about
+  121 s, which misses the 120 s target. At 50 the limits leave zero slack; above 50 no worker change can meet it. The
+  budget was not changed. Details are under Timing and Task 23.
+- **Pairing claim scope.** The claim after the simple loop raises an invocation's maximum from 20 to 25 simple-kind jobs
+  (20 simple plus up to 5 pairing), while spec §10.4 proposes five combat or 20 simple jobs. The controller accepted this
+  on 2026-10-14 (see "Batch limits"). It fires only when the invocation's own latest coordination reports
+  `wait: 'pairing'`, and claims one pairing job at a time with the CPU budget checked before each claim.
 - **Coordinator busy race (pre-existing, not observed).** Two invocations can finish a barrier's last jobs at nearly the
   same moment. If their final `coordinate_work()` calls overlap, the later one returns `busy`, and the earlier one may not
   have seen the other's last completion. The released work would then wait for the next tick. None of the measured runs
@@ -467,10 +551,14 @@ No SQL changed, so there is no new migration or replay. The local stack stayed a
 > 50-entrant Arena slots, steady state included.
 > - Steady-state publication is at **61.1 s** when the rolling dispatch window has cleared, and at **121.0–121.1 s** when it
 >   still counts the previous tick.
-> - The second case cannot meet 120 s within 5 invocations per rolling minute and 20 simple jobs per invocation: it needs
->   102 simple jobs before 120 s, and two ticks can run 100. By the same arithmetic it applies above 40 characters.
+> - In the second case the boundary needs 100 settlement and preparation jobs before 120 s, exactly the 5 × 20 the rolling
+>   window allows. The settlement barrier leaves 10 of the cutoff tick's slots unusable, so the current worker misses
+>   above 40 characters. A zero-slack worker change could in principle reach about 61 s at 50; above 50 no worker change can.
+> - Re-review fix `cf325d1`: pairing jobs are claimed one at a time with the CPU budget checked before each claim. An
+>   invocation can run up to 25 simple-kind jobs (20 simple plus 5 pairing); the controller accepted this on 2026-10-14.
 > - The budget is unchanged. Task 23 must choose between budget accounting, batch limit, job count and cadence, and then
->   measure hosted latency.
+>   measure hosted latency and `dispatch_log` spacing. Per-minute accounting would fix the held case up to 100
+>   characters without raising the monthly ceiling; it needs realistic tick offsets to test.
 > - Bouts finish by 241 s, at least 3 359 s before the minute-60 reveal.
 > - Release check (Task 24): no `prepare`, `pair` or `simulation` job in operator state.
 
@@ -478,4 +566,5 @@ No SQL changed, so there is no new migration or replay. The local stack stayed a
 
 No skill change is applied. The phase 2b observation (`supabase functions serve` restarted the Edge runtime on `WRITE`
 events for unchanged Edge sources during host-side reads) is now covered by Avi's approved database-test rule in
-`verification-gates.md` (`61af251`). The review fixes need no further skill change.
+`verification-gates.md` (`61af251`). The review and re-review fixes need no further skill change: the discarded re-review
+DB run was handled exactly as that rule says.

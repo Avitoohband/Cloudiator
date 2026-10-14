@@ -79,8 +79,11 @@ export type ExpeditionSceneState = {
   readonly battle: ExpeditionBattle | null;
   /** The gladiator's health, read from the latest battle log (running health during a fight). */
   readonly hp: { readonly current: number; readonly max: number; readonly encounter: number } | null;
-  /** The gladiator as the first revealed battle log shows it (participant 0). */
-  readonly gladiator: { readonly id: string; readonly name: string; readonly equipmentSilhouettes: readonly string[] } | null;
+  /**
+   * The gladiator as the first revealed battle log shows it (participant 0): its id and gear. The logged
+   * name is not an identity (Task 9 logs say "Gladiator"); views take names from the public world actor.
+   */
+  readonly gladiator: { readonly id: string; readonly equipmentSilhouettes: readonly string[] } | null;
   /** The arrival stage is revealed. */
   readonly complete: boolean;
   /** Once complete: from the summary when settled, otherwise from the revealed encounters. */
@@ -102,9 +105,12 @@ function freeze<V>(value: V, shared: ReadonlySet<object>): V {
   return value;
 }
 
-/** A tie-break victory with 0 HP counts as a defeat, as in settlement. */
+/**
+ * The logged winner alone decides an encounter, as Task 9 settles it: a simultaneous defeat whose seeded
+ * tie-break names the gladiator is a victory even at 0 HP. Health never decides it.
+ */
 function logOutcome(log: BattleLog): 'victory' | 'defeat' {
-  return log.winnerId === log.participants[0].id && log.finalHp[0] > 0 ? 'victory' : 'defeat';
+  return log.winnerId === log.participants[0].id ? 'victory' : 'defeat';
 }
 
 /** The outcome of an ended encounter: its log, else the stage that follows it, else its published label. */
@@ -201,7 +207,7 @@ export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: 
   }
   const firstLog = revealed.find((stage): stage is Battled => !!stage.battleLog)?.battleLog;
   const gladiator = firstLog
-    ? { id: firstLog.participants[0].id, name: firstLog.participants[0].name, equipmentSilhouettes: [...firstLog.participants[0].equipmentSilhouettes] }
+    ? { id: firstLog.participants[0].gladiatorId ?? firstLog.participants[0].id, equipmentSilhouettes: [...firstLog.participants[0].equipmentSilhouettes] }
     : null;
 
   // Journey.

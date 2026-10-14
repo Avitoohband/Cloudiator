@@ -19,13 +19,13 @@
       "endsAtMs": 1791582007848,
       "label": "Encounter 1: victory",
       "battleLog": {
-        "battleId": "fixture-woodland-encounter-1",
+        "battleId": "f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16:encounter:1",
         "rulesVersion": "v1",
         "participants": [
           {
             "id": "0d5f8471-d919-428f-9ab7-058c95821757",
             "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "name": "Aster",
+            "name": "Gladiator",
             "classId": "guardian",
             "stance": "balanced",
             "attributes": {
@@ -90,13 +90,13 @@
             "elapsedMs": 1308,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:1",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 12,
+            "damage": 0,
             "defend": false,
-            "evade": false,
+            "evade": true,
             "healthBefore": 35,
-            "healthAfter": 23
+            "healthAfter": 35
           },
           {
             "kind": "attack",
@@ -118,46 +118,18 @@
             "elapsedMs": 2616,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:1",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 12,
+            "damage": 0,
             "defend": false,
-            "evade": false,
-            "healthBefore": 23,
-            "healthAfter": 11
+            "evade": true,
+            "healthBefore": 35,
+            "healthAfter": 35
           },
           {
             "kind": "attack",
             "sequence": 4,
             "elapsedMs": 3300,
-            "attackerId": "creature:dire-wolf:1",
-            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "hit": false,
-            "critical": false,
-            "damage": 0,
-            "defend": false,
-            "evade": true,
-            "healthBefore": 124,
-            "healthAfter": 124
-          },
-          {
-            "kind": "attack",
-            "sequence": 5,
-            "elapsedMs": 3924,
-            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "defenderId": "creature:dire-wolf:1",
-            "hit": false,
-            "critical": false,
-            "damage": 0,
-            "defend": false,
-            "evade": true,
-            "healthBefore": 11,
-            "healthAfter": 11
-          },
-          {
-            "kind": "attack",
-            "sequence": 6,
-            "elapsedMs": 4400,
             "attackerId": "creature:dire-wolf:1",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "hit": true,
@@ -170,22 +142,22 @@
           },
           {
             "kind": "attack",
-            "sequence": 7,
-            "elapsedMs": 5232,
+            "sequence": 5,
+            "elapsedMs": 3924,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:1",
-            "hit": false,
+            "hit": true,
             "critical": false,
-            "damage": 0,
+            "damage": 12,
             "defend": false,
-            "evade": true,
-            "healthBefore": 11,
-            "healthAfter": 11
+            "evade": false,
+            "healthBefore": 35,
+            "healthAfter": 23
           },
           {
             "kind": "attack",
-            "sequence": 8,
-            "elapsedMs": 5500,
+            "sequence": 6,
+            "elapsedMs": 4400,
             "attackerId": "creature:dire-wolf:1",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "hit": true,
@@ -198,8 +170,8 @@
           },
           {
             "kind": "attack",
-            "sequence": 9,
-            "elapsedMs": 6540,
+            "sequence": 7,
+            "elapsedMs": 5232,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:1",
             "hit": false,
@@ -207,13 +179,13 @@
             "damage": 0,
             "defend": false,
             "evade": true,
-            "healthBefore": 11,
-            "healthAfter": 11
+            "healthBefore": 23,
+            "healthAfter": 23
           },
           {
             "kind": "attack",
-            "sequence": 10,
-            "elapsedMs": 6600,
+            "sequence": 8,
+            "elapsedMs": 5500,
             "attackerId": "creature:dire-wolf:1",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "hit": true,
@@ -222,6 +194,34 @@
             "defend": false,
             "evade": false,
             "healthBefore": 114,
+            "healthAfter": 109
+          },
+          {
+            "kind": "attack",
+            "sequence": 9,
+            "elapsedMs": 6540,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:dire-wolf:1",
+            "hit": true,
+            "critical": false,
+            "damage": 12,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 23,
+            "healthAfter": 11
+          },
+          {
+            "kind": "attack",
+            "sequence": 10,
+            "elapsedMs": 6600,
+            "attackerId": "creature:dire-wolf:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 109,
             "healthAfter": 109
           },
           {
@@ -284,16 +284,16 @@
       "kind": "encounter",
       "revealedAtMs": 1791583200000,
       "startedAtMs": 1791583200000,
-      "endsAtMs": 1791583209156,
+      "endsAtMs": 1791583207848,
       "label": "Encounter 2: victory",
       "battleLog": {
-        "battleId": "fixture-woodland-encounter-2",
+        "battleId": "f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16:encounter:2",
         "rulesVersion": "v1",
         "participants": [
           {
             "id": "0d5f8471-d919-428f-9ab7-058c95821757",
             "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "name": "Aster",
+            "name": "Gladiator",
             "classId": "guardian",
             "stance": "balanced",
             "attributes": {
@@ -358,13 +358,13 @@
             "elapsedMs": 1308,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:timber-wolf:2",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 12,
+            "damage": 0,
             "defend": false,
-            "evade": false,
+            "evade": true,
             "healthBefore": 35,
-            "healthAfter": 23
+            "healthAfter": 35
           },
           {
             "kind": "attack",
@@ -372,13 +372,13 @@
             "elapsedMs": 2200,
             "attackerId": "creature:timber-wolf:2",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 5,
+            "damage": 0,
             "defend": false,
-            "evade": false,
+            "evade": true,
             "healthBefore": 125,
-            "healthAfter": 120
+            "healthAfter": 125
           },
           {
             "kind": "attack",
@@ -386,13 +386,13 @@
             "elapsedMs": 2616,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:timber-wolf:2",
-            "hit": false,
-            "critical": false,
-            "damage": 0,
+            "hit": true,
+            "critical": true,
+            "damage": 18,
             "defend": false,
-            "evade": true,
-            "healthBefore": 23,
-            "healthAfter": 23
+            "evade": false,
+            "healthBefore": 35,
+            "healthAfter": 17
           },
           {
             "kind": "attack",
@@ -405,8 +405,8 @@
             "damage": 0,
             "defend": false,
             "evade": true,
-            "healthBefore": 120,
-            "healthAfter": 120
+            "healthBefore": 125,
+            "healthAfter": 125
           },
           {
             "kind": "attack",
@@ -419,8 +419,8 @@
             "damage": 0,
             "defend": false,
             "evade": true,
-            "healthBefore": 23,
-            "healthAfter": 23
+            "healthBefore": 17,
+            "healthAfter": 17
           },
           {
             "kind": "attack",
@@ -433,8 +433,8 @@
             "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 120,
-            "healthAfter": 115
+            "healthBefore": 125,
+            "healthAfter": 120
           },
           {
             "kind": "attack",
@@ -447,8 +447,8 @@
             "damage": 0,
             "defend": false,
             "evade": true,
-            "healthBefore": 23,
-            "healthAfter": 23
+            "healthBefore": 17,
+            "healthAfter": 17
           },
           {
             "kind": "attack",
@@ -461,8 +461,8 @@
             "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 115,
-            "healthAfter": 110
+            "healthBefore": 120,
+            "healthAfter": 115
           },
           {
             "kind": "attack",
@@ -475,8 +475,8 @@
             "damage": 12,
             "defend": false,
             "evade": false,
-            "healthBefore": 23,
-            "healthAfter": 11
+            "healthBefore": 17,
+            "healthAfter": 5
           },
           {
             "kind": "attack",
@@ -485,12 +485,12 @@
             "attackerId": "creature:timber-wolf:2",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "hit": true,
-            "critical": true,
-            "damage": 8,
+            "critical": false,
+            "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 110,
-            "healthAfter": 102
+            "healthBefore": 115,
+            "healthAfter": 110
           },
           {
             "kind": "attack",
@@ -503,8 +503,8 @@
             "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 102,
-            "healthAfter": 97
+            "healthBefore": 110,
+            "healthAfter": 105
           },
           {
             "kind": "attack",
@@ -512,56 +512,28 @@
             "elapsedMs": 7848,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:timber-wolf:2",
-            "hit": false,
-            "critical": false,
-            "damage": 0,
-            "defend": false,
-            "evade": true,
-            "healthBefore": 11,
-            "healthAfter": 11
-          },
-          {
-            "kind": "attack",
-            "sequence": 13,
-            "elapsedMs": 8800,
-            "attackerId": "creature:timber-wolf:2",
-            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "hit": true,
-            "critical": false,
-            "damage": 5,
-            "defend": false,
-            "evade": false,
-            "healthBefore": 97,
-            "healthAfter": 92
-          },
-          {
-            "kind": "attack",
-            "sequence": 14,
-            "elapsedMs": 9156,
-            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "defenderId": "creature:timber-wolf:2",
             "hit": true,
             "critical": false,
             "damage": 12,
             "defend": false,
             "evade": false,
-            "healthBefore": 11,
+            "healthBefore": 5,
             "healthAfter": 0
           },
           {
             "kind": "victory",
-            "sequence": 15,
-            "elapsedMs": 9156,
+            "sequence": 13,
+            "elapsedMs": 7848,
             "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "loserId": "creature:timber-wolf:2",
             "reason": "defeat"
           }
         ],
-        "durationMs": 9156,
+        "durationMs": 7848,
         "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
         "victoryReason": "defeat",
         "finalHp": [
-          92,
+          105,
           0
         ],
         "tieBreakReason": null
@@ -570,8 +542,8 @@
     {
       "id": "f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16:4",
       "kind": "exploration",
-      "revealedAtMs": 1791583209156,
-      "startedAtMs": 1791583209156,
+      "revealedAtMs": 1791583207848,
+      "startedAtMs": 1791583207848,
       "endsAtMs": 1791584400000,
       "label": "Recover and continue exploring"
     },
@@ -580,16 +552,16 @@
       "kind": "encounter",
       "revealedAtMs": 1791584400000,
       "startedAtMs": 1791584400000,
-      "endsAtMs": 1791584406540,
+      "endsAtMs": 1791584403924,
       "label": "Encounter 3: victory",
       "battleLog": {
-        "battleId": "fixture-woodland-encounter-3",
+        "battleId": "f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16:encounter:3",
         "rulesVersion": "v1",
         "participants": [
           {
             "id": "0d5f8471-d919-428f-9ab7-058c95821757",
             "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "name": "Aster",
+            "name": "Gladiator",
             "classId": "guardian",
             "stance": "balanced",
             "attributes": {
@@ -600,7 +572,7 @@
               "precision": 5
             },
             "maxHealth": 134,
-            "initialHealth": 118,
+            "initialHealth": 131,
             "armor": 5,
             "weaponDamage": 8,
             "attackIntervalMs": 1308,
@@ -645,69 +617,13 @@
             "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 118,
-            "healthAfter": 113
+            "healthBefore": 131,
+            "healthAfter": 126
           },
           {
             "kind": "attack",
             "sequence": 1,
             "elapsedMs": 1308,
-            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "defenderId": "creature:dire-wolf:3",
-            "hit": false,
-            "critical": false,
-            "damage": 0,
-            "defend": false,
-            "evade": true,
-            "healthBefore": 35,
-            "healthAfter": 35
-          },
-          {
-            "kind": "attack",
-            "sequence": 2,
-            "elapsedMs": 2200,
-            "attackerId": "creature:dire-wolf:3",
-            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "hit": true,
-            "critical": false,
-            "damage": 5,
-            "defend": false,
-            "evade": false,
-            "healthBefore": 113,
-            "healthAfter": 108
-          },
-          {
-            "kind": "attack",
-            "sequence": 3,
-            "elapsedMs": 2616,
-            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "defenderId": "creature:dire-wolf:3",
-            "hit": false,
-            "critical": false,
-            "damage": 0,
-            "defend": false,
-            "evade": true,
-            "healthBefore": 35,
-            "healthAfter": 35
-          },
-          {
-            "kind": "attack",
-            "sequence": 4,
-            "elapsedMs": 3300,
-            "attackerId": "creature:dire-wolf:3",
-            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-            "hit": true,
-            "critical": false,
-            "damage": 5,
-            "defend": false,
-            "evade": false,
-            "healthBefore": 108,
-            "healthAfter": 103
-          },
-          {
-            "kind": "attack",
-            "sequence": 5,
-            "elapsedMs": 3924,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:3",
             "hit": true,
@@ -720,8 +636,8 @@
           },
           {
             "kind": "attack",
-            "sequence": 6,
-            "elapsedMs": 4400,
+            "sequence": 2,
+            "elapsedMs": 2200,
             "attackerId": "creature:dire-wolf:3",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "hit": true,
@@ -729,13 +645,13 @@
             "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 103,
-            "healthAfter": 98
+            "healthBefore": 126,
+            "healthAfter": 121
           },
           {
             "kind": "attack",
-            "sequence": 7,
-            "elapsedMs": 5232,
+            "sequence": 3,
+            "elapsedMs": 2616,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:3",
             "hit": true,
@@ -748,8 +664,8 @@
           },
           {
             "kind": "attack",
-            "sequence": 8,
-            "elapsedMs": 5500,
+            "sequence": 4,
+            "elapsedMs": 3300,
             "attackerId": "creature:dire-wolf:3",
             "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "hit": true,
@@ -757,13 +673,13 @@
             "damage": 5,
             "defend": false,
             "evade": false,
-            "healthBefore": 98,
-            "healthAfter": 93
+            "healthBefore": 121,
+            "healthAfter": 116
           },
           {
             "kind": "attack",
-            "sequence": 9,
-            "elapsedMs": 6540,
+            "sequence": 5,
+            "elapsedMs": 3924,
             "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "defenderId": "creature:dire-wolf:3",
             "hit": true,
@@ -776,18 +692,18 @@
           },
           {
             "kind": "victory",
-            "sequence": 10,
-            "elapsedMs": 6540,
+            "sequence": 6,
+            "elapsedMs": 3924,
             "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
             "loserId": "creature:dire-wolf:3",
             "reason": "defeat"
           }
         ],
-        "durationMs": 6540,
+        "durationMs": 3924,
         "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
         "victoryReason": "defeat",
         "finalHp": [
-          93,
+          116,
           0
         ],
         "tieBreakReason": null
@@ -796,8 +712,8 @@
     {
       "id": "f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16:6",
       "kind": "travel",
-      "revealedAtMs": 1791584406540,
-      "startedAtMs": 1791584406540,
+      "revealedAtMs": 1791584403924,
+      "startedAtMs": 1791584403924,
       "endsAtMs": 1791585600000,
       "label": "Return to camp"
     },
@@ -813,36 +729,36 @@
   "summary": {
     "activityId": "f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16",
     "resolvedKind": "expedition",
-    "result": "completed",
+    "result": "victory",
     "success": true,
     "rewards": {
       "money": 20,
       "renown": 0,
       "xp": 100,
       "attributePoints": 0,
-      "overflowMoney": 0,
       "items": [
-        {
-          "catalogId": "salvage",
-          "catalogVersion": "v1",
-          "tier": 1,
-          "rarity": "common",
-          "quantity": 1
-        },
         {
           "catalogId": "light-boots:1:uncommon",
           "catalogVersion": "v1",
           "tier": 1,
           "rarity": "uncommon",
           "quantity": 1
+        },
+        {
+          "catalogId": "salvage",
+          "catalogVersion": "v1",
+          "tier": 1,
+          "rarity": "common",
+          "quantity": 1
         }
-      ]
+      ],
+      "overflowMoney": 0
     },
     "receiptId": "fixture-receipt-woodland",
     "settledAtMs": 1791585645000,
     "replayExpiry": {
       "state": "available",
-      "expiresAtMs": 1792190445000
+      "expiresAtMs": 1792190400000
     }
   }
 }

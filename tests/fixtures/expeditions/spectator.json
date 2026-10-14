@@ -19,13 +19,13 @@
       "endsAtMs": 1791586815400,
       "label": "Encounter 1: defeat",
       "battleLog": {
-        "battleId": "fixture-spectator-encounter-1",
+        "battleId": "ebab0cce-5d0a-4f62-9d74-bc2d3e4f5a6b:encounter:1",
         "rulesVersion": "v1",
         "participants": [
           {
             "id": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "gladiatorId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
-            "name": "Varro",
+            "name": "Gladiator",
             "classId": "berserker",
             "stance": "offensive",
             "attributes": {
@@ -146,13 +146,13 @@
             "elapsedMs": 3396,
             "attackerId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "defenderId": "creature:raider:1",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 14,
+            "damage": 0,
             "defend": false,
-            "evade": false,
+            "evade": true,
             "healthBefore": 80,
-            "healthAfter": 66
+            "healthAfter": 80
           },
           {
             "kind": "attack",
@@ -174,13 +174,13 @@
             "elapsedMs": 4528,
             "attackerId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "defenderId": "creature:raider:1",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 14,
+            "damage": 0,
             "defend": false,
-            "evade": false,
-            "healthBefore": 66,
-            "healthAfter": 52
+            "evade": true,
+            "healthBefore": 80,
+            "healthAfter": 80
           },
           {
             "kind": "attack",
@@ -189,12 +189,12 @@
             "attackerId": "creature:raider:1",
             "defenderId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "hit": true,
-            "critical": false,
-            "damage": 11,
+            "critical": true,
+            "damage": 17,
             "defend": false,
             "evade": false,
             "healthBefore": 86,
-            "healthAfter": 75
+            "healthAfter": 69
           },
           {
             "kind": "attack",
@@ -207,8 +207,8 @@
             "damage": 0,
             "defend": false,
             "evade": true,
-            "healthBefore": 52,
-            "healthAfter": 52
+            "healthBefore": 80,
+            "healthAfter": 80
           },
           {
             "kind": "attack",
@@ -221,8 +221,8 @@
             "damage": 0,
             "defend": false,
             "evade": true,
-            "healthBefore": 75,
-            "healthAfter": 75
+            "healthBefore": 69,
+            "healthAfter": 69
           },
           {
             "kind": "attack",
@@ -235,8 +235,8 @@
             "damage": 14,
             "defend": false,
             "evade": false,
-            "healthBefore": 52,
-            "healthAfter": 38
+            "healthBefore": 80,
+            "healthAfter": 66
           },
           {
             "kind": "attack",
@@ -244,13 +244,13 @@
             "elapsedMs": 7700,
             "attackerId": "creature:raider:1",
             "defenderId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 11,
+            "damage": 0,
             "defend": false,
-            "evade": false,
-            "healthBefore": 75,
-            "healthAfter": 64
+            "evade": true,
+            "healthBefore": 69,
+            "healthAfter": 69
           },
           {
             "kind": "attack",
@@ -258,13 +258,13 @@
             "elapsedMs": 7924,
             "attackerId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "defenderId": "creature:raider:1",
-            "hit": false,
+            "hit": true,
             "critical": false,
-            "damage": 0,
+            "damage": 14,
             "defend": false,
-            "evade": true,
-            "healthBefore": 38,
-            "healthAfter": 38
+            "evade": false,
+            "healthBefore": 66,
+            "healthAfter": 52
           },
           {
             "kind": "attack",
@@ -277,8 +277,8 @@
             "damage": 11,
             "defend": false,
             "evade": false,
-            "healthBefore": 64,
-            "healthAfter": 53
+            "healthBefore": 69,
+            "healthAfter": 58
           },
           {
             "kind": "attack",
@@ -286,12 +286,12 @@
             "elapsedMs": 9056,
             "attackerId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "defenderId": "creature:raider:1",
-            "hit": false,
+            "hit": true,
             "critical": false,
-            "damage": 0,
+            "damage": 14,
             "defend": false,
-            "evade": true,
-            "healthBefore": 38,
+            "evade": false,
+            "healthBefore": 52,
             "healthAfter": 38
           },
           {
@@ -305,8 +305,8 @@
             "damage": 11,
             "defend": false,
             "evade": false,
-            "healthBefore": 53,
-            "healthAfter": 42
+            "healthBefore": 58,
+            "healthAfter": 47
           },
           {
             "kind": "attack",
@@ -329,12 +329,12 @@
             "attackerId": "creature:raider:1",
             "defenderId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "hit": true,
-            "critical": true,
-            "damage": 17,
+            "critical": false,
+            "damage": 11,
             "defend": false,
             "evade": false,
-            "healthBefore": 42,
-            "healthAfter": 25
+            "healthBefore": 47,
+            "healthAfter": 36
           },
           {
             "kind": "attack",
@@ -356,12 +356,12 @@
             "elapsedMs": 12100,
             "attackerId": "creature:raider:1",
             "defenderId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
-            "hit": false,
+            "hit": true,
             "critical": false,
-            "damage": 0,
+            "damage": 11,
             "defend": false,
-            "evade": true,
-            "healthBefore": 25,
+            "evade": false,
+            "healthBefore": 36,
             "healthAfter": 25
           },
           {
@@ -370,13 +370,13 @@
             "elapsedMs": 12452,
             "attackerId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "defenderId": "creature:raider:1",
-            "hit": false,
+            "hit": true,
             "critical": false,
-            "damage": 0,
+            "damage": 14,
             "defend": false,
-            "evade": true,
+            "evade": false,
             "healthBefore": 38,
-            "healthAfter": 38
+            "healthAfter": 24
           },
           {
             "kind": "attack",
@@ -398,12 +398,12 @@
             "elapsedMs": 13584,
             "attackerId": "5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10",
             "defenderId": "creature:raider:1",
-            "hit": true,
+            "hit": false,
             "critical": false,
-            "damage": 14,
+            "damage": 0,
             "defend": false,
-            "evade": false,
-            "healthBefore": 38,
+            "evade": true,
+            "healthBefore": 24,
             "healthAfter": 24
           },
           {

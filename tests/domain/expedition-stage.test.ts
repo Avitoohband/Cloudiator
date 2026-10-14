@@ -3,6 +3,8 @@ import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import { RULES_V1 } from '@domain/rules-v1';
 import { EXPEDITION_FIXTURE_TIMELINES as T } from '../fixtures/expeditions';
 import { reduceReplay, REPLAY_OUTRO_MS } from '@/game/replay';
+import { planStage, stageAt, type StageLayout } from '@/game/battle-stage';
+import { loadAssetManifest } from '@/game/assets';
 import {
   EXPEDITION_APPROACH_MS, JOURNEY, expeditionRevealMarks, renderExpeditionStage, type ExpeditionSceneState,
 } from '@/game/expedition-stage';
@@ -132,6 +134,51 @@ describe('revealed stages only', () => {
   });
 });
 
+describe('the logged winner decides each encounter (Task 9 rule)', () => {
+  it('shows a zero-HP tie-break win as a victory, then explores on and starts the next fight at the logged health', () => {
+    const t = T.tiebreak;
+    const first = encounterStage(t, 1);
+    const log = first.battleLog!;
+    expect(log).toMatchObject({ winnerId: log.participants[0].id, tieBreakReason: 'simultaneous-defeat' });
+    expect(log.finalHp[0]).toBe(0);
+    const ended = renderExpeditionStage(t, first.endsAtMs);
+    expect(ended.stages.find(x => x.id === first.id)).toMatchObject({ label: 'Encounter 1: victory', outcome: 'victory', replay: true });
+    expect(ended.phase).toBe('exploration');
+    expect(ended.current?.label).toBe('Recover and continue exploring');
+    expect(ended.hp).toEqual({ current: 0, max: log.participants[0].maxHealth, encounter: 1 });
+    // After the result poses the gladiator walks on to the next search spot, never to the safe point.
+    expect(renderExpeditionStage(t, first.endsAtMs + REPLAY_OUTRO_MS + 1_000).route).toMatchObject({ from: 'encounter-1', to: 'search-2', then: 'search' });
+    expect(at(t, 39)).toMatchObject({ phase: 'exploration', route: { to: 'search-2', then: 'search' } });
+    expect(at(t, 39.5)).toMatchObject({ phase: 'exploration', route: { to: 'encounter-2', then: 'wait' } });
+    expect(texts(at(t, 39))).not.toMatch(/safe return|Returning without/i);
+    // Encounter 2 starts at the health its own log records (the server's 20% recovery), and is then lost.
+    expect(at(t, 40).hp).toEqual({ current: logOf(t, 2).participants[0].initialHealth, max: log.participants[0].maxHealth, encounter: 2 });
+    expect(at(t, 41)).toMatchObject({ phase: 'safe-return', route: { to: 'safe', then: 'rest' } });
+    expect(at(t, 80)).toMatchObject({ complete: true, outcome: 'failure' });
+  });
+
+  it('completes the expedition successfully when the final encounter is a zero-HP tie-break win', () => {
+    const t = T.laststand;
+    const third = encounterStage(t, 3);
+    expect(third.battleLog!.finalHp[0]).toBe(0);
+    expect(third.battleLog!.winnerId).toBe(third.battleLog!.participants[0].id);
+    expect(renderExpeditionStage(t, third.endsAtMs).stages.at(-2)).toMatchObject({ label: 'Encounter 3: victory', outcome: 'victory' });
+    expect(at(t, 79)).toMatchObject({ phase: 'returning', route: { from: 'encounter-3', to: 'search-4', then: 'search' } });
+    expect(at(t, 79.5)).toMatchObject({ phase: 'returning', route: { to: 'end', then: 'wait' } });
+    // Before the summary is visible the result comes from the revealed encounters alone.
+    expect(at(t, 80)).toMatchObject({ phase: 'arrived', complete: true, outcome: 'success', summary: null, route: { from: 'end', to: 'end' } });
+    expect(renderExpeditionStage(t, t.summary!.settledAtMs)).toMatchObject({ phase: 'settled', outcome: 'success', summary: { success: true, result: 'victory' } });
+  });
+
+  it('poses the zero-HP winner in victory and the creature in defeat once the battle ends', () => {
+    const log = logOf(T.tiebreak, 1);
+    const plan = planStage(log, loadAssetManifest());
+    const layout = { width: 0, height: 0, scale: 1, backdropX: 0, backdropY: 0, feet: [{ x: 0, y: 0 }, { x: 32, y: 0 }] } as StageLayout;
+    const end = stageAt(plan, log.durationMs + REPLAY_OUTRO_MS, layout);
+    expect(end.fighters.map(f => f.action)).toEqual(['victory', 'defeat']);
+  });
+});
+
 describe('health from the battle logs', () => {
   it('reads health from the logs only: running health in a fight, then the final health until the next log', () => {
     const t = T.woodland;
@@ -153,10 +200,18 @@ describe('health from the battle logs', () => {
 
   it('follows an unusual logged starting health instead of recomputing it', () => {
     const t = structuredClone(T.woodland);
-    const second = encounterStage(t, 2).battleLog as { participants: { initialHealth: number }[] };
+    const second = encounterStage(t, 2).battleLog as unknown as { participants: { initialHealth: number }[] };
     second.participants[0].initialHealth = 77;
     expect(at(t, 39).hp!.current).toBe(logOf(t, 1).finalHp[0]);
     expect(at(t, 40).hp!.current).toBe(77);
+  });
+
+  it('identifies the gladiator by the first revealed log id and its gear, never by the logged name', () => {
+    expect(at(T.spectator, 10).gladiator).toBeNull();
+    const p = logOf(T.spectator, 1).participants[0];
+    expect(p.name).toBe('Gladiator');
+    expect(at(T.spectator, 30).gladiator).toEqual({ id: p.gladiatorId, equipmentSilhouettes: [...p.equipmentSilhouettes] });
+    expect(at(T.expired, 85).gladiator).toBeNull();
   });
 
   it('has no health to show when the detailed logs were pruned', () => {

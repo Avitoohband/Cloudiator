@@ -1,0 +1,695 @@
+{
+  "activityId": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c",
+  "serverNowMs": 1791592800000,
+  "visibleThroughMs": 1791592800000,
+  "stages": [
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:0",
+      "kind": "depart",
+      "revealedAtMs": 1791566400000,
+      "startedAtMs": 1791566400000,
+      "endsAtMs": 1791567600000,
+      "label": "Depart for Mountain Pass"
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:1",
+      "kind": "encounter",
+      "revealedAtMs": 1791567600000,
+      "startedAtMs": 1791567600000,
+      "endsAtMs": 1791567604000,
+      "label": "Encounter 1: victory",
+      "battleLog": {
+        "battleId": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:encounter:1",
+        "rulesVersion": "v1",
+        "participants": [
+          {
+            "id": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "name": "Gladiator",
+            "classId": "berserker",
+            "stance": "balanced",
+            "attributes": {
+              "strength": 42.9,
+              "agility": 20,
+              "vitality": 5,
+              "endurance": 10,
+              "precision": 10
+            },
+            "maxHealth": 100,
+            "initialHealth": 100,
+            "armor": 0,
+            "weaponDamage": 7,
+            "attackIntervalMs": 1000,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": [
+              "spear:1:common"
+            ]
+          },
+          {
+            "id": "creature:rock-troll:1",
+            "gladiatorId": null,
+            "name": "Dangerous creature",
+            "classId": null,
+            "stance": "balanced",
+            "attributes": {
+              "strength": 20,
+              "agility": 16,
+              "vitality": 14,
+              "endurance": 16,
+              "precision": 16
+            },
+            "maxHealth": 140,
+            "initialHealth": 140,
+            "armor": 0,
+            "weaponDamage": 18,
+            "attackIntervalMs": 1000,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": []
+          }
+        ],
+        "events": [
+          {
+            "kind": "attack",
+            "sequence": 0,
+            "elapsedMs": 1000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:1",
+            "hit": true,
+            "critical": true,
+            "damage": 43,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 140,
+            "healthAfter": 97
+          },
+          {
+            "kind": "attack",
+            "sequence": 1,
+            "elapsedMs": 1000,
+            "attackerId": "creature:rock-troll:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 100,
+            "healthAfter": 82
+          },
+          {
+            "kind": "attack",
+            "sequence": 2,
+            "elapsedMs": 2000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:1",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 97,
+            "healthAfter": 69
+          },
+          {
+            "kind": "attack",
+            "sequence": 3,
+            "elapsedMs": 2000,
+            "attackerId": "creature:rock-troll:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 82,
+            "healthAfter": 82
+          },
+          {
+            "kind": "attack",
+            "sequence": 4,
+            "elapsedMs": 3000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:1",
+            "hit": true,
+            "critical": true,
+            "damage": 43,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 69,
+            "healthAfter": 26
+          },
+          {
+            "kind": "attack",
+            "sequence": 5,
+            "elapsedMs": 3000,
+            "attackerId": "creature:rock-troll:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 82,
+            "healthAfter": 64
+          },
+          {
+            "kind": "attack",
+            "sequence": 6,
+            "elapsedMs": 4000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:1",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 26,
+            "healthAfter": 0
+          },
+          {
+            "kind": "attack",
+            "sequence": 7,
+            "elapsedMs": 4000,
+            "attackerId": "creature:rock-troll:1",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 64,
+            "healthAfter": 64
+          },
+          {
+            "kind": "victory",
+            "sequence": 8,
+            "elapsedMs": 4000,
+            "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "loserId": "creature:rock-troll:1",
+            "reason": "defeat"
+          }
+        ],
+        "durationMs": 4000,
+        "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+        "victoryReason": "defeat",
+        "finalHp": [
+          64,
+          0
+        ],
+        "tieBreakReason": null
+      }
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:2",
+      "kind": "exploration",
+      "revealedAtMs": 1791567604000,
+      "startedAtMs": 1791567604000,
+      "endsAtMs": 1791568800000,
+      "label": "Recover and continue exploring"
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:3",
+      "kind": "encounter",
+      "revealedAtMs": 1791568800000,
+      "startedAtMs": 1791568800000,
+      "endsAtMs": 1791568805000,
+      "label": "Encounter 2: victory",
+      "battleLog": {
+        "battleId": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:encounter:2",
+        "rulesVersion": "v1",
+        "participants": [
+          {
+            "id": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "name": "Gladiator",
+            "classId": "berserker",
+            "stance": "balanced",
+            "attributes": {
+              "strength": 42.9,
+              "agility": 20,
+              "vitality": 5,
+              "endurance": 10,
+              "precision": 10
+            },
+            "maxHealth": 100,
+            "initialHealth": 84,
+            "armor": 0,
+            "weaponDamage": 7,
+            "attackIntervalMs": 1000,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": [
+              "spear:1:common"
+            ]
+          },
+          {
+            "id": "creature:frost-troll:2",
+            "gladiatorId": null,
+            "name": "Dangerous creature",
+            "classId": null,
+            "stance": "balanced",
+            "attributes": {
+              "strength": 20,
+              "agility": 16,
+              "vitality": 14,
+              "endurance": 16,
+              "precision": 16
+            },
+            "maxHealth": 140,
+            "initialHealth": 140,
+            "armor": 0,
+            "weaponDamage": 18,
+            "attackIntervalMs": 1000,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": []
+          }
+        ],
+        "events": [
+          {
+            "kind": "attack",
+            "sequence": 0,
+            "elapsedMs": 1000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:frost-troll:2",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 140,
+            "healthAfter": 112
+          },
+          {
+            "kind": "attack",
+            "sequence": 1,
+            "elapsedMs": 1000,
+            "attackerId": "creature:frost-troll:2",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 84,
+            "healthAfter": 84
+          },
+          {
+            "kind": "attack",
+            "sequence": 2,
+            "elapsedMs": 2000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:frost-troll:2",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 112,
+            "healthAfter": 84
+          },
+          {
+            "kind": "attack",
+            "sequence": 3,
+            "elapsedMs": 2000,
+            "attackerId": "creature:frost-troll:2",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 84,
+            "healthAfter": 66
+          },
+          {
+            "kind": "attack",
+            "sequence": 4,
+            "elapsedMs": 3000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:frost-troll:2",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 84,
+            "healthAfter": 56
+          },
+          {
+            "kind": "attack",
+            "sequence": 5,
+            "elapsedMs": 3000,
+            "attackerId": "creature:frost-troll:2",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 66,
+            "healthAfter": 66
+          },
+          {
+            "kind": "attack",
+            "sequence": 6,
+            "elapsedMs": 4000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:frost-troll:2",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 56,
+            "healthAfter": 28
+          },
+          {
+            "kind": "attack",
+            "sequence": 7,
+            "elapsedMs": 4000,
+            "attackerId": "creature:frost-troll:2",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": true,
+            "damage": 27,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 66,
+            "healthAfter": 39
+          },
+          {
+            "kind": "attack",
+            "sequence": 8,
+            "elapsedMs": 5000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:frost-troll:2",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 28,
+            "healthAfter": 0
+          },
+          {
+            "kind": "attack",
+            "sequence": 9,
+            "elapsedMs": 5000,
+            "attackerId": "creature:frost-troll:2",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 39,
+            "healthAfter": 39
+          },
+          {
+            "kind": "victory",
+            "sequence": 10,
+            "elapsedMs": 5000,
+            "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "loserId": "creature:frost-troll:2",
+            "reason": "defeat"
+          }
+        ],
+        "durationMs": 5000,
+        "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+        "victoryReason": "defeat",
+        "finalHp": [
+          39,
+          0
+        ],
+        "tieBreakReason": null
+      }
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:4",
+      "kind": "exploration",
+      "revealedAtMs": 1791568805000,
+      "startedAtMs": 1791568805000,
+      "endsAtMs": 1791570000000,
+      "label": "Recover and continue exploring"
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:5",
+      "kind": "encounter",
+      "revealedAtMs": 1791570000000,
+      "startedAtMs": 1791570000000,
+      "endsAtMs": 1791570005000,
+      "label": "Encounter 3: victory",
+      "battleLog": {
+        "battleId": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:encounter:3",
+        "rulesVersion": "v1",
+        "participants": [
+          {
+            "id": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "gladiatorId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "name": "Gladiator",
+            "classId": "berserker",
+            "stance": "balanced",
+            "attributes": {
+              "strength": 42.9,
+              "agility": 20,
+              "vitality": 5,
+              "endurance": 10,
+              "precision": 10
+            },
+            "maxHealth": 100,
+            "initialHealth": 59,
+            "armor": 0,
+            "weaponDamage": 7,
+            "attackIntervalMs": 1000,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": [
+              "spear:1:common"
+            ]
+          },
+          {
+            "id": "creature:rock-troll:3",
+            "gladiatorId": null,
+            "name": "Dangerous creature",
+            "classId": null,
+            "stance": "balanced",
+            "attributes": {
+              "strength": 20,
+              "agility": 16,
+              "vitality": 14,
+              "endurance": 16,
+              "precision": 16
+            },
+            "maxHealth": 140,
+            "initialHealth": 140,
+            "armor": 0,
+            "weaponDamage": 18,
+            "attackIntervalMs": 1000,
+            "efficiencyBasisPoints": 10000,
+            "equipmentSilhouettes": []
+          }
+        ],
+        "events": [
+          {
+            "kind": "attack",
+            "sequence": 0,
+            "elapsedMs": 1000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:3",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 140,
+            "healthAfter": 112
+          },
+          {
+            "kind": "attack",
+            "sequence": 1,
+            "elapsedMs": 1000,
+            "attackerId": "creature:rock-troll:3",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 59,
+            "healthAfter": 41
+          },
+          {
+            "kind": "attack",
+            "sequence": 2,
+            "elapsedMs": 2000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:3",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 112,
+            "healthAfter": 84
+          },
+          {
+            "kind": "attack",
+            "sequence": 3,
+            "elapsedMs": 2000,
+            "attackerId": "creature:rock-troll:3",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": false,
+            "critical": false,
+            "damage": 0,
+            "defend": false,
+            "evade": true,
+            "healthBefore": 41,
+            "healthAfter": 41
+          },
+          {
+            "kind": "attack",
+            "sequence": 4,
+            "elapsedMs": 3000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:3",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 84,
+            "healthAfter": 56
+          },
+          {
+            "kind": "attack",
+            "sequence": 5,
+            "elapsedMs": 3000,
+            "attackerId": "creature:rock-troll:3",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 41,
+            "healthAfter": 23
+          },
+          {
+            "kind": "attack",
+            "sequence": 6,
+            "elapsedMs": 4000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:3",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 56,
+            "healthAfter": 28
+          },
+          {
+            "kind": "attack",
+            "sequence": 7,
+            "elapsedMs": 4000,
+            "attackerId": "creature:rock-troll:3",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 23,
+            "healthAfter": 5
+          },
+          {
+            "kind": "attack",
+            "sequence": 8,
+            "elapsedMs": 5000,
+            "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "defenderId": "creature:rock-troll:3",
+            "hit": true,
+            "critical": false,
+            "damage": 28,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 28,
+            "healthAfter": 0
+          },
+          {
+            "kind": "attack",
+            "sequence": 9,
+            "elapsedMs": 5000,
+            "attackerId": "creature:rock-troll:3",
+            "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "hit": true,
+            "critical": false,
+            "damage": 18,
+            "defend": false,
+            "evade": false,
+            "healthBefore": 5,
+            "healthAfter": 0
+          },
+          {
+            "kind": "victory",
+            "sequence": 10,
+            "elapsedMs": 5000,
+            "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+            "loserId": "creature:rock-troll:3",
+            "reason": "tie-break"
+          }
+        ],
+        "durationMs": 5000,
+        "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+        "victoryReason": "tie-break",
+        "finalHp": [
+          0,
+          0
+        ],
+        "tieBreakReason": "simultaneous-defeat"
+      }
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:6",
+      "kind": "travel",
+      "revealedAtMs": 1791570005000,
+      "startedAtMs": 1791570005000,
+      "endsAtMs": 1791571200000,
+      "label": "Return to camp"
+    },
+    {
+      "id": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c:7",
+      "kind": "return",
+      "revealedAtMs": 1791571200000,
+      "startedAtMs": 1791571200000,
+      "endsAtMs": 1791571200000,
+      "label": "Arrive at camp"
+    }
+  ],
+  "summary": {
+    "activityId": "2f3e4d5c-7b6a-4f8e-8d9c-1b2a3f4e5d6c",
+    "resolvedKind": "expedition",
+    "result": "victory",
+    "success": true,
+    "rewards": {
+      "money": 120,
+      "renown": 0,
+      "xp": 500,
+      "attributePoints": 0,
+      "items": [
+        {
+          "catalogId": "salvage",
+          "catalogVersion": "v1",
+          "tier": 1,
+          "rarity": "common",
+          "quantity": 3
+        }
+      ],
+      "overflowMoney": 0
+    },
+    "receiptId": "fixture-receipt-laststand",
+    "settledAtMs": 1791571245000,
+    "replayExpiry": {
+      "state": "available",
+      "expiresAtMs": 1792176000000
+    }
+  }
+}

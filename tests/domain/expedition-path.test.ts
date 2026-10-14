@@ -4,7 +4,7 @@ import { EXPEDITION_APPROACH_MS, JOURNEY, renderExpeditionStage, type JourneyPoi
 import { REPLAY_OUTRO_MS } from '@/game/replay';
 import { pathLength } from '@/game/paths';
 import { REST_PATTERN, gladiatorPose, journeyMap, legPath } from '@/game/expedition-path';
-import { EXPEDITION_FIXTURE_TIMELINES as T } from '../fixtures/expeditions';
+import { EXPEDITION_FIXTURES, EXPEDITION_FIXTURE_TIMELINES as T } from '../fixtures/expeditions';
 
 const manifest = loadAssetManifest();
 const maps = (['woodland', 'outpost', 'mountain'] as const).map(id => manifest.maps.find(m => m.id === id) as MapData);
@@ -77,7 +77,7 @@ describe('expedition journey on the map', () => {
 
   it('turns a fixture state into a pose on its map for every minute of each run', () => {
     for (const [key, t] of Object.entries(T)) {
-      const map = maps.find(m => m.id === ({ woodland: 'woodland', outpost: 'outpost', mountain: 'mountain', delayed: 'woodland', expired: 'woodland', spectator: 'outpost' } as const)[key as keyof typeof T])!;
+      const map = maps.find(m => m.id === EXPEDITION_FIXTURES[key as keyof typeof T].expedition)!;
       const j = journeyMap(map);
       const s0 = t.stages[0].startedAtMs;
       for (let minute = 0; minute <= 90; minute += 0.25) {

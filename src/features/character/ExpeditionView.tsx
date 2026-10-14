@@ -4,7 +4,9 @@
 // health read from the battle logs, an activity log of revealed stages with replay links, camera
 // controls and a Camp button. Everything shown comes from the revealed timeline at the display clock
 // (src/game/expedition-stage.ts); results and rewards come only from a settled summary. The view only
-// reads (timeline, world, owner) and never sends a command. Names and labels render as React text.
+// reads (timeline, then world and owner once) and never sends a command. Names and labels render as
+// React text. The character's name comes from the public world actor (or the owner's own record),
+// never from a battle log, whose gladiator participant Task 9 names "Gladiator".
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { ActivitySummary, RevealedTimeline } from '@contracts/events';
@@ -24,9 +26,9 @@ export type ExpeditionReads = Pick<GameGateway, 'timeline' | 'world' | 'owner'>;
 /** Fixture builds only (NEXT_PUBLIC_FIXTURE_ENABLED): browser tests read the view and hold its clock. */
 export type ExpeditionTestHook = {
   state(): {
-    phase: ExpeditionSceneState['phase']; displayNowMs: number; minute: number | null; labels: string[]; current: string | null;
+    activityId: string; phase: ExpeditionSceneState['phase']; displayNowMs: number; minute: number | null; labels: string[]; current: string | null;
     hp: ExpeditionSceneState['hp']; route: ExpeditionSceneState['route']; replays: string[]; complete: boolean;
-    outcome: ExpeditionSceneState['outcome']; settled: boolean; owner: boolean; environment: ExpeditionEnvironment | null;
+    outcome: ExpeditionSceneState['outcome']; settled: boolean; owner: boolean; name: string | null; environment: ExpeditionEnvironment | null;
   } | null;
   /** Holds the display clock at a display time (null lets it run on from there). */
   freeze(displayNowMs: number | null): void;
@@ -76,26 +78,29 @@ function rewardLines(summary: ActivitySummary): string[] {
   ].filter((line): line is string => !!line);
 }
 
+/** The current phase in words. Titles never name an encounter number, so a log line stays the only "Encounter N". */
 function phaseText(state: ExpeditionSceneState, expedition: string): { title: string; detail: string } {
+  const lost = state.stages.find(s => s.outcome === 'defeat')?.encounter;
   switch (state.phase) {
     case 'depart': return { title: 'Setting out', detail: `Travelling the ${expedition} and searching the trail.` };
-    case 'exploration': return { title: 'Exploring', detail: 'Recovering and searching for the next encounter.' };
-    case 'encounter': return { title: 'Fighting a revealed encounter', detail: 'The battle plays in the scene. Its result appears when it ends.' };
-    case 'safe-return': return { title: 'Returning without rewards', detail: 'Defeated. The gladiator rests at the safe return point until the slot ends and keeps all gear.' };
+    case 'exploration': return { title: 'Exploring', detail: 'Searching the trail and waiting for whatever comes next.' };
+    case 'encounter': return { title: 'Fighting', detail: 'The revealed battle plays in the scene. Its result shows when it ends.' };
+    case 'safe-return': return { title: 'Returning without rewards', detail: `Defeated${lost ? ` in the ${['first', 'second', 'third'][lost - 1]} encounter` : ''}. Resting at the safe return point until the slot ends, with all gear kept.` };
     case 'returning': return { title: 'Returning to camp', detail: 'All three encounters cleared. Heading back along the trail.' };
     case 'preparing': return state.stages.length
       ? { title: 'Preparing', detail: 'The next stage has not been published yet. It appears here as soon as it is revealed.' }
       : { title: 'Preparing', detail: 'Nothing has been revealed for this expedition yet.' };
     default: return state.outcome === 'failure'
-      ? { title: 'Expedition failed', detail: 'The gladiator is back at camp with all gear.' }
-      : { title: 'Expedition complete', detail: 'The gladiator is back at camp.' };
+      ? { title: 'Back at camp after a defeat', detail: 'The gladiator returned with all gear.' }
+      : { title: 'Back at camp', detail: 'The expedition is complete.' };
   }
 }
 
 /**
  * Timeline reads. Task 10 replaces this with the shared sync controller: one read on entry, one each time
  * the display clock passes a reveal mark (the current stage's end and each 20-minute mark, at most once
- * per mark), and one when the tab regains focus. A failed later read keeps the last revealed timeline.
+ * per mark, see `passMarks`), and one when the tab regains focus. A failed later read keeps the last
+ * revealed timeline.
  */
 function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (timeline: RevealedTimeline) => void) {
   const [timeline, setTimeline] = useState<RevealedTimeline | null>(null);
@@ -132,6 +137,26 @@ function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (
   return { timeline, failure, read, count };
 }
 
+/** Marks the reveal times the display clock has passed; true when a fresh timeline read is due (once per mark). */
+function passMarks(marks: { pending: number[]; done: Set<number> }, state: ExpeditionSceneState): boolean {
+  const passed = marks.pending.filter(mark => mark <= state.displayNowMs && !marks.done.has(mark));
+  for (const mark of passed) marks.done.add(mark);
+  marks.pending = expeditionRevealMarks(state);
+  return passed.length > 0;
+}
+
+/** Shown for a missing, malformed or unreadable expedition: nothing is drawn or read further. */
+export function ExpeditionUnavailable({ fixture, reason }: { fixture: boolean; reason: 'not-found' | 'unavailable' }) {
+  const titleId = useId();
+  return <section className={`${styles.card} ${styles.missing}`} aria-labelledby={titleId}>
+    <h1 id={titleId}>This expedition is not available</h1>
+    <p>{reason === 'not-found'
+      ? 'No expedition matches this link.'
+      : 'It may not exist, or expedition scenes cannot be loaded in this build yet. Only revealed stages of an expedition are ever shown.'}</p>
+    <Link className={styles.camp} href={fixture ? '/game/?mode=fixture' : '/game/'}>Camp</Link>
+  </section>;
+}
+
 export function ExpeditionView({ reads, activityId, fixture, startMinute = null }: {
   reads: ExpeditionReads;
   activityId: string;
@@ -146,6 +171,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
     const c = clock.current;
     return c ? c.frozen ?? c.anchorMs + (performance.now() - c.at) : 0;
   }, []);
+  // The display clock starts at the server time of the first read (or the fixture minute) and runs in real time.
   const anchor = useCallback((timeline: RevealedTimeline) => {
     const departure = timeline.stages[0]?.startedAtMs;
     const start = startMinute !== null && departure !== undefined ? departure + startMinute * 60_000 : timeline.serverNowMs;
@@ -154,21 +180,23 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   const { timeline, failure, read, count } = useTimelineReads(reads, activityId, anchor);
   const timelineRef = useRef(timeline);
   const [displayMs, setDisplayMs] = useState<number | null>(null);
-  const [actor, setActor] = useState<PublicActor | null>(null);
-  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [world, setWorld] = useState<{ actors: readonly PublicActor[] } | null>(null);
+  const [ownerState, setOwnerState] = useState<{ id: string; name: string } | null>(null);
   const [reduced, setReduced] = useState(prefersReducedMotion);
   const marks = useRef<{ pending: number[]; done: Set<number> }>({ pending: [], done: new Set() });
   const titleId = useId();
   const resultId = useId();
   const logId = useId();
+  const loadedOnce = !!timeline;
 
-  // Public look and ownership: optional reads, never required to follow the expedition.
+  // Public names and look, and whose expedition this is: optional reads, made once the expedition exists.
   useEffect(() => {
+    if (!loadedOnce) return;
     let alive = true;
-    reads.world().then(world => { if (alive) setActor(world.actors.find(a => a.activityId === activityId) ?? null); }).catch(() => {});
-    reads.owner().then(owner => { if (alive) setOwnerId(owner.gladiatorId); }).catch(() => {});
+    reads.world().then(next => { if (alive) setWorld({ actors: next.actors }); }).catch(() => {});
+    reads.owner().then(owner => { if (alive) setOwnerState({ id: owner.gladiatorId, name: owner.name }); }).catch(() => {});
     return () => { alive = false; };
-  }, [activityId, reads]);
+  }, [loadedOnce, reads]);
 
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -178,7 +206,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
     return () => query.removeEventListener('change', onChange);
   }, []);
 
-  // A later read never moves the display clock back; a server ahead of it moves it forward.
+  // A later read never moves the display clock back; a server ahead of it moves it forward (not in a fixture minute).
   useEffect(() => {
     timelineRef.current = timeline;
     const c = clock.current;
@@ -195,11 +223,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
       if (document.visibilityState !== 'visible' || !timelineRef.current || !clock.current) return;
       const t = now();
       setDisplayMs(t);
-      const m = marks.current;
-      const passed = m.pending.filter(mark => mark <= t && !m.done.has(mark));
-      for (const mark of passed) m.done.add(mark);
-      m.pending = expeditionRevealMarks(renderExpeditionStage(timelineRef.current, t));
-      if (passed.length) void read();
+      if (passMarks(marks.current, renderExpeditionStage(timelineRef.current, t))) void read();
     };
     const timer = window.setInterval(tick, TICK_MS);
     return () => { window.clearInterval(timer); activeLoops -= 1; };
@@ -207,15 +231,18 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
 
   const state = useMemo(() => (timeline && displayMs !== null ? renderExpeditionStage(timeline, displayMs) : null), [timeline, displayMs]);
 
-  const environment = environmentOf(timeline, actor);
-  const gladiatorId = actor?.gladiatorId ?? state?.gladiator?.id ?? null;
-  const name = actor?.name ?? state?.gladiator?.name ?? null;
-  const silhouettes = (actor?.equipmentSilhouettes ?? state?.gladiator?.equipmentSilhouettes ?? []).join('|');
+  const byActivity = world?.actors.find(a => a.activityId === activityId) ?? null;
+  const gladiatorId = byActivity?.gladiatorId ?? state?.gladiator?.id ?? null;
+  const byId = gladiatorId ? world?.actors.find(a => a.gladiatorId === gladiatorId) ?? null : null;
+  const environment = environmentOf(timeline, byActivity);
+  // Only the owner's timeline carries a summary; otherwise compare the owner's id with the expedition's.
+  const owner = !!timeline?.summary || (!!ownerState && ownerState.id === gladiatorId);
+  const name = byActivity?.name ?? byId?.name ?? (owner ? ownerState?.name ?? null : null);
+  const silhouettes = (byActivity?.equipmentSilhouettes ?? state?.gladiator?.equipmentSilhouettes ?? []).join('|');
   const look = useMemo<GladiatorLook>(() => ({
     key: gladiatorId ?? activityId, name: name ?? 'Gladiator',
     layers: layersFor(silhouettes ? silhouettes.split('|') : []), tint: tintFor(gladiatorId ?? activityId),
   }), [activityId, gladiatorId, name, silhouettes]);
-  const owner = !!ownerId && ownerId === gladiatorId;
   const sceneState = useCallback(() => (timelineRef.current && clock.current ? renderExpeditionStage(timelineRef.current, now()) : null), [now]);
 
   useEffect(() => {
@@ -226,9 +253,9 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
         if (!t || !clock.current) return null;
         const s = renderExpeditionStage(t, now());
         return {
-          phase: s.phase, displayNowMs: s.displayNowMs, minute: s.progress?.minute ?? null, labels: s.stages.map(x => x.label), current: s.current?.label ?? null,
-          hp: s.hp, route: s.route, replays: s.stages.filter(x => x.replay).map(x => x.id), complete: s.complete, outcome: s.outcome,
-          settled: !!s.summary, owner, environment,
+          activityId: s.activityId, phase: s.phase, displayNowMs: s.displayNowMs, minute: s.progress?.minute ?? null, labels: s.stages.map(x => x.label),
+          current: s.current?.label ?? null, hp: s.hp, route: s.route, replays: s.stages.filter(x => x.replay).map(x => x.id), complete: s.complete,
+          outcome: s.outcome, settled: !!s.summary, owner, name, environment,
         };
       },
       freeze: ms => {
@@ -242,33 +269,27 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
       loops: () => activeLoops,
     };
     return () => { delete window.__cloudiatorExpedition; };
-  }, [bridge, count, environment, now, owner]);
+  }, [bridge, count, environment, name, now, owner]);
 
-  const campHref = fixture ? '/game/?mode=fixture' : '/game/';
-  const camp = <Link className={styles.camp} href={campHref}>Camp</Link>;
-  if (failure) {
-    return <section className={`${styles.card} ${styles.missing}`} aria-labelledby={titleId}>
-      <h1 id={titleId}>This expedition is not available</h1>
-      <p>{failure === 'not-found' ? 'No expedition was found for this link.' : 'Expedition scenes cannot be loaded in this build yet.'}</p>
-      {camp}
-    </section>;
-  }
+  if (failure) return <ExpeditionUnavailable fixture={fixture} reason={failure} />;
   if (!timeline || !state) return <p role="status">Loading the expedition…</p>;
 
+  const campHref = fixture ? '/game/?mode=fixture' : '/game/';
   const expedition = environment ? CATALOG_V1.expeditions[environment].name : 'Expedition';
   const text = phaseText(state, expedition);
   const progress = state.progress;
   const minute = Math.floor(progress?.minute ?? 0);
   const replayHref = (stage: VisibleStage) => `/replay/?${fixture ? 'mode=fixture&' : ''}activity=${encodeURIComponent(activityId)}&stage=${encodeURIComponent(stage.id)}`;
   const summary = state.summary;
+  const encounters = state.stages.some(s => s.encounter !== null);
   return (
     <section className={styles.view} aria-labelledby={titleId}>
       <header className={styles.header}>
-        <div>
-          <p className="eyebrow">EXPEDITION{name ? <> · <span>{name}</span></> : null}</p>
+        <div className={styles.heading}>
+          <p className="eyebrow">EXPEDITION · {name ?? (owner ? 'Your gladiator' : "Another gladiator's journey")}</p>
           <h1 id={titleId}>{expedition}</h1>
         </div>
-        {camp}
+        <Link className={styles.camp} href={campHref}>Camp</Link>
       </header>
 
       {environment ? <ExpeditionViewport environment={environment} state={sceneState} look={look} bridge={bridge} reducedMotion={reduced}
@@ -276,7 +297,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
         : <div className={styles.placeholder}>The scene appears once the departure is revealed.</div>}
 
       <div className={styles.now}>
-        <div className={styles.phase} role="status" aria-live="polite">
+        <div className={styles.phase} role="status" aria-live="polite" aria-label="Current stage">
           <strong>{text.title}</strong>
           <span>{text.detail}</span>
         </div>
@@ -286,7 +307,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
             aria-valuetext={`${state.hp.current} of ${state.hp.max} health`}>
             <span className={styles.fill} style={{ width: `${(100 * state.hp.current) / state.hp.max}%` }} />
             <span className={styles.hpText}>{state.hp.current} / {state.hp.max}</span>
-          </div> : <span className={styles.note}>{state.stages.some(s => s.encounter !== null) ? 'Not kept for this expedition' : 'Full at departure'}</span>}
+          </div> : <span className={styles.note}>{encounters ? 'Not kept for this expedition' : 'Full at departure'}</span>}
         </div>
       </div>
 
@@ -304,17 +325,19 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
       <div className={styles.columns}>
         <section className={styles.card} role="region" aria-labelledby={resultId}>
           <h2 id={resultId}>Result</h2>
-          {state.phase === 'safe-return' ? <p>Returning without rewards. A defeat ends the remaining encounters.</p>
+          {state.phase === 'safe-return' ? <p>No rewards: a defeat ends the remaining encounters, and the gladiator keeps all gear.</p>
             : !state.complete ? <p className={styles.note}>The result is known when the expedition returns at minute 80.</p>
               : <>
-                <p className={styles.verdict}>{state.outcome === 'failure' ? 'Defeated: no rewards' : 'Success'}</p>
-                {summary ? <>
-                  {summary.success && <><p className={styles.note}>Credited rewards</p><ul className={styles.rewards}>{rewardLines(summary).map((line, i) => <li key={`${i}-${line}`}>{line}</li>)}</ul></>}
-                  <p className={styles.note}>{summary.replayExpiry.state === 'available'
-                    ? `Encounter replays are kept until ${day(summary.replayExpiry.expiresAtMs)}; the result stays in your history for 90 days.`
-                    : 'Encounter replays are no longer kept; the result stays in your history for 90 days.'}</p>
-                </> : owner && state.awaitingSummary ? <p role="status">Processing results…</p>
-                  : !owner ? <p className={styles.note}>Another gladiator&apos;s expedition: only its revealed journey is shown.</p> : null}
+                <p className={styles.verdict}>{state.outcome === 'failure' ? 'Defeated' : 'Success'}</p>
+                {!owner ? <p className={styles.note}>Another gladiator&apos;s expedition: only its revealed journey is shown.</p>
+                  : summary ? <>
+                    {summary.success ? <><p className={styles.note}>Credited rewards</p>
+                      <ul className={styles.rewards}>{rewardLines(summary).map((line, i) => <li key={`${i}-${line}`}>{line}</li>)}</ul></>
+                      : <p className={styles.note}>No rewards are credited after a defeat.</p>}
+                    <p className={styles.note}>{summary.replayExpiry.state === 'available'
+                      ? `Encounter replays are kept until ${day(summary.replayExpiry.expiresAtMs)}; the result stays in your history for 90 days.`
+                      : 'Encounter replays are no longer kept; the result stays in your history for 90 days.'}</p>
+                  </> : state.awaitingSummary ? <p role="status">Processing results…</p> : null}
               </>}
         </section>
 

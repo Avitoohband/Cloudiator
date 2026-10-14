@@ -81,6 +81,8 @@ const WHEEL_LINE = 40;
 const WHEEL_IDLE_MS = 250;
 const DRAG_THRESHOLD = 6;
 const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', critical: '#ffe48f', guard: '#8edcf4', miss: '#d4d4d8' };
+/** Damage labels rise from just above the gladiator's name label (46 px over the feet), never over it. */
+const LABEL_LIFT = 14;
 
 type PropGroup = Omit<PlacedImage, 'slices'> & {
   id: string; frame: string; x: number; y: number; occludes: boolean; images: Image[];
@@ -426,7 +428,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         const text = labelPool[k] ?? (labelPool[k] = this.add.text(0, 0, '', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '10px', stroke: '#1a1423', strokeThickness: 3 })
           .setOrigin(0.5, 1).setResolution(2).setDepth(1_500_001));
         if (text.text !== l.text) text.setText(l.text);
-        text.setColor(LABEL_COLORS[l.kind]).setPosition(l.x, l.y).setAlpha(l.alpha).setVisible(true);
+        text.setColor(LABEL_COLORS[l.kind]).setPosition(l.x, l.y - LABEL_LIFT).setAlpha(l.alpha).setVisible(true);
         labelInfo[k] = { text: l.text };
       });
       for (let k = labels.length; k < labelPool.length; k += 1) if (labelPool[k].visible) labelPool[k].setVisible(false);

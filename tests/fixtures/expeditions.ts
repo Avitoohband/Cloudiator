@@ -9,14 +9,16 @@ import mountain from './expeditions/mountain.json';
 import delayed from './expeditions/delayed.json';
 import expired from './expeditions/expired.json';
 import spectator from './expeditions/spectator.json';
+import tiebreak from './expeditions/tiebreak.json';
+import laststand from './expeditions/laststand.json';
 import { EXPEDITION_FIXTURES, type ExpeditionFixtureKey } from './expedition-ids.ts';
 
 export { EXPEDITION_FIXTURES };
 
+const timeline = (json: unknown) => json as RevealedTimeline;
 export const EXPEDITION_FIXTURE_TIMELINES: Record<ExpeditionFixtureKey, RevealedTimeline> = {
-  woodland: woodland as unknown as RevealedTimeline, outpost: outpost as unknown as RevealedTimeline,
-  mountain: mountain as unknown as RevealedTimeline, delayed: delayed as unknown as RevealedTimeline,
-  expired: expired as unknown as RevealedTimeline, spectator: spectator as unknown as RevealedTimeline,
+  woodland: timeline(woodland), outpost: timeline(outpost), mountain: timeline(mountain), delayed: timeline(delayed),
+  expired: timeline(expired), spectator: timeline(spectator), tiebreak: timeline(tiebreak), laststand: timeline(laststand),
 };
 
 /** Timelines by activity id, as gateway.timeline(id) returns them. */

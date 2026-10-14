@@ -1,6 +1,6 @@
 # Cloudiator development handoff
 
-Last updated: 2026-10-14, after Task 16 (leagues, Arena pairing, bouts and ratings) completed. Development is in progress.
+Last updated: 2026-10-14, after Task 19 (automatic league tournaments) completed. Development is in progress.
 
 ## Authority and repository
 
@@ -15,10 +15,10 @@ Last updated: 2026-10-14, after Task 16 (leagues, Arena pairing, bouts and ratin
 
 ## Resume here
 
-Tasks 1–12, 14, 15, 16, 17 and 20 passed independent specification and quality review (17 of 24 tasks). Tasks 17 and 20 are complete on fixtures; Task 17's Arena card and Standings now also read live data (Task 16). Task 19's pure domain (phase 1) is reviewed; its backend (phase 2) remains.
+Tasks 1–12, 14, 15, 16, 17, 19 and 20 passed independent specification and quality review (18 of 24 tasks). Tasks 17 and 20 are complete on fixtures; Task 17's Arena card and Standings read live data (Task 16), and Task 20's tournament panel reads the live tournament view (Task 19).
 - Codex pushed Task 6 at `ec6939386e7fd0e2f997d0389238bce4d068cc64`; Claude pushed the first takeover checkpoint at `9b39edc` (Task 6 merged with Tasks 11/12, R2 applied) and the second at `9f2b69d` (Tasks 7 and 14; see the checkpoint sections below).
-- M01–M10 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`, `20261013065108_inventory_shops`, `20261013125213_expeditions`, `20261014045856_projections`, `20261014100253_projection_preparation_status`, `20261014113448_arena`, `20261014131209_arena_bouts`.
-- **Next (Claude, in small checkpoints):** Task 19 phase 2 (tournament backend, reusing Task 16's pairing job and per-battle seeds), then Task 13 (management over the animated world; Avi's new full-screen camp UI direction is being designed first), then Tasks 18, 21, 22, 23 and 24.
+- M01–M12 are committed and immutable: `20261012050952_identity`, `20261012121232_build_schedule`, `20261012135526_activities_jobs`, `20261012143533_task7_review_fixes`, `20261013065108_inventory_shops`, `20261013125213_expeditions`, `20261014045856_projections`, `20261014100253_projection_preparation_status`, `20261014113448_arena`, `20261014131209_arena_bouts`, `20261014160257_tournaments`, `20261014174629_tournament_results`. M09–M12 deploy together with the matching worker in one step (Task 24).
+- **Next (Claude, in small checkpoints):** Task 13, rebuilt around Avi's full-screen camp and visitor viewing. Avi approved the design on 2026-10-14; the written spec `docs/superpowers/specs/2026-10-14-full-screen-camp-design.md` (commit `cbffb98` on `claude/preview`) awaits Avi's review and joins this branch once approved. Task 13 starts with a visitor-access (anonymous public read) migration. Then Tasks 18, 21, 22, 23 and 24.
 - Task 13 consumes the reviewed Inventory/Shop, Arena/Standings and Tournament panels and mounts Task 10's sync controller.
 - Do not reimplement completed tasks.
 
@@ -47,9 +47,9 @@ The executing controller also maintains ignored scratch artifacts under `.superp
 | 17 — Arena staging, selection and standings (Claude) | `708688b..26acc23` on `claude/task-17` (brief `95eb764`, source `98284aa`, report `88e2e58`, approved shared edits `1f01531`, fixes `e3392fb`/`ff01dba`, follow-up `6df1b78`/`f429c83`, review `26acc23`) | Three rounds: spec, quality and visual Pass; [review](task-17-review.md) | 453 units; 172 dev browser passes on port 3300. Camp rings play each bout at its real time, after a ~4 s jog walk-in; Arena card and standings. Live reads wait for Task 10/16 wiring ([report](task-17-report.md), integration checklist). |
 | 20 — Tournament countdown, brackets and camp roles (Claude) | `08998e6..7182196` on `claude/task-20` (source `c1ff143`, report `b67a06c`, fixes `ffc1e2f`/`2cafdeb`, Task 17 merge `b7f38ad`, shared guard `b48ce1f`, review `7182196`) | Full review: spec Fail (2 Important) then fixed; scoped re-review spec, quality and visual Pass; [review](task-20-review.md) | 856 units; 256 dev browser passes / 0 failures on the combined branch. Role-safe `TournamentView` placements, round-1 placement field and the opt-in RPC are Task 19 phase 2 gates ([report](task-20-report.md)). |
 | 16 — Leagues, Arena pairing, bouts and ratings (Claude) | phase 1 `claude/task-16` `fc4832b`; phases 2a and 2b on `claude/task-16-p2` (`6e8fd57` M09, `430aec3`, `d3797e7`; `31cfdaa` M10, `deda395`; timing fix `337f38d`/`a1c6732`; re-review fixes `cf325d1`/`ee44626`) | Spec and quality Pass in every round; [phase 1](task-16-phase-1-review.md), [2a](task-16-phase-2a-review.md), [2b and timing](task-16-review.md) | 888 units; 137 DB/Auth/Edge on a clean M01–M10 replay with Edge stable; 260 dev browser, 14 production. 50 characters at production cron cadence: publication 61 s with a cleared dispatch window, 121 s with a held one (a Task 23 policy decision); bouts finish at least 3 359 s before the minute-60 reveal ([report](task-16-report.md)). |
-| 19 — phase 1 only (Claude) | `claude/task-19` `be28376` (tournament.ts) | Spec and quality Pass; [review](task-19-phase-1-review.md) | Pure domain only; phase 2 not started. |
+| 19 — Automatic league tournaments (Claude) | phase 1 `claude/task-19` `be28376`; phase 2 on `claude/task-19-p2` (`81dc36b` M11, `f9e3d97`, `a9f25d3`; `505b2b3` M12, `e4df403`; review fixes `477f673`/`fa0f7a2`) | Spec and quality Pass in every round; [phase 1](task-19-phase-1-review.md), [2a, 2b and fixes](task-19-review.md) | 922 units; 172 DB/Auth/Edge on a clean M01–M12 replay with Edge stable; 266 dev browser, 14 production. Includes the Task 16 phase-8 deadlock fix (40P01 regression). Polled tournament reads carry no battle logs (39–59 KB at 50 entrants); logs load on demand. 50 entrants at production cron cadence: publication 61 s with a cleared window (121 s in 4 of 9 runs, the coordinator race) and 121 s with a held one; all credited about 1 s after minute 80 (61 s later with a held window) ([report](task-19-report.md)). |
 
-Deferred Minors: the existing browser color warning and expected-diagnostic assertions (Tasks 1/8, Task 23/final triage); Task 6's stale estimated schedule clock (Task 13); Task15's safe-point leave pose/encounter-count/test-title Minors and Task10's initial-load clock-offset bias (Task13/final triage). Task14's two remaining Minors are resolved in reviewed708688b and the Task15 integration. The escaped-seed scanner gap is resolved in the reviewed supplement below.
+Deferred Minors: Task 19's gates for Tasks 13, 22 and 23 are listed at the end of its [review](task-19-review.md); the existing browser color warning and expected-diagnostic assertions (Tasks 1/8, Task 23/final triage); Task 6's stale estimated schedule clock (Task 13); Task15's safe-point leave pose/encounter-count/test-title Minors and Task10's initial-load clock-offset bias (Task13/final triage). Task14's two remaining Minors are resolved in reviewed708688b and the Task15 integration. The escaped-seed scanner gap is resolved in the reviewed supplement below.
 
 ## Coordination history (Codex and Claude)
 
@@ -174,6 +174,13 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - Development Playwright on port 3200, desktop and mobile: 258 passed, 8 skipped.
 - Isolated production gate (`.next/browser-test`, run after the development run): 14 passed, 252 skipped by design.
 - One infrastructure fault happened during this checkpoint. A first gate run had a type error, and its failed builds left a stale `out/` that the static scan read. After the fix, every build-dependent step was rerun in order; the numbers above come from that rerun.
+
+### Task 19 checkpoint (Claude, 2026-10-14)
+
+- **Shipped together:** M11 and M12 (phase 2a's bout jobs have no result acceptance without phase 2b; never deploy M11 alone).
+- **Contract changes:** `TournamentView.bracket {size, rounds, slots}` (the seeded first round, public from the start); placements `{gladiatorId, place, completion: PublicActivitySummary}`, empty until every entrant settles; an `insufficient-entrants` status; the live `tournament(id)` read with lookup id `tournament:<slot>:<league>` (pure, in `src/lib/tournament-id.ts`); `TournamentBout.revealedResult.fight?` (duration, victory reason, tie-break reason); `GameGateway.tournamentLog(boutId)` for on-demand logs. Owner rewards come only from the owner's own timeline.
+- **Task 16 fix inside M12:** `private.boundary_start` takes every preparing member's account lock, in gladiator order, before the debit loop.
+- **Reassigned:** the engine-free `isTournamentSlot` gate (Task 20) now belongs to Task 13. The client-readable `tournament_views.pairing_job_id` is closed by Task 13's column-by-column visitor-access grants. The coordinator busy race is a Task 16 follow-up under Task 23.
 
 ### Task5 integration notes
 

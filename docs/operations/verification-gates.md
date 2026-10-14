@@ -20,6 +20,19 @@ A Next.js build or export and a browser check must not use the same output direc
 
 Never start a build in a worktree whose development browser run or dev server is still active. Run the gate steps in that worktree one after another.
 
+## Database tests and the local Edge runtime
+
+Approved by Avi on 2026-10-14 as part of this override.
+
+- Run `npm run test:db` only while nothing else builds, runs a browser suite or edits files in the worktree whose `supabase functions serve` the Edge runtime uses.
+- Record the Edge container's start time before and after the run:
+  `docker inspect -f '{{.State.StartedAt}}' supabase_edge_runtime_Cloudiator`.
+- If the start time changed, the container was recreated during the run. Discard that run as an infrastructure fault, and rerun once nothing else is active.
+
+**Observed (2026-10-14, Task 16 phases 2a and 2b).** The CLI killed and recreated the Edge container a few seconds into several DB runs. One in-network request was then refused (for example 123/124). The serve log showed "File change detected (WRITE)" for Edge source files that git showed unchanged, while vitest, `tsc` or `deno check` were reading them. Other recreations coincided with a build export or the dev server. The cause is not confirmed.
+
+**Tested.** Every rerun with an unchanged start time passed (124/124, then 137/137). Keeping other work out of the serving worktree during the run is a precaution taken from these observations; it is not a proven fix.
+
 ## Parallel work
 
 Separate git worktrees have separate `.next` directories. They may run gates at the same time as long as each uses its own Playwright port and its own static server port.

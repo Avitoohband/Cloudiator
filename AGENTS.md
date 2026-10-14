@@ -177,6 +177,10 @@ production gate passed 8 cases. Infrastructure failures caused by overlapping
 output are not product evidence: rerun serialized before reporting.
 
 Follow the exact gate order in
-[the verification gate guide](docs/operations/verification-gates.md). Separate
+[the verification gate guide](docs/operations/verification-gates.md). Avi
+approved its database-test rule on 2026-10-14: run `npm run test:db` only
+while nothing else builds, browses or edits in the worktree that serves Edge,
+compare the Edge container's start time before and after, and discard and
+rerun a run during which it was recreated. Separate
 worktrees each have their own `.next` and may run in parallel on their own
 Playwright ports.

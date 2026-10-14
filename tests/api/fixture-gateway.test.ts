@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { createFixtureGateway } from '../../src/lib/api/fixture-gateway';
+import { createFixtureGateway, FIXTURE_ARENA } from '../../src/lib/api/fixture-gateway';
 
 test('fixture commands cannot mutate even the local owner preview', async () => {
   const gateway = createFixtureGateway();
@@ -24,13 +24,17 @@ test('fixture owner reads cannot share mutable state with callers', async () => 
 test('fixture public actors omit private owner management state', async () => {
   const gateway = createFixtureGateway();
   const world = await gateway.world();
-  expect(world.actors).toHaveLength(1);
+  // The owner, plus the current slot's Arena entrants (Task 17).
+  expect(world.actors).toHaveLength(14);
   const actor = world.actors[0];
   expect(actor.name).toBe('Aster');
   expect(actor.location).toBe('training');
-  for (const field of ['ownerId', 'wallets', 'inventory', 'schedule', 'seed', 'encounterPlan']) {
-    expect(actor).not.toHaveProperty(field);
+  for (const a of world.actors) {
+    for (const field of ['ownerId', 'wallets', 'inventory', 'schedule', 'seed', 'encounterPlan']) expect(a).not.toHaveProperty(field);
+    // The camp projection never carries a battle log.
+    expect(a.visibleStage?.battleLog).toBeUndefined();
   }
+  expect(world.actors.slice(1).every(a => a.location === 'arena' && a.visibleStage?.kind === 'staging')).toBe(true);
   const revision = await gateway.revision();
   expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex });
 });
@@ -39,8 +43,7 @@ test('unimplemented fixture reads reject explicitly as unavailable', async () =>
   const gateway = createFixtureGateway();
   await expect(gateway.market()).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.timeline('9fce3cd5-e831-4a66-8ca1-16b4576b1499')).rejects.toMatchObject({ code: 'unavailable' });
-  await expect(gateway.profile('0d5f8471-d919-428f-9ab7-058c95821757')).rejects.toMatchObject({ code: 'unavailable' });
-  await expect(gateway.standings('bronze')).rejects.toMatchObject({ code: 'unavailable' });
+  await expect(gateway.profile('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.tournament('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.recent()).rejects.toMatchObject({ code: 'unavailable' });
 });
@@ -83,4 +86,36 @@ test('fixture timelines cannot share mutable state with callers', async () => {
   const again = await gateway.timeline(REPLAY_FIXTURES.pvp.activityId);
   expect(again.stages[1].battleLog!.finalHp[0]).not.toBe(999);
   expect(again.summary!.rewards.renown).toBe(10);
+});
+
+test('fixture Arena timelines pair both entrants of a bout and keep spectators free of rewards', async () => {
+  const { ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaActivityId, arenaBattleId } = await import('../fixtures/arena');
+  const gateway = createFixtureGateway();
+  const [bellator, corvina] = ['bellator', 'corvina'].map(name => ARENA_WORLD_ACTORS.find(a => a.name.toLowerCase() === name)!);
+  const timelines = await Promise.all([bellator, corvina].map(a => gateway.timeline(a.activityId!)));
+  expect(timelines.map(t => t.stages.find(s => s.kind === 'bout')!.battleLog!.battleId)).toEqual([arenaBattleId('campOne'), arenaBattleId('campOne')]);
+  expect(timelines.every(t => t.summary === undefined)).toBe(true);
+  expect(await gateway.timeline(arenaActivityId('ownerHumanWin'))).toEqual(ARENA_TIMELINES[arenaActivityId('ownerHumanWin')]);
+  expect(FIXTURE_ARENA.map(s => s.activityId)).toContain(arenaActivityId('ownerNpcWin'));
+  // Callers get copies.
+  const first = await gateway.timeline(arenaActivityId('ownerHumanWin'));
+  first.summary!.rewards.renown = 999;
+  expect((await gateway.timeline(arenaActivityId('ownerHumanWin'))).summary!.rewards.renown).toBe(10);
+});
+
+test('fixture standings page each league at most 50 rows, and profiles carry the standings rating', async () => {
+  const gateway = createFixtureGateway();
+  const first = await gateway.standings('bronze');
+  expect(first).toMatchObject({ league: 'bronze', archived: false });
+  expect(first.rows).toHaveLength(50);
+  const read = gateway.standings as (league: 'bronze', cursor?: string) => ReturnType<typeof gateway.standings>;
+  const second = await read('bronze', first.nextCursor!);
+  expect(second.rows[0].rank).toBe(51);
+  expect(second.nextCursor).toBeNull();
+  expect((await gateway.standings('champion')).rows).toEqual([]);
+  const aster = await gateway.profile('0d5f8471-d919-428f-9ab7-058c95821757');
+  expect(aster).toMatchObject({ actor: { name: 'Aster' }, rating: 1000 });
+  expect(first.rows.find(r => r.name === 'Aster')!.rating).toBe(aster.rating);
+  first.rows[0].rating = -1;
+  expect((await gateway.standings('bronze')).rows[0].rating).not.toBe(-1);
 });

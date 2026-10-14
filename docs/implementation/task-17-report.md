@@ -1,6 +1,6 @@
 # Task 17 implementation report: shared Arena staging, selection and standings
 
-Status: **BLOCKED** on the owner's approval of three shared files. Everything in Claude's lane is implemented, tested and committed; the exact shared diff is in `task-17-request-shared.patch` (summary below). It was validated only in a throwaway copy of this branch, never applied to the branch.
+Status: **DONE.** The implementer stopped, as briefed, before the three shared files. On 2026-10-14 the controller applied the exact patch `task-17-request-shared.patch` to this branch. That was under Avi's instruction that Claude may take Codex's part, and it was recorded on the board at 07:36 IDT; Codex reviews the edits at integration. The original BLOCKED text is kept below for the record: **BLOCKED** on the owner's approval of three shared files. Everything in Claude's lane is implemented, tested and committed; the exact shared diff is in `task-17-request-shared.patch` (summary below). It was validated only in a throwaway copy of this branch, never applied to the branch.
 
 - Date: 2026-10-14, Asia/Jerusalem. Owner: Claude (fresh implementer; the controller reviews and integrates).
 - Branch: `claude/task-17`, worktree `C:\Avi\Studies\Projects\Cloudiator-replay`. Base: `708688b` (reviewed checkpoint `05b1ea0` plus the Task 14 Minor fix); the controller brief is `95eb764`.
@@ -119,6 +119,12 @@ Apply with `git apply docs/implementation/task-17-request-shared.patch` (or `pat
 1. `src/lib/api/fixture-gateway.ts`: `FIXTURE_ARENA` (samples with entrant ids); `world()` adds `ARENA_WORLD_ACTORS`; `timeline(id)` adds `ARENA_TIMELINES`; `profile(id)` returns `ARENA_PROFILES`; `standings(league, cursor?)` returns `arenaStandingsPage`.
 2. `src/app/game/page.tsx`: one `createDisplayClock()`; keep the fixture gateway in state; pass `clock` and `timelines={fixtureReads}` to `GameViewport`; render `ArenaPanel` in the aside when an owner is visible; the Standings tab renders `StandingsPanel` (live mode reads the live gateway, which reports "not available").
 3. `tests/api/fixture-gateway.test.ts`: 14 world actors without battle logs; profile/standings no longer unavailable; two new tests (paired timelines, standings pages and profiles).
+
+## Shared edits applied (controller, 2026-10-14)
+
+- `git apply docs/implementation/task-17-request-shared.patch` changes `src/lib/api/fixture-gateway.ts`, `src/app/game/page.tsx` and `tests/api/fixture-gateway.test.ts`. No contract, live gateway, route, scanner or style change.
+- Verified on the branch: `npm test` 440 passed; `npm run typecheck` exit 0; `npm run build` exit 0; `npm run verify:static` with 4 fixed routes and 81 assets clean; the full development browser suite on port 3300 with 149 passed, 5 skipped and 0 failed. The 24 page tests that were red before the patch now pass.
+- Not run on the branch: the isolated production gate.
 
 ## Limitations and gates
 

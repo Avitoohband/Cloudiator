@@ -1,8 +1,10 @@
 import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } from '@contracts/commands';
-import type { RevealedTimeline } from '@contracts/events';
+import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
-import { GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings, readTournament } from './reads';
+import {
+  GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings, readTournament, readTournamentLog,
+} from './reads';
 export { GatewayReadError } from './reads';
 
 export interface GameGateway {
@@ -16,7 +18,13 @@ export interface GameGateway {
   profile(id: GladiatorId): Promise<PublicProfile>;
   market(cursor?: string): Promise<MarketPage>;
   standings(league: LeagueId, cursor?: string): Promise<StandingsPage>;
+  /** A polled read: each fought result carries its fight summary, never its battle log. */
   tournament(id: string): Promise<TournamentView>;
+  /**
+   * One revealed tournament bout's battle log, loaded on demand when the bout is watched or animated. Results are
+   * immutable, so a log is fetched at most once per session; callers share it and must not change it.
+   */
+  tournamentLog(boutId: string): Promise<BattleLog>;
   recent(cursor?: string): Promise<ResultsPage>;
 }
 
@@ -24,6 +32,8 @@ export interface GameGateway {
 export function createLiveGateway(): GameGateway {
   const unavailable = async (): Promise<never> => { throw new GatewayReadError('unavailable'); };
   let epoch = 0;
+  /** Loaded (or loading) tournament logs of this session; a failed load is forgotten so it can be asked again. */
+  const logs = new Map<string, Promise<BattleLog>>();
   async function read<T>(load: (client: NonNullable<ReturnType<typeof getBrowserClient>>) => Promise<T>): Promise<T> {
     const client = getBrowserClient();
     if (!client) throw new GatewayReadError('unavailable');
@@ -48,7 +58,7 @@ export function createLiveGateway(): GameGateway {
         const next = session?.user.id ?? null;
         if (event === 'INITIAL_SESSION') { account = next; return; }
         if (next === account) return;
-        account = next; epoch++; listener();
+        account = next; epoch++; logs.clear(); listener();
       });
       return () => data.subscription.unsubscribe();
     },
@@ -80,6 +90,14 @@ export function createLiveGateway(): GameGateway {
     recent: cursor => read(client => readRecent(client, cursor)),
     standings: (league, cursor) => read(client => readStandings(client, league, cursor)),
     tournament: id => read(client => readTournament(client, id)),
+    tournamentLog: boutId => {
+      const cached = logs.get(boutId);
+      if (cached) return cached;
+      const pending = read(client => readTournamentLog(client, boutId));
+      logs.set(boutId, pending);
+      pending.catch(() => { if (logs.get(boutId) === pending) logs.delete(boutId); });
+      return pending;
+    },
     market: unavailable,
   };
 }

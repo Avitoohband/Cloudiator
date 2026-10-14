@@ -3,26 +3,33 @@
 // shape, ring schedule and seek rule as regular Arena bouts, so no second arena layout), and once eliminated watch from
 // spectator spots around the outside of the arena wall. The champion is marked once the final has ended. Everything
 // comes from the public TournamentView through the stage core's reveal rule (a bout appears only when published and
-// its round's reveal time has passed); nothing here simulates a fight, decides a result or adds an actor.
+// its round's reveal time has passed); nothing here simulates a fight, decides a result or adds an actor. Polled views
+// carry no battle logs (Task 19 phase 2b review I1): the camp asks for the log of each revealed bout it stages
+// (`tournamentLogsDue`), once, and merges it in with the stage core's `withTournamentLogs`.
 import type { PublicActor, TournamentView } from '@contracts/reads';
 import type { Direction, MapData } from './assets';
 import type { CampFight } from './arena-layout';
 import { RULES_V1 } from '@domain/rules-v1';
-import { renderTournament, tournamentIdFor, type TournamentRole } from './tournament-stage';
+import { tournamentLookupIdOrNull } from '../lib/tournament-id';
+import { TOURNAMENT_RETRY_MS, processingRetryDelay, renderTournament, type TournamentRole } from './tournament-stage';
 
-/** A missing or stale tournament view is asked for again this often while its slot runs. */
-export const TOURNAMENT_RETRY_MS = 30_000;
+/** A failed tournament read is asked for again this often while its slot runs (processing re-reads back off). */
+export { TOURNAMENT_RETRY_MS };
 const SLOT_MS = RULES_V1.clock.slotMs;
 
 const isEntrant = (actor: PublicActor) => actor.location === 'tournament' && actor.startsAtMs !== null && !!actor.activityId;
-/** The tournament an entrant is in: its league's tournament of the slot its activity started in. */
-export function tournamentIdOfActor(actor: PublicActor): string {
-  return tournamentIdFor(Math.floor(actor.startsAtMs! / SLOT_MS), actor.league);
+/**
+ * The tournament an entrant is in: its league's tournament of the slot its activity started in. Null when its slot or
+ * league cannot name one (2b review M3): that actor then has no tournament, and the camp carries on without throwing.
+ */
+export function tournamentIdOfActor(actor: PublicActor): string | null {
+  return tournamentLookupIdOrNull(Math.floor(Number(actor.startsAtMs) / SLOT_MS), actor.league);
 }
 function entrantsByTournament(actors: readonly PublicActor[]): Map<string, Map<string, PublicActor>> {
   const groups = new Map<string, Map<string, PublicActor>>();
   for (const actor of actors.filter(isEntrant)) {
     const id = tournamentIdOfActor(actor);
+    if (id === null) continue;
     const group = groups.get(id) ?? new Map<string, PublicActor>();
     group.set(actor.gladiatorId, actor);
     groups.set(id, group);
@@ -110,23 +117,56 @@ export function assignSpectators(spectators: readonly { gladiatorId: string; eli
   return new Map(order.slice(0, spots.length).map((s, i) => [s.gladiatorId, spots[i]]));
 }
 
-export type TournamentRead = { readAtMs: number; view: TournamentView | null };
+/**
+ * The camp's last read of one tournament: when it was asked (display time), the latest view it has (a failed read keeps
+ * the previous one) and how many reads in a row found it processing, which sets the processing back-off.
+ */
+export type TournamentRead = { readAtMs: number; view: TournamentView | null; processingReads?: number };
+/** The record after a read at `readAtMs` answered `view` (null: the read failed). */
+export function recordTournamentRead(previous: TournamentRead | undefined, view: TournamentView | null, readAtMs: number): TournamentRead {
+  if (!view) return { readAtMs, view: previous?.view ?? null, processingReads: previous?.processingReads ?? 0 };
+  const processing = renderTournament(view, readAtMs).status === 'processing';
+  return { readAtMs, view, processingReads: processing ? (previous?.processingReads ?? 0) + 1 : 0 };
+}
 /**
  * Tournaments the camp should read now: each tournament with an entrant in camp during its slot, once; again when a
- * reveal mark (a round, the settlement) has passed since the last read; and every 30 s while the read failed or a due
- * round is unpublished. Never before the start or after the slot.
+ * reveal mark (a round, the settlement) has passed since the last read; every 30 s while the read failed; and, while a
+ * due round is unpublished (processing), after 30 s, 60 s, 120 s, 240 s and then every 5 minutes, back to 30 s once
+ * a read is no longer processing (2b review I1). `focused` (the tab has just become visible) re-reads a processing
+ * tournament at once. Never before the start or after the slot; hidden tabs do not call this.
  */
-export function tournamentReadsDue(actors: readonly PublicActor[], known: ReadonlyMap<string, TournamentRead>, displayNowMs: number): string[] {
+export function tournamentReadsDue(actors: readonly PublicActor[], known: ReadonlyMap<string, TournamentRead>, displayNowMs: number,
+  options: { focused?: boolean } = {}): string[] {
   const due: string[] = [];
   for (const [id, entrants] of entrantsByTournament(actors)) {
     const start = [...entrants.values()][0].startsAtMs!;
     if (displayNowMs < start || displayNowMs >= start + SLOT_MS) continue;
     const read = known.get(id);
     if (!read) { due.push(id); continue; }
-    const waited = displayNowMs - read.readAtMs >= TOURNAMENT_RETRY_MS;
-    if (!read.view) { if (waited) due.push(id); continue; }
+    const waited = displayNowMs - read.readAtMs;
+    if (!read.view) { if (waited >= TOURNAMENT_RETRY_MS) due.push(id); continue; }
     const passed = renderTournament(read.view, read.readAtMs).revealMarks.some(mark => mark <= displayNowMs);
-    if (passed || (waited && renderTournament(read.view, displayNowMs).status === 'processing')) due.push(id);
+    const processing = renderTournament(read.view, displayNowMs).status === 'processing';
+    const backoff = processingRetryDelay(Math.max(0, (read.processingReads ?? 0) - 1));
+    if (passed || (processing && (options.focused || waited >= backoff))) due.push(id);
+  }
+  return due;
+}
+
+/**
+ * Bouts whose battle log the camp should load now: each revealed fought bout between two camp entrants (the bouts it
+ * stages in a ring, fighting or already decided) whose view has no log for it yet. Pass views with the loaded logs
+ * merged in, so a loaded log is never asked for again.
+ */
+export function tournamentLogsDue(actors: readonly PublicActor[], views: ReadonlyMap<string, TournamentView>, displayNowMs: number): string[] {
+  const due: string[] = [];
+  for (const [id, entrants] of entrantsByTournament(actors)) {
+    const view = views.get(id);
+    if (!view) continue;
+    for (const bout of renderTournament(view, displayNowMs).rounds.flatMap(r => r.bouts)) {
+      if (bout.log || (bout.status !== 'fighting' && bout.status !== 'decided')) continue;
+      if (bout.sides.length === 2 && bout.sides.every(side => side !== null && entrants.has(side.gladiatorId))) due.push(bout.id);
+    }
   }
   return due;
 }

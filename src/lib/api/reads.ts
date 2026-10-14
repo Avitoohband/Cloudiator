@@ -1,11 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
-import type { PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type { BattleLog, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
   OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView,
   WorldSnapshot,
 } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
+import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
 
 export class GatewayReadError extends Error {
   constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
@@ -113,12 +114,23 @@ export async function readStandings(client: SupabaseClient, league: LeagueId, cu
     nextCursor: page.length === STANDINGS_PAGE ? `${season}:${page.at(-1)!.rank}` : null };
 }
 
-const TOURNAMENT_ID = /^tournament:(\d{1,15}):(bronze|silver|gold|champion)$/;
 const PAGE = 50;
-/** The lookup id of a league's tournament in a slot: Task 19's graph id, `tournament:<slot>:<league>`. */
-export function tournamentLookupId(slotIndex: number, league: LeagueId): string {
-  if (!Number.isSafeInteger(slotIndex) || slotIndex < 0 || !LEAGUES.includes(league)) throw new RangeError('Invalid tournament lookup');
-  return `tournament:${slotIndex}:${league}`;
+/**
+ * The result fields a polled tournament read needs, by PostgREST JSON-path selection on `result`: participants, winner,
+ * bye and the fight summary (duration, victory and tie-break reasons). Never the battle log (2b review I1): a late
+ * 50-entrant view carried about half a megabyte of logs on every poll. A log loads on demand (`readTournamentLog`).
+ */
+const POLLED_RESULT = 'bout_id,ordinal,participants:result->participants,winnerId:result->>winnerId,bye:result->bye,'
+  + 'durationMs:result->battleLog->durationMs,victoryReason:result->battleLog->>victoryReason,tieBreakReason:result->battleLog->>tieBreakReason';
+type PolledResultRow = { bout_id: string; ordinal: number; participants: TournamentEntrant[]; winnerId: GladiatorId; bye: boolean;
+  durationMs: unknown; victoryReason: unknown; tieBreakReason: unknown };
+/** A polled row as the view's revealed result; the stage core checks it is well formed before showing it. */
+function polledResult(row: PolledResultRow): NonNullable<TournamentBout['revealedResult']> {
+  const result: NonNullable<TournamentBout['revealedResult']> = { participants: row.participants, winnerId: row.winnerId, bye: row.bye };
+  if (row.durationMs != null || row.victoryReason != null || row.tieBreakReason != null) {
+    result.fight = { durationMs: row.durationMs, victoryReason: row.victoryReason, tieBreakReason: row.tieBreakReason ?? null } as NonNullable<typeof result.fight>;
+  }
+  return result;
 }
 type TournamentRow = { id: string; slot_index: number; league: LeagueId; starts_at_ms: number; ends_at_ms: number; status: 'active' | 'insufficient-entrants';
   entrants: TournamentEntrant[]; bracket: TournamentView['bracket']; bouts: Omit<TournamentBout, 'revealedResult'>[]; reveal_at_ms: number[] };
@@ -129,7 +141,8 @@ const byName = (a: TournamentEntrant, b: TournamentEntrant) => (a.name < b.name 
  * (by name, never in the private seeded order), the bracket's seeded first round from the start, each bout's result only
  * once it is due, and the placements, with their public completion only, once every entrant has settled. Its status is
  * `processing` while a due result or the settlement is missing, so a delay is never shown as a result. Results and
- * placements are read in pages of at most 50. Never rewards, receipts, ratings or seeds.
+ * placements are read in pages of at most 50. Never rewards, receipts, ratings, seeds or battle logs (each result carries
+ * its fight summary; `readTournamentLog` loads one bout's log on demand).
  */
 export async function readTournament(client: SupabaseClient, id: string): Promise<TournamentView> {
   if (typeof id !== 'string' || !TOURNAMENT_ID.test(id)) throw new GatewayReadError('not-found');
@@ -138,9 +151,9 @@ export async function readTournament(client: SupabaseClient, id: string): Promis
     .select('id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms').eq('id', id).maybeSingle());
   const results = new Map<string, TournamentBout['revealedResult']>();
   for (let ordinal = -1; ;) {
-    const rows = checked(await client.from('tournament_bout_results').select('bout_id,ordinal,result').eq('tournament_id', id)
-      .lte('reveal_at_ms', clock.serverNowMs).gt('ordinal', ordinal).order('ordinal').limit(PAGE));
-    for (const r of rows) results.set(r.bout_id, r.result);
+    const rows = checked(await client.from('tournament_bout_results').select(POLLED_RESULT).eq('tournament_id', id)
+      .lte('reveal_at_ms', clock.serverNowMs).gt('ordinal', ordinal).order('ordinal').limit(PAGE)) as unknown as PolledResultRow[];
+    for (const r of rows) results.set(r.bout_id, polledResult(r));
     if (rows.length < PAGE) break;
     ordinal = rows.at(-1)!.ordinal;
   }
@@ -177,4 +190,19 @@ export async function readTournament(client: SupabaseClient, id: string): Promis
     : clock.serverNowMs >= Number(row.ends_at_ms) || dueMissing ? 'processing' : 'active';
   return { id: row.id, league: row.league, slotIndex: Number(row.slot_index), startsAtMs: Number(row.starts_at_ms), endsAtMs: Number(row.ends_at_ms),
     status, bracket: row.bracket, entrants, bouts, placements };
+}
+
+/**
+ * One revealed tournament bout's battle log, on demand (2b review I1): only once its public result is due, under the same
+ * RLS due-time filter as the polled read and also filtered by the sampled server time. A malformed bout id never reaches
+ * a query. A bout that is not due, not published or a bye (no log) is `not-found`. Results are immutable, so callers
+ * cache what this returns.
+ */
+export async function readTournamentLog(client: SupabaseClient, boutId: string): Promise<BattleLog> {
+  if (typeof boutId !== 'string' || !TOURNAMENT_BOUT_ID.test(boutId)) throw new GatewayReadError('not-found');
+  const clock = await readRevision(client);
+  const row = checked<{ battleLog: BattleLog | null }>(await client.from('tournament_bout_results').select('battleLog:result->battleLog')
+    .eq('bout_id', boutId).lte('reveal_at_ms', clock.serverNowMs).maybeSingle());
+  if (!row.battleLog || typeof row.battleLog !== 'object') throw new GatewayReadError('not-found');
+  return row.battleLog;
 }

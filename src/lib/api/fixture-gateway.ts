@@ -4,6 +4,7 @@ import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battle
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
 import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
 import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
+import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
 export const FIXTURE_REPLAYS: readonly { activityId: string; label: string }[] = REPLAY_SAMPLES;
@@ -39,8 +40,16 @@ export function createFixtureGateway(): GameGateway {
     // Pages of at most 50 rows; the optional cursor (absent from GameGateway.standings) selects the next page.
     standings: async (league, cursor?: string) => arenaStandingsPage(league, cursor),
     // Public tournament views, each projected at its own server time (no clock here): the panel shows only the results
-    // its display time has reached. Every other tournament id stays unavailable.
-    tournament: async id => (Object.hasOwn(TOURNAMENT_VIEWS_BY_ID, id) ? structuredClone(TOURNAMENT_VIEWS_BY_ID[id]) : unavailable()),
+    // its display time has reached. As the live read, a view carries each fought bout's fight summary and no battle log;
+    // the log of a revealed bout loads on demand. Every other tournament id stays unavailable.
+    tournament: async id => (Object.hasOwn(TOURNAMENT_VIEWS_BY_ID, id) ? withoutTournamentLogs(structuredClone(TOURNAMENT_VIEWS_BY_ID[id])) : unavailable()),
+    tournamentLog: async boutId => {
+      const id = typeof boutId === 'string' ? boutId.split(':').slice(0, 3).join(':') : '';
+      if (!Object.hasOwn(TOURNAMENT_VIEWS_BY_ID, id)) return unavailable();
+      const log = TOURNAMENT_VIEWS_BY_ID[id].bouts.find(b => b.id === boutId)?.revealedResult?.battleLog;
+      if (!log) throw Object.assign(new Error('This bout has no revealed log in the fixture preview.'), { code: 'not-found' as const });
+      return structuredClone(log);
+    },
     market: unavailable, recent: unavailable,
   };
 }

@@ -6,9 +6,10 @@ import { npcPostTiles } from '@/game/npcs';
 import { layoutCamp, planActorRoutine } from '@/game/actors';
 import { ringTiles } from '@/game/arena-layout';
 import {
-  TOURNAMENT_RETRY_MS, assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, spectatorSpots, tournamentIdOfActor,
-  tournamentReadsDue, type TournamentRead,
+  TOURNAMENT_RETRY_MS, assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, recordTournamentRead, spectatorSpots,
+  tournamentIdOfActor, tournamentLogsDue, tournamentReadsDue, type TournamentRead,
 } from '@/game/tournament-camp';
+import { withTournamentLogs, withoutTournamentLogs } from '@/game/tournament-stage';
 import { scheduleArenaRings, type CampFight } from '@/game/arena-layout';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { tournamentCampActors } from '../fixtures/tournament-build';
@@ -161,5 +162,91 @@ describe('tournament reads for the camp', () => {
     expect(tournamentReadsDue(openingActors, stale, o + 25 * MIN + 30_000)).toEqual([tournamentId('opening')]);
     // Only tournament entrants count.
     expect(tournamentReadsDue(ACTORS.map(a => ({ ...a, location: 'arena' as const })), known([]), S + 5 * MIN)).toEqual([]);
+  });
+});
+
+describe('one malformed camp actor (2b review M3)', () => {
+  // Server projections constrain the league and the start, but the camp must never throw for one actor: an entrant
+  // whose slot or league cannot name a tournament simply has none, and every other entrant keeps its tournament.
+  const broken: PublicActor[] = [
+    { ...ACTORS[0], gladiatorId: 'bad-league', name: 'Bad league', league: 'platinum' as never },
+    { ...ACTORS[1], gladiatorId: 'bad-slot', name: 'Bad slot', startsAtMs: Number.NaN },
+    { ...ACTORS[2], gladiatorId: 'negative-slot', name: 'Negative slot', startsAtMs: -4_800_000 },
+  ];
+  const all = [...broken, ...ACTORS];
+
+  it('gives that actor no tournament and carries on with the rest', () => {
+    for (const actor of broken) expect(tournamentIdOfActor(actor), actor.name).toBeNull();
+    expect(() => campTournamentFights(all, VIEWS, S + 30 * MIN)).not.toThrow();
+    expect(campTournamentFights(all, VIEWS, S + 30 * MIN)).toEqual(campTournamentFights(ACTORS, VIEWS, S + 30 * MIN));
+    expect([...campTournamentRoles(all, VIEWS, S + 30 * MIN)]).toEqual([...campTournamentRoles(ACTORS, VIEWS, S + 30 * MIN)]);
+    expect(tournamentReadsDue(all, new Map(), S + 5 * MIN)).toEqual([tournamentId('completed')]);
+    expect(tournamentLogsDue(all, new Map([[tournamentId('completed'), withoutTournamentLogs(TOURNAMENT_VIEWS.completed)]]), S + 30 * MIN))
+      .toEqual(tournamentLogsDue(ACTORS, new Map([[tournamentId('completed'), withoutTournamentLogs(TOURNAMENT_VIEWS.completed)]]), S + 30 * MIN));
+  });
+});
+
+describe('processing re-reads in the camp (2b review I1)', () => {
+  const tid = tournamentId('completed');
+  /** The completed view as a server reports it while a settlement or reveal is stuck: processing. */
+  const stuck: TournamentView = { ...TOURNAMENT_VIEWS.completed, status: 'processing' };
+  const at = (seconds: number) => S + 61 * MIN + seconds * 1000;
+  const due = (read: TournamentRead, seconds: number, options?: { focused?: boolean }) =>
+    tournamentReadsDue(ACTORS, new Map([[tid, read]]), at(seconds), options).includes(tid);
+
+  it('backs off 30 s, 60 s, 120 s, 240 s, then every 5 minutes, and resets once the status changes', () => {
+    // From minute 61 the final is revealed and only minute 80 is still a reveal mark, so only processing retries are due.
+    let read = recordTournamentRead(undefined, stuck, at(0));
+    expect(read.processingReads).toBe(1);
+    let t = 0;
+    for (const wait of [30, 60, 120, 240, 300, 300]) {
+      expect(due(read, t + wait - 0.001), `before ${wait} s`).toBe(false);
+      expect(due(read, t + wait), `after ${wait} s`).toBe(true);
+      t += wait;
+      read = recordTournamentRead(read, stuck, at(t));
+    }
+    expect(read.processingReads).toBe(7);
+    // A read that is no longer processing resets the schedule: no processing retry, and the next one starts at 30 s.
+    read = recordTournamentRead(read, TOURNAMENT_VIEWS.completed, at(t));
+    expect(read.processingReads).toBe(0);
+    expect(due(read, t + 60)).toBe(false);
+    read = recordTournamentRead(read, stuck, at(t + 10));
+    expect([read.processingReads, due(read, t + 10 + 29.999), due(read, t + 10 + 30)]).toEqual([1, false, true]);
+    // A failed read keeps the previous view and its count; the failure retry stays at 30 s.
+    const failed = recordTournamentRead(read, null, at(t + 40));
+    expect(failed).toEqual({ readAtMs: at(t + 40), view: stuck, processingReads: 1 });
+    expect(TOURNAMENT_RETRY_MS).toBe(30_000);
+  });
+
+  it('re-reads a processing tournament once on focus, whatever is left of its wait, and never a settled one', () => {
+    let read = recordTournamentRead(undefined, stuck, at(0));
+    for (const t of [30, 90, 210]) read = recordTournamentRead(read, stuck, at(t));
+    expect([due(read, 220), due(read, 220, { focused: true })]).toEqual([false, true]);
+    const fine = recordTournamentRead(undefined, TOURNAMENT_VIEWS.completed, at(0));
+    expect(due(fine, 10, { focused: true })).toBe(false);
+  });
+});
+
+describe('battle logs in the camp load on demand (2b review I1)', () => {
+  const tid = tournamentId('completed');
+  const polled = withoutTournamentLogs(TOURNAMENT_VIEWS.completed);
+  const logOf = (boutId: string) => TOURNAMENT_VIEWS.completed.bouts.find(b => b.id === boutId)!.revealedResult!.battleLog!;
+
+  it('asks for the log of each revealed bout of two camp entrants, once loaded never again, and stages it then', () => {
+    expect(polled.bouts.every(b => !b.revealedResult?.battleLog)).toBe(true);
+    const views = new Map([[tid, polled]]);
+    expect(tournamentLogsDue(ACTORS, views, S + 19.99 * MIN)).toEqual([]);
+    const round1 = TOURNAMENT_VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.id);
+    expect(tournamentLogsDue(ACTORS, views, S + 20 * MIN).sort()).toEqual([...round1].sort());
+    // Without its log a revealed bout is not staged in a ring yet.
+    expect(campTournamentFights(ACTORS, views, S + 20 * MIN)).toEqual([]);
+    const loaded = new Map(round1.map(id => [id, logOf(id)]));
+    const merged = new Map([[tid, withTournamentLogs(polled, loaded)]]);
+    expect(tournamentLogsDue(ACTORS, merged, S + 20 * MIN)).toEqual([]);
+    expect(campTournamentFights(ACTORS, merged, S + 20 * MIN)).toEqual(campTournamentFights(ACTORS, VIEWS, S + 20 * MIN));
+    // Round 2 adds only its own two bouts; a bout with an entrant outside the camp needs no log.
+    expect(tournamentLogsDue(ACTORS, merged, S + 40 * MIN)).toHaveLength(2);
+    const withoutAster = ACTORS.filter(a => a.gladiatorId !== id('aster'));
+    expect(tournamentLogsDue(withoutAster, views, S + 20 * MIN)).toHaveLength(3);
   });
 });

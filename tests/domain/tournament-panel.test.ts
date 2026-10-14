@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { TournamentView } from '@contracts/reads';
-import { renderTournament } from '@/game/tournament-stage';
-import { RegistrationView, TournamentBracketView, TournamentScheduleView, type BracketModel, type RegistrationModel } from '@/features/tournaments/TournamentPanel';
+import { renderTournament, tournamentPreparing, withoutTournamentLogs } from '@/game/tournament-stage';
+import {
+  RegistrationView, TournamentBracketView, TournamentNotice, TournamentScheduleView, type BracketModel, type RegistrationModel,
+} from '@/features/tournaments/TournamentPanel';
 import { viewerText } from '@/features/tournaments/tournament-text';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
@@ -222,5 +224,66 @@ describe('fixture samples', () => {
     expect([shown('pair').status, shown('pair').championId]).toEqual(['completed', ASTER]);
     expect(shown('insufficient').status).toBe('insufficient-entrants');
     expect([shown('upcoming').status, shown('upcoming').entrants]).toEqual(['scheduled', []]);
+  });
+});
+
+describe('replays load on demand (2b review I1)', () => {
+  const polled = (key: TournamentKey) => withoutTournamentLogs(TOURNAMENT_VIEWS[key]);
+  const final = TOURNAMENT_VIEWS.completed.bouts.find(b => b.round === 3)!;
+
+  it('offers a replay of every completed bout of a polled view, which carries no log', () => {
+    const html = bracket('completed', 30, { round: 1 }, polled('completed'));
+    expect(count(html, '>Watch replay<')).toBe(4);
+    // Bouts in progress still name no winner and offer no replay; their timing comes from the fight summary.
+    const live = bracket('completed', 20.1, { round: 1 }, polled('completed'));
+    expect(count(text(live), 'Bout in progress')).toBe(4);
+    expect(live).not.toContain('Watch replay');
+    // How the winner won comes from the summary too.
+    expect(text(bracket('pair', 79, {}, polled('pair')))).toContain('Both fell at 0 HP; a seeded tie-break decided it.');
+  });
+
+  it('says the replay is loading, or cannot be loaded, until its log arrives, and can be closed either way', () => {
+    const loading = bracket('completed', 85, { replayBoutId: final.id, replayStatus: 'loading' }, polled('completed'));
+    expect(text(loading)).toContain('Replay · Final, bout 1');
+    expect(text(loading)).toContain('Loading the replay…');
+    expect(loading).toContain('>Close replay<');
+    expect(loading).not.toContain('Combat log');
+    const failed = bracket('completed', 85, { replayBoutId: final.id, replayStatus: 'failed' }, polled('completed'));
+    expect(text(failed)).toContain('This replay cannot be loaded right now. Try again shortly.');
+    expect(failed).toContain('>Close replay<');
+    // Once the log is merged the replay plays as before.
+    expect(text(bracket('completed', 85, { replayBoutId: final.id, replayStatus: null }))).toContain('Combat log');
+  });
+});
+
+describe('the tournament being prepared (2b review M4)', () => {
+  const slot = TOURNAMENTS.completed.startsAtMs / 4_800_000;
+  const tid = tournamentId('completed');
+  const start = TOURNAMENTS.completed.startsAtMs;
+
+  it('treats a missing view of the running tournament slot as being prepared until the viewer’s slot is published', () => {
+    // Between the cutoff and phase 8 the viewer's processed slot is still the previous one.
+    expect(tournamentPreparing(tid, start, slot - 1)).toBe(true);
+    expect(tournamentPreparing(tid, start + 121_000, slot - 1)).toBe(true);
+    expect(tournamentPreparing(tid, start + 80 * MIN - 1, slot - 1)).toBe(true);
+    // Once published, a missing view means no tournament in this league; before the cutoff and after the slot it is
+    // never "being prepared"; nor for another slot's tournament, a malformed id or without a gladiator.
+    expect(tournamentPreparing(tid, start + 121_000, slot)).toBe(false);
+    expect(tournamentPreparing(tid, start - 1, slot - 1)).toBe(false);
+    expect(tournamentPreparing(tid, start + 80 * MIN, slot - 1)).toBe(false);
+    expect(tournamentPreparing(tournamentId('pair'), start + 60_000, slot - 1)).toBe(false);
+    expect(tournamentPreparing('tournament:x:bronze', start + 60_000, slot - 1)).toBe(false);
+    expect(tournamentPreparing(tid, start + 60_000, null)).toBe(false);
+  });
+
+  it('says “Tournament being prepared” in place of “No tournament matches” in that window', () => {
+    const notice = (failure: 'not-found' | 'unavailable', preparing: boolean) =>
+      text(renderToStaticMarkup(createElement(TournamentNotice, { failure, preparing })));
+    expect(notice('not-found', true)).toContain('Tournament being prepared');
+    expect(notice('not-found', true)).toContain('Entrants and the bracket appear here once this slot’s entries are processed, usually within about two minutes of the start.');
+    expect(notice('not-found', true)).not.toContain('No tournament matches');
+    expect(notice('not-found', false)).toContain('No tournament matches this selection.');
+    expect(notice('unavailable', true)).toContain('Tournament brackets cannot be loaded right now.');
+    expect(renderToStaticMarkup(createElement(TournamentNotice, { failure: 'not-found', preparing: true }))).toContain('role="status"');
   });
 });

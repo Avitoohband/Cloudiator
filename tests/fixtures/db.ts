@@ -29,6 +29,20 @@ export async function account(provider = 'google') {
   const client = createClient(url, process.env.LOCAL_ANON_KEY!, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
   return { id, token, client };
 }
+/**
+ * A Data API client signed in with `token` that records every response body it receives (decoded JSON text and its
+ * UTF-8 size), so a test can measure what a read transfers. Bodies stay in memory; nothing is logged here.
+ */
+export function recordingClient(token: string) {
+  const responses: { path: string; bytes: number; text: string }[] = [];
+  const client = createClient(url, process.env.LOCAL_ANON_KEY!, { global: { headers: { Authorization: `Bearer ${token}` }, fetch: async (input, init) => {
+    const response = await fetch(input, init);
+    const text = await response.clone().text();
+    responses.push({ path: new URL(String(input instanceof Request ? input.url : input)).pathname, bytes: Buffer.byteLength(text, 'utf8'), text });
+    return response;
+  } }, auth: { persistSession: false, autoRefreshToken: false } });
+  return { client, responses };
+}
 export async function resetIdentity() {
   // No schema creation here: missing schema must produce an honest RED result.
   await sql`truncate public.gladiators cascade`;

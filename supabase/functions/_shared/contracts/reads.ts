@@ -56,10 +56,15 @@ export type StandingRow = {
 };
 export type StandingsPage = CursorPage<StandingRow> & { league: LeagueId; seasonId: string; archived: boolean };
 export type TournamentEntrant = { gladiatorId: GladiatorId; name: string; classId: ClassId };
+/** A fought bout's public facts from its log: how long it plays and how its winner won (Task 19 phase 2b review I1). */
+export type TournamentFightSummary = Pick<BattleLog, 'durationMs' | 'victoryReason' | 'tieBreakReason'>;
 export type TournamentBout = {
   id: string; round: number; position: number; parentBoutIds: string[];
-  /** Null means not revealed, including participants in future rounds. */
-  revealedResult: { participants: TournamentEntrant[]; winnerId: GladiatorId; bye: boolean; battleLog?: BattleLog } | null;
+  /**
+   * Null means not revealed, including participants in future rounds. A polled tournament read carries a fought bout's
+   * `fight` summary and never its `battleLog`, which loads on demand (`GameGateway.tournamentLog`); a bye has neither.
+   */
+  revealedResult: { participants: TournamentEntrant[]; winnerId: GladiatorId; bye: boolean; fight?: TournamentFightSummary; battleLog?: BattleLog } | null;
 };
 /**
  * The bracket's shape and its seeded first round, public from the start (no result): `slots` has `size` seats in bracket

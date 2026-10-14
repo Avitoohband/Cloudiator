@@ -16,13 +16,17 @@
 // bouts read "Result preparing"; a due round without published results is "delayed" (the tournament shows as
 // processing), never an invented result; later rounds name sides from the winners already shown. Nothing here computes
 // a result, rating or reward, and no Phaser, React, clock or randomness is used.
+//
+// Polled views carry no battle logs (Task 19 phase 2b review I1): a fought result carries its fight summary (duration,
+// victory and tie-break reasons), which times the fight and explains its winner; its log loads on demand and is merged
+// in with `withTournamentLogs` when the bout is watched or animated.
 import type { LeagueId } from '@contracts/commands';
 import type { BattleLog } from '@contracts/events';
-import type { TournamentBout, TournamentEntrant, TournamentView } from '@contracts/reads';
+import type { TournamentBout, TournamentEntrant, TournamentFightSummary, TournamentView } from '@contracts/reads';
 import { slotAt } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import { isTournamentSlot } from '@domain/tournament';
-import { tournamentLookupId } from '../lib/api/reads';
+import { tournamentLookupId, tournamentSlotOf } from '../lib/tournament-id';
 
 /** One tournament lasts one 80-minute slot; its rewards settle at the end. */
 export const TOURNAMENT_DURATION_MS = RULES_V1.tournament.durationMs;
@@ -78,9 +82,34 @@ export function bracketShape(entrants: number): BracketShape | null {
   return { size, rounds, byes: size - entrants };
 }
 
-/** The id of a league's tournament in a slot: the reads layer's lookup id (Task 19's graph id, `tournament:<slot>:<league>`). */
+/** The id of a league's tournament in a slot: Task 19's graph id, `tournament:<slot>:<league>` (the pure lookup id). */
 export function tournamentIdFor(slotIndex: number, league: LeagueId): string {
   return tournamentLookupId(slotIndex, league);
+}
+
+/** A tournament view is asked for again this often while a read failed or, at first, while it is processing. */
+export const TOURNAMENT_RETRY_MS = 30_000;
+/** The longest wait between processing re-reads. */
+export const TOURNAMENT_RETRY_MAX_MS = 300_000;
+/**
+ * The wait before the next re-read of a tournament that is still processing, after `retries` processing re-reads in a
+ * row: 30 s, 60 s, 120 s, 240 s, then every 5 minutes (2b review I1), so a stuck settlement is not re-read every 30 s.
+ */
+export function processingRetryDelay(retries: number): number {
+  const n = Number.isFinite(retries) && retries > 0 ? Math.floor(retries) : 0;
+  return Math.min(TOURNAMENT_RETRY_MAX_MS, TOURNAMENT_RETRY_MS * 2 ** Math.min(n, 10));
+}
+
+/**
+ * Whether a missing view (`not-found`) of tournament `id` means it is still being prepared (2b review M4): the display
+ * time is inside that tournament's slot and the viewer's own processed slot is still the previous one, i.e. phase 8 has
+ * not published the slot yet (about 61–121 s after the cutoff). Once the viewer's slot is published, a missing view
+ * means no tournament in that league. Never before the cutoff, after the slot, for a malformed id or without a gladiator.
+ */
+export function tournamentPreparing(id: string, displayNowMs: number, processedSlotIndex: number | null): boolean {
+  const slot = tournamentSlotOf(id);
+  if (slot === null || processedSlotIndex === null || !Number.isFinite(displayNowMs) || displayNowMs < 0) return false;
+  return tournamentWindowAt(displayNowMs)?.slotIndex === slot && processedSlotIndex < slot;
 }
 
 const roundLabel = (round: number, rounds: number) =>
@@ -107,8 +136,10 @@ export type TournamentBoutState = {
   /** Only once decided (or a bye). */
   readonly winnerId: string | null;
   readonly loserId: string | null;
-  /** The revealed battle log (shared by reference), from the reveal time on. */
+  /** The revealed battle log (shared by reference), from the reveal time on, once loaded (polled views carry none). */
   readonly log: BattleLog | null;
+  /** How the winner won (from the log, or the polled fight summary); only once decided. */
+  readonly fight: TournamentFightSummary | null;
   readonly fightEndsAtMs: number | null;
   /** Display time since the bout's reveal; a scene seeks its playback to it. */
   readonly elapsedMs: number | null;
@@ -169,9 +200,26 @@ function freeze<V>(value: V, shared: ReadonlySet<object>): V {
 }
 
 type Result = NonNullable<TournamentBout['revealedResult']>;
+const VICTORY_REASONS: readonly unknown[] = ['defeat', 'health-fraction', 'tie-break'];
+const TIE_BREAK_REASONS: readonly unknown[] = ['simultaneous-defeat', 'equal-health-fraction', null];
+/** A fight summary: a nonnegative finite duration and known victory and tie-break reasons. */
+function wellFormedFight(fight: unknown): fight is TournamentFightSummary {
+  if (!fight || typeof fight !== 'object') return false;
+  const { durationMs, victoryReason, tieBreakReason } = fight as Record<string, unknown>;
+  return typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs >= 0 && VICTORY_REASONS.includes(victoryReason)
+    && TIE_BREAK_REASONS.includes(tieBreakReason ?? null);
+}
+/** A log agrees with a fought result: the same winner and the same two gladiators, in either order. */
+function logAgrees(log: BattleLog, result: Pick<Result, 'participants' | 'winnerId'>): boolean {
+  if (!log || typeof log !== 'object' || log.winnerId !== result.winnerId || !Array.isArray(log.participants) || log.participants.length !== 2) return false;
+  const ids = result.participants.map(p => p?.gladiatorId);
+  const logged = log.participants.map(p => p?.gladiatorId);
+  return new Set(logged).size === 2 && logged.every(id => typeof id === 'string' && ids.includes(id));
+}
 /**
- * A published result names one entrant for a bye or two for a fight, its winner among them, and a log that agrees: the
- * same winner and the same two gladiators, in either order (the result's order names the sides).
+ * A published result names one entrant for a bye or two for a fight, and its winner among them. A bye carries no log and
+ * no fight summary; a fought result's log, when present, agrees with it (the result's order names the sides), and its
+ * fight summary, when present, is well formed.
  */
 function wellFormed(result: TournamentBout['revealedResult'], entrants: ReadonlySet<string>): result is Result {
   if (!result || typeof result !== 'object' || !Array.isArray(result.participants)) return false;
@@ -179,11 +227,40 @@ function wellFormed(result: TournamentBout['revealedResult'], entrants: Readonly
   const count = result.bye ? 1 : 2;
   if (ids.length !== count || new Set(ids).size !== count || !ids.every(id => entrants.has(id)) || !ids.includes(result.winnerId)) return false;
   const log = result.battleLog;
-  if (result.bye) return log == null;
-  if (log == null) return true;
-  if (log.winnerId !== result.winnerId || !Array.isArray(log.participants) || log.participants.length !== 2) return false;
-  const logged = log.participants.map(p => p?.gladiatorId);
-  return new Set(logged).size === 2 && logged.every(id => typeof id === 'string' && ids.includes(id));
+  if (result.bye) return log == null && result.fight == null;
+  if (result.fight != null && !wellFormedFight(result.fight)) return false;
+  return log == null || logAgrees(log, result);
+}
+const fightOf = (log: BattleLog): TournamentFightSummary => ({ durationMs: log.durationMs, victoryReason: log.victoryReason, tieBreakReason: log.tieBreakReason });
+
+/**
+ * The polled shape of a view (what the live read returns): each fought result's battle log replaced by its fight
+ * summary. Byes and unrevealed bouts are unchanged. A copy; the input keeps its logs.
+ */
+export function withoutTournamentLogs(view: TournamentView): TournamentView {
+  return { ...view, bouts: view.bouts.map(bout => {
+    const result = bout.revealedResult;
+    if (!result?.battleLog) return { ...bout, parentBoutIds: [...bout.parentBoutIds], revealedResult: result ? { ...result } : null };
+    const { battleLog, ...rest } = result;
+    return { ...bout, parentBoutIds: [...bout.parentBoutIds], revealedResult: { ...rest, fight: rest.fight ?? fightOf(battleLog) } };
+  }) };
+}
+
+/**
+ * The view with the loaded logs of its published fought bouts merged in: a log joins only its own bout, only when the
+ * bout has none yet and only when it agrees with the published result. The same view object when nothing joins.
+ */
+export function withTournamentLogs(view: TournamentView, logs: ReadonlyMap<string, BattleLog>): TournamentView {
+  if (logs.size === 0 || !Array.isArray(view.bouts)) return view;
+  let changed = false;
+  const bouts = view.bouts.map(bout => {
+    const result = bout.revealedResult;
+    const log = logs.get(bout.id);
+    if (!log || !result || result.bye || result.battleLog || !Array.isArray(result.participants) || !logAgrees(log, result)) return bout;
+    changed = true;
+    return { ...bout, revealedResult: { ...result, battleLog: log } };
+  });
+  return changed ? { ...view, bouts } : view;
 }
 
 /**
@@ -232,28 +309,30 @@ export function renderTournament(view: TournamentView, displayNowMs: number, opt
       if (seated?.length === 1) {
         // A bye is public from the start: its entrant advances at once, with no fight.
         shown.set(bout.id, seated[0]);
-        return { ...base, status: 'bye', sides: [copy(seated[0])], winnerId: seated[0], loserId: null, log: null, fightEndsAtMs: null, elapsedMs: null };
+        return { ...base, status: 'bye', sides: [copy(seated[0])], winnerId: seated[0], loserId: null, log: null, fight: null, fightEndsAtMs: null, elapsedMs: null };
       }
       const published = due && wellFormed(bout.revealedResult, ids) ? bout.revealedResult! : null;
       // A published round-1 result must be exactly its seeded pair (and a bye there, when seeded, is never a fight).
       const result = published && (!seated || (!published.bye && published.participants.every(p => seated.includes(p.gladiatorId)))) ? published : null;
       if (!result) {
         const sides = round === 1 ? (seated ? seated.map(copy) : []) : bout.parentBoutIds.map(parent => (shown.has(parent) ? copy(shown.get(parent)!) : null));
-        return { ...base, status: due ? 'delayed' : 'preparing', sides, winnerId: null, loserId: null, log: null, fightEndsAtMs: null, elapsedMs: null };
+        return { ...base, status: due ? 'delayed' : 'preparing', sides, winnerId: null, loserId: null, log: null, fight: null, fightEndsAtMs: null, elapsedMs: null };
       }
       const sides = result.participants.map(p => copy(p.gladiatorId));
       if (result.bye) {
         shown.set(bout.id, result.winnerId);
-        return { ...base, status: 'bye', sides, winnerId: result.winnerId, loserId: null, log: null, fightEndsAtMs: null, elapsedMs: null };
+        return { ...base, status: 'bye', sides, winnerId: result.winnerId, loserId: null, log: null, fight: null, fightEndsAtMs: null, elapsedMs: null };
       }
       const log = result.battleLog ?? null;
       if (log) shared.add(log);
-      const fightEndsAtMs = revealAtMs + (log?.durationMs ?? 0);
+      // The fight plays for its logged duration, known from the log once loaded or from the polled fight summary.
+      const fight = log ? fightOf(log) : result.fight ? { ...result.fight, tieBreakReason: result.fight.tieBreakReason ?? null } : null;
+      const fightEndsAtMs = revealAtMs + (fight?.durationMs ?? 0);
       const elapsedMs = t - revealAtMs;
-      if (t < fightEndsAtMs) return { ...base, status: 'fighting', sides, winnerId: null, loserId: null, log, fightEndsAtMs, elapsedMs };
+      if (t < fightEndsAtMs) return { ...base, status: 'fighting', sides, winnerId: null, loserId: null, log, fight: null, fightEndsAtMs, elapsedMs };
       shown.set(bout.id, result.winnerId);
       const loserId = sides.find(s => s.gladiatorId !== result.winnerId)!.gladiatorId;
-      return { ...base, status: 'decided', sides, winnerId: result.winnerId, loserId, log, fightEndsAtMs, elapsedMs };
+      return { ...base, status: 'decided', sides, winnerId: result.winnerId, loserId, log, fight, fightEndsAtMs, elapsedMs };
     });
     return { round, label: roundLabel(round, reveals.length), revealAtMs, due, delayed: due && bouts.some(b => b.status === 'delayed'), bouts };
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { readRecent, readStandings, readTimeline, readTournament, readWorld, tournamentLookupId } from '../src/lib/api/reads';
+import { readRecent, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
+import { tournamentLookupId } from '../src/lib/tournament-id';
 
 function transport(rows: Record<string, unknown>, calls: string[]) {
   return createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async (input) => {
@@ -93,7 +94,9 @@ describe('protected Data API adapters', () => {
   const result = { participants: [entrant('g1', 'Aster'), entrant('g2', 'Varro')], winnerId: 'g1', bye: false };
   const completion = (activity: string, outcome: string) => ({ activityId: activity, resolvedKind: 'tournament', result: outcome,
     success: outcome === 'victory', settledAtMs: S + 4_800_000, replayExpiry: { state: 'expired' } });
-  const due = [{ bout_id: view.bouts[0].id, ordinal: 0, result }];
+  // Polled rows carry only the result fields the view needs (JSON-path selection), never the battle log.
+  const due = [{ bout_id: view.bouts[0].id, ordinal: 0, participants: result.participants, winnerId: 'g1', bye: false,
+    durationMs: null, victoryReason: null, tieBreakReason: null }];
   it('reads a tournament from its public rows: the seeded first round, due results only, and placements once every entrant settled', async () => {
     const calls: string[] = [];
     // Before round one is due: the bracket and no result; active.
@@ -105,11 +108,20 @@ describe('protected Data API adapters', () => {
     const results = calls.find(c => c.includes('tournament_bout_results'))!;
     expect(results).toContain(`reveal_at_ms=lte.${S + 1_000}`);
     expect(results).toContain('limit=50');
+    // Only the fields the view needs cross: participants, winner, bye and the fight summary, never the battle log itself.
+    expect(new URL(`http://local${results}`).searchParams.get('select')!.split(',')).toEqual(['bout_id', 'ordinal',
+      'participants:result->participants', 'winnerId:result->>winnerId', 'bye:result->bye', 'durationMs:result->battleLog->durationMs',
+      'victoryReason:result->battleLog->>victoryReason', 'tieBreakReason:result->battleLog->>tieBreakReason']);
     // A due round without its result is processing, never invented.
     const late = await readTournament(tournament({ tournament_views: view, tournament_bout_results: [], tournament_placements: [] }, [], S + 2_400_000), view.id);
     expect(late.status).toBe('processing');
     const shown = await readTournament(tournament({ tournament_views: view, tournament_bout_results: due, tournament_placements: [] }, [], S + 2_400_000), view.id);
     expect([shown.status, shown.bouts[0].revealedResult]).toEqual(['active', result]);
+    // A fought result carries its fight summary (duration, victory and tie-break reasons) in place of the log.
+    const fought = [{ ...due[0], durationMs: 9_000, victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' }];
+    const summarized = await readTournament(tournament({ tournament_views: view, tournament_bout_results: fought, tournament_placements: [] }, [], S + 2_400_000), view.id);
+    expect(summarized.bouts[0].revealedResult).toEqual({ ...result, fight: { durationMs: 9_000, victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' } });
+    expect(JSON.stringify(summarized)).not.toContain('battleLog');
     // One entrant settled: no placement yet, and processing after minute 80.
     const one = await readTournament(tournament({ tournament_views: view, tournament_bout_results: due,
       tournament_placements: [{ gladiator_id: 'g1', activity_id: 'a1', place: 1 }], recent_results: [{ activity_id: 'a1', summary: completion('a1', 'victory') }] },
@@ -136,5 +148,24 @@ describe('protected Data API adapters', () => {
     }
     expect(calls).toHaveLength(0);
     await expect(readTournament(tournament({ tournament_views: null }, calls, 0), 'tournament:301:bronze')).rejects.toMatchObject({ code: 'not-found' });
+  });
+  it('loads one revealed bout’s log on demand, filtered by the sampled server time as well as by RLS', async () => {
+    const id = 'tournament:301:bronze:1:0', log = { battleId: id, durationMs: 9_000, winnerId: 'g1', participants: [], events: [] };
+    const calls: string[] = [];
+    expect(await readTournamentLog(tournament({ tournament_bout_results: { battleLog: log } }, calls, S + 2_400_000), id)).toEqual(log);
+    const query = calls.find(c => c.includes('tournament_bout_results'))!;
+    expect(new URL(`http://local${query}`).searchParams.get('select')).toBe('battleLog:result->battleLog');
+    expect(query).toContain(`bout_id=eq.${id}`);
+    expect(query).toContain(`reveal_at_ms=lte.${S + 2_400_000}`);
+    // Not due (no row under RLS) or a bye (no log): not found.
+    for (const row of [null, { battleLog: null }]) {
+      await expect(readTournamentLog(tournament({ tournament_bout_results: row }, [], S), id)).rejects.toMatchObject({ code: 'not-found' });
+    }
+    // Malformed bout ids never reach a query.
+    const none: string[] = [], client = tournament({}, none, 0);
+    for (const bad of ['tournament:301:bronze', 'tournament:301:bronze:1:0,bout_id.neq.x', 'tournament:301:platinum:1:0', 'x', '']) {
+      await expect(readTournamentLog(client, bad), bad).rejects.toMatchObject({ code: 'not-found' });
+    }
+    expect(none).toHaveLength(0);
   });
 });

@@ -64,6 +64,32 @@ describe('live projection session guards', () => {
       startsAtMs: 1_444_800_000, endsAtMs: 1_449_600_000, status: 'insufficient-entrants', bracket: null, entrants: row.entrants, bouts: [], placements: [] });
     expect(paths).toEqual(['/rest/v1/world_revision','/rest/v1/tournament_views','/rest/v1/tournament_bout_results']);
   });
+  it('loads a tournament bout’s log on demand once per session: later requests share it, a failure is not kept, a new account reads again', async () => {
+    const id = 'tournament:301:gold:1:0', log = { battleId: id, durationMs: 9_000, winnerId: 'g1', participants: [], events: [] };
+    let logReads = 0, failNext = true;
+    const client=createClient('http://127.0.0.1:54321','test-key',{auth:{persistSession:false},global:{fetch:async input=>{
+      const table=new URL(String(input)).pathname.split('/').at(-1);
+      if(table==='world_revision') return new Response(JSON.stringify({revision:'1',server_now_ms:1_450_000_000,slot_index:302}),{headers:{'Content-Type':'application/json'}});
+      logReads++;
+      if(failNext){failNext=false;return new Response(JSON.stringify({code:'XX000',message:'down'}),{status:500,headers:{'Content-Type':'application/json'}});}
+      return new Response(JSON.stringify({battleLog:log}),{headers:{'Content-Type':'application/json'}});
+    }}});
+    vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first'} as Session},error:null});holder.client=client;
+    let callback!: Parameters<typeof client.auth.onAuthStateChange>[0];
+    vi.spyOn(client.auth,'onAuthStateChange').mockImplementation(handler=>{callback=handler;return {data:{subscription:{id:'test',callback:handler,unsubscribe:vi.fn()}}};});
+    const gateway=createLiveGateway();gateway.subscribeSession!(()=>{});
+    callback('INITIAL_SESSION',{user:{id:'first'},access_token:'first'} as Session);
+    await expect(gateway.tournamentLog(id)).rejects.toMatchObject({code:'unavailable'});
+    const [first, second] = await Promise.all([gateway.tournamentLog(id), gateway.tournamentLog(id)]);
+    expect(first).toEqual(log);
+    expect(second).toBe(first);
+    expect(await gateway.tournamentLog(id)).toBe(first);
+    expect(logReads).toBe(2);
+    // Another account's session starts with an empty cache.
+    callback('SIGNED_IN',{user:{id:'second'},access_token:'second'} as Session);
+    expect(await gateway.tournamentLog(id)).toEqual(log);
+    expect(logReads).toBe(3);
+  });
   it('sends the automatic-entry command to the authenticated command endpoint', async () => {
     const client=createClient('http://127.0.0.1:54321','test-key',{auth:{persistSession:false}});holder.client=client;
     vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first',

@@ -258,6 +258,70 @@ test.describe('tournament registration and brackets', () => {
     await expect(page.getByText('Tournament brackets cannot be loaded right now.')).toBeVisible();
   });
 
+  test('backs processing re-reads off from 30 s to 5 minutes, pauses them in a hidden tab, re-reads once on focus and resets when the status changes', async ({ page }) => {
+    // The late view (final revealed, placements pending) after minute 80 is a stuck settlement: processing, no mark left.
+    const reads = () => page.evaluate(() => window.__cloudiatorTournaments!.reads());
+    const at = (seconds: number) => page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('late') + 85 * MIN + seconds * 1000);
+    const settled = async (expected: number) => { await page.waitForTimeout(1200); expect(await reads()).toBe(expected); };
+    await tournamentFlow.openAtMinute(page, 'late', 85);
+    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+    // Crossing minute 80 read the view once; then only the processing back-off reads.
+    await page.waitForTimeout(1200);
+    let n = await reads();
+    let t = 0;
+    for (const wait of [30, 60, 120, 240, 300, 300]) {
+      await at(t + wait - 1);
+      await settled(n);
+      await at(t + wait);
+      await expect.poll(reads, { message: `after ${wait} s` }).toBe(n + 1);
+      n += 1;
+      t += wait;
+    }
+    // A hidden tab never reads, however long it waits; coming back reads once (focus and visibility fire together).
+    await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }));
+    await at(t + 900);
+    await settled(n);
+    await page.evaluate(() => {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    await expect.poll(reads).toBe(n + 1);
+    await settled(n + 1);
+    n += 1;
+    // Back before the end the view is not processing, which resets the back-off: the next stuck spell starts at 30 s.
+    await page.evaluate(ts => window.__cloudiatorTournaments!.freeze(ts), startOf('late') + 78 * MIN);
+    await expect(card(page).getByRole('status')).toHaveText('In progress');
+    await settled(n);
+    await at(0);
+    await expect.poll(reads).toBe(n + 1);
+    n += 1;
+    await at(29);
+    await settled(n);
+    await at(30);
+    await expect.poll(reads).toBe(n + 1);
+  });
+
+  test('loads a bout’s battle log only when its replay is watched, and only once', async ({ page }) => {
+    await tournamentFlow.openAtMinute(page, 'completed', 79);
+    const logReads = () => page.evaluate(() => window.__cloudiatorTournaments!.logReads());
+    // Every round is revealed and decided, and no log has been asked for.
+    await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
+    await expect(card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' })).toBeVisible();
+    expect(await logReads()).toBe(0);
+    await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
+    const replay = card(page).getByRole('region', { name: /^Replay · Final, bout 1$/ });
+    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
+    expect(await logReads()).toBe(1);
+    // Watching it again, and a fresh read of the view after minute 80, keep the loaded log.
+    await replay.getByRole('button', { name: 'Close replay' }).click();
+    await tournamentFlow.openAtMinute(page, 'completed', 85);
+    await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
+    await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
+    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible();
+    expect(await logReads()).toBe(1);
+  });
+
   test('reads the view again when the display clock passes a reveal', async ({ page }) => {
     await tournamentFlow.openAt(page, 'completed', revealOf('completed', 2) - 2000);
     const reads = await page.evaluate(() => window.__cloudiatorTournaments!.reads());
@@ -509,5 +573,28 @@ test.describe('tournament entrants in the camp', () => {
     await freezeCamp(page, startOf('completed') + 80 * MIN + 1000);
     await page.waitForTimeout(1500);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.tournamentReads())).toBe(2);
+  });
+
+  test('loads the battle log of each bout it stages on demand, once, from views that carry none', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openCampTournament(page, 5, false);
+    const logReads = () => page.evaluate(() => window.__cloudiatorCamp!.tournamentLogReads());
+    await page.waitForFunction(() => window.__cloudiatorCamp!.tournamentReads() === 1);
+    await page.waitForTimeout(1500);
+    // Before round 1 nothing is staged, so no log is asked for.
+    expect([await logReads(), await page.evaluate(() => window.__cloudiatorCamp!.state()!.arena.fights.length)]).toEqual([0, 0]);
+    // Round 1: its four bouts' logs load, and then the bouts are staged in rings.
+    await freezeCamp(page, revealOf('completed', 1) + 500);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.length === 4);
+    const round1 = VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.id).sort();
+    expect((await page.evaluate(() => window.__cloudiatorCamp!.tournamentLogs())).sort()).toEqual(round1);
+    expect(await logReads()).toBe(4);
+    // Later checks, and the read after the next reveal, ask only for the new round's two logs.
+    await page.waitForTimeout(1500);
+    expect(await logReads()).toBe(4);
+    await freezeCamp(page, revealOf('completed', 2) + 500);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.length === 6);
+    await page.waitForTimeout(1500);
+    expect(await logReads()).toBe(6);
   });
 });

@@ -159,20 +159,33 @@ test('fixture standings page each league at most 50 rows, and profiles carry the
   expect((await gateway.standings('bronze')).rows[0].rating).not.toBe(-1);
 });
 
-test('fixture tournaments serve each sample view by id as a copy; unknown ids stay unavailable', async () => {
+test('fixture tournaments serve each sample view by id as a copy, without logs as the live read does, and each log on demand; unknown ids stay unavailable', async () => {
   const { TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, tournamentId } = await import('../fixtures/tournaments');
   const { FIXTURE_TOURNAMENTS } = await import('../../src/lib/api/fixture-gateway');
+  const { withoutTournamentLogs } = await import('../../src/game/tournament-stage');
   const gateway = createFixtureGateway();
   expect(FIXTURE_TOURNAMENTS).toEqual(TOURNAMENT_SAMPLES);
   for (const [key, view] of Object.entries(TOURNAMENT_VIEWS)) {
     const read = await gateway.tournament(tournamentId(key as keyof typeof TOURNAMENT_VIEWS));
-    expect(read, key).toEqual(view);
+    // The polled view carries each fought bout's fight summary, never its battle log.
+    expect(read, key).toEqual(withoutTournamentLogs(view));
+    expect(JSON.stringify(read), key).not.toContain('battleLog');
     // Callers get their own copy.
     read.entrants.length = 0;
     read.placements.length = 0;
-    expect(await gateway.tournament(view.id), key).toEqual(view);
+    expect(await gateway.tournament(view.id), key).toEqual(withoutTournamentLogs(view));
+    // Each revealed fought bout's log loads on demand, as a copy; a bye or an unrevealed bout has none.
+    for (const bout of view.bouts) {
+      const log = bout.revealedResult?.battleLog;
+      if (log) {
+        const loaded = await gateway.tournamentLog(bout.id);
+        expect(loaded, bout.id).toEqual(log);
+        expect(loaded).not.toBe(log);
+      } else await expect(gateway.tournamentLog(bout.id), bout.id).rejects.toMatchObject({ code: 'not-found' });
+    }
   }
   await expect(gateway.tournament('tournament:1:bronze')).rejects.toMatchObject({ code: 'unavailable' });
+  await expect(gateway.tournamentLog('tournament:1:bronze:1:0')).rejects.toMatchObject({ code: 'unavailable' });
   // The owner's own settled tournament activity: its timeline carries its credited summary, which no public view carries.
   const { TOURNAMENT_OWNER_TIMELINES, tournamentActivityId } = await import('../fixtures/tournaments');
   const own = tournamentActivityId('completed', 'aster');

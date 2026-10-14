@@ -120,12 +120,12 @@ export function roundNote(round: TournamentRoundState, timeZone?: string): strin
   return null;
 }
 
-/** How the logged winner won. The winner is always the logged winnerId. */
+/** How the logged winner won, from its fight summary (no log needed). The winner is always the logged winnerId. */
 export function victoryText(bout: TournamentBoutState): string | null {
-  const log = bout.log;
-  if (!log || bout.status !== 'decided') return null;
-  if (log.victoryReason === 'tie-break') return log.tieBreakReason === 'simultaneous-defeat' ? 'Both fell at 0 HP; a seeded tie-break decided it.' : 'Time ran out with equal health; a seeded tie-break decided it.';
-  if (log.victoryReason === 'health-fraction') return 'Time ran out; the winner kept the larger share of health.';
+  const fight = bout.fight;
+  if (!fight || bout.status !== 'decided') return null;
+  if (fight.victoryReason === 'tie-break') return fight.tieBreakReason === 'simultaneous-defeat' ? 'Both fell at 0 HP; a seeded tie-break decided it.' : 'Time ran out with equal health; a seeded tie-break decided it.';
+  if (fight.victoryReason === 'health-fraction') return 'Time ran out; the winner kept the larger share of health.';
   const loser = bout.sides.find(s => s?.gladiatorId === bout.loserId);
   return loser ? `${loser.name} was defeated.` : null;
 }

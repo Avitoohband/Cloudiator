@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TournamentView } from '@contracts/reads';
 import {
-  TOURNAMENT_DURATION_MS, bracketShape, latestTournament, nextTournament, renderTournament, roundRevealTimes, tournamentIdFor, tournamentRevealMarks,
-  tournamentWindowAt, type TournamentStageState,
+  TOURNAMENT_DURATION_MS, bracketShape, latestTournament, nextTournament, processingRetryDelay, renderTournament, roundRevealTimes, tournamentIdFor,
+  tournamentRevealMarks, tournamentWindowAt, withTournamentLogs, withoutTournamentLogs, type TournamentStageState,
 } from '@/game/tournament-stage';
 import { countdownText, tournamentTimeText } from '@/features/tournaments/tournament-text';
 import type { ArenaEntrant } from '@domain/arena';
@@ -378,5 +378,84 @@ describe('purity', () => {
     const source = readFileSync('src/game/tournament-stage.ts', 'utf8');
     expect(source).not.toMatch(/Date\.now|performance\.now|Math\.random|window\.|document\.|new Date/);
     expect(source).not.toMatch(/from '[^']*(phaser|react|combat|arena\.ts|@domain\/arena)[^']*'/);
+  });
+});
+
+describe('polled views carry no battle log (2b review I1)', () => {
+  const lean = (key: TournamentKey) => withoutTournamentLogs(view(key));
+  const withoutLogs = (state: TournamentStageState) => boutsOf(state).map(b => ({ ...b, log: null }));
+
+  it('replaces each fought log with its fight summary and leaves byes and unrevealed bouts alone', () => {
+    for (const key of ['completed', 'midway', 'pair', 'opening'] as const) {
+      const polled = lean(key);
+      expect(JSON.stringify(polled), key).not.toMatch(/battleLog|"events"|finalHp/);
+      for (const bout of polled.bouts) {
+        const full = view(key).bouts.find(b => b.id === bout.id)!.revealedResult;
+        const log = full?.battleLog;
+        expect(bout.revealedResult, bout.id).toEqual(!full ? null : log ? { participants: full.participants, winnerId: full.winnerId, bye: false,
+          fight: { durationMs: log.durationMs, victoryReason: log.victoryReason, tieBreakReason: log.tieBreakReason } } : full);
+      }
+    }
+    // A copy: the fixture view keeps its logs.
+    expect(view('completed').bouts[0].revealedResult!.battleLog).toBeTruthy();
+  });
+
+  it('shows the same bracket at every display time from the summary alone: fighting for the logged duration, then decided', () => {
+    const polled = lean('completed');
+    for (const minute of [-5, 19, 20, 20.1, 20.2, 30, 40.1, 41, 60.1, 79, 85]) {
+      const full = at('completed', minute, id('aster'));
+      const shown = renderTournament(polled, S('completed') + minute * MIN, { viewerId: id('aster') });
+      expect(withoutLogs(shown), `minute ${minute}`).toEqual(withoutLogs(full));
+      expect([shown.status, shown.championId, shown.entrants, shown.placements, shown.viewer], `minute ${minute}`)
+        .toEqual([full.status, full.championId, full.entrants, full.placements, full.viewer]);
+    }
+    // How the winner won is known without the log, and only once the bout is decided.
+    const final = view('pair').bouts[0].revealedResult!.battleLog!;
+    const fighting = renderTournament(lean('pair'), S('pair') + 40 * MIN).rounds[0].bouts[0];
+    expect([fighting.status, fighting.fight]).toEqual(['fighting', null]);
+    const decided = renderTournament(lean('pair'), S('pair') + 40 * MIN + final.durationMs).rounds[0].bouts[0];
+    expect([decided.status, decided.log, decided.fight]).toEqual(['decided', null,
+      { durationMs: final.durationMs, victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' }]);
+  });
+
+  it('merges a loaded log only into its own published bout, and only when it agrees with the result', () => {
+    const polled = lean('completed');
+    const final = polled.bouts.find(b => b.round === 3)!;
+    const log = logOf('completed', final.id);
+    const merged = withTournamentLogs(polled, new Map([[final.id, log]]));
+    expect(merged.bouts.find(b => b.id === final.id)!.revealedResult!.battleLog).toBe(log);
+    expect(merged.bouts.filter(b => b.revealedResult?.battleLog)).toHaveLength(1);
+    const state = renderTournament(merged, S('completed') + 79 * MIN);
+    expect([state.rounds[2].bouts[0].status, state.rounds[2].bouts[0].log]).toEqual(['decided', log]);
+    // Nothing new to merge keeps the same view object.
+    expect(withTournamentLogs(polled, new Map())).toBe(polled);
+    expect(withTournamentLogs(merged, new Map([[final.id, log]]))).toBe(merged);
+    // Another bout's log, a log naming another winner, an unpublished bout and a bye never take a log.
+    const firstLog = logOf('completed', polled.bouts[0].id);
+    const loser = log.participants.find(p => p.gladiatorId !== log.winnerId)!.gladiatorId;
+    expect(withTournamentLogs(polled, new Map([[final.id, firstLog]]))).toBe(polled);
+    expect(withTournamentLogs(polled, new Map([[final.id, { ...log, winnerId: loser! }]]))).toBe(polled);
+    const opening = lean('opening');
+    expect(withTournamentLogs(opening, new Map([[opening.bouts[0].id, firstLog]]))).toBe(opening);
+    const midway = lean('midway');
+    const bye = midway.bouts.find(b => b.revealedResult?.bye)!;
+    expect(withTournamentLogs(midway, new Map([[bye.id, firstLog]]))).toBe(midway);
+  });
+
+  it('fails closed on a malformed fight summary, as on a malformed log', () => {
+    const decided = (patch: (fight: Record<string, unknown>) => void) => {
+      const polled = structuredClone(lean('pair'));
+      patch(polled.bouts[0].revealedResult!.fight as unknown as Record<string, unknown>);
+      return renderTournament(polled, S('pair') + 79 * MIN).rounds[0].bouts[0].status;
+    };
+    expect(decided(() => {})).toBe('decided');
+    for (const patch of [(f: Record<string, unknown>) => { f.durationMs = -1; }, (f: Record<string, unknown>) => { f.durationMs = '9000'; },
+      (f: Record<string, unknown>) => { f.durationMs = Number.POSITIVE_INFINITY; }, (f: Record<string, unknown>) => { f.victoryReason = 7; }]) {
+      expect(decided(patch)).toBe('delayed');
+    }
+  });
+
+  it('backs processing re-reads off from 30 s, doubling to a 5-minute cap', () => {
+    expect([0, 1, 2, 3, 4, 5, 20].map(processingRetryDelay)).toEqual([30_000, 60_000, 120_000, 240_000, 300_000, 300_000, 300_000]);
   });
 });

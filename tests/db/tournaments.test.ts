@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
-import { sql, account, resetIdentity, admin, anonymous, creation, directEdge } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, directEdge, recordingClient } from '../fixtures/db.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import type { TournamentBoutRead } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1, runWorker, simulateTournamentBoutV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -12,7 +12,7 @@ import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import type { JobLease, PreparationInput, PreparationResult } from '../../supabase/functions/_shared/domain/types.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import type { ActivitySummary, RevealedStage } from '../../supabase/functions/_shared/contracts/events.ts';
-import { readProfile, readTimeline, readTournament } from '../../src/lib/api/reads.ts';
+import { readProfile, readTimeline, readTournament, readTournamentLog } from '../../src/lib/api/reads.ts';
 
 const SLOT = 4_800_000;
 const MINUTE = 60_000;
@@ -986,8 +986,11 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       const graph = await graphOf(t.id);
       for (const bout of revealed.bouts.filter(b => !round1.find(r => r.id === b.id)?.bye)) {
         const stored = graph.bouts.find(b => b.id === bout.id)!.result!;
+        // The polled read carries the fight summary; the log itself loads on demand (2b review I1).
         expect(bout.revealedResult).toEqual({ participants: stored.log!.participants.map(p => revealed.entrants.find(e => e.gladiatorId === p.gladiatorId)),
-          winnerId: stored.winnerId, bye: false, battleLog: stored.log });
+          winnerId: stored.winnerId, bye: false,
+          fight: { durationMs: stored.log!.durationMs, victoryReason: stored.log!.victoryReason, tieBreakReason: stored.log!.tieBreakReason } });
+        expect(await readTournamentLog(spectator.client, bout.id)).toEqual(stored.log);
       }
       // Every round is revealed, but no placement shows until every entrant has settled.
       expect([revealed.status, revealed.placements]).toEqual(['processing', []]);
@@ -1019,6 +1022,125 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         await expect(readTournament(spectator.client, unknown), unknown).rejects.toMatchObject({ code: 'not-found' });
       }
       await expect(readTournament(anonymous, tid)).rejects.toBeTruthy();
+    }, 60_000);
+
+    /**
+     * 2b review I1. A polled read of one tournament (every response of one `readTournament` call) must stay small for the
+     * largest bracket tested (50 entrants, a 64-slot bracket: 63 result rows at most). Without logs it scales with the
+     * entrants and bouts only: about 1.2 KB per entrant once settled (placements and completions included). Names here
+     * have 16 of the 20 characters allowed, so the longest names add under 1 KB (162 name occurrences). 80 KiB leaves
+     * about a third of headroom over that, and is a seventh of the 0.56 MB one poll carried with every revealed log. The
+     * measured sizes are printed for the report.
+     */
+    const POLLED_READ_BOUND = 80 * 1024;
+    it('keeps battle logs out of every polled read of a late 50-entrant view, under the byte bound, and loads each log on demand once revealed', async () => {
+      await many(50, { optIn: true });
+      const viewer = await account();
+      const { client, responses } = recordingClient(viewer.token);
+      const tid = `tournament:${T}:bronze`;
+      await toPublished();
+      const [t] = await tournaments();
+      await simulateBouts();
+      const revealRound = async () => {
+        const jobs = await claim('reveal');
+        for (const job of jobs) expect(await complete(job, {})).toMatchObject({ ok: true });
+        return jobs.map(job => Number((job.snapshot as { boutId: string }).boutId.split(':')[3]));
+      };
+      // Every round but the final revealed: the final is due and unpublished, so the view is processing (and re-read).
+      for (let round = 1; round < t.rounds; round += 1) expect(new Set(await revealRound()), `round ${round}`).toEqual(new Set([round]));
+      const poll = async () => {
+        responses.length = 0;
+        const view = await readTournament(client, tid);
+        return { view, bytes: responses.reduce((sum, r) => sum + r.bytes, 0), requests: responses.map(r => r.path), text: responses.map(r => r.text).join('\n') };
+      };
+      const late = await poll();
+      console.log(`Task 19 phase 2b fix: polled read of the late 50-entrant view: ${late.bytes} bytes in ${late.requests.length} responses (${late.requests.join(', ')})`);
+      expect([late.view.status, late.view.entrants.length, late.view.bouts.filter(b => b.revealedResult).length]).toEqual(['processing', 50, 62]);
+      expect(late.text).not.toMatch(/battleLog|"events"|finalHp/);
+      expect(JSON.stringify(late.view)).not.toMatch(/battleLog|"events"|finalHp/);
+      expect(late.bytes).toBeLessThan(POLLED_READ_BOUND);
+      // On demand: each revealed bout's stored log, read once per bout; a bye has none; the final none until revealed.
+      const graph = await graphOf(t.id);
+      const final = graph.bouts.find(b => b.round === t.rounds)!;
+      const logBytes: number[] = [];
+      for (const bout of graph.bouts) {
+        responses.length = 0;
+        if (bout.bye || bout.id === final.id) {
+          await expect(readTournamentLog(client, bout.id), bout.id).rejects.toMatchObject({ code: 'not-found' });
+          continue;
+        }
+        expect(await readTournamentLog(client, bout.id), bout.id).toEqual(bout.result!.log);
+        logBytes.push(responses.reduce((sum, r) => sum + r.bytes, 0));
+      }
+      expect(logBytes).toHaveLength(48);
+      expect(await revealRound()).toEqual([t.rounds]);
+      expect(await readTournamentLog(client, final.id)).toEqual(final.result!.log);
+      // Settled: placements and their public completions join the polled read, still without a log and under the bound.
+      expect([...(await settleAll()).values()].every(s => s.ok)).toBe(true);
+      const done = await poll();
+      expect([done.view.status, done.view.placements.length]).toEqual(['completed', 50]);
+      expect(done.text).not.toMatch(/battleLog|"events"|finalHp/);
+      expect(done.bytes).toBeLessThan(POLLED_READ_BOUND);
+      console.log(`Task 19 phase 2b fix: measured ${JSON.stringify({ lateBytes: late.bytes, completedBytes: done.bytes, completedResponses: done.requests.length,
+        boundBytes: POLLED_READ_BOUND, logReads: logBytes.length + 1, logBytesMin: Math.min(...logBytes), logBytesMax: Math.max(...logBytes),
+        logBytesTotal: logBytes.reduce((a, b) => a + b, 0) })}`);
+    }, 180_000);
+
+    it('hides a future-dated public bout result from the owner, another account and anonymous callers, by id and by tournament, through the due-time policy alone (2b review M2)', async () => {
+      const [owner] = await many(2, { optIn: true });
+      const other = await account();
+      await toPublished();
+      const [t] = await tournaments();
+      await simulateBouts();
+      const [bout] = (await boutsOf(t.id)).filter(b => !b.bye);
+      const entries = await entriesOf(t.id);
+      const log = bout.result!.log as { participants: { gladiatorId: string }[] };
+      const participants = log.participants.map(p => {
+        const e = entries.find(x => x.gladiator_id === p.gladiatorId)!;
+        return { gladiatorId: e.gladiator_id, name: e.name, classId: (e.fighter as { classId: string }).classId };
+      });
+      expect(participants.map(p => p.gladiatorId)).toContain(owner.gid);
+      // The operator writes the bout's public result as its reveal job would, dated an hour after database time.
+      const [{ at }] = await sql`select (floor(extract(epoch from clock_timestamp())*1000) + 3600000)::bigint as at`;
+      await sql`insert into public.tournament_bout_results(bout_id,tournament_id,ordinal,round,position,reveal_at_ms,result)
+        values(${bout.id},${t.id},0,${bout.round},${bout.position},${at},${sql.json({ participants, winnerId: bout.result!.winnerId, bye: false, battleLog: bout.result!.log } as never)})`;
+      expect(await sql`select count(*)::int as n from public.tournament_bout_results where bout_id=${bout.id}`).toEqual([{ n: 1 }]);
+      const reads = (client: typeof anonymous) => [
+        client.from('tournament_bout_results').select('bout_id,reveal_at_ms,result').eq('bout_id', bout.id),
+        client.from('tournament_bout_results').select('bout_id,reveal_at_ms,result').eq('tournament_id', t.id),
+      ];
+      for (const [who, client] of [['owner', owner.client], ['another account', other.client]] as const) {
+        for (const [i, query] of reads(client).entries()) expect(await query, `${who} ${i ? 'by tournament' : 'by id'}`).toMatchObject({ error: null, data: [] });
+        await expect(readTournamentLog(client, bout.id), who).rejects.toMatchObject({ code: 'not-found' });
+        const view = await readTournament(client, t.id);
+        expect(view.bouts.find(b => b.id === bout.id)!.revealedResult, who).toBeNull();
+      }
+      for (const [i, query] of reads(anonymous).entries()) {
+        const { data, error } = await query;
+        expect([data ?? [], error !== null], `anonymous ${i ? 'by tournament' : 'by id'}`).toEqual([[], true]);
+      }
+      await expect(readTournamentLog(anonymous, bout.id)).rejects.toBeTruthy();
+      // The due-time policy is what hides it: in a rolled-back transaction the same player read under `using (true)`
+      // returns the row by id and by tournament, so these reads would fail against such a policy.
+      const qual = async () => (await sql`select pg_get_expr(polqual, polrelid) as q from pg_policy
+        where polrelid='public.tournament_bout_results'::regclass and polname='player_read'`)[0].q as string;
+      const policy = await qual();
+      expect(policy).toMatch(/reveal_at_ms <= .*clock_timestamp\(\)/);
+      const rollback = new Error('rollback-only');
+      await expect(sql.begin(async tx => {
+        const asPlayer = async () => {
+          await tx`set local role authenticated`;
+          const rows = await tx`select bout_id from public.tournament_bout_results where bout_id=${bout.id}
+            union all select bout_id from public.tournament_bout_results where tournament_id=${t.id}`;
+          await tx`reset role`;
+          return rows.length;
+        };
+        expect(await asPlayer()).toBe(0);
+        await tx`alter policy player_read on public.tournament_bout_results using (true)`;
+        expect(await asPlayer()).toBe(2);
+        throw rollback;
+      })).rejects.toBe(rollback);
+      expect(await qual()).toBe(policy);
     }, 60_000);
 
     it('refuses forged bout results with nothing written, accepts the canonical one once, and freezes the final’s outcomes for settlement', async () => {

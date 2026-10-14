@@ -20,6 +20,8 @@ export const IMPACT_FRAME = 2;
 /** Floor rows shown below the fighters' feet. */
 const FLOOR_BELOW = 22;
 const LABEL_MS = 800;
+/** Damage labels start this far (at scale 1) above the target's feet and rise up to 12 px more. */
+export const LABEL_BASE = 50;
 const SHAKE_MS = 180;
 const FLASH_MS = 140;
 const ARROW_MS = 120;
@@ -301,7 +303,7 @@ export function stageAt(plan: StagePlan, positionMs: number, layout: StageLayout
     const feet = layout.feet[l.target];
     labels.push({
       sequence: l.sequence, text: l.text, kind: l.kind, target: l.target, x: feet.x,
-      y: Math.round(feet.y - 50 * s - (reduced ? 0 : 12 * s * p)),
+      y: Math.round(feet.y - LABEL_BASE * s - (reduced ? 0 : 12 * s * p)),
       alpha: p < 0.7 ? 1 : Math.max(0, 1 - (p - 0.7) / 0.3),
     });
   }

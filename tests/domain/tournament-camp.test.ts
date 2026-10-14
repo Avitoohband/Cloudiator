@@ -37,6 +37,8 @@ describe('tournament fights in the camp', () => {
       const log = bouts.find(b => b.id === fight.battleId)!.revealedResult!.battleLog!;
       expect(fight.log).toBe(log);
       expect(fight.startedAtMs).toBe(S + 20 * MIN);
+      // The ring shows the result from the stage core's decision, when the Tournaments panel shows the winner.
+      expect(fight.endsAtMs).toBe(S + 20 * MIN + log.durationMs);
       // Ring side a holds participant 0, as for Arena bouts; both activities are the entrants' tournament activities.
       expect(fight.fighters).toEqual(log.participants.map(p => p.gladiatorId));
       expect(fight.activities).toEqual(fight.fighters.map(g => ACTORS.find(a => a.gladiatorId === g)!.activityId));
@@ -56,7 +58,8 @@ describe('tournament fights in the camp', () => {
   });
 
   it('merges tournament and Arena fights in start order, so they share the six rings', () => {
-    const arena = { battleId: 'arena-b', startedAtMs: S + 10 * MIN, log: TOURNAMENT_VIEWS.pair.bouts[0].revealedResult!.battleLog!, fighters: ['x', null], activities: ['ax', 'ax'] } as CampFight;
+    const log = TOURNAMENT_VIEWS.pair.bouts[0].revealedResult!.battleLog!;
+    const arena: CampFight = { battleId: 'arena-b', startedAtMs: S + 10 * MIN, endsAtMs: S + 10 * MIN + log.durationMs, log, fighters: ['x', null], activities: ['ax', 'ax'] };
     const merged = mergeCampFights(fightsAt(20), [arena]);
     expect(merged[0].battleId).toBe('arena-b');
     expect(merged).toHaveLength(5);

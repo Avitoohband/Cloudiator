@@ -150,8 +150,11 @@ test('fixture standings page each league at most 50 rows, and profiles carry the
   expect(second.nextCursor).toBeNull();
   expect((await gateway.standings('champion')).rows).toEqual([]);
   const aster = await gateway.profile('0d5f8471-d919-428f-9ab7-058c95821757');
-  expect(aster).toMatchObject({ actor: { name: 'Aster' }, rating: 1000 });
+  expect(aster).toMatchObject({ actor: { name: 'Aster' }, rating: 1015 });
   expect(first.rows.find(r => r.name === 'Aster')!.rating).toBe(aster.rating);
+  // The owner's rating and renown include the credited sample bouts (latest: +13 rating, +10 renown).
+  const owner = await gateway.owner();
+  expect([owner.progression.rating, owner.wallets.renown]).toEqual([aster.rating, 25]);
   first.rows[0].rating = -1;
   expect((await gateway.standings('bronze')).rows[0].rating).not.toBe(-1);
 });

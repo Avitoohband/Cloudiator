@@ -1,8 +1,8 @@
 import type { GameGateway } from './gateway';
-import { ownerFixture, worldFixture } from '../../../tests/fixtures/domain';
+import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
-import { ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
+import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
 import { TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
 
 /** Sample replays the fixture game page links to. */
@@ -27,7 +27,8 @@ export function createFixtureGateway(): GameGateway {
   };
   return {
     command: async () => ({ ok: false, code: 'unavailable' }),
-    owner: async () => structuredClone(ownerFixture),
+    // The owner fixture with the rating and renown of its credited Arena samples.
+    owner: async () => structuredClone(ARENA_OWNER),
     world: async () => structuredClone(FIXTURE_WORLD),
     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex }),
     // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Expedition and Arena

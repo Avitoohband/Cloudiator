@@ -4,8 +4,9 @@
 // so the static build never touches WebGL. Unmounting removes the scene's bridge listeners
 // synchronously and destroys the game. With a timeline reader, the host also reads the
 // timelines of Arena entrants once their bouts are due (src/game/arena-layout.ts), so the
-// camp can stage revealed fights, and lists those fights as keyboard buttons. With a tournament
-// reader it reads the tournaments of entrants in camp during their slot (src/game/tournament-camp.ts),
+// camp can stage revealed fights, forgets those of activities no longer in the world, and
+// lists the ring fights as keyboard buttons below the camp view. With a tournament reader it
+// reads the tournaments of entrants in camp during their slot (src/game/tournament-camp.ts),
 // so they wait, fight and spectate by the revealed bracket.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { TournamentView, WorldSnapshot } from '@contracts/reads';
@@ -14,7 +15,7 @@ import type { GameGateway } from '../lib/api/gateway';
 import type { Point } from './iso';
 import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
-import { arenaReadsDue, type ArenaRead } from './arena-layout';
+import { arenaFightButton, arenaReadsDue, type ArenaRead } from './arena-layout';
 import { tournamentReadsDue, type TournamentRead } from './tournament-camp';
 import { createDisplayClock, type DisplayClock } from './display-clock';
 import { prefersReducedMotion, supportsWebGL } from './webgl';
@@ -25,6 +26,15 @@ import styles from './GameViewport.module.css';
 const ARENA_CHECK_MS = 1000;
 
 type Status = { kind: 'loading' } | { kind: 'ready' } | { kind: 'unavailable'; message: string };
+
+/** Drops what is kept for activities no longer in the world; true when something was dropped. */
+function forgetLeft<V>(kept: Map<string, V>, world: WorldSnapshot | null): boolean {
+  if (!world) return false;
+  const live = new Set(world.actors.map(a => a.activityId));
+  let dropped = false;
+  for (const id of [...kept.keys()]) if (!live.has(id)) { kept.delete(id); dropped = true; }
+  return dropped;
+}
 
 /** Fixture builds only (NEXT_PUBLIC_FIXTURE_ENABLED): browser tests read and drive the scene. */
 export type CampTestHook = {
@@ -87,6 +97,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
     if (!world) return;
     clock.current.sync(world.serverNowMs);
     handle.current?.setWorld(world);
+    if (forgetLeft(arenaTimelines.current, world)) handle.current?.setTimelines(new Map(arenaTimelines.current));
   }, [world]);
 
   // Arena timelines: read once an entrant's bout is due, retried while it is missing; paused in hidden tabs.
@@ -98,6 +109,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
     const check = () => {
       const current = latestWorld.current;
       if (!current || document.visibilityState !== 'visible') return;
+      forgetLeft(known, current);
       const now = clock.current.now();
       const batch: Promise<unknown>[] = [];
       for (const activityId of arenaReadsDue(current.actors, known, now)) {
@@ -114,7 +126,11 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
         }, () => {}).finally(() => inFlight.delete(activityId)));
       }
       // Reads due together land together, so bouts revealed at the same minute are scheduled as one wave.
-      if (batch.length) void Promise.all(batch).then(() => { if (alive) handle.current?.setTimelines(new Map(arenaTimelines.current)); });
+      if (batch.length) void Promise.all(batch).then(() => {
+        if (!alive) return;
+        forgetLeft(arenaTimelines.current, latestWorld.current);
+        handle.current?.setTimelines(new Map(arenaTimelines.current));
+      });
     };
     check();
     const timer = window.setInterval(check, ARENA_CHECK_MS);
@@ -225,12 +241,17 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
           centerOn: (x, y, zoom) => handle.current?.centerOn(x, y, zoom),
           screenOf: id => handle.current?.screenOf(id) ?? null,
           world: () => latestWorld.current,
-          setWorld: next => { latestWorld.current = next; handle.current?.setWorld(next); },
+          setWorld: next => {
+            latestWorld.current = next;
+            handle.current?.setWorld(next);
+            if (forgetLeft(arenaTimelines.current, next)) handle.current?.setTimelines(new Map(arenaTimelines.current));
+          },
           freezeClock: ms => clock.current.freeze(ms),
           arenaReads: () => arenaReadCount.current,
           arenaTimelines: () => [...arenaTimelines.current.keys()],
           setArenaTimelines: next => {
             for (const [id, timeline] of Object.entries(next)) arenaTimelines.current.set(id, timeline);
+            forgetLeft(arenaTimelines.current, latestWorld.current);
             handle.current?.setTimelines(new Map(arenaTimelines.current));
           },
           tournamentReads: () => tournamentReadCount.current,
@@ -263,55 +284,60 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
 
   const unavailable = status.kind === 'unavailable';
   return (
-    <div className={styles.viewport}>
-      <div
-        ref={host}
-        className={styles.canvas}
-        tabIndex={unavailable ? -1 : 0}
-        role={unavailable ? undefined : 'application'}
-        aria-label={unavailable ? 'Camp view unavailable' : 'Isometric camp view. Drag or use the arrow keys to look around; use plus and minus to zoom.'}
-        aria-describedby={statusId}
-        onKeyDown={unavailable ? undefined : onKeyDown}
-        // Phaser cancels the default pointerdown, so focus the host ourselves for the arrow keys.
-        onPointerDown={() => host.current?.focus({ preventScroll: true })}
-      />
-      {!unavailable && (
-        <div className={styles.controls} role="group" aria-label="Camera controls">
-          <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'in' })} aria-label="Zoom in">+</button>
-          <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'out' })} aria-label="Zoom out">−</button>
-          <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'reset' })} aria-label="Reset zoom">1:1</button>
-          {focusGladiatorId && (
-            <>
-              <button type="button" disabled={!ownerInCamp} onClick={() => bridge.emit('find-character', { gladiatorId: focusGladiatorId })} aria-label="Find my gladiator">Find</button>
-              <button
-                type="button"
-                disabled={!ownerInCamp}
-                aria-pressed={following && ownerInCamp}
-                onClick={() => bridge.emit('follow-character', { gladiatorId: following ? null : focusGladiatorId })}
-                aria-label="Follow my gladiator"
-              >Follow</button>
-            </>
-          )}
-        </div>
-      )}
+    <div className={styles.frame}>
+      <div className={styles.viewport}>
+        <div
+          ref={host}
+          className={styles.canvas}
+          tabIndex={unavailable ? -1 : 0}
+          role={unavailable ? undefined : 'application'}
+          aria-label={unavailable ? 'Camp view unavailable' : 'Isometric camp view. Drag or use the arrow keys to look around; use plus and minus to zoom.'}
+          aria-describedby={statusId}
+          onKeyDown={unavailable ? undefined : onKeyDown}
+          // Phaser cancels the default pointerdown, so focus the host ourselves for the arrow keys.
+          onPointerDown={() => host.current?.focus({ preventScroll: true })}
+        />
+        {!unavailable && (
+          <div className={styles.controls} role="group" aria-label="Camera controls">
+            <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'in' })} aria-label="Zoom in">+</button>
+            <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'out' })} aria-label="Zoom out">−</button>
+            <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'reset' })} aria-label="Reset zoom">1:1</button>
+            {focusGladiatorId && (
+              <>
+                <button type="button" disabled={!ownerInCamp} onClick={() => bridge.emit('find-character', { gladiatorId: focusGladiatorId })} aria-label="Find my gladiator">Find</button>
+                <button
+                  type="button"
+                  disabled={!ownerInCamp}
+                  aria-pressed={following && ownerInCamp}
+                  onClick={() => bridge.emit('follow-character', { gladiatorId: following ? null : focusGladiatorId })}
+                  aria-label="Follow my gladiator"
+                >Follow</button>
+              </>
+            )}
+          </div>
+        )}
+        <p id={statusId} className={unavailable ? styles.fallback : styles.status} role="status">
+          {status.kind === 'loading' ? 'Opening the camp…' : unavailable ? status.message : ''}
+        </p>
+      </div>
+      {/* Keyboard and touch equivalents of clicking a fighting pair, below the view so they never cover it. */}
       {!unavailable && fights.length > 0 && (
         <div className={styles.fights} role="group" aria-label="Arena bouts in the rings">
-          {fights.map(f => (
-            <button
-              key={f.battleId}
-              type="button"
-              onClick={() => {
-                const [entrant] = f.sides;
-                if (entrant.gladiatorId) bridge.emit('find-character', { gladiatorId: entrant.gladiatorId });
-                bridge.emit('open-arena', { activityId: entrant.activityId, gladiatorId: entrant.gladiatorId });
-              }}
-            >{f.sides[0].name} vs {f.sides[1].name}{f.sides[1].npc ? ' (NPC)' : ''}</button>
-          ))}
+          {fights.map(f => {
+            const { label, entrant } = arenaFightButton(f);
+            return (
+              <button
+                key={f.battleId}
+                type="button"
+                onClick={() => {
+                  if (entrant.gladiatorId) bridge.emit('find-character', { gladiatorId: entrant.gladiatorId });
+                  bridge.emit('open-arena', { activityId: entrant.activityId, gladiatorId: entrant.gladiatorId });
+                }}
+              >{label}</button>
+            );
+          })}
         </div>
       )}
-      <p id={statusId} className={unavailable ? styles.fallback : styles.status} role="status">
-        {status.kind === 'loading' ? 'Opening the camp…' : unavailable ? status.message : ''}
-      </p>
     </div>
   );
 }

@@ -19,7 +19,7 @@ import {
   type ArenaActivityKey, type ArenaBoutKey, type ArenaGladiatorKey,
 } from '../fixtures/arena-ids.ts';
 import {
-  ARENA_BATTLE_LOGS, ARENA_BOUT_RATINGS, ARENA_PROFILES, ARENA_SAMPLES, ARENA_STANDINGS, ARENA_TIMELINES, ARENA_WORLD_ACTORS,
+  ARENA_BATTLE_LOGS, ARENA_BOUT_RATINGS, ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_STANDINGS, ARENA_TIMELINES, ARENA_WORLD_ACTORS,
   arenaStandingsPage,
 } from '../fixtures/arena.ts';
 import { EQUIPMENT_LAYERS } from '../../src/game/actors.ts';
@@ -248,8 +248,47 @@ describe('arena fixture timelines', () => {
       expect(profile.rating).toBe(row.rating);
       expect(Number.isSafeInteger(profile.combatStrength) && profile.combatStrength > 0).toBe(true);
     }
-    expect(ARENA_PROFILES[ownerFixture.gladiatorId].rating).toBe(ownerFixture.progression.rating);
-    expect(ARENA_PROFILES[ownerFixture.gladiatorId].actor.league).toBe(ownerFixture.progression.league);
+    expect(ARENA_PROFILES[ownerFixture.gladiatorId].rating).toBe(ARENA_OWNER.progression.rating);
+    expect(ARENA_PROFILES[ownerFixture.gladiatorId].actor.league).toBe(ARENA_OWNER.progression.league);
+  });
+
+  it('chains the owner’s credited bouts from the season start into the owner, profile and standings', () => {
+    // The owner's credited Arena activities, oldest slot first.
+    const credited = ACTIVITIES.filter(k => ARENA_ACTIVITIES[k].owner && ARENA_ACTIVITIES[k].bout !== null)
+      .sort((p, q) => ARENA_ACTIVITIES[q].slotsAgo - ARENA_ACTIVITIES[p].slotsAgo);
+    let rating = RULES_V1.rating.initial;
+    let renown = 0;
+    let wins = 0;
+    let losses = 0;
+    const opponentsAfter = new Map<string, number>();
+    for (const key of credited) {
+      const bout = ARENA_ACTIVITIES[key].bout!;
+      const summary = ARENA_TIMELINES[arenaActivityId(key)].summary!;
+      renown += summary.rewards.renown;
+      const opponent = ARENA_BOUTS[bout].opponent;
+      if (opponent === null) continue;
+      const before = ARENA_BOUT_RATINGS[bout]!;
+      expect(before.entrant, `${bout}: Aster's rating before the bout is her rating after the previous one`).toBe(rating);
+      const won = summary.result === 'victory';
+      const gain = won ? eloGain(before.entrant, before.opponent) : eloGain(before.opponent, before.entrant);
+      const delta = won ? gain : -gain;
+      expect(summary.ratingDelta, bout).toBe(delta);
+      rating += delta;
+      if (won) wins += 1; else losses += 1;
+      opponentsAfter.set(ARENA_GLADIATORS[opponent].id, before.opponent - delta);
+    }
+    // The latest credited bout is in the owner's state, profile and standings row.
+    expect(ARENA_OWNER.progression.rating).toBe(rating);
+    expect(ARENA_OWNER.wallets.renown).toBe(renown);
+    expect(ARENA_OWNER.processedSlotIndex).toBe(worldFixture.slotIndex - 1);
+    expect(ARENA_PROFILES[ARENA_GLADIATORS.aster.id].rating).toBe(rating);
+    const row = ARENA_STANDINGS.bronze.find(r => r.gladiatorId === ARENA_GLADIATORS.aster.id)!;
+    expect([row.rating, row.humanWins, row.humanLosses]).toEqual([rating, wins, losses]);
+    // Each opponent has not fought since: its current rating is its rating after that bout.
+    for (const [id, after] of opponentsAfter) {
+      expect(ARENA_PROFILES[id].rating, ARENA_PROFILES[id].actor.name).toBe(after);
+      expect(ARENA_STANDINGS[ARENA_PROFILES[id].actor.league].find(r => r.gladiatorId === id)!.rating).toBe(after);
+    }
   });
 });
 

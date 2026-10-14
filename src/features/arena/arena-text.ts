@@ -3,7 +3,11 @@
 import type { ActivitySummary } from '@contracts/events';
 import type { ClassId, LeagueId } from '@contracts/commands';
 import { RULES_V1 } from '@domain/rules-v1';
-import type { ArenaResult, ArenaStageState } from '../../game/arena-stage';
+import { ARENA_REVEAL_MS, ARENA_SLOT_MS, type ArenaResult, type ArenaStageState } from '../../game/arena-stage';
+
+/** The slot's reveal and settlement minutes (60 and 80 in rules v1). */
+export const REVEAL_MINUTE = ARENA_REVEAL_MS / 60_000;
+export const SLOT_MINUTES = ARENA_SLOT_MS / 60_000;
 
 /** The binding fallback disclosure (plan Step 1). */
 export const NPC_DISCLOSURE = 'NPC opponent — reduced renown, no rating change';
@@ -27,16 +31,29 @@ export function phaseTitle(state: ArenaStageState): string {
 export function phaseDetail(state: ArenaStageState, owner: boolean, revealAt: string | null): string {
   switch (state.phase) {
     // Worded without the phase title, so the title is the card's only "Warming up".
-    case 'warming-up': return `In the arena staging area until the bout is revealed at minute 60${revealAt ? ` (${revealAt})` : ''}. The warm-up grants no training.`;
+    case 'warming-up': return `In the arena staging area until the bout is revealed at minute ${REVEAL_MINUTE}${revealAt ? ` (${revealAt})` : ''}. The warm-up grants no training.`;
     case 'preparing': return state.awaitingSummary
-      ? 'Processing results: minute 80 has passed, but the bout and rewards are not published yet. Nothing is credited until the server records them.'
-      : 'Minute 60 has passed, but the bout has not been published yet. It appears here as soon as it is revealed.';
+      ? `Processing results: minute ${SLOT_MINUTES} has passed, but the bout and rewards are not published yet. Nothing is credited until the server records them.`
+      // Only a known slot start can say that the reveal minute has passed.
+      : state.minute !== null && state.minute >= REVEAL_MINUTE
+        ? `Minute ${REVEAL_MINUTE} has passed, but the bout has not been published yet. It appears here as soon as it is revealed.`
+        : 'The bout has not been published yet. It appears here as soon as it is revealed.';
     case 'bout': return 'The revealed bout is being fought now. Its result shows when it ends.';
     case 'completed': return owner
-      ? state.awaitingSummary ? 'Processing results: the rewards and rating change appear once the server credits them.' : 'Rewards and any rating change are credited at minute 80.'
+      ? state.awaitingSummary ? 'Processing results: the rewards and rating change appear once the server credits them.' : `Rewards and any rating change are credited at minute ${SLOT_MINUTES}.`
       : 'Rewards are private to the gladiator’s owner.';
     default: return 'The result is credited.';
   }
+}
+
+/**
+ * Why the card cannot show an activity: the build has no Arena read yet (the live game until Task 10's timeline read
+ * lands), the read found no activity, or a real read failed (temporary; the card reads again on focus).
+ */
+export function arenaUnavailableText(reason: 'build' | 'not-found' | 'unavailable'): string {
+  return reason === 'build' ? 'The Arena card is not available in this build yet.'
+    : reason === 'not-found' ? 'No Arena activity matches this selection.'
+      : 'Arena activity cannot be loaded right now. Only revealed stages are ever shown.';
 }
 
 /** "Victory" or "Defeat", with how the logged winner won. The winner is always the logged winnerId. */

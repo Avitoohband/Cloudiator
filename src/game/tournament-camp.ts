@@ -39,6 +39,8 @@ export function mergeCampFights(...lists: readonly (readonly CampFight[])[]): Ca
 /**
  * Revealed tournament bouts between two entrants in camp at the display time, from their round's reveal time on
  * (fighting or already decided, so a later round never reschedules an earlier fight). Participant 0 takes ring side a.
+ * A bout ends where the stage core decides it (its logged duration after the reveal), the moment the Tournaments panel
+ * shows its winner, so its ring shows the result from then too.
  */
 export function campTournamentFights(actors: readonly PublicActor[], views: ReadonlyMap<string, TournamentView>, displayNowMs: number): CampFight[] {
   const fights: CampFight[] = [];
@@ -50,7 +52,7 @@ export function campTournamentFights(actors: readonly PublicActor[], views: Read
       const ids = bout.log.participants.map(p => p.gladiatorId);
       if (!ids.every(g => g !== null && entrants.has(g))) continue;
       const [a, b] = ids as [string, string];
-      fights.push({ battleId: bout.log.battleId, log: bout.log, startedAtMs: bout.revealAtMs, fighters: [a, b],
+      fights.push({ battleId: bout.log.battleId, log: bout.log, startedAtMs: bout.revealAtMs, endsAtMs: bout.fightEndsAtMs!, fighters: [a, b],
         activities: [entrants.get(a)!.activityId!, entrants.get(b)!.activityId!] });
     }
   }

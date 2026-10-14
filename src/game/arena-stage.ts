@@ -1,18 +1,18 @@
-// Pure Arena stage core. Given a revealed Arena timeline (or the visible stage of a public camp actor) and the
-// display clock (estimated server time), it returns what the camp, the Arena card and the replay link show: the
-// phase, the opponent once the bout is revealed, whether that opponent is an NPC fallback, the bout to play, the
-// replay link, the result once the bout has ended and, for the owner only, the credited summary once settled.
+// Pure Arena stage core. Given a revealed Arena timeline and the display clock (estimated server time), it returns
+// what the camp, the Arena card and the replay link show: the phase, the opponent once the bout is revealed, whether
+// that opponent is an NPC fallback, the bout to play, the replay link, the result once the bout has ended and, for
+// the owner only, the credited summary once settled.
 //
 // The public stage sequence (proposed to Codex for Task 16) for a slot starting at S:
 //   0 `staging` S..S+60 min "Warming up"; 1 `bout` from S+60 min for the logged duration; 2 `return` at S+80 min.
 // Only stages whose revealedAtMs <= displayNowMs exist here, even when the timeline already holds later ones, and
 // the summary appears only once its settlement time has passed. A bout's outcome is never shown before the bout's
 // endsAtMs, although its published label names it. The winner is always the logged winnerId (a seeded tie-break at
-// 0 HP included); health never decides it. Nothing here computes a result, rating or reward, and no Phaser, React,
-// clock or randomness is used, so the same inputs always give the same state.
+// 0 HP included); health and labels never decide it, so a bout without its log has no result here. Nothing here
+// computes a result, rating or reward, and no Phaser, React, clock or randomness is used, so the same inputs always
+// give the same state.
 import type { ActivitySummary, BattleLog, RevealedCombatant, RevealedStage, RevealedTimeline } from '@contracts/events';
 import type { ClassId } from '@contracts/commands';
-import type { PublicActor } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
 
 export const ARENA_SLOT_MS = RULES_V1.clock.slotMs;
@@ -67,7 +67,7 @@ export type ArenaStageState = {
   readonly activityId: string | null;
   readonly displayNowMs: number;
   readonly phase: ArenaPhase;
-  /** Slot start, from the warm-up stage or the public actor; null when unknown. */
+  /** Slot start, from the warm-up stage; null when unknown. */
   readonly startMs: number | null;
   /** Minutes since the slot started, or null. */
   readonly minute: number | null;
@@ -94,8 +94,6 @@ export type ArenaStageOptions = {
   entrantId?: string | null;
   /** The viewer owns this activity. Only then is a summary shown (the backend sends it to owners only, too). */
   owner?: boolean;
-  /** Slot start when no warm-up stage is visible (from the public actor). */
-  startsAtMs?: number | null;
 };
 
 /** Deep-freezes the state it built; the caller's battle logs are shared by reference and left untouched. */
@@ -110,17 +108,14 @@ function freeze<V>(value: V, shared: ReadonlySet<object>): V {
 const fighterOf = (p: Readonly<RevealedCombatant>): ArenaFighter =>
   ({ id: p.id, gladiatorId: p.gladiatorId, name: p.name, classId: p.classId, npc: p.gladiatorId === null });
 
-/** The outcome named by a published bout label ("Bout: victory"), used only when no log is known. */
-function labelOutcome(label: string): 'victory' | 'defeat' | null {
-  const word = /:\s*(victory|defeat)\s*$/i.exec(label)?.[1]?.toLowerCase();
-  return word === 'victory' || word === 'defeat' ? word : null;
-}
-
-function renderStages(activityId: string | null, all: readonly RevealedStage[], displayNowMs: number, options: ArenaStageOptions, summarySource: ActivitySummary | null): ArenaStageState {
+/** The Arena state of one revealed timeline at the display time. */
+export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: number, options: ArenaStageOptions = {}): ArenaStageState {
+  const { activityId } = timeline;
+  const summarySource = timeline.summary ?? null;
   const t = displayNowMs;
-  const revealed = all.filter(stage => stage.revealedAtMs <= t);
+  const revealed: RevealedStage[] = timeline.stages.filter(stage => stage.revealedAtMs <= t);
   const staging = revealed.find(stage => stage.kind === 'staging');
-  const startMs = staging?.startedAtMs ?? options.startsAtMs ?? null;
+  const startMs = staging?.startedAtMs ?? null;
   const owner = !!options.owner;
   const boutStage = [...revealed].reverse().find(stage => stage.kind === 'bout');
   const log = boutStage?.battleLog ?? null;
@@ -141,17 +136,12 @@ function renderStages(activityId: string | null, all: readonly RevealedStage[], 
   }
 
   let result: ArenaResult | null = null;
-  if (boutStage && finished) {
-    if (log && entrant) {
-      const me = log.participants[0].id === entrant.id ? 0 : 1;
-      result = {
-        outcome: log.winnerId === entrant.id ? 'victory' : 'defeat', winnerId: log.winnerId, reason: log.victoryReason,
-        tieBreakReason: log.tieBreakReason, finalHp: [log.finalHp[me], log.finalHp[1 - me]],
-      };
-    } else {
-      const outcome = labelOutcome(boutStage.label);
-      if (outcome) result = { outcome, winnerId: null, reason: null, tieBreakReason: null, finalHp: null };
-    }
+  if (finished && log && entrant) {
+    const me = log.participants[0].id === entrant.id ? 0 : 1;
+    result = {
+      outcome: log.winnerId === entrant.id ? 'victory' : 'defeat', winnerId: log.winnerId, reason: log.victoryReason,
+      tieBreakReason: log.tieBreakReason, finalHp: [log.finalHp[me], log.finalHp[1 - me]],
+    };
   }
 
   const summary = owner && summarySource && summarySource.settledAtMs <= t ? structuredClone(summarySource) : null;
@@ -159,7 +149,7 @@ function renderStages(activityId: string | null, all: readonly RevealedStage[], 
   const phase: ArenaPhase = summary ? 'credited'
     : boutStage ? (finished ? 'completed' : 'bout')
       : startMs !== null && t >= startMs + ARENA_REVEAL_MS ? 'preparing'
-        : staging || (startMs !== null && t >= startMs) ? 'warming-up' : 'preparing';
+        : staging ? 'warming-up' : 'preparing';
 
   return freeze({
     activityId,
@@ -181,20 +171,6 @@ function renderStages(activityId: string | null, all: readonly RevealedStage[], 
     awaitingSummary: owner && !summary && startMs !== null && t >= startMs + ARENA_SLOT_MS,
     replayExpired,
   }, new Set(log ? [log] : []));
-}
-
-/** The Arena state of one revealed timeline at the display time. */
-export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: number, options: ArenaStageOptions = {}): ArenaStageState {
-  return renderStages(timeline.activityId, timeline.stages, displayNowMs, options, timeline.summary ?? null);
-}
-
-/**
- * The Arena state a public camp actor shows: its latest visible stage (the camp projection omits battle logs, so
- * the opponent stays unknown until the timeline is read) and its slot start. Spectator view: never a summary.
- */
-export function arenaStageOfActor(actor: PublicActor, displayNowMs: number): ArenaStageState {
-  return renderStages(actor.activityId, actor.visibleStage ? [actor.visibleStage] : [], displayNowMs,
-    { entrantId: actor.gladiatorId, owner: false, startsAtMs: actor.startsAtMs }, null);
 }
 
 /**

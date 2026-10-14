@@ -388,12 +388,12 @@ test.describe('tournament entrants in the camp', () => {
       expect(fromCentre(a.x, a.y), `${a.name} inside the wall`).toBeLessThan(MAP.arena.radius);
       expect(RINGS.has(`${Math.floor(a.x)},${Math.floor(a.y)}`), `${a.name} on a ring tile`).toBe(false);
     }
-    // Round 1 reveals at minute 20: every entrant is fighting by the stage core's reveal rule...
+    // Round 1 reveals at minute 20: every entrant is fighting by the stage core's reveal rule, and its four bouts jog
+    // into rings (at most 4 s) and play from their logs there at the bout's real time, participant 0 on side a (Task
+    // 17's ring rule: the shortest bout, 10.2 s, already shows its result 12 s after the reveal).
     await freezeCamp(page, revealOf('completed', 1) + 5_000);
-    expect(Object.values((await campState(page)).tournament.roles)).toEqual(Array(8).fill('fighting'));
-    // ...and its four bouts walk into rings (11 s) and play from their logs there, participant 0 on side a.
-    await freezeCamp(page, revealOf('completed', 1) + 12_000);
     state = await campState(page);
+    expect(Object.values(state.tournament.roles)).toEqual(Array(8).fill('fighting'));
     const round1 = VIEWS.completed.bouts.filter(b => b.round === 1);
     expect(state.arena.fights.map(f => f.battleId).sort()).toEqual(round1.map(b => b.id).sort());
     for (const fight of state.arena.fights) {
@@ -457,16 +457,19 @@ test.describe('tournament entrants in the camp', () => {
     const duration = final.revealedResult!.battleLog!.durationMs;
     const varro = ARENA_GLADIATORS.varro.id;
     const ring = (state: Awaited<ReturnType<typeof campState>>) => state.arena.fights.find(f => f.battleId === final.id)!;
-    // The camp learns the final at its reveal and walks the finalists in before playing it (Task 17's ring rule).
-    await freezeCamp(page, revealOf('completed', 3) + 500);
+    // A ring shows a bout's result from the bout's end, as the stage core does, once its pair stands there (Task 17's
+    // ring rule). A camp that learns the final only after it ended (a late read, a tab coming back) still jogs the
+    // finalists in first; with motion on, the frozen clock holds them on the way.
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(async () => (await campState(page)).reducedMotion).toBe(false);
     await freezeCamp(page, revealOf('completed', 3) + duration + 1000);
     let state = await campState(page);
-    // The stage core has decided the final, but its ring is still fighting: no champion tag yet.
+    // The stage core has decided the final, but its pair is still jogging into the ring: no champion tag yet.
     expect(state.tournament.roles[varro]).toBe('champion');
-    expect(ring(state).status).toBe('fighting');
+    expect(ring(state).status).toBe('entering');
     expect(state.actors.filter(a => a.marker === 'Champion')).toEqual([]);
-    // Once the ring has played the final, the champion carries the tag.
-    await freezeCamp(page, ring(state).fightStartMs + duration + 500);
+    // Once the ring shows the final's result (the pair is in by the jog-in bound), the champion carries the tag.
+    await freezeCamp(page, ring(state).fightStartMs);
     state = await campState(page);
     expect(ring(state).status).toBe('result');
     expect(state.actors.filter(a => a.marker === 'Champion').map(a => a.id)).toEqual([varro]);

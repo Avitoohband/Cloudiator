@@ -6,8 +6,8 @@
 // spec §7 template until Task 16's makeFallback lands. Summaries are sample data: views show them, never compute them.
 import type { ActivitySummary, BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events.ts';
 import type { ClassId, LeagueId } from '../../supabase/functions/_shared/contracts/commands.ts';
-import type { EquipmentSilhouette, PublicActor, PublicProfile, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads.ts';
-import { worldFixture } from './domain.ts';
+import type { EquipmentSilhouette, OwnerState, PublicActor, PublicProfile, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads.ts';
+import { ownerFixture, worldFixture } from './domain.ts';
 import {
   ARENA_ACTIVITIES, ARENA_BOUTS, ARENA_CAMP_KEYS, ARENA_GLADIATORS, ARENA_SAMPLE_KEYS, arenaActivityId, fixtureUuid,
   type ArenaActivityKey, type ArenaBoutKey, type ArenaGladiatorKey,
@@ -20,11 +20,15 @@ const NOW = worldFixture.serverNowMs;
 /** The fixture world's current slot starts 40 minutes before its server time. */
 const SLOT_START = NOW - (NOW % SLOT_MS);
 
-/** Ratings of both entrants just before each credited human bout of the owner (for its Elo delta). */
+/**
+ * Ratings of both entrants just before each credited human bout of the owner (for its Elo delta). Aster's season
+ * starts at 1000 with the tie-break (5 slots ago, +15), then loses to Cassia (2 ago, -13) and beats Varro (1 ago,
+ * +13): 1000, 1015, 1002, 1015 now. Her NPC bouts change no rating, and no opponent has fought since.
+ */
 export const ARENA_BOUT_RATINGS: Partial<Record<ArenaBoutKey, { entrant: number; opponent: number }>> = {
-  ownerHumanWin: { entrant: 1000, opponent: 1040 },
-  ownerHumanLoss: { entrant: 1013, opponent: 990 },
   ownerTieBreak: { entrant: 1000, opponent: 1100 },
+  ownerHumanLoss: { entrant: 1015, opponent: 990 },
+  ownerHumanWin: { entrant: 1002, opponent: 1040 },
 };
 /** Elo K=24 deltas for those ratings, recomputed independently by the generator test. */
 const RATING_DELTAS: Partial<Record<ArenaBoutKey, number>> = { ownerHumanWin: 13, ownerHumanLoss: -13, ownerTieBreak: 15 };
@@ -37,8 +41,8 @@ function stage(activityId: string, index: 0 | 1 | 2, kind: RevealedStage['kind']
 /** Public look and standing of each fixture gladiator (silhouettes match the gear in their battle logs). */
 type PublicInfo = { classId: ClassId; silhouettes: EquipmentSilhouette[]; league: LeagueId; level: number; rating: number; combatStrength: number; humanWins: number; humanLosses: number };
 const INFO: Record<ArenaGladiatorKey, PublicInfo> = {
-  aster: { classId: 'guardian', silhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet', 'armor-light'], league: 'bronze', level: 1, rating: 1000, combatStrength: 412, humanWins: 2, humanLosses: 1 },
-  varro: { classId: 'berserker', silhouettes: ['weapon-spear', 'head-hood', 'armor-heavy'], league: 'bronze', level: 3, rating: 1052, combatStrength: 455, humanWins: 6, humanLosses: 3 },
+  aster: { classId: 'guardian', silhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet', 'armor-light'], league: 'bronze', level: 1, rating: 1015, combatStrength: 412, humanWins: 2, humanLosses: 1 },
+  varro: { classId: 'berserker', silhouettes: ['weapon-spear', 'head-hood', 'armor-heavy'], league: 'bronze', level: 3, rating: 1027, combatStrength: 455, humanWins: 6, humanLosses: 3 },
   cassia: { classId: 'duelist', silhouettes: ['weapon-sword', 'head-hood', 'armor-light'], league: 'bronze', level: 2, rating: 1003, combatStrength: 398, humanWins: 4, humanLosses: 4 },
   severus: { classId: 'guardian', silhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet', 'armor-light'], league: 'bronze', level: 4, rating: 1085, combatStrength: 430, humanWins: 8, humanLosses: 2 },
   bellator: { classId: 'berserker', silhouettes: ['weapon-axe', 'armor-light'], league: 'bronze', level: 2, rating: 1021, combatStrength: 401, humanWins: 3, humanLosses: 2 },
@@ -54,6 +58,16 @@ const INFO: Record<ArenaGladiatorKey, PublicInfo> = {
   valeria: { classId: 'guardian', silhouettes: ['weapon-sword', 'head-helmet', 'armor-light'], league: 'gold', level: 9, rating: 1120, combatStrength: 905, humanWins: 11, humanLosses: 3 },
   cato: { classId: 'berserker', silhouettes: ['weapon-bow', 'head-hood'], league: 'bronze', level: 2, rating: 970, combatStrength: 366, humanWins: 1, humanLosses: 4 },
   ardea: { classId: 'duelist', silhouettes: ['weapon-sword', 'offhand-shield'], league: 'bronze', level: 1, rating: 1000, combatStrength: 351, humanWins: 0, humanLosses: 0 },
+};
+
+/**
+ * The fixture owner after the credited Arena bouts above: Aster's rating after her latest human bout and the renown
+ * of all five credited bouts (10 + 0 + 3 + 2 + 10). Everything else is the shared owner fixture.
+ */
+export const ARENA_OWNER: OwnerState = {
+  ...ownerFixture,
+  wallets: { ...ownerFixture.wallets, renown: ownerFixture.wallets.renown + 25 },
+  progression: { ...ownerFixture.progression, rating: INFO.aster.rating },
 };
 
 /** Arena samples listed on the fixture game page, with the entrant whose activity each one is. */

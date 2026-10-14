@@ -1,17 +1,24 @@
 // Pure camp Arena layout: which revealed bouts the camp shows, which sparring ring each one uses and when, and when
 // the camp reads an Arena entrant's timeline. Arena entrants warm up in the staging spots (src/game/actors.ts); once
-// a bout is revealed, its pair walks into a free ring, fights from the battle log and returns to staging. Rings are
-// bounded (the map's six ring stations): extra pairs queue in staging and take the next free ring, so their camp
-// animation starts later than the authoritative bout (the Arena card and replay keep the logged times). Nothing
-// here simulates a fight, decides a result or reveals a bout early: only bouts the stage core shows are scheduled.
+// a bout is revealed, its pair jogs into a free ring and plays the battle log there at the bout's real time (the
+// display time minus the logged start) until the bout stage's end, the moment the Arena card shows the result; what
+// the bout showed during the short jog-in is skipped, and the full bout stays in the replay. Rings are bounded (the
+// map's six ring stations): extra pairs queue in staging and take the next free ring, then show the bout at its real
+// position or, when it is already over, its end state. Nothing here simulates a fight, decides a result or reveals a bout
+// early: only bouts the stage core shows are scheduled.
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { PublicActor } from '@contracts/reads';
-import type { Direction, MapData } from './assets';
+import type { Direction, MapData, TilePoint } from './assets';
+import type { ArenaFightSide, ArenaFightSummary } from './bridge';
 import { REPLAY_OUTRO_MS } from './replay';
 import { ARENA_REVEAL_MS, ARENA_SLOT_MS, renderArenaStage } from './arena-stage';
 
-/** Walking time allowed from any staging tile into a ring (the longest walk is about 10 s at 1 tile/s). */
-export const ARENA_ENTRY_MS = 11_000;
+/** Pairs jog into their rings at this multiple of the manifest walk (3 tiles/s at 1 tile/s), stepping as much faster. */
+export const ARENA_JOG_PACE = 3;
+/** NPC fallback opponents walk in and out through the arena gate, inside the wall. */
+export const ARENA_GATE: TilePoint = { x: 27, y: 27 };
+/** Jogging time allowed from any staging tile or the arena gate into a ring (the longest jog is about 10.1 tiles, 3.4 s). */
+export const ARENA_ENTRY_MS = 4_000;
 /** The victory and defeat poses stay this long after the replay outro before the pair leaves the ring. */
 export const ARENA_RESULT_HOLD_MS = 6_000;
 /** A missing bout is asked for again this often while its slot runs. */
@@ -44,8 +51,10 @@ export type CampFight = {
   readonly log: BattleLog;
   /** The authoritative bout start (minute 60). */
   readonly startedAtMs: number;
-  /** Camp gladiator ids in participant order; null is an NPC fallback, which the scene draws itself. */
-  readonly fighters: readonly [string, string | null];
+  /** The bout stage's end: the ring shows the result from here, as the Arena card does. */
+  readonly endsAtMs: number;
+  /** Camp gladiator ids in participant order; null is an NPC fallback (on either side), which the scene draws itself. */
+  readonly fighters: readonly [string | null, string | null];
   /** The activity each side's Arena card opens; the NPC side opens its entrant's. */
   readonly activities: readonly [string, string];
 };
@@ -64,24 +73,36 @@ export function campArenaFights(actors: readonly PublicActor[], timelines: Reado
     if (!timeline) continue;
     const bout = renderArenaStage(timeline, displayNowMs, { entrantId: actor.gladiatorId }).bout;
     if (!bout?.log || !bout.battleId || fights.has(bout.battleId)) continue;
-    const ids = bout.log.participants.map(p => p.gladiatorId) as [string | null, string | null];
+    const ids: readonly [string | null, string | null] = [bout.log.participants[0].gladiatorId, bout.log.participants[1].gladiatorId];
     if (!ids.includes(actor.gladiatorId)) continue;
     if (!ids.every(id => id === null || entrants.has(id)) || ids.every(id => id === null)) continue;
     const activityOf = (id: string | null) => (id ? entrants.get(id)!.activityId! : actor.activityId!);
     fights.set(bout.battleId, {
-      battleId: bout.battleId, log: bout.log, startedAtMs: bout.startedAtMs,
-      fighters: ids as [string, string | null], activities: [activityOf(ids[0]), activityOf(ids[1])],
+      battleId: bout.battleId, log: bout.log, startedAtMs: bout.startedAtMs, endsAtMs: bout.endsAtMs,
+      fighters: ids, activities: [activityOf(ids[0]), activityOf(ids[1])],
     });
   }
   return [...fights.values()].sort((p, q) => p.startedAtMs - q.startedAtMs || (p.battleId < q.battleId ? -1 : p.battleId > q.battleId ? 1 : 0));
 }
 
-export type RingSlot = { readonly battleId: string; readonly ring: number; readonly enterAtMs: number; readonly fightStartMs: number; readonly leaveAtMs: number };
+export type RingSlot = {
+  readonly battleId: string;
+  readonly ring: number;
+  /** The authoritative bout start: ring playback is always the display time minus this. */
+  readonly boutStartMs: number;
+  /** The bout stage's end, when the Arena card shows the result. */
+  readonly boutEndsAtMs: number;
+  readonly enterAtMs: number;
+  /** The latest arrival (the jog-in bound); a pair already standing in its ring plays from its arrival. */
+  readonly fightStartMs: number;
+  readonly leaveAtMs: number;
+};
 
 /**
- * Assigns each fight a ring and a window: it enters when its bout starts and a ring is free, starts fighting after
- * the walk-in, and leaves after the result poses. `previous` keeps already scheduled fights unchanged; fights new to
- * it go after them and never before `knownAtMs`, so a late reveal never moves a running fight.
+ * Assigns each fight a ring and a window: it enters when its bout starts and a ring is free, plays from its arrival
+ * (at the latest after the jog-in), and leaves after the bout stage's end, the outro and the result hold (or, when it
+ * arrives after the bout ended, after its arrival and the hold). `previous` keeps already scheduled fights unchanged;
+ * fights new to it go after them and never before `knownAtMs`, so a late reveal never moves a running fight.
  */
 export function scheduleArenaRings(fights: readonly CampFight[], ringCount: number, options: { previous?: ReadonlyMap<string, RingSlot>; knownAtMs?: number } = {}): Map<string, RingSlot> {
   const schedule = new Map<string, RingSlot>();
@@ -99,8 +120,8 @@ export function scheduleArenaRings(fights: readonly CampFight[], ringCount: numb
     for (let r = 1; r < ringCount; r += 1) if (free[r] < free[ring]) ring = r;
     const enterAtMs = Math.max(fight.startedAtMs, free[ring], options.knownAtMs ?? -Infinity);
     const fightStartMs = enterAtMs + ARENA_ENTRY_MS;
-    const leaveAtMs = fightStartMs + fight.log.durationMs + REPLAY_OUTRO_MS + ARENA_RESULT_HOLD_MS;
-    schedule.set(fight.battleId, { battleId: fight.battleId, ring, enterAtMs, fightStartMs, leaveAtMs });
+    const leaveAtMs = Math.max(fightStartMs, fight.endsAtMs + REPLAY_OUTRO_MS) + ARENA_RESULT_HOLD_MS;
+    schedule.set(fight.battleId, { battleId: fight.battleId, ring, boutStartMs: fight.startedAtMs, boutEndsAtMs: fight.endsAtMs, enterAtMs, fightStartMs, leaveAtMs });
     free[ring] = leaveAtMs;
   }
   return schedule;
@@ -108,14 +129,28 @@ export function scheduleArenaRings(fights: readonly CampFight[], ringCount: numb
 
 export type FightStatus = 'queued' | 'entering' | 'fighting' | 'result' | 'done';
 
-/** Where a scheduled fight is at the display time, and the replay position its pair shows. */
-export function fightStatus(slot: RingSlot, durationMs: number, t: number): { status: FightStatus; positionMs: number } {
-  const positionMs = Math.min(durationMs + REPLAY_OUTRO_MS, Math.max(0, t - slot.fightStartMs));
+/**
+ * Where a scheduled fight is at the display time, and the replay position its pair shows. It is fighting only until
+ * the bout stage's end, the moment the Arena card shows the result, at the bout's real time (display time minus the
+ * logged start), held short of the logged result if the stage ends after the log; from the stage's end it shows the
+ * logged result and its outro. `arrived` (both fighters stand in the ring) ends the jog-in before its bound.
+ */
+export function fightStatus(slot: RingSlot, durationMs: number, t: number, arrived = false): { status: FightStatus; positionMs: number } {
+  const ended = durationMs + Math.min(REPLAY_OUTRO_MS, Math.max(0, t - slot.boutEndsAtMs));
   if (t < slot.enterAtMs) return { status: 'queued', positionMs: 0 };
-  if (t < slot.fightStartMs) return { status: 'entering', positionMs: 0 };
-  if (t < slot.fightStartMs + durationMs) return { status: 'fighting', positionMs };
-  if (t < slot.leaveAtMs) return { status: 'result', positionMs };
-  return { status: 'done', positionMs };
+  if (t < slot.fightStartMs && !arrived) return { status: 'entering', positionMs: 0 };
+  if (t < slot.boutEndsAtMs) return { status: 'fighting', positionMs: Math.min(durationMs - 1, Math.max(0, t - slot.boutStartMs)) };
+  if (t < slot.leaveAtMs) return { status: 'result', positionMs: ended };
+  return { status: 'done', positionMs: ended };
+}
+
+/**
+ * The keyboard button for a ring fight: the gladiator first and an NPC fallback second (marked), whichever side of
+ * the log the NPC is on; it opens the gladiator's Arena card (an NPC side opens its entrant's activity anyway).
+ */
+export function arenaFightButton(fight: ArenaFightSummary): { label: string; entrant: ArenaFightSide } {
+  const [first, second] = fight.sides[0].npc && !fight.sides[1].npc ? [fight.sides[1], fight.sides[0]] : fight.sides;
+  return { label: `${first.name} vs ${second.name}${second.npc ? ' (NPC)' : ''}`, entrant: first };
 }
 
 export type ArenaRead = { readAtMs: number; hasBout: boolean };

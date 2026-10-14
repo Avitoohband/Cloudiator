@@ -3,7 +3,7 @@ import { applyRatingDelta, arenaOutcomes, estimateArenaStrength, leagueFor, make
   type ArenaAssignment, type ArenaEntrant, type PairingHistory } from '@domain/arena.ts';
 import { buildChangeFee, validateBuild } from '@domain/build.ts';
 import { CATALOG_V1 } from '@domain/catalog-v1.ts';
-import { makeFighter, simulateBattle } from '@domain/combat.ts';
+import { criticalProbability, hitProbability, makeFighter, simulateBattle } from '@domain/combat.ts';
 import { historicalGearScore } from '@domain/inventory.ts';
 import { RULES_V1 } from '@domain/rules-v1.ts';
 import type { LeagueId } from '@contracts/commands.ts';
@@ -54,17 +54,34 @@ describe('league placement', () => {
   });
   it('counts banked earned points exactly like allocated ones, and respecs never lower placement', () => {
     const owned = [item('sword:1:common')];
+    const history = historicalGearScore(owned, 0);
     const equipment = { ...buildInputFixture.equipment, weapon: owned[0].id };
-    const banked = validateBuild({ ...buildInputFixture, equipment }, owned, 125, 1);
-    const spent = validateBuild({ ...buildInputFixture, equipment, allocation: { strength: 100, agility: 5, vitality: 10, endurance: 0, precision: 10 } }, owned, 125, 1);
-    expect(banked).toMatchObject({ ok: true, unspentPoints: 115 });
-    expect(spent).toMatchObject({ ok: true, unspentPoints: 0 });
+    const EARNED = 125;
+    const legal = (allocation: Attributes) => {
+      const result = validateBuild({ ...buildInputFixture, equipment, allocation }, owned, EARNED, 1);
+      if (!result.ok) throw new Error(`illegal fixture allocation: ${result.reason}`);
+      return result;
+    };
+    // Every point the character earned, allocated or banked, recovered from one legal build state.
+    const earned = (state: ReturnType<typeof legal>) =>
+      Object.values(state.snapshot.allocations).reduce((sum, points) => sum + points, 0) + state.unspentPoints;
+    expect(legal(buildInputFixture.allocation)).toMatchObject({ unspentPoints: 115 });
     // 2 + floor(125 / 5) + floor(24 / 10) = 29; counting only the 10 allocated points would give bronze.
-    expect(leagueFor(1, 125, historicalGearScore(owned, 0))).toBe('silver');
-    expect(leagueFor(1, 10, historicalGearScore(owned, 0))).toBe('bronze');
-    // A respec costs money but leaves the earned total, the only point input, unchanged.
-    expect(buildChangeFee({ ...buildInputFixture, allocation: spent.ok ? spent.snapshot.allocations : buildInputFixture.allocation },
-      buildInputFixture)).toBe(100);
+    expect(leagueFor(1, EARNED, history)).toBe('silver');
+    expect(leagueFor(1, 10, history)).toBe('bronze');
+    // Bank 115, spend all 125, respec Strength into Agility, then respec back down to 10 allocated and 115 banked.
+    const states = [buildInputFixture.allocation, { strength: 100, agility: 5, vitality: 10, endurance: 2, precision: 8 },
+      { strength: 5, agility: 100, vitality: 10, endurance: 2, precision: 8 }, buildInputFixture.allocation];
+    const placement = rank(leagueFor(1, earned(legal(states[0])), history));
+    expect(placement).toBe(rank('silver'));
+    for (let i = 1; i < states.length; i += 1) {
+      const fee = buildChangeFee({ ...buildInputFixture, allocation: states[i - 1] }, { ...buildInputFixture, allocation: states[i] });
+      // The first step only allocates banked points (free); every later step lowers an attribute and is a paid respec.
+      expect(fee).toBe(i === 1 ? 0 : RULES_V1.fees.respec);
+      const after = legal(states[i]);
+      expect(earned(after)).toBe(EARNED);
+      expect(rank(leagueFor(1, earned(after), history))).toBeGreaterThanOrEqual(placement);
+    }
   });
   it('keeps a weak current loadout in the league its historical gear earned', () => {
     const everOwned = [item('sword:10:rare'), item('round-shield:10:rare'), item('spear:10:rare'), item('iron-helmet:10:rare'),
@@ -90,6 +107,17 @@ describe('league placement', () => {
         }
       }
     }
+  });
+  it('reads thresholds, weights and input limits from the rules it is given, defaulting to v1', () => {
+    // 2 × 1 + floor(10 / 5) + floor(0 / 10) = 4.
+    const lowSilver: Rules = { ...RULES_V1, leagues: { ...RULES_V1.leagues, silver: 4 } };
+    expect(leagueFor(1, 10, 0)).toBe('bronze');
+    expect(leagueFor(1, 10, 0, RULES_V1)).toBe('bronze');
+    expect(leagueFor(1, 10, 0, lowSilver)).toBe('silver');
+    const heavyLevels: Rules = { ...RULES_V1, leagues: { ...RULES_V1.leagues, levelWeight: 12 } };
+    expect(leagueFor(2, 10, 0, heavyLevels)).toBe('silver'); // 24 + 2 = 26
+    const lowCap: Rules = { ...RULES_V1, attributes: { ...RULES_V1.attributes, maximumLevel: 10 } };
+    expect(() => leagueFor(11, 10, 0, lowCap)).toThrow(RangeError);
   });
   it.each([
     [0, 10, 0], [1.5, 10, 0], [Number.NaN, 10, 0], [1_000_000_001, 10, 0],
@@ -133,6 +161,17 @@ describe('Elo ratings', () => {
       expect(() => ratingDelta(winner, loser)).toThrow(RangeError);
       expect(() => applyRatingDelta(winner, loser)).toThrow(RangeError);
     });
+  it('reads K, the expectation scale and the floor from the rules it is given, defaulting to v1', () => {
+    const custom: Rules = { ...RULES_V1, rating: { ...RULES_V1.rating, k: 32, minimum: 100 } };
+    expect(ratingDelta(1000, 1000, RULES_V1)).toEqual({ winner: 12, loser: -12 });
+    expect(ratingDelta(1000, 1000, custom)).toEqual({ winner: 16, loser: -16 });
+    const wideScale: Rules = { ...RULES_V1, rating: { ...RULES_V1.rating, expectationScale: 800 } };
+    expect(ratingDelta(1400, 1000, wideScale)).toEqual({ winner: 6, loser: -6 }); // expected .7597, 5.77
+    // Winner 100 against loser 110: expected .4856, gain round(32 × .5144) = 16; the loser stops at the floor 100.
+    expect(applyRatingDelta(100, 110, custom)).toEqual({ winner: 116, loser: 100, applied: { winner: 16, loser: -10 } });
+    expect(() => ratingDelta(1000, 99, custom)).toThrow(RangeError);
+    expect(() => applyRatingDelta(99, 1000, custom)).toThrow(RangeError);
+  });
   it('rejects an applied rating beyond the safe integer range', () => {
     expect(() => applyRatingDelta(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)).toThrow(RangeError);
   });
@@ -170,6 +209,32 @@ describe('arena strength estimate', () => {
     expect(estimateArenaStrength(arena(bound))).toBe(775.04);
     // The expedition snapshot carries no arena modifier: 100 × 9.4 × .71 × 1.0325 / .952 = 723.8345…
     expect(estimateArenaStrength(makeFighter(bound, 'expedition', RULES_V1))).toBe(723.83);
+  });
+  it('normalises the engine hit and critical probabilities to exact decimals before the final rounding', () => {
+    // The engine's own Precision 17 hit probability carries floating-point error; the engine itself keeps using it.
+    expect(hitProbability(17, RULES_V1.leagues.referenceAgility, RULES_V1)).toBe(0.7699999999999999);
+    expect(criticalProbability(17, RULES_V1)).toBe(0.101);
+    // Berserker Precision 12 + 5 = 17, Agility 7 (round(1000 / 1.07) = 935), renown sword 6 × 1.1 = 6.6 + 2.75 = 9.35:
+    // 100 × 9.35 × .77 × (1 + .5 × .101) / .935 = 808.885 exactly, so 808.89; the raw .7699999999999999 gives 808.88.
+    const precise = arena(build('berserker', 'balanced', { strength: 0, agility: 2, vitality: 0, endurance: 0, precision: 12 },
+      { weapon: item('sword:1:renown') }));
+    expect(precise).toMatchObject({ attributes: { precision: 17 }, maxHealth: 100, baseDamage: 9.35, attackIntervalMs: 935, efficiency: 1 });
+    expect(estimateArenaStrength(precise)).toBe(808.89);
+    // The same exact half cent at a 1 s interval: 100 × 10 × .77 × 1.0505.
+    expect(estimateArenaStrength({ ...tuned(100, 10), attributes: { ...reference.attributes, precision: 17 } })).toBe(808.89);
+  });
+  it("leaves the estimate unchanged by the fighter's own armor (the reference target's armor is 0)", () => {
+    const body = item('heavy-armor:1:renown');
+    body.stats.armor = 6.65;
+    const allocation = { strength: 3, agility: 2, vitality: 2, endurance: 2, precision: 1 };
+    const armored = arena(build('guardian', 'balanced', allocation, { weapon: item('spear:1:common'), body }));
+    const unarmored = arena(build('guardian', 'balanced', allocation, { weapon: item('spear:1:common') }));
+    expect(armored).toMatchObject({ armor: 7.315, maxHealth: 123, baseDamage: 11, attackIntervalMs: 1121, efficiency: 1 });
+    expect(unarmored).toMatchObject({ armor: 0, maxHealth: 123, baseDamage: 11, attackIntervalMs: 1121, efficiency: 1 });
+    // 123 × 11 × .715 × 1.034 / 1.121 = 892.3164…, with or without the bound arena armor.
+    expect(estimateArenaStrength(armored)).toBe(892.32);
+    expect(estimateArenaStrength(unarmored)).toBe(892.32);
+    expect(estimateArenaStrength({ ...armored, armor: 60 })).toBe(892.32);
   });
   it.each([[100, 10, 733.08], [100, 18, 1319.54], [100, 22, 1612.77], [100, 20, 1466.15], [200, 20, 2932.3]])(
     'rounds HP %s × base damage %s once, half-up, from exact decimals to %s', (maxHealth, baseDamage, strength) => {
@@ -389,6 +454,14 @@ describe('regular Arena pairing', () => {
   it('requires a private seed', () => {
     expect(() => matchArena(roster(2), [], '')).toThrow(RangeError);
   });
+  it('derives its rules once from the entrants and rejects mixed rules versions', () => {
+    const [a, b, c] = roster(3);
+    const other = { ...b, fighter: { ...b.fighter, rulesVersion: 'v2' } };
+    expect(() => matchArena([a, other, c], [], 's')).toThrow(/share one rules version/);
+    expect(() => matchArena([other, a, c], [], 's')).toThrow(/share one rules version/);
+    // A single unknown version still fails closed as an invalid snapshot.
+    expect(() => matchArena([other], [], 's')).toThrow(/Invalid arena fighter snapshot/);
+  });
 });
 
 describe('regular Arena outcomes', () => {
@@ -453,5 +526,35 @@ describe('regular Arena outcomes', () => {
     expect(() => arenaOutcomes(solo, { ...log, battleId: solo.battleId })).toThrow(RangeError);
     expect(() => arenaOutcomes(pair, { ...log, winnerId: 'npc:a' })).toThrow(RangeError);
     expect(() => arenaOutcomes(pair, { ...log, rulesVersion: 'v2' })).toThrow(RangeError);
+  });
+  it('validates every fighter of the bout and requires one rules version', () => {
+    if (pair.kind !== 'human') throw new Error('expected a human assignment');
+    const log = bout(pair, 'bout-0');
+    const [first, second] = pair.sides;
+    const withSecond = (fighter: FighterSnapshot) => ({ ...pair, sides: [first, { ...second, fighter }] }) as ArenaAssignment;
+    expect(() => arenaOutcomes(withSecond({ ...second.fighter, maxHealth: 0 }), log)).toThrow(RangeError);
+    expect(() => arenaOutcomes(withSecond({ ...second.fighter, rulesVersion: 'v2' }), log)).toThrow(/share one rules version/);
+    if (solo.kind !== 'npc') throw new Error('expected an NPC assignment');
+    const npcLog = bout(solo, 'npc-0');
+    const withOpponent = (snapshot: FighterSnapshot) => ({ ...solo, opponent: { ...solo.opponent, snapshot } }) as ArenaAssignment;
+    expect(() => arenaOutcomes(withOpponent({ ...solo.opponent.snapshot, attackIntervalMs: 0 }), npcLog)).toThrow(RangeError);
+    expect(() => arenaOutcomes(withOpponent({ ...solo.opponent.snapshot, rulesVersion: 'v2' }), npcLog)).toThrow(/share one rules version/);
+    expect(arenaOutcomes(pair, log)).toHaveLength(2);
+    expect(arenaOutcomes(solo, npcLog)).toHaveLength(1);
+  });
+  it('requires each human participant to carry its gladiator id and the NPC participant a null one', () => {
+    const relabel = (log: BattleLog, index: 0 | 1, gladiatorId: string | null): BattleLog => {
+      const [zero, one] = log.participants;
+      return { ...log, participants: index === 0 ? [{ ...zero, gladiatorId }, one] : [zero, { ...one, gladiatorId }] };
+    };
+    const log = bout(pair, 'bout-0');
+    expect(log.participants.map(p => [p.id, p.gladiatorId])).toEqual([['a', 'a'], ['b', 'b']]);
+    expect(() => arenaOutcomes(pair, relabel(log, 0, null))).toThrow(RangeError);
+    expect(() => arenaOutcomes(pair, relabel(log, 1, 'a'))).toThrow(RangeError);
+    if (solo.kind !== 'npc') throw new Error('expected an NPC assignment');
+    const npcLog = bout(solo, 'npc-0');
+    expect(npcLog.participants.map(p => [p.id, p.gladiatorId])).toEqual([['solo', 'solo'], ['npc:solo', null]]);
+    expect(() => arenaOutcomes(solo, relabel(npcLog, 1, 'solo'))).toThrow(RangeError);
+    expect(() => arenaOutcomes(solo, relabel(npcLog, 0, null))).toThrow(RangeError);
   });
 });

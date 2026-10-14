@@ -18,18 +18,25 @@ function rulesFor(fighter: FighterSnapshot): Rules {
   return rules!;
 }
 
+/** The one retained rules version shared by a non-empty set of fighters, each validated against it. Mixed versions fail. */
+function sharedRules(fighters: readonly FighterSnapshot[]): Rules {
+  if (new Set(fighters.map(fighter => fighter?.rulesVersion)).size !== 1) throw new RangeError('Arena fighters must share one rules version');
+  return fighters.map(rulesFor)[0];
+}
+
 /** Spec §8.1 league order, lowest first. */
 const LEAGUES: readonly LeagueId[] = Object.freeze(['bronze', 'silver', 'gold', 'champion']);
 
 /**
- * Spec §8.1 placement: `2 × level + floor(earned points / 5) + floor(historical gear / 10)`, then the v1 thresholds
- * (below 25 Bronze, 25–59 Silver, 60–119 Gold, 120 and above Champion). `earnedPoints` is every allocatable point the
+ * Spec §8.1 placement: `2 × level + floor(earned points / 5) + floor(historical gear / 10)`, then the thresholds
+ * (v1: below 25 Bronze, 25–59 Silver, 60–119 Gold, 120 and above Champion). `earnedPoints` is every allocatable point the
  * character ever earned, including the starting 10 and banked (unallocated) points; `gearHistory` is the monotonic
  * Task 8 `historicalGearScore`. None of the inputs ever decreases, so placement never drops through equipment removal,
- * sale, discard or respec. The current loadout is deliberately not an input.
+ * sale, discard or respec. The current loadout is deliberately not an input. `rules` is the character's retained
+ * rules version (default v1); weights, thresholds and input limits all come from it.
  */
-export function leagueFor(level: number, earnedPoints: number, gearHistory: number): LeagueId {
-  const { attributes, leagues } = RULES_V1;
+export function leagueFor(level: number, earnedPoints: number, gearHistory: number, rules: Rules = RULES_V1): LeagueId {
+  const { attributes, leagues } = rules;
   if (!Number.isSafeInteger(level) || level < 1 || level > attributes.maximumLevel
     || !Number.isSafeInteger(earnedPoints) || earnedPoints < attributes.creationPoints || earnedPoints > attributes.maximumPoints
     || !Number.isFinite(gearHistory) || gearHistory < 0) throw new RangeError('Invalid league progression input');
@@ -40,32 +47,35 @@ export function leagueFor(level: number, earnedPoints: number, gearHistory: numb
 
 /** Nominal Elo changes for one human bout: the winner gains `winner`, the loser receives `loser` (its negative). */
 export type RatingDelta = { winner: number; loser: number };
-/** Ratings after applying a human bout, clamped at the v1 minimum, and the change actually applied to each. */
+/** Ratings after applying a human bout, clamped at the rules minimum (v1: 0), and the change actually applied to each. */
 export type RatingUpdate = { winner: number; loser: number; applied: RatingDelta };
 
-function validRating(rating: number): void {
-  if (!Number.isSafeInteger(rating) || rating < RULES_V1.rating.minimum) throw new RangeError('Invalid arena rating');
+function validRating(rating: number, rules: Rules): void {
+  if (!Number.isSafeInteger(rating) || rating < rules.rating.minimum) throw new RangeError('Invalid arena rating');
 }
 
 /**
- * Spec §8.1 Elo, K = 24: the winner's expectation is `1 / (1 + 10^((loser − winner) / 400))` and its gain is
- * `round(24 × (1 − expectation))`; the loser receives the negative. Only human bouts call this; NPC bouts never change a
- * rating. `ratingDelta(1000, 1000)` is `{ winner: 12, loser: -12 }`.
+ * Spec §8.1 Elo (v1: K = 24, scale 400): the winner's expectation is `1 / (1 + 10^((loser − winner) / 400))` and its
+ * gain is `round(24 × (1 − expectation))`; the loser receives the negative. Only human bouts call this; NPC bouts never
+ * change a rating. `ratingDelta(1000, 1000)` is `{ winner: 12, loser: -12 }`. `rules` defaults to v1.
  */
-export function ratingDelta(winnerRating: number, loserRating: number): RatingDelta {
-  validRating(winnerRating);
-  validRating(loserRating);
-  const { k, expectationScale } = RULES_V1.rating;
+export function ratingDelta(winnerRating: number, loserRating: number, rules: Rules = RULES_V1): RatingDelta {
+  validRating(winnerRating, rules);
+  validRating(loserRating, rules);
+  const { k, expectationScale } = rules.rating;
   const expected = 1 / (1 + 10 ** ((loserRating - winnerRating) / expectationScale));
   const gain = Math.round(k * (1 - expected));
   // `0 - gain` keeps a zero loss as positive zero in JSON-equal and Object.is comparisons.
   return { winner: gain, loser: 0 - gain };
 }
 
-/** Applies `ratingDelta`, then clamps each rating at zero. `applied` is the change each rating actually received. */
-export function applyRatingDelta(winnerRating: number, loserRating: number): RatingUpdate {
-  const delta = ratingDelta(winnerRating, loserRating);
-  const minimum = RULES_V1.rating.minimum;
+/**
+ * Applies `ratingDelta`, then clamps each rating at the rules minimum (v1: zero). `applied` is the change each rating
+ * actually received. `rules` defaults to v1.
+ */
+export function applyRatingDelta(winnerRating: number, loserRating: number, rules: Rules = RULES_V1): RatingUpdate {
+  const delta = ratingDelta(winnerRating, loserRating, rules);
+  const minimum = rules.rating.minimum;
   const winner = Math.max(minimum, winnerRating + delta.winner);
   const loser = Math.max(minimum, loserRating + delta.loser);
   if (!Number.isSafeInteger(winner) || !Number.isSafeInteger(loser)) throw new RangeError('Arena rating exceeds the safe integer range');
@@ -73,24 +83,39 @@ export function applyRatingDelta(winnerRating: number, loserRating: number): Rat
 }
 
 /**
+ * Significant digits that recover the exact decimal of an engine probability. The v1 coefficients have at most three
+ * decimals and effective attributes at most hundredths, so an exact probability has at most five decimals, while the
+ * engine's floating-point sum can be off by about 1e-16 (Precision 17: .7699999999999999 for the exact .77).
+ */
+const PROBABILITY_DIGITS = 12;
+/** The engine's own probability formula, normalised to the exact decimal its rule arithmetic defines. */
+const exactProbability = (probability: number): Fraction => decimal(Number(probability.toPrecision(PROBABILITY_DIGITS)));
+
+/**
  * Spec §8.1 strength estimate: `max health × expected outgoing damage per second` for a frozen **arena** fighter (its base
  * damage already carries the bound arena weapon modifier). Expected damage per attack is base damage × efficiency ×
  * outgoing stance × the engine's hit probability against the reference Agility 5 × the expected critical multiplier
- * `1 + (1.5 − 1) × critical probability`, against a reference target with armor 0 and incoming stance 1; the frozen
- * attack interval already includes efficiency. Exact decimal factors, then one half-up rounding to hundredths.
- * The estimate orders opponents only; the seeded combat engine still decides bouts.
+ * `1 + (1.5 − 1) × critical probability`, against a reference target with armor 0 and incoming stance 1, so the
+ * fighter's own armor never matters; the frozen attack interval already includes efficiency. The hit and critical
+ * probabilities come from the engine's formulas, normalised to 12 significant digits to remove their floating-point
+ * error; every factor is then an exact decimal, and the product is rounded once, half-up, to hundredths.
+ * The estimate orders opponents only; the seeded combat engine still decides bouts with its own probabilities.
  */
 export function estimateArenaStrength(fighter: FighterSnapshot): number {
-  const rules = rulesFor(fighter);
+  return strengthOf(fighter, rulesFor(fighter));
+}
+
+/** `estimateArenaStrength` for a fighter already validated against `rules`. */
+function strengthOf(fighter: FighterSnapshot, rules: Rules): number {
   const precision = fighter.attributes.precision;
   const criticalBonus = decimal(rules.combat.criticalDamage);
   const extra = multiply({ numerator: criticalBonus.numerator - criticalBonus.denominator, denominator: criticalBonus.denominator },
-    decimal(criticalProbability(precision, rules)));
+    exactProbability(criticalProbability(precision, rules)));
   const expectedCritical: Fraction = { numerator: extra.denominator + extra.numerator, denominator: extra.denominator };
   const perSecond: Fraction = { numerator: 1000n, denominator: BigInt(fighter.attackIntervalMs) };
-  const total = [fighter.maxHealth, fighter.baseDamage, fighter.efficiency, rules.stances[fighter.stance].outgoing,
-    hitProbability(precision, rules.leagues.referenceAgility, rules)].map(decimal)
-    .reduce(multiply, multiply(expectedCritical, perSecond));
+  const hit = exactProbability(hitProbability(precision, rules.leagues.referenceAgility, rules));
+  const total = [fighter.maxHealth, fighter.baseDamage, fighter.efficiency, rules.stances[fighter.stance].outgoing].map(decimal)
+    .reduce(multiply, multiply(multiply(expectedCritical, perSecond), hit));
   const cents = (200n * total.numerator + total.denominator) / (2n * total.denominator);
   if (cents > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError('Arena strength exceeds the safe integer range');
   return Number(cents) / 100;
@@ -104,7 +129,11 @@ export function estimateArenaStrength(fighter: FighterSnapshot): number {
  * arena-damage or overload modifiers. The template carries no rewards; callers retain it with the activity.
  */
 export function makeFallback(fighter: FighterSnapshot): FighterSnapshot {
-  const rules = rulesFor(fighter);
+  return fallbackOf(fighter, rulesFor(fighter));
+}
+
+/** `makeFallback` for a fighter already validated against `rules`. */
+function fallbackOf(fighter: FighterSnapshot, rules: Rules): FighterSnapshot {
   const factor = decimal(rules.arena.npcHealthDamageMultiplier);
   const health = multiply(decimal(fighter.maxHealth), factor);
   const a = fighter.attributes;
@@ -161,6 +190,9 @@ function copyFighter(f: FighterSnapshot): FighterSnapshot {
  */
 export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly PairingHistory[], seed: Seed): ArenaAssignment[] {
   if (!Array.isArray(entrants) || !Array.isArray(recent) || !nonEmpty(seed)) throw new RangeError('Invalid arena pairing input');
+  // One retained rules version for the whole pairing: window, cap, ratings and strengths all come from it (with no
+  // entrants nothing is paired and the window is never read).
+  const rules = entrants.length > 0 ? sharedRules(entrants.map(entrant => entrant?.fighter)) : RULES_V1;
   const slot = entrants[0]?.slotIndex, season = entrants[0]?.seasonId;
   const ids = new Set<string>(), activities = new Set<string>();
   const pool = entrants.map(entrant => {
@@ -169,10 +201,10 @@ export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly P
       || entrant.slotIndex !== slot || entrant.seasonId !== season || ids.has(entrant.gladiatorId) || activities.has(entrant.activityId)) {
       throw new RangeError('Invalid arena entrant');
     }
-    validRating(entrant.rating);
+    validRating(entrant.rating, rules);
     ids.add(entrant.gladiatorId);
     activities.add(entrant.activityId);
-    const strength = estimateArenaStrength(entrant.fighter);
+    const strength = strengthOf(entrant.fighter, rules);
     return { entrant, strength, cents: Math.round(strength * 100), tie: seededRandom(`${seed}:arena:${entrant.gladiatorId}`)() };
   });
   const recentPairings = new Map<string, number>();
@@ -183,7 +215,7 @@ export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly P
       throw new RangeError('Invalid arena pairing history');
     }
     // Only the preceding window counts: slots S − 18 … S − 1.
-    if (slot !== undefined && pairing.slotIndex >= slot - RULES_V1.matchmaking.recentPairingSlots) {
+    if (slot !== undefined && pairing.slotIndex >= slot - rules.matchmaking.recentPairingSlots) {
       const key = pairKey(pair[0], pair[1]);
       recentPairings.set(key, (recentPairings.get(key) ?? 0) + 1);
     }
@@ -196,7 +228,7 @@ export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly P
     || pairings(first, a) - pairings(first, b)
     || Math.abs(first.entrant.rating - a.entrant.rating) - Math.abs(first.entrant.rating - b.entrant.rating) || seeded(a, b);
   const eligible = (a: Candidate, b: Candidate) =>
-    Math.max(a.cents, b.cents) <= RULES_V1.matchmaking.maximumStrengthRatio * Math.min(a.cents, b.cents);
+    Math.max(a.cents, b.cents) <= rules.matchmaking.maximumStrengthRatio * Math.min(a.cents, b.cents);
   const side = (c: Candidate): ArenaSide => ({ gladiatorId: c.entrant.gladiatorId, activityId: c.entrant.activityId,
     rating: c.entrant.rating, strength: c.strength, fighter: copyFighter(c.entrant.fighter) });
   const assignments: ArenaAssignment[] = [];
@@ -210,7 +242,7 @@ export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly P
       const id = first.entrant.gladiatorId;
       if (best < 0) {
         assignments.push(freezeDomain({ kind: 'npc' as const, battleId: `arena:${slot}:${id}:npc`, ...scope, sides: [side(first)] as [ArenaSide],
-          opponent: { id: `npc:${id}`, snapshot: makeFallback(first.entrant.fighter) } }));
+          opponent: { id: `npc:${id}`, snapshot: fallbackOf(first.entrant.fighter, rules) } }));
       } else {
         const [opponent] = open.splice(best, 1);
         assignments.push(freezeDomain({ kind: 'human' as const, battleId: `arena:${slot}:${id}:${opponent.entrant.gladiatorId}`, ...scope,
@@ -231,19 +263,26 @@ export type ArenaOutcome = DeepReadonly<{
  * Pure regular-Arena rewards for an assignment's revealed bout, one outcome per side in assignment order. The winner is
  * the log's `winnerId`, including a seeded simultaneous-defeat winner at zero health. Human bouts credit 10 renown for a
  * win and 2 for a loss and apply clamped Elo from the frozen side ratings; NPC bouts credit 3 or 0 renown and never
- * change rating. No XP or money is ever granted. Rejects a log that is not this assignment's bout.
+ * change rating. No XP or money is ever granted. Rejects a log that is not this assignment's bout: every fighter of the
+ * bout (both sides, or the side and the NPC template) must be valid under one retained rules version, and the log's
+ * participants must be exactly the bout's, a human logged with its own `gladiatorId` and the NPC with a null one.
  */
 export function arenaOutcomes(assignment: ArenaAssignment, log: BattleLog): ArenaOutcome[] {
   const sides = assignment?.sides;
-  const expected = assignment?.kind === 'human' && sides?.length === 2 ? [sides[0].gladiatorId, sides[1].gladiatorId]
-    : assignment?.kind === 'npc' && sides?.length === 1 ? [sides[0].gladiatorId, assignment.opponent?.id] : null;
-  const logged = Array.isArray(log?.participants) ? log.participants.map(p => p?.id) : [];
-  if (!expected || !expected.every(nonEmpty) || expected[0] === expected[1] || !nonEmpty(assignment.battleId)
-    || log.battleId !== assignment.battleId || logged.length !== 2 || !expected.every(id => logged.includes(id))
-    || !expected.includes(log.winnerId)) throw new RangeError('Battle log does not belong to the arena assignment');
-  const rules = rulesFor(sides[0].fighter);
+  const npc = assignment?.kind === 'npc' && sides?.length === 1 ? assignment.opponent : null;
+  // Each participant's battle-log identity, as `[participant id, logged gladiatorId]`.
+  const expected: readonly (readonly [string, string | null])[] | null = assignment?.kind === 'human' && sides?.length === 2
+    ? [[sides[0].gladiatorId, sides[0].gladiatorId], [sides[1].gladiatorId, sides[1].gladiatorId]]
+    : npc ? [[sides[0].gladiatorId, sides[0].gladiatorId], [npc.id, null]] : null;
+  const ids = expected?.map(([id]) => id) ?? [];
+  const logged = Array.isArray(log?.participants) ? log.participants : [];
+  if (!expected || !ids.every(nonEmpty) || ids[0] === ids[1] || !nonEmpty(assignment.battleId)
+    || log.battleId !== assignment.battleId || logged.length !== 2
+    || !expected.every(([id, gladiatorId]) => logged.some(p => p?.id === id && p.gladiatorId === gladiatorId))
+    || !ids.includes(log.winnerId)) throw new RangeError('Battle log does not belong to the arena assignment');
+  const rules = sharedRules([...sides.map(side => side.fighter), ...(npc ? [npc.snapshot] : [])]);
   if (log.rulesVersion !== rules.version) throw new RangeError('Battle log does not belong to the arena assignment');
-  sides.forEach(side => validRating(side.rating));
+  sides.forEach(side => validRating(side.rating, rules));
   const { humanWinRenown, humanLossRenown, npcWinRenown, npcLossRenown } = rules.arena;
   const outcome = (side: ArenaSide, won: boolean, renown: number, ratingAfter: number): ArenaOutcome => freezeDomain({
     gladiatorId: side.gladiatorId, activityId: side.activityId, result: won ? 'victory' as const : 'defeat' as const, success: won,
@@ -255,7 +294,7 @@ export function arenaOutcomes(assignment: ArenaAssignment, log: BattleLog): Aren
   }
   const [first, second] = assignment.sides;
   const [winner, loser] = log.winnerId === first.gladiatorId ? [first, second] : [second, first];
-  const update = applyRatingDelta(winner.rating, loser.rating);
+  const update = applyRatingDelta(winner.rating, loser.rating, rules);
   return assignment.sides.map(side => side === winner
     ? outcome(side, true, humanWinRenown, update.winner) : outcome(side, false, humanLossRenown, update.loser));
 }

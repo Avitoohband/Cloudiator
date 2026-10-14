@@ -1,0 +1,191 @@
+diff --git a/src/lib/api/fixture-gateway.ts b/src/lib/api/fixture-gateway.ts
+--- a/src/lib/api/fixture-gateway.ts
++++ b/src/lib/api/fixture-gateway.ts
+@@ -1,9 +1,15 @@
+ import type { GameGateway } from './gateway';
+ import { ownerFixture, worldFixture } from '../../../tests/fixtures/domain';
+ import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
++import { ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
+
+ /** Sample replays the fixture game page links to. */
+ export const FIXTURE_REPLAYS: readonly { activityId: string; label: string }[] = REPLAY_SAMPLES;
++/** Sample Arena activities the fixture game page opens in its Arena card, with each entrant's gladiator. */
++export const FIXTURE_ARENA: readonly { activityId: string; label: string; gladiatorId: string }[] = ARENA_SAMPLES;
++const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...ARENA_TIMELINES };
++/** The owner plus the current slot's Arena entrants, warming up at the fixture time (minute 40). */
++const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS] };
+
+ /** Pure local preview: no transport, auth session, storage, clock, or side effects. */
+ export function createFixtureGateway(): GameGateway {
+@@ -13,11 +19,14 @@
+   return {
+     command: async () => ({ ok: false, code: 'unavailable' }),
+     owner: async () => structuredClone(ownerFixture),
+-    world: async () => structuredClone(worldFixture),
++    world: async () => structuredClone(FIXTURE_WORLD),
+     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex }),
+-    // Revealed sample timelines with engine-generated battle logs; every other activity stays unavailable.
+-    timeline: async id => (Object.hasOwn(REPLAY_TIMELINES, id) ? structuredClone(REPLAY_TIMELINES[id]) : unavailable()),
+-    profile: unavailable, market: unavailable,
+-    standings: unavailable, tournament: unavailable, recent: unavailable,
++    // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Arena samples hold
++    // every stage of their slot (no clock here): views show only the stages revealed by their display time.
++    timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
++    profile: async id => (Object.hasOwn(ARENA_PROFILES, id) ? structuredClone(ARENA_PROFILES[id]) : unavailable()),
++    // Pages of at most 50 rows; the optional cursor (absent from GameGateway.standings) selects the next page.
++    standings: async (league, cursor?: string) => arenaStandingsPage(league, cursor),
++    market: unavailable, tournament: unavailable, recent: unavailable,
+   };
+ }
+diff --git a/src/app/game/page.tsx b/src/app/game/page.tsx
+--- a/src/app/game/page.tsx
++++ b/src/app/game/page.tsx
+@@ -5,15 +5,18 @@
+ import { useSearchParams } from 'next/navigation';
+ import type { OwnerState, WorldSnapshot } from '@contracts/reads';
+ import type { Phase } from '@contracts/commands';
+-import { createLiveGateway, GatewayReadError } from '../../lib/api/gateway';
++import { createLiveGateway, GatewayReadError, type GameGateway } from '../../lib/api/gateway';
+ import { signOut, useSession } from '../../lib/api/session';
+ import { SignIn } from '../../features/auth/SignIn';
+ import { CreateCharacter } from '../../features/character/CreateCharacter';
+ import { SchedulePanel } from '../../features/schedule/SchedulePanel';
+ import { BuildPanel } from '../../features/build/BuildPanel';
+ import { InventoryPanel } from '../../features/inventory/InventoryPanel';
++import { ArenaPanel, type ArenaSample } from '../../features/arena/ArenaPanel';
++import { StandingsPanel } from '../../features/arena/StandingsPanel';
+ import { GameViewport } from '../../game/GameViewport';
+ import { createSceneBridge } from '../../game/bridge';
++import { createDisplayClock } from '../../game/display-clock';
+ import { withDemoCrowd } from '../../game/demo-world';
+
+ const panels = ['Schedule', 'Gladiator', 'Inventory', 'Marketplace', 'Standings', 'Tournaments', 'Results'] as const;
+@@ -29,6 +32,9 @@
+   const [panel, setPanel] = useState<Panel>('Schedule');
+   const [previewError, setPreviewError] = useState(false);
+   const [sampleReplays, setSampleReplays] = useState<readonly { activityId: string; label: string }[]>([]);
++  const [sampleArena, setSampleArena] = useState<readonly ArenaSample[]>([]);
++  const [fixtureReads, setFixtureReads] = useState<GameGateway | null>(null);
++  const [clock] = useState(createDisplayClock);
+   const session = useSession();
+   const [gateway] = useState(createLiveGateway);
+   const [liveOwner, setLiveOwner] = useState<{ account: string; value: OwnerState | null } | null>(null);
+@@ -68,7 +74,7 @@
+     let active = true;
+     if (fixture) {
+       import('../../lib/api/fixture-gateway')
+-        .then(({ createFixtureGateway, FIXTURE_REPLAYS }) => { if (active) setSampleReplays(FIXTURE_REPLAYS); const fixtureGateway = createFixtureGateway(); return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
++        .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_ARENA }) => { const fixtureGateway = createFixtureGateway(); if (active) { setSampleReplays(FIXTURE_REPLAYS); setSampleArena(FIXTURE_ARENA); setFixtureReads(fixtureGateway); } return Promise.all([fixtureGateway.owner(), fixtureGateway.world()]); })
+         .then(([ownerData, worldData]) => { if (active) { setOwner(ownerData); setWorld(withDemoCrowd(worldData)); } })
+         .catch(() => { if (active) setPreviewError(true); });
+     }
+@@ -76,6 +82,7 @@
+   }, [fixture]);
+
+   const visibleOwner = fixture ? owner : session.status === 'signed-in' && liveOwner?.account === session.userId ? liveOwner.value : null;
++  const reads = fixture ? fixtureReads : gateway;
+   const noCharacter = session.status === 'signed-in' && liveOwner?.account === session.userId && liveOwner.value === null;
+   async function refreshPlanning() {
+     const account = session.userId;
+@@ -95,7 +102,7 @@
+     <main id="main" className="dashboard">
+       <section className="camp-area" aria-labelledby="camp-heading">
+         <div className="section-title"><div><p className="eyebrow">THE SHARED WORLD</p><h1 id="camp-heading">Hearthstone Camp</h1></div><span className="tag">{fixture ? 'Preview' : 'Coming soon'}</span></div>
+-        {fixture ? <GameViewport world={world} bridge={bridge} focusGladiatorId={owner?.gladiatorId ?? null} /> : <div className="scene-placeholder">
++        {fixture ? <GameViewport world={world} bridge={bridge} focusGladiatorId={owner?.gladiatorId ?? null} clock={clock} timelines={fixtureReads} /> : <div className="scene-placeholder">
+           <div className="scene-label">CAMP VIEW</div>
+           <h2>Your world is taking shape.</h2>
+           <p>The living camp and its fighters will appear here.<br />Management stays available alongside the world.</p>
+@@ -131,6 +138,7 @@
+           <p className="eyebrow">SAMPLE REPLAYS</p>
+           <ul>{sampleReplays.map(r => <li key={r.activityId}><Link href={`/replay/?mode=fixture&activity=${r.activityId}`}>{r.label}</Link></li>)}</ul>
+         </nav>}
++        {visibleOwner && <ArenaPanel bridge={bridge} reads={reads} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />}
+       </aside>
+       <section className="management" aria-label="Gladiator management">
+         <nav className="panel-nav" aria-label="Management panels">
+@@ -140,6 +148,7 @@
+           {!fixture && visibleOwner && panel === 'Schedule' ? <SchedulePanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
+             : !fixture && visibleOwner && panel === 'Gladiator' ? <BuildPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
+               : visibleOwner && panel === 'Inventory' ? <InventoryPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} preview={fixture} />
++              : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} />
+               : panel === 'Schedule' ? <>
+             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
+             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>
+diff --git a/tests/api/fixture-gateway.test.ts b/tests/api/fixture-gateway.test.ts
+--- a/tests/api/fixture-gateway.test.ts
++++ b/tests/api/fixture-gateway.test.ts
+@@ -1,5 +1,5 @@
+ import { expect, test } from 'vitest';
+-import { createFixtureGateway } from '../../src/lib/api/fixture-gateway';
++import { createFixtureGateway, FIXTURE_ARENA } from '../../src/lib/api/fixture-gateway';
+
+ test('fixture commands cannot mutate even the local owner preview', async () => {
+   const gateway = createFixtureGateway();
+@@ -24,13 +24,17 @@
+ test('fixture public actors omit private owner management state', async () => {
+   const gateway = createFixtureGateway();
+   const world = await gateway.world();
+-  expect(world.actors).toHaveLength(1);
++  // The owner, plus the current slot's Arena entrants (Task 17).
++  expect(world.actors).toHaveLength(14);
+   const actor = world.actors[0];
+   expect(actor.name).toBe('Aster');
+   expect(actor.location).toBe('training');
+-  for (const field of ['ownerId', 'wallets', 'inventory', 'schedule', 'seed', 'encounterPlan']) {
+-    expect(actor).not.toHaveProperty(field);
++  for (const a of world.actors) {
++    for (const field of ['ownerId', 'wallets', 'inventory', 'schedule', 'seed', 'encounterPlan']) expect(a).not.toHaveProperty(field);
++    // The camp projection never carries a battle log.
++    expect(a.visibleStage?.battleLog).toBeUndefined();
+   }
++  expect(world.actors.slice(1).every(a => a.location === 'arena' && a.visibleStage?.kind === 'staging')).toBe(true);
+   const revision = await gateway.revision();
+   expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex });
+ });
+@@ -39,8 +43,7 @@
+   const gateway = createFixtureGateway();
+   await expect(gateway.market()).rejects.toMatchObject({ code: 'unavailable' });
+   await expect(gateway.timeline('9fce3cd5-e831-4a66-8ca1-16b4576b1499')).rejects.toMatchObject({ code: 'unavailable' });
+-  await expect(gateway.profile('0d5f8471-d919-428f-9ab7-058c95821757')).rejects.toMatchObject({ code: 'unavailable' });
+-  await expect(gateway.standings('bronze')).rejects.toMatchObject({ code: 'unavailable' });
++  await expect(gateway.profile('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
+   await expect(gateway.tournament('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
+   await expect(gateway.recent()).rejects.toMatchObject({ code: 'unavailable' });
+ });
+@@ -84,3 +87,35 @@
+   expect(again.stages[1].battleLog!.finalHp[0]).not.toBe(999);
+   expect(again.summary!.rewards.renown).toBe(10);
+ });
++
++test('fixture Arena timelines pair both entrants of a bout and keep spectators free of rewards', async () => {
++  const { ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaActivityId, arenaBattleId } = await import('../fixtures/arena');
++  const gateway = createFixtureGateway();
++  const [bellator, corvina] = ['bellator', 'corvina'].map(name => ARENA_WORLD_ACTORS.find(a => a.name.toLowerCase() === name)!);
++  const timelines = await Promise.all([bellator, corvina].map(a => gateway.timeline(a.activityId!)));
++  expect(timelines.map(t => t.stages.find(s => s.kind === 'bout')!.battleLog!.battleId)).toEqual([arenaBattleId('campOne'), arenaBattleId('campOne')]);
++  expect(timelines.every(t => t.summary === undefined)).toBe(true);
++  expect(await gateway.timeline(arenaActivityId('ownerHumanWin'))).toEqual(ARENA_TIMELINES[arenaActivityId('ownerHumanWin')]);
++  expect(FIXTURE_ARENA.map(s => s.activityId)).toContain(arenaActivityId('ownerNpcWin'));
++  // Callers get copies.
++  const first = await gateway.timeline(arenaActivityId('ownerHumanWin'));
++  first.summary!.rewards.renown = 999;
++  expect((await gateway.timeline(arenaActivityId('ownerHumanWin'))).summary!.rewards.renown).toBe(10);
++});
++
++test('fixture standings page each league at most 50 rows, and profiles carry the standings rating', async () => {
++  const gateway = createFixtureGateway();
++  const first = await gateway.standings('bronze');
++  expect(first).toMatchObject({ league: 'bronze', archived: false });
++  expect(first.rows).toHaveLength(50);
++  const read = gateway.standings as (league: 'bronze', cursor?: string) => ReturnType<typeof gateway.standings>;
++  const second = await read('bronze', first.nextCursor!);
++  expect(second.rows[0].rank).toBe(51);
++  expect(second.nextCursor).toBeNull();
++  expect((await gateway.standings('champion')).rows).toEqual([]);
++  const aster = await gateway.profile('0d5f8471-d919-428f-9ab7-058c95821757');
++  expect(aster).toMatchObject({ actor: { name: 'Aster' }, rating: 1000 });
++  expect(first.rows.find(r => r.name === 'Aster')!.rating).toBe(aster.rating);
++  first.rows[0].rating = -1;
++  expect((await gateway.standings('bronze')).rows[0].rating).not.toBe(-1);
++});

@@ -46,6 +46,7 @@ describe('live projection session guards', () => {
     vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first'} as Session},error:null});holder.client=client;
     expect(await createLiveGateway().standings('bronze')).toEqual({league:'bronze',seasonId:'2',archived:false,nextCursor:null,
       rows:[{rank:1,gladiatorId:'g1',name:'Aster',rating:1012,humanWins:1,humanLosses:0,promoted:false,inactive:false,rewardEligible:false}]});
-    expect(paths.every(path=>path==='/rest/v1/arena_standing_reads')).toBe(true);
+    // The latest-season probe reads the indexed projection table; the ranked page reads the public view.
+    expect(paths).toEqual(['/rest/v1/arena_standings','/rest/v1/arena_standing_reads']);
   });
 });

@@ -36,7 +36,9 @@ async function liveArena(context: BrowserContext) {
     if (path === '/rest/v1/world_revision') return json({ revision: '1', server_now_ms: start + 10 * MINUTE, slot_index: start / SLOT });
     if (path === '/rest/v1/visible_events') return json(url.searchParams.get('activity_id') === `eq.${activity}` ? [{ ordinal: 0, stage: staging }] : []);
     if (path === '/rest/v1/recent_results' || path === '/rest/v1/activities') return json(null);
-    if (path === '/rest/v1/arena_standing_reads') return json(url.searchParams.get('select') === 'season_index' ? [{ season_index: 3 }] : standings);
+    // The latest-season probe reads the projection table; the ranked page reads the public view.
+    if (path === '/rest/v1/arena_standings') return json(url.searchParams.get('select') === 'season_index' ? [{ season_index: 3 }] : []);
+    if (path === '/rest/v1/arena_standing_reads') return json(standings);
     if (path === '/rest/v1/public_profile_reads') return json({ profile: { actor: {}, combatStrength: 931.75, rating: 1012, prestige: [] } });
     // Other panels' reads are not part of this check; answer them as an empty, unavailable backend.
     return json({ code: 'PGRST000', message: 'not part of this test' }, 503);
@@ -60,5 +62,6 @@ test('gives the live Arena card and Standings panel the live gateway reads', asy
   await expect(page.getByText('Standings are not available in this build yet.')).toHaveCount(0);
   // "Your standing" shows the current combat strength from the live public profile read.
   await expect(page.getByRole('region', { name: 'Your standing' })).toContainText('931.75');
-  expect(flow.reads).toEqual(expect.arrayContaining(['/rest/v1/visible_events', '/rest/v1/arena_standing_reads', '/rest/v1/public_profile_reads']));
+  expect(flow.reads).toEqual(expect.arrayContaining(['/rest/v1/visible_events', '/rest/v1/arena_standings', '/rest/v1/arena_standing_reads',
+    '/rest/v1/public_profile_reads']));
 });

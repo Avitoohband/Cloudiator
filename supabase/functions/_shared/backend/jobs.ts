@@ -132,7 +132,10 @@ export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({
     reveal: () => ({}) }),
 });
 
-/** One bounded invocation: settle, then prepare, then pair, then reveal (≤20 simple), or else ≤5 combat simulations. */
+/**
+ * One bounded invocation: settle, then prepare, then pair, then reveal (≤20 simple), then any pairing its own coordination
+ * released (≤5), or else ≤5 combat simulations.
+ */
 export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport> {
   const executors = deps.executors ?? DEFAULT_EXECUTORS;
   const now = deps.now ?? Date.now;
@@ -213,6 +216,14 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
     for (const job of jobs) await process(job);
     // Settled slots or completed preparation can release the next ordered boundary phase.
     report.coordination = await coordinate();
+  }
+  // The invocation that completes a boundary's last preparation has usually spent its simple budget, so the pairing jobs
+  // its own coordination released would wait a whole scheduled minute. Claim them within the combat batch limit and the
+  // compute budget (at most one pairing job per league and slot); the dispatch budget is unchanged.
+  if (computeMs < WORKER_LIMITS.cpuMs && report.coordination?.boundaries?.some(b => b.status === 'waiting' && b.wait === 'pairing')) {
+    const jobs = await deps.database.claim(deps.workerId, 'pair', WORKER_LIMITS.combat);
+    for (const job of jobs) await process(job);
+    if (jobs.length) report.coordination = await coordinate();
   }
   if (simple === WORKER_LIMITS.simple && computeMs < WORKER_LIMITS.cpuMs) {
     const jobs = await deps.database.claim(deps.workerId, 'simulation', WORKER_LIMITS.combat);

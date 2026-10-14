@@ -235,6 +235,42 @@ describe('fenced worker orchestration', () => {
     const completedPair = calls.find(c => c.name === 'complete' && (c.args[2] as { assignments?: unknown }).assignments);
     expect(completedPair?.args[2]).toMatchObject({ assignments: [{ kind: 'npc', battleId: 'arena:300:solo:npc' }] });
   });
+  /** A port whose boundary waits on preparation until 20 preparations completed, then on pairing until 2 pairings completed. */
+  function pairingBoundary(queues: Partial<Record<JobKind, JobLease[]>>) {
+    const { database, calls } = port(queues);
+    database.coordinate = async () => {
+      calls.push({ name: 'coordinate', args: [] });
+      const done = (kind: JobKind) => calls.filter(c => c.name === 'complete' && c.args[2] && (c.args[2] as { kind?: string }).kind === kind).length;
+      const boundary = done('prepare') < 20 ? { ok: true, slotIndex: 300, phase: 4, status: 'waiting' as const, wait: 'preparation' as const }
+        : done('pair') < 2 ? { ok: true, slotIndex: 300, phase: 7, status: 'waiting' as const, wait: 'pairing' as const }
+        : { ok: true, slotIndex: 300, phase: 9, status: 'complete' as const };
+      return { ok: true, publishedSlot: boundary.phase === 9 ? 300 : 299, currentSlot: 300, boundaries: [boundary] };
+    };
+    const executors: ExecutorRegistry = { v1: { prepare: () => ({ kind: 'prepare' }), pair: () => ({ kind: 'pair' }) } };
+    return { database, calls, executors };
+  }
+  it('claims the pairing jobs its own coordination released after spending its simple budget, within the combat limit', async () => {
+    // The invocation that completes a boundary's last preparation has usually spent its twenty simple jobs; without this
+    // claim the released pairing would wait a whole scheduled minute for the next dispatch.
+    const pairs = [lease('pair', { gladiatorId: null }), lease('pair', { gladiatorId: null })], pairIds = pairs.map(p => p.id);
+    const { database, calls, executors } = pairingBoundary({ prepare: Array.from({ length: 20 }, () => lease('prepare')), pair: pairs,
+      simulation: [lease('simulation')] });
+    const report = await runWorker({ database, workerId: 'worker-q', executors });
+    expect(calls.filter(c => c.name === 'claim').map(c => c.args.slice(1))).toEqual([['settlement', 20], ['prepare', 20], ['pair', WORKER_LIMITS.combat]]);
+    expect(calls.filter(c => c.name === 'complete').slice(-2).map(c => c.args[0])).toEqual(pairIds);
+    // It coordinates once more after pairing, which publishes; simulations still wait for an invocation without simple work.
+    expect(calls.at(-1)?.name).toBe('coordinate');
+    expect(report).toMatchObject({ claimed: 22, completed: 22, failed: 0, byKind: { prepare: 20, pair: 2, simulation: 0 },
+      coordination: { publishedSlot: 300 } });
+  });
+  it('claims no pairing beyond the simple budget once the compute budget is spent', async () => {
+    let cpu = 0;
+    const { database, calls, executors } = pairingBoundary({ prepare: Array.from({ length: 20 }, () => lease('prepare')), pair: [lease('pair')] });
+    const timed: ExecutorRegistry = { v1: { ...executors.v1, prepare: job => { cpu += WORKER_LIMITS.cpuMs / 20; return executors.v1.prepare!(job); } } };
+    const report = await runWorker({ database, workerId: 'worker-r', executors: timed, cpuNow: () => cpu });
+    expect(calls.filter(c => c.name === 'claim').map(c => c.args[1])).toEqual(['settlement', 'prepare']);
+    expect(report).toMatchObject({ claimed: 20, byKind: { prepare: 20, pair: 0 } });
+  });
   it('processes at most five combat jobs only when no simple work exists', async () => {
     const simulations = Array.from({ length: 9 }, () => lease('simulation'));
     let executed = 0;

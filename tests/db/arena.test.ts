@@ -508,17 +508,19 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(rows.map(r => [r.battle_id, r.kind])).toEqual([[`arena:300:${solo.gid}:npc`, 'npc']]);
     });
 
-    it('pairs and simulates 50 real entrants through real scheduled dispatch, inside the two-minute target', async () => {
-      // Database time starts just after the next cutoff, as when the scheduler processes a boundary on time, so the
-      // minute-60 reveals stay in the future: boundary work and the simulations run under the real dispatch budget.
-      const current = await stableRealSlot(30_000), target = current + 1;
-      await resetWorld(current);
+    it('times consecutive 50-entrant Arena boundaries at the one-minute cron cadence: steady-state publication within 120 s once the rolling dispatch window clears, within 180 s while it holds the previous tick, every bout before minute 60', async () => {
+      // Three consecutive 50-entrant Arena slots P, P + 1 and P + 2 run end to end through the real scheduled tick and the
+      // real private Edge worker reached through pg_net. P is a cold first boundary. P + 1 and P + 2 are steady state: the
+      // previous slot's 50 settlements fall due at their cutoff and must finish before phase 1 continues, under the same
+      // dispatch budget (at most five invocations per rolling minute) and batch limits as the boundary itself.
+      const first = (await stableRealSlot(30_000)) + 1;
+      await resetWorld(first - 1);
       const CLASSES = ['berserker', 'guardian', 'duelist'] as const;
       const owners: Fighter[] = [];
       for (let batch = 0; batch < 5; batch++) {
         owners.push(...await Promise.all(Array.from({ length: 10 }, (_, j) => {
           const i = batch * 10 + j;
-          return fighter({ firstSlot: target, earned: i < 10 ? 105 : 40, build: { classId: CLASSES[i % 3],
+          return fighter({ firstSlot: first, earned: i < 10 ? 105 : 40, build: { classId: CLASSES[i % 3],
             allocations: allocation(i % 7, (i * 3) % 5, (i * 2) % 4, i % 3, (i * 5) % 4) } });
         })));
       }
@@ -526,62 +528,135 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(secret.length).toBeGreaterThanOrEqual(32);
       const clockQuery = `select pg_get_functiondef('private.planning_now_ms()'::regprocedure) as definition`;
       const [{ definition }] = await sql.unsafe(clockQuery);
-      const offset = target * SLOT + 1_000 - Date.now();
+      // Test-only stand-ins for the database clock, restored and verified below. Database time stays ahead of real time.
+      const setClock = (body: string) => sql.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql
+        volatile security invoker set search_path='' as '${body}'`);
+      type Report = { failed: number; conflicts: number; unrecorded: number; deferred?: number; byKind: Record<string, number> };
+      type Tick = { atMs: number; dispatched: number; claimableSimple: number; claimableCombat: number; invocations: string[] };
+      const reports: Report[] = [];
+      /**
+       * One scheduled tick at database time `at`. The clock stands still for cron_tick() itself, so its dispatch is sampled
+       * exactly at `at`, then runs on in real time from `at` while the dispatched invocations work. The tick returns once
+       * every invocation has answered, which the minute between real ticks always allows; no other wall-clock time is spent.
+       */
+      async function tick(at: number): Promise<Tick> {
+        await setClock(`select ${at}::bigint`);
+        // The function pg_cron runs every minute. The scheduler is enabled only inside this transaction, so the real pg_cron
+        // run stays inert and never adds an uncontrolled tick.
+        const result = await sql.begin(async tx => {
+          await tx`update private.scheduler set enabled=true where singleton`;
+          const [{ tick: ran }] = await tx`select private.cron_tick() as tick`;
+          await tx`update private.scheduler set enabled=false where singleton`;
+          return ran;
+        });
+        const [{ real }] = await sql`select floor(extract(epoch from clock_timestamp())*1000)::float8 as real`;
+        await setClock(`select floor(extract(epoch from clock_timestamp())*1000)::bigint+${at - real}`);
+        const ids: number[] = result.dispatch.requestIds;
+        let responses: { status_code: number | null; content: string | null }[] = [];
+        for (const deadline = Date.now() + 60_000; ids.length && Date.now() < deadline;) {
+          responses = await sql`select status_code, content from net._http_response where id in ${sql(ids)}`;
+          if (responses.length === ids.length && responses.every(r => r.status_code)) break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        // Every invocation was the real private Edge worker and answered.
+        expect(responses.map(r => r.status_code)).toEqual(ids.map(() => 200));
+        const invocations = responses.map(r => JSON.parse(r.content!) as Report);
+        reports.push(...invocations);
+        return { atMs: at, dispatched: result.dispatch.dispatched, claimableSimple: result.dispatch.claimableSimple,
+          claimableCombat: result.dispatch.claimableCombat,
+          invocations: invocations.map(r => Object.entries(r.byKind).filter(([, n]) => n).map(([kind, n]) => `${kind} ${n}`).join(', ') || 'idle') };
+      }
+      /** Ticks one boundary from its cutoff every `spacing` ms until it is published and every bout is simulated. */
+      async function boundary(slot: number, spacing: number) {
+        const cutoff = slot * SLOT, ticks: Tick[] = [];
+        for (let k = 0; k < 8; k++) {
+          ticks.push(await tick(cutoff + k * spacing));
+          const [state] = await sql`select (select phase::int from private.boundaries where slot_index=${slot}) as phase,
+            (select count(*)::int from private.arena_assignments where slot_index=${slot}) as battles,
+            (select count(*)::int from private.jobs where kind='simulation' and slot_index=${slot} and status='completed') as simulated`;
+          if (state.phase === 9 && state.battles > 0 && state.simulated === state.battles) break;
+        }
+        const [t] = await sql`select
+          (select max(completed_at_ms) from private.jobs where kind='settlement' and slot_index=${slot - 1})::float8 as settled,
+          (select max(completed_at_ms) from private.jobs where kind='prepare' and slot_index=${slot})::float8 as prepared,
+          (select max(completed_at_ms) from private.jobs where kind='pair' and slot_index=${slot})::float8 as paired,
+          (select completed_at_ms from private.boundaries where slot_index=${slot})::float8 as published,
+          (select max(completed_at_ms) from private.jobs where kind='simulation' and slot_index=${slot})::float8 as simulated,
+          (select count(*)::int from private.arena_assignments where slot_index=${slot}) as battles,
+          (select count(*)::int from private.jobs where kind='simulation' and slot_index=${slot} and status='completed') as simulations`;
+        const since = (ms: number | null) => ms === null ? null : ms - cutoff;
+        return { slot, spacingMs: spacing, battles: t.battles as number, simulations: t.simulations as number, settledMs: since(t.settled),
+          preparedMs: since(t.prepared)!, pairedMs: since(t.paired)!, publishedMs: since(t.published)!, simulatedMs: since(t.simulated)!,
+          ticks: ticks.map(x => ({ ...x, atMs: x.atMs - cutoff })) };
+      }
+      /** The minute-60 reveals of a slot, one scheduled tick a minute, long before the next cutoff. */
+      async function reveals(slot: number) {
+        for (let k = 0; k < 3; k++) {
+          await tick(slot * SLOT + RULES_V1.arena.revealAfterMs + k * MINUTE);
+          const [{ n }] = await sql`select count(*)::int as n from private.jobs where kind='reveal' and slot_index=${slot} and status<>'completed'`;
+          if (n === 0) return;
+        }
+        throw new Error(`the minute-60 reveals of slot ${slot} did not complete`);
+      }
       await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
-      let wallMs = Infinity;
+      const started = Date.now();
+      let measured: Awaited<ReturnType<typeof boundary>>[] = [];
       try {
-        // Test-only stand-in for the database clock, restored and verified below: real time, shifted to the next cutoff.
-        await sql.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker
-          set search_path='' as 'select floor(extract(epoch from clock_timestamp())*1000)::bigint+${offset}'`);
         await sql`select vault.create_secret('http://supabase_edge_runtime_Cloudiator:8081/game-worker','game_worker_url')`;
         await sql`select vault.create_secret(${secret},'game_worker_secret')`;
-        await sql`update private.scheduler set enabled=true where singleton`;
-        const started = Date.now();
-        // The scheduled tick (coordinate, then dispatch at most five worker invocations per rolling minute), here once a
-        // second instead of once a minute. Every bout is simulated by the real private Edge worker reached through pg_net.
-        for (const deadline = Date.now() + 180_000; Date.now() < deadline;) {
-          await sql`select private.cron_tick()`;
-          const [state] = await sql`select (select phase::int from private.boundaries where slot_index=${target}) as phase,
-            (select count(*)::int from private.arena_assignments) as battles,
-            (select count(*)::int from private.jobs where kind='simulation' and status='completed') as simulated`;
-          if (state.phase === 9 && state.battles > 0 && state.simulated === state.battles) { wallMs = Date.now() - started; break; }
-          await new Promise(resolve => setTimeout(resolve, 1_000));
-        }
+        // P: the cold first boundary (nothing to settle), then its minute-60 reveals.
+        const cold = await boundary(first, MINUTE);
+        await reveals(first);
+        // P + 1: steady state, each tick exactly one minute after the previous one, so the rolling window has cleared.
+        const cleared = await boundary(first + 1, MINUTE);
+        await reveals(first + 1);
+        // P + 2: steady state, each tick 1 ms less than a minute after the previous one, so the window still holds the
+        // previous tick's invocations. Cron start and coordination jitter decide which of the two cases a real minute sees.
+        const held = await boundary(first + 2, MINUTE - 1);
+        measured = [cold, cleared, held];
       } finally {
         await sql`update private.scheduler set enabled=false where singleton`;
         await sql.unsafe(definition);
         await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
       }
       expect((await sql.unsafe(clockQuery))[0].definition).toBe(definition);
-      const [times] = await sql`select (select opened_at_ms from private.boundaries where slot_index=${target})::float8 as opened,
-        (select max(completed_at_ms) from private.jobs where kind='prepare')::float8 as prepared,
-        (select max(completed_at_ms) from private.jobs where kind='pair')::float8 as paired,
-        (select completed_at_ms from private.boundaries where slot_index=${target})::float8 as published,
-        (select max(completed_at_ms) from private.jobs where kind='simulation')::float8 as simulated,
-        (select count(*)::int from private.dispatch_log) as dispatches, (select count(*)::int from private.arena_assignments) as battles`;
-      const measured = { entrants: 50, battles: times.battles, dispatches: times.dispatches, openToPreparedMs: times.prepared - times.opened,
-        openToPairedMs: times.paired - times.opened, openToPublishedMs: times.published - times.opened,
-        openToSimulatedMs: times.simulated - times.opened, wallMs, targetMs: 120_000 };
-      console.info(`Task 16 boundary with Arena simulation: ${JSON.stringify(measured)}`);
-      expect(times.opened <= times.prepared && times.prepared <= times.paired && times.paired <= times.published && times.published <= times.simulated).toBe(true);
-      expect(measured.openToSimulatedMs).toBeLessThan(120_000);
-      expect(wallMs).toBeLessThan(120_000);
-      // Every invocation was the real private Edge worker, and none failed.
-      const requests = (await sql`select request_id from private.dispatch_log order by id`).map(row => row.request_id);
-      let responses: { status_code: number | null; content: string | null }[] = [];
-      for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
-        responses = await sql`select status_code, content from net._http_response where id in ${sql(requests)}`;
-        if (responses.length === requests.length && responses.every(r => r.status_code)) break;
-        await new Promise(resolve => setTimeout(resolve, 200));
+      console.info(`Task 16 Arena boundaries at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, targetMs: 120_000,
+        revealMs: RULES_V1.arena.revealAfterMs, wallMs: Date.now() - started, boundaries: measured })}`);
+      const [cold, cleared, held] = measured;
+      for (const b of measured) {
+        expect(b.simulations).toBe(b.battles);
+        expect(b.preparedMs <= b.pairedMs && b.pairedMs <= b.publishedMs && b.publishedMs <= b.simulatedMs).toBe(true);
+        // The bouts need only be simulated before the minute-60 reveal.
+        expect(b.simulatedMs).toBeLessThan(RULES_V1.arena.revealAfterMs);
       }
-      expect(responses.map(r => r.status_code)).toEqual(requests.map(() => 200));
-      const reports = responses.map(r => JSON.parse(r.content!));
-      expect(reports.reduce((sum, r) => sum + r.failed + r.conflicts + r.unrecorded, 0)).toBe(0);
-      expect(reports.reduce((sum, r) => sum + r.byKind.simulation, 0)).toBe(times.battles);
-      // Every entrant exactly once, within its league, exactly as canonical matchArena pairs the frozen input.
-      const jobs = await sql`select id, seed, input, status from private.jobs where kind='pair' order by dedupe_key`;
+      expect(cold.settledMs).toBeNull();
+      expect(cold.publishedMs).toBeLessThan(120_000);
+      for (const b of [cleared, held]) {
+        // Steady state: the cutoff tick dispatches the previous slot's 50 settlements to three invocations, and they finish
+        // before preparation (phase 4) can start.
+        expect(b.ticks[0]).toMatchObject({ atMs: 0, dispatched: 3, claimableSimple: 50 });
+        expect(b.settledMs).not.toBeNull();
+        expect(b.settledMs!).toBeLessThanOrEqual(b.preparedMs);
+      }
+      // Spec §10.4: normal boundary processing (settling the previous slot through publication) within two minutes.
+      expect(cleared.publishedMs).toBeLessThan(120_000);
+      // While the window still holds the cutoff tick's three invocations, the next tick can dispatch only two: 40 of the 52
+      // simple jobs (50 preparations and 2 pairings) left, so publication waits for a third tick.
+      expect(held.ticks[1]).toMatchObject({ dispatched: 2 });
+      expect(held.publishedMs).toBeLessThan(180_000);
+      // Every job was run by the real worker, with no failure, conflict, unrecorded failure or deferral.
+      expect(reports.reduce((sum, r) => sum + r.failed + r.conflicts + r.unrecorded + (r.deferred ?? 0), 0)).toBe(0);
+      const total = (kind: string) => reports.reduce((sum, r) => sum + (r.byKind[kind] ?? 0), 0);
+      expect([total('settlement'), total('prepare'), total('pair'), total('reveal'), total('simulation')])
+        .toEqual([100, 150, 6, 100, cold.battles + cleared.battles + held.battles]);
+      expect(await sql`select count(*)::int as n from public.activities where slot_index in ${sql([first, first + 1])} and status='completed'`)
+        .toEqual([{ n: 100 }]);
+      // The last slot: every entrant exactly once, within its league, exactly as canonical matchArena pairs the frozen input
+      // (with the two earlier slots' human bouts as history).
+      const target = first + 2;
+      const jobs = await sql`select id, seed, input, status from private.jobs where kind='pair' and slot_index=${target} order by dedupe_key`;
       expect(jobs.map(j => j.status)).toEqual(['completed', 'completed']);
-      const rows = await assignments();
+      const rows = (await assignments()).filter(r => r.slot === target);
       for (const job of jobs) {
         const input = job.input as PairingInput;
         expect(input.historyFromSlot).toBe(target - RULES_V1.matchmaking.recentPairingSlots);
@@ -590,7 +665,8 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         expect(rows.filter(r => r.pairing_job_id === job.id)).toHaveLength(expected.length);
       }
       expect(sidesOf(rows).sort()).toEqual(owners.map(o => o.gid).sort());
-      expect(await sql`select count(distinct activity_id)::int as n from private.arena_assignment_sides`).toEqual([{ n: 50 }]);
+      expect(await sql`select count(distinct s.activity_id)::int as n from private.arena_assignment_sides s
+        join public.activities a on a.id=s.activity_id where a.slot_index=${target}`).toEqual([{ n: 50 }]);
       for (const row of rows.filter(r => r.kind === 'human')) {
         const [x, y] = row.assignment.sides.map(s => Math.round(s.strength * 100));
         expect(Math.max(x, y)).toBeLessThanOrEqual(2 * Math.min(x, y));
@@ -598,8 +674,8 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       // One simulation per battle under its battle seed, anchored to its first side, its log frozen once.
       const simulations = await sql`select j.seed, j.activity_id, j.gladiator_id, x.battle_id, x.seed as battle_seed, x.assignment, r.log
         from private.jobs j join private.arena_assignments x on j.dedupe_key='arena:'||x.battle_id
-        left join private.arena_results r on r.battle_id=x.battle_id where j.kind='simulation'`;
-      expect(simulations).toHaveLength(times.battles);
+        left join private.arena_results r on r.battle_id=x.battle_id where j.kind='simulation' and j.slot_index=${target}`;
+      expect(simulations).toHaveLength(held.battles);
       for (const s of simulations) {
         expect(s.seed).toBe(s.battle_seed);
         expect([s.activity_id, s.gladiator_id]).toEqual([s.assignment.sides[0].activityId, s.assignment.sides[0].gladiatorId]);
@@ -613,7 +689,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(await sql`select status, count(*)::int as n from private.jobs where kind in ('reveal','settlement') and slot_index=${target}
         group by status`).toEqual([{ status: 'pending', n: 100 }]);
       for (const owner of owners) expect(await owner.row()).toMatchObject({ processed: target });
-    }, 300_000);
+    }, 600_000);
   });
 
   it('denies clients the assignments, battle seeds and results, rating rows, the epoch and the Arena internals', async () => {

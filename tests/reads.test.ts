@@ -49,7 +49,10 @@ describe('protected Data API adapters', () => {
     // Five human bouts in the league are the season's reward threshold.
     expect(page.rows[5]).toMatchObject({ humanWins: 5, humanLosses: 1, rewardEligible: true });
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toContain('/arena_standing_reads?select=season_index&order=season_index.desc&limit=1');
+    // The latest-season probe reads the base table, whose index leads with season_index, not the ranked view (which would
+    // evaluate its window function and promotion check over every row).
+    expect(calls[0]).toContain('/arena_standings?select=season_index&order=season_index.desc&limit=1');
+    expect(calls[1]).toContain('/arena_standing_reads?');
     expect(calls[1]).toMatch(/league=eq\.silver/);
     expect(calls[1]).toMatch(/season_index=eq\.4/);
     expect(calls[1]).toMatch(/rank=gt\.0/);

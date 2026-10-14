@@ -91,7 +91,9 @@ export async function readStandings(client: SupabaseClient, league: LeagueId, cu
     if (!match) throw new GatewayReadError('unavailable');
     season = Number(match[1]); after = Number(match[2]);
   } else {
-    const latest = checked(await client.from('arena_standing_reads').select('season_index').order('season_index', { ascending: false }).limit(1));
+    // max(season_index) from the projection table, whose index leads with season_index; the ranked view would evaluate its
+    // window function and promotion check over every row first.
+    const latest = checked(await client.from('arena_standings').select('season_index').order('season_index', { ascending: false }).limit(1));
     if (latest.length) season = Number(latest[0].season_index);
   }
   if (season === null) return { league, seasonId: '', archived: false, rows: [], nextCursor: null };

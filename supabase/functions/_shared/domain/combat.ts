@@ -10,9 +10,10 @@ const positiveInteger = (value: number) => Number.isSafeInteger(value) && value 
 function copyAttributes(a: Readonly<Attributes>): Attributes {
   return { strength: a.strength, agility: a.agility, vitality: a.vitality, endurance: a.endurance, precision: a.precision };
 }
-type Fraction = { numerator: bigint; denominator: bigint };
+/** Exact rational arithmetic for decimal factors; shared with Arena estimates and NPC templates (Task 16). */
+export type Fraction = { numerator: bigint; denominator: bigint };
 /** Exact decimal factors prevent e.g. 50 × 1.15 rounding 57.499999… down. */
-function decimal(value: number): Fraction {
+export function decimal(value: number): Fraction {
   if (!numeric(value)) throw new RangeError('Invalid combat coefficient');
   const [significand, exponent = '0'] = value.toString().split('e');
   const decimalPlaces = significand.split('.')[1]?.length ?? 0;
@@ -21,10 +22,10 @@ function decimal(value: number): Fraction {
   return scale >= 0 ? { numerator, denominator: 10n ** BigInt(scale) }
     : { numerator: numerator * 10n ** BigInt(-scale), denominator: 1n };
 }
-function multiply(a: Fraction, b: Fraction): Fraction {
+export function multiply(a: Fraction, b: Fraction): Fraction {
   return { numerator: a.numerator * b.numerator, denominator: a.denominator * b.denominator };
 }
-const fractionValue = (fraction: Fraction) => Number(fraction.numerator) / Number(fraction.denominator);
+export const fractionValue = (fraction: Fraction) => Number(fraction.numerator) / Number(fraction.denominator);
 function baseDamage(weapon: number, strength: number, coefficient: number): number {
   const a = decimal(weapon), b = multiply(decimal(strength), decimal(coefficient));
   return Number(a.numerator * b.denominator + b.numerator * a.denominator) / Number(a.denominator * b.denominator);
@@ -62,17 +63,22 @@ export function makeFighter(build: BuildSnapshot, context: 'arena' | 'expedition
   });
 }
 
+/** The engine's private snapshot checks for these retained rules. A snapshot without attributes throws a TypeError. */
+export function validFighter(s: FighterSnapshot, rules: Rules): boolean {
+  return s.rulesVersion === rules.version && Object.hasOwn(rules.stances, s.stance)
+    && (s.classId === null || Object.hasOwn(rules.classes, s.classId))
+    && positiveInteger(s.maxHealth) && positiveInteger(s.attackIntervalMs)
+    && s.attackIntervalMs >= rules.combat.minimumIntervalMs
+    && [s.armor, s.weaponDamage, s.baseDamage, ...Object.values(copyAttributes(s.attributes))].every(numeric)
+    && Number.isFinite(s.efficiency) && s.efficiency > 0 && s.efficiency <= 1
+    && Array.isArray(s.equipmentSilhouettes) && s.equipmentSilhouettes.every(value => typeof value === 'string');
+}
+
 function validateParticipant(p: BattleParticipant, rules: Rules): void {
   const s = p.snapshot;
   if (!p.id || typeof p.id !== 'string' || typeof p.name !== 'string'
     || (p.gladiatorId !== null && typeof p.gladiatorId !== 'string')
-    || s.rulesVersion !== rules.version || !Object.hasOwn(rules.stances, s.stance)
-    || (s.classId !== null && !Object.hasOwn(rules.classes, s.classId))
-    || !positiveInteger(s.maxHealth) || !positiveInteger(s.attackIntervalMs)
-    || s.attackIntervalMs < rules.combat.minimumIntervalMs
-    || ![s.armor, s.weaponDamage, s.baseDamage, ...Object.values(copyAttributes(s.attributes))].every(numeric)
-    || !Number.isFinite(s.efficiency) || s.efficiency <= 0 || s.efficiency > 1
-    || !Array.isArray(s.equipmentSilhouettes) || !s.equipmentSilhouettes.every(value => typeof value === 'string')
+    || !validFighter(s, rules)
     || (p.startingHealth !== undefined && (!positiveInteger(p.startingHealth) || p.startingHealth > s.maxHealth))) {
     throw new RangeError('Invalid private combat snapshot');
   }
@@ -87,14 +93,23 @@ function publicParticipant(p: BattleParticipant): RevealedCombatant {
     efficiencyBasisPoints: Math.round(s.efficiency * 10_000), equipmentSilhouettes: [...s.equipmentSilhouettes] };
 }
 
+/** Spec §7 hit probability of an attacker's effective Precision against a defender's effective Agility. */
+export function hitProbability(precision: number, defenderAgility: number, rules: Rules): number {
+  const r = rules.combat;
+  return clamp(r.hitBase + r.hitPrecision * precision - r.hitDefenderAgility * defenderAgility, r.minimumHit, r.maximumHit);
+}
+
+/** Spec §7 critical probability of an attacker's effective Precision. */
+export function criticalProbability(precision: number, rules: Rules): number {
+  const r = rules.combat;
+  return clamp(r.criticalBase + r.criticalPrecision * precision, r.minimumCritical, r.maximumCritical);
+}
+
 /** Both random draws occur for every scheduled attack, even a miss. No block/evade extra rolls. */
 function attack(attacker: FighterSnapshot, defender: FighterSnapshot, rules: Rules, random: () => number) {
-  const r = rules.combat;
-  const hit = random() < clamp(r.hitBase + r.hitPrecision * attacker.attributes.precision
-    - r.hitDefenderAgility * defender.attributes.agility, r.minimumHit, r.maximumHit);
+  const hit = random() < hitProbability(attacker.attributes.precision, defender.attributes.agility, rules);
   const criticalRoll = random();
-  const critical = hit && criticalRoll < clamp(r.criticalBase + r.criticalPrecision * attacker.attributes.precision,
-    r.minimumCritical, r.maximumCritical);
+  const critical = hit && criticalRoll < criticalProbability(attacker.attributes.precision, rules);
   const damage = hit ? roundedDamage(attacker, defender, rules, critical) : 0;
   if (!Number.isSafeInteger(damage) || damage < 0) throw new RangeError('Unsafe combat damage');
   return { hit, critical, damage, defend: hit && defender.stance === 'defensive', evade: !hit };

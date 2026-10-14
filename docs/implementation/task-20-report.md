@@ -6,7 +6,9 @@ Status: **DONE_WITH_CONCERNS** (concerns at the end: the open `TournamentView` q
 - Branch: `claude/task-20`, worktree `C:\Avi\Studies\Projects\Cloudiator-claude`. Task base `7a173b8` (Tasks 15, 16/19 phase 1 and 17 merged); branch head before this work `08998e6` (the controller brief).
 - Commits:
   - `c1ff143`: `feat: show tournament participation and brackets` (source, fixtures, tests, the shared edits).
-  - The next commit: this report and `task-20-evidence/`.
+  - `b67a06c`: this report and `task-20-evidence/`.
+  - `ffc1e2f`: `fix: apply Task 20 review findings` (the review fix pass below).
+  - The next commit: `docs: record Task 20 review fix pass` (this update and the refreshed 360 px screenshot).
 - Scope: [task-20-claude-dispatch.md](task-20-claude-dispatch.md) and [task-20-brief-base.md](task-20-brief-base.md).
 - Not done, by instruction: no Supabase or Docker command, no push or merge, no `HANDOFF.md` edit, no subagent, no download or package install. The other checkouts (`Cloudiator`, `Cloudiator-replay`, `Cloudiator-arena`) were not touched; no command ran in them. Playwright ran only through `node_modules/.cache/pw-claude.config.mjs` (port 3200).
 
@@ -16,7 +18,7 @@ Status: **DONE_WITH_CONCERNS** (concerns at the end: the open `TournamentView` q
 - **Next tournament:** `nextTournament(t)` is the first slot after `t` for which `isTournamentSlot` holds (Wednesday and Saturday 17:20 UTC), with its countdown; `tournamentWindowAt(t)` is the tournament running now; `latestTournament(t)` the running or most recent one (the live default).
 - **Status:** `scheduled` before the start; `insufficient-entrants` from the view; `active` within the slot; `processing` when a due round is unpublished, when the view says so, or when minute 80 has passed without placements; `completed` once the view is settled.
 - **Bracket shape:** next power of two, rounds and byes from the entrant count, shown from the start only (before it, no entrants or shape show, even if the view holds them).
-- **Reveals:** round r of R at `start + ceil(80 min × r / (R + 1))`, as Task 19 computes it. A bout's result shows only when the view carries a well-formed `revealedResult` **and** the display clock has reached its round's reveal time. A fought bout then plays for its logged duration (`fighting`) before its winner shows (`decided`); byes advance at round 1 with no fight. Before its reveal a bout is `preparing` ("Result preparing"); due without a published result it is `delayed`. A result whose winner is not a participant or disagrees with its log is never shown.
+- **Reveals:** round r of R at `start + ceil(80 min × r / (R + 1))`, as Task 19 computes it. A bout's result shows only when the view carries a well-formed `revealedResult` **and** the display clock has reached its round's reveal time. A fought bout then plays for its logged duration (`fighting`) before its winner shows (`decided`); byes advance at round 1 with no fight. Before its reveal a bout is `preparing` ("Result preparing"); due without a published result it is `delayed`. A result whose winner is not a participant or disagrees with its log is never shown; its participants may list the log's two gladiators in either order (review fix 7), anything else fails closed.
 - **Winners and roles:** the winner of every shown bout is `winnerId` (a seeded tie-break with both fighters at 0 HP included). Each entrant's role: `waiting`, `fighting` (with its bout), `spectating` (with its elimination round) or `champion` (the final's winner once it has ended).
 - **Later rounds:** sides are named from the winners already shown; round 1 pairings stay hidden until their reveal (see "Open questions").
 - **Placements:** only when the status is `completed`; place and public name only. The viewer's own credited summary is returned separately, never anyone else's.
@@ -26,16 +28,17 @@ Status: **DONE_WITH_CONCERNS** (concerns at the end: the open `TournamentView` q
 **Tournaments panel** (`src/features/tournaments/TournamentPanel.tsx`, its CSS module and `tournament-text.ts`), in the "Tournaments" tab:
 - **Schedule:** the next tournament in the viewer's time zone with the UTC time beside it (`Wed 28 Oct, 18:20 GMT+1 (Wed 28 Oct, 17:20 UTC)`; a UTC+0 viewer sees one UTC time), the countdown, and a "running now" line during a tournament.
 - **Registration:** an "Automatically enter tournaments" checkbox showing `OwnerState.tournamentOptIn`. Toggling sends `set-tournament-opt-in` through the gateway, reusing the operation id on transient failures. The box always shows the saved setting; in fixture mode the command is refused, the note reads "Registration changes are unavailable in this preview. Your setting is unchanged." and the box stays as it was. Rules: entry needs automatic entry on, Arena scheduled for the afternoon and at least 25 stamina at the 17:20 UTC cutoff; opting out keeps a normal Arena bout; a change after a cutoff applies from the next tournament; fewer than two qualifiers fight regular Arena; one stamina charge; full health per bout; the eliminated stay to spectate. A contextual note says which tournament a change made now applies to, and during a tournament that its entries were fixed at the cutoff. The owner's checklist shows the setting, the afternoon schedule ("Expedition: Woodland Path (not Arena)") and current stamina.
-- **Bracket:** league and start time, status and its meaning, the viewer's own line ("You are entered…", "You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at …; this slot has no other activity for you.", "You are the champion…"), the champion, the shape (`8-slot bracket · 3 rounds · 3 byes`), the entrants with their roles, and rounds as tabs (Quarterfinals, Semifinals, Final; `role="tablist"`, roving tabindex, arrow keys, Home and End; a horizontal scroller on phones). The round panel has one status line ("Result preparing", "Bouts in progress", "Results revealed"), a reveal or delay note, and bout cards (sides, "Bout in progress", "Winner: …" with how it was won, "… advances on a bye", "Not published yet"). Placements after settlement show place and name only, plus the viewer's own "Credited: +7 renown." Names render as React text.
-- **Replays:** a completed bout's "Watch replay" opens the existing `BattleReplay` inline with its revealed log (no `/replay/` link: the public view has no activity id).
-- **Reads:** on open, at each reveal mark, every 30 s while processing, and on focus. Fixture mode lists the samples; live mode opens the owner's league tournament of the running or latest slot (`tournamentIdFor`; the live gateway still says unavailable).
+- **Bracket:** league and start time, status and its meaning, the viewer's own line ("You are entered…", "You advance…" only after a shown win or bye in every due round, "Your Quarterfinals result is not published yet…" while the viewer's due result is unpublished (review fix 1), "You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at …; this slot has no other activity for you.", "You are the champion…"), the champion, the shape (`8-slot bracket · 3 rounds · 3 byes`), the entrants with their roles, and rounds as tabs (Quarterfinals, Semifinals, Final; `role="tablist"`, roving tabindex, arrow keys, Home and End; a horizontal scroller on phones). The round panel has one status line ("Result preparing", "Bouts in progress", "Results revealed"), a reveal or delay note, and bout cards (sides, "Bout in progress", "Winner: …" with how it was won, "… advances on a bye", "Not published yet"). Placements after settlement show place and name only, plus the viewer's own "Credited: +7 renown." Names render as React text.
+- **Replays:** a completed bout's "Watch replay" opens the existing `BattleReplay` inline with its revealed log (no `/replay/` link: the public view has no activity id), its title at h6 under the card's h4 and the replay section's h5 (review fix 4). On phones (≤ 540 px) the replay runs to the card's edges, so its fighter table keeps whole words (review fix 3).
+- **Reads:** on open, at each reveal mark, every 30 s while processing, every 30 s while a first read has failed (visible tab only, review fix 6), and on focus. Fixture mode lists the samples; live mode opens the owner's league tournament of the running or latest slot (`tournamentIdFor`; the live gateway still says unavailable).
+- **Fixture samples** (review fix 8): each sample carries the server time its view was projected at (`asOfMs`); opening one holds its bracket card there, so "before round 1", "mid-way" and "late" show what their labels say. The schedule, registration, camp and Arena keep the running clock; the test hook's `freeze` releases the hold.
 - Fixture-only hook `window.__cloudiatorTournaments { state, freeze, reads, commands, open }`.
 
 **Camp roles** (`src/game/tournament-camp.ts`, additive edits to `camp-scene.ts`, `GameViewport.tsx`, `actors.ts`):
 - Tournament entrants (public location `tournament`) wait in the arena staging spots: `actors.ts` no longer gives them random ring pairs.
 - **Fighting:** `campTournamentFights` turns each shown bout of two camp entrants into Task 17's `CampFight` (participant 0 on ring side a, starting at the round's reveal time). The scene merges them with the Arena fights, so they share the six rings through `scheduleArenaRings`, walk in, play from the log through `battle-stage` seeked to the ring window, hold the result and walk out. No second layout and no simulation; no NPC is ever added.
 - **Spectating:** an eliminated entrant walks to a spectator spot outside the arena wall: 62 walkable tiles 0.6–2.6 tiles beyond the wall before NPC posts are removed (at least 49 are tested), none on a station, NPC post, another zone or the gate approach; sides first, facing the arena. Spots are assigned by elimination round, then id, so earlier spectators never move; world updates leave them in place.
-- **Champion:** a gold "Champion" tag once the final has ended.
+- **Champion:** a gold "Champion" tag once the final has ended **and** its ring has finished playing it (no bout of the champion queued, walking in or fighting; review fix 2). The camp starts a bout after its walk-in, so the tag follows the stage core's decision by about the walk-in time.
 - **Population:** no actor is added; tournament bouts are not listed among the "Arena bouts in the rings" buttons (they have no Arena card).
 - **Reads:** `GameViewport` (new optional `tournaments` reader) reads each camp entrant's tournament during its slot: once, after each reveal mark, and every 30 s while a read failed or a due round is unpublished; paused in hidden tabs. Fixture hook additions: `tournamentReads()`, `setTournaments(views)`; debug state `tournament { roles, champion, spectators }`.
 
@@ -43,10 +46,11 @@ Status: **DONE_WITH_CONCERNS** (concerns at the end: the open `TournamentView` q
 
 - `src/game/tournament-stage.ts`: `TOURNAMENT_DURATION_MS`, `TournamentWindow`, `NextTournament`, `tournamentWindowAt(t)`, `nextTournament(t)`, `latestTournament(t)`, `roundRevealTimes(start, rounds)`, `BracketShape`, `bracketShape(n)`, `tournamentIdFor(slot, league)`, `TournamentRole`, `TournamentStatus`, `TournamentBoutState`, `TournamentRoundState`, `TournamentEntrantState`, `TournamentPlacementState`, `TournamentStageState`, `renderTournament(view, t, { viewerId? })`, `tournamentRevealMarks(state)`.
 - `src/game/tournament-camp.ts`: `TOURNAMENT_RETRY_MS`, `tournamentIdOfActor`, `mergeCampFights`, `campTournamentFights(actors, views, t)`, `CampTournamentRole`, `campTournamentRoles(actors, views, t)`, `SpectatorSpot`, `spectatorSpots(map, reserved)`, `assignSpectators(spectators, spots)`, `TournamentRead`, `tournamentReadsDue(actors, known, t)`.
-- `src/features/tournaments/TournamentPanel.tsx`: `TournamentReads`, `TournamentSample`, `TournamentTestHook`, `TournamentScheduleView`, `RegistrationModel`/`RegistrationView`, `BracketModel`/`TournamentBracketView`, `TournamentPanel({ reads, owner, clock, fixture, samples?, refresh? })`.
+- `src/features/arena/BattleReplay.tsx` (review fix 4): `HeadingLevel`; `BattleReplay({ view, bridge?, headingLevel? })`, default 1.
+- `src/features/tournaments/TournamentPanel.tsx`: `TournamentReads`, `TournamentSample` (`{ id, label, asOfMs? }`), `TournamentTestHook`, `TournamentScheduleView`, `RegistrationModel`/`RegistrationView`, `BracketModel`/`TournamentBracketView`, `TournamentPanel({ reads, owner, clock, fixture, samples?, refresh? })`.
 - `src/features/tournaments/tournament-text.ts`: `tournamentTimeText(ms, timeZone?)`, `timeWithUtc`, `countdownText`, `CUTOFF_UTC`, `ENTRY_STAMINA`, `ENTRY_RULES`, `registrationNote`, `afternoonText`, `statusText`, `statusDetail`, `shapeText`, `roundStatus`, `roundNote`, `victoryText`, `roleText`, `ordinal`, `creditedText`, `viewerText`.
 - `CampSceneHandle.setTournaments(map)`; `CampDebugState.tournament`; `GameViewport` prop `tournaments?`; `CampTestHook.tournamentReads()`/`setTournaments(views)`.
-- Fixtures: `tests/fixtures/tournament-ids.ts` (cases, ids, looks; no JSON), `tournament-build.ts` (`projectTournament`, `scheduledView`, `insufficientView`, `tournamentCampActors`; domain types only), `tournaments.ts` (`TOURNAMENT_VIEWS`, `TOURNAMENT_VIEWS_BY_ID`, `TOURNAMENT_SAMPLES`), `tournaments/*.json`.
+- Fixtures: `tests/fixtures/tournament-ids.ts` (cases, ids, looks; no JSON), `tournament-build.ts` (`projectTournament`, `scheduledView`, `insufficientView`, `tournamentCampActors`; domain types only), `tournaments.ts` (`TOURNAMENT_VIEWS`, `TOURNAMENT_VIEWS_BY_ID`, `TOURNAMENT_SAMPLES` with `asOfMs`), `tournaments/*.json`.
 
 ## Fixtures
 
@@ -70,7 +74,7 @@ All five decisions are implemented. Where they left room:
 1. **`isTournamentSlot` and "no engine imports".** The function lives in `tournament.ts`, which imports the combat engine. The core imports only that function; `npm run build` then contains none of the engine's or the tournament graph's strings (`Invalid private combat snapshot`, `Invalid battle input`, `Invalid tournament graph`: 0 files in `out/`), so the bundle carries no engine. The purity test forbids direct Phaser, React, combat and Arena imports.
 2. **Reveal-time gating plus fight duration.** A revealed fought bout shows "Bout in progress" for its logged duration and names its winner after it, as Task 17 does for Arena; this is stricter than the dispatch's two conditions, never looser. Replays open only for completed bouts.
 3. **"Result preparing" once per round.** The plan's Step 1 locator (`getByText('Result preparing')`) needs exactly one match, so the round panel carries the single status line and only the selected round renders.
-4. **Fixtures as separate tournaments.** The fixture gateway has no clock, and a view has no server time, so "before round 1", "mid-way" and "late" are three tournaments, each projected at its own time. Viewed later (for example in the preview without a frozen clock) a partial view honestly shows its missing rounds as processing.
+4. **Fixtures as separate tournaments.** The fixture gateway has no clock, and a view has no server time, so "before round 1", "mid-way" and "late" are three tournaments, each projected at its own time. Viewed later, a partial view honestly shows its missing rounds as processing; since the review fix pass the preview opens each sample at its own projection time (fix 8).
 5. **Placement summaries.** The contract's `placements[].summary` is a full `ActivitySummary`; the fixtures fill it from the outcome without the rating delta, and the core and panel show rewards only for the viewer's own placement (the role-safe DTO is open, below).
 6. **Live tournament id.** `tournamentIdFor(slot, league)` uses the Task 19 graph id, which the fixture views keep; the live gateway is unchanged and still unavailable.
 7. **Spectator spots.** The map has no spectator stations, so `spectatorSpots` derives them from the arena circle; no asset changed.
@@ -84,6 +88,13 @@ Under Avi's 2026-10-14 authorization (dispatch decision 5):
 3. `tests/api/fixture-gateway.test.ts`: one new test (views by id as copies, unknown ids unavailable, the opt-in command refused with the owner's flag unchanged).
 
 No contract, live gateway, route, scanner or `globals.css` change. Edits to Task 17's files under its fix pass are additive: `camp-scene.ts` (+63/−7: tournament fights merged into the ring schedule, a spectator skip in `applyWorld`, `placeTournamentEntrant`, `setTournaments`, debug state, tournament bouts left out of the Arena fight buttons) and `GameViewport.tsx` (+48/−3: the reader prop, its effect and the hook). `arena-layout.ts`, `ArenaPanel.tsx`, `StandingsPanel.tsx` and `arena.spec.ts` are unchanged. `actors.ts` (Task 12) changes one line.
+
+Review fix pass (`ffc1e2f`), to record on the board as well:
+4. `src/lib/api/fixture-gateway.ts`: the `FIXTURE_TOURNAMENTS` type gains `asOfMs` (the samples' projection times); nothing else.
+5. `src/game/camp-scene.ts` (Task 17, still additive, +8/−4): `updateArena` collects the fighters whose ring bout is queued, walking in or fighting, and `placeTournamentEntrant(v, now, inRing)` shows the champion tag only when that is false.
+6. `src/features/arena/BattleReplay.tsx` and `BattleReplay.module.css` (Task 14, Claude-owned): the optional `headingLevel` prop (default 1) and heading selectors that match any level (the same rules for h1 and h2, so the replay route renders as before; `replay.spec.ts` unchanged and green).
+
+`src/app/game/page.tsx` and `tests/api/fixture-gateway.test.ts` were not changed in the fix pass.
 
 ## RED and GREEN
 
@@ -120,20 +131,38 @@ Each cycle wrote its tests first, except where stated. Unit runs used `npx vites
 | Scene: no spectator placement | 2 failed |
 | Scene: world updates pull spectators back (no `applyWorld` skip) | 1 failed |
 
+## Review fix pass (2026-10-14)
+
+An independent review passed code quality and visuals but failed the specification on two Important defects, with seven minor items. All were fixed in `ffc1e2f`, each test written first and watched failing; "fix reverted" means the fix was set aside for the RED run and restored (compared with `cmp`).
+
+| # | Finding | Fix | RED (observed) | GREEN |
+| --- | --- | --- | --- | --- |
+| 1 (Important) | `viewerText` told an entrant "You advance." while their due bout was unpublished. | "You advance" only after a shown win or bye in every due round; otherwise "Your <round> result is not published yet. It appears here as soon as it is revealed." | Unit: `opening` at minute 25 as Aster rendered "You advance. Your next bout is revealed at Wed 7 Oct, 18:00 UTC." Browser case (fix reverted): the same text on desktop and mobile. | Unit 12/12 (also Varro and a bye receiver advancing, both mid-way finalists waiting on the unpublished final, a bout in progress); the browser case passes on both projects. |
+| 2 (Important) | The camp tagged the champion when the core decided the final, while its ring was still fighting. | `placeTournamentEntrant` also needs no ring bout of the entrant queued, walking in or fighting. | New camp test at final reveal + 14 716 ms + 1 s: ring `fighting`, yet Varro carried the marker (desktop and mobile). | No marker while the ring fights; only Varro's once it shows the result. The minute-79 champion test still passes. |
+| 3 | 360 px replay table split "Endurance" and "Equipment". | At ≤ 540 px the replay runs to the card's edges (`margin-inline: -0.5rem`) and `.brackets` padding is 0.35rem. | A new no-split-word check in the 360 px test failed on both projects. | Passes on both; a probe measured the narrowest slack at 5.1 px ("Equipment") and 7.2 px ("Endurance"). Screenshot refreshed. |
+| 4 | `BattleReplay` rendered its own `h1` inside the panel. | Optional `headingLevel` (default 1); sections take the next level (at most h6); the panel uses 6. | Unit: the card's headings included an h1 title and h2 sections. | Unit: h4 card, h5 Entrants and Replay, h6 title, Result, Fighters and Combat log; a standalone replay still h1/h2; `replay.spec.ts` unchanged and green. |
+| 5 | The core restates Task 19's private bracket frame and id format. | Cross-check test against the real `buildBracket` for 2 to 64 entrants across the four leagues: reveal times, size, rounds, byes, tournament id, settlement and each bout's id, round and reveal time. | Passes on the current core (a guard). Mutations fail it: id format (n = 2), reveal times rounded down (n = 33), byes off by one (n = 3). | 20/20 in `tournament-stage.test.ts`. |
+| 6 | A failed first read was retried only on focus. | Every 30 s while `failure && !view`, visible tab only. | With the interval disabled: no read 30.5 s later (2, expected 3), desktop and mobile. | Reads at 30 s and 60 s, none over 65 s in a hidden tab, one again once visible (Playwright `page.clock`). |
+| 7 | `wellFormed` required the result's participants in the log's order. | Set equality of the two gladiator ids; still fails closed on another entrant, a repeated fighter, one or three fighters, or a duplicate. | Swapped order rendered `delayed` with no winner. | `decided` with the logged winner, sides in the result's order. Mutations dropping the distinct-ids or the length check each fail the new test. |
+| 8 | Under the running preview clock, `opening`, `midway` and `late` all read "Processing results". | Samples carry `asOfMs`; opening a sample holds its bracket card there (fixture only). The browser helper now opens a sample before setting the clock. | Unit: samples had no `asOfMs`. Browser: `opening` showed "Processing results", expected "In progress" (both projects). | Each sample shows its label's state (In progress ×3, Completed ×2, Not held, Scheduled) and stays held; the hook's clock still overrides. |
+| 9 | Spec §11 expired replays. | Recorded as a Task 22 gate (below); no code change. | — | — |
+
+The hold in fix 8 is scoped to the bracket card rather than the shared display clock: freezing the shared clock at a past sample time would also move the camp and the Arena samples (whose server-time sync a frozen clock ignores) to that day.
+
 ## Commands and results (final)
 
-All on the final source (`c1ff143` content), in this worktree:
-- `npm test`: 32 files, **838 passed** (baseline before this task: 28 files, 784).
+All on the final source (`ffc1e2f` content), in this worktree:
+- `npm test`: 32 files, **843 passed** (838 before the fix pass; baseline before this task: 28 files, 784).
 - `npm run typecheck`: **exit 0** (tsc, frozen Deno check of both Edge entrypoints, 2 Deno runtime tests).
 - `node assets/source/build-assets.mjs --check`: up to date (28 files).
 - `npm run build`, then `npm run verify:static`: 5 fixed routes, 91 assets, no forbidden backend material. A grep of `out/` for `Invalid private combat snapshot`, `Invalid battle input`, `Invalid tournament graph`, `fixture-season` and a fixture slot id found 0 files: no engine and no fixture data in the export.
 - `git diff --check` and `git diff --cached --check`: clean (only the configured LF-to-CRLF notices).
-- Full development browser suite through `pw-claude.config.mjs` (port 3200), desktop and mobile: **217 passed, 6 failed, 7 skipped** of 230. The 6 failures are exactly the known `arena.spec.ts` page tests at lines 273, 287 and 407 on both projects; each fails at `expect(remote).toEqual([])` listing only `http://127.0.0.1:3200/...` URLs (the spec allows port 3300 until Task 17's fix is merged). `tournament.spec.ts` passed 28/28 inside this run; the camp cold-compile timeout did not occur.
+- Full development browser suite through `pw-claude.config.mjs` (port 3200), desktop and mobile: **225 passed, 6 failed, 7 skipped** of 238 (before the fix pass: 217/6/7 of 230). The 6 failures are exactly the known `arena.spec.ts` page tests at lines 273, 287 and 407 on both projects; each fails at `expect(remote).toEqual([])` (spec lines 284, 306 and 430) listing only `http://127.0.0.1:3200/...` URLs (the spec allows port 3300 until Task 17's fix is merged). `tournament.spec.ts` passed 36/36 inside this run.
 - Not run: the isolated production gate (the tournament tests skip in production by design) and anything needing Supabase or Docker.
 
 ## Evidence (`task-20-evidence/`)
 
-All from the final full browser run (`testInfo.outputPath`), copied unchanged:
+All from the final full browser run (`testInfo.outputPath`), copied unchanged; `width360-bracket-replay.png` was refreshed from the fix pass's full run (mobile project), the others are from the first run:
 
 | Image | Shows |
 | --- | --- |
@@ -144,7 +173,7 @@ All from the final full browser run (`testInfo.outputPath`), copied unchanged:
 | `desktop-unavailable-round.png` | A due final not yet published: "Processing results", "Result preparing" and the delay note, its sides from the semifinal winners. |
 | `desktop-one-entrant.png` | One qualifier: "regular Arena this slot". |
 | `desktop-local-time-new-york.png` | The schedule in America/New_York after the daylight-saving change, with the UTC time beside it. |
-| `width360-registration.png`, `width360-bracket-replay.png` | 360 px phone: registration, rules and checklist; the bracket with an inline replay, no horizontal scroll. |
+| `width360-registration.png`, `width360-bracket-replay.png` | 360 px phone: registration, rules and checklist; the bracket with an inline replay running to the card's edges, every fighter-table word whole, no horizontal scroll. |
 | `desktop-camp-round-1.png` | The camp at round 1: four tournament bouts in the rings, effects from the logs. |
 | `desktop-camp-spectators.png` | Minute 30: the four first-round losers outside the wall, the winners waiting in staging. |
 | `desktop-camp-champion.png`, `mobile-camp-champion.png` | Minute 79: seven spectators around the wall and the champion's tag. |
@@ -160,7 +189,8 @@ Outside that list: `src/game/tournament-stage.ts`, `src/game/tournament-camp.ts`
 - **Task 19 phase 2:** the views, opt-in RPC, stages and settlement; publish the live lookup of a league's tournament for a slot (this branch assumes the graph id); answer the open questions below.
 - **Task 10:** the live `tournament()` read and `set-tournament-opt-in` in the live gateway (today "unavailable"); world polling that moves entrants to location `tournament` during their slot.
 - **Task 13:** own the shared sync clock (the panel and the camp each poll tournaments today) and show the camp outside fixture mode. A confirmed toggle already re-reads the owner through `refreshPlanning`.
-- `BattleReplay` renders its own `h1` inside the panel; a heading-level prop would suit an inline use (Task 14 component, not changed here). At 360 px its fighter table is tight inside the panel but causes no page scroll (tested).
+- **Task 22 gate (spec §11, expired replays):** a decided bout whose `revealedResult` has no `battleLog` (the log expired) shows its winner but no "Watch replay" button and no "replay no longer retained" note. Task 22 should add that note (and decide its wording) wherever a decided tournament bout lacks its log; nothing in this branch tests an expired tournament log.
+- At 360 px the replay's fighter table now keeps every header word whole with about 5 px to spare ("Equipment"). Its value cells use Task 14's fixed layout, so an unusually long word there (for example a rarity such as "uncommon)," in a gear name) could still wrap mid-word at that width; the fixtures carry only common gear.
 - Physical FPS with tournament fights and spectators is a Task 23 measurement, not claimed.
 
 ## Open questions
@@ -175,7 +205,8 @@ Outside that list: `src/game/tournament-stage.ts`, `src/game/tournament-camp.ts`
 - `arena.spec.ts` keeps its 6 port-3300 page failures on this branch until the controller merges Task 17's fix; nothing here touches that spec.
 - The open `TournamentView` questions above (round 1 pairing, role-safe placements, no server time, the id lookup) are recorded, not decided; no contract changed.
 - The plan's Step 2 RED for the browser suite and the camp tests' RED were not observed as written (both specs followed the code); the unit cycles, the observed browser failures and the behavioural mutations above stand in for them.
-- After a clock jump or a late read, the camp plays a tournament bout from the moment it learns of it (Task 17's ring rule); the panel always shows the logged times.
-- `BattleReplay`'s `h1` inside the panel (see Limitations).
+- After a clock jump or a late read, the camp plays a tournament bout from the moment it learns of it (Task 17's ring rule); the panel always shows the logged times. Since the fix pass the camp's champion tag waits for the ring, so it can follow the panel's "Champion" by the walk-in time or more.
+- Fix 5's cross-check passed on the existing core, so its RED is the three mutations, not a failing first run.
+- Fix 6's first browser run failed for a test reason (the panel was remounted when the owner loaded under the installed fake clock); the test now waits for the owner, and its behavioural RED was then observed with the interval disabled.
 
 No reusable skill change is proposed: the TDD, verification and project guidance already cover this work.

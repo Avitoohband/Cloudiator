@@ -314,6 +314,7 @@ The reviewer's Important finding I1 corrected the earlier version of this list. 
     - both sides of a human bout reveal the same log, and exactly one is credited the win;
     - pairing job wait, operator and adopt states, and rejection of a result that omits, duplicates or alters an entrant or fighter;
     - a frozen/live rating mismatch goes to operator state;
+    - the second side of a human bout settles after the first side has already moved its rating row, because each side compares only its own frozen rating;
     - access denial for private plans, assignments and seeds, including battle seeds;
     - stages appear only when due;
     - migration-only replay parity.

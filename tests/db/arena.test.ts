@@ -640,8 +640,9 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       }
       // Spec §10.4: normal boundary processing (settling the previous slot through publication) within two minutes.
       expect(cleared.publishedMs).toBeLessThan(120_000);
-      // While the window still holds the cutoff tick's three invocations, the next tick can dispatch only two: 40 of the 52
-      // simple jobs (50 preparations and 2 pairings) left, so publication waits for a third tick.
+      // While the window still holds the cutoff tick's three invocations, the next tick can dispatch only two, which run 40
+      // of the 50 preparations, so publication waits for a third tick. (The cutoff tick's spare 10 slots cannot prepare:
+      // preparation jobs exist only after the last settlement commits.)
       expect(held.ticks[1]).toMatchObject({ dispatched: 2 });
       expect(held.publishedMs).toBeLessThan(180_000);
       // Every job was run by the real worker, with no failure, conflict, unrecorded failure or deferral.

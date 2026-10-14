@@ -134,7 +134,7 @@ export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({
 
 /**
  * One bounded invocation: settle, then prepare, then pair, then reveal (≤20 simple), then any pairing its own coordination
- * released (≤5), or else ≤5 combat simulations.
+ * released (≤5, claimed one at a time within the compute budget), or else ≤5 combat simulations.
  */
 export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport> {
   const executors = deps.executors ?? DEFAULT_EXECUTORS;
@@ -218,12 +218,18 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
     report.coordination = await coordinate();
   }
   // The invocation that completes a boundary's last preparation has usually spent its simple budget, so the pairing jobs
-  // its own coordination released would wait a whole scheduled minute. Claim them within the combat batch limit and the
-  // compute budget (at most one pairing job per league and slot); the dispatch budget is unchanged.
-  if (computeMs < WORKER_LIMITS.cpuMs && report.coordination?.boundaries?.some(b => b.status === 'waiting' && b.wait === 'pairing')) {
-    const jobs = await deps.database.claim(deps.workerId, 'pair', WORKER_LIMITS.combat);
-    for (const job of jobs) await process(job);
-    if (jobs.length) report.coordination = await coordinate();
+  // its own coordination released would wait a whole scheduled minute. Claim them one at a time, at most the combat batch
+  // limit (a slot has one pairing job per league), checking the compute budget before each claim so that a spent budget
+  // never leaves a claimed pairing job leased and unrun until its lease expires. The dispatch budget is unchanged.
+  if (report.coordination?.boundaries?.some(b => b.status === 'waiting' && b.wait === 'pairing')) {
+    let paired = 0;
+    while (paired < WORKER_LIMITS.combat && computeMs < WORKER_LIMITS.cpuMs) {
+      const [job] = await deps.database.claim(deps.workerId, 'pair', 1);
+      if (!job) break;
+      paired += 1;
+      await process(job);
+    }
+    if (paired) report.coordination = await coordinate();
   }
   if (simple === WORKER_LIMITS.simple && computeMs < WORKER_LIMITS.cpuMs) {
     const jobs = await deps.database.claim(deps.workerId, 'simulation', WORKER_LIMITS.combat);

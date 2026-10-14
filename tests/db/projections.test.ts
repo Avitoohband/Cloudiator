@@ -1,7 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
-import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
+import { createSync, type SyncState } from '../../src/lib/api/sync.ts';
+import type { GameGateway } from '../../src/lib/api/gateway.ts';
 import { readOwner, readWorld, readTimeline, readProfile, readRecent, readRevision } from '../../src/lib/api/reads.ts';
 import { refreshProjections } from '../../supabase/functions/_shared/backend/projections.ts';
 
@@ -23,6 +27,45 @@ async function activity(gid: string, status = 'active') {
 const forbidden = ['owner_id','ownerId','wallets','inventory','seed','email','schedule','ownedCosmetics','rewards','receiptId','pendingBuild'];
 function safe(value: unknown) { const json = JSON.stringify(value); for (const key of forbidden) expect(json).not.toContain(`"${key}"`); }
 describe('safe projection authorization', () => {
+  it('keeps the next slot processing after prior settlement until preparation and publication finish without exposing the choice', async () => {
+    const f=await fighter(), slot=Math.floor(Date.now()/4_800_000), previous=slot-1, token=randomUUID();
+    await sql`truncate private.boundaries,private.boundary_work`;
+    await sql`update private.coordinator set published_slot=${previous-1},lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
+    await sql`update public.gladiators set created_at_ms=${(previous-1)*4_800_000+1},orientation_end_ms=${previous*4_800_000},processed_slot_index=${previous-1} where id=${f.gid}`;
+    await sql`update public.schedule_revisions set choice='{"kind":"rest"}',received_at_ms=${(previous-1)*4_800_000+1},effective_slot_index=${previous} where gladiator_id=${f.gid}`;
+    const rpc=async(name:string,args:Record<string,unknown>)=>{const {data,error}=await admin.rpc(name,args);if(error)throw Error(error.message);return data;};
+    const advance=(target:number)=>rpc('advance_boundary',{target_slot:target,coordinator_token:token});
+    const prepare=async()=>{
+      const jobs=await rpc('claim_jobs',{worker_id:randomUUID(),kind:'prepare',batch_limit:20}) as JobLease[];
+      expect(jobs).toHaveLength(1);
+      for(const job of jobs)expect(await rpc('complete_job',{job_id:job.id,lease_token:job.token,result:prepareActivityV1(job.snapshot as PreparationInput)})).toMatchObject({ok:true});
+    };
+    expect(await advance(previous)).toMatchObject({status:'waiting',wait:'preparation'});
+    await prepare();expect(await advance(previous)).toMatchObject({status:'complete'});
+    const [settlement]=await rpc('claim_jobs',{worker_id:randomUUID(),kind:'settlement',batch_limit:20}) as JobLease[];
+    expect(await createWorkerDatabase(admin).settle(settlement.activityId!,settlement.token)).toMatchObject({ok:true});
+    const completedId=settlement.activityId!;
+    expect((await readTimeline(f.other.client,completedId)).completion).toMatchObject({resolvedKind:'rest',result:'completed'});
+    const states:SyncState[]=[],sync=createSync({world:()=>readWorld(f.other.client),revision:()=>readRevision(f.other.client)} as GameGateway,state=>states.push(state));
+    try {
+      await sync.start();
+      const waiting={location:'camp',activityId:null,activityStatus:'processing',startsAtMs:null,endsAtMs:null,visibleStage:null};
+      expect(states.at(-1)).toMatchObject({processing:true,world:{actors:[waiting]}});
+      expect((await readProfile(f.other.client,f.gid)).actor).toMatchObject(waiting);
+      // The next authoritative choice exists only in preparation inputs/snapshot until publication.
+      await sql`update public.schedule_revisions set choice='{"kind":"expedition","expeditionId":"woodland"}',effective_slot_index=${slot} where gladiator_id=${f.gid}`;
+      expect(await advance(slot)).toMatchObject({status:'waiting',wait:'preparation'});
+      await sync.refresh();expect(states.at(-1)).toMatchObject({processing:true,world:{actors:[waiting]}});
+      expect(JSON.stringify(states.at(-1)?.world)).not.toContain('woodland');safe(states.at(-1)?.world);
+      expect((await readOwner(f.owner.client)).processedSlotIndex).toBe(previous);
+      await prepare();expect(await advance(slot)).toMatchObject({status:'complete'});
+      await sync.refresh();
+      expect(states.at(-1)).toMatchObject({processing:false,world:{actors:[{location:'expedition:woodland',activityStatus:'active'}]}});
+      expect(states.at(-1)?.world?.actors[0].activityId).not.toBe(completedId);
+      expect((await readOwner(f.owner.client)).processedSlotIndex).toBe(slot);
+      expect((await readTimeline(f.other.client,completedId)).completion?.result).toBe('completed');
+    } finally {sync.stop();}
+  });
   it('publishes explicit equipped silhouettes to authenticated spectators, retaining private owner management', async () => {
     const f = await fighter();
     const world = await readWorld(f.other.client);

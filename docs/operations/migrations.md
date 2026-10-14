@@ -1,5 +1,24 @@
 # Local identity backend and migrations
 
+## Task 10 delayed-preparation correction
+
+M08 is `supabase/migrations/20261014100253_projection_preparation_status.sql`,
+generated with CLI 2.120.0 `db pull projection_preparation_status --local --schema public,private --yes`
+from the corrected `supabase/sql/06-projections.sql`. Committed M01–M07 remain
+unchanged. The draft was completed with the existing-character checkpoint
+backfill and explicit invoker-view/function ACL preservation.
+
+The projection retains the authoritative published-slot checkpoint. When the
+previous activity is completed but the current database slot is unpublished,
+world/profile reads return a generic camp `processing` actor with no activity
+identity, destination choice, timestamps or stage. The old completed result
+remains available separately through the authorized timeline/recent reads.
+The new slot's published activity replaces that waiting state atomically.
+
+Clean migration-only replay matched all 303 captured schema/ACL/column records
+against tested source. See [Task 10's correction report](../implementation/task-10-report.md#review-correction-round-1--delayed-next-slot-preparation)
+for exact regression, replay and advisor results.
+
 ## Task 10 safe projection migration
 
 M07 is `supabase/migrations/20261014045856_projections.sql`, generated with

@@ -1,4 +1,4 @@
--- Task 10 reapplicable source. M01-M06 are immutable; deploy the new generated M07.
+-- Task 10 reapplicable source. Committed M01-M07 are immutable; later corrections use new migrations.
 begin;
 create table if not exists public.world_revision_state (
   singleton boolean primary key default true check(singleton), revision bigint not null default 0
@@ -8,6 +8,8 @@ create table if not exists public.world_actors (
   gladiator_id uuid primary key references public.gladiators(id) on delete cascade,
   actor jsonb not null check(jsonb_typeof(actor)='object')
 );
+-- Safe publication progress, separate from any unpublished activity choice or snapshot.
+alter table public.world_actors add column if not exists processed_slot_index bigint not null default 0;
 create table if not exists public.public_profiles (
   gladiator_id uuid primary key references public.gladiators(id) on delete cascade,
   rating bigint not null, combat_strength numeric, prestige jsonb not null default '[]'
@@ -61,8 +63,9 @@ begin
     'location',case when a.id is null then 'orientation' when a.resolved_kind='expedition' then 'expedition:'||(a.requested->>'expeditionId') else a.resolved_kind end,
     'activityId',a.id,'activityStatus',case when a.id is null then 'active' else a.status end,
     'startsAtMs',coalesce(a.starts_at_ms,g.created_at_ms),'endsAtMs',coalesce(a.ends_at_ms,g.orientation_end_ms),'visibleStage',null);
-  insert into public.world_actors values(gid,actor) on conflict(gladiator_id) do update set actor=excluded.actor
-    where world_actors.actor is distinct from excluded.actor;
+  insert into public.world_actors(gladiator_id,actor,processed_slot_index) values(gid,actor,g.processed_slot_index)
+    on conflict(gladiator_id) do update set actor=excluded.actor,processed_slot_index=excluded.processed_slot_index
+    where (world_actors.actor,world_actors.processed_slot_index) is distinct from (excluded.actor,excluded.processed_slot_index);
   -- Combined combat strength/league score belongs to Task 16. Never label gear history as that score.
   insert into public.public_profiles(gladiator_id,rating) values(gid,g.rating) on conflict(gladiator_id) do update set rating=excluded.rating
     where public_profiles.rating is distinct from excluded.rating;
@@ -118,10 +121,15 @@ create or replace view public.world_revision with(security_invoker=true) as
   from public.world_revision_state r where singleton;
 create or replace view public.world_actor_reads with(security_invoker=true) as
   select w.gladiator_id,w.actor||jsonb_build_object(
-    'phase',(array['morning','afternoon','evening'])[1+mod(floor(extract(epoch from statement_timestamp())*1000/4800000)::bigint,3)::integer],
+    'phase',(array['morning','afternoon','evening'])[1+mod(floor(extract(epoch from statement_timestamp())*1000/4800000)::bigint,3)::integer])||
+    case when w.actor->>'activityStatus'='completed'
+      and w.processed_slot_index<floor(extract(epoch from statement_timestamp())*1000/4800000)::bigint then
+      -- The old result remains in timeline/recent. A late next slot has no published identity or destination yet.
+      jsonb_build_object('location','camp','activityId',null,'activityStatus','processing','startsAtMs',null,'endsAtMs',null,'visibleStage',null)
+    else jsonb_build_object(
     'activityStatus',case when w.actor->>'activityStatus'='active' and (w.actor->>'endsAtMs')::bigint<=floor(extract(epoch from statement_timestamp())*1000)::bigint then 'processing' else w.actor->>'activityStatus' end,
     -- Camp projection deliberately omits bulky battle logs; on-demand timeline carries them.
-    'visibleStage',(select e.stage-'battleLog' from public.visible_events e where e.activity_id=(w.actor->>'activityId')::uuid order by ordinal desc limit 1)) as actor
+    'visibleStage',(select e.stage-'battleLog' from public.visible_events e where e.activity_id=(w.actor->>'activityId')::uuid order by ordinal desc limit 1)) end as actor
   from public.world_actors w;
 create or replace view public.public_profile_reads with(security_invoker=true) as
   select p.gladiator_id,jsonb_build_object('actor',w.actor,'combatStrength',p.combat_strength,'rating',p.rating,'prestige',p.prestige) as profile

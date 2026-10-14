@@ -45,10 +45,11 @@ const ENEMY_NAMES: Record<string, string> = { 'wild beast': 'dire-wolf', 'armed 
  * Creature art for a participant, or null. Only participants without a gladiator can be creatures.
  * Lookup order: an id of the form `creature:<manifest creature id>[:...]`, then the creature's name
  * (case-insensitive), then a catalog expedition enemy name. Anyone else without a gladiator is an
- * NPC fallback and is drawn as a gladiator.
+ * NPC fallback and is drawn as a gladiator; an `npc:` id is one without any lookup.
  */
 export function creatureFor(p: RevealedCombatant, list: readonly Creature[]): Creature | null {
-  if (p.gladiatorId !== null) return null;
+  // An Arena NPC fallback (id `npc:<entrant gladiatorId>`, Task 16) is never a creature, whatever its name.
+  if (p.gladiatorId !== null || p.id.startsWith('npc:')) return null;
   const byId = /^creature:([a-z0-9-]+)/.exec(p.id)?.[1];
   const name = p.name.trim().toLowerCase();
   const creature = list.find(c => c.id === byId) ?? list.find(c => c.name.toLowerCase() === name) ?? list.find(c => c.id === ENEMY_NAMES[name]) ?? null;

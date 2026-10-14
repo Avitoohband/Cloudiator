@@ -89,6 +89,25 @@ test.describe('living isometric camp', () => {
     expect((await campState(page)).following).toBe(ownerId);
   });
 
+  test('selects the gladiator whose body is under the pointer, not a neighbour', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openCamp(page);
+    const ownerId = await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors[0].gladiatorId);
+    const box = (await page.locator('canvas').boundingBox())!;
+    // screenOf is the body centre, 20 art px above the feet; at zoom 2 the head is about 50 px above it. Points
+    // above the feet keep clear of a neighbour standing in front, whose body may cover the owner's feet.
+    for (const dy of [-36, -16, 0, 10]) {
+      await page.evaluate(() => window.__cloudiatorCamp!.emit('find-character', { gladiatorId: 'npc:smith' }));
+      expect((await campState(page)).selected).toBe('npc:smith');
+      const owner = (await campState(page)).actors.find(a => a.id === ownerId)!;
+      await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: owner.x, y: owner.y });
+      await nextFrames(page);
+      const at = (await page.evaluate(id => window.__cloudiatorCamp!.screenOf(id), ownerId))!;
+      await page.mouse.click(box.x + at.x, box.y + at.y + dy);
+      expect((await campState(page)).selected, `${dy} px from the body centre`).toBe(ownerId);
+    }
+  });
+
   test('disables Find and Follow while the owner is away, and never shows a follow that did not happen', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // departures leave at once
     await openCamp(page);

@@ -1,0 +1,172 @@
+.standings {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.own {
+  padding: 0.9rem 1rem;
+  background: #141c2c;
+  border: 1px solid #4b5872;
+  border-left: 3px solid var(--gold);
+}
+
+.own h3,
+.explain h3 {
+  font-family: Georgia, serif;
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+}
+
+.own dl {
+  margin: 0 0 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.own dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.own dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.own p {
+  margin: 0;
+}
+
+.leagues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.leagues button {
+  min-height: 44px;
+  padding: 0 0.95rem;
+  color: var(--ink);
+  background: #1b2336;
+  border: 1px solid #6b5a3a;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.leagues button[aria-pressed='true'] {
+  color: #1a1423;
+  background: var(--gold);
+  border-color: #ffe48f;
+}
+
+.tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.table caption {
+  text-align: left;
+  font-weight: 700;
+  padding-bottom: 0.4rem;
+}
+
+.table th,
+.table td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.table thead th {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.table tbody th {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.mine {
+  background: #2b2a2c;
+}
+
+.notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.you,
+.promoted,
+.inactive {
+  display: inline-block;
+  padding: 0 0.4rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid;
+}
+
+.you {
+  color: #1a1423;
+  background: var(--gold);
+  border-color: #ffe48f;
+}
+
+.promoted {
+  color: #9fe0b8;
+  border-color: #4f8a67;
+}
+
+.inactive {
+  color: var(--muted);
+  border-color: #4b5872;
+}
+
+.more {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 1.2rem;
+  color: var(--ink);
+  background: #1b2336;
+  border: 1px solid var(--gold);
+  font-weight: 650;
+}
+
+.explain {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.explain p,
+.explain ul {
+  margin: 0 0 0.5rem;
+}
+
+.explain strong {
+  color: var(--ink);
+}
+
+@media (max-width: 480px) {
+  .table th,
+  .table td {
+    padding: 0.35rem 0.3rem;
+  }
+}

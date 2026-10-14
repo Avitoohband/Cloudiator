@@ -9,7 +9,7 @@ import { drawSlices, frontEdgeY, hidesActor, propSlices } from '@/game/depth';
 import { NPC_ROUTINES, NPC_WALK_TILES_PER_SECOND, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
 import { phaseLighting } from '@/game/lighting';
 import { createSceneBridge } from '@/game/bridge';
-import { createDemoWorld } from '@/game/demo-world';
+import { createDemoWorld, withDemoCrowd } from '@/game/demo-world';
 import { createCampScene } from '@/game/camp-scene';
 
 const manifest = loadAssetManifest();
@@ -202,6 +202,21 @@ describe('actor routines', () => {
       const { placements } = layoutCamp(actors, camp, SLOT, { reserved: posts });
       for (const p of placements.values()) expect(posts.has(`${p.x},${p.y}`), `${location} ${p.x},${p.y}`).toBe(false);
     }
+  });
+
+  it('fills a fixture world up to 50 public rows with a crowd spread over every camp zone', () => {
+    const base = { revision: 'r', serverNowMs: 1_791_592_800_000, slotIndex: SLOT, actors: Array.from({ length: 14 }, (_, i) => actor(900 + i, i ? 'arena' : 'training')) };
+    for (const world of [{ ...base, actors: base.actors.slice(0, 1) }, base]) {
+      const crowded = withDemoCrowd(world);
+      expect(crowded.actors).toHaveLength(50);
+      expect(crowded.actors.slice(0, world.actors.length)).toEqual(world.actors);
+      expect(crowded.actors.filter(a => a.location.startsWith('expedition'))).toHaveLength(6);
+      const inCamp = crowded.actors.filter(a => !a.location.startsWith('expedition'));
+      expect(new Set(inCamp.map(a => locationKind(a.location))), `${world.actors.length} fixture actors`).toEqual(new Set(['training', 'rest', 'arena', 'orientation', 'idle']));
+    }
+    // With its own Arena entrants, the fixture world keeps the arena to them: the crowd has no timelines to read.
+    expect(withDemoCrowd({ ...base, actors: base.actors.slice(0, 1) }).actors.slice(1).some(a => a.location === 'arena')).toBe(true);
+    expect(withDemoCrowd(base).actors.slice(base.actors.length).some(a => a.location === 'arena')).toBe(false);
   });
 
   it('leaves everyone else in place when one gladiator arrives or leaves', () => {

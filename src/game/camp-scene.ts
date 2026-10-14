@@ -1,17 +1,23 @@
 // The living isometric camp. Phaser is injected (loaded lazily in the browser) so this
 // module stays importable during the static build. The scene only renders public world
-// state; it never decides outcomes or rewards.
+// state; it never decides outcomes or rewards. Arena entrants warm up in staging; a revealed
+// bout (from the entrants' timelines) walks its pair into a sparring ring and plays the
+// battle log there, seeked to the display time (src/game/arena-layout.ts, battle-stage.ts).
 import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor } from '@contracts/reads';
+import type { RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
-import { layoutCamp, type Placement } from './actors';
+import { layersFor, layoutCamp, type Placement } from './actors';
+import { ARENA_REVEAL_MS } from './arena-stage';
+import { arenaRings, campArenaFights, fightStatus, scheduleArenaRings, type ArenaRing, type CampFight, type FightStatus, type RingSlot } from './arena-layout';
+import { NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageLayout, type StagePlan } from './battle-stage';
 import { NPC_ROUTINES, facingFor, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
 import { clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
 import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
 import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
 import { lightingAt } from './lighting';
 import { drawSlices, hidesActor, type PlacedImage } from './depth';
-import type { SceneBridge } from './bridge';
+import type { ArenaFightSummary, SceneBridge } from './bridge';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
@@ -35,6 +41,8 @@ export type CampSceneDeps = {
 
 export type CampSceneHandle = {
   setWorld(world: WorldSnapshot): void;
+  /** Revealed timelines of Arena entrants by activity id; only stages revealed by the display time are used. */
+  setTimelines(timelines: ReadonlyMap<string, RevealedTimeline>): void;
   setReducedMotion(reduced: boolean): void;
   /** Removes the scene's bridge listeners. Idempotent; also runs when the game destroys the scene. */
   dispose(): void;
@@ -47,10 +55,14 @@ export type CampSceneHandle = {
 };
 
 export type CampDebugActor = {
-  id: string; kind: 'player' | 'npc'; name: string; x: number; y: number;
+  id: string; kind: 'player' | 'npc' | 'arena-npc'; name: string; x: number; y: number;
   zone: string | null; location: string | null; action: string; frame: string;
   layers: string[]; tint: { skin: number; cloth: number; hair: number } | null;
   visible: boolean; depth: number; walking: boolean;
+  /** Mirrored to face south-west (or west in a ring). */
+  flip: boolean;
+  /** The always-visible tag over an NPC fallback opponent, else null. */
+  marker: string | null;
 };
 export type CampDebugState = {
   ready: boolean;
@@ -67,6 +79,12 @@ export type CampDebugState = {
   faded: string[];
   /** What the scene actually applied this frame. */
   lighting: { overlayColor: number; overlayAlpha: number; torchAlpha: number };
+  /** Revealed bouts the camp knows, with their ring window and what each shows now. */
+  arena: { fights: CampDebugFight[]; effects: { effect: string; battleId: string; target: 0 | 1 }[]; labels: string[] };
+};
+export type CampDebugFight = {
+  battleId: string; ring: number; status: FightStatus; positionMs: number; fighters: [string | null, string | null];
+  enterAtMs: number; fightStartMs: number; leaveAtMs: number; npc: string | null;
 };
 export type PropDebug = { id: string; frame: string; x: number; y: number; occludes: boolean; slices: { left: number; width: number; depth: number }[]; alpha: number };
 
@@ -80,10 +98,18 @@ const WHEEL_LINE = 40;
 const WHEEL_IDLE_MS = 250;
 /** Pointer travel (CSS px) before a press becomes a drag. */
 const DRAG_THRESHOLD = 6;
+const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', critical: '#ffe48f', guard: '#8edcf4', miss: '#d4d4d8' };
+/** Fight damage labels rise from just above the nameplates (46 px over the feet). */
+const LABEL_LIFT = 14;
+/** Arena fights are re-derived this often (display ms), and whenever new data arrives. */
+const ARENA_REFRESH_MS = 1000;
+/** NPC fallback opponents walk in and out through the arena gate, inside the wall. */
+const ARENA_GATE: TilePoint = { x: 27, y: 27 };
 
+type Pose = { x: number; y: number; depth: number; flip: boolean; body: string };
 type ActorView = {
   id: string;
-  kind: 'player' | 'npc';
+  kind: 'player' | 'npc' | 'arena-npc';
   name: string;
   container: Container;
   layers: { id: string; sprite: Sprite }[];
@@ -102,6 +128,15 @@ type ActorView = {
   frame: string;
   flip: boolean | null;
   depth: number;
+  /** Public activity and slot start (arena entrants warm up until minute 60). */
+  activityId?: string | null;
+  startsAtMs?: number | null;
+  /** The ring side this view stands on while its revealed bout is on. */
+  arena?: { key: string; battleId: string } | null;
+  /** A fight pose from the battle log, drawn instead of the routine frame. */
+  pose?: Pose | null;
+  /** NPC fallback opponents carry a small always-visible "NPC" tag. */
+  marker?: PhaserNS.GameObjects.Text;
 };
 
 type PropGroup = Omit<PlacedImage, 'slices'> & {
@@ -166,6 +201,20 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   let ring: PhaserNS.GameObjects.Ellipse | null = null;
   let ringDepth = NaN;
   let groundChunks: { rt: PhaserNS.GameObjects.RenderTexture; left: number; top: number; tiles: { frame: string; left: number; top: number }[] }[] = [];
+  // Arena: revealed bouts of the entrants in camp, their ring windows and what is drawn for them.
+  const rings: ArenaRing[] = arenaRings(map);
+  let timelines: ReadonlyMap<string, RevealedTimeline> = new Map();
+  let arenaDirty = true;
+  let arenaComputedAt = -Infinity;
+  let fights: CampFight[] = [];
+  let fightsKey = '';
+  let schedule = new Map<string, RingSlot>();
+  const plans = new Map<string, StagePlan>();
+  const npcFighters = new Map<string, ActorView>();
+  const effectPool: Sprite[] = [];
+  const labelPool: PhaserNS.GameObjects.Text[] = [];
+  let arenaDebug: CampDebugState['arena'] = { fights: [], effects: [], labels: [] };
+  let fightsSignature = '';
 
   class CampScene extends P.Scene {
     constructor() { super({ key: 'camp' }); }
@@ -180,7 +229,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     preload() {
-      const keys = new Set([gladiator.atlas, 'npcs', map.tilesAtlas, map.propsAtlas]);
+      const keys = new Set([gladiator.atlas, 'npcs', 'effects', map.tilesAtlas, map.propsAtlas]);
       for (const key of keys) {
         const def = manifest.atlases[key];
         this.load.atlas(key, `${deps.assetBase}${def.image}`, deps.atlasData[def.data] as object);
@@ -315,7 +364,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     makeContainer(sprites: Sprite[]) {
       const container = this.add.container(0, 0, sprites);
       container.setSize(26, 46);
-      container.setInteractive(new P.Geom.Rectangle(-13, -46, 26, 46), P.Geom.Rectangle.Contains);
+      // Phaser offsets container hit tests by the display origin (half the size), so this covers the body from
+      // 13 px left to 13 px right of the feet and 46 px up: the drawn actor, not a box above and left of it.
+      container.setInteractive(new P.Geom.Rectangle(0, -23, 26, 46), P.Geom.Rectangle.Contains);
       return container;
     }
 
@@ -347,16 +398,20 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     createPlayer(actor: PublicActor, placement: Placement): ActorView {
       const layers = this.playerSprites(placement);
       const container = this.makeContainer(layers.map(l => l.sprite));
+      const v: ActorView = {
+        id: actor.gladiatorId, kind: 'player', name: actor.name, container, layers, look: lookKey(placement),
+        label: this.makeLabel(actor.name), x: placement.x + 0.5, y: placement.y + 0.5, action: placement.action, facing: placement.facing,
+        offsetMs: placement.routine.offsetMs, walk: null, placement, location: actor.location, frame: '', flip: null, depth: NaN,
+        activityId: actor.activityId, startsAtMs: actor.startsAtMs, arena: null, pose: null,
+      };
       container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => {
         if (dragged(pointer)) return;
         selected = actor.gladiatorId;
         deps.bridge.emit('select-character', { gladiatorId: actor.gladiatorId });
+        // An Arena entrant (warming up, fighting or done) opens its Arena card.
+        if (v.location === 'arena' && v.activityId) deps.bridge.emit('open-arena', { activityId: v.activityId, gladiatorId: actor.gladiatorId });
       });
-      return {
-        id: actor.gladiatorId, kind: 'player', name: actor.name, container, layers, look: lookKey(placement),
-        label: this.makeLabel(actor.name), x: placement.x + 0.5, y: placement.y + 0.5, action: placement.action, facing: placement.facing,
-        offsetMs: placement.routine.offsetMs, walk: null, placement, location: actor.location, frame: '', flip: null, depth: NaN,
-      };
+      return v;
     }
 
     /** Public equipment or colours changed: swap the layer sprites in place. */
@@ -392,6 +447,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         existing.placement = placement;
         existing.location = actor.location;
         existing.offsetMs = placement.routine.offsetMs;
+        existing.activityId = actor.activityId;
+        existing.startsAtMs = actor.startsAtMs;
+        // A fighter in a ring stays there; it walks to its new staging spot when its bout is over.
+        if (existing.arena) continue;
         const target = existing.walk ? existing.walk.path[existing.walk.path.length - 1] : { x: Math.floor(existing.x), y: Math.floor(existing.y) };
         if (target.x !== placement.x || target.y !== placement.y) this.walkTo(existing, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing });
         else if (existing.walk) existing.walk.then = { action: placement.action, facing: placement.facing };
@@ -404,6 +463,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         else this.removeView(v);
       }
       awayCount = layout.away.length;
+      arenaDirty = true;
       const focusId = initial ? deps.focusId?.() : null;
       const owner = focusId ? views.get(focusId) : undefined;
       if (owner) this.centerOnActor(owner);
@@ -429,7 +489,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     removeView(v: ActorView) {
       v.container.destroy();
       v.label.destroy();
+      v.marker?.destroy();
       views.delete(v.id);
+      for (const [battleId, npc] of npcFighters) if (npc === v) npcFighters.delete(battleId);
       if (selected === v.id) selected = null;
       if (following === v.id) stopFollowing();
     }
@@ -518,10 +580,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (index !== a.index) { a.index = index; a.image.setFrame(a.anim.frames[index]); }
       }
 
+      this.updateArena(now);
+
       const viewRect = cam.worldView;
       const margin = 80;
       for (const v of views.values()) {
-        if (v.npcRoutine) {
+        if (v.pose) {
+          // A fighter in a ring: drawn from the battle log (updateArena), never walked.
+        } else if (v.npcRoutine) {
           const p = reducedMotion ? stillNpc(v.npcRoutine) : planNpcPosition(v.npcRoutine, map, now, walkTilesPerSecond);
           v.x = p.x; v.y = p.y; v.action = p.action; v.facing = p.facing;
         } else if (v.walk) {
@@ -538,15 +604,24 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
             if (remove) { this.removeView(v); continue; }
           }
         }
-        const s = worldToScreen(v.x, v.y);
+        const pose = v.pose;
+        const s = pose ?? worldToScreen(v.x, v.y);
+        const depth = pose ? pose.depth : s.y;
         v.container.setPosition(s.x, s.y);
-        if (v.depth !== s.y) { v.depth = s.y; v.container.setDepth(s.y); }
+        if (v.depth !== depth) { v.depth = depth; v.container.setDepth(depth); }
         const visible = s.x > viewRect.x - margin && s.x < viewRect.right + margin && s.y > viewRect.y - margin && s.y < viewRect.bottom + margin * 1.5;
         if (v.container.visible !== visible) v.container.setVisible(visible);
-        const showLabel = visible && (v.kind === 'player' ? cam.zoom >= 1.4 || selected === v.id || following === v.id : cam.zoom >= 2);
+        const showLabel = visible && (v.kind !== 'npc' ? cam.zoom >= 1.4 || selected === v.id || following === v.id : cam.zoom >= 2);
         if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
         if (showLabel) v.label.setPosition(s.x, s.y - 46);
-        if (visible) this.updateFrames(v, now);
+        if (v.marker) {
+          if (v.marker.visible !== visible) v.marker.setVisible(visible);
+          if (visible) v.marker.setPosition(s.x, s.y - (showLabel ? 58 : 46));
+        }
+        if (visible) {
+          if (pose) this.applyPose(v, pose);
+          else this.updateFrames(v, now);
+        }
       }
       const focus = following ?? selected;
       const fv = focus ? views.get(focus) : undefined;
@@ -570,6 +645,200 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         }
       }
       this.updateOccluders(fv);
+    }
+
+    /**
+     * Arena: each revealed bout of two entrants in camp (or an entrant and its NPC fallback) walks into its ring,
+     * plays the battle log from its ring window, holds the result and walks back to staging. Everyone else in the
+     * arena warms up until minute 60, then waits in staging.
+     */
+    updateArena(now: number) {
+      if (arenaDirty || Math.abs(now - arenaComputedAt) >= ARENA_REFRESH_MS) {
+        arenaDirty = false;
+        arenaComputedAt = now;
+        const inCamp = (world?.actors ?? []).filter(a => views.get(a.gladiatorId)?.kind === 'player');
+        const next = campArenaFights(inCamp, timelines, now);
+        const key = next.map(f => f.battleId).join('|');
+        if (key !== fightsKey) {
+          fightsKey = key;
+          const kept = new Map([...schedule].filter(([id]) => next.some(f => f.battleId === id)));
+          // The first bouts the camp learns show where their logged times put them; later ones never move them.
+          schedule = scheduleArenaRings(next, rings.length, kept.size ? { previous: kept, knownAtMs: now } : {});
+          fights = next;
+        }
+      }
+      type Active = { fight: CampFight; slot: RingSlot; status: FightStatus; positionMs: number };
+      const active: Active[] = [];
+      const sides = new Map<string, Active & { side: 0 | 1 }>();
+      for (const fight of fights) {
+        const slot = schedule.get(fight.battleId);
+        if (!slot) continue;
+        const { status, positionMs } = fightStatus(slot, fight.log.durationMs, now);
+        if (status === 'queued' || status === 'done') continue;
+        const entry = { fight, slot, status, positionMs };
+        active.push(entry);
+        fight.fighters.forEach((id, side) => { if (id) sides.set(id, { ...entry, side: side as 0 | 1 }); });
+      }
+
+      for (const v of views.values()) {
+        if (v.kind !== 'player') continue;
+        v.pose = null;
+        const mine = sides.get(v.id);
+        if (mine) {
+          const r = rings[mine.slot.ring];
+          const spot = mine.side === 0 ? r.a : r.b;
+          const key = `${mine.fight.battleId}:${mine.side}`;
+          if (v.arena?.key !== key) {
+            v.arena = { key, battleId: mine.fight.battleId };
+            if (mine.status === 'entering') this.walkTo(v, spot, now, { action: 'idle', facing: spot.facing });
+            else this.standAt(v, spot, 'idle', spot.facing);
+          }
+        } else if (v.arena) {
+          v.arena = null;
+          if (v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
+        }
+        // Warm-up animation until the bout is revealed; it grants nothing.
+        if (!v.arena && !v.walk && v.placement?.routine.kind === 'arena') {
+          const warm = v.startsAtMs != null && now >= v.startsAtMs && now < v.startsAtMs + ARENA_REVEAL_MS;
+          v.action = warm ? 'practice' : 'idle';
+        }
+      }
+
+      // NPC fallback opponents walk in through the arena gate for their bout and out again after it.
+      const npcSeen = new Set<string>();
+      for (const { fight, slot, status } of active) {
+        const side = fight.fighters[0] === null ? 0 : fight.fighters[1] === null ? 1 : -1;
+        if (side === -1) continue;
+        npcSeen.add(fight.battleId);
+        if (npcFighters.has(fight.battleId)) continue;
+        const r = rings[slot.ring];
+        const spot = side === 0 ? r.a : r.b;
+        const npc = this.createArenaNpc(fight, side);
+        if (status === 'entering') this.walkTo(npc, spot, now, { action: 'idle', facing: spot.facing }, ARENA_GATE);
+        else this.standAt(npc, spot, 'idle', spot.facing);
+      }
+      for (const [battleId, npc] of [...npcFighters]) {
+        if (npcSeen.has(battleId)) continue;
+        npcFighters.delete(battleId);
+        npc.pose = null;
+        npc.arena = null;
+        this.walkTo(npc, ARENA_GATE, now, { action: 'idle', facing: 'se' }, undefined, true);
+      }
+
+      // Fights: poses, effects and (for the focused fight only) damage labels, all from the logs.
+      const focus = following ?? selected;
+      let effects = 0;
+      let labels = 0;
+      const debugEffects: CampDebugState['arena']['effects'] = [];
+      const debugLabels: string[] = [];
+      for (const { fight, slot, status, positionMs } of active) {
+        if (status === 'entering') continue;
+        const r = rings[slot.ring];
+        let plan = plans.get(fight.battleId);
+        if (!plan) { plan = planStage(fight.log, manifest); plans.set(fight.battleId, plan); }
+        const feet: StageLayout['feet'] = [worldToScreen(r.a.x + 0.5, r.a.y + 0.5), worldToScreen(r.b.x + 0.5, r.b.y + 0.5)];
+        const frame = stageAt(plan, positionMs, { width: 0, height: 0, scale: 1, backdropX: 0, backdropY: 0, feet }, { reducedMotion });
+        const shake = reducedMotion ? { x: 0, y: 0 } : frame.shake;
+        for (const side of [0, 1] as const) {
+          const id = fight.fighters[side];
+          const v = id ? views.get(id) : npcFighters.get(fight.battleId);
+          if (!v) continue;
+          const spot = side === 0 ? r.a : r.b;
+          v.walk = null;
+          v.x = spot.x + 0.5; v.y = spot.y + 0.5; v.facing = spot.facing;
+          const f = frame.fighters[side];
+          v.action = f.action;
+          v.pose = { x: f.x + shake.x, y: f.y + shake.y, depth: f.y + f.depth / 100, flip: f.flip, body: manifest.animations[f.animation].frames[f.frame] };
+        }
+        for (const e of frame.effects) {
+          const sprite = effectPool[effects] ?? (effectPool[effects] = this.add.sprite(0, 0, 'effects', e.frameName));
+          sprite.setFrame(e.frameName).setPosition(e.x + shake.x, e.y + shake.y).setFlipX(e.flip).setDepth(feet[e.target].y + 0.5).setVisible(true);
+          debugEffects.push({ effect: e.effect, battleId: fight.battleId, target: e.target });
+          effects += 1;
+        }
+        if (!focus || !fight.fighters.includes(focus)) continue;
+        for (const l of frame.labels) {
+          const text = labelPool[labels] ?? (labelPool[labels] = this.add.text(0, 0, '', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '10px', stroke: '#1a1423', strokeThickness: 3 })
+            .setOrigin(0.5, 1).setResolution(2).setDepth(2_000_003));
+          if (text.text !== l.text) text.setText(l.text);
+          text.setColor(LABEL_COLORS[l.kind]).setPosition(l.x, l.y - LABEL_LIFT).setAlpha(l.alpha).setVisible(true);
+          debugLabels.push(l.text);
+          labels += 1;
+        }
+      }
+      for (let k = effects; k < effectPool.length; k += 1) if (effectPool[k].visible) effectPool[k].setVisible(false);
+      for (let k = labels; k < labelPool.length; k += 1) if (labelPool[k].visible) labelPool[k].setVisible(false);
+
+      arenaDebug = {
+        fights: fights.map(fight => {
+          const slot = schedule.get(fight.battleId)!;
+          const { status, positionMs } = fightStatus(slot, fight.log.durationMs, now);
+          const npc = fight.fighters.includes(null) ? `arena-npc:${fight.battleId}` : null;
+          return { battleId: fight.battleId, ring: slot.ring, status, positionMs, fighters: [fight.fighters[0], fight.fighters[1]], enterAtMs: slot.enterAtMs, fightStartMs: slot.fightStartMs, leaveAtMs: slot.leaveAtMs, npc };
+        }),
+        effects: debugEffects,
+        labels: debugLabels,
+      };
+      // Tell the UI which bouts are in the rings, for keyboard selection; only when that changes.
+      const summaries: ArenaFightSummary[] = active.map(({ fight, status }) => ({
+        battleId: fight.battleId,
+        status: status as ArenaFightSummary['status'],
+        sides: ([0, 1] as const).map(side => {
+          const id = fight.fighters[side];
+          const logged = fight.log.participants[side].name;
+          return { gladiatorId: id, name: id ? views.get(id)?.name ?? logged : logged, activityId: fight.activities[side], npc: !id };
+        }) as ArenaFightSummary['sides'],
+      }));
+      const signature = summaries.map(f => `${f.battleId}:${f.status}`).join('|');
+      if (signature !== fightsSignature) {
+        fightsSignature = signature;
+        deps.bridge.emit('arena-fights', { fights: summaries });
+      }
+    }
+
+    standAt(v: ActorView, spot: TilePoint, action: ActionId, facing: Direction) {
+      v.walk = null;
+      v.x = spot.x + 0.5; v.y = spot.y + 0.5; v.action = action; v.facing = facing;
+    }
+
+    /** An NPC fallback opponent: the entrant's mirrored gear in the neutral NPC grey, with an "NPC" tag. */
+    createArenaNpc(fight: CampFight, side: 0 | 1): ActorView {
+      const p = fight.log.participants[side];
+      const id = `arena-npc:${fight.battleId}`;
+      const old = views.get(id);
+      if (old) this.removeView(old);
+      const look = fighterLook(p, manifest);
+      const layers = look.layers.map(l => {
+        const sprite = this.add.sprite(0, 0, gladiator.atlas, `${l.id}/idle/se/0`);
+        if (l.tint !== null) sprite.setTint(l.tint);
+        return { id: l.id, sprite };
+      });
+      const container = this.makeContainer(layers.map(l => l.sprite));
+      const entrant = fight.fighters[1 - side];
+      container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => {
+        if (dragged(pointer)) return;
+        if (entrant) selected = entrant;
+        deps.bridge.emit('open-arena', { activityId: fight.activities[side], gladiatorId: entrant });
+      });
+      const marker = this.add.text(0, 0, 'NPC', { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color: '#1a1423', backgroundColor: '#c9d3da', padding: { x: 3, y: 1 } })
+        .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2);
+      const v: ActorView = {
+        id, kind: 'arena-npc', name: p.name, container, layers, look: '', label: this.makeLabel(p.name).setColor('#c9d3da'),
+        x: ARENA_GATE.x + 0.5, y: ARENA_GATE.y + 0.5, action: 'idle', facing: 'sw', offsetMs: 0, walk: null, placement: null, location: 'arena',
+        frame: '', flip: null, depth: NaN, activityId: fight.activities[side], startsAtMs: null, arena: { key: `${fight.battleId}:${side}`, battleId: fight.battleId }, pose: null, marker,
+      };
+      views.set(id, v);
+      npcFighters.set(fight.battleId, v);
+      return v;
+    }
+
+    /** Draws a fight pose: every layer shows the logged action's frame. */
+    applyPose(v: ActorView, pose: Pose) {
+      if (pose.body !== v.frame) {
+        for (const l of v.layers) l.sprite.setFrame(pose.body.replace(/^body\//, `${l.id}/`));
+        v.frame = pose.body;
+      }
+      if (pose.flip !== v.flip) { v.container.setScale(pose.flip ? -1 : 1, 1); v.flip = pose.flip; }
     }
 
     /** Fade whole buildings whose pixels hide the focused character; only faded ones are restored. */
@@ -696,6 +965,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       world = next;
       if (live()) scene.applyWorld(next);
     },
+    setTimelines(next) {
+      timelines = next;
+      arenaDirty = true;
+    },
     setReducedMotion(reduced) {
       reducedMotion = reduced;
     },
@@ -716,13 +989,15 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds },
         actors: [...views.values()].map(v => ({
           id: v.id, kind: v.kind, name: v.name, x: v.x, y: v.y, zone: v.placement?.zone ?? null, location: v.location,
-          action: v.action, frame: frameFor(v, now).frame, layers: v.layers.map(l => l.id), tint: v.placement ? { ...v.placement.routine.tint } : null,
+          action: v.action, frame: v.pose ? v.pose.body.slice(v.pose.body.indexOf('/') + 1) : frameFor(v, now).frame, layers: v.layers.map(l => l.id), tint: v.placement ? { ...v.placement.routine.tint } : null,
           visible: v.container.visible, depth: v.container.depth, walking: !!v.walk,
+          flip: v.flip ?? (v.facing === 'sw' || v.facing === 'nw'), marker: v.marker?.text ?? null,
         })),
         selected,
         following,
         faded: [...faded].map(g => g.id),
         lighting: { overlayColor: overlay?.fillColor ?? 0, overlayAlpha: overlay?.fillAlpha ?? 0, torchAlpha: lights[0]?.image.alpha ?? 0 },
+        arena: arenaDebug,
       };
     },
     props() {

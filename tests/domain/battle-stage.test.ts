@@ -108,6 +108,18 @@ describe('fighter looks', () => {
     }
   });
 
+  it('draws an Arena NPC fallback (id npc:<entrant>) as an NPC without a creature lookup or warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Named like a creature on purpose: the npc: id alone decides.
+      expect(creatureFor(combatant({ id: 'npc:0d5f8471-d919-428f-9ab7-058c95821757', name: 'Timber Wolf', gladiatorId: null }), manifest.actors.creatures)).toBeNull();
+      expect(fighterLook(combatant({ id: 'npc:0d5f8471-d919-428f-9ab7-058c95821757', name: 'Iron Warden', gladiatorId: null }), manifest).kind).toBe('npc');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('stages arena bouts in the arena and encounters where the creature lives', () => {
     expect(backdropFor(FIXTURE_BATTLE_LOGS.pvp, manifest)).toBe('arena');
     expect(backdropFor(FIXTURE_BATTLE_LOGS.npc, manifest)).toBe('arena');

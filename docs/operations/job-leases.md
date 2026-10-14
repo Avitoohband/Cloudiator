@@ -69,3 +69,20 @@ and replay verification. The observed defect, proposed correction and final
 verification must remain distinct. Read the eventual Task 9 report/review for
 confirmed RED/GREEN, changed functions, the actual new migration and any limits.
 This guide does not itself claim that those pending checks passed.
+
+Subsequent Task 9 verification is recorded in
+[task-09-report.md](../implementation/task-09-report.md), source
+`e96e0f1b43e7498c80d2db06bfcba6426bf77584`. The strengthened regression observed
+PostgreSQL blocking, proved the contender began while its lease was valid, and
+released the blocker after database expiry. Reinstating pre-lock sampling
+produced meaningful failures for renewal, generic completion and plan completion;
+restoring the correction passed the owning cases. Settlement's existing post-lock
+guard was tested separately, not claimed as a newly reproduced defect.
+
+The M06 migration-only replay passed 103 DB/Auth/Edge tests plus four later
+privacy/token cases. All 258 schema metadata entries still matched after tests,
+including the temporary clock/hook teardown. Any regression that temporarily
+changes a database function must restore it in `finally` and verify restoration;
+an interrupted test must not become evidence for the replayed artifact. The
+Task 9 independent review remains a separate gate; these are observed implementer
+results, not a claim that the reviewer repeated those runs.

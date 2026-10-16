@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import type { BattleAction, BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import type { PublicActor } from '../../supabase/functions/_shared/contracts/reads';
+import type { PublicActor, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_ACTIVITIES, ARENA_BOUTS, ARENA_GLADIATORS, arenaActivityId, arenaBattleId, type ArenaActivityKey, type ArenaBoutKey } from '../fixtures/arena-ids';
-import { buildArenaFixtures } from '../fixtures/arena-build';
-import { worldFixture } from '../fixtures/domain';
+import { ARENA_STANDINGS, buildArenaFixtures } from '../fixtures/arena-build';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { worldToScreen } from '../../src/game/iso';
+import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote, remoteRequest } from './remote';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -442,6 +443,10 @@ const arenaState = (page: Page) => page.evaluate(() => window.__cloudiatorArena!
 async function openGame(page: Page) {
   await page.goto('/game/?mode=fixture');
   await expect(page.getByRole('heading', { name: 'Arena bouts' })).toBeVisible({ timeout: 45_000 });
+  // The section also shows for spectators (Task 13.4), so it can appear before the fixture owner, whose page these tests
+  // are, and before its test hook is installed.
+  await expect(page.getByRole('heading', { name: 'Aster', exact: true, level: 2 })).toBeVisible({ timeout: 45_000 });
+  await page.waitForFunction(() => !!window.__cloudiatorArena);
 }
 /** Opens a sample Arena activity in the card. */
 async function openSample(page: Page, key: ArenaActivityKey) {
@@ -718,50 +723,36 @@ test.describe('the Arena card and league standings', () => {
     expect(remote).toEqual([]);
   });
 
-  test('re-reads standings after the slot boundary instead of adding results itself', async ({ page }) => {
-    await openGame(page);
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
-    await expect(page.getByRole('table', { name: 'Bronze league standings' }).locator('tbody tr')).toHaveCount(50);
-    const reads = await page.evaluate(() => window.__cloudiatorStandings!.reads());
-    await page.evaluate(ms => window.__cloudiatorArena!.freeze(ms), S + 79 * MIN);
-    await page.waitForTimeout(1500);
-    expect(await page.evaluate(() => window.__cloudiatorStandings!.reads())).toBe(reads);
-    await page.evaluate(ms => window.__cloudiatorArena!.freeze(ms), S + 80 * MIN + 1000);
-    await page.waitForFunction(n => window.__cloudiatorStandings!.reads() === n + 1, reads);
-    await expect(page.getByRole('region', { name: 'Your standing' }).getByRole('definition').nth(1)).toHaveText('1015');
-  });
-
-  test('keeps re-reading standings every 30 s for five minutes after the boundary, then stops', async ({ page }) => {
-    await openGame(page);
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
-    await expect(page.getByRole('table', { name: 'Bronze league standings' }).locator('tbody tr')).toHaveCount(50);
-    const reads = () => page.evaluate(() => window.__cloudiatorStandings!.reads());
-    const boundary = S + 80 * MIN;
-    const base = await reads();
-    // [display time after the boundary, standings reads expected by then]
-    const steps: [number, number][] = [[1000, 1], [20_000, 1], [31_000, 2], [62_000, 3], [4 * MIN + 59_000, 4], [5 * MIN + 1000, 4], [9 * MIN, 4]];
-    for (const [after, expected] of steps) {
-      await page.evaluate(ms => window.__cloudiatorArena!.freeze(ms), boundary + after);
-      await page.waitForFunction(n => window.__cloudiatorStandings!.reads() >= n, base + expected, { timeout: 10_000 });
-      await page.waitForTimeout(1500);
-      expect(await reads(), `${after / 1000} s after the boundary`).toBe(base + expected);
-    }
-  });
-
-  test('keeps the rows loaded with More when it re-reads after the boundary', async ({ page }) => {
-    await openGame(page);
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
-    const table = page.getByRole('table', { name: 'Bronze league standings' });
-    await expect(table.locator('tbody tr')).toHaveCount(50);
-    await page.getByRole('button', { name: 'More', exact: true }).click();
-    await expect(table.locator('tbody tr')).toHaveCount(58);
-    const reads = await page.evaluate(() => window.__cloudiatorStandings!.reads());
-    await page.evaluate(ms => window.__cloudiatorArena!.freeze(ms), S + 80 * MIN + 1000);
-    // Both loaded pages are read again, and every row stays.
-    await page.waitForFunction(n => window.__cloudiatorStandings!.reads() === n + 2, reads, { timeout: 10_000 });
-    await page.waitForTimeout(500);
-    await expect(table.locator('tbody tr')).toHaveCount(58);
-    await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+  test('opens a spectator Arena card from the camp without owner rewards', async ({ page, baseURL }) => {
+    const remote = forbidRemote(page, baseURL);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    // The visitor preview: the fixture camp and reads, with no owner.
+    await page.goto('/game/?mode=fixture&as=visitor');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await expect(page.getByRole('heading', { name: 'A legend awaits' })).toBeVisible();
+    const arena = page.getByRole('region', { name: 'Arena bouts' });
+    await expect(arena).toBeVisible();
+    await expect(arena.getByRole('button', { name: 'Your arena bout' })).toHaveCount(0);
+    // A fight button in the camp opens that entrant's card.
+    await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN + 12_000);
+    const fights = page.getByRole('group', { name: 'Arena bouts in the rings' });
+    await expect(fights.getByRole('button')).toHaveCount(6, { timeout: 15_000 });
+    await fights.getByRole('button', { name: 'Bellator vs Corvina' }).click();
+    await expect(card(page).getByRole('heading', { name: 'Bellator' })).toBeFocused();
+    await expect(card(page).getByRole('status')).toHaveText('Bout in progress');
+    expect((await arenaState(page))!.owner).toBe(false);
+    // The owner's credited bout, opened from the camp by a visitor: its public stages and result, never its rewards.
+    await page.evaluate(next => window.__cloudiatorCamp!.emit('open-arena', next), { activityId: arenaActivityId('ownerHumanWin'), gladiatorId: ARENA_GLADIATORS.aster.id });
+    await page.waitForFunction(id => window.__cloudiatorArena?.state()?.activityId === id, arenaActivityId('ownerHumanWin'));
+    await page.evaluate(ms => window.__cloudiatorArena!.freeze(ms), startOf('ownerHumanWin') + 85 * MIN);
+    await expect(card(page).getByRole('status')).toHaveText('Completed');
+    await expect(card(page).getByRole('region', { name: 'Result' })).toContainText('Victory');
+    await expect(card(page)).toContainText('Rewards are private');
+    await expect(card(page).getByRole('region', { name: 'Credited' })).toHaveCount(0);
+    await expect(card(page)).not.toContainText(/renown|Rating [+−]|CREDITED/i);
+    const state = (await arenaState(page))!;
+    expect([state.owner, state.phase, state.credited, state.awaitingSummary]).toEqual([false, 'completed', null, false]);
+    expect(remote).toEqual([]);
   });
 
   test('works by keyboard alone', async ({ page }) => {
@@ -790,5 +781,74 @@ test.describe('the Arena card and league standings', () => {
     await expect(page.getByRole('table', { name: 'Bronze league standings' }).locator('tbody tr')).toHaveCount(50);
     expect(await wide()).toBeLessThanOrEqual(0);
     await page.getByRole('region', { name: 'Your standing' }).screenshot({ path: testInfo.outputPath('width360-standings.png') });
+  });
+});
+
+// ------------------------------------------------------------------ live standings follow the world revision
+// Live mode through the test transport (Task 13.4): the shared sync controller's revision, not a timer in the panel,
+// tells the standings to read again.
+
+const standingsPage = (rows: StandingRow[]): StandingsPage => ({ league: 'bronze', seasonId: '3', archived: false, nextCursor: null, rows });
+const standingRow = (gladiatorId: string, name: string, rank: number, rating: number): StandingRow =>
+  ({ rank, gladiatorId, name, rating, humanWins: 1, humanLosses: 0, promoted: false, inactive: false, rewardEligible: false });
+
+test.describe('live league standings', () => {
+  test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');
+
+  test('re-reads standings when the revision changes, and not on its own timer', async ({ page, context }) => {
+    const user = await seedSession(context);
+    const owner = structuredClone(ownerFixture);
+    const varro = ARENA_GLADIATORS.varro.id;
+    const world = emptyWorld();
+    const live = await routeLiveReads(context, { world, owner, standings: [standingsPage([standingRow(owner.gladiatorId, 'Aster', 1, 1000), standingRow(varro, 'Varro', 2, 990)])] });
+    await page.clock.install();
+    await page.goto('/game/');
+    await page.getByRole('button', { name: 'Standings', exact: true }).click();
+    const table = page.getByRole('table', { name: 'Bronze league standings' });
+    await expect(table.getByRole('row', { name: /Aster/ })).toContainText('1000');
+    const own = page.getByRole('region', { name: 'Your standing' }).getByRole('definition');
+    await expect(own.nth(1)).toHaveText('1000');
+    const reads = () => live.count('arena_standing_reads');
+    const first = reads();
+    // No timer of its own: the shared clock passes a slot boundary and five minutes go by with the same revision.
+    await page.evaluate(() => { const clock = window.__cloudiatorShell!.clock; clock.freeze((Math.floor(clock.now() / 4_800_000) + 1) * 4_800_000 + 1000); });
+    for (let poll = 0; poll < 10; poll++) await page.clock.fastForward(30_000);
+    await page.waitForTimeout(500);
+    expect(reads()).toBe(first);
+    // The server credits a result, which changes the world revision: the shown standings and the owner are read again.
+    live.setStandings([standingsPage([standingRow(owner.gladiatorId, 'Aster', 1, 1013), standingRow(varro, 'Varro', 2, 977)])]);
+    live.setOwner({ ...owner, progression: { ...owner.progression, rating: 1013 } });
+    live.setWorld({ ...world, revision: 'empty-2' });
+    await page.clock.fastForward(30_000);
+    await expect.poll(reads).toBe(first + 1);
+    await expect(table.getByRole('row', { name: /Aster/ })).toContainText('1013');
+    await expect(own.nth(1)).toHaveText('1013');
+    // The same revision again: nothing more.
+    await page.clock.fastForward(30_000);
+    await page.waitForTimeout(500);
+    expect(reads()).toBe(first + 1);
+    expect(live.requests.filter(r => r.table === 'arena_standing_reads').every(r => r.reader === user.id)).toBe(true);
+  });
+
+  test('keeps the rows loaded with More when a new revision re-reads them', async ({ page, context }) => {
+    const world = emptyWorld();
+    const live = await routeLiveReads(context, { world, standings: [standingsPage(ARENA_STANDINGS.bronze)] });
+    await page.clock.install();
+    await page.goto('/game/');
+    await page.getByRole('button', { name: 'Standings', exact: true }).click();
+    const table = page.getByRole('table', { name: 'Bronze league standings' });
+    await expect(table.locator('tbody tr')).toHaveCount(50);
+    await page.getByRole('button', { name: 'More', exact: true }).click();
+    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length);
+    const reads = live.count('arena_standing_reads');
+    live.setWorld({ ...world, revision: 'empty-2' });
+    await page.clock.fastForward(30_000);
+    // Both loaded pages are read again, and every row stays.
+    await expect.poll(() => live.count('arena_standing_reads')).toBe(reads + 2);
+    await page.waitForTimeout(500);
+    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length);
+    await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+    // A visitor's standings reads are anonymous.
+    expect(live.requests.every(r => r.reader === null)).toBe(true);
   });
 });

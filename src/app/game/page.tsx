@@ -102,20 +102,22 @@ function GameShell() {
           <p className="eyebrow">SAMPLE EXPEDITIONS</p>
           <ul>{sampleExpeditions.map(e => <li key={e.activityId}><Link href={`/expedition/?mode=fixture&activity=${e.activityId}`}>{e.label}</Link></li>)}</ul>
         </nav>}
-        {/* Live mode reads the owner's Arena timeline and opponent profile through the live gateway (Tasks 10/16). */}
-        {visibleOwner && <ArenaPanel bridge={bridge} reads={reads} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />}
+        {/* Live mode reads Arena timelines and opponent profiles through the live gateway (Tasks 10/16); without an owner
+            it is a spectator's: cards opened from the camp, with public stages and results only. */}
+        <ArenaPanel bridge={bridge} reads={reads} owner={visibleOwner} world={world} clock={clock} fixture={fixture} samples={sampleArena} />
       </aside>
       <section className="management" aria-label="Gladiator management">
         <nav className="panel-nav" aria-label="Management panels">
           {panels.map((name) => <button key={name} aria-pressed={panel === name} aria-controls="management-panel" onClick={() => setPanel(name)}>{name}</button>)}
         </nav>
         <div id="management-panel" className="panel-content">
-          {!fixture && visibleOwner && panel === 'Schedule' ? <SchedulePanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
+          {!fixture && visibleOwner && panel === 'Schedule' ? <SchedulePanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} clock={clock} />
             : !fixture && visibleOwner && panel === 'Gladiator' ? <BuildPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} />
               : visibleOwner && panel === 'Inventory' ? <InventoryPanel key={visibleOwner.gladiatorId} owner={visibleOwner} gateway={gateway} refresh={refreshPlanning} preview={fixture} />
               // Live mode reads the paginated league standings through the live gateway (Task 16).
-              : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} />
-              : panel === 'Tournaments' ? <TournamentPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} fixture={fixture} samples={sampleTournaments} refresh={fixture ? undefined : refreshPlanning} />
+              : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} revision={game.revision} />
+              : panel === 'Tournaments' ? <TournamentPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} fixture={fixture} samples={sampleTournaments}
+                refresh={fixture ? undefined : refreshPlanning} revisionSlotIndex={game.slotIndex} />
               : panel === 'Schedule' ? <>
             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>

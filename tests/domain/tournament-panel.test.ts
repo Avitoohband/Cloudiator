@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { TournamentView } from '@contracts/reads';
-import { renderTournament, tournamentPreparing, withoutTournamentLogs } from '@/game/tournament-stage';
+import { publishedSlotEstimate, renderTournament, tournamentPreparing, withoutTournamentLogs } from '@/game/tournament-stage';
 import {
-  RegistrationView, TournamentBracketView, TournamentNotice, TournamentScheduleView, type BracketModel, type RegistrationModel,
+  RegistrationView, TournamentBracketView, TournamentCardNotice, TournamentNotice, TournamentScheduleView, readTournamentCard, type BracketModel,
+  type RegistrationModel,
 } from '@/features/tournaments/TournamentPanel';
 import { viewerText } from '@/features/tournaments/tournament-text';
 import { BattleReplay } from '@/features/arena/BattleReplay';
@@ -256,24 +257,66 @@ describe('replays load on demand (2b review I1)', () => {
   });
 });
 
-describe('the tournament being prepared (2b review M4)', () => {
+describe('the tournament being prepared (2b review M4; Task 19 R3 and R5)', () => {
   const slot = TOURNAMENTS.completed.startsAtMs / 4_800_000;
   const tid = tournamentId('completed');
   const start = TOURNAMENTS.completed.startsAtMs;
 
-  it('treats a missing view of the running tournament slot as being prepared until the viewer’s slot is published', () => {
-    // Between the cutoff and phase 8 the viewer's processed slot is still the previous one.
+  it('treats a missing view of the running tournament slot as being prepared until that slot is published', () => {
+    // Between the cutoff and phase 8 the latest published slot is still the previous one.
     expect(tournamentPreparing(tid, start, slot - 1)).toBe(true);
     expect(tournamentPreparing(tid, start + 121_000, slot - 1)).toBe(true);
     expect(tournamentPreparing(tid, start + 80 * MIN - 1, slot - 1)).toBe(true);
     // Once published, a missing view means no tournament in this league; before the cutoff and after the slot it is
-    // never "being prepared"; nor for another slot's tournament, a malformed id or without a gladiator.
+    // never "being prepared"; nor for another slot's tournament, a malformed id or without a published slot.
     expect(tournamentPreparing(tid, start + 121_000, slot)).toBe(false);
     expect(tournamentPreparing(tid, start - 1, slot - 1)).toBe(false);
     expect(tournamentPreparing(tid, start + 80 * MIN, slot - 1)).toBe(false);
     expect(tournamentPreparing(tournamentId('pair'), start + 60_000, slot - 1)).toBe(false);
     expect(tournamentPreparing('tournament:x:bronze', start + 60_000, slot - 1)).toBe(false);
     expect(tournamentPreparing(tid, start + 60_000, null)).toBe(false);
+  });
+
+  it('estimates the published slot from the revision’s slot and, with an owner, its processed slot (the lower one)', () => {
+    // A gladiator created after the cutoff (R3): its processed slot is already the tournament's, but the revision read
+    // before the cutoff still names the slot before.
+    expect(publishedSlotEstimate(slot - 1, slot)).toBe(slot - 1);
+    // A revision read after the cutoff names the slot by time, before its publication; the owner's lagging processed
+    // slot (published in the same transaction as the slot's tournaments) still tells it is being prepared.
+    expect(publishedSlotEstimate(slot, slot - 1)).toBe(slot - 1);
+    // A visitor has only the revision; before the first revision read only the owner tells.
+    expect(publishedSlotEstimate(slot, null)).toBe(slot);
+    expect(publishedSlotEstimate(null, slot - 1)).toBe(slot - 1);
+    expect(publishedSlotEstimate(null, null)).toBeNull();
+    // Anything but a nonnegative safe integer is unknown.
+    for (const bad of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) expect(publishedSlotEstimate(bad, null)).toBeNull();
+    expect(publishedSlotEstimate(Number.NaN, slot)).toBe(slot);
+  });
+
+  it('renders the card with a not-found gateway and a lagging processed slot', async () => {
+    const asked: string[] = [];
+    const gateway = { tournament: async (id: string) => { asked.push(id); throw Object.assign(new Error('missing'), { code: 'not-found' as const }); } };
+    const read = await readTournamentCard(gateway, tid);
+    expect(read).toEqual({ view: null, failure: 'not-found' });
+    expect(asked).toEqual([tid]);
+    const card = (failure: 'not-found' | 'unavailable', revisionSlotIndex: number | null, processedSlotIndex: number | null, now = start + MIN) =>
+      text(renderToStaticMarkup(createElement(TournamentCardNotice, { id: tid, failure, now, revisionSlotIndex, processedSlotIndex })));
+    // A minute after the cutoff the revision already names this slot by time, but the owner's processed slot lags.
+    expect(card(read.failure!, slot, slot - 1)).toContain('Tournament being prepared');
+    expect(card(read.failure!, slot, slot - 1)).not.toContain('No tournament matches');
+    // Once the owner's slot is published as well, a missing view means no tournament in this league.
+    expect(card(read.failure!, slot, slot)).toContain('No tournament matches this selection.');
+    // A visitor (no owner) before the revision has caught up with the cutoff, and after it.
+    expect(card(read.failure!, slot - 1, null)).toContain('Tournament being prepared');
+    expect(card(read.failure!, slot, null)).toContain('No tournament matches this selection.');
+    // Never before the cutoff, and a failed read is never "being prepared".
+    expect(card(read.failure!, slot - 1, slot - 1, start - 1)).toContain('No tournament matches this selection.');
+    expect(card('unavailable', slot, slot - 1)).toContain('Tournament brackets cannot be loaded right now.');
+    // Any other failure of the gateway reads as unavailable.
+    const broken = await readTournamentCard({ tournament: async () => { throw new Error('network'); } }, tid);
+    expect(broken).toEqual({ view: null, failure: 'unavailable' });
+    const view = await readTournamentCard({ tournament: async () => TOURNAMENT_VIEWS.completed }, tid);
+    expect(view).toEqual({ view: TOURNAMENT_VIEWS.completed, failure: null });
   });
 
   it('says “Tournament being prepared” in place of “No tournament matches” in that window', () => {

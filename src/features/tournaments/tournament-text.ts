@@ -175,8 +175,9 @@ export function viewerText(state: TournamentStageState, hasViewer: boolean, time
       // viewer's unpublished (delayed) result. A waiting entrant has lost no shown bout.
       const open = due.find(r => !r.bouts.some(b => (b.status === 'decided' || b.status === 'bye') && b.winnerId === me.gladiatorId));
       if (open) return `Your ${open.label} result is not published yet. It appears here as soon as it is revealed.`;
-      const next = state.rounds.find(r => !r.due);
-      return next ? `You advance. Your next bout is revealed at ${timeWithUtc(next.revealAtMs, timeZone)}.` : 'You advance. Your next result is being prepared.';
+      // A shown win in every round, the final included, makes the viewer the champion (above), so a round is still to come.
+      const next = state.rounds.find(r => !r.due)!;
+      return `You advance. Your next bout is revealed at ${timeWithUtc(next.revealAtMs, timeZone)}.`;
     }
   }
 }

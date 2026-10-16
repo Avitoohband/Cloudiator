@@ -141,6 +141,30 @@
   border-color: #ffe48f;
 }
 
+/* A visitor's league picker (no owner league to follow). */
+.leagues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.8rem;
+}
+
+.leagues button {
+  min-height: 44px;
+  padding: 0 0.95rem;
+  color: var(--ink);
+  background: #1b2336;
+  border: 1px solid #6b5a3a;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.leagues button[aria-pressed='true'] {
+  color: #1a1423;
+  background: var(--gold);
+  border-color: #ffe48f;
+}
+
 .card {
   display: grid;
   gap: 0.6rem;

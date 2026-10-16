@@ -72,6 +72,10 @@ export type LiveTransport = {
   count(table: string): number;
   setWorld(world: WorldSnapshot): void;
   setOwner(owner: OwnerState | null): void;
+  /** Replaces the current-season standings pages (the server credited results). */
+  setStandings(pages: readonly StandingsPage[]): void;
+  /** Replaces the public tournament views (a slot's publication adds its views). */
+  setTournaments(views: readonly TournamentView[]): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
   delay(table: string, ms: number): void;
   /** Holds a table's requests until the returned release is called (then answers them, and later ones, at once). */
@@ -93,7 +97,8 @@ const INVALID_READER = 'invalid-token';
  * Auth calls of a stored session. Commands and any other request fail the test. Register a spec's own handler for
  * commands or special reads after this one; it runs first, and `route.fallback()` hands everything else here.
  */
-export async function routeLiveReads(context: BrowserContext, data: LiveData): Promise<LiveTransport> {
+export async function routeLiveReads(context: BrowserContext, initial: LiveData): Promise<LiveTransport> {
+  const data: LiveData = { ...initial };
   let world = data.world, owner = data.owner ?? null, rejecting = false;
   const started = Date.now(), base = data.world.serverNowMs;
   const now = data.serverNowMs ?? (() => base + (Date.now() - started));
@@ -130,6 +135,8 @@ export async function routeLiveReads(context: BrowserContext, data: LiveData): P
     count: table => requests.filter(r => r.table === table).length,
     setWorld: next => { world = next; },
     setOwner: next => { owner = next; },
+    setStandings: pages => { data.standings = pages; },
+    setTournaments: views => { data.tournaments = views; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {
       let release!: () => void;

@@ -20,8 +20,12 @@ export type GameUiState = {
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
 };
 
-/** Fixture-enabled builds only (as the other test hooks): browser tests read and hold the shared display clock. */
-export type ShellTestHook = { clock: DisplayClock };
+/**
+ * Fixture-enabled builds only (as the other test hooks): browser tests read and hold the shared display clock, and can
+ * give `refreshOwner` a new identity (as a parent re-rendering with a new function would), so panels prove they keep
+ * their timers (Task 19 R2).
+ */
+export type ShellTestHook = { clock: DisplayClock; renewRefreshOwner(): void };
 declare global {
   interface Window { __cloudiatorShell?: ShellTestHook }
 }
@@ -115,9 +119,13 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
     void signOut({ scope: 'local' }).catch(() => undefined);
   }, [fixture, session.status, syncError]);
 
+  // `refreshOwner` is `loadOwner` itself unless a fixture-enabled test renews its identity (never in production).
+  const [renewals, setRenewals] = useState(0);
+  const refreshOwner = useMemo(() => (renewals === 0 ? loadOwner : () => loadOwner()), [loadOwner, renewals]);
+
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED !== 'true') return;
-    window.__cloudiatorShell = { clock };
+    window.__cloudiatorShell = { clock, renewRefreshOwner: () => setRenewals(n => n + 1) };
     return () => { if (window.__cloudiatorShell?.clock === clock) delete window.__cloudiatorShell; };
   }, [clock]);
 
@@ -137,6 +145,6 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   return {
     viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, clock,
-    sceneStatus, refreshOwner: loadOwner, setSceneStatus,
+    sceneStatus, refreshOwner, setSceneStatus,
   };
 }

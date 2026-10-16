@@ -2,17 +2,16 @@
 
 // League standings: paginated rows (at most 50 per page, a "More" cursor) with rating, human wins and losses and the
 // promoted and inactive markers; separately the owner's own rating, renown and current combat strength; and a short
-// explanation of the leagues from the spec thresholds. After each slot boundary it re-reads the pages it shows while
-// results settle (standings-refresh.ts), so standings change only from results the server has credited; it never
-// adds a rating change itself and never computes another player's league index. It only reads and never sends a
-// command. Names render as React text.
+// explanation of the leagues from the spec thresholds. It re-reads the pages it shows when the shared world revision
+// changes (Task 13.4: the server credits results with a new revision, and the sync controller polls it), so standings
+// change only from results the server has credited; it has no timer of its own, never adds a rating change itself and
+// never computes another player's league index. It only reads and never sends a command. Names render as React text.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { GladiatorId, LeagueId } from '@contracts/commands';
 import type { OwnerState, StandingRow, StandingsPage } from '@contracts/reads';
 import type { DisplayClock } from '../../game/display-clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import { leagueName, leagueRules } from './arena-text';
-import { readNextPage, readStandingsPages, standingsRefreshDue, type StandingsPages, type StandingsReader } from './standings-refresh';
 import styles from './StandingsPanel.module.css';
 
 /**
@@ -32,8 +31,32 @@ declare global {
 }
 
 const LEAGUES: LeagueId[] = ['bronze', 'silver', 'gold', 'champion'];
-const SLOT_MS = RULES_V1.clock.slotMs;
-const TICK_MS = 1000;
+const PAGE_ROWS = 50;
+
+export type StandingsReader = { standings(league: LeagueId, cursor?: string): Promise<StandingsPage> };
+export type StandingsPages = { league: LeagueId; rows: StandingRow[]; nextCursor: string | null; seasonId: string; archived: boolean; pages: number };
+
+/** Appends the page after `cursor` to `rows`, without repeats; a reader that ignores the cursor ends the list. */
+export async function readNextPage(reader: StandingsReader, loaded: StandingsPages): Promise<StandingsPages> {
+  if (!loaded.nextCursor) return loaded;
+  const next = await reader.standings(loaded.league, loaded.nextCursor);
+  const seen = new Set(loaded.rows.map(r => r.gladiatorId));
+  const fresh = next.rows.slice(0, PAGE_ROWS).filter(r => !seen.has(r.gladiatorId));
+  if (!fresh.length) return { ...loaded, nextCursor: null };
+  return { ...loaded, rows: [...loaded.rows, ...fresh], nextCursor: next.nextCursor, pages: loaded.pages + 1 };
+}
+
+/** The first `pages` pages of a league (at least one), so a refresh keeps every row the viewer loaded with More. */
+export async function readStandingsPages(reader: StandingsReader, league: LeagueId, pages: number): Promise<StandingsPages> {
+  const first = await reader.standings(league);
+  let loaded: StandingsPages = { league, rows: first.rows.slice(0, PAGE_ROWS), nextCursor: first.nextCursor, seasonId: first.seasonId, archived: first.archived, pages: 1 };
+  while (loaded.pages < pages && loaded.nextCursor) {
+    const next = await readNextPage(reader, loaded);
+    if (next.pages === loaded.pages) return next;
+    loaded = next;
+  }
+  return loaded;
+}
 
 export type StandingsModel = {
   league: LeagueId;
@@ -118,29 +141,32 @@ export function StandingsView({ model, onLeague, onMore, onRetry, loadingMore = 
   );
 }
 
+export type StandingsPanelProps = {
+  reads: StandingsReads | null;
+  /** The signed-in owner ("Your standing"), re-read by the shared game state on each new revision; null for a visitor. */
+  owner: OwnerState | null;
+  /** The shared display clock, as every panel receives it. Standings follow the revision, never the clock. */
+  clock: DisplayClock;
+  /** The shared world revision (`GameUiState.revision`); a change re-reads the shown standings. */
+  revision: string | null;
+};
+
 /**
- * Live standings: reads the chosen league, pages with "More", and re-reads the loaded pages after each slot boundary
- * while results settle (standingsRefreshDue) and when the tab returns. A failed read keeps any rows shown and offers
- * a retry.
+ * Live standings: reads the chosen league, pages with "More", and re-reads the loaded pages when the world revision
+ * changes, which is when the server credits results. A failed read keeps any rows shown and offers a retry.
  */
-export function StandingsPanel({ reads, owner, clock }: { reads: StandingsReads | null; owner: OwnerState | null; clock: DisplayClock }) {
+export function StandingsPanel({ reads, owner, revision }: StandingsPanelProps) {
   const [league, setLeague] = useState<LeagueId>(owner?.progression.league ?? 'bronze');
   const [page, setPage] = useState<StandingsPages | null>(null);
   const [status, setStatus] = useState<StandingsModel['status']>(reads ? 'loading' : 'unavailable');
   const [loadingMore, setLoadingMore] = useState(false);
   const [strength, setStrength] = useState<{ id: string; value: number | null } | null>(null);
-  const [slot, setSlot] = useState(() => Math.floor(clock.now() / SLOT_MS));
   const request = useRef(0);
   const readCount = useRef(0);
   const rowCount = useRef(0);
   /** The pages shown now, so a refresh reloads as many. */
   const shown = useRef<StandingsPages | null>(null);
-  /** When the shown standings were read (display time) and the owner's processed slot then. */
-  const lastRead = useRef<{ atMs: number; processed: number | null }>({ atMs: -Infinity, processed: null });
-  const processed = useRef<number | null>(owner?.processedSlotIndex ?? null);
   const ownerId = owner?.gladiatorId ?? null;
-  const processedSlotIndex = owner?.processedSlotIndex ?? null;
-  useEffect(() => { processed.current = processedSlotIndex; }, [processedSlotIndex]);
 
   const counted = useCallback((): StandingsReader | null => reads && {
     standings: (which, cursor) => { readCount.current += 1; return reads.standings(which, cursor); },
@@ -151,7 +177,6 @@ export function StandingsPanel({ reads, owner, clock }: { reads: StandingsReads 
     const reader = counted();
     if (!reader) { setStatus('unavailable'); return; }
     const mine = ++request.current;
-    lastRead.current = { atMs: clock.now(), processed: processed.current };
     const kept = refresh && shown.current?.league === which ? shown.current : null;
     setStatus('loading');
     try {
@@ -166,31 +191,26 @@ export function StandingsPanel({ reads, owner, clock }: { reads: StandingsReads 
       if (!kept) { shown.current = null; setPage(null); }
       setStatus('failed');
     }
-  }, [clock, counted]);
+  }, [counted]);
 
   useEffect(() => { void load(league, false); }, [league, load]);
-  // After each slot boundary (credited results only) while the tab is visible, and when the tab returns.
+  // A new world revision (the sync controller polls it every 30 s, and on focus) re-reads the shown pages: credited
+  // results arrive with one. The first revision after opening is no change.
+  const seen = useRef(revision);
   useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState !== 'visible') return;
-      const now = clock.now();
-      setSlot(Math.floor(now / SLOT_MS));
-      const due = standingsRefreshDue({ nowMs: now, lastReadMs: lastRead.current.atMs, processedSlotIndex: processed.current, readProcessedSlotIndex: lastRead.current.processed });
-      if (due) void load(league, true);
-    };
-    const timer = window.setInterval(tick, TICK_MS);
-    const off = clock.subscribe(tick);
-    const onFocus = () => { if (document.visibilityState === 'visible') void load(league, true); };
-    window.addEventListener('focus', onFocus);
-    return () => { window.clearInterval(timer); off(); window.removeEventListener('focus', onFocus); };
-  }, [clock, league, load]);
+    const previous = seen.current;
+    seen.current = revision;
+    if (previous !== null && revision !== null && revision !== previous) void load(league, true);
+  }, [revision, league, load]);
 
+  // The owner's current combat strength, from its public profile: again with each new revision (a queued build
+  // activates at a slot boundary, which changes the revision).
   useEffect(() => {
     if (!ownerId || !reads?.profile) return;
     let alive = true;
     reads.profile(ownerId).then(p => { if (alive) setStrength({ id: ownerId, value: p.combatStrength ?? null }); }, () => { if (alive) setStrength({ id: ownerId, value: null }); });
     return () => { alive = false; };
-  }, [ownerId, reads, slot]);
+  }, [ownerId, reads, revision]);
 
   const more = async () => {
     const reader = counted();

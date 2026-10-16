@@ -5,22 +5,41 @@ import type { ActivityChoice, GameCommand, Phase } from '@contracts/commands';
 import type { OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { nextPhaseStart } from '@domain/clock';
+import { RULES_V1 } from '@domain/rules-v1';
 import type { GameGateway } from '../../lib/api/gateway';
+import type { DisplayClock } from '../../game/display-clock';
 
 const phases = ['morning', 'afternoon', 'evening'] as const;
 const choiceKey = (choice: ActivityChoice) => choice.kind === 'expedition' ? `expedition:${choice.expeditionId}` : choice.kind;
 type Edit = Extract<GameCommand, { kind: 'edit-schedule' }>;
+const SLOT_MS = RULES_V1.clock.slotMs;
+/** How often the panel checks the shared clock for a slot boundary while the tab is visible. */
+const TICK_MS = 1000;
 
-export function SchedulePanel({ owner, gateway, refresh }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void> }) {
+/**
+ * The repeating schedule. The estimated next start of each phase comes from the shared display clock (estimated server
+ * time), and follows it: past a slot boundary, or when the clock is held or moved, the estimates move with it, so the
+ * panel never shows a start that has already passed (the Task 6 stale-clock gate).
+ */
+export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock }) {
   const [draft, setDraft] = useState(owner.schedule);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState<number | null>(null);
+  /** The slot the shared clock is in; the estimates depend on nothing else. Null until mounted. */
+  const [slot, setSlot] = useState<number | null>(null);
   const sending = useRef(false), mounted = useRef(false);
   const attempt = useRef<Edit | null>(null);
   const draftVersion = useRef(owner.scheduleVersion);
-  useEffect(() => { mounted.current = true; setNow(Date.now()); return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    const update = () => setSlot(Math.floor(clock.now() / SLOT_MS));
+    update();
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') update(); }, TICK_MS);
+    const off = clock.subscribe(update);
+    document.addEventListener('visibilitychange', update);
+    return () => { window.clearInterval(timer); off(); document.removeEventListener('visibilitychange', update); };
+  }, [clock]);
   useEffect(() => {
     if (draftVersion.current !== owner.scheduleVersion) {
       draftVersion.current = owner.scheduleVersion; setDraft(owner.schedule); attempt.current = null;
@@ -64,7 +83,7 @@ export function SchedulePanel({ owner, gateway, refresh }: { owner: OwnerState; 
         <option value="training">Training</option><option value="rest">Rest</option><option value="arena">Arena</option>
         {Object.values(CATALOG_V1.expeditions).map(entry => <option key={entry.id} value={`expedition:${entry.id}`} disabled={owner.progression.level < entry.requiredLevel}>{entry.name} · Level {entry.requiredLevel}</option>)}
       </select>
-      {now !== null && <p>Estimated next start: {new Date(nextPhaseStart(phase, now)).toLocaleString()}</p>}
+      {slot !== null && <p>Estimated next start: {new Date(nextPhaseStart(phase, slot * SLOT_MS)).toLocaleString()}</p>}
       <button onClick={() => void save(phase)} disabled={busy}>Save {phase}</button>
     </article>)}</div>
     <p className="muted">The server confirms the effective time when you save.</p>

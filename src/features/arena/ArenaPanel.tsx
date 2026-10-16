@@ -7,6 +7,10 @@
 // the bout, the logged result; and for the owner only, the renown and rating change once the server has credited
 // them. It only reads (the timeline, then the opponent's public profile) and never sends a command. Names render as
 // React text.
+//
+// Spectators (Task 13.4): without an owner (a visitor, or a player without a gladiator) the section still opens cards
+// from the camp, with no "Your arena bout" button; a card it does not own shows the public stages and result only, and
+// never an owner summary, even one a reader returned.
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from 'react';
 import { useRouter } from 'next/navigation';
 import type { RevealedTimeline } from '@contracts/events';
@@ -154,7 +158,9 @@ function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixtur
     return () => window.clearInterval(timer);
   }, [clock]);
 
-  const state = timeline ? renderArenaStage(timeline, now, { entrantId: selection.gladiatorId, owner: isOwner }) : null;
+  // A card the viewer does not own is drawn from the public timeline only: its stages and public completion.
+  const visible = timeline && !isOwner && timeline.summary ? { ...timeline, summary: undefined } : timeline;
+  const state = visible ? renderArenaStage(visible, now, { entrantId: selection.gladiatorId, owner: isOwner }) : null;
 
   // A fresh read once the clock passes minute 60 or 80 (the reveal marks), and every 30 s while the bout or the
   // results are missing. Marks are recomputed after every render, so a clock moved back and forward reads again.
@@ -218,8 +224,8 @@ function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixtur
 
 /**
  * The page's Arena section: opens the card from camp selections (bridge `open-arena`), for the owner's own Arena
- * activity, and from the fixture samples. Without a reader (the live game until Task 10's timeline read lands) it says
- * that the card is not available in this build yet; a real read failure keeps the temporary "right now" message.
+ * activity (only with an owner), and from the fixture samples. `owner` is null for a spectator. Without a reader it
+ * says that the card is not available in this build yet; a real read failure keeps the temporary "right now" message.
  */
 export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, samples = [] }: {
   bridge: SceneBridge;

@@ -113,3 +113,22 @@ test('edits future repeating phases and retries processing without local authori
   expect(flow.commands[0]).toEqual(flow.commands[1]);
   await expect(page.getByLabel('afternoon activity').locator('option[value="expedition:mountain"]')).toBeDisabled();
 });
+
+test('re-estimates the next start after a boundary passes while the panel stays open', async ({ page, context }) => {
+  await planningFlow(context);
+  await page.goto('/game/');
+  const starts = page.locator('.planning-form p').filter({ hasText: /^Estimated next start:/ });
+  await expect(starts).toHaveCount(3);
+  // The shared clock has its server time from the first revision read.
+  await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+  const before = await starts.allTextContents();
+  // One slot (80 minutes) later, with the panel still open: the phase that has just started moves to its next
+  // occurrence, and no estimate is in the past. Written apart from the panel: slot n is phase n mod 3.
+  const later = await page.evaluate(() => { const clock = window.__cloudiatorShell!.clock; const t = clock.now() + 80 * 60_000; clock.freeze(t); return t; });
+  const slot = Math.floor(later / 4_800_000);
+  const next = [0, 1, 2].map(phase => (slot + ((phase - (slot % 3) + 3) % 3 || 3)) * 4_800_000);
+  for (const ms of next) expect(ms).toBeGreaterThan(later);
+  const expected = await page.evaluate(times => times.map(ms => `Estimated next start: ${new Date(ms).toLocaleString()}`), next);
+  await expect(starts).toHaveText(expected);
+  expect(expected).not.toEqual(before);
+});

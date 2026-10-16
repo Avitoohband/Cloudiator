@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { LeagueId } from '@contracts/commands';
 import type { StandingRow } from '@contracts/reads';
 import { renderArenaStage, ARENA_SLOT_MS } from '@/game/arena-stage';
 import { ArenaCardView, type ArenaCardModel } from '@/features/arena/ArenaPanel';
-import { StandingsView, type StandingsModel } from '@/features/arena/StandingsPanel';
+import { StandingsView, readStandingsPages, type StandingsModel } from '@/features/arena/StandingsPanel';
 import { NO_INJURY, NPC_DISCLOSURE, arenaUnavailableText, creditedLines, replayHref, resultText } from '@/features/arena/arena-text';
-import { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId, arenaStandingsPage, type ArenaActivityKey } from '../fixtures/arena';
+import { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_STANDINGS, ARENA_TIMELINES, arenaActivityId, arenaStandingsPage, type ArenaActivityKey } from '../fixtures/arena';
 import { worldFixture } from '../fixtures/domain';
 
 const MIN = 60_000;
@@ -189,5 +190,29 @@ describe('Arena standings', () => {
     const row: StandingRow = { ...page.rows[0], name: '<b>Bold</b>' };
     const html = view({ rows: [row] });
     expect(html).toContain('&lt;b&gt;Bold&lt;/b&gt;');
+  });
+});
+
+describe('standings pages', () => {
+  const reader = { standings: async (league: LeagueId, cursor?: string) => arenaStandingsPage(league, cursor) };
+
+  it('reads as many pages as were loaded, so a refresh keeps the rows loaded with More', async () => {
+    const one = await readStandingsPages(reader, 'bronze', 1);
+    expect(one).toMatchObject({ league: 'bronze', pages: 1, seasonId: 'fixture-season-1', archived: false });
+    expect(one.rows).toEqual(ARENA_STANDINGS.bronze.slice(0, 50));
+    expect(one.nextCursor).not.toBeNull();
+    const two = await readStandingsPages(reader, 'bronze', 2);
+    expect(two).toMatchObject({ pages: 2, nextCursor: null });
+    expect(two.rows).toEqual(ARENA_STANDINGS.bronze);
+    // Asking for more pages than exist stops at the last one.
+    expect(await readStandingsPages(reader, 'bronze', 5)).toEqual(two);
+    expect((await readStandingsPages(reader, 'silver', 3)).rows).toEqual(ARENA_STANDINGS.silver);
+  });
+
+  it('stops when a reader ignores the cursor, without repeating rows', async () => {
+    const ignoring = { standings: async (league: LeagueId) => arenaStandingsPage(league) };
+    const read = await readStandingsPages(ignoring, 'bronze', 3);
+    expect(read).toMatchObject({ pages: 1, nextCursor: null });
+    expect(read.rows).toEqual(ARENA_STANDINGS.bronze.slice(0, 50));
   });
 });

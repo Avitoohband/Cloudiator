@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
+import { ownerFixture } from '../fixtures/domain';
 import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
 import { tournamentCampActors } from '../fixtures/tournament-build';
+import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -414,6 +416,137 @@ test.describe('tournament times in the viewer’s time zone', () => {
   });
 });
 
+
+// ------------------------------------------------------------------ the live Tournaments panel (Task 13.4)
+// Live mode through the test transport: the shared clock, the world revision's slot and the owner refresh drive the
+// panel. The `opening` tournament's slot stands for "this slot".
+
+/** A view of the same tournament slot for another league (its ids and league relabelled). */
+const inLeague = (view: TournamentView, league: TournamentView['league']): TournamentView =>
+  JSON.parse(JSON.stringify(view).replaceAll(`:${view.league}`, `:${league}`).replace(`"league":"${view.league}"`, `"league":"${league}"`)) as TournamentView;
+const OPENING_SLOT = startOf('opening') / SLOT_MS;
+const tournamentsPanel = async (page: Page) => {
+  await page.getByRole('button', { name: 'Tournaments', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Tournaments', exact: true });
+  await expect(panel).toBeVisible({ timeout: 45_000 });
+  return panel;
+};
+
+test.describe('the live Tournaments panel', () => {
+  test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');
+  test.use({ timezoneId: 'UTC' });
+
+  test('keeps one 30 s retry while preparing even when the owner refresh prop changes', async ({ page, context }) => {
+    // 40 s after the cutoff: the slot is not published yet, so the view is missing and the owner's processed slot lags.
+    const at = startOf('opening') + 40_000;
+    const owner = { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT - 1 };
+    await seedSession(context);
+    const live = await routeLiveReads(context, { world: emptyWorld(at), owner, serverNowMs: () => at });
+    await page.clock.install();
+    await page.goto('/game/');
+    await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+    const panel = await tournamentsPanel(page);
+    await expect(panel.getByRole('status').filter({ hasText: 'Tournament being prepared' })).toBeVisible();
+    const views = () => live.count('tournament_views'), owners = () => live.count('owner_state');
+    const [v0, o0] = [views(), owners()];
+    // A parent handing the panel a new refresh function part-way leaves the 30 s retry where it was.
+    await page.clock.fastForward(10_000);
+    await page.evaluate(() => window.__cloudiatorShell!.renewRefreshOwner());
+    await page.clock.fastForward(20_500);
+    await expect.poll(views).toBe(v0 + 1);
+    expect(owners()).toBe(o0 + 1);
+    // Exactly one retry per 30 s.
+    await page.clock.fastForward(25_000);
+    await page.waitForTimeout(500);
+    expect([views(), owners()]).toEqual([v0 + 1, o0 + 1]);
+    // While preparing, each retry awaits the owner refresh before it reads the tournament again.
+    const release = live.hold('owner_state');
+    await page.clock.fastForward(6_000);
+    await expect.poll(owners).toBe(o0 + 2);
+    await page.waitForTimeout(1_000);
+    expect(views()).toBe(v0 + 1);
+    // Phase 8 publishes the slot: the owner's processed slot and the slot's views commit together.
+    live.setOwner({ ...owner, processedSlotIndex: OPENING_SLOT });
+    live.setTournaments([VIEWS.opening]);
+    release();
+    await expect.poll(views).toBe(v0 + 2);
+    const bracket = panel.locator('article[data-status]');
+    await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    await expect(bracket).toContainText('You are entered.');
+    // With a view, the retry stops.
+    await page.clock.fastForward(31_000);
+    await page.waitForTimeout(500);
+    expect(views()).toBe(v0 + 2);
+  });
+
+  test('shows "Tournament being prepared" for a gladiator created after the cutoff', async ({ page, context }) => {
+    // Created after the cutoff, the gladiator's processed slot is already the tournament's. The last revision read was
+    // still in the slot before (polled up to 30 s ago), which tells that this slot is not published yet (R3).
+    const before = startOf('opening') - 5 * MIN;
+    await seedSession(context);
+    const live = await routeLiveReads(context, { world: emptyWorld(before), owner: { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT },
+      serverNowMs: () => before });
+    await page.goto('/game/');
+    await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), startOf('opening') + 30_000);
+    const panel = await tournamentsPanel(page);
+    await expect(panel.getByRole('status').filter({ hasText: 'Tournament being prepared' })).toBeVisible();
+    await expect(panel).not.toContainText('No tournament matches');
+    expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:bronze`)).toBe(true);
+  });
+
+  test('lets a visitor pick a league and see its countdown and bracket', async ({ page, context }) => {
+    const at = startOf('opening') + 30 * MIN;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [VIEWS.opening, inLeague(VIEWS.opening, 'silver')], serverNowMs: () => at });
+    await page.goto('/game/');
+    const panel = await tournamentsPanel(page);
+    const schedule = panel.getByRole('region', { name: 'Tournament schedule' });
+    await expect(schedule).toContainText('A tournament is running now');
+    await expect(schedule.getByRole('definition')).toHaveText(['Sat 10 Oct, 17:20 UTC', /^2 d 23 h 2\d min$/]);
+    const leagues = panel.getByRole('group', { name: 'League' });
+    await expect(leagues.getByRole('button')).toHaveText(['Bronze', 'Silver', 'Gold', 'Champion']);
+    await expect(leagues.getByRole('button', { name: 'Bronze' })).toHaveAttribute('aria-pressed', 'true');
+    const bracket = panel.locator('article[data-status]');
+    await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    await expect(bracket.getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
+    await expect(bracket).not.toContainText(/You are|Your /);
+    await leagues.getByRole('button', { name: 'Silver' }).click();
+    await expect(leagues.getByRole('button', { name: 'Silver' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
+    await expect(bracket.getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
+    // A league without a tournament in that slot.
+    await leagues.getByRole('button', { name: 'Gold' }).click();
+    await expect(panel.getByRole('status').filter({ hasText: 'No tournament matches this selection.' })).toBeVisible();
+    await expect(panel).not.toContainText('Create a gladiator to follow');
+    // A visitor reads public projections only, anonymously, and never the owner state.
+    const ids = live.requests.filter(r => r.table === 'tournament_views').map(r => r.query.get('id'));
+    expect(new Set(ids)).toEqual(new Set(['silver', 'bronze', 'gold'].map(league => `eq.tournament:${OPENING_SLOT}:${league}`)));
+    expect(live.requests.every(r => r.reader === null)).toBe(true);
+    expect(live.requests.some(r => r.table === 'owner_state' || r.table === 'activities')).toBe(false);
+  });
+
+  test('follows the owner’s league after a promotion, from the owner read on a new revision', async ({ page, context }) => {
+    // The lookup league is the owner's, re-read by the shared game state when the revision changes (Task 19 gate).
+    const at = startOf('opening') + 30 * MIN;
+    const owner = { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT };
+    const world = emptyWorld(at);
+    await seedSession(context);
+    const live = await routeLiveReads(context, { world, owner, tournaments: [VIEWS.opening, inLeague(VIEWS.opening, 'silver')], serverNowMs: () => at });
+    await page.clock.install();
+    await page.goto('/game/');
+    await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+    const panel = await tournamentsPanel(page);
+    const bracket = panel.locator('article[data-status]');
+    await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    // An owner follows its own league: no picker.
+    await expect(panel.getByRole('group', { name: 'League' })).toHaveCount(0);
+    live.setOwner({ ...owner, progression: { ...owner.progression, league: 'silver' } });
+    live.setWorld({ ...world, revision: 'promoted' });
+    await page.clock.fastForward(30_000);
+    await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
+    expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:silver`)).toBe(true);
+  });
+});
 
 // ------------------------------------------------------------------ tournament roles in the camp
 // The fixture world has no tournament in its own slot, so these push the `completed` tournament's entrants (location

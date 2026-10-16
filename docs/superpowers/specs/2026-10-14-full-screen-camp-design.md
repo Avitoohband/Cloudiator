@@ -1,6 +1,8 @@
 # Full-screen camp and visitor viewing — design
 
-Date: 2026-10-14. Approved in conversation by Avi on 2026-10-14. This amends the approved [game design](2026-10-11-gladiator-arena-design.md). It is implemented in plan Task 13, together with one small backend step for visitor access.
+Date: 2026-10-14. Approved in conversation by Avi on 2026-10-14; the written spec and its clickable [mockup](references/2026-10-14-full-screen-camp-mockup.html) were approved on 2026-10-16. This amends the approved [game design](2026-10-11-gladiator-arena-design.md). It is implemented in plan Task 13, together with one small backend step for visitor access.
+
+The mockup lays the design over a real screenshot of the camp, with sample data. It shows layout and behaviour; the live panels keep their existing content.
 
 ## Intent
 

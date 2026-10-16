@@ -106,3 +106,44 @@ Range `22ad713..46fd8c3`: `5bb3452` (feature) and `46fd8c3`, a pre-review test f
 - **Owner reads (Task 23 measurement):**
   - the owner is re-read on every revision change (plan-mandated);
   - one extra owner read follows creation.
+
+## 13.4: Panels follow the shared clock and revision
+
+Range `52c697f..d9a0d27`: `c035491` (feature) and `d9a0d27` (review fixes). [Implementer report](task-13.4-report.md).
+
+**Implementer evidence:**
+- Unit tests 939/939; typecheck clean.
+- `test:db` 177/177 with the Edge start time unchanged.
+- Full development browser suite 290 passed and 8 skipped; production gate 14 passed.
+- The controller re-ran the build and static scan after the fix round: 5 routes, 91 assets, clean.
+- Two earlier `test:db` runs failed on the known coordinator busy race in the production-cadence timing test (`arena.test.ts:642`, 120 991 ms against a 120 000 ms bound). That test is flaky and is tracked for Task 23.
+
+**Round 1 (full review).** Verdicts: spec ❌ (R3), quality Needs fixes.
+- **What it confirmed:**
+  - The Schedule panel re-estimates from the shared clock (the Task 6 stale-clock gate).
+  - Standings re-read exactly on a revision change; `standings-refresh.ts` is deleted.
+  - R2: the owner refresh is held in a ref and awaited before the tournament read while preparing.
+  - Visitors get a league picker that defaults to Bronze.
+  - The live id uses `tournamentLookupIdOrNull`; the unreachable "You advance…" branch is removed.
+  - A spectator Arena card has the owner summary stripped, so it never shows credited lines.
+- **I1 (Important):** R3 still let visitors and new gladiators read "No tournament matches" during preparation. The plan's premise was wrong: the revision's slot is the slot by time, not a publication signal.
+
+**Controller rulings:**
+- **R3:** a not-found tournament reads "Tournament being prepared" for every viewer for 300 s after its slot starts (`TOURNAMENT_PREPARE_GRACE_MS`), and longer while a player's processed slot lags. A server published-slot field is Task 23/24 scope.
+- **M1** joined the fix round: the card showed "Loading" forever when the sync never succeeded, a regression this diff introduced.
+
+**Round 2 (scoped re-review of `d9a0d27`):** both ADDRESSED, no new breakage.
+- The grace is measured from the tournament slot's start and never applies outside it.
+- `revisionSlotIndex` was removed with no dangling caller.
+- `syncError` is wired from the page.
+
+**Deferred Minors:**
+- **Carried to 13.5:** the league picker flashes for a player whose owner is still loading.
+- **Carried to 13.6:** visitors still see a disabled Registration box.
+- **Other:**
+  - a re-render each second under a held clock;
+  - a non-null assertion on a malformed later-round bye;
+  - extra owner reads while preparing;
+  - one extra profile read;
+  - the unused `tournamentIdFor`;
+  - `TournamentPanel.tsx` has grown to 577 lines.

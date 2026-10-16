@@ -20,7 +20,7 @@
 - Wednesday and Saturday, 17:20 UTC, lasting one 80-minute afternoon slot.
 - Allocating previously unspent points is free. A respec fee is required when any already-allocated attribute decreases.
 - Changing Endurance preserves absolute current stamina, clamping it to a reduced maximum if needed. Raising capacity does not refill stamina.
-- Initial reads are authenticated.
+- Public projections are readable by anyone, including visitors who have not signed in. Private reads and all commands require Google sign-in, and the acting character is bound to the verified account. (Amended 2026-10-16 by the [full-screen camp spec](../specs/2026-10-14-full-screen-camp-design.md#visitor-access-backend); Task 13.1, M13.)
 - Backend credentials, worker authentication material, seeds, and unrevealed plans remain server-side.
 - Runtime package versions are pinned and lockfiles committed when implementation begins.
 - Target 60 fps desktop and at least 30 fps on the mobile test device, verified before release rather than assumed.

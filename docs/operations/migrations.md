@@ -1,5 +1,62 @@
 # Local identity backend and migrations
 
+## Task 13.1: visitor read access
+
+M13 is `supabase/migrations/20261016141628_visitor_access.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull visitor_access --local --schema public,private --yes` from the tested `supabase/sql/11-visitor-access.sql`.
+M01–M12 are unchanged.
+
+It lets the `anon` role (visitors who have not signed in) SELECT the sanitized public projections, read-only, and nothing
+else ([full-screen camp spec](../superpowers/specs/2026-10-14-full-screen-camp-design.md#visitor-access-backend)):
+- the base tables `world_revision_state`, `world_actors`, `public_profiles`, `recent_results`, `activity_stages`,
+  `arena_standings`, `tournament_bout_results` and `tournament_placements`;
+- the views `visible_events`, `world_revision`, `world_actor_reads`, `public_profile_reads` and `arena_standing_reads`;
+- `tournament_views`, column by column: `id`, `slot_index`, `league`, `starts_at_ms`, `ends_at_ms`, `status`, `entrants`,
+  `bracket`, `bouts` and `reveal_at_ms`, for `anon` and `authenticated`. The table-level SELECT from `authenticated` is
+  revoked, so `pairing_job_id` and `published_at_ms` are readable by no client (Task 19 review M1). A client
+  `select('*')` on it is refused, so name the columns, as `readTournament` already does.
+
+The five views are `security_invoker=true`, so every base table beneath them needs the anon grant and a select policy too:
+a grant without a policy silently returns no rows. Each existing select policy (`player_read`, and `due_read` on
+`activity_stages`) has its role list altered to `anon, authenticated` with its USING expression unchanged. The due-time
+rule `reveal_at_ms <= clock_timestamp()` therefore applies to visitors by guessed id too, and no second permissive policy
+exists. M13 also revokes anon's leftover TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on `public.owner_state`: the platform's
+default table privileges granted them when M01 created the view, and M01's generated revokes covered only its tables.
+anon never had SELECT on it. Private tables, owner tables and views, functions and commands stay denied to anon.
+
+The draft needed five completions before commit:
+- It only added table grants. Source-equivalent `revoke all ... from anon` statements now precede them.
+- It had no view privileges, so the five views' anon revoke/grant pair is added.
+- It revoked `authenticated`'s table SELECT on `tournament_views` but omitted the column grants and the matching anon
+  revoke. Both are added.
+- It omitted the owner view's anon revoke.
+- It dropped and re-created all nine select policies. That is replaced by the source's in-place
+  `alter policy … to anon, authenticated`, which leaves each USING expression untouched. A provenance header and
+  `notify pgrst` were added.
+
+It changes no function, trigger or data, and needs no backfill or initialization.
+
+**Release (Task 24).** M13 does not depend on the worker. Ship it before (or with) the signed-out reads of Task 13.2
+onward. The current read adapters already name `tournament_views` columns, so signed-in reads are unaffected.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M13, with no source applied afterwards.
+- The schema fingerprint (900 lines) matched the tested source exactly, and was identical again after the tests. It
+  covers function definitions, search paths, security, volatility and ACLs; relation ACLs, RLS, options and view
+  definitions; columns with their column ACLs; policies, triggers, constraints and indexes; schema and default ACLs; the
+  cron job and the seed rows.
+- `npm run test:db` passed **176/176** in nine files on the replay, with the Edge container's start time unchanged across
+  the run.
+- Lint is empty. Advisors report four INFO unused-index notices and no warnings or errors (no
+  `multiple_permissive_policies`). `migration list --local` shows M01–M13.
+
+**Observed, not changed here.** anon keeps MAINTAIN on the eight M01 owner tables (`builds`, `gladiators`,
+`item_instances`, `operation_receipts`, `reservations`, `schedules`, `wallet_ledger`, `wallets`). `authenticated` and
+`service_role` keep TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on `owner_state`. The replayed default privileges for new
+`public` tables still give anon, `authenticated` and `service_role` TRUNCATE, REFERENCES, TRIGGER and MAINTAIN, so every new
+public table needs its explicit `revoke all`, as every source already has. None of these is reachable through the Data
+API, and none is a read or a row write.
+
 ## Task 19 phase 2b: tournament results, reveals, settlement and the public view
 
 M12 is `supabase/migrations/20261014174629_tournament_results.sql`, generated with CLI 2.120.0 (engine `migra`) by
@@ -473,7 +530,7 @@ const { data, error } = await client.from('owner_state').select('state').maybeSi
 // data.state: the canonical OwnerState DTO, ready for the management UI.
 ```
 
-`public.owner_state` has `owner_id` and `state` columns. Select only `state`; ownership is enforced by the security-invoker view's underlying owner-only RLS policies. A no-character account returns zero rows; other owners see zero rows; anonymous callers lack SELECT permission. The same owner restrictions cover all base game tables. All client mutations and both command RPCs are denied to `anon`/`authenticated`. `private` is not exposed and grants no client USAGE. The service-role client is backend-only and calls SECURITY INVOKER RPCs. Creation results are `{ok:true, receiptId, value:{gladiatorId}}`; query `owner_state` afterward.
+`public.owner_state` has `owner_id` and `state` columns. Select only `state`; ownership is enforced by the security-invoker view's underlying owner-only RLS policies. A no-character account returns zero rows; other owners see zero rows; anonymous callers lack SELECT permission. The same owner restrictions cover every base game table holding a character's private state. Since M13, only the sanitized public projections are readable without a session, read-only (see "Task 13.1: visitor read access" at the top of this guide). All client mutations and both command RPCs are denied to `anon`/`authenticated`. `private` is not exposed and grants no client USAGE. The service-role client is backend-only and calls SECURITY INVOKER RPCs. Creation results are `{ok:true, receiptId, value:{gladiatorId}}`; query `owner_state` afterward.
 
 `create_gladiator(actor_id uuid, operation_id uuid, input jsonb)` consumes trusted backend preparation containing `{command, starterItems, staminaMaximum}`. HTTP accepts only canonical `GameCommand`; players cannot submit the prepared envelope, owner IDs, authoritative inventory, rolls, or stamina. `prepareCreation` uses the reviewed domain allocation/build/catalog/stats functions. SQL revalidates exact shapes, name/allocation/integer/catalog constraints, serializes each account, enforces global case-insensitive names, and writes initial state/items/ledger/receipt atomically. Account-scoped operation replay compares the original JSON command; a changed payload returns conflict. Successful and business-conflict receipts are durable. Invalid requests do not create receipts. Separate database-backed rolling limits count 60 authenticated attempts/minute and five creation attempts/minute; retries count too. The handler charges the general limit once and then the creation limit by parsed kind, including invalid creation payloads.
 

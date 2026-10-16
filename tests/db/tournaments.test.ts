@@ -19,6 +19,8 @@ const MINUTE = 60_000;
 /** Slot 301 starts on Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot. Its cutoff is 301 × 4 800 000 ms. */
 const T = 301;
 const CUTOFF = T * SLOT;
+/** tournament_views is readable column by column only (Task 13.1): never its pairing job or publication time. */
+const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms';
 const commands = createDatabase(admin);
 type Outcome = { ok: boolean; code?: string; [key: string]: unknown };
 async function rpc<T = Outcome>(name: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -1021,7 +1023,8 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       for (const unknown of [`tournament:${T}:silver`, 'tournament:x:bronze', `tournament:${T}:bronze:1:0`]) {
         await expect(readTournament(spectator.client, unknown), unknown).rejects.toMatchObject({ code: 'not-found' });
       }
-      await expect(readTournament(anonymous, tid)).rejects.toBeTruthy();
+      // Visitors (Task 13.1) read the same public tournament as a signed-in spectator.
+      expect(await readTournament(anonymous, tid)).toEqual(done);
     }, 60_000);
 
     /**
@@ -1109,17 +1112,13 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         client.from('tournament_bout_results').select('bout_id,reveal_at_ms,result').eq('bout_id', bout.id),
         client.from('tournament_bout_results').select('bout_id,reveal_at_ms,result').eq('tournament_id', t.id),
       ];
-      for (const [who, client] of [['owner', owner.client], ['another account', other.client]] as const) {
+      // Visitors (Task 13.1) may read public results, so the due-time policy alone must hide this one from them too.
+      for (const [who, client] of [['owner', owner.client], ['another account', other.client], ['anonymous', anonymous]] as const) {
         for (const [i, query] of reads(client).entries()) expect(await query, `${who} ${i ? 'by tournament' : 'by id'}`).toMatchObject({ error: null, data: [] });
         await expect(readTournamentLog(client, bout.id), who).rejects.toMatchObject({ code: 'not-found' });
         const view = await readTournament(client, t.id);
         expect(view.bouts.find(b => b.id === bout.id)!.revealedResult, who).toBeNull();
       }
-      for (const [i, query] of reads(anonymous).entries()) {
-        const { data, error } = await query;
-        expect([data ?? [], error !== null], `anonymous ${i ? 'by tournament' : 'by id'}`).toEqual([[], true]);
-      }
-      await expect(readTournamentLog(anonymous, bout.id)).rejects.toBeTruthy();
       // The due-time policy is what hides it: in a rolled-back transaction the same player read under `using (true)`
       // returns the row by id and by tournament, so these reads would fail against such a policy.
       const qual = async () => (await sql`select pg_get_expr(polqual, polrelid) as q from pg_policy
@@ -1452,16 +1451,20 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='private' and c.relname in ${sql(privateTables)}`)
         .toEqual([{ relname: 'tournament_results', rls: true, client: false }]);
       const publicTables = ['tournament_views', 'tournament_bout_results', 'tournament_placements'];
-      expect(await sql`select c.relname, c.relrowsecurity as rls, has_table_privilege('authenticated',c.oid,'SELECT') as reads,
-        has_table_privilege('authenticated',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') as writes,
-        has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') as anon
+      // Players and visitors (Task 13.1) read; tournament_views only column by column (has_any_column_privilege), never written.
+      expect(await sql`select c.relname, c.relrowsecurity as rls, has_any_column_privilege('authenticated',c.oid,'SELECT') as reads,
+        has_table_privilege('authenticated',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') or has_any_column_privilege('authenticated',c.oid,'INSERT,UPDATE') as writes,
+        has_any_column_privilege('anon',c.oid,'SELECT') as anon_reads,
+        has_table_privilege('anon',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') or has_any_column_privilege('anon',c.oid,'INSERT,UPDATE') as anon_writes
         from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ${sql(publicTables)} order by c.relname`)
-        .toEqual([...publicTables].sort().map(relname => ({ relname, rls: true, reads: true, writes: false, anon: false })));
+        .toEqual([...publicTables].sort().map(relname => ({ relname, rls: true, reads: true, writes: false, anon_reads: true, anon_writes: false })));
       for (const client of [owner.client, other.client, anonymous]) {
         expect((await client.schema('private').from('tournament_results').select('*')).error).not.toBeNull();
         for (const table of publicTables) expect((await client.from(table).insert({}).select()).error, table).not.toBeNull();
       }
-      for (const table of publicTables) expect((await anonymous.from(table).select('*')).error, table).not.toBeNull();
+      for (const table of publicTables) {
+        expect((await anonymous.from(table).select(table === 'tournament_views' ? PUBLIC_TOURNAMENT_COLUMNS : '*')).error, table).toBeNull();
+      }
       const functions = await sql`select p.oid::regprocedure::text as name, p.prosecdef,
         has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE') as client,
         has_function_privilege('service_role',p.oid,'EXECUTE') as backend
@@ -1475,7 +1478,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       const [{ outcomes }] = await sql`select outcomes from private.tournament_results`;
       const activity = (await activityOf(owner.gid)).id;
       const seen = JSON.stringify([await owner.state(), await readProfile(other.client, owner.gid), (await other.client.from('world_actor_reads').select('*')).data,
-        (await other.client.from('tournament_views').select('*')).data, (await other.client.from('tournament_bout_results').select('*')).data,
+        (await other.client.from('tournament_views').select(PUBLIC_TOURNAMENT_COLUMNS)).data, (await other.client.from('tournament_bout_results').select('*')).data,
         (await other.client.from('tournament_placements').select('*')).data, await readTimeline(other.client, activity),
         await readTournament(other.client, `tournament:${T}:bronze`)]);
       expect(seen).not.toMatch(/"seed"|"rank"|"fighter"|"ratingBefore"|"ratingAfter"|grantId|"placement"/);

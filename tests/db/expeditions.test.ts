@@ -348,13 +348,13 @@ describe('private expedition integration',()=>{
     const futureId=randomUUID();
     await sql`insert into public.activity_stages(id,activity_id,ordinal,reveal_at_ms,stage) values(${futureId},${f.aid},99,
       ${Date.now()+100000},${sql.json({id:futureId,kind:'return',revealedAtMs:Date.now()+100000,startedAtMs:Date.now()+100000,endsAtMs:Date.now()+100000,label:'future'})})`;
-    for(const client of [f.client,other.client]) {
+    // Visitors (Task 13.1) read due stages exactly as signed-in players do; a guessed future id stays hidden.
+    for(const client of [f.client,other.client,anonymous]) {
       const hidden=await client.from('activity_stages').select('*').eq('id',futureId);
       expect(hidden.error).toBeNull();expect(hidden.data).toEqual([]);
       const visible=await client.from('activity_stages').select('*').eq('activity_id',f.aid);
       expect(visible.data!.length).toBeGreaterThan(0);
       expect(JSON.stringify(visible.data)).not.toContain('seed');
     }
-    expect((await anonymous.from('activity_stages').select('*')).error).not.toBeNull();
   });
 });

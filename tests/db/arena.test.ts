@@ -704,21 +704,21 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
     for (const client of [owner.client, other.client, anonymous]) {
       for (const table of tables) expect((await client.schema('private').from(table).select('*')).error, table).not.toBeNull();
     }
-    // The public standings projection and its invoker view: signed-in players read, only the backend writes.
+    // The public standings projection and its invoker view: visitors (Task 13.1) and signed-in players read, only the backend writes.
     expect(await sql`select c.relname, c.relrowsecurity as rls, c.reloptions, has_table_privilege('anon',c.oid,'SELECT') as anon,
       has_table_privilege('authenticated',c.oid,'SELECT') as player,
       has_table_privilege('anon',c.oid,'INSERT,UPDATE,DELETE') or has_table_privilege('authenticated',c.oid,'INSERT,UPDATE,DELETE') as write
       from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('arena_standings','arena_standing_reads')
       order by c.relname`).toEqual([
-      { relname: 'arena_standing_reads', rls: false, reloptions: ['security_invoker=true'], anon: false, player: true, write: false },
-      { relname: 'arena_standings', rls: true, reloptions: null, anon: false, player: true, write: false }]);
-    for (const client of [owner.client, other.client]) {
+      { relname: 'arena_standing_reads', rls: false, reloptions: ['security_invoker=true'], anon: true, player: true, write: false },
+      { relname: 'arena_standings', rls: true, reloptions: null, anon: true, player: true, write: false }]);
+    for (const client of [owner.client, other.client, anonymous]) {
       expect((await client.from('arena_standings').update({ rating: 5000 }).eq('gladiator_id', owner.gid)).error).not.toBeNull();
       expect((await client.from('arena_standings').insert({ gladiator_id: owner.gid, league: 'gold', season_index: 0, name: 'Forged',
         rating: 1, human_wins: 0, human_losses: 0 })).error).not.toBeNull();
       expect((await client.from('arena_standings').delete().eq('gladiator_id', owner.gid)).error).not.toBeNull();
     }
-    expect((await anonymous.from('arena_standing_reads').select('*')).error).not.toBeNull();
+    expect((await anonymous.from('arena_standing_reads').select('*')).error).toBeNull();
     const names = ['season_index', 'league_rank', 'accept_pairing', 'boundary_pair', 'boundary_recompute_leagues', 'guard_league', 'guard_arena_rating',
       'pairing_input', 'accept_arena_result', 'arena_rewards', 'arena_settlement_failure', 'accept_job_result', 'prepare_activity_jobs',
       'settle_rewards', 'settle_activity_core', 'project_character', 'activity_executor_ready'];
@@ -1283,7 +1283,10 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         order by ordinal_position`).map(c => c.column_name))
         .toEqual(['league', 'season_index', 'gladiator_id', 'name', 'rating', 'human_wins', 'human_losses', 'rank', 'promoted']);
       expect(JSON.stringify((await spectator.client.from('arena_standing_reads').select('*')).data)).not.toMatch(/money|renown|inventory|owner|item/);
-      expect((await anonymous.from('arena_standing_reads').select('*')).error).not.toBeNull();
+      // Visitors (Task 13.1) read the same standings as a signed-in spectator.
+      for (const league of ['bronze', 'silver', 'champion'] as const) {
+        expect(await readStandings(anonymous, league), league).toEqual(await readStandings(spectator.client, league));
+      }
       // A malformed cursor is rejected before any query is sent.
       await expect(readStandings(spectator.client, 'bronze', '1:50,rating.lt.0')).rejects.toMatchObject({ code: 'unavailable' });
       // Task 10's projection hooks follow the private rows: a credited rating republishes the row and bumps the revision.

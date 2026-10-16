@@ -75,7 +75,9 @@ describe('safe projection authorization', () => {
     expect((await readOwner(f.owner.client)).wallets.money).toBe(100);
     await expect(readOwner(f.other.client)).rejects.toMatchObject({code:'not-found'});
     for (const name of ['world_actors','world_revision','public_profiles','visible_events','recent_results','world_actor_reads']) {
-      expect((await anonymous.from(name).select('*')).error).not.toBeNull();
+      // Visitors read the public projections (Task 13.1); only the backend writes them.
+      const visitor = await anonymous.from(name).select('*');
+      expect(visitor.error, name).toBeNull(); safe(visitor.data);
       expect((await f.other.client.from(name).delete().neq('gladiator_id',randomUUID())).error).not.toBeNull();
     }
     expect((await f.other.client.rpc('refresh_projections')).error).not.toBeNull();

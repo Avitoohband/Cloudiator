@@ -58,6 +58,17 @@ No files were deleted. After a hidden restart, the daemon probe returned
 Engine29.8.2, Desktop/backend processes were running and the error report had
 disappeared. Task10 then verified the Cloudiator label and resumed its own stack.
 
+On 2026-10-16 the same failure recurred after a restart. The nested error
+named component `services`, "initializing Secrets Engine", and an
+`*os.LinkError` renaming the same `engine.sock` to `engine.sock.stale`. The
+`syscall.Errno` value was not present in the JSON. After the documented
+force-stop, no Desktop or backend process remained. The directory again held
+exactly one zero-byte `engine.sock` with Archive/ReparsePoint attributes. It
+was preserved as
+`C:/Users/Avi_OP_PC/AppData/Local/docker-secrets-engine.cloudiator-stale-20261016-1`.
+After a hidden launch, Engine 29.8.2 answered and the error report was gone.
+The Cloudiator label was verified before the stack was started.
+
 This is a tested workaround on this host, not a permanent Docker fix. The
 preserved backup is not a database export and remains outside the repository.
 No full-Docker reset, upgrade, data-directory cleanup or removal of that backup

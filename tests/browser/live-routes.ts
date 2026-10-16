@@ -76,6 +76,8 @@ export type LiveTransport = {
   delay(table: string, ms: number): void;
   /** Holds a table's requests until the returned release is called (then answers them, and later ones, at once). */
   hold(table: string): () => void;
+  /** Answers a table's requests with a server error (500, which supabase-js does not retry): a read the backend cannot serve. */
+  fail(table: string): void;
   /** Rejects every signed-in request as PostgREST rejects a token it no longer accepts (a stale stored session). */
   rejectSessions(reject?: boolean): void;
   serverNowMs(): number;
@@ -98,6 +100,7 @@ export async function routeLiveReads(context: BrowserContext, data: LiveData): P
   const requests: LiveRequest[] = [];
   const delays = new Map<string, number>();
   const holds = new Map<string, Promise<void>>();
+  const failing = new Set<string>();
   await context.route(`${SUPABASE_URL}/**`, async route => {
     const request = route.request(), url = new URL(request.url());
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
@@ -111,6 +114,7 @@ export async function routeLiveReads(context: BrowserContext, data: LiveData): P
     await holds.get(table);
     if (!request.headers().apikey) return json(route, { code: 'PGRST301', message: 'No API key found in request' }, 401);
     if (reader !== null && (rejecting || reader === INVALID_READER)) return json(route, { code: 'PGRST301', message: 'JWT could not be verified' }, 401);
+    if (failing.has(table)) return json(route, { code: 'XX000', message: 'internal error', details: null, hint: null }, 500);
     const source = tables({ world, owner, now: now(), reader, data })[table];
     if (!source) throw new Error(`Unexpected live transport table ${table}`);
     if (source.private && reader === null) return json(route, { code: '42501', message: `permission denied for table ${table}`, details: null, hint: null }, 401);
@@ -132,6 +136,7 @@ export async function routeLiveReads(context: BrowserContext, data: LiveData): P
       holds.set(table, new Promise<void>(resolve => { release = resolve; }));
       return () => { holds.delete(table); release(); };
     },
+    fail: table => { failing.add(table); },
     rejectSessions: (reject = true) => { rejecting = reject; },
     serverNowMs: now,
   };

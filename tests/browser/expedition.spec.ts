@@ -8,6 +8,7 @@ import { gladiatorPose, journeyMap } from '../../src/game/expedition-path';
 import { worldToScreen } from '../../src/game/iso';
 import { drawSlices, hidesActor } from '../../src/game/depth';
 import type { MapData } from '../../src/game/assets';
+import { emptyWorld, routeLiveReads } from './live-routes';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -619,18 +620,31 @@ test.describe('followable expedition scenes', () => {
     expect(text).not.toMatch(/Encounter [23]|Return to camp|Arrive at camp|light boots|salvage|\+\d+ money/i);
   });
 
-  test('explains an unknown, malformed or live expedition without reading or drawing one', async ({ page }) => {
+  test('explains an unknown, malformed or live expedition without reading or drawing one', async ({ page, context }) => {
+    // Since Task 13.2 the live page reads a visitor's public timeline, so its Data API reads are routed to the test
+    // transport (never the local Supabase stack). Here the live read fails on the server: the live page cannot read the
+    // expedition and must explain it. (An unknown live expedition the server answers reads as "Preparing", as for any
+    // expedition not yet revealed.)
+    const live = await routeLiveReads(context, { world: emptyWorld() });
+    live.fail('world_revision');
     const requests: string[] = [];
     page.on('request', request => requests.push(request.url()));
     await page.goto('/expedition/?mode=fixture&activity=0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e');
     await expect(page.getByRole('heading', { name: 'This expedition is not available' })).toBeVisible({ timeout: 45_000 });
     await page.goto('/expedition/?mode=fixture&activity=not-an-id');
     await expect(page.getByRole('heading', { name: 'This expedition is not available' })).toBeVisible();
+    // The unknown and malformed fixture expeditions read nothing at all.
+    expect(requests.filter(url => /functions\/v1|rest\/v1|auth\/v1|54321/.test(url))).toEqual([]);
+    expect(live.requests).toEqual([]);
     await page.goto(`/expedition/?activity=${idOf('woodland')}&minute=39`);
     await expect(page.getByRole('heading', { name: 'This expedition is not available' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Camp', exact: true })).toHaveAttribute('href', '/game/');
     expect(await page.locator('canvas').count()).toBe(0);
-    expect(requests.filter(url => /functions\/v1|rest\/v1|auth\/v1|54321/.test(url))).toEqual([]);
+    // The live page sent no command and no Auth call, and read only the public timeline, as a visitor, through the transport.
+    expect(requests.filter(url => /functions\/v1|auth\/v1/.test(url))).toEqual([]);
+    expect(live.requests.length).toBeGreaterThan(0);
+    expect(live.requests.every(r => r.reader === null && ['world_revision', 'visible_events', 'recent_results'].includes(r.table))).toBe(true);
+    expect(requests.filter(url => /54321/.test(url)).every(url => /\/rest\/v1\/(world_revision|visible_events|recent_results)\?/.test(url))).toBe(true);
   });
 
   test('draws the gladiator on walkable tiles with the shared depth rule, and fades the tree that hides it', async ({ page }, testInfo) => {

@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { BattleAction, BattleLog } from '../../supabase/functions/_shared/contracts/events';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
+import { emptyWorld, routeLiveReads } from './live-routes';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -160,13 +161,18 @@ test.describe('battle-log replay', () => {
     await page.screenshot({ path: testInfo.outputPath('replay-expired.png'), fullPage: true });
   });
 
-  test('explains an unknown activity and the live build without fabricating a replay', async ({ page }) => {
+  test('explains an unknown activity and the live build without fabricating a replay', async ({ page, context }) => {
+    // Since Task 13.2 the live page reads a visitor's public timeline: the test transport answers it (the server knows no
+    // such activity), never the local Supabase stack.
+    const live = await routeLiveReads(context, { world: emptyWorld() });
     await page.goto(url('9fce3cd5-e831-4a66-8ca1-16b4576b1499'));
     await expect(page.getByText(/replay is not available/i)).toBeVisible();
     await page.goto(`/replay/?activity=${REPLAY_FIXTURES.pvp.activityId}`);
     await expect(page.getByText(/replay is not available/i)).toBeVisible();
     expect(await page.locator('canvas').count()).toBe(0);
     await expect(page.getByRole('link', { name: 'Back to camp' })).toHaveAttribute('href', '/game/');
+    expect(live.requests.length).toBeGreaterThan(0);
+    expect(live.requests.every(r => r.reader === null && ['world_revision', 'visible_events', 'recent_results'].includes(r.table))).toBe(true);
   });
 
   test('plays at normal speed to the logged result in real time', async ({ page }) => {

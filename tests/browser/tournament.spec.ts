@@ -479,20 +479,65 @@ test.describe('the live Tournaments panel', () => {
     expect(views()).toBe(v0 + 2);
   });
 
-  test('shows "Tournament being prepared" for a gladiator created after the cutoff', async ({ page, context }) => {
-    // Created after the cutoff, the gladiator's processed slot is already the tournament's. The last revision read was
-    // still in the slot before (polled up to 30 s ago), which tells that this slot is not published yet (R3).
-    const before = startOf('opening') - 5 * MIN;
-    await seedSession(context);
-    const live = await routeLiveReads(context, { world: emptyWorld(before), owner: { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT },
-      serverNowMs: () => before });
+  for (const viewer of ['gladiator', 'visitor'] as const) {
+    test(viewer === 'gladiator' ? 'shows "Tournament being prepared" for a gladiator created after the cutoff, for five minutes'
+      : 'shows a visitor "Tournament being prepared" for five minutes after the cutoff', async ({ page, context }) => {
+      // R3: the server's time runs on (and jumps with the page clock), so every revision read reports the tournament's
+      // slot by time. The slot is never published here, so its view stays missing. A gladiator created after the cutoff
+      // already has the tournament's processed slot; a visitor has none.
+      const start = startOf('opening');
+      let skipped = 0;
+      const began = Date.now();
+      if (viewer === 'gladiator') await seedSession(context);
+      const live = await routeLiveReads(context, { world: emptyWorld(start + 40_000), serverNowMs: () => start + 40_000 + skipped + (Date.now() - began),
+        owner: viewer === 'gladiator' ? { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT } : null });
+      await page.clock.install();
+      await page.goto('/game/');
+      if (viewer === 'gladiator') await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+      const panel = await tournamentsPanel(page);
+      const preparing = panel.getByRole('status').filter({ hasText: 'Tournament being prepared' });
+      const missing = panel.getByRole('status').filter({ hasText: 'No tournament matches this selection.' });
+      await expect(preparing).toBeVisible();
+      /** Moves the page clock, and the server's time with it, to `ms` after the cutoff. */
+      const advanceTo = async (ms: number) => {
+        const shown = await page.evaluate(() => window.__cloudiatorShell!.clock.now());
+        const by = Math.max(0, start + ms - shown);
+        skipped += by;
+        await page.clock.fastForward(by);
+      };
+      // Well past the first revision polls after the cutoff, which report the tournament's slot.
+      const polls = live.count('world_revision');
+      await advanceTo(120_000);
+      await expect(preparing).toBeVisible();
+      await expect.poll(() => live.count('world_revision')).toBeGreaterThan(polls);
+      expect(Math.floor(live.serverNowMs() / SLOT_MS)).toBe(OPENING_SLOT);
+      await advanceTo(290_000);
+      await expect(preparing).toBeVisible();
+      await expect(missing).toHaveCount(0);
+      // From 300 s after the cutoff a missing view means no tournament in this league.
+      await advanceTo(302_000);
+      await expect(missing).toBeVisible();
+      await expect(preparing).toHaveCount(0);
+      expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:bronze`)).toBe(true);
+      if (viewer === 'visitor') {
+        await expect(panel.getByRole('group', { name: 'League' })).toBeVisible();
+        expect(live.requests.every(r => r.reader === null)).toBe(true);
+      }
+    });
+  }
+
+  test('says brackets cannot be loaded when the world revision cannot be read', async ({ page, context }) => {
+    // Review M1: without a revision read the shared clock never gets the server's time; the panel must not wait forever.
+    const at = startOf('opening') + 30 * MIN;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [VIEWS.opening], serverNowMs: () => at });
+    live.fail('world_revision');
     await page.goto('/game/');
-    await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
-    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), startOf('opening') + 30_000);
     const panel = await tournamentsPanel(page);
-    await expect(panel.getByRole('status').filter({ hasText: 'Tournament being prepared' })).toBeVisible();
-    await expect(panel).not.toContainText('No tournament matches');
-    expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:bronze`)).toBe(true);
+    await expect(panel.getByRole('status').filter({ hasText: 'Tournament brackets cannot be loaded right now.' })).toBeVisible();
+    await expect(panel).not.toContainText('Loading the tournament');
+    // Without the server's time the panel names no slot's tournament, so it reads none.
+    expect(live.count('world_revision')).toBeGreaterThan(0);
+    expect(live.count('tournament_views')).toBe(0);
   });
 
   test('lets a visitor pick a league and see its countdown and bracket', async ({ page, context }) => {

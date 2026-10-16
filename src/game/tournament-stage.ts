@@ -101,29 +101,24 @@ export function processingRetryDelay(retries: number): number {
 }
 
 /**
- * Whether a missing view (`not-found`) of tournament `id` means it is still being prepared (2b review M4): the display
- * time is inside that tournament's slot and the latest published slot is still an earlier one, i.e. phase 8 has not
- * published the slot yet (about 61–121 s after the cutoff). Once the slot is published, a missing view means no
- * tournament in that league. Never before the cutoff, after the slot, for a malformed id or without a published slot.
+ * How long after a tournament's cutoff a missing view reads as "being prepared" for every viewer (Task 19 R3). Phase 8
+ * publishes a slot about 61–121 s after its cutoff; no public field says when it has, so a time bound covers visitors
+ * and gladiators created after the cutoff, with room for a late cron tick.
  */
-export function tournamentPreparing(id: string, displayNowMs: number, publishedSlotIndex: number | null): boolean {
-  const slot = tournamentSlotOf(id);
-  if (slot === null || publishedSlotIndex === null || !Number.isFinite(displayNowMs) || displayNowMs < 0) return false;
-  return tournamentWindowAt(displayNowMs)?.slotIndex === slot && publishedSlotIndex < slot;
-}
-
-const slotOrNull = (value: number | null) => (value !== null && Number.isSafeInteger(value) && value >= 0 ? value : null);
+export const TOURNAMENT_PREPARE_GRACE_MS = 300_000;
 /**
- * The latest slot a client can tell is published, for `tournamentPreparing` (Task 19 R3): the lower of the known ones.
- * - The world revision's slot is slot-wide and needs no gladiator, but it is the server's slot by time when the revision
- *   was last polled (up to 30 s ago), so it passes a cutoff before that slot's publication.
- * - With an owner, its processed slot is published in the same transaction as the slot's tournaments, but it is per
- *   gladiator: one created after the cutoff already has the tournament's slot.
- * Either one still behind the tournament's slot means it is being prepared. Null when neither is known.
+ * Whether a missing view (`not-found`) of tournament `id` means it is still being prepared (2b review M4; Task 19 R3):
+ * the display time is inside that tournament's slot, and either less than `TOURNAMENT_PREPARE_GRACE_MS` has passed since
+ * its cutoff, or the owner's processed slot (published with the slot's tournaments; null without an owner) is still an
+ * earlier one. Otherwise a missing view means no tournament in that league. Never before the cutoff, after the slot or
+ * for a malformed id.
  */
-export function publishedSlotEstimate(revisionSlotIndex: number | null, processedSlotIndex: number | null): number | null {
-  const known = [slotOrNull(revisionSlotIndex), slotOrNull(processedSlotIndex)].filter((slot): slot is number => slot !== null);
-  return known.length ? Math.min(...known) : null;
+export function tournamentPreparing(id: string, displayNowMs: number, processedSlotIndex: number | null): boolean {
+  const slot = tournamentSlotOf(id);
+  if (slot === null || !Number.isFinite(displayNowMs) || displayNowMs < 0) return false;
+  const running = tournamentWindowAt(displayNowMs);
+  if (running?.slotIndex !== slot) return false;
+  return displayNowMs - running.startsAtMs < TOURNAMENT_PREPARE_GRACE_MS || (processedSlotIndex !== null && processedSlotIndex < slot);
 }
 
 const roundLabel = (round: number, rounds: number) =>

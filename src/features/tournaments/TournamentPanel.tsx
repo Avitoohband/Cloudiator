@@ -13,11 +13,12 @@
 // is watched (I1); while a tournament is processing its re-reads back off from 30 s to 5 minutes and pause in hidden tabs
 // (I1); and a missing view of the running slot before its publication reads "Tournament being prepared" (M4).
 //
-// Task 13.4: the panel runs on the shared display clock and the world revision's slot. "Being prepared" uses the latest
-// published slot it can tell (the revision's slot and, with an owner, its processed slot; Task 19 R3); a card keeps the
-// owner refresh in a ref, so a new function from its parent never restarts its retry timer, and while its slot is being
-// prepared it awaits the owner refresh before it reads the tournament again (R2). A visitor, with no league of its own,
-// picks one (Bronze first).
+// Task 13.4: the panel runs on the shared display clock. "Being prepared" holds for every viewer during the five minutes
+// after a cutoff, and for a player while its processed slot still lags (Task 19 R3); a card keeps the owner refresh in a
+// ref, so a new function from its parent never restarts its retry timer, and while its slot is being prepared it awaits
+// the owner refresh before it reads the tournament again (R2). A visitor, with no league of its own, picks one (Bronze
+// first). The panel names a slot's tournament only once the shared clock has the server's time; while the sync cannot
+// read the revision it says brackets cannot be loaded (review M1).
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { GameCommand, LeagueId } from '@contracts/commands';
 import type { ActivitySummary, BattleLog } from '@contracts/events';
@@ -25,7 +26,7 @@ import type { OwnerState, TournamentView } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import {
-  latestTournament, nextTournament, processingRetryDelay, publishedSlotEstimate, renderTournament, tournamentPreparing, tournamentRevealMarks,
+  latestTournament, nextTournament, processingRetryDelay, renderTournament, tournamentPreparing, tournamentRevealMarks,
   tournamentWindowAt, withTournamentLogs, type TournamentBoutState, type TournamentStageState,
 } from '../../game/tournament-stage';
 import { tournamentLookupIdOrNull } from '../../lib/tournament-id';
@@ -284,17 +285,18 @@ export async function readTournamentCard(reads: Pick<TournamentReads, 'tournamen
   }
 }
 
-/** Slots that tell whether a card's slot is published: the world revision's (every viewer) and the owner's processed one. */
-type PublishedSlots = { revisionSlotIndex: number | null; processedSlotIndex: number | null };
-const cardPreparing = (id: string, failure: 'unavailable' | 'not-found', now: number, { revisionSlotIndex, processedSlotIndex }: PublishedSlots) =>
-  failure === 'not-found' && tournamentPreparing(id, now, publishedSlotEstimate(revisionSlotIndex, processedSlotIndex));
+const cardPreparing = (id: string, failure: 'unavailable' | 'not-found', now: number, processedSlotIndex: number | null) =>
+  failure === 'not-found' && tournamentPreparing(id, now, processedSlotIndex);
 
 /**
- * A card without a view (Task 19 R5): its tournament is being prepared while a slot it can tell is published is still
- * behind the tournament's slot (`publishedSlotEstimate`); otherwise it is missing or cannot be read now.
+ * A card without a view (Task 19 R5): its tournament is being prepared during the five minutes after its cutoff, or while
+ * the owner's processed slot (null without an owner) is still behind it (`tournamentPreparing`); otherwise it is missing
+ * or cannot be read now.
  */
-export function TournamentCardNotice({ id, failure, now, ...slots }: { id: string; failure: 'unavailable' | 'not-found'; now: number } & PublishedSlots) {
-  return <TournamentNotice failure={failure} preparing={cardPreparing(id, failure, now, slots)} />;
+export function TournamentCardNotice({ id, failure, now, processedSlotIndex }: {
+  id: string; failure: 'unavailable' | 'not-found'; now: number; processedSlotIndex: number | null;
+}) {
+  return <TournamentNotice failure={failure} preparing={cardPreparing(id, failure, now, processedSlotIndex)} />;
 }
 
 /**
@@ -303,12 +305,10 @@ export function TournamentCardNotice({ id, failure, now, ...slots }: { id: strin
  * changes); never from a hidden tab. A bout's battle log loads only when its replay is watched. While its slot is being
  * prepared, a re-read first awaits the owner refresh (R2).
  */
-function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, revisionSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
+function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
   id: string; reads: TournamentReads; clock: DisplayClock; now: number; viewerId: string | null;
   /** The viewer's own processed slot (owner state; null without an owner), published with the slot's tournaments. */
   processedSlotIndex: number | null;
-  /** The world revision's slot (null before the first revision read), which needs no owner. */
-  revisionSlotIndex: number | null;
   /** Re-reads the owner, so its processed slot is current while the slot is being prepared. */
   refreshOwner?: () => Promise<void>;
   onRead(): void; onLogRead(): void; hook: { current: TournamentTestHook['state'] | null };
@@ -362,7 +362,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
   }, [read]);
 
   // Between the cutoff and the slot's publication the live read answers not-found: the tournament is being prepared.
-  const preparing = !!failure && !view && cardPreparing(id, failure, now, { revisionSlotIndex, processedSlotIndex });
+  const preparing = !!failure && !view && cardPreparing(id, failure, now, processedSlotIndex);
   useEffect(() => { preparingNow.current = preparing; });
 
   // A failed first read is asked again every 30 s while the tab is visible (as well as on focus); while the slot is being
@@ -432,7 +432,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
     };
   });
 
-  if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} revisionSlotIndex={revisionSlotIndex} processedSlotIndex={processedSlotIndex} />;
+  if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} processedSlotIndex={processedSlotIndex} />;
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
   return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, replayStatus, viewerId,
     credited: credited && credited.activityId === placed ? credited.summary : null }}
@@ -447,9 +447,10 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * The Tournaments tab. In fixture mode it opens sample tournaments; otherwise the tournament of the running or latest
  * tournament slot (Task 19's lookup id `tournament:<slot>:<league>`, `tournamentLookupIdOrNull`) in the owner's league,
  * or, without an owner, in the league the viewer picks (Bronze first). Without a reader it says brackets cannot be shown
- * yet. Every time is the shared display clock's.
+ * yet. Every time is the shared display clock's; until it has the server's time the panel waits, or says brackets cannot
+ * be loaded while the sync fails to read the revision.
  */
-export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, revisionSlotIndex }: {
+export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError }: {
   reads: TournamentReads | null;
   owner: OwnerState | null;
   clock: DisplayClock;
@@ -457,8 +458,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   samples?: readonly TournamentSample[];
   /** Re-reads the owner: after a confirmed change, and before a re-read while the slot is being prepared. */
   refresh?: () => Promise<void>;
-  /** The world revision's slot (`GameUiState.slotIndex`), which tells every viewer a slot not yet published. */
-  revisionSlotIndex: number | null;
+  /** The shared sync's error (`GameUiState.syncError`): while the clock has no server time, a failed revision read. */
+  syncError: 'unavailable' | 'unauthenticated' | null;
 }) {
   /** The shared clock's time, and whether it has the server's time yet (or is held), read together at each tick. */
   const [time, setTime] = useState(() => readClock(clock));
@@ -565,12 +566,14 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
             {LEAGUES.map(option => <button key={option} type="button" aria-pressed={league === option} onClick={() => setLeague(option)}>{leagueName(option)}</button>)}
           </div>
         )}
-        {!id ? (fixture ? <p className="muted">Choose a sample tournament to follow its bracket.</p>
-          : !time.ready ? <p role="status" className={styles.detail}>Loading the tournament…</p> : <TournamentNotice failure="not-found" preparing={false} />)
+        {fixture && !id ? <p className="muted">Choose a sample tournament to follow its bracket.</p>
           : !reads ? <p className="panel-notice" role="status">Tournament brackets cannot be shown in this build yet.</p>
-            : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null}
-              processedSlotIndex={owner?.processedSlotIndex ?? null} revisionSlotIndex={revisionSlotIndex} refreshOwner={refresh}
-              onRead={onRead} onLogRead={onLogRead} hook={cardState} />}
+            : !id ? (time.ready ? <TournamentNotice failure="not-found" preparing={false} />
+              // No server time yet: a failed revision read is said at once, never an endless "Loading" (review M1).
+              : syncError ? <TournamentNotice failure="unavailable" preparing={false} />
+                : <p role="status" className={styles.detail}>Loading the tournament…</p>)
+              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null}
+                processedSlotIndex={owner?.processedSlotIndex ?? null} refreshOwner={refresh} onRead={onRead} onLogRead={onLogRead} hook={cardState} />}
       </section>
     </section>
   );

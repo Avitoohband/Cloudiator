@@ -117,7 +117,7 @@ function GameShell() {
               // Live mode reads the paginated league standings through the live gateway (Task 16).
               : panel === 'Standings' ? <StandingsPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} revision={game.revision} />
               : panel === 'Tournaments' ? <TournamentPanel key={visibleOwner?.gladiatorId ?? 'none'} reads={reads} owner={visibleOwner} clock={clock} fixture={fixture} samples={sampleTournaments}
-                refresh={fixture ? undefined : refreshPlanning} revisionSlotIndex={game.slotIndex} />
+                refresh={fixture ? undefined : refreshPlanning} syncError={game.syncError} />
               : panel === 'Schedule' ? <>
             <div className="section-title"><div><p className="eyebrow">PLAN THE NEXT CHAPTER</p><h2>Repeating schedule</h2></div><span className="tag">{visibleOwner ? fixture ? 'Sample plan' : 'Your plan' : 'Awaiting character'}</span></div>
             <p className="muted">A morning of practice. An afternoon of adventure. An evening to recover.</p>

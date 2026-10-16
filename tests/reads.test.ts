@@ -22,13 +22,22 @@ describe('protected Data API adapters', () => {
   it('keeps spectator completion separate from an absent RLS owner summary', async () => {
     const calls: string[] = [], summary = { activityId: 'a', resolvedKind: 'rest', result: 'completed', success: true, settledAtMs: 10, replayExpiry: { state: 'expired' } };
     const client = transport({ world_revision: { revision: '1', server_now_ms: 20, slot_index: 0 }, visible_events: [], recent_results: { summary }, activities: null }, calls);
-    expect(await readTimeline(client, 'a')).toEqual({ activityId: 'a', serverNowMs: 20, visibleThroughMs: 20, stages: [], completion: summary });
+    expect(await readTimeline(client, 'a', { ownerSummary: true })).toEqual({ activityId: 'a', serverNowMs: 20, visibleThroughMs: 20, stages: [], completion: summary });
     expect(calls.find(c => c.includes('visible_events'))).toContain('limit=50');
+    expect(calls.some(c => c.includes('/activities'))).toBe(true);
+  });
+  it('never asks the owner-only activities table for a timeline read without the owner summary', async () => {
+    const calls: string[] = [], summary = { activityId: 'a', resolvedKind: 'rest', result: 'completed', success: true, settledAtMs: 10, replayExpiry: { state: 'expired' } };
+    const client = transport({ world_revision: { revision: '1', server_now_ms: 20, slot_index: 0 }, visible_events: [], recent_results: { summary } }, calls);
+    expect(await readTimeline(client, 'a', { ownerSummary: false })).toEqual({ activityId: 'a', serverNowMs: 20, visibleThroughMs: 20, stages: [], completion: summary });
+    expect(calls.some(c => c.includes('/activities'))).toBe(false);
   });
   it('rejects malformed cursors before issuing a query and bounds recent pages', async () => {
     const calls: string[] = [], client = transport({ recent_results: [] }, calls);
     await expect(readRecent(client, 'bad,filter')).rejects.toMatchObject({ code: 'unavailable' }); expect(calls).toHaveLength(0);
     expect(await readRecent(client)).toEqual({ rows: [], nextCursor: null }); expect(calls[0]).toContain('limit=50');
+    // An empty cursor is no cursor: the first page, with no cursor filter.
+    expect(await readRecent(client, '')).toEqual({ rows: [], nextCursor: null }); expect(calls[1]).not.toContain('reveal_at_ms.lt');
   });
   /** The standings view answers the latest-season probe and the rank page separately. */
   function standings(season: { season_index: number }[], rows: unknown[], calls: string[]) {

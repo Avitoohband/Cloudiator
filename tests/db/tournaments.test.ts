@@ -722,7 +722,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
     const activity = (await activityOf(owner.gid)).id;
     const visible = JSON.stringify([await owner.state(), await readProfile(other.client, owner.gid), (await owner.client.from('activities').select('*')).data,
       (await other.client.from('world_actor_reads').select('*')).data, (await other.client.from('activity_stages').select('*')).data,
-      (await other.client.from('recent_results').select('*')).data, await readTimeline(other.client, activity), await readTimeline(owner.client, activity)]);
+      (await other.client.from('recent_results').select('*')).data, await readTimeline(other.client, activity, { ownerSummary: true }), await readTimeline(owner.client, activity, { ownerSummary: true })]);
     for (const seed of [pairing.seed, pairing.bracket, ...boutSeeds]) expect(visible).not.toContain(seed);
     expect(visible).not.toMatch(/"seed"|bracketSeed|"rank"|"fighter"|"placed"|"routes"|tournament:301/);
   });
@@ -1013,10 +1013,10 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       }
       // The owner's rewards come only from its own timeline summary, under RLS.
       const own = done.placements.find(p => p.gladiatorId === entrants[0].gid)!;
-      const mine = await readTimeline(entrants[0].client, own.completion.activityId);
+      const mine = await readTimeline(entrants[0].client, own.completion.activityId, { ownerSummary: true });
       expect(mine.summary).toMatchObject({ activityId: own.completion.activityId, resolvedKind: 'tournament',
         rewards: outcomes.find(o => o.gladiatorId === entrants[0].gid)!.rewards });
-      const watched = await readTimeline(spectator.client, own.completion.activityId);
+      const watched = await readTimeline(spectator.client, own.completion.activityId, { ownerSummary: true });
       expect(watched.summary).toBeUndefined();
       expect(watched.completion).toEqual(own.completion);
       // An unknown or malformed tournament id is not found.
@@ -1479,7 +1479,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       const activity = (await activityOf(owner.gid)).id;
       const seen = JSON.stringify([await owner.state(), await readProfile(other.client, owner.gid), (await other.client.from('world_actor_reads').select('*')).data,
         (await other.client.from('tournament_views').select(PUBLIC_TOURNAMENT_COLUMNS)).data, (await other.client.from('tournament_bout_results').select('*')).data,
-        (await other.client.from('tournament_placements').select('*')).data, await readTimeline(other.client, activity),
+        (await other.client.from('tournament_placements').select('*')).data, await readTimeline(other.client, activity, { ownerSummary: true }),
         await readTournament(other.client, `tournament:${T}:bronze`)]);
       expect(seen).not.toMatch(/"seed"|"rank"|"fighter"|"ratingBefore"|"ratingAfter"|grantId|"placement"/);
       expect(outcomes).toHaveLength(2);

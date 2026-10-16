@@ -230,11 +230,22 @@ test('fixture recent results list public completions of every kind, newest first
   expect(page.rows.some(row => row.summary.activityId === REPLAY_FIXTURES.tie.activityId)).toBe(false);
 });
 
-test('fixture recent results pages as the live read does: an unknown cursor is an empty last page, and callers get copies', async () => {
+test('fixture recent results follow the live cursor rules, and callers get copies', async () => {
   const { RESULTS_FIXTURE, resultPages } = await import('../fixtures/results');
+  const { GatewayReadError } = await import('../../src/lib/api/gateway');
   const gateway = createFixtureGateway();
+  const recent = gateway.recent as (cursor?: string | null) => ReturnType<typeof gateway.recent>;
+  // A well-formed cursor that no page issued ends the list with an empty page.
   expect(await gateway.recent('1791592800000:0d5f8471-d919-428f-9ab7-058c95821757')).toEqual({ rows: [], nextCursor: null });
-  expect(await gateway.recent('not a cursor')).toEqual({ rows: [], nextCursor: null });
+  // A malformed one is refused with the error `readRecent` throws, whatever its type.
+  for (const bad of ['not a cursor', 'bad,filter', '1791592800000', '1791592800000:not-a-uuid', '1:0d5f8471-d919-428f-9ab7-058c95821757:2',
+    '99999999999999999:0d5f8471-d919-428f-9ab7-058c95821757', '9999999999999999:0d5f8471-d919-428f-9ab7-058c95821757', 42]) {
+    const read = recent(bad as string);
+    await expect(read, String(bad)).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(read, String(bad)).rejects.toBeInstanceOf(GatewayReadError);
+  }
+  // No cursor, null or an empty one starts the list.
+  for (const none of [undefined, null, '']) expect(await recent(none), String(none)).toEqual(RESULTS_FIXTURE[0]);
   const first = await gateway.recent();
   first.rows[0].name = 'Changed';
   first.rows.length = 1;

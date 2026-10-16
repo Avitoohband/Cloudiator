@@ -45,7 +45,7 @@ describe('safe projection authorization', () => {
     const [settlement]=await rpc('claim_jobs',{worker_id:randomUUID(),kind:'settlement',batch_limit:20}) as JobLease[];
     expect(await createWorkerDatabase(admin).settle(settlement.activityId!,settlement.token)).toMatchObject({ok:true});
     const completedId=settlement.activityId!;
-    expect((await readTimeline(f.other.client,completedId)).completion).toMatchObject({resolvedKind:'rest',result:'completed'});
+    expect((await readTimeline(f.other.client,completedId, { ownerSummary: true })).completion).toMatchObject({resolvedKind:'rest',result:'completed'});
     const states:SyncState[]=[],sync=createSync({world:()=>readWorld(f.other.client),revision:()=>readRevision(f.other.client)} as GameGateway,state=>states.push(state));
     try {
       await sync.start();
@@ -63,7 +63,7 @@ describe('safe projection authorization', () => {
       expect(states.at(-1)).toMatchObject({processing:false,world:{actors:[{location:'expedition:woodland',activityStatus:'active'}]}});
       expect(states.at(-1)?.world?.actors[0].activityId).not.toBe(completedId);
       expect((await readOwner(f.owner.client)).processedSlotIndex).toBe(slot);
-      expect((await readTimeline(f.other.client,completedId)).completion?.result).toBe('completed');
+      expect((await readTimeline(f.other.client,completedId, { ownerSummary: true })).completion?.result).toBe('completed');
     } finally {sync.stop();}
   });
   it('publishes explicit equipped silhouettes to authenticated spectators, retaining private owner management', async () => {
@@ -135,26 +135,26 @@ describe('safe projection authorization', () => {
       ${sql.json({id:event,kind:'travel',revealedAtMs:future,startedAtMs:future,endsAtMs:future+100,label:'Travel'})})`;
     for (const client of [f.owner.client,f.other.client]) {
       expect((await client.from('visible_events').select('*').eq('id',event)).data).toEqual([]);
-      expect((await readTimeline(client,id)).stages).toEqual([]);
+      expect((await readTimeline(client,id, { ownerSummary: true })).stages).toEqual([]);
       expect((await readWorld(client)).actors[0].visibleStage).toBeNull();
     }
     // Trusted fixture marker proves camp/profile omit the bulky replay payload while timeline remains on demand.
     await sql`update public.activity_stages set reveal_at_ms=0,stage=jsonb_set(stage,'{revealedAtMs}','0')||'{"battleLog":{"battleId":"only-on-demand"}}'::jsonb where id=${event}`;
-    expect((await readTimeline(f.other.client,id)).stages).toHaveLength(1);
+    expect((await readTimeline(f.other.client,id, { ownerSummary: true })).stages).toHaveLength(1);
     expect((await readRevision(f.other.client)).revision).not.toBe(before.revision);
     expect((await readWorld(f.other.client)).actors[0].visibleStage?.id).toBe(event);
     expect((await readWorld(f.other.client)).actors[0].visibleStage).not.toHaveProperty('battleLog');
     expect((await readProfile(f.other.client,f.gid)).actor.visibleStage).not.toHaveProperty('battleLog');
-    expect((await readTimeline(f.other.client,id)).stages[0].battleLog?.battleId).toBe('only-on-demand');
+    expect((await readTimeline(f.other.client,id, { ownerSummary: true })).stages[0].battleLog?.battleId).toBe('only-on-demand');
   });
   it('publishes completion without reward details, exposes full settled rewards only to the owner, and stays processing before settlement', async () => {
     const f = await fighter(), id = await activity(f.gid);
     expect((await readWorld(f.other.client)).actors[0].activityStatus).toBe('processing');
-    expect((await readTimeline(f.owner.client,id)).summary).toBeUndefined();
+    expect((await readTimeline(f.owner.client,id, { ownerSummary: true })).summary).toBeUndefined();
     const summary = {activityId:id,resolvedKind:'rest',result:'completed',success:true,settledAtMs:Date.now()-1,replayExpiry:{state:'expired'},receiptId:randomUUID(),
       rewards:{money:1,renown:0,xp:0,attributePoints:0,items:[],overflowMoney:0}};
     await sql`update public.activities set status='completed',summary=${sql.json(summary)},settled_at_ms=${summary.settledAtMs} where id=${id}`;
-    const spectator = await readTimeline(f.other.client,id), owner = await readTimeline(f.owner.client,id);
+    const spectator = await readTimeline(f.other.client,id, { ownerSummary: true }), owner = await readTimeline(f.owner.client,id, { ownerSummary: true });
     expect(owner.summary?.rewards.money).toBe(1); expect(spectator.summary).toBeUndefined();
     expect(spectator.completion).toMatchObject({resolvedKind:'rest',result:'completed'}); safe(spectator);
     const recent = await readRecent(f.other.client); expect(recent.rows).toHaveLength(1); safe(recent);

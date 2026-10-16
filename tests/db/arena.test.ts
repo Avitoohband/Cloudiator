@@ -737,7 +737,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
     const visible = JSON.stringify([await owner.state(), await readProfile(other.client, owner.gid), (await owner.client.from('activities').select('*')).data,
       (await other.client.from('world_actor_reads').select('*')).data, (await other.client.from('activity_stages').select('*')).data,
       (await other.client.from('recent_results').select('*')).data, await readStandings(other.client, 'bronze'),
-      await readTimeline(other.client, await activityOf(owner.gid))]);
+      await readTimeline(other.client, await activityOf(owner.gid), { ownerSummary: true })]);
     for (const seed of [row.seed, simulation.seed]) expect(visible).not.toContain(seed);
     expect(visible).not.toMatch(/"seed"|npcTemplate|arenaFighter|ratingBefore|ratingAfter|"outcomes"|"names"|"assignment"/);
     // A spectator never reads another owner's credited summary.
@@ -800,12 +800,12 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(simulated).toMatchObject({ seed: row.seed, gladiatorId: row.assignment.sides[0].gladiatorId });
       // Simulated but not revealed: nothing a player can read names the opponent before minute 60.
       for (const [me, opponent, activity] of [[a, b, aid], [b, a, bid]] as const) {
-        const seen = JSON.stringify([await me.state(), await readTimeline(me.client, activity), await readTimeline(spectator.client, activity),
+        const seen = JSON.stringify([await me.state(), await readTimeline(me.client, activity, { ownerSummary: true }), await readTimeline(spectator.client, activity, { ownerSummary: true }),
           (await spectator.client.from('world_actor_reads').select('actor').eq('gladiator_id', me.gid)).data, await readProfile(spectator.client, me.gid)]);
         const [{ name }] = await sql`select name from public.gladiators where id=${opponent.gid}`;
         expect(seen).not.toContain(opponent.gid);
         expect(seen).not.toContain(name);
-        expect((await readTimeline(me.client, activity)).stages.map(s => s.kind)).toEqual(['staging']);
+        expect((await readTimeline(me.client, activity, { ownerSummary: true })).stages.map(s => s.kind)).toEqual(['staging']);
       }
       await revealAll();
       const [aStages, bStages] = [await stagesOf(aid), await stagesOf(bid)];
@@ -840,12 +840,12 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(await walletOf(loser.gid)).toEqual({ money: 100, renown: 2 });
       expect(await ledgerOf(winner.gid)).toEqual([{ money: 0, renown: 10, reason: 'arena' }]);
       // Owners read their credited summary; a spectator reads only the public completion and the public rating.
-      const owned = await readTimeline(winner.client, await activityOf(winner.gid));
+      const owned = await readTimeline(winner.client, await activityOf(winner.gid), { ownerSummary: true });
       expect(owned.stages.map(s => s.kind)).toEqual(['staging', 'bout', 'return']);
       expect(owned.stages[2]).toEqual({ id: `${await activityOf(winner.gid)}:2`, kind: 'return', revealedAtMs: S + 80 * MINUTE,
         startedAtMs: S + 80 * MINUTE, endsAtMs: S + 80 * MINUTE, label: 'Results credited' });
       expect(owned.summary).toMatchObject({ rewards: { renown: 10 }, ratingDelta: 12 });
-      const watched = await readTimeline(spectator.client, await activityOf(loser.gid));
+      const watched = await readTimeline(spectator.client, await activityOf(loser.gid), { ownerSummary: true });
       expect(watched.summary).toBeUndefined();
       expect(watched.completion).toEqual({ activityId: await activityOf(loser.gid), resolvedKind: 'arena', result: 'defeat', success: false,
         settledAtMs: (await summaryOf(loser.gid)).settledAtMs, replayExpiry: { state: 'expired' } });

@@ -1,4 +1,5 @@
 import type { GameGateway } from './gateway';
+import { parseResultsCursor } from './reads';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
@@ -51,11 +52,13 @@ export function createFixtureGateway(): GameGateway {
       if (!log) throw Object.assign(new Error('This bout has no revealed log in the fixture preview.'), { code: 'not-found' as const });
       return structuredClone(log);
     },
-    // Settled results from the fixture timelines, newest first, paged as the live read is. The cursor is opaque: an unknown one
+    // Settled results from the fixture timelines, newest first, paged as the live read is, with its cursor rules: none (absent,
+    // null or empty) starts the list, a malformed cursor is refused as `unavailable`, and a well-formed one that no page issued
     // ends the list with an empty page.
     recent: async cursor => {
-      const previous = cursor === undefined ? -1 : RESULTS_FIXTURE.findIndex(page => page.nextCursor === cursor);
-      if (cursor !== undefined && previous < 0) return { rows: [], nextCursor: null };
+      const after = parseResultsCursor(cursor);
+      const previous = after === null ? -1 : RESULTS_FIXTURE.findIndex(page => page.nextCursor === cursor);
+      if (after !== null && previous < 0) return { rows: [], nextCursor: null };
       return structuredClone(RESULTS_FIXTURE[previous + 1]);
     },
     market: unavailable,

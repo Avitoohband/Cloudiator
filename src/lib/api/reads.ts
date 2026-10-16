@@ -47,10 +47,11 @@ export async function readProfile(client: SupabaseClient, id: GladiatorId): Prom
 }
 /**
  * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`
- * (the default, for a signed-in client) it also asks `activities` for the owner's credited summary; that table is
- * owner-only, so a visitor's read must pass `false` (the denial would fail the whole read) and never has a summary.
+ * it also asks `activities` for the owner's credited summary; that table is owner-only, so a visitor's read must pass
+ * `false` (the denial would fail the whole read) and never has a summary. The option is required, so no caller gets
+ * either behavior by omission.
  */
-export async function readTimeline(client: SupabaseClient, id: ActivityId, options: { ownerSummary: boolean } = { ownerSummary: true }): Promise<RevealedTimeline> {
+export async function readTimeline(client: SupabaseClient, id: ActivityId, options: { ownerSummary: boolean }): Promise<RevealedTimeline> {
   const clock = await readRevision(client);
   const result: RevealedTimeline = { activityId: id, serverNowMs: clock.serverNowMs, visibleThroughMs: clock.serverNowMs, stages: [] };
   let ordinal = -1;
@@ -71,15 +72,21 @@ export async function readTimeline(client: SupabaseClient, id: ActivityId, optio
   if (owner.data?.summary) result.summary = owner.data.summary;
   return result;
 }
+/**
+ * The results cursor `revealAtMs:activityId`: null for no cursor (absent, null or empty), and `unavailable` for anything
+ * malformed, before a query is built from it. The fixture gateway applies the same rule.
+ */
+export function parseResultsCursor(cursor?: string | null): { time: string; id: string } | null {
+  if (!cursor) return null;
+  const match = typeof cursor === 'string' ? /^(\d{1,16}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(cursor) : null;
+  if (!match || !Number.isSafeInteger(Number(match[1]))) throw new GatewayReadError('unavailable');
+  return { time: match[1], id: match[2] };
+}
 export async function readRecent(client: SupabaseClient, cursor?: string): Promise<ResultsPage> {
   let query = client.from('recent_results').select('activity_id,gladiator_id,name,summary,reveal_at_ms')
     .order('reveal_at_ms', { ascending: false }).order('activity_id').limit(50);
-  if (cursor) {
-    const match = /^(\d{1,16}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(cursor);
-    if (!match || !Number.isSafeInteger(Number(match[1]))) throw new GatewayReadError('unavailable');
-    const [,time,id] = match;
-    query = query.or(`reveal_at_ms.lt.${time},and(reveal_at_ms.eq.${time},activity_id.gt.${id})`);
-  }
+  const after = parseResultsCursor(cursor);
+  if (after) query = query.or(`reveal_at_ms.lt.${after.time},and(reveal_at_ms.eq.${after.time},activity_id.gt.${after.id})`);
   const rows = checked(await query);
   return { rows: rows.map(row => ({ gladiatorId: row.gladiator_id, name: row.name, summary: row.summary })),
     nextCursor: rows.length === 50 ? `${rows.at(-1)!.reveal_at_ms}:${rows.at(-1)!.activity_id}` : null };

@@ -66,3 +66,43 @@ Range `abb5376..6fed6b0`: `f8d6fc3` (feature) and `6fed6b0` (review fixes). [Imp
 - **Wording and noise:** two stale test names, an inaccurate cursor-format comment, and LF line endings in `tests/fixtures/results.ts`.
 
 **Ruling carried to 13.3:** a public read can fail `unauthenticated` when the server rejects a stale stored token. `useGameState` maps that, while signed in, to a local sign-out, after which reads run as a visitor.
+
+## 13.3: One shared game state, sync clock and live camp
+
+Range `22ad713..46fd8c3`: `5bb3452` (feature) and `46fd8c3`, a pre-review test fix. That fix routes the live expedition and replay reads, which 13.2's sign-in-free reads had left reaching the local stack in two specs. [Implementer report](task-13.3-report.md).
+
+**Implementer evidence:**
+- Unit tests 939/939; `test:db` 177/177 with the Edge start time unchanged.
+- Typecheck, build and `verify:static` clean.
+- Development browser suite green after `46fd8c3` (expedition 46 passed, replay 36 passed); production gate 14 passed.
+
+**Verdicts:** spec compliant; quality Approved; no Critical or Important findings.
+
+**What the reviewer confirmed:**
+- **Sync offset:** it comes only from a timed `revision()` round trip. The Task 10 bias test is RED at 1 950 ms off and GREEN under 50 ms.
+- **`useGameState`:**
+  - It owns the sync controller, the shared clock and account-scoped owner reads.
+  - Live mode never uses fixture state.
+  - While the session says signed in, a server-rejected stale token signs out locally (mutation-checked).
+- **`GameViewport`:** it reports its scene status and no longer re-anchors a shared clock.
+- **The page:** it mounts the camp live, keeping its layout.
+- **`tests/browser/live-routes.ts`:** it serves visitors and seeded sessions, fails loudly on unknown traffic and refuses anon on private tables.
+
+**Deferred Minors carried to later checkpoints:**
+- **To 13.5:**
+  - retry a failed local sign-out;
+  - pin `scope=local` in its test;
+  - make `activityStatus` robust to a slot index up to 30 s old (`max(slotIndex, slot of now)`);
+  - surface sync, scene and owner-refresh failures in the shell.
+- **To 13.8:** rename the expedition test that now reads, and decide what an unknown live expedition shows.
+- **To 13.9:** cover the camp's live timeline and tournament reads for a visitor.
+
+**Other deferred Minors:**
+- **Sync and clock:**
+  - the first timed sample is lost when the first world load fails;
+  - timeline reads still nudge the shared clock forward;
+  - the world memo relies on the revision embedding the slot.
+- **Test transport and specs:** unexercised transport helpers; two specs still seed sessions by hand.
+- **Owner reads (Task 23 measurement):**
+  - the owner is re-read on every revision change (plan-mandated);
+  - one extra owner read follows creation.

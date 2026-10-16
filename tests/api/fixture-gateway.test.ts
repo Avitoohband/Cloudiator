@@ -45,7 +45,6 @@ test('unimplemented fixture reads reject explicitly as unavailable', async () =>
   await expect(gateway.timeline('9fce3cd5-e831-4a66-8ca1-16b4576b1499')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.profile('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.tournament('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
-  await expect(gateway.recent()).rejects.toMatchObject({ code: 'unavailable' });
 });
 
 test('fixture timelines reveal the sample battle logs and their saved summaries', async () => {
@@ -196,4 +195,57 @@ test('fixture tournaments serve each sample view by id as a copy, without logs a
   const result = await gateway.command({ kind: 'set-tournament-opt-in', operationId: '5d1f0b9e-8a43-4b55-9c7e-2f6a1d3c4b5e', enabled: true });
   expect(result).toEqual({ ok: false, code: 'unavailable' });
   expect((await gateway.owner()).tournamentOptIn).toBe(false);
+});
+
+test('fixture recent results list public completions of every kind, newest first, and no owner reward detail', async () => {
+  const { RESULTS_FIXTURE } = await import('../fixtures/results');
+  const { ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId } = await import('../fixtures/arena');
+  const { TOURNAMENT_OWNER_TIMELINES } = await import('../fixtures/tournaments');
+  const gateway = createFixtureGateway();
+  const page = await gateway.recent();
+  expect(page).toEqual(RESULTS_FIXTURE[0]);
+  expect(page.nextCursor).toBeNull();
+  const kinds = new Set(page.rows.map(row => row.summary.resolvedKind));
+  for (const kind of ['arena', 'expedition', 'tournament', 'training', 'rest'] as const) expect(kinds, kind).toContain(kind);
+  // Each row names a fixture gladiator, and only the six public completion fields appear.
+  const names = new Map(Object.values(ARENA_GLADIATORS).map(g => [g.id, g.name]));
+  for (const row of page.rows) {
+    expect(row.name, row.summary.activityId).toBe(names.get(row.gladiatorId));
+    expect(Object.keys(row.summary).sort()).toEqual(['activityId', 'replayExpiry', 'resolvedKind', 'result', 'settledAtMs', 'success']);
+  }
+  expect(JSON.stringify(page)).not.toMatch(/rewards|receiptId|ratingDelta|overflow/);
+  // The order of the live read: newest result first, then by activity id; every activity once.
+  const keys = page.rows.map(row => [row.summary.settledAtMs, row.summary.activityId] as const);
+  expect(keys).toEqual([...keys].sort((a, b) => b[0] - a[0] || (a[1] < b[1] ? -1 : 1)));
+  expect(new Set(keys.map(k => k[1])).size).toBe(keys.length);
+  // A row is the public part of its timeline: a settled Arena bout by its summary, a tournament by its own completion.
+  const bout = page.rows.find(row => row.summary.activityId === arenaActivityId('ownerHumanWin'))!;
+  const { activityId, resolvedKind, result, success, settledAtMs, replayExpiry } = ARENA_TIMELINES[arenaActivityId('ownerHumanWin')].summary!;
+  expect(bout).toEqual({ gladiatorId: ARENA_GLADIATORS.aster.id, name: 'Aster', summary: { activityId, resolvedKind, result, success, settledAtMs, replayExpiry } });
+  for (const timeline of Object.values(TOURNAMENT_OWNER_TIMELINES)) {
+    expect(page.rows.find(row => row.summary.activityId === timeline.activityId)?.summary).toEqual(timeline.completion);
+  }
+  // A bout whose rewards are not yet credited has no result yet.
+  const { REPLAY_FIXTURES } = await import('../fixtures/battles');
+  expect(page.rows.some(row => row.summary.activityId === REPLAY_FIXTURES.tie.activityId)).toBe(false);
+});
+
+test('fixture recent results pages as the live read does: an unknown cursor is an empty last page, and callers get copies', async () => {
+  const { RESULTS_FIXTURE, resultPages } = await import('../fixtures/results');
+  const gateway = createFixtureGateway();
+  expect(await gateway.recent('1791592800000:0d5f8471-d919-428f-9ab7-058c95821757')).toEqual({ rows: [], nextCursor: null });
+  expect(await gateway.recent('not a cursor')).toEqual({ rows: [], nextCursor: null });
+  const first = await gateway.recent();
+  first.rows[0].name = 'Changed';
+  first.rows.length = 1;
+  expect(await gateway.recent()).toEqual(RESULTS_FIXTURE[0]);
+  expect(RESULTS_FIXTURE[0].rows[0].name).not.toBe('Changed');
+  // The pager: a full page's cursor is `settledAtMs:activityId` of its last row, and an exact multiple ends with an empty page.
+  const rows = RESULTS_FIXTURE[0].rows;
+  const pages = resultPages(rows.slice(0, 4), 2);
+  const last = (i: number) => `${pages[i].rows.at(-1)!.summary.settledAtMs}:${pages[i].rows.at(-1)!.summary.activityId}`;
+  expect(pages.map(p => p.rows.length)).toEqual([2, 2, 0]);
+  expect(pages.map(p => p.nextCursor)).toEqual([last(0), last(1), null]);
+  expect(resultPages(rows.slice(0, 3), 2).map(p => [p.rows.length, p.nextCursor === null])).toEqual([[2, false], [1, true]]);
+  expect(resultPages([], 2)).toEqual([{ rows: [], nextCursor: null }]);
 });

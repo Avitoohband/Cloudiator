@@ -45,7 +45,12 @@ export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> 
 export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<PublicProfile> {
   return checked<{profile:PublicProfile}>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
 }
-export async function readTimeline(client: SupabaseClient, id: ActivityId): Promise<RevealedTimeline> {
+/**
+ * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`
+ * (the default, for a signed-in client) it also asks `activities` for the owner's credited summary; that table is
+ * owner-only, so a visitor's read must pass `false` (the denial would fail the whole read) and never has a summary.
+ */
+export async function readTimeline(client: SupabaseClient, id: ActivityId, options: { ownerSummary: boolean } = { ownerSummary: true }): Promise<RevealedTimeline> {
   const clock = await readRevision(client);
   const result: RevealedTimeline = { activityId: id, serverNowMs: clock.serverNowMs, visibleThroughMs: clock.serverNowMs, stages: [] };
   let ordinal = -1;
@@ -59,6 +64,7 @@ export async function readTimeline(client: SupabaseClient, id: ActivityId): Prom
   const publicResult = await client.from('recent_results').select('summary').eq('activity_id', id).lte('reveal_at_ms', clock.serverNowMs).maybeSingle();
   if (publicResult.error) checked(publicResult);
   if (publicResult.data) result.completion = publicResult.data.summary;
+  if (!options.ownerSummary) return result;
   // This separate query remains owner-only through activities RLS; no privileged fallback.
   const owner = await client.from('activities').select('summary').eq('id', id).eq('status', 'completed').lte('settled_at_ms', clock.serverNowMs).maybeSingle();
   if (owner.error) checked(owner);

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { readWorld, readProfile, readStandings, readTournament, readTimeline, readRecent } from '../../src/lib/api/reads.ts';
 
 // Task 13.1 (M13): visitors (the `anon` role) read the sanitized public projections, and nothing else.
 const commands = createDatabase(admin);
@@ -128,5 +129,42 @@ describe('visitor read access', () => {
       expect((await anonymous.schema('private').from(t).select('*')).error, t).not.toBeNull();
     }
     expect(await sql`select has_schema_privilege('anon','private','USAGE') as private`).toEqual([{ private: false }]);
+  });
+
+  it('serves a visitor the same world, profile, standings, tournament, timeline and results as a signed-in spectator', async () => {
+    const f = await fighter(), spectator = await account();
+    await sql`insert into private.arena_ratings(gladiator_id,league,season_index,rating,human_wins,human_losses) values(${f.gid},'bronze',1,1010,1,0)`;
+    // A due public stage and completion for a rest activity, and an operator-published tournament.
+    const id = await activity(f.gid, 2), stageId = randomUUID(), t = await tournament();
+    const completion = { activityId: id, resolvedKind: 'rest', result: 'completed', success: true, settledAtMs: 0, replayExpiry: { state: 'expired' } };
+    await sql`insert into public.recent_results(activity_id,gladiator_id,name,reveal_at_ms,summary) values(${id},${f.gid},'Visit',0,${sql.json(completion)})`;
+    await sql`insert into public.activity_stages(id,activity_id,ordinal,reveal_at_ms,stage) values(${stageId},${id},0,0,
+      ${sql.json({ id: stageId, kind: 'travel', revealedAtMs: 0, startedAtMs: 0, endsAtMs: 100, label: 'Travel' })})`;
+    // The database clock differs between two reads, so it is left out of the comparison; everything else must match.
+    const unclocked = <T extends { serverNowMs: number }>(read: T) => ({ ...read, serverNowMs: 0 });
+
+    const world = await readWorld(anonymous);
+    expect(world.actors.map(a => a.gladiatorId)).toEqual([f.gid]);
+    expect(unclocked(world)).toEqual(unclocked(await readWorld(spectator.client)));
+    const profile = await readProfile(anonymous, f.gid);
+    expect(profile.actor.gladiatorId).toBe(f.gid);
+    expect(profile).toEqual(await readProfile(spectator.client, f.gid));
+    const standings = await readStandings(anonymous, 'bronze');
+    expect(standings.rows.map(r => r.gladiatorId)).toEqual([f.gid]);
+    expect(standings).toEqual(await readStandings(spectator.client, 'bronze'));
+    const view = await readTournament(anonymous, t.id);
+    expect(view).toMatchObject({ id: t.id, league: 'bronze', status: 'insufficient-entrants' });
+    expect(view).toEqual(await readTournament(spectator.client, t.id));
+    // The visitor's timeline asks only for public objects: its stages and completion, and no owner summary.
+    const timeline = await readTimeline(anonymous, id, { ownerSummary: false });
+    expect(timeline).toMatchObject({ activityId: id, completion, stages: [{ id: stageId, kind: 'travel' }] });
+    expect(timeline.summary).toBeUndefined();
+    const clocks = <T extends { serverNowMs: number; visibleThroughMs: number }>(read: T) => ({ ...read, serverNowMs: 0, visibleThroughMs: 0 });
+    expect(clocks(timeline)).toEqual(clocks(await readTimeline(spectator.client, id, { ownerSummary: true })));
+    // Asking a visitor's client for the owner summary reaches the owner-only table and is refused: the gateway must not.
+    await expect(readTimeline(anonymous, id, { ownerSummary: true })).rejects.toMatchObject({ code: 'unauthenticated' });
+    const results = await readRecent(anonymous);
+    expect(results.rows).toEqual([{ gladiatorId: f.gid, name: 'Visit', summary: completion }]);
+    expect(results).toEqual(await readRecent(spectator.client));
   });
 });

@@ -4,6 +4,7 @@ import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battle
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
 import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
 import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
+import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
@@ -50,6 +51,13 @@ export function createFixtureGateway(): GameGateway {
       if (!log) throw Object.assign(new Error('This bout has no revealed log in the fixture preview.'), { code: 'not-found' as const });
       return structuredClone(log);
     },
-    market: unavailable, recent: unavailable,
+    // Settled results from the fixture timelines, newest first, paged as the live read is. The cursor is opaque: an unknown one
+    // ends the list with an empty page.
+    recent: async cursor => {
+      const previous = cursor === undefined ? -1 : RESULTS_FIXTURE.findIndex(page => page.nextCursor === cursor);
+      if (cursor !== undefined && previous < 0) return { rows: [], nextCursor: null };
+      return structuredClone(RESULTS_FIXTURE[previous + 1]);
+    },
+    market: unavailable,
   };
 }

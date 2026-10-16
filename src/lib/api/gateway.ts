@@ -7,6 +7,10 @@ import {
 } from './reads';
 export { GatewayReadError } from './reads';
 
+/**
+ * Public projections (world, revision, timeline, profile, standings, tournament, tournament log, recent results) can be
+ * read without a session. `owner()` and `command()` require a signed-in account.
+ */
 export interface GameGateway {
   /** Session identity changes invalidate pending reads and synchronized caches. */
   subscribeSession?(listener: () => void): () => void;
@@ -28,13 +32,19 @@ export interface GameGateway {
   recent(cursor?: string): Promise<ResultsPage>;
 }
 
-/** Authenticated Data API reads; the server enforces ownership and reveal authorization. */
+type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
+
+/**
+ * Data API reads. The server enforces ownership and reveal authorization: the public projections are readable without a
+ * session (visitors read as `anon`), while the owner's state and every command need a signed-in account.
+ */
 export function createLiveGateway(): GameGateway {
   const unavailable = async (): Promise<never> => { throw new GatewayReadError('unavailable'); };
   let epoch = 0;
-  /** Loaded (or loading) tournament logs of this session; a failed load is forgotten so it can be asked again. */
+  /** Loaded (or loading) tournament logs, shared by every viewer; a failed load is forgotten so it can be asked again. */
   const logs = new Map<string, Promise<BattleLog>>();
-  async function read<T>(load: (client: NonNullable<ReturnType<typeof getBrowserClient>>) => Promise<T>): Promise<T> {
+  /** An owner read: needs a session, and fails `unauthenticated` if the account changes while it runs. */
+  async function read<T>(load: (client: BrowserClient) => Promise<T>): Promise<T> {
     const client = getBrowserClient();
     if (!client) throw new GatewayReadError('unavailable');
     const ticket = epoch;
@@ -48,6 +58,28 @@ export function createLiveGateway(): GameGateway {
       if (!result.ok) throw result.error;
       return result.value;
     } catch (error) { throw error instanceof GatewayReadError ? error : new GatewayReadError('unavailable'); }
+  }
+  /**
+   * A public read: a visitor and a signed-in reader see the same projections, so it needs no session. `account` is the
+   * reader's id, or null for a visitor; the timeline asks for the owner summary only when there is one. A result read while
+   * the account changed belongs to the old identity, so it is dropped and read once more as the new one; a second change
+   * fails `unavailable`. A session that cannot be loaded reads as a visitor, which is how its request is then sent.
+   */
+  async function publicRead<T>(load: (client: BrowserClient, account: string | null) => Promise<T>): Promise<T> {
+    const client = getBrowserClient();
+    if (!client) throw new GatewayReadError('unavailable');
+    const accountOf = async () => (await client.auth.getSession()).data.session?.user.id ?? null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const ticket = epoch, before = await accountOf();
+        const result = await load(client, before).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
+        const after = await accountOf();
+        if (ticket !== epoch || before !== after) continue;
+        if (!result.ok) throw result.error;
+        return result.value;
+      }
+    } catch (error) { throw error instanceof GatewayReadError ? error : new GatewayReadError('unavailable'); }
+    throw new GatewayReadError('unavailable');
   }
   return {
     subscribeSession(listener) {
@@ -85,15 +117,18 @@ export function createLiveGateway(): GameGateway {
         return { ok: false, code: 'unavailable' };
       } catch { return { ok: false, code: 'unavailable' }; }
     },
-    owner: () => read(readOwner), world: () => read(readWorld), revision: () => read(readRevision),
-    timeline: id => read(client => readTimeline(client, id)), profile: id => read(client => readProfile(client, id)),
-    recent: cursor => read(client => readRecent(client, cursor)),
-    standings: (league, cursor) => read(client => readStandings(client, league, cursor)),
-    tournament: id => read(client => readTournament(client, id)),
+    owner: () => read(readOwner),
+    world: () => publicRead(readWorld), revision: () => publicRead(readRevision),
+    timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),
+    profile: id => publicRead(client => readProfile(client, id)),
+    recent: cursor => publicRead(client => readRecent(client, cursor)),
+    standings: (league, cursor) => publicRead(client => readStandings(client, league, cursor)),
+    tournament: id => publicRead(client => readTournament(client, id)),
     tournamentLog: boutId => {
+      // A due log is public and immutable, so a cached one is served without a session check; an account change clears the cache.
       const cached = logs.get(boutId);
       if (cached) return cached;
-      const pending = read(client => readTournamentLog(client, boutId));
+      const pending = publicRead(client => readTournamentLog(client, boutId));
       logs.set(boutId, pending);
       pending.catch(() => { if (logs.get(boutId) === pending) logs.delete(boutId); });
       return pending;

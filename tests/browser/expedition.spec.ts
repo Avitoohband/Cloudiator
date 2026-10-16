@@ -730,8 +730,10 @@ test.describe('exported expedition route', () => {
     await page.goto('/game/?mode=fixture');
     await expect(page.getByText('Fixture preview is unavailable in this build.')).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Sample expeditions' })).toHaveCount(0);
-    // Only same-origin static reads (the exported router also prefetches linked pages with HEAD); no data source at all.
+    // Only same-origin static reads (the exported router also prefetches linked pages with HEAD, and the camp's art loads
+    // through in-page blob URLs of this origin); no data source at all.
     const origin = new URL(page.url()).origin;
-    expect(requests.filter(r => !/^(GET|HEAD) /.test(r) || !r.slice(r.indexOf(' ') + 1).startsWith(origin) || /functions\/v1|rest\/v1|auth\/v1|54321/.test(r))).toEqual([]);
+    const local = (url: string) => url.startsWith(origin) || url.startsWith(`blob:${origin}/`);
+    expect(requests.filter(r => !/^(GET|HEAD) /.test(r) || !local(r.slice(r.indexOf(' ') + 1)) || /functions\/v1|rest\/v1|auth\/v1|54321/.test(r))).toEqual([]);
   });
 });

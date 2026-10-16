@@ -19,10 +19,11 @@ test('real browser revision polling honors visibility, skew, outage and focus re
     return scope.sync.start();
   });
   await page.clock.runFor(90_000);
-  expect(await page.evaluate(() => {const s=window as any;return [s.worldReads,s.revisionReads,s.states.at(-1).offsetMs];})).toEqual([1,3,-86_400_000]);
+  // One timed revision sample before the first world load, then three polls.
+  expect(await page.evaluate(() => {const s=window as any;return [s.worldReads,s.revisionReads,s.states.at(-1).offsetMs];})).toEqual([1,4,-86_400_000]);
   await page.evaluate(() => { const s=window as any;s.hidden=true;document.dispatchEvent(new Event('visibilitychange')); });
   await page.clock.runFor(60_000);
-  expect(await page.evaluate(() => (window as any).revisionReads)).toBe(3);
+  expect(await page.evaluate(() => (window as any).revisionReads)).toBe(4);
   await page.evaluate(() => {const s=window as any;s.hidden=false;s.down=true;window.dispatchEvent(new Event('focus'));});
   await expect.poll(()=>page.evaluate(()=>(window as any).states.at(-1).error)).toBe('unavailable');
   expect(await page.evaluate(()=>(window as any).states.at(-1).world.revision)).toBe('1');

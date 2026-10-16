@@ -44,9 +44,13 @@ export function useSession(): SessionState {
   return state;
 }
 
-export async function signOut(): Promise<void> {
+/**
+ * Signs out every session of the account (`global`, the Sign out button), or only this browser's (`local`): a stored
+ * session the server no longer accepts is dropped locally, even when the server also refuses its sign-out.
+ */
+export async function signOut({ scope = 'global' }: { scope?: 'global' | 'local' } = {}): Promise<void> {
   const client = getBrowserClient();
   if (!client) return;
-  const { error } = await client.auth.signOut();
+  const { error } = await client.auth.signOut({ scope });
   if (error) throw new Error('unavailable');
 }

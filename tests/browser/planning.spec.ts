@@ -2,6 +2,7 @@ import { test, expect, type BrowserContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { ownerFixture } from '../fixtures/domain';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
+import { emptyWorld, routeLiveReads } from './live-routes';
 
 async function planningFlow(context: BrowserContext) {
   let state = structuredClone(ownerFixture);
@@ -17,6 +18,8 @@ async function planningFlow(context: BrowserContext) {
     const token = `${btoa(JSON.stringify({ alg: 'HS256' }))}.${btoa(JSON.stringify({ sub: user.id, exp }))}.test-only`;
     localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test-only', token_type: 'bearer', expires_at: exp, expires_in: 3600, user }));
   }, { user });
+  // The live camp's public reads; this spec's own handler (registered next, so it runs first) hands it everything else.
+  await routeLiveReads(context, { world: emptyWorld() });
   await context.route('http://127.0.0.1:54321/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
@@ -51,7 +54,7 @@ async function planningFlow(context: BrowserContext) {
       if (lose) { lose = false; return route.abort('failed'); }
       return json(result);
     }
-    throw new Error(`Unexpected test-only transport ${path}`);
+    return route.fallback();
   });
   return { commands, loseNext: () => { lose = true; }, processing: (value: boolean) => { processing = value; }, conflictNext: () => { conflict = true; } };
 }

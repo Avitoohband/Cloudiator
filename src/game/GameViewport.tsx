@@ -79,11 +79,14 @@ declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
 
-export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null }: {
+export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus }: {
   world: WorldSnapshot | null;
   bridge: SceneBridge;
   focusGladiatorId?: string | null;
-  /** The page's display clock, shared with its panels; the viewport keeps its own when none is given. */
+  /**
+   * The page's display clock, shared with its panels and synced by its owner (the game state's sync controller), so the
+   * viewport never syncs it from the world. Without one the viewport keeps its own, synced from each world's server time.
+   */
   clock?: DisplayClock;
   /** Reads Arena entrants' timelines so revealed bouts can be staged; without it the arena only warms up. */
   timelines?: Pick<GameGateway, 'timeline'> | null;
@@ -92,6 +95,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
    * in staging (and without `tournamentLog` only logs a view already carries are staged).
    */
   tournaments?: (Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'tournamentLog'>>) | null;
+  /** Hears the scene's availability: loading, ready, or unavailable (no WebGL, art that failed to load, a stopped scene). */
+  onStatus?(status: 'loading' | 'ready' | 'unavailable'): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
@@ -99,7 +104,9 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   const focus = useRef(focusGladiatorId);
   const [ownClock] = useState(() => createDisplayClock());
   const clock = useRef<DisplayClock>(sharedClock ?? ownClock);
-  useEffect(() => { clock.current = sharedClock ?? ownClock; }, [ownClock, sharedClock]);
+  /** Whether the viewport syncs the clock from world snapshots: only its own clock. */
+  const syncsClock = useRef(!sharedClock);
+  useEffect(() => { clock.current = sharedClock ?? ownClock; syncsClock.current = !sharedClock; }, [ownClock, sharedClock]);
   const arenaTimelines = useRef(new Map<string, RevealedTimeline>());
   const arenaReadCount = useRef(0);
   const tournamentViews = useRef(new Map<string, TournamentView>());
@@ -113,11 +120,14 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   const statusId = useId();
 
   useEffect(() => { focus.current = focusGladiatorId; }, [focusGladiatorId]);
+  const statusListener = useRef(onStatus);
+  useEffect(() => { statusListener.current = onStatus; }, [onStatus]);
+  useEffect(() => { statusListener.current?.(status.kind); }, [status.kind]);
 
   useEffect(() => {
     latestWorld.current = world;
     if (!world) return;
-    clock.current.sync(world.serverNowMs);
+    if (syncsClock.current) clock.current.sync(world.serverNowMs);
     handle.current?.setWorld(world);
     if (forgetLeft(arenaTimelines.current, world)) handle.current?.setTimelines(new Map(arenaTimelines.current));
   }, [world]);
@@ -249,7 +259,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       fail('webgl', 'The animated camp needs WebGL, which this browser does not provide. Management panels still work.');
       return () => { cancelled = true; };
     }
-    if (latestWorld.current) clock.current.sync(latestWorld.current.serverNowMs);
+    if (latestWorld.current && syncsClock.current) clock.current.sync(latestWorld.current.serverNowMs);
     (async () => {
       const [P, assets, campScene] = await Promise.all([import('phaser'), import('./assets'), import('./camp-scene')]);
       if (cancelled || !host.current) return;

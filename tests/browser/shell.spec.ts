@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { emptyWorld, routeLiveReads } from './live-routes';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 
@@ -15,7 +16,9 @@ test('management shell labels local fixture data and exposes an accessible sched
   await page.screenshot({ path: testInfo.outputPath('fixture-shell.png'), fullPage: true });
 });
 
-test('normal entry exposes Google sign-in with an explicit configuration state', async ({ page }, testInfo) => {
+test('normal entry exposes Google sign-in with an explicit configuration state', async ({ page, context }, testInfo) => {
+  // The live camp reads the public world; in development it is answered here, never by the local Supabase stack.
+  if (!production) await routeLiveReads(context, { world: emptyWorld() });
   await page.goto('/game/');
   await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
   if (production) {

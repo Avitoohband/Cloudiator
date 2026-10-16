@@ -7,7 +7,12 @@ export type SyncState = {
 };
 export type SyncController = { start(): Promise<void>; stop(): void; refresh(): Promise<void> };
 
-/** Poll only revision/time after entry. Details and owner management are requested by their consumers. */
+/**
+ * Poll only revision/time after entry. Details and owner management are requested by their consumers. Every refresh,
+ * the first included, starts with one timed `revision()` read, the only source of `offsetMs`: a world load spans
+ * several requests (pages and its revision checks), so timing it would bias the offset by about half the load. The
+ * world is then loaded only when there is none yet or its revision changed.
+ */
 export function createSync(gateway: GameGateway, listener: (state: SyncState) => void): SyncController {
   let state: SyncState = { world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null };
   let running = false, generation = 0;
@@ -25,15 +30,19 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
     publish({ refreshing: true });
     const work = (async () => {
       try {
-        let began = Date.now();
-        let data = state.world ? await gateway.revision() : await gateway.world();
-        if (ticket !== generation || !running) return;
-        if (state.world && data.revision !== state.world.revision) { began = Date.now(); data = await gateway.world(); }
-        if (ticket !== generation || !running) return;
+        const began = Date.now();
+        const clock = await gateway.revision();
         const ended = Date.now();
-        const world = 'actors' in data ? data as WorldSnapshot : state.world ? { ...state.world, ...data } : null;
-        publish({ world, offsetMs: data.serverNowMs - (began + ended) / 2, lastSyncMs: ended, refreshing: false,
-          processing: world?.actors.some(actor => actor.activityStatus === 'processing' || actor.activityStatus === 'queued') ?? false, error: null });
+        if (ticket !== generation || !running) return;
+        const offsetMs = clock.serverNowMs - (began + ended) / 2;
+        let world: WorldSnapshot;
+        if (state.world && clock.revision === state.world.revision) world = { ...state.world, ...clock };
+        else {
+          world = await gateway.world();
+          if (ticket !== generation || !running) return;
+        }
+        publish({ world, offsetMs, lastSyncMs: Date.now(), refreshing: false,
+          processing: world.actors.some(actor => actor.activityStatus === 'processing' || actor.activityStatus === 'queued'), error: null });
       } catch (error) {
         if (ticket !== generation || !running) return;
         const code = error && typeof error === 'object' && 'code' in error && error.code === 'unauthenticated' ? 'unauthenticated' : 'unavailable';

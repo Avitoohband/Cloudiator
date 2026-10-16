@@ -3,6 +3,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
+import { emptyWorld, routeLiveReads } from './live-routes';
 
 // Explicitly test-only HTTP identity transport. Production uses the unchanged Supabase SDK.
 // Task 4 owns real Auth/database authority; hosted Google consent is Task 24's release gate.
@@ -29,6 +30,8 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
       Buffer.from(JSON.stringify({ sub: userId, aud: 'authenticated', role: 'authenticated', exp: now + expiresIn, iat: now })).toString('base64url'), 'test-signature'].join('.');
     return { access_token: jwt, refresh_token: 'test-refresh', token_type: 'bearer', expires_in: expiresIn, expires_at: now + expiresIn, user };
   };
+  // The live camp's public reads; this spec's own handler (registered next, so it runs first) hands it everything else.
+  await routeLiveReads(context, { world: emptyWorld() });
   await context.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -93,7 +96,7 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
       if (failResponse) { failResponse = false; return route.abort('failed'); }
       return json(result, (result as { ok: boolean }).ok ? 200 : 409);
     }
-    throw new Error(`Unexpected test transport request ${url.pathname}`);
+    return route.fallback();
   });
   return {
     commands, characterCount: () => creationCount,

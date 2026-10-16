@@ -35,3 +35,34 @@ Range `a8d59f9..43af136` on `claude/task-13`: `43af136` adds the source `supabas
 - **Tournament catalog check:** `has_any_column_privilege` slightly weakens the table-level check there.
 
 **Carried to 13.2:** the visitor timeline read (`readTimeline` still queries owner-only `activities`) and a visitor `readProfile` DB test.
+
+## 13.2: Public reads without a session
+
+Range `abb5376..6fed6b0`: `f8d6fc3` (feature) and `6fed6b0` (review fixes). [Implementer report](task-13.2-report.md).
+
+**Implementer evidence:**
+- Unit tests 933/933; typecheck clean.
+- `test:db` 177/177 with the Edge start time unchanged in each counted run.
+- Build and `verify:static` clean; the live-gateway browser specs passed 36/36 on port 3200.
+
+**Round 1 (full review).** Verdicts: spec ❌ for two deviations, quality Approved, no Critical or Important findings.
+- **What it confirmed:**
+  - All eight public reads use `publicRead`, which retries once on an account change and throws `unavailable` on a second change.
+  - `owner()` and commands still require a session.
+  - A visitor timeline never queries `activities`.
+  - The shared log cache is cleared on an account change.
+  - The fixture results carry only the six public summary fields.
+  - The DB test reads world, profile, standings, tournament and a timeline as `anon`, with spectator parity.
+- **Deviation 1:** `readTimeline`'s owner-summary option had a default instead of being required.
+- **Deviation 2:** the fixture `recent()` cursor diverged from `readRecent` (malformed and empty cursors).
+
+**Round 2 (scoped re-review of `6fed6b0`):** both findings ADDRESSED, no new breakage.
+- The option is required at all 20 call sites.
+- A shared `parseResultsCursor` gives identical cursor semantics, and `readRecent`'s behaviour is unchanged.
+
+**Deferred Minors:**
+- **Fixture rows:** the synthesized Training and Rest fixture rows share slots with existing fixture bouts, so the preview feed can show overlapping results.
+- **Untested paths:** a `getSession` error read as a visitor, and an epoch-only account change.
+- **Wording and noise:** two stale test names, an inaccurate cursor-format comment, and LF line endings in `tests/fixtures/results.ts`.
+
+**Ruling carried to 13.3:** a public read can fail `unauthenticated` when the server rejects a stale stored token. `useGameState` maps that, while signed in, to a local sign-out, after which reads run as a visitor.

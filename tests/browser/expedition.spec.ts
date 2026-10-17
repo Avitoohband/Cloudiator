@@ -224,9 +224,14 @@ test.describe('followable expedition scenes', () => {
     await page.waitForURL(/\/game\/\?mode=fixture/);
     await openMenu(page, 'Results');
     await page.getByRole('navigation', { name: 'Sample expeditions' }).getByRole('link', { name: EXPEDITION_FIXTURES.mountain.label }).click();
+    // A sample opens as a scene over the camp (Task 13.8 fix round 1): one view, one clock, one scene canvas beside the
+    // camp's own.
     await ready('mountain');
-    expect(await counts()).toEqual(base);
+    expect(await page.evaluate(() => ({ listeners: window.__cloudiatorExpedition!.listeners(), loops: window.__cloudiatorExpedition!.loops(),
+      canvases: document.querySelectorAll('dialog canvas').length }))).toEqual({ listeners: base.listeners, loops: 1, canvases: 1 });
+    // Back closes the scene, and Back again returns to the expedition page.
     await page.goBack();
+    await expect(page.getByRole('dialog', { name: 'Expedition', exact: true })).toHaveCount(0);
     await page.goBack();
     await ready('woodland');
     expect(await counts()).toEqual(base);

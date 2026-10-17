@@ -8,6 +8,7 @@ import { NPC_ROUTINES, npcPostTiles, planNpcPosition } from '../../src/game/npcs
 import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
 import { createDemoWorld } from '../../src/game/demo-world';
+import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { closeMenu, openMenu, revealRail, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -406,13 +407,19 @@ test.describe('living isometric camp', () => {
   });
 
   test('re-entering the game keeps one canvas and the camera still responds', async ({ page }) => {
-    await openCamp(page);
+    // The camp has no link away from itself (since Task 13.8 even the Results samples open over it), so it is entered
+    // from a replay page's Back to camp link, left with the browser's Back and re-entered with Forward, each a
+    // navigation inside the one document.
+    await page.goto(`/replay/?mode=fixture&activity=${REPLAY_FIXTURES.pvp.activityId}`);
+    await page.getByRole('link', { name: 'Back to camp' }).click();
+    await page.waitForURL(url => url.pathname === '/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     expect(await page.evaluate(() => window.__cloudiatorCamp!.canvases())).toBe(1);
     const listeners = await page.evaluate(() => window.__cloudiatorCamp!.listeners());
-    // Leave through a link in the page (the shell has no header: a sample replay in Results), then come back.
-    await (await openMenu(page, 'Results')).getByRole('navigation', { name: 'Sample replays' }).getByRole('link').first().click();
-    await page.waitForURL(url => !url.pathname.startsWith('/game'));
     await page.goBack();
+    await page.waitForURL(url => url.pathname === '/replay/');
+    await page.goForward();
+    await page.waitForURL(url => url.pathname === '/game/');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     expect(await page.evaluate(() => window.__cloudiatorCamp!.canvases())).toBe(1);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.listeners())).toBe(listeners);

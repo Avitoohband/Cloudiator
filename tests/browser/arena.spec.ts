@@ -502,10 +502,14 @@ test.describe('the Arena card and league standings', () => {
     await expect(page.getByRole('button', { name: 'Watch replay' })).toBeDisabled();
     await expect(page.getByText('NPC opponent — reduced renown, no rating change')).toHaveCount(0);
     await arenaFlow.openAtMinute(page, 60);
-    await expect(page.getByRole('button', { name: 'Watch replay' })).toBeEnabled();
     await expect(page.getByText('NPC opponent — reduced renown, no rating change')).toBeVisible();
     await expect(card(page)).toContainText('Bout in progress');
     await expect(card(page)).not.toContainText(/Victory|Defeat/);
+    // The replay opens once the bout has ended (Task 13.8 fix round 1, M3): mid-bout it would only say "not available yet".
+    await expect(page.getByRole('button', { name: 'Watch replay' })).toBeDisabled();
+    await expect(card(page)).toContainText('The replay becomes available when the bout ends.');
+    await arenaFlow.openAtMinute(page, 61);
+    await expect(page.getByRole('button', { name: 'Watch replay' })).toBeEnabled();
     expect(remote).toEqual([]);
   });
 

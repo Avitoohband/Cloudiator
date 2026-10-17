@@ -219,12 +219,17 @@ export type ReplayView =
   | { kind: 'replay'; battles: ReplayBattle[]; selected: number; summary: ActivitySummary | null }
   /** No animation is kept: show the saved outcome and credited rewards only. */
   | { kind: 'summary'; reason: 'expired' | 'missing'; summary: ActivitySummary }
-  | { kind: 'unavailable'; reason: 'not-revealed' | 'not-found' | 'unavailable' };
+  /** `expired`: a spectator's replay that is no longer kept (only the public completion says so; it holds no rewards). */
+  | { kind: 'unavailable'; reason: 'not-revealed' | 'not-found' | 'unavailable' | 'expired' };
 
-/** What a replay page can show for a revealed timeline. An expired replay always shows its summary. */
+/**
+ * What a replay page can show for a revealed timeline. An expired replay always shows its owner's summary; a spectator,
+ * who has only the public completion, is told it is no longer kept (Task 13.8 fix round 1).
+ */
 export function replayViewOf(timeline: RevealedTimeline, stageId?: string | null): ReplayView {
   const summary = timeline.summary ?? null;
   if (summary?.replayExpiry.state === 'expired') return { kind: 'summary', reason: 'expired', summary };
+  if (!summary && timeline.completion?.replayExpiry.state === 'expired') return { kind: 'unavailable', reason: 'expired' };
   const battles = timeline.stages.filter((s): s is RevealedStage & { battleLog: BattleLog } => !!s.battleLog).map(stage => ({ stage, log: stage.battleLog }));
   if (battles.length) return { kind: 'replay', battles, selected: Math.max(0, battles.findIndex(b => b.stage.id === stageId)), summary };
   if (summary) return { kind: 'summary', reason: 'missing', summary };

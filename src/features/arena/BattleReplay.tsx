@@ -90,15 +90,19 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView)
  * its Result, Fighters and Combat log sections take the next level. With the shared display `clock` (the replay page
  * and the scene over the camp, Task 13.8) only the battles that ended by its time are offered, and the summary only once
  * settled (Task 15 review Minor 2): a fight still in progress, a later encounter and its server label stay hidden.
+ * `viewerId` is the viewer's own gladiator (null for a visitor): only a fighter in the bout is told its rewards are
+ * credited when the activity settles; when it is left out, everyone is (Task 13.8 fix round 1).
  */
-export function BattleReplay({ view, bridge, headingLevel = 1, clock }: { view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null }) {
+export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId }: {
+  view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
+}) {
   const now = useReplayTime(clock, view);
   if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
   if (view.kind === 'unavailable') return <ReplayUnavailable reason={view.reason} level={headingLevel} />;
   const battles = clock ? replayBattles(view, now) : view.battles;
   if (!battles.length) return <ReplayUnavailable reason="in-progress" level={headingLevel} />;
   const summary = view.summary && (!clock || view.summary.settledAtMs <= now) ? view.summary : null;
-  return <ReplayBattles battles={battles} initial={Math.min(view.selected, battles.length - 1)} summary={summary} bridge={bridge} level={headingLevel} />;
+  return <ReplayBattles battles={battles} initial={Math.min(view.selected, battles.length - 1)} summary={summary} bridge={bridge} level={headingLevel} viewerId={viewerId} />;
 }
 
 /**
@@ -106,12 +110,14 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock }: { view: 
  * over the camp. It waits for `reads` (a fixture preview's load) and for `clock` (null until the shared clock has a
  * server time, so nothing is filtered by the device's own clock).
  */
-export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1 }: {
+export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId }: {
   reads: Pick<GameGateway, 'timeline'> | null;
   activityId: string;
   stageId?: string | null;
   clock: DisplayClock | null;
   headingLevel?: HeadingLevel;
+  /** The viewer's own gladiator, or null for a visitor (`BattleReplay`). */
+  viewerId?: string | null;
 }) {
   const [loaded, setLoaded] = useState<{ reads: object; view: ReplayView } | null>(null);
   useEffect(() => {
@@ -121,10 +127,12 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
     return () => { active = false; };
   }, [activityId, reads, stageId]);
   const view = loaded && loaded.reads === reads ? loaded.view : null;
-  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} /> : <p role="status">Loading the replay…</p>;
+  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} /> : <p role="status">Loading the replay…</p>;
 }
 
-function ReplayBattles({ battles, initial, summary, bridge, level }: { battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel }) {
+function ReplayBattles({ battles, initial, summary, bridge, level, viewerId }: {
+  battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
+}) {
   const [chosen, setSelected] = useState(initial);
   // A display clock held back by a test can offer fewer battles than were chosen from.
   const selected = Math.min(chosen, battles.length - 1);
@@ -133,7 +141,7 @@ function ReplayBattles({ battles, initial, summary, bridge, level }: { battles: 
     {battles.length > 1 && <div className={styles.encounters} role="group" aria-label="Encounters">
       {battles.map((b, i) => <button key={b.stage.id} type="button" aria-pressed={i === selected} onClick={() => setSelected(i)}>{b.stage.label}</button>)}
     </div>}
-    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} bridge={bridge} level={level} />
+    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} bridge={bridge} level={level} viewerId={viewerId} />
   </>;
 }
 
@@ -143,8 +151,12 @@ function useController(controller: ReplayController) {
   useEffect(() => controller.subscribe(force), [controller]);
 }
 
-function BattlePlayer({ battle, summary, bridge: external, level }: { battle: ReplayBattle; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel }) {
+function BattlePlayer({ battle, summary, bridge: external, level, viewerId }: {
+  battle: ReplayBattle; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
+}) {
   const { log, stage } = battle;
+  // Rewards to come are promised only to a fighter in the bout (or when the viewer is not known).
+  const fighter = viewerId === undefined || (viewerId !== null && log.participants.some(p => p.gladiatorId === viewerId));
   const [bridge] = useState(() => external ?? createSceneBridge());
   const [controller] = useState(() => createReplayController(log));
   useController(controller);
@@ -293,7 +305,7 @@ function BattlePlayer({ battle, summary, bridge: external, level }: { battle: Re
                 : frame.result.tieBreakReason === 'simultaneous-defeat' ? `Both fighters fell at the same moment, so a seeded tie-break chose ${winner.name}.`
                   : `Time ran out with equal shares of health, so a seeded tie-break chose ${winner.name}.`}</p>
             {summary ? <Rewards summary={summary} scope={stage.kind === 'encounter' ? 'Credited for the whole expedition' : 'Credited rewards'} />
-              : <p className={styles.note}>Rewards are credited when the activity settles.</p>}
+              : fighter ? <p className={styles.note}>Rewards are credited when the activity settles.</p> : null}
           </div> : <p className={styles.note}>The result appears when the fight ends. Use Skip to result to see it now.</p>}
           {summary?.replayExpiry.state === 'available' && <p className={styles.note}>This replay is kept until {day(summary.replayExpiry.expiresAtMs)}; the result and rewards stay in your history for 90 days.</p>}
         </section>
@@ -371,15 +383,16 @@ function SavedOutcome({ summary, level }: { summary: ActivitySummary; level: Hea
 
 /**
  * No replay to play. A guessed, unrevealed or still-running fight is "not available yet", with no summary, never an
- * error (Review Focus 3); a missing link or a build without reads is not available at all.
+ * error (Review Focus 3); an expired one is no longer kept; a missing link or a build without reads is not available.
  */
-function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-progress' | 'not-found' | 'unavailable'; level: HeadingLevel }) {
+function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-progress' | 'not-found' | 'unavailable' | 'expired'; level: HeadingLevel }) {
   const later = reason === 'not-revealed' || reason === 'in-progress';
   return <section className={`${styles.card} ${styles.saved}`}>
-    <Heading level={level}>{later ? 'This replay is not available yet' : 'This replay is not available'}</Heading>
+    <Heading level={level}>{later ? 'This replay is not available yet' : reason === 'expired' ? 'This replay is no longer kept' : 'This replay is not available'}</Heading>
     <p>{reason === 'not-revealed' ? 'The fight has not been revealed yet. Replays appear once the bout is revealed.'
       : reason === 'in-progress' ? 'The fight is still going on. Its replay appears here as soon as it ends.'
-        : reason === 'not-found' ? 'No fight was found for this link.'
-          : 'Replays cannot be loaded in this build yet.'}</p>
+        : reason === 'expired' ? 'Detailed replays are kept for seven days. The result stays in the recent results.'
+          : reason === 'not-found' ? 'No fight was found for this link.'
+            : 'Replays cannot be loaded in this build yet.'}</p>
   </section>;
 }

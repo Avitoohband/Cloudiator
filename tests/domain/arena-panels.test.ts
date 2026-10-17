@@ -35,10 +35,15 @@ describe('Arena card', () => {
     expect(html).not.toMatch(/Iron Warden|Victory|Defeat|renown/);
   });
 
-  it('enables the replay and discloses the NPC fallback at minute 60, with no outcome yet', () => {
+  it('discloses the NPC fallback at minute 60, with no outcome yet, and offers the replay once the bout has ended', () => {
     const html = card('ownerNpcWin', 60);
     expect(text(html)).toContain('Bout in progress');
-    expect(watch(html)).not.toContain('disabled');
+    // Fix round 1, M3: mid-bout the replay would only say "not available yet".
+    expect(watch(html)).toContain('disabled');
+    expect(text(html)).toContain('The replay becomes available when the bout ends.');
+    const ended = card('ownerNpcWin', 61);
+    expect(watch(ended)).not.toContain('disabled');
+    expect(text(ended)).toContain('The replay is the recorded bout.');
     expect(text(html)).toContain(NPC_DISCLOSURE);
     expect(text(html)).toContain('Iron Warden');
     // Nothing but the disclosure itself mentions renown before the result is credited.

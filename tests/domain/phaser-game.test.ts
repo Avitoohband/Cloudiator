@@ -68,6 +68,49 @@ describe('startGame', () => {
     expect(window.onfocus).toBe(previousFocus);
   });
 
+  it("releases the destroyed game's own WebGL context once Phaser has run its deferred destroy (Task 13.8 fix round 1)", async () => {
+    vi.stubGlobal('document', new FakeDocument());
+    vi.stubGlobal('window', { onblur: previousBlur, onfocus: previousFocus });
+    const context = () => {
+      const lose = vi.fn();
+      let lost = false;
+      return { lose, gl: { isContextLost: () => lost, getExtension: (name: string) => (name === 'WEBGL_lose_context' ? { loseContext: () => { lost = true; lose(); } } : null) } };
+    };
+    /** Phaser's Game as far as destroy goes: destroy() only flags it; its next step emits DESTROY, then drops the renderer. */
+    class SteppedGame {
+      readonly own = context();
+      renderer: { gl: unknown } | null = { gl: this.own.gl };
+      pendingDestroy = false;
+      private readonly handlers = new Map<string, (() => void)[]>();
+      readonly events = { once: (name: string, fn: () => void) => { this.handlers.set(name, [...(this.handlers.get(name) ?? []), fn]); } };
+      constructor(readonly config: PhaserNS.Types.Core.GameConfig) {}
+      destroy() { this.pendingDestroy = true; }
+      step() {
+        if (!this.pendingDestroy) return;
+        for (const fn of this.handlers.get('destroy') ?? []) fn();
+        this.handlers.clear();
+        this.renderer = null;
+      }
+    }
+    const P = { Game: SteppedGame } as unknown as typeof PhaserNS;
+    const scene = startGame(P, {}), camp = startGame(P, {});
+    const [sceneGame, campGame] = [scene.game, camp.game] as unknown as SteppedGame[];
+    scene.destroy();
+    await flush();
+    // Nothing is released before Phaser's own destroy has run.
+    expect(sceneGame.own.lose).not.toHaveBeenCalled();
+    sceneGame.step();
+    await flush();
+    expect(sceneGame.own.lose).toHaveBeenCalledTimes(1);
+    // Another game's context, the camp's, is never touched; a second destroy does nothing more.
+    campGame.step();
+    scene.destroy();
+    sceneGame.step();
+    await flush();
+    expect(campGame.own.lose).not.toHaveBeenCalled();
+    expect(sceneGame.own.lose).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps handlers that someone else installed after Phaser', async () => {
     const { handle, game } = setup();
     game.start();

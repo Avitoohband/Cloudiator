@@ -319,6 +319,18 @@ describe('replay views', () => {
     expect(replayViewOf(stale)).toMatchObject({ kind: 'summary', reason: 'expired' });
   });
 
+  it('tells a spectator, who has only the public completion, that an expired replay is no longer kept (fix round 1, M5)', () => {
+    const pvp = timeline(REPLAY_FIXTURES.pvp.activityId);
+    const { summary: _owner, ...spectator } = pvp;
+    const completion = { activityId: pvp.activityId, resolvedKind: 'arena' as const, result: 'victory' as const, success: true, settledAtMs: pvp.summary!.settledAtMs };
+    expect(replayViewOf({ ...spectator, stages: [], completion: { ...completion, replayExpiry: { state: 'expired' } } })).toEqual({ kind: 'unavailable', reason: 'expired' });
+    // Even a log the server still holds is no longer offered once the replay has expired.
+    expect(replayViewOf({ ...spectator, completion: { ...completion, replayExpiry: { state: 'expired' } } })).toEqual({ kind: 'unavailable', reason: 'expired' });
+    // A kept replay plays as before, and the owner's own summary still decides for the owner.
+    expect(replayViewOf({ ...spectator, completion: { ...completion, replayExpiry: pvp.summary!.replayExpiry } })).toMatchObject({ kind: 'replay', summary: null });
+    expect(replayViewOf({ ...pvp, stages: [], completion: { ...completion, replayExpiry: { state: 'expired' } } })).toMatchObject({ kind: 'summary', reason: 'missing' });
+  });
+
   it('shows the saved summary when no battle stage was kept, and nothing when there is no summary either', () => {
     const missing: RevealedTimeline = { ...timeline(REPLAY_FIXTURES.pvp.activityId), stages: [] };
     expect(replayViewOf(missing)).toMatchObject({ kind: 'summary', reason: 'missing', summary: { rewards: { renown: 10 } } });

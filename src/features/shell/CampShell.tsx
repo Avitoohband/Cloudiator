@@ -20,7 +20,6 @@
 // `view-expedition` open one (the Arena card's Watch replay, the Gladiators list's away rows), `return-camp` closes it
 // (the scene's "Back to camp"); Results opens each result by its kind. The camp keeps running beneath a scene.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
@@ -58,8 +57,8 @@ const SIGN_IN_MESSAGES: Record<SignInResult, string> = {
   failed: 'Google sign-in could not be completed. Please try again.',
 };
 
-type SampleLink = { activityId: string; label: string };
-type Samples = { replays: readonly SampleLink[]; expeditions: readonly SampleLink[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
+type Sample = { activityId: string; label: string };
+type Samples = { replays: readonly Sample[]; expeditions: readonly Sample[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
 const NO_SAMPLES: Samples = { replays: [], expeditions: [], arena: [], tournaments: [] };
 
 /**
@@ -92,23 +91,34 @@ function SchedulePreview({ owner }: { owner: OwnerState | null }) {
 }
 
 /**
- * Results: the recent results, and in fixture mode the sample replays and expeditions below them (deep links to the
- * /replay/ and /expedition/ pages, which stay as such).
+ * A fixture sample as a link to its scene over the camp (spec "Scenes", Task 13.8 fix round 1): a plain click opens the
+ * scene in place; a modified click (a new tab or window) follows the link, which opens the same scene over a new camp.
  */
-function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, onWatch }: {
+function SampleLink({ view, label, onOpen }: { view: SceneView; label: string; onOpen(view: SceneView): void }) {
+  const href = `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}`;
+  return <a href={href} onClick={event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onOpen(view);
+  }}>{label}</a>;
+}
+
+/** Results: the recent results, and in fixture mode the sample replays and expeditions below them, opened as scenes. */
+function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, onWatch, onOpen }: {
   fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
+  onOpen(view: SceneView): void;
 }) {
   return <>
     {reads ? <ResultsPanel reads={reads} viewerId={viewerId} onWatch={onWatch} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
-      <ul>{samples.replays.map(r => <li key={r.activityId}><Link href={`/replay/?mode=fixture&activity=${r.activityId}`}>{r.label}</Link></li>)}</ul>
+      <ul>{samples.replays.map(r => <li key={r.activityId}><SampleLink view={{ kind: 'replay', activityId: r.activityId }} label={r.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
     {fixture && samples.expeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
       <p className="eyebrow">SAMPLE EXPEDITIONS</p>
-      <ul>{samples.expeditions.map(e => <li key={e.activityId}><Link href={`/expedition/?mode=fixture&activity=${e.activityId}`}>{e.label}</Link></li>)}</ul>
+      <ul>{samples.expeditions.map(e => <li key={e.activityId}><SampleLink view={{ kind: 'expedition', activityId: e.activityId }} label={e.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
   </>;
 }
@@ -265,7 +275,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
         onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} />;
-      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} onWatch={watchResult} />;
+      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} onWatch={watchResult}
+        onOpen={openScene} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;

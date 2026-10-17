@@ -45,7 +45,8 @@ function ReplayShell() {
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page">
       {!activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
-        : <ActivityReplay key={`${fixture}|${activityId}|${stageId}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock} />}
+        : <ActivityReplay key={`${fixture}|${activityId}|${stageId}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock}
+          viewerId={game.owner?.gladiatorId ?? null} />}
     </main>
     <footer className="game-footer">CLOUDIATOR <span>Replays show the recorded fight; they never change its result.</span></footer>
   </div>;

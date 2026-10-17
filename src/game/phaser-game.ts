@@ -8,7 +8,8 @@ type Capture = [string, EventListenerOrEventListenerObject, boolean | AddEventLi
  * scene leaks one listener holding the dead game's event emitter. Game.start calls the postBoot
  * callback and then VisibilityHandler synchronously, so the listener is captured in between.
  * VisibilityHandler also overwrites window.onblur/onfocus; destroy() puts the previous handlers back
- * when Phaser's are still installed.
+ * when Phaser's are still installed. Once the destroyed game has let go of its renderer, destroy() also
+ * releases that game's WebGL context (Task 13.8 fix round 1).
  */
 export function startGame(P: typeof PhaserNS, config: PhaserNS.Types.Core.GameConfig): { game: PhaserNS.Game; destroy(): void } {
   const captured: Capture[] = [];
@@ -56,6 +57,15 @@ export function startGame(P: typeof PhaserNS, config: PhaserNS.Types.Core.GameCo
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      // Phaser 4.2.1 never releases its WebGL context, and Chromium keeps a cap of live contexts (16 on desktop, fewer on
+      // Android) by force-losing the oldest: the camp's, once scenes over it (Task 13.8) have come and gone. Game.destroy
+      // only flags the game; its next step runs runDestroy, which emits DESTROY and then destroys the renderer. This
+      // game's own context (never another game's) is released right after that, in the same step's microtask.
+      const events = (game as Partial<Pick<PhaserNS.Game, 'events'>>).events;
+      events?.once?.('destroy', () => {
+        const gl = (game.renderer as { gl?: WebGLRenderingContext | WebGL2RenderingContext | null } | null)?.gl ?? null;
+        if (gl) queueMicrotask(() => { if (!gl.isContextLost()) gl.getExtension('WEBGL_lose_context')?.loseContext(); });
+      });
       game.destroy(true);
       for (const [type, listener, options] of captured.splice(0)) document.removeEventListener(type, listener, options);
       restoreWindowHandlers();

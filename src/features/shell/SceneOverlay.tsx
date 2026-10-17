@@ -50,6 +50,17 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
     };
   }, []);
 
+  // Another scene in the same dialog (an expedition's encounter replay, or Back and Forward between scenes) starts at its
+  // top with the focus on Back to camp, as the first one did: the control that opened it is gone (fix round 1, M6).
+  const sceneKey = `${view.kind}|${view.activityId}|${view.kind === 'replay' ? view.stageId ?? '' : ''}`;
+  const shownKey = useRef(sceneKey);
+  useLayoutEffect(() => {
+    if (shownKey.current === sceneKey) return;
+    shownKey.current = sceneKey;
+    dialog.current?.scrollTo({ top: 0 });
+    back.current?.focus({ preventScroll: true });
+  }, [sceneKey]);
+
   const player = state.viewer === 'player';
   const reads = useMemo<ExpeditionReads | null>(() => {
     if (!gateway) return null;
@@ -59,7 +70,6 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
 
   // The display clock has a server time once the shared sync has read the world (or it never will).
   const clock = state.world || state.syncError ? state.clock : null;
-  const sceneKey = `${view.kind}|${view.activityId}|${view.kind === 'replay' ? view.stageId ?? '' : ''}`;
   return (
     <dialog ref={dialog} className={styles.scene} aria-label={view.kind === 'replay' ? 'Replay' : 'Expedition'}
       // Escape closes a modal dialog natively (it may refuse to cancel it): follow it into the address. The close event
@@ -68,7 +78,8 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
       <button ref={back} type="button" className={styles.sceneBack} onClick={onClose}><span aria-hidden="true">←</span> Back to camp</button>
       <div className={styles.sceneBody}>
         {view.kind === 'replay'
-          ? <ActivityReplay key={sceneKey} reads={reads} activityId={view.activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2} />
+          ? <ActivityReplay key={sceneKey} reads={reads} activityId={view.activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2}
+            viewerId={player ? state.owner?.gladiatorId ?? null : null} />
           : !reads ? <p role="status">Loading the expedition…</p>
             : <ExpeditionView key={sceneKey} reads={reads} activityId={view.activityId} fixture={fixture} revision={state.revision} world={state.world}
               worldFailed={!state.world && state.syncError !== null} owner={player ? state.owner : null}

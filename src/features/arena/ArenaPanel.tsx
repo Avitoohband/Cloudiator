@@ -63,7 +63,9 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
   const titleId = useId();
   const reveal = state.startMs === null ? null : time(state.startMs + ARENA_REVEAL_MS);
   const result = state.result && opponent ? resultText(state.result, { entrant: entrantName, opponent: opponent.name }) : null;
-  const href = state.replay ? replayHref(state.replay, model.fixture) : null;
+  // The replay opens once the bout has ended (Task 13.8 fix round 1): mid-bout the replay scene, which offers only ended
+  // fights, would say "not available yet". The bout plays live in the camp's ring meanwhile.
+  const href = state.replay && state.bout?.finished ? replayHref(state.replay, model.fixture) : null;
   const minute = state.minute === null ? null : Math.max(0, Math.min(SLOT_MINUTES, Math.floor(state.minute)));
   return (
     <article className={styles.card} aria-labelledby={titleId} data-phase={state.phase}>
@@ -105,6 +107,7 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
         <button type="button" className={styles.watch} disabled={!href} onClick={() => href && onWatch(href)}>Watch replay</button>
         <p className="muted">{state.replayExpired ? 'The detailed replay is no longer kept; the saved result remains.'
           : href ? 'The replay is the recorded bout. Watching it never changes the result.'
+            : state.replay ? 'The replay becomes available when the bout ends.'
             : state.phase === 'preparing' && state.minute !== null && state.minute >= REVEAL_MINUTE ? 'The replay becomes available once the bout is published.'
               : `The replay becomes available when the bout is revealed at minute ${REVEAL_MINUTE}.`}</p>
       </div>

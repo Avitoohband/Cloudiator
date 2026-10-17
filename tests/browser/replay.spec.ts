@@ -318,13 +318,17 @@ test.describe('battle-log replay', () => {
     expect(base).toMatchObject({ loops: 1, canvases: 1 });
     await page.getByRole('link', { name: 'Back to camp' }).click();
     await page.waitForURL(/\/game\//);
-    // The sample replays are listed in the camp's Results menu (Task 13.5).
+    // The sample replays are listed in the camp's Results menu (Task 13.5) and open as scenes over the camp (Task 13.8
+    // fix round 1): one playback loop and one scene canvas beside the camp's own.
     await openMenu(page, 'Results');
     await page.getByRole('link', { name: REPLAY_FIXTURES.npc.label }).click();
     await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, REPLAY_FIXTURES.npc.battleId, { timeout: 45_000 });
     await sceneReady(page);
-    expect(await counts()).toEqual(base);
+    expect(await page.evaluate(() => ({ listeners: window.__cloudiatorReplay!.listeners(), loops: window.__cloudiatorReplay!.loops(),
+      canvases: document.querySelectorAll('dialog canvas').length }))).toEqual({ listeners: base.listeners, loops: 1, canvases: 1 });
+    // Back closes the scene, and Back again returns to the replay page.
     await page.goBack();
+    await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toHaveCount(0);
     await page.goBack();
     await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, REPLAY_FIXTURES.pvp.battleId, { timeout: 45_000 });
     await sceneReady(page);

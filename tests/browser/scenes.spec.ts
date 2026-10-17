@@ -126,7 +126,16 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await watch.click();
     await expect(scene(page, 'Replay')).toBeVisible();
     expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: woodland, stage: `${woodland}:1` });
+    // The focus moves with the scene (fix round 1, M6): to Back to camp, never to <body>.
+    await expect(backToCamp(page)).toBeFocused();
     await expect(scene(page, 'Replay').getByRole('button', { name: 'Encounter 1: victory', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // The browser's Back returns to the expedition scene, again with the focus in the scene.
+    await page.goBack();
+    await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    await expect(backToCamp(page)).toBeFocused();
+    await page.goForward();
+    await expect(scene(page, 'Replay')).toBeVisible();
+    await expect(backToCamp(page)).toBeFocused();
     await backToCamp(page).click();
     await expect(scene(page, 'Replay')).toHaveCount(0);
     await expect(scene(page, 'Expedition')).toHaveCount(0);
@@ -176,6 +185,8 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await replay.getByRole('button', { name: 'Skip to result' }).click();
     await expect(replay.getByRole('region', { name: 'Result' })).toContainText('wins');
     await expect(replay).not.toContainText(REWARDS);
+    // Nor a promise of rewards that are not theirs (fix round 1, M5).
+    await expect(replay).not.toContainText(/Rewards are credited/i);
     await backToCamp(page).click();
     await page.goto(`/game/?mode=fixture&as=visitor&view=expedition&activity=${EXPEDITION_FIXTURES.woodland.activityId}`);
     const expedition = scene(page, 'Expedition');
@@ -183,6 +194,84 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await expect(expedition.getByRole('region', { name: 'Result' })).toContainText('Success');
     await expect(expedition).not.toContainText(REWARDS);
     await expect(expedition).toContainText("Another gladiator's expedition");
+  });
+
+  test('opens the fixture samples over the camp', async ({ page }) => {
+    // Fix round 1, M10: the Results menu's sample replays and expeditions are scenes over the camp too (spec "Scenes").
+    await openCamp(page, '/game/?mode=fixture');
+    const results = await openMenu(page, 'Results');
+    await results.getByRole('navigation', { name: 'Sample replays' }).getByRole('link', { name: REPLAY_FIXTURES.npc.label }).click();
+    await expect(scene(page, 'Replay').getByRole('heading', { level: 2, name: 'Aster vs Iron Warden' })).toBeVisible({ timeout: 45_000 });
+    expect(new URL(page.url()).pathname).toBe('/game/');
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.npc.activityId });
+    await backToCamp(page).click();
+    await expect(scene(page, 'Replay')).toHaveCount(0);
+    await results.getByRole('navigation', { name: 'Sample expeditions' }).getByRole('link', { name: EXPEDITION_FIXTURES.mountain.label }).click();
+    await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Mountain Pass' })).toBeVisible({ timeout: 45_000 });
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: EXPEDITION_FIXTURES.mountain.activityId });
+    await backToCamp(page).click();
+    await expect(scene(page, 'Expedition')).toHaveCount(0);
+    expect(search(page)).toEqual({ mode: 'fixture' });
+    expect(await page.evaluate(() => ({ ready: window.__cloudiatorCamp!.state()!.ready, canvases: window.__cloudiatorCamp!.canvases() }))).toEqual({ ready: true, canvases: 1 });
+  });
+
+  test("releases each closed scene's WebGL context, so the camp's is never the one the browser drops", async ({ page }) => {
+    // Fix round 1, I1: Phaser 4.2.1 never releases its context, and Chromium force-loses the oldest live one past its cap
+    // (16 on desktop), which is the camp's. Every WebGL context the page creates is recorded.
+    test.setTimeout(240_000);
+    await page.addInitScript(() => {
+      const made: { canvas: HTMLCanvasElement; gl: WebGLRenderingContext }[] = [];
+      const original = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...args: unknown[]) {
+        const context = (original as (...a: unknown[]) => RenderingContext | null).call(this, type, ...args);
+        if (context && /webgl/.test(type) && !made.some(m => m.gl === context)) made.push({ canvas: this, gl: context as WebGLRenderingContext });
+        return context;
+      } as typeof original;
+      // A game's canvas joins the page; a feature probe's never does.
+      const attached = new WeakSet<Element>();
+      new MutationObserver(records => {
+        for (const record of records) for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node instanceof HTMLCanvasElement) attached.add(node);
+          node.querySelectorAll('canvas').forEach(canvas => attached.add(canvas));
+        }
+      }).observe(document, { childList: true, subtree: true });
+      (window as unknown as { __webgl: () => unknown }).__webgl = () => made.map(m => ({
+        camp: !!m.canvas.closest('[data-camp-view]'), attached: attached.has(m.canvas), connected: m.canvas.isConnected, lost: m.gl.isContextLost() }));
+    });
+    type Context = { camp: boolean; attached: boolean; connected: boolean; lost: boolean };
+    const contexts = () => page.evaluate(() => (window as unknown as { __webgl: () => Context[] }).__webgl());
+    await openCamp(page, '/game/?mode=fixture');
+    const woodland = EXPEDITION_FIXTURES.woodland.activityId;
+    const battleReady = (id: string) => page.waitForFunction(b => window.__cloudiatorReplay?.state().battleId === b && window.__cloudiatorBattle?.debug()?.ready === true, id, { timeout: 45_000 });
+    for (let round = 0; round < 6; round += 1) {
+      // A replay with its three encounters (each a scene of its own), then an expedition.
+      await page.evaluate(id => window.__cloudiatorCamp!.emit('view-replay', { activityId: id, stageId: null }), REPLAY_FIXTURES.expedition.activityId);
+      const replay = scene(page, 'Replay');
+      await battleReady(REPLAY_FIXTURES.expedition.battleIds[0]);
+      for (const n of [1, 2]) {
+        await replay.getByRole('group', { name: 'Encounters' }).getByRole('button').nth(n).click();
+        await battleReady(REPLAY_FIXTURES.expedition.battleIds[n]);
+      }
+      await backToCamp(page).click();
+      await expect(replay).toHaveCount(0);
+      await page.evaluate(id => window.__cloudiatorCamp!.emit('view-expedition', { activityId: id }), woodland);
+      await page.waitForFunction(() => window.__cloudiatorExpeditionScene?.debug()?.ready === true, null, { timeout: 45_000 });
+      await backToCamp(page).click();
+      await expect(scene(page, 'Expedition')).toHaveCount(0);
+    }
+    await expect.poll(async () => (await contexts()).filter(c => c.attached && !c.connected && !c.lost).length, { timeout: 5_000 }).toBe(0);
+    const all = await contexts();
+    // Far more scenes than the browser's cap came and went...
+    expect(all.filter(c => c.attached && !c.camp).length).toBeGreaterThan(20);
+    // ...each one's context is released once it closed, and the camp's own is live, with the camp still ready.
+    expect(all.filter(c => c.camp)).toEqual([{ camp: true, attached: true, connected: true, lost: false }]);
+    // Besides them, only Phaser's own WebGL feature probe (made once per page, never shown) is left as it was.
+    expect(all.filter(c => !c.attached && !c.lost).length).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-camp-view] canvas')!;
+      return { lost: (canvas.getContext('webgl') as WebGLRenderingContext).isContextLost(), ready: window.__cloudiatorCamp!.state()!.ready };
+    })).toEqual({ lost: false, ready: true });
   });
 });
 
@@ -221,6 +310,22 @@ test.describe('replays and expeditions over the live camp for a visitor', () => 
     expect(live.requests.every(r => r.reader === null)).toBe(true);
     expect(live.count('owner_state') + live.count('activities')).toBe(0);
     expect(live.count('visible_events')).toBeGreaterThan(0);
+  });
+
+  test("says a visitor's expired replay is no longer kept, not that it is coming", async ({ page, context }) => {
+    // Fix round 1, M5: a visitor has no owner summary, only the public completion, which says the replay expired.
+    const now = Date.now();
+    const expired = randomUUID();
+    const timeline: RevealedTimeline = { activityId: expired, serverNowMs: now, visibleThroughMs: now, stages: [],
+      completion: { activityId: expired, resolvedKind: 'arena', result: 'victory', success: true, settledAtMs: now - 10 * 86_400_000, replayExpiry: { state: 'expired' } } };
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(now), revision: 'scenes-3' }, timelines: { [expired]: timeline } });
+    await page.goto(`/replay/?activity=${expired}`);
+    await expect(page.getByRole('heading', { name: 'This replay is no longer kept' })).toBeVisible({ timeout: 45_000 });
+    await expect(page.locator('main')).not.toContainText(/not available yet|has not been revealed/i);
+    await expect(page.locator('main')).not.toContainText(REWARDS);
+    await openCamp(page, `/game/?view=replay&activity=${expired}`);
+    await expect(scene(page, 'Replay').getByRole('heading', { level: 2, name: 'This replay is no longer kept' })).toBeVisible({ timeout: 45_000 });
+    expect(live.requests.every(r => r.reader === null)).toBe(true);
   });
 
   test("shows a visitor's guessed or unrevealed activity as not available yet, without a summary", async ({ page, context }, testInfo) => {

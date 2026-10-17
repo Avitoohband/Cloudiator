@@ -82,6 +82,10 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
     if (element && !element.open) element.showModal();
     heading.current?.focus({ preventScroll: true });
   }, []);
+  // A submit that fails moves the focus to its reason: while a creation is confirmed its button and fields are disabled,
+  // which would drop the focus to <body> (13.6 review I1). Editing a field clears the reason.
+  const reason = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (error && !busy) reason.current?.focus(); }, [error, busy]);
   useEffect(() => {
     mounted.current = true;
     setDraft(readDraft()); setReady(true);
@@ -156,7 +160,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
         <dl><div><dt>Health</dt><dd data-testid="preview-hp">{preview.maxHp}</dd></div><div><dt>Stamina</dt><dd data-testid="preview-stamina">{preview.maxStamina}</dd></div><div><dt>Equipment load</dt><dd data-testid="preview-load">{preview.load} / {preview.loadCapacity}</dd></div></dl>
         <p className="muted">Common sword · Light body armor · 100 money · 0 renown</p>
       </section>}
-      {error && <p role="alert" className="form-error">{error}</p>}
+      {error && <p ref={reason} role="alert" className="form-error" tabIndex={-1}>{error}</p>}
       {!storageAvailable && <p role="status">This browser cannot retain your draft after leaving the page.</p>}
       {!accountId && <p className="muted">Sign in with Google before confirming.</p>}
       <div className={styles.actions}>

@@ -60,11 +60,12 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   const signedIn = !fixture && session.status === 'signed-in';
   const account = viewer === 'player' || signedIn;
 
-  // Escape (before the shell's own handler, which then leaves an open panel alone) and a press elsewhere close it.
+  // Escape (before the shell's own handler, which then leaves an open panel alone) and a press elsewhere close it. While
+  // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1).
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || document.querySelector('dialog:modal')) return;
       event.preventDefault();
       setOpen(false);
       toggle.current?.focus();
@@ -94,7 +95,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   return (
     <div ref={chip} className={styles.chip} data-testid="corner-chip">
       <div className={styles.chipRow}>
-        {viewer === 'no-gladiator' && <button type="button" className={styles.create} onClick={onCreate}>Create your gladiator</button>}
+        {viewer === 'no-gladiator' && <button type="button" className={styles.create} onClick={() => { setOpen(false); onCreate(); }}>Create your gladiator</button>}
         <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>

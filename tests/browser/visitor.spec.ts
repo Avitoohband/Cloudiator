@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { OwnerState, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { createDemoWorld } from '../../src/game/demo-world';
-import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import {
   cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, signOutFromChip, touchLayout,
 } from './shell-helpers';
@@ -40,6 +40,17 @@ function watchCommands(page: Page) {
   return sent;
 }
 const railLabels = (page: Page) => railMenus(page).getByRole('button').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')));
+/** A visitor signs in with Google (the test-only consent page) without a gladiator; the creation dialog opens. */
+async function signInToCreate(page: Page) {
+  await page.goto('/game/');
+  await joinButton(page).click();
+  await page.getByRole('link', { name: 'Approve test Google' }).click();
+  await expect(page).toHaveURL(/\/game\/$/);
+  await expect(creationDialog(page)).toBeVisible({ timeout: 30_000 });
+  return creationDialog(page);
+}
+/** Dispatches the `pageshow` a page restored from the back-forward cache receives. */
+const restoredFromCache = (page: Page) => page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live mode uses development-only intercepted Supabase transport.'); });
 
@@ -214,4 +225,93 @@ test('closes a private menu and shows no private value when the session ends', a
   const mine = await openMenu(page, 'My gladiator');
   await expect(mine.getByRole('button', { name: VISITOR_PROMPT })).toBeVisible();
   for (const value of [owner.name, '4321']) await expect(page.locator('body')).not.toContainText(value);
+});
+
+test('offers sign-in again when the camp comes back from the back-forward cache', async ({ page, context }) => {
+  // 13.6 review I2. Playwright's Chrome has no back-forward cache, so the restore is stood in for: the way to Google is
+  // aborted (the camp stays as it was when it left, "Opening Google…"), then the camp gets a restored page's `pageshow`.
+  await routeLiveReads(context, { world: emptyWorld() });
+  await context.route('**/auth/v1/authorize**', route => route.abort('aborted'));
+  await page.goto('/game/');
+  await joinButton(page).click();
+  await expect(cornerChip(page).getByRole('button', { name: 'Opening Google…' })).toBeDisabled();
+  await restoredFromCache(page);
+  await expect(joinButton(page)).toBeEnabled();
+  // The same for My gladiator's sign-in button.
+  const mine = await openMenu(page, 'My gladiator');
+  await mine.getByRole('button', { name: VISITOR_PROMPT }).click();
+  await expect(mine.getByRole('button', { name: 'Opening Google…' })).toBeDisabled();
+  await restoredFromCache(page);
+  await expect(mine.getByRole('button', { name: VISITOR_PROMPT })).toBeEnabled();
+});
+
+test.describe('the creation dialog with a keyboard', () => {
+  test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The rail and its first Tab are the desktop layout.'); });
+
+  test('keeps Tab and Escape inside the dialog when the focus has fallen to the page', async ({ page, context }) => {
+    // 13.6 review I1: with the focus fallen to <body> while the modal dialog is open, the shell's own Tab and Escape
+    // handling (reveal the rail; close the open menu) must stand down. In this Chrome a click on the dialog's text
+    // focuses the dialog itself, so the fall (as when a confirmation disables the focused button) is a blur here.
+    await routeLiveReads(context, { world: liveWorld(), owner: null });
+    const dialog = await signInToCreate(page);
+    const intro = dialog.getByText('Name your gladiator and pick a class');
+    const dropFocus = async () => {
+      await intro.click();
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    };
+    await dropFocus();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByLabel('Gladiator name')).toBeFocused();
+    await expect(page.getByTestId('menu-rail')).toHaveAttribute('data-revealed', 'false');
+    // With My gladiator open behind the dialog, Escape closes the dialog and leaves the menu open.
+    await dialog.getByRole('button', { name: 'Not now', exact: true }).click();
+    const mine = await openMenu(page, 'My gladiator');
+    await mine.getByRole('button', { name: 'Create your gladiator', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await dropFocus();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(mine).toBeVisible();
+  });
+
+  test('moves the focus to the reason when a creation is refused', async ({ page, context }) => {
+    // 13.6 review I1: while a creation is confirmed its button and fields are disabled, so the focus would fall to <body>.
+    await routeLiveReads(context, { world: liveWorld(), owner: null });
+    await context.route(`${SUPABASE_URL}/functions/v1/game-command`, route => (route.request().method() === 'OPTIONS' ? route.fallback()
+      : route.fulfill({ status: 409, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'conflict' }) })));
+    const dialog = await signInToCreate(page);
+    await dialog.getByLabel('Gladiator name').fill('Taken Name');
+    await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+    const reason = dialog.getByRole('alert');
+    await expect(reason).toContainText('name may already be taken');
+    await expect(reason).toBeFocused();
+    // The keyboard goes on from there, inside the dialog.
+    await page.keyboard.press('Shift+Tab');
+    expect(await page.evaluate(() => !!document.activeElement?.closest('dialog'))).toBe(true);
+  });
+});
+
+test('fits the creation dialog on a 360 px phone with its actions in view', async ({ page, context }, testInfo) => {
+  // Global Constraint: at 360 px wide there is no horizontal scroll, and sheets fit the viewport (controller check 3).
+  test.skip(testInfo.project.name !== 'mobile', 'The phone layout runs on the mobile project.');
+  await page.setViewportSize({ width: 360, height: 740 });
+  const world = liveWorld();
+  await routeLiveReads(context, { world, owner: null });
+  const dialog = await signInToCreate(page);
+  await waitForCamp(page, world.actors.length);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const box = await boxOf(dialog);
+  expect(box.x >= 0 && box.x + box.width <= 360 && box.y >= 0 && box.y + box.height <= 740, JSON.stringify(box)).toBe(true);
+  for (const name of ['Not now', 'Create gladiator']) {
+    const button = dialog.getByRole('button', { name, exact: true });
+    await button.scrollIntoViewIfNeeded();
+    await expect(button).toBeInViewport();
+    const at = await boxOf(button);
+    expect(at.x >= 0 && at.x + at.width <= 360 && at.y >= 0 && at.y + at.height <= 740, `${name} ${JSON.stringify(at)}`).toBe(true);
+  }
+  await dialog.evaluate(el => el.scrollTo(0, 0));
+  await nextFrames(page);
+  await page.screenshot({ path: testInfo.outputPath('join-phone-360x740-create-dialog.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

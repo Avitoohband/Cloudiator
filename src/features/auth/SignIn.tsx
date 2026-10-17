@@ -3,7 +3,7 @@
 // Google sign-in, the existing Task 5 flow (`startGoogleSignIn` leaves for Google and returns through /auth/callback/).
 // Task 13.6: the approved mockup's "G" mark, the hook the corner chip and My gladiator start it with, and a visitor's
 // prompt in My gladiator. Watching needs no account; joining needs Google sign-in.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { startGoogleSignIn } from '../../lib/api/client';
 import styles from './SignIn.module.css';
 
@@ -12,10 +12,19 @@ export function GoogleMark() {
   return <span className={styles.mark} aria-hidden="true" data-testid="google-mark">G</span>;
 }
 
-/** Starts Google sign-in: `busy` while the browser leaves for Google, `failed` when it could not be started. */
+/**
+ * Starts Google sign-in: `busy` while the browser leaves for Google, `failed` when it could not be started. A page the
+ * browser restores from its back-forward cache (Back from Google) is no longer leaving, so it offers sign-in again
+ * (13.6 review I2).
+ */
 export function useGoogleSignIn() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const restored = (event: PageTransitionEvent) => { if (event.persisted) setBusy(false); };
+    window.addEventListener('pageshow', restored);
+    return () => window.removeEventListener('pageshow', restored);
+  }, []);
   async function begin() {
     setBusy(true); setFailed(false);
     try { await startGoogleSignIn(); } catch { setFailed(true); setBusy(false); }

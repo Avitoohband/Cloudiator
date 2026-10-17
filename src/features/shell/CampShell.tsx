@@ -55,6 +55,9 @@ const shown = (element: HTMLElement | null): element is HTMLElement => !!element
   ? element.checkVisibility({ visibilityProperty: true })
   : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
 
+/** Whether a modal dialog is open (`:modal`, Safari 15.6+, within the project's Safari 16.4 floor). */
+const modalOpen = () => document.querySelector('dialog:modal') !== null;
+
 /** The fixture preview's schedule: the sample plan, read-only. */
 function SchedulePreview({ owner }: { owner: OwnerState | null }) {
   return <>
@@ -186,9 +189,12 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   useEffect(() => bridge.on('open-arena', () => setRail(state => (state.open === 'arena' ? state : railReducer(state, { toggle: 'arena' })))), [bridge]);
 
   // Escape closes the open menu (a native dialog inside a panel, such as a discard confirmation, handles its own);
-  // the first Tab from the page reveals the rail at its first icon.
+  // the first Tab from the page reveals the rail at its first icon. Both stand down while a modal dialog is open (the
+  // creation dialog, a discard confirmation): the page behind it is inert, and the dialog owns Tab and Escape even when
+  // the focus has fallen to <body> (13.6 review I1).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (modalOpen()) return;
       if (event.key === 'Escape') {
         const current = openRef.current;
         if (!current || event.defaultPrevented || (event.target instanceof Element && event.target.closest('dialog'))) return;

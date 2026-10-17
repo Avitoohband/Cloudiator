@@ -195,3 +195,50 @@ Range `1cd64eb..6bbbdbe`: `5c109f6` (feature) and `6bbbdbe` (review fixes). [Imp
   - a duplicated countdown hook;
   - no "Following …" feedback (mockup follow-up);
   - the first-Tab fallback path and narrow pointer windows are untested.
+
+## 13.6: Visitors watch and join
+
+Range `43573b9..0332c2a`: `6f5730c` (feature) and `0332c2a` (review fixes). [Implementer report](task-13.6-report.md).
+
+**Implementer evidence:**
+- Unit tests 949/949; typecheck clean.
+- `test:db` 177/177 with the Edge start time unchanged.
+- Build and `verify:static` clean (5 routes, 90 assets).
+- Development browser suite 338 passed, 22 skipped, 0 failed after the fixes; production gate 16 passed.
+- The controller re-ran the build and static scan after the fix round.
+
+**Round 1 (full review: spec, quality and visual).** Verdicts: spec compliant; quality Needs fixes.
+- **What it confirmed:**
+  - The visitor sees the camp with only the "Sign in with Google to join" chip (Google mark; "Sign in to join" on touch) and the five public menus.
+  - The visitor's My gladiator shows the sign-in prompt.
+  - After sign-in without a gladiator, a native modal "Create your gladiator" dialog opens over the running camp. "Not now" leaves a "Create your gladiator" chip, and the draft survives.
+  - A cancelled or failed sign-in returns to the visitor view with a short message, and the parameter is removed (Decision 6).
+  - A session change closes private menus and leaves no private value on screen.
+  - The carried Minors are fixed:
+    - Registration is hidden for visitors;
+    - a lost menu closes the rail;
+    - "Connection lost" shows only for `unavailable`.
+- **I1 (Important):** the shell's global Tab and Escape handling broke keyboard use inside the modal dialog.
+- **I2 (Important):** Back from Google could leave the join button stuck on "Opening Google…" when the browser restores the page from its back-forward cache.
+
+**Controller ruling:** a 360×740 dialog overflow check joined the fix round, because the Global Constraint binds it and no screenshot covered it.
+
+**Round 2 (scoped re-review of `0332c2a`):** all ADDRESSED, no new breakage.
+- The keyboard guard stands down while a modal is open.
+- Focus moves to the alert after a refused creation.
+- A persisted `pageshow` resets the button; it is tested with a dispatched event, because this Chrome has no back-forward cache.
+- The dialog fits at 360 px.
+
+**Deferred Minors:**
+- **Edge cases:**
+  - a second Escape mid-send can close the dialog before success is applied;
+  - expiry and account-switch browser cases are untested;
+  - focus can fall to `body` after some unmounts.
+- **Polish:**
+  - a 28 px notice close button;
+  - the duplicated fake Google flow in two test helpers;
+  - one extra owner read;
+  - a duplicated modal query.
+- **Product choices for Avi:**
+  - My gladiator opens after creation, where the mockup shows a welcome toast;
+  - the creation dialog reopens on each visit until a gladiator exists.

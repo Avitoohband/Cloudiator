@@ -71,8 +71,10 @@ export type StandingsModel = {
 };
 
 /** Pure view of one league's standings and the owner's own figures. */
-export function StandingsView({ model, onLeague, onMore, onRetry, loadingMore = false }: {
+export function StandingsView({ model, onLeague, onMore, onRetry, onProfile, loadingMore = false }: {
   model: StandingsModel; onLeague(league: LeagueId): void; onMore(): void; onRetry(): void; loadingMore?: boolean;
+  /** Opens a row's profile card (Task 13.7: the keyboard path of a camp click); without it names are plain text. */
+  onProfile?(row: StandingRow): void;
 }) {
   const titleId = useId();
   const ownId = useId();
@@ -116,7 +118,9 @@ export function StandingsView({ model, onLeague, onMore, onRetry, loadingMore = 
                     <tbody>{rows.map(row => (
                       <tr key={row.gladiatorId} aria-current={row.gladiatorId === model.ownerId ? 'true' : undefined} className={row.gladiatorId === model.ownerId ? styles.mine : undefined}>
                         <td>{row.rank}</td>
-                        <th scope="row">{row.name}</th>
+                        <th scope="row">{onProfile
+                          ? <button type="button" className={styles.name} aria-label={`Profile: ${row.name}`} onClick={() => onProfile(row)}>{row.name}</button>
+                          : row.name}</th>
                         <td>{row.rating}</td>
                         <td>{row.humanWins}–{row.humanLosses}</td>
                         <td><span className={styles.notes}>
@@ -149,13 +153,15 @@ export type StandingsPanelProps = {
   clock: DisplayClock;
   /** The shared world revision (`GameUiState.revision`); a change re-reads the shown standings. */
   revision: string | null;
+  /** Opens a row's profile card. */
+  onProfile?(row: StandingRow): void;
 };
 
 /**
  * Live standings: reads the chosen league, pages with "More", and re-reads the loaded pages when the world revision
  * changes, which is when the server credits results. A failed read keeps any rows shown and offers a retry.
  */
-export function StandingsPanel({ reads, owner, revision }: StandingsPanelProps) {
+export function StandingsPanel({ reads, owner, revision, onProfile }: StandingsPanelProps) {
   const [league, setLeague] = useState<LeagueId>(owner?.progression.league ?? 'bronze');
   const [page, setPage] = useState<StandingsPages | null>(null);
   const [status, setStatus] = useState<StandingsModel['status']>(reads ? 'loading' : 'unavailable');
@@ -244,5 +250,5 @@ export function StandingsPanel({ reads, owner, revision }: StandingsPanelProps) 
     own: owner ? { name: owner.name, league: owner.progression.league, rating: owner.progression.rating, renown: owner.wallets.renown,
       combatStrength: strength && strength.id === owner.gladiatorId ? strength.value : null } : null,
   };
-  return <StandingsView model={model} onLeague={setLeague} onMore={() => void more()} onRetry={() => void load(league, true)} loadingMore={loadingMore} />;
+  return <StandingsView model={model} onLeague={setLeague} onMore={() => void more()} onRetry={() => void load(league, true)} onProfile={onProfile} loadingMore={loadingMore} />;
 }

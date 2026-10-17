@@ -2,24 +2,20 @@
 
 // The "Gladiators" menu: everyone in the shared world, with a name filter, and Find (centre the camera on them) and
 // Follow (keep them in view) for each gladiator drawn in the camp; a player also gets Find and Follow for their own.
-// Gladiators away on an expedition say so instead (the link to their expedition arrives in Task 13.8). Every world click
-// has this keyboard path. Without a camp view (no WebGL, art that failed to load) the buttons stay, disabled with the
-// reason. Names render as React text.
+// Gladiators away on an expedition say so instead (the link to their expedition arrives in Task 13.8). Each name opens
+// that gladiator's profile card (Task 13.7). Every world click has this keyboard path. Without a camp view (no WebGL,
+// art that failed to load), or for a gladiator the camp does not draw, the buttons stay, disabled with the reason.
+// Names render as React text.
 import { useId, useState } from 'react';
-import type { PublicActor, WorldSnapshot } from '@contracts/reads';
+import type { WorldSnapshot } from '@contracts/reads';
 import type { SceneBridge } from '../../game/bridge';
+import { classLine, isAway, placeOf } from './actor-text';
 import styles from './CharacterPanel.module.css';
 
 /** The scene's last `roster` event: who is drawn in the camp, and who is away. */
 export type Roster = { inCamp: readonly string[]; away: readonly { gladiatorId: string; name: string; location: string }[] };
 
-const PLACE: Record<string, string> = {
-  orientation: 'Arriving at camp', camp: 'At camp', training: 'Training', rest: 'Resting', arena: 'In the arena', tournament: 'In a tournament',
-};
-const placeOf = (actor: PublicActor) => (actor.location.startsWith('expedition:') ? 'On an expedition' : PLACE[actor.location] ?? 'At camp');
-const title = (value: string) => value[0].toUpperCase() + value.slice(1);
-
-export function RosterPanel({ world, ownerId, roster, sceneStatus, following, bridge, onDone }: {
+export function RosterPanel({ world, ownerId, roster, sceneStatus, following, bridge, onDone, onProfile }: {
   world: WorldSnapshot | null;
   /** The player's own gladiator, or null for a visitor. */
   ownerId: string | null;
@@ -30,10 +26,13 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
   bridge: SceneBridge;
   /** Find and Follow hand the view back to the camp: the menu closes. */
   onDone(): void;
+  /** Opens a gladiator's profile card, as a click on them in the camp does. */
+  onProfile(gladiatorId: string): void;
 }) {
   const [filter, setFilter] = useState('');
   const reasonId = useId();
   const awayId = useId();
+  const absentId = useId();
   const reason = sceneStatus === 'unavailable' ? 'The camp view is unavailable, so gladiators cannot be shown on the map.'
     : sceneStatus === 'loading' || !roster ? 'The camp view is still opening.' : null;
   const inCamp = new Set(roster?.inCamp ?? []);
@@ -61,18 +60,23 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
       {actors.length === 0 ? <p className="muted">{world ? `No gladiator matches “${filter.trim()}”.` : 'The world is still loading.'}</p> : (
         <ul className={styles.list} aria-label="Gladiators">
           {actors.map(actor => {
-            const away = actor.location.startsWith('expedition:');
-            const disabled = !!reason || !inCamp.has(actor.gladiatorId);
+            // Neither drawn in the camp nor away (13.5 review): the row says why its buttons are off.
+            const away = isAway(actor);
+            const absent = !reason && !away && !inCamp.has(actor.gladiatorId);
+            const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
             return (
               <li key={actor.gladiatorId} className={styles.row}>
-                <p className={styles.who}>{actor.name}{actor.gladiatorId === ownerId ? ' (you)' : ''}
-                  <span>{title(actor.classId)} · Level {actor.level} · {title(actor.league)} league · {placeOf(actor)}</span>
+                <p className={styles.who}>
+                  <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
+                  {actor.gladiatorId === ownerId ? ' (you)' : ''}
+                  <span>{classLine(actor)} · {placeOf(actor)}</span>
+                  {absent && <span id={`${absentId}-${actor.gladiatorId}`}>Not in the camp right now.</span>}
                 </p>
                 {away ? <span className={styles.away}>On an expedition</span> : (
                   <span className={styles.actions}>
-                    <button type="button" disabled={disabled} aria-describedby={reason ? reasonId : undefined} aria-label={`Find ${actor.name}`} onClick={() => find(actor.gladiatorId)}>Find</button>
-                    <button type="button" disabled={disabled} aria-describedby={reason ? reasonId : undefined} aria-label={`Follow ${actor.name}`}
-                      aria-pressed={following === actor.gladiatorId && !disabled} onClick={() => follow(actor.gladiatorId)}>Follow</button>
+                    <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Find ${actor.name}`} onClick={() => find(actor.gladiatorId)}>Find</button>
+                    <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Follow ${actor.name}`}
+                      aria-pressed={following === actor.gladiatorId && !reason && !absent} onClick={() => follow(actor.gladiatorId)}>Follow</button>
                   </span>
                 )}
               </li>

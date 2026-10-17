@@ -1,7 +1,14 @@
 // Typed event bridge between the Phaser scenes and React management panels.
 // Scenes emit user intent (select, open merchant, view replay...); panels send camera commands.
+import type { Point } from './iso';
+
 export type SceneEvents = {
-  'select-character': { gladiatorId: string };
+  /**
+   * Scene to UI: a click on a gladiator's body, and where it is drawn (canvas-relative CSS px, the scene's `screenOf`) so
+   * the profile card can open beside it; null when it is not placed.
+   */
+  'select-character': { gladiatorId: string; screen: Point | null };
+  /** Scene to UI: a click on a merchant's stall or the merchant (Task 13.7 opens that merchant's shop tab). */
   'open-merchant': { merchant: 'weapons' | 'armor' };
   'view-expedition': { activityId: string };
   'view-replay': { activityId: string };

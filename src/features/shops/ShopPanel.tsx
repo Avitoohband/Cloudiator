@@ -1,14 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { shopOffers, type Merchant } from '@domain/inventory';
 
-export function ShopPanel({ owner, busy, preview, buy }: {
-  owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void;
+/**
+ * The weapon smith's and the armorer's shops. `initialMerchant` opens that merchant's tab and brings the shops into view in
+ * their scrolling menu (a click on the merchant in the camp, Task 13.7); without it the weapon smith's tab shows.
+ */
+export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
+  owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void; initialMerchant?: Merchant;
 }) {
-  const [merchant, setMerchant] = useState<Merchant>('weaponsmith');
+  const [merchant, setMerchant] = useState<Merchant>(initialMerchant ?? 'weaponsmith');
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => { if (initialMerchant) scrollToTop(section.current); }, [initialMerchant]);
   const [currency, setCurrency] = useState<'money' | 'renown'>('money');
   const [tier, setTier] = useState(1), [quantity, setQuantity] = useState(1);
   const validQuantity = Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 60;
@@ -16,7 +22,7 @@ export function ShopPanel({ owner, busy, preview, buy }: {
   const full = owner.inventory.length + quantity > owner.inventoryCapacity;
   const banner = CATALOG_V1.cosmetics.banner;
   const ownsBanner = owner.ownedCosmetics.some(item => item.catalogId === banner.id);
-  return <section aria-labelledby="shops-heading" className="shops-panel">
+  return <section ref={section} aria-labelledby="shops-heading" className="shops-panel">
     <h2 id="shops-heading">Shops</h2>
     <div className="shop-merchants" aria-label="Merchants">
       <button aria-pressed={merchant === 'weaponsmith'} onClick={() => setMerchant('weaponsmith')}>Weaponsmith</button>
@@ -48,4 +54,15 @@ export function ShopPanel({ owner, busy, preview, buy }: {
       {ownsBanner ? <p>Arena banner · Owned · Account-bound</p> : <button disabled={busy || (!preview && owner.wallets.renown - owner.reservedFees.renown < banner.renownPrice)} onClick={() => buy(banner.id, 1)}>Buy Arena banner</button>}
     </article>}
   </section>;
+}
+
+/** Scrolls the nearest scrolling ancestor (the menu's body) so `element` starts at its top; the page itself never moves. */
+function scrollToTop(element: HTMLElement | null) {
+  for (let parent = element?.parentElement; element && parent; parent = parent.parentElement) {
+    const { overflowY } = getComputedStyle(parent);
+    if (overflowY === 'auto' || overflowY === 'scroll') {
+      parent.scrollTop += element.getBoundingClientRect().top - parent.getBoundingClientRect().top;
+      return;
+    }
+  }
 }

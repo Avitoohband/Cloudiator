@@ -230,6 +230,48 @@ test('fixture recent results list public completions of every kind, newest first
   expect(page.rows.some(row => row.summary.activityId === REPLAY_FIXTURES.tie.activityId)).toBe(false);
 });
 
+test('fixture Training and Rest results fall in slots where their gladiators did nothing else (13.2 review)', async () => {
+  const { RESULTS_FIXTURE } = await import('../fixtures/results');
+  const { worldFixture } = await import('../fixtures/domain');
+  const { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId } = await import('../fixtures/arena');
+  const { REPLAY_TIMELINES } = await import('../fixtures/battles');
+  const { EXPEDITION_FIXTURE_TIMELINES } = await import('../fixtures/expeditions');
+  const { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS } = await import('../fixtures/expedition-ids');
+  const { TOURNAMENT_OWNER_TIMELINES } = await import('../fixtures/tournaments');
+  const SLOT_MS = 4_800_000;
+  // Every slot each gladiator spends on a fixture activity: its own timelines, and every bout it fights in.
+  const busy = new Map<string, Set<number>>();
+  const mark = (id: string | null | undefined, slot: number | null) => {
+    if (!id || slot === null) return;
+    busy.set(id, (busy.get(id) ?? new Set()).add(slot));
+  };
+  const slotOf = (t: { stages: { startedAtMs: number }[]; summary?: { settledAtMs: number }; completion?: { settledAtMs: number } }) => {
+    if (t.stages.length) return Math.floor(t.stages[0].startedAtMs / SLOT_MS);
+    const settled = t.summary?.settledAtMs ?? t.completion?.settledAtMs;
+    return settled === undefined ? null : Math.floor(settled / SLOT_MS) - 1;
+  };
+  for (const key of Object.keys(ARENA_ACTIVITIES) as (keyof typeof ARENA_ACTIVITIES)[]) {
+    mark(ARENA_GLADIATORS[ARENA_ACTIVITIES[key].gladiator].id, slotOf(ARENA_TIMELINES[arenaActivityId(key)]));
+  }
+  for (const key of Object.keys(EXPEDITION_FIXTURES) as (keyof typeof EXPEDITION_FIXTURES)[]) {
+    mark((EXPEDITION_FIXTURES[key].owner ? EXPEDITION_GLADIATORS.aster : EXPEDITION_GLADIATORS.varro).id, slotOf(EXPEDITION_FIXTURE_TIMELINES[key]));
+  }
+  const timelines = [...Object.values(ARENA_TIMELINES), ...Object.values(REPLAY_TIMELINES), ...Object.values(EXPEDITION_FIXTURE_TIMELINES), ...Object.values(TOURNAMENT_OWNER_TIMELINES)];
+  for (const t of timelines) for (const stage of t.stages) for (const p of stage.battleLog?.participants ?? []) mark(p.gladiatorId, slotOf(t));
+  const rows = RESULTS_FIXTURE[0].rows;
+  const plain = rows.filter(r => r.summary.resolvedKind === 'training' || r.summary.resolvedKind === 'rest');
+  expect(plain.map(r => r.summary.resolvedKind).sort()).toEqual(['rest', 'training']);
+  for (const row of plain) {
+    const slot = Math.floor(row.summary.settledAtMs / SLOT_MS) - 1;
+    const label = `${row.name} ${row.summary.resolvedKind} in slot ${slot - worldFixture.slotIndex}`;
+    expect(busy.get(row.gladiatorId)?.has(slot) ?? false, label).toBe(false);
+    expect(rows.filter(r => r.gladiatorId === row.gladiatorId && Math.floor(r.summary.settledAtMs / SLOT_MS) - 1 === slot), label).toEqual([row]);
+    // A settled slot before the current one, at its end, as the live settlement records it.
+    expect(row.summary.settledAtMs % SLOT_MS, label).toBe(0);
+    expect(slot, label).toBeLessThan(worldFixture.slotIndex);
+  }
+});
+
 test('fixture recent results follow the live cursor rules, and callers get copies', async () => {
   const { RESULTS_FIXTURE, resultPages } = await import('../fixtures/results');
   const { GatewayReadError } = await import('../../src/lib/api/gateway');

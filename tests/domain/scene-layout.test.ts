@@ -352,11 +352,11 @@ describe('scene bridge', () => {
     const bridge = createSceneBridge();
     const select = vi.fn();
     const off = bridge.on('select-character', select);
-    bridge.emit('select-character', { gladiatorId: 'g1' });
+    bridge.emit('select-character', { gladiatorId: 'g1', screen: { x: 10, y: 20 } });
     off();
-    bridge.emit('select-character', { gladiatorId: 'g2' });
+    bridge.emit('select-character', { gladiatorId: 'g2', screen: null });
     expect(select).toHaveBeenCalledTimes(1);
-    expect(select).toHaveBeenCalledWith({ gladiatorId: 'g1' });
+    expect(select).toHaveBeenCalledWith({ gladiatorId: 'g1', screen: { x: 10, y: 20 } });
     const merchant = vi.fn();
     bridge.on('open-merchant', merchant);
     bridge.destroy();
@@ -426,7 +426,7 @@ describe('scene bridge', () => {
     for (const event of ['select-character', 'open-merchant', 'view-expedition', 'view-replay', 'return-camp', 'follow-character'] as const) {
       bridge.on(event, () => seen.push(event));
     }
-    bridge.emit('select-character', { gladiatorId: 'g' });
+    bridge.emit('select-character', { gladiatorId: 'g', screen: null });
     bridge.emit('open-merchant', { merchant: 'armor' });
     bridge.emit('view-expedition', { activityId: 'a' });
     bridge.emit('view-replay', { activityId: 'a' });

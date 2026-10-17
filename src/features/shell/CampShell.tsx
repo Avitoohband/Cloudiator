@@ -7,12 +7,16 @@
 // and returns the focus to its icon. Menus render outside the camp view's element, so its keys never see their typing.
 //
 // Task 13.6, visitors and joining: anyone watches the camp and its public menus; the chip starts Google sign-in. Signed in
-// without a gladiator, the "Create your gladiator" dialog opens over the running camp (once per account and page load;
-// the chip and My gladiator offer it again). When the viewer stops being a player (sign-out, expiry, another account),
-// a private menu that is open closes. A cancelled or failed sign-in comes back as `?signin=cancelled|failed` (plan
-// Decision 6): the shell shows a short message and removes the parameter.
+// without a gladiator, the "Create your gladiator" dialog opens over the running camp (`useJoining`). When the viewer
+// stops being a player (sign-out, expiry, another account), a private menu that is open closes. A cancelled or failed
+// sign-in comes back as `?signin=cancelled|failed` (plan Decision 6): the shell shows a short message and removes it.
+//
+// Task 13.7: clicks on gladiators and merchants in the camp (`useCampClicks`) open profile cards and the shops; the
+// Gladiators list and the standings open the same cards. Escape closes the card first when it has the focus or no menu
+// is open. Results lists the recent results.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { Phase } from '@contracts/commands';
 import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
@@ -20,11 +24,13 @@ import { useGameState } from '../character/useGameState';
 import { CharacterPanel } from '../character/CharacterPanel';
 import { CreateCharacter } from '../character/CreateCharacter';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
+import { ProfileLayer } from '../character/ProfileCard';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { InventoryPanel } from '../inventory/InventoryPanel';
 import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
+import { ResultsPanel } from '../results/ResultsPanel';
 import { GameViewport } from '../../game/GameViewport';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { CornerChip } from './CornerChip';
@@ -32,6 +38,8 @@ import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
+import { useCampClicks } from './useCampClicks';
+import { useJoining } from './useJoining';
 import styles from './shell.module.css';
 
 /** How a Google sign-in that did not complete came back (`AuthCallback`, plan Decision 6). */
@@ -57,6 +65,8 @@ const shown = (element: HTMLElement | null): element is HTMLElement => !!element
 
 /** Whether a modal dialog is open (`:modal`, Safari 15.6+, within the project's Safari 16.4 floor). */
 const modalOpen = () => document.querySelector('dialog:modal') !== null;
+/** Gives the keyboard back to the camp view (the menus hand the view to the camp). */
+const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 
 /** The fixture preview's schedule: the sample plan, read-only. */
 function SchedulePreview({ owner }: { owner: OwnerState | null }) {
@@ -74,16 +84,18 @@ function SchedulePreview({ owner }: { owner: OwnerState | null }) {
   </>;
 }
 
-/** Results: in fixture mode the sample replays and expeditions (Task 13.7 adds the list of recent results). */
-function ResultsMenu({ fixture, samples, previewFailed }: { fixture: boolean; samples: Samples; previewFailed: boolean }) {
-  if (!fixture) return <p className="panel-notice">Recent results are not available in this build yet.</p>;
-  if (!samples.replays.length && !samples.expeditions.length) return <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
+/** Results: the recent results, and in fixture mode the sample replays and expeditions below them. */
+function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, onWatch }: {
+  fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; onWatch(activityId: string): void;
+}) {
   return <>
-    {samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
+    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} onWatch={onWatch} />
+      : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
+    {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
       <ul>{samples.replays.map(r => <li key={r.activityId}><Link href={`/replay/?mode=fixture&activity=${r.activityId}`}>{r.label}</Link></li>)}</ul>
     </nav>}
-    {samples.expeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
+    {fixture && samples.expeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
       <p className="eyebrow">SAMPLE EXPEDITIONS</p>
       <ul>{samples.expeditions.map(e => <li key={e.activityId}><Link href={`/expedition/?mode=fixture&activity=${e.activityId}`}>{e.label}</Link></li>)}</ul>
     </nav>}
@@ -100,6 +112,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
 }) {
   const [bridge] = useState(createSceneBridge);
   const [gateway] = useState(createLiveGateway);
+  const router = useRouter();
   const [previewError, setPreviewError] = useState(false);
   const [samples, setSamples] = useState<Samples>(NO_SAMPLES);
   const [fixtureReads, setFixtureReads] = useState<GameGateway | null>(null);
@@ -121,8 +134,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   const reads = fixture ? fixtureReads : gateway;
   // One sync controller, display clock and owner state for the camp and every menu (the fixture gateway once loaded).
   const game = useGameState(reads, { fixture, previewAs });
-  const { owner, world, clock } = game;
-  const menus = menusFor(game.viewer);
+  const { owner, world, clock, viewer } = game;
+  const menus = menusFor(viewer);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
   const send = useCallback((event: RailEvent) => setRail(state => railReducer(state, event)), []);
@@ -135,21 +148,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   useEffect(() => { if (lost) send('escape'); }, [lost, send]);
   const show = useCallback((id: MenuId) => { if (openRef.current !== id) send({ toggle: id }); }, [send]);
 
-  // Joining: signed in without a gladiator, the creation dialog opens over the camp once per account (and page load).
-  const [creating, setCreating] = useState(false);
-  const offered = useRef<string | null>(null);
-  const { viewer, refreshOwner } = game;
   const account = game.session.userId;
-  useEffect(() => {
-    if (viewer === 'visitor') offered.current = null;
-    if (viewer !== 'no-gladiator') { setCreating(false); return; }
-    if (account !== null && offered.current !== account) { offered.current = account; setCreating(true); }
-  }, [viewer, account]);
-  // Created: the dialog closes, and My gladiator shows the new gladiator once its owner state is read.
-  const created = useCallback(() => {
-    setCreating(false);
-    void refreshOwner().catch(() => undefined).finally(() => show('gladiator'));
-  }, [refreshOwner, show]);
+  const joining = useJoining({ viewer, account, refreshOwner: game.refreshOwner, show });
 
   // A sign-in that did not complete: keep its message, and take the parameter out of the address.
   const [signInNotice, setSignInNotice] = useState<SignInResult | null>(signInResult);
@@ -175,8 +175,10 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   // Find and Follow hand the view back to the camp: the menu closes and the camp view takes the keyboard.
   const handBack = useCallback(() => {
     send('camp-click');
-    document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
+    focusCamp();
   }, [send]);
+
+  const { card, cardRef, openRow, closeCard, shop } = useCampClicks({ bridge, open, viewer, world, show, focusCamp });
 
   // The scene's public facts the menus show, kept while they are closed.
   const [fights, setFights] = useState<readonly ArenaFightSummary[]>([]);
@@ -188,16 +190,22 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   // A click on an Arena entrant (or a ring-fight button) opens its card in the Arena menu.
   useEffect(() => bridge.on('open-arena', () => setRail(state => (state.open === 'arena' ? state : railReducer(state, { toggle: 'arena' })))), [bridge]);
 
-  // Escape closes the open menu (a native dialog inside a panel, such as a discard confirmation, handles its own);
-  // the first Tab from the page reveals the rail at its first icon. Both stand down while a modal dialog is open (the
-  // creation dialog, a discard confirmation): the page behind it is inert, and the dialog owns Tab and Escape even when
-  // the focus has fallen to <body> (13.6 review I1).
+  // Escape closes the profile card when it has the focus or no menu is open, and otherwise the open menu (a native dialog
+  // inside a panel, such as a discard confirmation, handles its own); the first Tab from the page reveals the rail at its
+  // first icon. Both stand down while a modal dialog is open (the creation dialog, a discard confirmation): the page
+  // behind it is inert, and the dialog owns Tab and Escape even when the focus has fallen to <body> (13.6 review I1).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (modalOpen()) return;
       if (event.key === 'Escape') {
         const current = openRef.current;
-        if (!current || event.defaultPrevented || (event.target instanceof Element && event.target.closest('dialog'))) return;
+        if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('dialog'))) return;
+        if (cardRef.current && (!current || (event.target instanceof Element && event.target.closest('[data-profile-card]')))) {
+          event.preventDefault();
+          closeCard(true);
+          return;
+        }
+        if (!current) return;
         event.preventDefault();
         close(current);
       } else if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
@@ -211,25 +219,34 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [close, send]);
+  }, [close, closeCard, send]);
+
+  // Results open a kept replay on the existing replay page; Task 13.8 opens it over the camp instead.
+  const watchReplay = useCallback((activityId: string) => {
+    router.push(`/replay/?${fixture ? 'mode=fixture&' : ''}activity=${encodeURIComponent(activityId)}`);
+  }, [fixture, router]);
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
+  const ownerId = owner?.gladiatorId ?? null;
   const content = (id: MenuId) => {
     switch (id) {
-      case 'gladiator': return <CharacterPanel viewer={game.viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
+      case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
-        onCreate={() => setCreating(true)} />;
+        onCreate={joining.offer} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} />
         : <SchedulePreview owner={owner} />;
-      case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} preview={fixture} /> : null;
+      case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} preview={fixture}
+        initialMerchant={shop?.merchant} merchantRequest={shop?.request} /> : null;
       case 'arena': return <ArenaMenu open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
-        samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision} />;
+        samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
+        onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
-        refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={game.viewer} />;
-      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} />;
-      case 'gladiators': return <RosterPanel world={world} ownerId={owner?.gladiatorId ?? null} roster={roster} sceneStatus={game.sceneStatus}
-        following={following} bridge={bridge} onDone={handBack} />;
+        refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} />;
+      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} onWatch={watchReplay} />;
+      case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
+        following={following} bridge={bridge} onDone={handBack}
+        onProfile={gladiatorId => openRow(gladiatorId)} />;
     }
   };
 
@@ -238,8 +255,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
-      <CornerChip viewer={game.viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock}
-        onOpenMenu={show} onCreate={() => setCreating(true)} />
+      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock}
+        onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices}>
@@ -253,18 +270,24 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
+      {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
+        following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
+        onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
+        onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}
       <main id="main" className={styles.camp} data-camp-view=""
         onPointerDown={event => { press.current = { x: event.clientX, y: event.clientY }; }}
         onPointerUp={event => {
           const start = press.current;
           press.current = null;
-          if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < CLICK_PX) send('camp-click');
+          // A click on the camp closes the menus and the card; a gladiator's click opens its card just after (Phaser
+          // hears the mouseup that follows this pointerup).
+          if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < CLICK_PX) { send('camp-click'); closeCard(false); }
         }}>
-        <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={owner?.gladiatorId ?? null} clock={clock} timelines={reads} tournaments={reads}
+        <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
           onStatus={game.setSceneStatus} />
       </main>
-      {creating && viewer === 'no-gladiator' && (
-        <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={created} onDismiss={() => setCreating(false)} />
+      {joining.creating && (
+        <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} />
       )}
     </div>
   );

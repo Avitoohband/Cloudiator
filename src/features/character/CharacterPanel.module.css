@@ -187,6 +187,25 @@
   font-size: 0.74rem;
 }
 
+/* A name in the list opens that gladiator's profile card (Task 13.7): it reads as the name, underlined on hover. */
+.row .nameButton {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.row .nameButton:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .actions {
   display: flex;
   flex: none;

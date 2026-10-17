@@ -103,6 +103,28 @@
   overflow-wrap: anywhere;
 }
 
+/* A name opens that gladiator's profile card (Task 13.7); it reads as the name, underlined on hover. */
+.name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.name:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.name:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
 .mine {
   background: #2b2a2c;
 }

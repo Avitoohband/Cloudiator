@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameCommand } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
-import { npcSaleValue } from '@domain/inventory';
+import { npcSaleValue, type Merchant } from '@domain/inventory';
 import type { GameGateway } from '../../lib/api/gateway';
 import { ShopPanel } from '../shops/ShopPanel';
 
@@ -12,8 +12,12 @@ type InventoryCommand = Extract<GameCommand, { kind: 'buy-shop' | 'sell-item' | 
 type Intent = Omit<Extract<InventoryCommand, { kind: 'buy-shop' }>, 'operationId'> | Omit<Extract<InventoryCommand, { kind: 'sell-item' | 'discard-item' }>, 'operationId'>;
 const itemName = (item: ItemInstance) => item.catalogId === 'salvage' ? 'Salvage' : CATALOG_V1.items[item.catalogId]?.name ?? item.catalogId;
 
-export function InventoryPanel({ owner, gateway, refresh, preview = false }: {
+export function InventoryPanel({ owner, gateway, refresh, preview = false, initialMerchant, merchantRequest = 0 }: {
   owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; preview?: boolean;
+  /** Opens the shops at this merchant's tab (a click on the merchant in the camp). */
+  initialMerchant?: Merchant;
+  /** Counts merchant clicks: each one opens the shops at `initialMerchant` again, even the same merchant's. */
+  merchantRequest?: number;
 }) {
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [confirmation, setConfirmation] = useState<{ item: ItemInstance; quantity: number } | null>(null);
@@ -73,7 +77,7 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false }: {
     })}</div>
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
     {retry && <button disabled={busy} onClick={() => { if (attempt.current) void send(attempt.current); }}>Retry request</button>}
-    <ShopPanel owner={owner} busy={busy} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
+    <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => setConfirmation(null)}>
       <h2 id="discard-heading">Confirm discard</h2><p>Discard {confirmation?.quantity} × {confirmation ? itemName(confirmation.item) : ''}? This gives no money or renown.</p>
       <button autoFocus onClick={() => { dialog.current?.close(); setConfirmation(null); }}>Keep item</button>

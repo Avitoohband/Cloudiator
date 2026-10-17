@@ -447,7 +447,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => {
         if (dragged(pointer)) return;
         selected = actor.gladiatorId;
-        deps.bridge.emit('select-character', { gladiatorId: actor.gladiatorId });
+        // Where the body is drawn, so the profile card opens beside it (Task 13.7).
+        deps.bridge.emit('select-character', { gladiatorId: actor.gladiatorId, screen: screenOfView(v) });
         // An Arena entrant (warming up, fighting or done) opens its Arena card.
         if (v.location === 'arena' && v.activityId) deps.bridge.emit('open-arena', { activityId: v.activityId, gladiatorId: actor.gladiatorId });
       });
@@ -1127,6 +1128,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     for (const off of unsubscribe.splice(0)) off();
   }
 
+  /** Canvas-relative CSS pixel position of an actor's body (20 art px above its feet), or null without a live camera. */
+  function screenOfView(v: ActorView): Point | null {
+    if (!live()) return null;
+    const cam = scene.cameras.main;
+    const s = worldToScreen(v.x, v.y);
+    return { x: (s.x - cam.worldView.x) * cam.zoom, y: (s.y - 20 - cam.worldView.y) * cam.zoom };
+  }
+
   const handle: CampSceneHandle = {
     setWorld(next) {
       world = next;
@@ -1192,10 +1201,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     },
     screenOf(id) {
       const v = views.get(id);
-      if (!v || !live()) return null;
-      const cam = scene.cameras.main;
-      const s = worldToScreen(v.x, v.y);
-      return { x: (s.x - cam.worldView.x) * cam.zoom, y: (s.y - 20 - cam.worldView.y) * cam.zoom };
+      return v ? screenOfView(v) : null;
     },
   };
   return { scene, handle };

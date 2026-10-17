@@ -1,0 +1,97 @@
+/* Recent results in the Results menu (the approved mockup's rows): what happened, its kind and time, and a Replay button. */
+.results {
+  min-width: 0;
+  margin-bottom: 1rem;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.what {
+  min-width: 0;
+}
+
+.line {
+  margin: 0;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.when {
+  margin: 0;
+  color: var(--ink-dim, var(--muted));
+  font-size: 0.74rem;
+}
+
+.you {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(230, 180, 80, 0.92);
+  color: #2a1d05;
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.watch,
+.more,
+.failed button {
+  flex: none;
+  min-height: 36px;
+  padding: 5px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.watch:hover,
+.more:hover,
+.failed button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.watch:focus-visible,
+.more:focus-visible,
+.failed button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.more {
+  margin-top: 10px;
+}
+
+.failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.failed p,
+.moreFailed {
+  margin: 0;
+  font-size: 0.8rem;
+}

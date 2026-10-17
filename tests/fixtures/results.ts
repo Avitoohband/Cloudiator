@@ -2,7 +2,9 @@
 // first, as the live `recent_results` read serves them (Task 13.2). A completion holds only what a spectator may see (what
 // happened, how it ended and when), never the owner's rewards, receipt or rating change. Only the tournament timelines carry
 // a `completion`; for the others it is the six public fields of their settled summary. Training and Rest have no replay, so
-// the fixtures hold no timeline for them: two plain completions stand in. Like arena.ts, this imports the engine-generated
+// the fixtures hold no timeline for them: two plain completions stand in, 3 and 4 slots ago, where Varro and Cassia
+// have no other fixture activity (theirs are 1 and 2 slots ago; 13.2 review). Aster's independent sample sets (Arena
+// samples, replays, expeditions) still share some slots. Like arena.ts, this imports the engine-generated
 // JSON through the timeline modules, so Playwright specs (whose loader cannot import JSON) must not import it.
 import type { PublicActivitySummary, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events.ts';
 import type { ResultRow, ResultsPage } from '../../supabase/functions/_shared/contracts/reads.ts';
@@ -30,10 +32,13 @@ function rowOf(gladiator: { id: string; name: string }, timeline: RevealedTimeli
   const summary = completionOf(timeline);
   return summary ? [{ gladiatorId: gladiator.id, name: gladiator.name, summary }] : [];
 }
-/** A Training or Rest completion settled `slotsAgo` slots before the current one began (it has no replay). */
+/**
+ * A Training or Rest completion of the slot `slotsAgo` slots before the current one (as ARENA_ACTIVITIES counts them),
+ * settled at that slot's end. It has no replay.
+ */
 function plainRow(gladiator: { id: string; name: string }, kind: 'training' | 'rest', slotsAgo: number): ResultRow {
   return { gladiatorId: gladiator.id, name: gladiator.name, summary: { activityId: fixtureUuid(`results-${kind}-${gladiator.name}`),
-    resolvedKind: kind, result: 'completed', success: true, settledAtMs: SLOT_START - slotsAgo * SLOT_MS, replayExpiry: { state: 'expired' } } };
+    resolvedKind: kind, result: 'completed', success: true, settledAtMs: SLOT_START - (slotsAgo - 1) * SLOT_MS, replayExpiry: { state: 'expired' } } };
 }
 
 /** Newest first, then by activity id: the order of the live read. */
@@ -43,7 +48,7 @@ const ROWS: ResultRow[] = [
   ...(Object.keys(EXPEDITION_FIXTURES) as ExpeditionFixtureKey[]).flatMap(key =>
     rowOf(EXPEDITION_FIXTURES[key].owner ? EXPEDITION_GLADIATORS.aster : EXPEDITION_GLADIATORS.varro, EXPEDITION_FIXTURE_TIMELINES[key])),
   ...Object.values(TOURNAMENT_OWNER_TIMELINES).flatMap(timeline => rowOf(aster, timeline)),
-  plainRow(varro, 'training', 0), plainRow(cassia, 'rest', 1),
+  plainRow(varro, 'training', 3), plainRow(cassia, 'rest', 4),
 ].sort((a, b) => b.summary.settledAtMs - a.summary.settledAtMs || (a.summary.activityId < b.summary.activityId ? -1 : 1));
 
 /**

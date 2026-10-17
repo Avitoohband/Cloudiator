@@ -169,8 +169,9 @@ const sectionTag = (level: HeadingLevel) => (level === 1 ? 'h2' : 'h3');
 
 /**
  * Shown for a missing, malformed or unreadable expedition (nothing is drawn or read further), and for a guessed or
- * unknown one (`not-yet`), which shows no summary at all. Over the camp there is no Camp link (the scene has Back to
- * camp) and the title is an h2.
+ * unknown one (`not-yet`), which shows no summary at all. A failed read cannot be loaded right now (timelines have had a
+ * reader since Task 13.2, so it is no longer "in this build"; final review Minor 6). Over the camp there is no Camp link
+ * (the scene has Back to camp) and the title is an h2.
  */
 export function ExpeditionUnavailable({ fixture, reason, overCamp = false }: { fixture: boolean; reason: 'not-found' | 'unavailable' | 'not-yet'; overCamp?: boolean }) {
   const titleId = useId();
@@ -179,7 +180,7 @@ export function ExpeditionUnavailable({ fixture, reason, overCamp = false }: { f
     <Title id={titleId}>{reason === 'not-yet' ? 'This expedition is not available yet' : 'This expedition is not available'}</Title>
     <p>{reason === 'not-yet' ? 'Nothing has been revealed for it. Only the revealed stages of an expedition are ever shown, as they happen.'
       : reason === 'not-found' ? 'No expedition matches this link.'
-        : 'It may not exist, or expedition scenes cannot be loaded in this build yet. Only revealed stages of an expedition are ever shown.'}</p>
+        : 'This expedition cannot be loaded right now. Only revealed stages of an expedition are ever shown.'}</p>
     {!overCamp && <Link className={styles.camp} href={fixture ? '/game/?mode=fixture' : '/game/'}>Camp</Link>}
   </section>;
 }

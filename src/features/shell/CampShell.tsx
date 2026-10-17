@@ -44,7 +44,7 @@ import { MenuSurface } from './MenuSurface';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
-import { sceneForResult, type SceneView } from './scene-url';
+import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
 import { useCampClicks } from './useCampClicks';
 import { useJoining } from './useJoining';
 import { useSceneHistory } from './useSceneHistory';
@@ -131,7 +131,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   /** `?signin=`: a Google sign-in that was cancelled or failed has returned to the camp. */
   signInResult?: SignInResult | null;
   /** `?view=replay|expedition&activity=…`: the scene over the camp (plan Decision 4). */
-  scene?: SceneView | null;
+  scene?: SceneAddress | null;
 }) {
   const [bridge] = useState(createSceneBridge);
   const [gateway] = useState(createLiveGateway);
@@ -141,7 +141,9 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
 
   useEffect(() => {
     let active = true;
-    if (fixture) {
+    // The inlined build flag (as the replay and expedition pages guard it) lets a production export drop the fixture
+    // gateway's chunk and its sample data; the prop alone would keep it (final review Minor 4).
+    if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true' && fixture) {
       import('../../lib/api/fixture-gateway')
         .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_ARENA, FIXTURE_TOURNAMENTS }) => {
           if (!active) return;
@@ -293,8 +295,10 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices}>
-        {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review). */}
-        {!fixture && game.syncError === 'unavailable' && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
+        {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
+            signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
+        {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))
+          && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
         {signInNotice && <div className={styles.signInNotice} role="status">
           <p>{SIGN_IN_MESSAGES[signInNotice]}</p>
           <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setSignInNotice(null)}>×</button>

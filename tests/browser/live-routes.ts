@@ -38,7 +38,7 @@ export async function seedSession(context: BrowserContext, user: TestUser = test
   await context.addInitScript(({ user, expiresIn }) => {
     const exp = Math.floor(Date.now() / 1000) + expiresIn;
     const token = `${btoa(JSON.stringify({ alg: 'HS256' }))}.${btoa(JSON.stringify({ sub: user.id, exp }))}.test-only`;
-    localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test-only', token_type: 'bearer', expires_at: exp, expires_in: expiresIn, user }));
+    localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: `test-only:${user.id}`, token_type: 'bearer', expires_at: exp, expires_in: expiresIn, user }));
   }, { user, expiresIn });
   return user;
 }
@@ -99,6 +99,17 @@ export type LiveTransport = {
   failLogout(times?: number): void;
   /** Rejects every signed-in request as PostgREST rejects a token it no longer accepts (a stale stored session). */
   rejectSessions(reject?: boolean): void;
+  /**
+   * Answers the next `times` refresh-token grants with a new session for the token's user (a refresh is otherwise always
+   * refused). With `accepted` (the default) the server takes the new access tokens even while `rejectSessions` holds;
+   * without it, they are refused as well.
+   */
+  renewSessions(options?: { times?: number; accepted?: boolean }): void;
+  /**
+   * Refuses a table's requests as PostgREST refuses a role without the grant (401, `42501`), visitors' as well:
+   * public reads the server no longer allows. `refuse(table, false)` serves the table again.
+   */
+  refuse(table: string, refusing?: boolean): void;
   serverNowMs(): number;
   /** The account the test-only Google consent page signs in ("Approve test Google"). */
   readonly googleUser: TestUser;
@@ -122,6 +133,10 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
   const requests: LiveRequest[] = [];
   const authRequests: AuthRequest[] = [];
   let failedLogouts = 0;
+  let renewals = 0, renewalsAccepted = true;
+  /** Access tokens issued by an accepted renewal: the server takes them even while rejecting stored sessions. */
+  const renewed = new Set<string>();
+  const refused = new Set<string>();
   const delays = new Map<string, number>();
   const holds = new Map<string, Promise<void>>();
   const failing = new Set<string>();
@@ -136,7 +151,17 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
         failedLogouts -= 1;
         return json(route, { code: 503, error_code: 'unexpected_failure', msg: 'Service unavailable' }, 503);
       }
-      return auth(route, url, readerOf(request), rejecting, google);
+      if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token' && renewals > 0) {
+        const token = (JSON.parse(request.postData() ?? '{}') as { refresh_token?: string }).refresh_token ?? '';
+        const user = users.get(token.startsWith('test-only:') ? token.slice('test-only:'.length) : '');
+        if (user) {
+          renewals -= 1;
+          const session = sessionFor(user);
+          if (renewalsAccepted) renewed.add(session.access_token);
+          return json(route, session);
+        }
+      }
+      return auth(route, url, readerOf(request), rejecting && !renewed.has(bearerOf(request) ?? ''), google);
     }
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
     if (!table || request.method() !== 'GET') throw new Error(`Unexpected live transport request ${request.method()} ${url.pathname}`);
@@ -146,7 +171,8 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     if (wait) await new Promise(resolve => setTimeout(resolve, wait));
     await holds.get(table);
     if (!request.headers().apikey) return json(route, { code: 'PGRST301', message: 'No API key found in request' }, 401);
-    if (reader !== null && (rejecting || reader === INVALID_READER)) return json(route, { code: 'PGRST301', message: 'JWT could not be verified' }, 401);
+    if (reader !== null && ((rejecting && !renewed.has(bearerOf(request) ?? '')) || reader === INVALID_READER)) return json(route, { code: 'PGRST301', message: 'JWT could not be verified' }, 401);
+    if (refused.has(table)) return json(route, { code: '42501', message: `permission denied for table ${table}`, details: null, hint: null }, 401);
     if (failing.has(table)) return json(route, { code: 'XX000', message: 'internal error', details: null, hint: null }, 500);
     const source = tables({ world, owner, now: now(), reader, data })[table];
     if (!source) throw new Error(`Unexpected live transport table ${table}`);
@@ -176,6 +202,8 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     fail: (table, on = true) => { if (on) failing.add(table); else failing.delete(table); },
     failLogout: (times = 1) => { failedLogouts = times; },
     rejectSessions: (reject = true) => { rejecting = reject; },
+    renewSessions: ({ times = 1, accepted = true } = {}) => { renewals = times; renewalsAccepted = accepted; },
+    refuse: (table, on = true) => { if (on) refused.add(table); else refused.delete(table); },
     serverNowMs: now,
     googleUser: google.user,
   };
@@ -183,9 +211,10 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) });
 
+const bearerOf = (request: Request) => /^Bearer (.+)$/.exec(request.headers().authorization ?? '')?.[1];
 /** A user id from the bearer token, or null for a visitor (the publishable key, or no token). */
 function readerOf(request: Request): string | null {
-  const bearer = /^Bearer (.+)$/.exec(request.headers().authorization ?? '')?.[1];
+  const bearer = bearerOf(request);
   if (!bearer || bearer === PUBLISHABLE_KEY) return null;
   try { return String(JSON.parse(Buffer.from(bearer.split('.')[1], 'base64').toString('utf8')).sub); } catch { return INVALID_READER; }
 }
@@ -194,16 +223,18 @@ function readerOf(request: Request): string | null {
 type GoogleSignIn = { user: TestUser; challenges: Map<string, string> };
 let codes = 0;
 
-/** A session for `user` as the Auth API returns one; its access token names the user (`readerOf`). */
+let issued = 0;
+/** A session for `user` as the Auth API returns one; its access token names the user (`readerOf`), and each is new. */
 function sessionFor(user: TestUser, expiresIn = 3600) {
   const exp = Math.floor(Date.now() / 1000) + expiresIn;
   const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  return { access_token: `${part({ alg: 'HS256' })}.${part({ sub: user.id, exp })}.test-only`, refresh_token: 'test-only', token_type: 'bearer',
+  return { access_token: `${part({ alg: 'HS256' })}.${part({ sub: user.id, exp, jti: ++issued })}.test-only`, refresh_token: `test-only:${user.id}`, token_type: 'bearer',
     expires_in: expiresIn, expires_at: exp, user };
 }
 
 /**
- * A stored session's Auth calls: its user, a local or global sign-out, and a refresh that is always refused. A Google
+ * A stored session's Auth calls: its user, a local or global sign-out, and a refresh that is refused (unless
+ * `renewSessions` answered it before this). A Google
  * sign-in goes through the test-only consent page (as identity.spec.ts), whose links return to the app's callback with
  * a code or a cancellation (with provider text the app must never show); the code's PKCE exchange signs in `google.user`.
  */

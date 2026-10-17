@@ -33,6 +33,9 @@ function ExpeditionShell() {
   const reads = loaded?.fixture === fixture ? loaded.reads : null;
   // Without a well-formed activity there is nothing to show, so nothing is read or polled.
   const game = useGameState(activityId ? reads : null, { fixture });
+  // The expedition is the account's own read: once the session is known, a sign-out, expiry or account switch (here or in
+  // another tab) remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1).
+  const reader = game.session.userId ?? 'visitor';
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
@@ -42,7 +45,7 @@ function ExpeditionShell() {
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page">
       {!activityId ? <ExpeditionUnavailable fixture={fixture} reason="not-found" />
-        : reads ? <ExpeditionView key={`${fixture}|${activityId}|${minute}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute}
+        : reads && game.session.status !== 'loading' ? <ExpeditionView key={`${fixture}|${activityId}|${minute}|${reader}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute}
           revision={game.revision} world={game.world} worldFailed={!game.world && game.syncError !== null} owner={game.owner} />
           : <p role="status">Loading the expedition…</p>}
     </main>

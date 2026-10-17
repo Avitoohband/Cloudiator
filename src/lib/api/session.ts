@@ -45,6 +45,19 @@ export function useSession(): SessionState {
 }
 
 /**
+ * Asks Auth once for a new access token for the stored session (its refresh token): true when the session was renewed.
+ * A refused refresh keeps a session whose access token has not expired by this device's clock (supabase-js 2.117.3).
+ */
+export async function refreshSession(): Promise<boolean> {
+  const client = getBrowserClient();
+  if (!client) return false;
+  try {
+    const { data, error } = await client.auth.refreshSession();
+    return !error && !!data.session;
+  } catch { return false; }
+}
+
+/**
  * Signs out every session of the account (`global`, the Sign out button), or only this browser's (`local`): a stored
  * session the server no longer accepts is dropped locally, even when the server also refuses its sign-out.
  */

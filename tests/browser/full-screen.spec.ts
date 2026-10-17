@@ -437,6 +437,27 @@ test.describe('live failures in the shell', () => {
     await expect(lost).toHaveCount(0);
   });
 
+  test('says the connection is lost when a visitor’s public reads are refused', async ({ page, context }) => {
+    // Final review Minor 2: a refusal (401, 42501) becomes the sync's `unauthenticated`, but a visitor has no session to
+    // sign out, so it is a lost connection to them, never a silently empty camp.
+    const world = { ...worldFixture, revision: 'live-1' };
+    const live = await routeLiveReads(context, { world });
+    live.refuse('world_revision');
+    await page.clock.install();
+    await page.goto('/game/');
+    const lost = page.getByRole('status').filter({ hasText: 'Connection lost — showing the last known camp' });
+    await expect(lost).toBeVisible({ timeout: 45_000 });
+    await expect(joinButton(page)).toBeVisible();
+    expect(live.requests.filter(r => r.table === 'world_revision').every(r => r.reader === null)).toBe(true);
+    // Nothing to sign out: no Auth call at all.
+    expect(live.authRequests).toEqual([]);
+    // Served again at the next poll: the camp loads and the notice goes.
+    live.refuse('world_revision', false);
+    await page.clock.fastForward(30_000);
+    await page.waitForFunction(n => window.__cloudiatorCamp?.state()?.ready === true && window.__cloudiatorCamp.world()?.actors.length === n, world.actors.length, { timeout: 45_000 });
+    await expect(lost).toHaveCount(0);
+  });
+
   test('never says the connection is lost while a rejected session is signed out', async ({ page, context }) => {
     // 13.5 review: the sync's `unauthenticated` (a stored session the server rejects) is no lost connection; the session
     // is signed out locally and the camp reads on as a visitor's. The sign-out is held here so that window stays open.
@@ -469,6 +490,8 @@ test.describe('live failures in the shell', () => {
     const stale = panel.getByRole('status').filter({ hasText: 'could not be refreshed' });
     await expect(stale).toHaveCount(0);
     live.fail('owner_state');
+    // A tab return reads the owner only 2 s or more after the last read (final review Minor 5).
+    await page.waitForTimeout(2_100);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(stale).toBeVisible();
     await expect(panel.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible();

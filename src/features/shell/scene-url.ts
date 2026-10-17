@@ -3,18 +3,25 @@
 // shared link opens it straight over the camp and the browser's Back closes it. The /replay/ and /expedition/ pages stay
 // as deep links. Nothing here touches the history; `useSceneHistory` does.
 import type { PublicActivitySummary } from '@contracts/events';
+import { isActivityId } from '../character/expedition-query';
 
 export type SceneView = { kind: 'replay'; activityId: string; stageId?: string } | { kind: 'expedition'; activityId: string };
+/**
+ * A scene the address names. As on the expedition page (`expeditionQuery`), its activity id must be UUID-shaped: a
+ * malformed one (a mangled shared link) names no activity, so the scene says "not found" and reads nothing (final review
+ * Minor 6).
+ */
+export type SceneAddress = SceneView | { kind: SceneView['kind']; activityId: null };
 
 const SCENE_PARAMS = ['view', 'activity', 'stage'] as const;
 
 /** The scene an address names, or null. */
-export function sceneOf(search: Pick<URLSearchParams, 'get'>): SceneView | null {
+export function sceneOf(search: Pick<URLSearchParams, 'get'>): SceneAddress | null {
   const view = search.get('view');
   const activityId = search.get('activity');
-  if (!activityId) return null;
+  if (!activityId || (view !== 'replay' && view !== 'expedition')) return null;
+  if (!isActivityId(activityId)) return { kind: view, activityId: null };
   if (view === 'expedition') return { kind: 'expedition', activityId };
-  if (view !== 'replay') return null;
   const stageId = search.get('stage');
   return stageId ? { kind: 'replay', activityId, stageId } : { kind: 'replay', activityId };
 }

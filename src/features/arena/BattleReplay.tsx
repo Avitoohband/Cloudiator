@@ -383,7 +383,9 @@ function SavedOutcome({ summary, level }: { summary: ActivitySummary; level: Hea
 
 /**
  * No replay to play. A guessed, unrevealed or still-running fight is "not available yet", with no summary, never an
- * error (Review Focus 3); an expired one is no longer kept; a missing link or a build without reads is not available.
+ * error (Review Focus 3); an expired one is no longer kept; a missing or malformed link names no fight; a failed read
+ * cannot be loaded right now (timelines have had a reader since Task 13.2, so it is no longer "in this build"; final
+ * review Minor 6).
  */
 function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-progress' | 'not-found' | 'unavailable' | 'expired'; level: HeadingLevel }) {
   const later = reason === 'not-revealed' || reason === 'in-progress';
@@ -393,6 +395,6 @@ function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-pro
       : reason === 'in-progress' ? 'The fight is still going on. Its replay appears here as soon as it ends.'
         : reason === 'expired' ? 'Detailed replays are kept for seven days. The result stays in the recent results.'
           : reason === 'not-found' ? 'No fight was found for this link.'
-            : 'Replays cannot be loaded in this build yet.'}</p>
+            : 'This replay cannot be loaded right now. Try again shortly.'}</p>
   </section>;
 }

@@ -5,20 +5,23 @@
 // (or Escape) closes it, and the focus goes back to whatever opened it. The scenes are the existing views: the battle
 // replay, filtered by the shared display clock, and the followable expedition, re-read on the shared revision. A
 // viewer who is not a player never gets an owner summary here (the live server sends a visitor none; the fixture
-// preview's samples carry their owner's, so the scene drops it), so visitors never see rewards in a scene.
+// preview's samples carry their owner's, so the scene drops it), so visitors never see rewards in a scene. An address
+// with a malformed activity id names nothing: the scene says so and reads nothing (final review Minor 6). Each view is
+// the account's own read: once the session is known, a sign-out, expiry or account switch (here or in another tab)
+// remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1).
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
-import { ActivityReplay } from '../arena/BattleReplay';
-import { ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
-import type { SceneView } from './scene-url';
+import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
+import { ExpeditionUnavailable, ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
+import type { SceneAddress, SceneView } from './scene-url';
 import styles from './shell.module.css';
 
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 
 export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch }: {
-  view: SceneView;
+  view: SceneAddress;
   /** The camp's reads: the live gateway, or the fixture preview's once it has loaded (null until then). */
   gateway: GameGateway | null;
   state: GameUiState;
@@ -52,7 +55,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
 
   // Another scene in the same dialog (an expedition's encounter replay, or Back and Forward between scenes) starts at its
   // top with the focus on Back to camp, as the first one did: the control that opened it is gone (fix round 1, M6).
-  const sceneKey = `${view.kind}|${view.activityId}|${view.kind === 'replay' ? view.stageId ?? '' : ''}`;
+  const sceneKey = `${view.kind}|${view.activityId}|${view.activityId !== null && view.kind === 'replay' ? view.stageId ?? '' : ''}`;
   const shownKey = useRef(sceneKey);
   useLayoutEffect(() => {
     if (shownKey.current === sceneKey) return;
@@ -70,6 +73,9 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
 
   // The display clock has a server time once the shared sync has read the world (or it never will).
   const clock = state.world || state.syncError ? state.clock : null;
+  const activityId = view.activityId;
+  const viewKey = `${sceneKey}|${state.session.userId ?? 'visitor'}`;
+  const loading = !reads || state.session.status === 'loading';
   return (
     <dialog ref={dialog} className={styles.scene} aria-label={view.kind === 'replay' ? 'Replay' : 'Expedition'}
       // Escape closes a modal dialog natively (it may refuse to cancel it): follow it into the address. The close event
@@ -77,13 +83,17 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
       onClose={() => { if (!leaving.current && !dialog.current?.open) closeRef.current(); }}>
       <button ref={back} type="button" className={styles.sceneBack} onClick={onClose}><span aria-hidden="true">←</span> Back to camp</button>
       <div className={styles.sceneBody}>
-        {view.kind === 'replay'
-          ? <ActivityReplay key={sceneKey} reads={reads} activityId={view.activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2}
-            viewerId={player ? state.owner?.gladiatorId ?? null : null} />
-          : !reads ? <p role="status">Loading the expedition…</p>
-            : <ExpeditionView key={sceneKey} reads={reads} activityId={view.activityId} fixture={fixture} revision={state.revision} world={state.world}
-              worldFailed={!state.world && state.syncError !== null} owner={player ? state.owner : null}
-              overCamp={{ onWatch: stageId => onWatch?.({ kind: 'replay', activityId: view.activityId, stageId }) }} />}
+        {activityId === null
+          ? view.kind === 'replay' ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} headingLevel={2} />
+            : <ExpeditionUnavailable fixture={fixture} reason="not-found" overCamp />
+          : view.kind === 'replay'
+            ? loading ? <p role="status">Loading the replay…</p>
+              : <ActivityReplay key={viewKey} reads={reads} activityId={activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2}
+                viewerId={player ? state.owner?.gladiatorId ?? null : null} />
+            : loading ? <p role="status">Loading the expedition…</p>
+              : <ExpeditionView key={viewKey} reads={reads} activityId={activityId} fixture={fixture} revision={state.revision} world={state.world}
+                worldFailed={!state.world && state.syncError !== null} owner={player ? state.owner : null}
+                overCamp={{ onWatch: stageId => onWatch?.({ kind: 'replay', activityId, stageId }) }} />}
       </div>
     </dialog>
   );

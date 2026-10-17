@@ -324,6 +324,8 @@ test('a slow no-character focus read cannot replace the confirmed creation owner
   await creationDialog(page).getByLabel('Gladiator name').fill('Confirmed Fighter');
   await expect(page.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();
   const held = flow.holdNextOwnerRead();
+  // A tab return reads the owner only 2 s or more after the last read (final review Minor 5).
+  await page.waitForTimeout(2_100);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await held.started;
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();

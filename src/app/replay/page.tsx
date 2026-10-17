@@ -10,12 +10,15 @@ import { useSearchParams } from 'next/navigation';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../../features/character/useGameState';
 import { ActivityReplay, BattleReplay } from '../../features/arena/BattleReplay';
+import { isActivityId } from '../../features/character/expedition-query';
 
 function ReplayShell() {
   const search = useSearchParams();
   const requested = search.get('mode') === 'fixture';
   const fixture = requested && process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true';
-  const activityId = search.get('activity');
+  // A malformed activity id names no fight, as on the expedition page: it is not found, with nothing read (final review Minor 6).
+  const requestedId = search.get('activity');
+  const activityId = requestedId !== null && isActivityId(requestedId) ? requestedId : null;
   const stageId = search.get('stage');
   const [loaded, setLoaded] = useState<{ fixture: boolean; reads: GameGateway } | null>(null);
 
@@ -32,10 +35,13 @@ function ReplayShell() {
   }, [fixture]);
 
   const reads = loaded?.fixture === fixture ? loaded.reads : null;
-  // Without an activity there is nothing to show, so nothing is read or polled.
+  // Without a well-formed activity there is nothing to show, so nothing is read or polled.
   const game = useGameState(activityId ? reads : null, { fixture });
   // The display clock has a server time once the shared sync has read the world (or it never will: the device's clock).
   const clock = game.world || game.syncError ? game.clock : null;
+  // The replay is the account's own read: once the session is known, a sign-out, expiry or account switch (here or in
+  // another tab) remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1).
+  const reader = game.session.userId ?? 'visitor';
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
@@ -45,8 +51,9 @@ function ReplayShell() {
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page">
       {!activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
-        : <ActivityReplay key={`${fixture}|${activityId}|${stageId}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock}
-          viewerId={game.owner?.gladiatorId ?? null} />}
+        : game.session.status === 'loading' ? <p role="status">Loading the replay…</p>
+          : <ActivityReplay key={`${fixture}|${activityId}|${stageId}|${reader}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock}
+            viewerId={game.owner?.gladiatorId ?? null} />}
     </main>
     <footer className="game-footer">CLOUDIATOR <span>Replays show the recorded fight; they never change its result.</span></footer>
   </div>;

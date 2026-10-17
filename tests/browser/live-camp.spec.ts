@@ -9,7 +9,7 @@ import { TOURNAMENTS } from '../fixtures/tournament-ids';
 import { tournamentCampActors } from '../fixtures/tournament-build';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { openMenu } from './shell-helpers';
+import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 
 // Task 13.3: the game page mounts the camp in live mode from the public reads, with one sync controller owning the
 // shared display clock (`window.__cloudiatorShell.clock`, fixture-enabled builds only) and the owner state.
@@ -27,6 +27,10 @@ async function waitForCamp(page: Page, actors?: number) {
   }, actors ?? null, { timeout: 45_000 });
 }
 const shownTime = (page: Page) => page.evaluate(() => window.__cloudiatorShell!.clock.now());
+/** The stored session's Auth calls that renew or end it, in order: `token:refresh_token` and `logout:local`. */
+const renewalsAndSignOuts = (live: { authRequests: readonly { path: string; query: URLSearchParams }[] }) => live.authRequests
+  .filter(r => r.path === '/auth/v1/token' || r.path === '/auth/v1/logout')
+  .map(r => (r.path === '/auth/v1/token' ? `token:${r.query.get('grant_type')}` : `logout:${r.query.get('scope')}`));
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live mode uses development-only intercepted Supabase transport.'); });
 
@@ -133,6 +137,46 @@ test('signs a rejected stored session out locally and keeps the camp running for
   // The sign-out was this browser's only (scope=local), never the account's other sessions.
   const logouts = live.authRequests.filter(r => r.path === '/auth/v1/logout');
   expect(logouts.map(r => r.query.get('scope'))).toEqual(['local']);
+  // Final review Minor 3: one refresh was tried first; the server refused it, so the session was signed out.
+  expect(renewalsAndSignOuts(live)).toEqual(['token:refresh_token', 'logout:local']);
+});
+
+test('keeps a player signed in when one refresh renews a rejected stored session', async ({ page, context }) => {
+  // Final review Minor 3: a device clock running slow, or a transient rejection, has the server refuse a stored access
+  // token whose refresh token is still good. One refresh renews it; the camp and the owner read again with the new token.
+  const user = await seedSession(context);
+  const world = liveWorld();
+  const live = await routeLiveReads(context, { world, owner: ownerFixture });
+  live.rejectSessions();
+  live.renewSessions();
+  await page.goto('/game/');
+  await waitForCamp(page, world.actors.length);
+  await expectOwnerShown(page, 'Aster');
+  await expect(joinButton(page)).toHaveCount(0);
+  expect(renewalsAndSignOuts(live)).toEqual(['token:refresh_token']);
+  expect(await page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).not.toBeNull();
+  expect(live.requests.filter(r => r.table === 'world_actor_reads').every(r => r.reader === user.id)).toBe(true);
+  // Nothing more is renewed or signed out while the reads succeed.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.waitForTimeout(1_000);
+  expect(renewalsAndSignOuts(live)).toEqual(['token:refresh_token']);
+});
+
+test('signs out locally when the renewed session is still refused at the next read', async ({ page, context }) => {
+  // Final review Minor 3: the refresh succeeds but the server refuses the new token as well, so this browser signs out.
+  await seedSession(context);
+  const world = liveWorld();
+  const live = await routeLiveReads(context, { world, owner: ownerFixture });
+  live.rejectSessions();
+  live.renewSessions({ accepted: false });
+  await page.goto('/game/');
+  await waitForCamp(page, world.actors.length);
+  await expect(joinButton(page)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
+  expect(renewalsAndSignOuts(live)).toEqual(['token:refresh_token', 'logout:local']);
+  const loads = live.requests.filter(r => r.table === 'world_actor_reads');
+  expect(loads.length).toBeGreaterThan(0);
+  expect(loads.every(r => r.reader === null)).toBe(true);
 });
 
 test('retries a failed local sign-out of a rejected session on the next sync publish, then reads as a visitor', async ({ page, context }) => {
@@ -218,7 +262,19 @@ test('a signed-in player sees the camp on their gladiator and re-reads the owner
   await page.clock.fastForward(30_000);
   await expect.poll(revisions).toBe(++polled);
   await expect.poll(owners).toBe(++read);
-  // The tab regains focus.
+  // The tab comes back (visibilitychange and focus fire together) more than 2 s after the last owner read: one read
+  // serves both events (final review Minor 5).
+  await page.waitForTimeout(500);
+  await page.clock.fastForward(2_500);
+  await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); });
+  await expect.poll(owners).toBe(++read);
+  await page.waitForTimeout(1_000);
+  expect(owners()).toBe(read);
+  // Another return within 2 s of that read is served by it; one after that reads again.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.waitForTimeout(500);
+  expect(owners()).toBe(read);
+  await page.clock.fastForward(2_500);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect.poll(owners).toBe(++read);
   expect(live.requests.filter(r => r.table === 'owner_state').every(r => r.reader === user.id)).toBe(true);

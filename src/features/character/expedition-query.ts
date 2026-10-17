@@ -16,11 +16,14 @@ const ACTIVITY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const MINUTE = /^\d{1,2}(?:\.\d{1,3})?$/;
 export const MAX_FIXTURE_MINUTE = 90;
 
+/** Whether an activity id from an address is UUID-shaped; the scenes over the camp check theirs the same way. */
+export const isActivityId = (id: string) => ACTIVITY_ID.test(id);
+
 export function expeditionQuery(params: { get(name: string): string | null }, fixtureBuild: boolean): ExpeditionQuery {
   const requested = params.get('mode') === 'fixture';
   const fixture = requested && fixtureBuild;
   const id = params.get('activity');
   const raw = fixture ? params.get('minute') : null;
   const minute = raw !== null && MINUTE.test(raw) && Number(raw) <= MAX_FIXTURE_MINUTE ? Number(raw) : null;
-  return { requested, fixture, activityId: id !== null && ACTIVITY_ID.test(id) ? id : null, minute };
+  return { requested, fixture, activityId: id !== null && isActivityId(id) ? id : null, minute };
 }

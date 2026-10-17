@@ -80,3 +80,21 @@ test.each([
   expect(result.status).toBe(1);
   expect(result.stderr).toContain('Forbidden');
 });
+// Final review Minor 4: the fixture preview (its gateway and sample data) must never reach a production export. Every
+// export the scanner checks is a production build, which forces NEXT_PUBLIC_FIXTURE_ENABLED off (next.config.ts),
+// including the isolated `.next/browser-test` build.
+test.each([
+  'throw Object.assign(new Error("This read is unavailable in the fixture preview."),{code:"unavailable"})',
+  'const s={receiptId:"fixture-receipt-pvp",settledAtMs:1}',
+])('scanner refuses fixture preview data in an exported chunk: %s', (content) => {
+  const directory = exportedSite();
+  mkdirSync(join(directory, '_next/static/chunks'), { recursive: true });
+  writeFileSync(join(directory, '_next/static/chunks/fixture.js'), content);
+  const result = scan(directory);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Fixture preview data in _next');
+  expect(result.stderr).toContain('fixture.js');
+});
+test('scanner accepts the production notice that refuses the fixture preview', () => {
+  expect(scan(exportedSite('<p role="status">Fixture preview is unavailable in this build.</p>')).status).toBe(0);
+});

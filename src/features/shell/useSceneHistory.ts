@@ -6,7 +6,7 @@
 // opened on top of it (an expedition's encounter replay is another entry). A scene opened by a link has no camp entry
 // below it, so "Back to camp" replaces its entry with the camp instead.
 import { useCallback, useEffect, useRef } from 'react';
-import { campHref, sceneHref, type SceneView } from './scene-url';
+import { campHref, sceneHref, type SceneAddress, type SceneView } from './scene-url';
 
 /** Our mark on a scene's history entry: how many entries back the camp's entry is, or null when there is none. */
 const MARK = 'cloudiatorScene';
@@ -14,11 +14,11 @@ const markOf = (state: unknown): number | null => {
   const value = state && typeof state === 'object' ? (state as Record<string, unknown>)[MARK] : null;
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 };
-const same = (a: SceneView | null, b: SceneView) => !!a && a.kind === b.kind && a.activityId === b.activityId
-  && (a.kind === 'replay' ? a.stageId : undefined) === (b.kind === 'replay' ? b.stageId : undefined);
+const stageOf = (view: SceneAddress) => (view.activityId !== null && view.kind === 'replay' ? view.stageId : undefined);
+const same = (a: SceneAddress | null, b: SceneView) => !!a && a.kind === b.kind && a.activityId === b.activityId && stageOf(a) === stageOf(b);
 
 /** `scene` is the scene the address names now; `open` and `close` change the address (and so the scene). */
-export function useSceneHistory(scene: SceneView | null) {
+export function useSceneHistory(scene: SceneAddress | null) {
   const current = useRef(scene);
   useEffect(() => { current.current = scene; });
 

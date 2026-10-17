@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import { ownerFixture } from '../fixtures/domain';
 import { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS } from '../fixtures/expedition-ids';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
-import { SLOT_MS, emptyWorld, routeLiveReads } from './live-routes';
+import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { menuDialog, openMenu } from './shell-helpers';
 
 // Task 13.8 (spec "Scenes", plan Decision 4): a replay or an expedition opens as a full-screen scene over the running
@@ -43,6 +44,33 @@ function liveExpedition(key: keyof typeof EXPEDITION_FIXTURES, nowMs: number, mi
     stages: timeline.stages.map(s => ({ ...s, revealedAtMs: s.revealedAtMs + delta, startedAtMs: s.startedAtMs + delta, endsAtMs: s.endsAtMs + delta })),
   };
 }
+/** The owner's settled Arena bout two hours before `nowMs` (the fixture PvP log), with its credited summary. */
+function ownerBout(nowMs: number): RevealedTimeline {
+  const activityId = randomUUID();
+  const start = nowMs - 120 * MIN, settledAtMs = start + 80 * MIN;
+  const stage = (n: number, kind: RevealedStage['kind'], from: number, to: number, label: string, battleLog?: BattleLog): RevealedStage =>
+    ({ id: `${activityId}:${n}`, kind, revealedAtMs: start + from * MIN, startedAtMs: start + from * MIN, endsAtMs: start + to * MIN, label, ...(battleLog ? { battleLog } : {}) });
+  const replayExpiry = { state: 'available' as const, expiresAtMs: settledAtMs + 7 * 86_400_000 };
+  return {
+    activityId, serverNowMs: nowMs, visibleThroughMs: nowMs,
+    stages: [stage(0, 'staging', 0, 60, 'Warm-up in the arena staging area'), stage(1, 'bout', 60, 80, 'Arena bout against Varro', readJson('tests/fixtures/battles/pvp.json') as BattleLog),
+      stage(2, 'settlement', 80, 80, 'Result credited')],
+    summary: { activityId, resolvedKind: 'arena', result: 'victory', success: true, rewards: { money: 15, renown: 2, xp: 40, attributePoints: 0, items: [], overflowMoney: 0 },
+      receiptId: 'owner-bout', settledAtMs, replayExpiry, ratingDelta: 12 },
+    completion: { activityId, resolvedKind: 'arena', result: 'victory', success: true, settledAtMs, replayExpiry },
+  };
+}
+/**
+ * Another tab signs this account out: supabase-js there removes the stored session the tabs share and tells the other
+ * tabs' clients (its BroadcastChannel, named after the storage key), so this tab's session state ends without a reload.
+ */
+const signOutInAnotherTab = (page: Page) => page.evaluate(() => {
+  localStorage.removeItem('sb-127-auth-token');
+  const channel = new BroadcastChannel('sb-127-auth-token');
+  channel.postMessage({ event: 'SIGNED_OUT', session: null });
+  channel.close();
+});
+
 /** Varro, away on the shifted Ruined Outpost expedition: the public actor a visitor's world shows. */
 function awayActor(timeline: RevealedTimeline): PublicActor {
   const start = timeline.stages[0].startedAtMs;
@@ -369,5 +397,96 @@ test.describe('replays and expeditions over the live camp for a visitor', () => 
     expect(live.requests.every(r => r.reader === null)).toBe(true);
     expect(live.count('activities') + live.count('owner_state')).toBe(0);
     expect(errors).toEqual([]);
+  });
+
+  test('says a failed live read cannot be loaded right now, and a malformed shared link is not found without a read', async ({ page, context }) => {
+    // Final review Minor 6: a network failure (or PostgREST refusing a malformed id) is no missing reader, so it never
+    // says "in this build"; a malformed activity id names nothing, on the deep link as over the camp, and reads nothing.
+    const now = Date.now();
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(now), revision: 'scenes-4' } });
+    const unreadable = randomUUID();
+    live.fail('visible_events');
+    const noBuildCopy = /in this build|may not exist/;
+    await page.goto(`/replay/?activity=${unreadable}`);
+    await expect(page.locator('main').getByText('This replay cannot be loaded right now. Try again shortly.')).toBeVisible({ timeout: 45_000 });
+    await expect(page.locator('main')).not.toContainText(noBuildCopy);
+    await page.goto(`/expedition/?activity=${unreadable}`);
+    await expect(page.locator('main').getByText(/^This expedition cannot be loaded right now\./)).toBeVisible({ timeout: 45_000 });
+    await expect(page.locator('main')).not.toContainText(noBuildCopy);
+    await openCamp(page, `/game/?view=replay&activity=${unreadable}`);
+    await expect(scene(page, 'Replay').getByText('This replay cannot be loaded right now. Try again shortly.')).toBeVisible({ timeout: 45_000 });
+    await expect(scene(page, 'Replay')).not.toContainText(noBuildCopy);
+    await page.goto(`/game/?view=expedition&activity=${unreadable}`);
+    await expect(scene(page, 'Expedition').getByText(/^This expedition cannot be loaded right now\./)).toBeVisible({ timeout: 45_000 });
+    await expect(scene(page, 'Expedition')).not.toContainText(noBuildCopy);
+    live.fail('visible_events', false);
+    // A malformed id from a shared link: not found, with no timeline read at all (only the camp's own world reads).
+    const timelineReads = () => live.count('visible_events') + live.count('recent_results') + live.count('activities');
+    const before = timelineReads();
+    for (const bad of ['not-an-id', `${unreadable}x`]) {
+      await openCamp(page, `/game/?view=replay&activity=${encodeURIComponent(bad)}`);
+      await expect(scene(page, 'Replay').getByRole('heading', { level: 2, name: 'This replay is not available' })).toBeVisible();
+      await expect(scene(page, 'Replay').getByText('No fight was found for this link.')).toBeVisible();
+      await page.goto(`/game/?view=expedition&activity=${encodeURIComponent(bad)}`);
+      await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'This expedition is not available' })).toBeVisible();
+      await expect(scene(page, 'Expedition').getByText('No expedition matches this link.')).toBeVisible();
+      await backToCamp(page).click();
+      await expect(scene(page, 'Expedition')).toHaveCount(0);
+      expect(search(page)).toEqual({});
+      // The replay deep link, as the expedition page already does.
+      await page.goto(`/replay/?activity=${encodeURIComponent(bad)}`);
+      await expect(page.locator('main').getByText('No fight was found for this link.')).toBeVisible({ timeout: 45_000 });
+    }
+    await page.waitForTimeout(500);
+    expect(timelineReads()).toBe(before);
+    expect(live.requests.every(r => r.reader === null)).toBe(true);
+  });
+});
+
+test.describe("an owner's replay and expedition when the session ends", () => {
+  test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');
+
+  test('leaves no credited reward on the pages or the scenes once the session ends in another tab', async ({ page, context }) => {
+    // Final review Minor 1: the views were keyed without the account, so the owner's credited rewards outlived the
+    // session (on /replay/ until a reload, on /expedition/ until the next revision, and in the expedition scene until the
+    // visitor's re-read landed). The timeline re-read is held here, so a view that keeps the owner's timeline shows it.
+    const user = await seedSession(context);
+    const now = Date.now();
+    const bout = ownerBout(now);
+    const expedition = readJson('tests/fixtures/expeditions/woodland.json') as RevealedTimeline;
+    expect(expedition.summary).toBeDefined();
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(now), revision: 'scenes-owner' }, owner: ownerFixture,
+      timelines: { [bout.activityId]: bout, [expedition.activityId]: expedition } });
+    type Root = ReturnType<Page['locator']>;
+    // A replay shows its result (and any credited rewards) once played through: skip to it.
+    const replayResult = async (root: Root) => {
+      await root.getByRole('button', { name: 'Skip to result' }).click({ timeout: 45_000 });
+      await expect(root.getByRole('heading', { name: 'Result' })).toBeVisible();
+    };
+    const journey = async (root: Root) => { await expect(root.getByRole('heading', { name: 'Woodland Path', exact: true })).toBeVisible({ timeout: 45_000 }); };
+    const surfaces = [
+      { url: `/replay/?activity=${bout.activityId}`, root: () => page.locator('main'), shown: replayResult },
+      { url: `/expedition/?activity=${expedition.activityId}`, root: () => page.locator('main'), shown: journey },
+      { url: `/game/?view=replay&activity=${bout.activityId}`, root: () => scene(page, 'Replay'), shown: replayResult },
+      { url: `/game/?view=expedition&activity=${expedition.activityId}`, root: () => scene(page, 'Expedition'), shown: journey },
+    ];
+    for (const surface of surfaces) {
+      await page.goto(surface.url);
+      const root = surface.root();
+      // Signed in, the owner sees the credited rewards.
+      await surface.shown(root);
+      await expect(root).toContainText(REWARDS);
+      const release = live.hold('visible_events');
+      const from = live.requests.length;
+      await signOutInAnotherTab(page);
+      // This tab now reads as a visitor (the sync's world, then any timeline re-read, which is held).
+      await expect.poll(() => live.requests.slice(from).some(r => r.table === 'world_revision' && r.reader === null), { message: surface.url }).toBe(true);
+      await expect(root, surface.url).not.toContainText(REWARDS);
+      release();
+      await surface.shown(root);
+      await expect(root, surface.url).not.toContainText(REWARDS);
+      // Nothing after the sign-out read as the old account.
+      expect(live.requests.slice(from).filter(r => r.reader === user.id).map(r => r.table), surface.url).toEqual([]);
+    }
   });
 });

@@ -7,6 +7,14 @@ export type ViewState = { centerX: number; centerY: number; zoom: number; viewWi
 export const ZOOM_LIMITS = { min: 0.5, max: 3 } as const;
 export const ZOOM_STEP = 1.25;
 
+/**
+ * Pointer travel (CSS px) up to which a press is a click; further is a drag. The camp scene (which selects what was
+ * clicked) and the shell (which closes its menus on a camp click) share it, so a press is a click for both or neither.
+ */
+export const CLICK_TRAVEL_PX = 6;
+/** Whether a press that travelled (dx, dy) between down and up is a click rather than a drag. */
+export const isClick = (dx: number, dy: number) => Math.hypot(dx, dy) <= CLICK_TRAVEL_PX;
+
 export function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return 1;
   return Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, zoom));

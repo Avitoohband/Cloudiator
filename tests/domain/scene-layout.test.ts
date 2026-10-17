@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CampLocation, EquipmentSilhouette, PublicActor } from '@contracts/reads';
 import { loadAssetManifest } from '@/game/assets';
 import { mapScreenBounds, screenToWorld, worldToScreen } from '@/game/iso';
-import { clampView, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
+import { readFileSync } from 'node:fs';
+import { CLICK_TRAVEL_PX, clampView, isClick, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
 import { findPath, gridFromMap } from '@/game/paths';
 import { EQUIPMENT_LAYERS, layersFor, layoutCamp, locationKind, planActorRoutine } from '@/game/actors';
 import { drawSlices, frontEdgeY, hidesActor, propSlices } from '@/game/depth';
@@ -88,6 +89,23 @@ describe('camera limits', () => {
     for (let i = 0; i < 4; i += 1) zoom = stepZoom(zoom, 1);
     for (let i = 0; i < 4; i += 1) zoom = stepZoom(zoom, -1);
     expect(zoom).toBeCloseTo(1, 9);
+  });
+
+  it('tells a click from a drag by one shared travel, so the shell and the camp scene agree at its edge (13.7 review)', () => {
+    // The shell closes the menus on a camp click and the scene selects the gladiator under it: a press moved exactly
+    // the threshold must be a click for both, never for one of them only.
+    expect(CLICK_TRAVEL_PX).toBe(6);
+    expect(isClick(0, 0)).toBe(true);
+    expect(isClick(6, 0)).toBe(true);
+    expect(isClick(0, -6)).toBe(true);
+    expect(isClick(3.6, 4.8)).toBe(true);
+    expect(isClick(6.01, 0)).toBe(false);
+    expect(isClick(4.3, 4.3)).toBe(false);
+    const sceneSource = readFileSync('src/game/camp-scene.ts', 'utf8');
+    const shellSource = readFileSync('src/features/shell/CampShell.tsx', 'utf8');
+    expect(sceneSource).toMatch(/DRAG_THRESHOLD = CLICK_TRAVEL_PX/);
+    expect(shellSource).toMatch(/isClick\(/);
+    expect(shellSource).not.toMatch(/CLICK_PX\s*=/);
   });
 });
 

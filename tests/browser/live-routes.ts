@@ -84,6 +84,8 @@ export type LiveTransport = {
   setStandings(pages: readonly StandingsPage[]): void;
   /** Replaces the public tournament views (a slot's publication adds its views). */
   setTournaments(views: readonly TournamentView[]): void;
+  /** Replaces the activity timelines (the server published a stage that was late). */
+  setTimelines(timelines: Readonly<Record<string, RevealedTimeline>>): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
   delay(table: string, ms: number): void;
   /** Holds a table's requests until the returned release is called (then answers them, and later ones, at once). */
@@ -164,6 +166,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setOwner: next => { owner = next; },
     setStandings: pages => { data.standings = pages; },
     setTournaments: views => { data.tournaments = views; },
+    setTimelines: timelines => { data.timelines = timelines; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {
       let release!: () => void;

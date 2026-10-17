@@ -6,7 +6,7 @@
 // shows its Arena card. A click on a merchant (`open-merchant`) opens Inventory and shops at that merchant for a player,
 // counted so every click opens the shops there again, and My gladiator's sign-in prompt for anyone else.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { WorldSnapshot } from '@contracts/reads';
+import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { Merchant } from '@domain/inventory';
 import type { SceneBridge } from '../../game/bridge';
 import type { ProfileTarget } from '../character/ProfileCard';
@@ -15,6 +15,9 @@ import type { MenuId } from './menus';
 
 /** The open profile card: whose, how it was opened, and where the focus goes back when it closes. */
 export type OpenCard = ProfileTarget & { n: number; returnTo: HTMLElement | null };
+
+/** An Arena entrant, whose camp click the scene answers with `open-arena` (the camp scene's own test). */
+const isArenaEntrant = (actor: PublicActor) => actor.location === 'arena' && !!actor.activityId;
 
 export function useCampClicks({ bridge, open, viewer, world, show, focusCamp }: {
   bridge: SceneBridge;
@@ -51,9 +54,13 @@ export function useCampClicks({ bridge, open, viewer, world, show, focusCamp }: 
   useEffect(() => { setCard(null); }, [open]);
   useEffect(() => { if (open !== 'inventory') setShop(null); }, [open]);
 
-  // A gladiator's click: the card beside them, and the camp keeps the focus.
+  // A gladiator's click: the card beside them, and the camp keeps the focus. An Arena entrant's click opens its Arena
+  // card instead (the scene's `open-arena`, the 13.7 ruling), so no profile card mounts and no profile is read for it
+  // (13.7 review); its profile card opens from the Gladiators list and the standings.
   useEffect(() => bridge.on('select-character', ({ gladiatorId, screen }) => {
-    openCard({ gladiatorId, name: worldRef.current?.actors.find(a => a.gladiatorId === gladiatorId)?.name ?? '', screen, record: null, focus: false });
+    const actor = worldRef.current?.actors.find(a => a.gladiatorId === gladiatorId);
+    if (actor && isArenaEntrant(actor)) return;
+    openCard({ gladiatorId, name: actor?.name ?? '', screen, record: null, focus: false });
   }), [bridge, openCard]);
   useEffect(() => bridge.on('open-merchant', ({ merchant }) => {
     if (viewerRef.current !== 'player') { show('gladiator'); return; }

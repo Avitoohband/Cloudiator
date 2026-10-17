@@ -11,8 +11,9 @@
 // Spectators (Task 13.4): without an owner (a visitor, or a player without a gladiator) the section still opens cards
 // from the camp, with no "Your arena bout" button; a card it does not own shows the public stages and result only, and
 // never an owner summary, even one a reader returned.
+//
+// Task 13.8: Watch replay opens the bout's replay as a scene over the camp (the bridge's `view-replay`).
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from 'react';
-import { useRouter } from 'next/navigation';
 import type { RevealedTimeline } from '@contracts/events';
 import type { OwnerState, PublicProfile, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
@@ -56,7 +57,7 @@ export type ArenaCardModel = {
   fixture: boolean;
 };
 
-/** Pure view of one Arena activity. `onWatch` navigates to the expanded replay. */
+/** Pure view of one Arena activity. `onWatch` opens the expanded replay (`href` is its /replay/ deep link). */
 export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: ArenaCardModel; onWatch(href: string): void; onClose?: () => void; headingRef?: Ref<HTMLHeadingElement> }) {
   const { state, owner, entrantName, opponent } = model;
   const titleId = useId();
@@ -112,11 +113,10 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
 }
 
 /** Live card: reads the timeline on open, again at the reveal marks, every 30 s while results are missing and on focus. */
-function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixture, onClose, onRead, hook }: {
-  selection: ArenaSelection; focusRequest: number; reads: ArenaReads; owner: OwnerState | null; world: WorldSnapshot | null; clock: DisplayClock; fixture: boolean;
-  onClose(): void; onRead(): void; hook: { current: ArenaTestHook['state'] | null };
+function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock, fixture, onClose, onRead, hook }: {
+  selection: ArenaSelection; focusRequest: number; bridge: SceneBridge; reads: ArenaReads; owner: OwnerState | null; world: WorldSnapshot | null; clock: DisplayClock;
+  fixture: boolean; onClose(): void; onRead(): void; hook: { current: ArenaTestHook['state'] | null };
 }) {
-  const router = useRouter();
   const [timeline, setTimeline] = useState<RevealedTimeline | null>(null);
   const [failure, setFailure] = useState<'unavailable' | 'not-found' | null>(null);
   const [now, setNow] = useState(() => clock.now());
@@ -219,7 +219,8 @@ function ArenaCard({ selection, focusRequest, reads, owner, world, clock, fixtur
     </article>;
   }
   if (!state) return <p role="status" className={styles.detail}>Loading the Arena bout…</p>;
-  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={href => router.push(href)} onClose={onClose} headingRef={heading} />;
+  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId }); }}
+    onClose={onClose} headingRef={heading} />;
 }
 
 /**
@@ -273,7 +274,7 @@ export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, sample
       )}
       {!selection ? <p className="muted">Select a gladiator in the arena, or one of its bout buttons, to follow that bout here.</p>
         : !reads ? <p className={styles.detail} role="status">{arenaUnavailableText('build')}</p>
-          : <ArenaCard key={selection.activityId} selection={selection} focusRequest={selection.focus} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
+          : <ArenaCard key={selection.activityId} selection={selection} focusRequest={selection.focus} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
             onClose={() => setSelection(null)} onRead={onRead} hook={cardState} />}
     </section>
   );

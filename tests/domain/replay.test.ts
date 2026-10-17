@@ -8,6 +8,7 @@ import {
   groupReplay,
   loadReplayView,
   reduceReplay,
+  replayBattles,
   replayLines,
   replayViewOf,
   type ReplayController,
@@ -329,5 +330,36 @@ describe('replay views', () => {
     await expect(loadReplayView(gateway, '9fce3cd5-e831-4a66-8ca1-16b4576b1499')).resolves.toEqual({ kind: 'unavailable', reason: 'unavailable' });
     const notFound = { timeline: async () => { throw Object.assign(new Error('not-found'), { code: 'not-found' }); } };
     await expect(loadReplayView(notFound, 'x')).resolves.toEqual({ kind: 'unavailable', reason: 'not-found' });
+  });
+});
+
+describe('replay battles by display time (Task 15 review Minor 2)', () => {
+  const view = replayViewOf(structuredClone(REPLAY_TIMELINES[REPLAY_FIXTURES.expedition.activityId]));
+  if (view.kind !== 'replay') throw new Error('the expedition fixture is a replay');
+  /** A battle ends when its logged fight does: its start plus the log's duration (the server's published bout end). */
+  const endOf = (n: number) => view.battles[n].stage.startedAtMs + view.battles[n].log.durationMs;
+  const endOfFirstBattle = endOf(0);
+
+  it('keeps only the battles that ended by the display time', () => {
+    expect(replayBattles(view, endOfFirstBattle - 1).map(b => b.stage.id)).toEqual([]);
+    expect(replayBattles(view, endOfFirstBattle).map(b => b.stage.id)).toEqual(['woodland-encounter-1']);
+    // A battle in progress (its log is revealed when it starts) is never offered under its server label.
+    expect(replayBattles(view, view.battles[1].stage.startedAtMs + 1).map(b => b.stage.id)).toEqual(['woodland-encounter-1']);
+    expect(replayBattles(view, endOf(2)).map(b => b.stage.id)).toEqual(['woodland-encounter-1', 'woodland-encounter-2', 'woodland-encounter-3']);
+  });
+
+  it('offers no battle for a saved outcome or an unavailable replay', () => {
+    expect(replayBattles({ kind: 'unavailable', reason: 'not-revealed' }, endOf(2))).toEqual([]);
+    expect(replayBattles(replayViewOf(structuredClone(REPLAY_TIMELINES[REPLAY_FIXTURES.expired.activityId])), endOf(2))).toEqual([]);
+  });
+
+  it("ends an Arena bout with its logged fight, not with a stage that runs to the slot's minute 80", () => {
+    const tie = replayViewOf(structuredClone(REPLAY_TIMELINES[REPLAY_FIXTURES.tie.activityId]));
+    if (tie.kind !== 'replay') throw new Error('the tie fixture is a replay');
+    const [bout] = tie.battles;
+    const ended = bout.stage.startedAtMs + bout.log.durationMs;
+    expect(bout.stage.endsAtMs).toBeGreaterThan(ended);
+    expect(replayBattles(tie, ended - 1)).toEqual([]);
+    expect(replayBattles(tie, ended)).toHaveLength(1);
   });
 });

@@ -14,10 +14,15 @@
 // Task 13.7: clicks on gladiators and merchants in the camp (`useCampClicks`) open profile cards and the shops; the
 // Gladiators list and the standings open the same cards. Escape closes the card first when it has the focus or no menu
 // is open. Results lists the recent results.
+//
+// Task 13.8: replays and expeditions open as full-screen scenes over the running camp (`SceneOverlay`), each a history
+// entry on the camp's route (`?view=…`, plan Decision 4, `useSceneHistory`). The bridge carries them: `view-replay` and
+// `view-expedition` open one (the Arena card's Watch replay, the Gladiators list's away rows), `return-camp` closes it
+// (the scene's "Back to camp"); Results opens each result by its kind. The camp keeps running beneath a scene.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import type { Phase } from '@contracts/commands';
+import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../character/useGameState';
@@ -33,13 +38,17 @@ import { TournamentPanel, type TournamentSample } from '../tournaments/Tournamen
 import { ResultsPanel } from '../results/ResultsPanel';
 import { GameViewport } from '../../game/GameViewport';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
+import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
+import { SceneOverlay } from './SceneOverlay';
+import { sceneForResult, type SceneView } from './scene-url';
 import { useCampClicks } from './useCampClicks';
 import { useJoining } from './useJoining';
+import { useSceneHistory } from './useSceneHistory';
 import styles from './shell.module.css';
 
 /** How a Google sign-in that did not complete came back (`AuthCallback`, plan Decision 6). */
@@ -52,8 +61,6 @@ const SIGN_IN_MESSAGES: Record<SignInResult, string> = {
 type SampleLink = { activityId: string; label: string };
 type Samples = { replays: readonly SampleLink[]; expeditions: readonly SampleLink[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
 const NO_SAMPLES: Samples = { replays: [], expeditions: [], arena: [], tournaments: [] };
-/** A click on the camp moves the pointer less than this; more is a drag, which leaves the menus open. */
-const CLICK_PX = 6;
 
 /**
  * Whether an element is rendered and not hidden (the touch row of icons hides while a sheet is open).
@@ -84,9 +91,13 @@ function SchedulePreview({ owner }: { owner: OwnerState | null }) {
   </>;
 }
 
-/** Results: the recent results, and in fixture mode the sample replays and expeditions below them. */
+/**
+ * Results: the recent results, and in fixture mode the sample replays and expeditions below them (deep links to the
+ * /replay/ and /expedition/ pages, which stay as such).
+ */
 function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, onWatch }: {
-  fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; onWatch(activityId: string): void;
+  fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null;
+  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
 }) {
   return <>
     {reads ? <ResultsPanel reads={reads} viewerId={viewerId} onWatch={onWatch} />
@@ -102,17 +113,18 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, onWatch
   </>;
 }
 
-export function CampShell({ fixture, previewAs, fixtureRefused = false, signInResult = null }: {
+export function CampShell({ fixture, previewAs, fixtureRefused = false, signInResult = null, scene = null }: {
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** `?mode=fixture` was asked for in a build without the preview: say so over the live camp. */
   fixtureRefused?: boolean;
   /** `?signin=`: a Google sign-in that was cancelled or failed has returned to the camp. */
   signInResult?: SignInResult | null;
+  /** `?view=replay|expedition&activity=…`: the scene over the camp (plan Decision 4). */
+  scene?: SceneView | null;
 }) {
   const [bridge] = useState(createSceneBridge);
   const [gateway] = useState(createLiveGateway);
-  const router = useRouter();
   const [previewError, setPreviewError] = useState(false);
   const [samples, setSamples] = useState<Samples>(NO_SAMPLES);
   const [fixtureReads, setFixtureReads] = useState<GameGateway | null>(null);
@@ -221,10 +233,20 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
     return () => document.removeEventListener('keydown', onKey);
   }, [close, closeCard, send]);
 
-  // Results open a kept replay on the existing replay page; Task 13.8 opens it over the camp instead.
-  const watchReplay = useCallback((activityId: string) => {
-    router.push(`/replay/?${fixture ? 'mode=fixture&' : ''}activity=${encodeURIComponent(activityId)}`);
-  }, [fixture, router]);
+  // Scenes over the camp: a history entry each; the bridge opens and closes them.
+  const { open: openScene, close: closeScene } = useSceneHistory(scene);
+  useEffect(() => bridge.on('view-replay', ({ activityId, stageId }) => openScene(stageId ? { kind: 'replay', activityId, stageId } : { kind: 'replay', activityId })),
+    [bridge, openScene]);
+  useEffect(() => bridge.on('view-expedition', ({ activityId }) => openScene({ kind: 'expedition', activityId })), [bridge, openScene]);
+  useEffect(() => bridge.on('return-camp', () => closeScene()), [bridge, closeScene]);
+  // A scene takes the screen: the profile card closes (the menus stay, to come back to).
+  const sceneKey = scene ? `${scene.kind}|${scene.activityId}` : null;
+  useEffect(() => { if (sceneKey) closeCard(false); }, [sceneKey, closeCard]);
+  // Results open each kept result by its kind: an expedition its expedition, a bout its replay (13.7 review).
+  const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind']) => {
+    const view = sceneForResult(activityId, kind);
+    if (view) openScene(view);
+  }, [openScene]);
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
@@ -243,7 +265,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
         onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} />;
-      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} onWatch={watchReplay} />;
+      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} onWatch={watchResult} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;
@@ -280,12 +302,13 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
           const start = press.current;
           press.current = null;
           // A click on the camp closes the menus and the card; a gladiator's click opens its card just after (Phaser
-          // hears the mouseup that follows this pointerup).
-          if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < CLICK_PX) { send('camp-click'); closeCard(false); }
+          // hears the mouseup that follows this pointerup). The scene tells a click from a drag by the same travel.
+          if (start && isClick(event.clientX - start.x, event.clientY - start.y)) { send('camp-click'); closeCard(false); }
         }}>
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
           onStatus={game.setSceneStatus} />
       </main>
+      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} />
       )}

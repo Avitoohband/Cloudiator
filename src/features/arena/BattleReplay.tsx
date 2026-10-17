@@ -6,7 +6,11 @@
 import { useCallback, useEffect, useId, useReducer, useRef, useState, type HTMLAttributes, type KeyboardEvent } from 'react';
 import type { ActivitySummary, RevealedCombatant } from '@contracts/events';
 import rawManifest from '../../../public/assets/manifest.json';
-import { createReplayController, replayLines, type ReplayBattle, type ReplayController, type ReplaySpeed, type ReplayView } from '../../game/replay';
+import {
+  battleEndMs, createReplayController, loadReplayView, replayBattles, replayLines, type ReplayBattle, type ReplayController, type ReplaySpeed, type ReplayView,
+} from '../../game/replay';
+import type { DisplayClock } from '../../game/display-clock';
+import type { GameGateway } from '../../lib/api/gateway';
 import { creatureFor, type Creature } from '../../game/battle-stage';
 import { createSceneBridge, type SceneBridge } from '../../game/bridge';
 import { BattleViewport } from '../../game/BattleViewport';
@@ -58,17 +62,72 @@ function Heading({ level, ...props }: { level: HeadingLevel } & HTMLAttributes<H
 const below = (level: HeadingLevel) => Math.min(6, level + 1) as HeadingLevel;
 
 /**
- * `headingLevel` places the replay's title (default h1, as on the replay page) under an embedding page's headings;
- * its Result, Fighters and Combat log sections take the next level.
+ * The display time for a replay view, re-rendered when its next battle ends (and when the clock is held or let go), so a
+ * fight in progress is offered once it has ended. Without a clock (a view whose battles are already over) it is 0.
  */
-export function BattleReplay({ view, bridge, headingLevel = 1 }: { view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel }) {
+function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView): number {
+  const [now, setNow] = useState(() => clock?.now() ?? 0);
+  useEffect(() => {
+    if (!clock) return;
+    let timer: number | undefined;
+    const update = () => {
+      const t = clock.now();
+      setNow(t);
+      window.clearTimeout(timer);
+      const next = view.kind === 'replay' ? Math.min(...view.battles.map(battleEndMs).filter(end => end > t)) : Infinity;
+      // A server time moved forward by a later revision read is caught within a minute.
+      if (Number.isFinite(next) && clock.frozen() === null) timer = window.setTimeout(update, Math.min(60_000, next - t + 50));
+    };
+    update();
+    const off = clock.subscribe(update);
+    return () => { off(); window.clearTimeout(timer); };
+  }, [clock, view]);
+  return now;
+}
+
+/**
+ * `headingLevel` places the replay's title (default h1, as on the replay page) under an embedding page's headings;
+ * its Result, Fighters and Combat log sections take the next level. With the shared display `clock` (the replay page
+ * and the scene over the camp, Task 13.8) only the battles that ended by its time are offered, and the summary only once
+ * settled (Task 15 review Minor 2): a fight still in progress, a later encounter and its server label stay hidden.
+ */
+export function BattleReplay({ view, bridge, headingLevel = 1, clock }: { view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null }) {
+  const now = useReplayTime(clock, view);
   if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
   if (view.kind === 'unavailable') return <ReplayUnavailable reason={view.reason} level={headingLevel} />;
-  return <ReplayBattles battles={view.battles} initial={view.selected} summary={view.summary} bridge={bridge} level={headingLevel} />;
+  const battles = clock ? replayBattles(view, now) : view.battles;
+  if (!battles.length) return <ReplayUnavailable reason="in-progress" level={headingLevel} />;
+  const summary = view.summary && (!clock || view.summary.settledAtMs <= now) ? view.summary : null;
+  return <ReplayBattles battles={battles} initial={Math.min(view.selected, battles.length - 1)} summary={summary} bridge={bridge} level={headingLevel} />;
+}
+
+/**
+ * One activity's replay, read once (`loadReplayView`) and shown with `BattleReplay`: the replay page and the replay scene
+ * over the camp. It waits for `reads` (a fixture preview's load) and for `clock` (null until the shared clock has a
+ * server time, so nothing is filtered by the device's own clock).
+ */
+export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1 }: {
+  reads: Pick<GameGateway, 'timeline'> | null;
+  activityId: string;
+  stageId?: string | null;
+  clock: DisplayClock | null;
+  headingLevel?: HeadingLevel;
+}) {
+  const [loaded, setLoaded] = useState<{ reads: object; view: ReplayView } | null>(null);
+  useEffect(() => {
+    if (!reads) return;
+    let active = true;
+    loadReplayView(reads, activityId, stageId).then(view => { if (active) setLoaded({ reads, view }); });
+    return () => { active = false; };
+  }, [activityId, reads, stageId]);
+  const view = loaded && loaded.reads === reads ? loaded.view : null;
+  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} /> : <p role="status">Loading the replay…</p>;
 }
 
 function ReplayBattles({ battles, initial, summary, bridge, level }: { battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel }) {
-  const [selected, setSelected] = useState(initial);
+  const [chosen, setSelected] = useState(initial);
+  // A display clock held back by a test can offer fewer battles than were chosen from.
+  const selected = Math.min(chosen, battles.length - 1);
   const battle = battles[selected];
   return <>
     {battles.length > 1 && <div className={styles.encounters} role="group" aria-label="Encounters">
@@ -310,11 +369,17 @@ function SavedOutcome({ summary, level }: { summary: ActivitySummary; level: Hea
   </section>;
 }
 
-function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'not-found' | 'unavailable'; level: HeadingLevel }) {
+/**
+ * No replay to play. A guessed, unrevealed or still-running fight is "not available yet", with no summary, never an
+ * error (Review Focus 3); a missing link or a build without reads is not available at all.
+ */
+function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-progress' | 'not-found' | 'unavailable'; level: HeadingLevel }) {
+  const later = reason === 'not-revealed' || reason === 'in-progress';
   return <section className={`${styles.card} ${styles.saved}`}>
-    <Heading level={level}>This replay is not available</Heading>
+    <Heading level={level}>{later ? 'This replay is not available yet' : 'This replay is not available'}</Heading>
     <p>{reason === 'not-revealed' ? 'The fight has not been revealed yet. Replays appear once the bout is revealed.'
-      : reason === 'not-found' ? 'No fight was found for this link.'
-        : 'Replays cannot be loaded in this build yet.'}</p>
+      : reason === 'in-progress' ? 'The fight is still going on. Its replay appears here as soon as it ends.'
+        : reason === 'not-found' ? 'No fight was found for this link.'
+          : 'Replays cannot be loaded in this build yet.'}</p>
   </section>;
 }

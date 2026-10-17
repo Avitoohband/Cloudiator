@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
-import type { OwnerState, ResultRow } from '../../supabase/functions/_shared/contracts/reads';
+import type { OwnerState, PublicActor, ResultRow } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
@@ -183,10 +183,55 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(results.getByRole('navigation', { name: 'Sample expeditions' })).toBeVisible();
     await results.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
     await page.screenshot({ path: testInfo.outputPath(`results-menu-${testInfo.project.name}.png`) });
-    // A kept replay opens the existing replay page (13.8 moves it over the camp).
+    // A kept replay opens over the camp (Task 13.8, plan Decision 4).
     const replay = list.getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first();
     await replay.click();
-    await expect(page).toHaveURL(/\/replay\/\?mode=fixture&activity=[0-9a-f-]{36}$/);
+    await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/game\/\?mode=fixture&view=replay&activity=[0-9a-f-]{36}$/);
+  });
+});
+
+// ------------------------------------------------------------------ live: a camp click on an Arena entrant (13.7 review)
+
+test.describe('a camp click on an Arena entrant', () => {
+  test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');
+
+  test('opens only the Arena card for an Arena entrant, with no profile card or profile read', async ({ page, context }) => {
+    // The 13.7 review: the click mounted the profile card, which sent one discarded profile read, before open-arena
+    // opened the Arena card. Every profile card mounted on the page is counted, however briefly.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __profileCards: number };
+      w.__profileCards = 0;
+      new MutationObserver(records => {
+        for (const record of records) for (const node of record.addedNodes) {
+          if (node instanceof Element && (node.matches('[data-profile-card]') || node.querySelector('[data-profile-card]'))) w.__profileCards += 1;
+        }
+      }).observe(document, { childList: true, subtree: true });
+    });
+    const slotStart = Math.floor(Date.now() / SLOT_MS) * SLOT_MS;
+    const actor = (name: string, location: PublicActor['location'], activityId: string | null): PublicActor => ({
+      gladiatorId: randomUUID(), name, classId: 'berserker', equipmentSilhouettes: ['weapon-axe'], league: 'bronze', level: 3, phase: 'morning',
+      location, activityId, activityStatus: 'active', startsAtMs: slotStart, endsAtMs: slotStart + SLOT_MS, visibleStage: null,
+    });
+    // Warming up in staging at minute 40 (no bout revealed yet, so the Arena card reads no opponent profile), and a trainee.
+    const entrant = actor('Bellator', 'arena', randomUUID());
+    const trainee = actor('Corvina', 'training', randomUUID());
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(slotStart + 40 * 60_000), revision: 'entrant-1', actors: [entrant, trainee] } });
+    await openCamp(page, '/game/');
+    await page.waitForFunction(n => window.__cloudiatorCamp!.state()!.actors.filter(a => a.kind === 'player').length === n, 2);
+    await clickInCamp(page, entrant.gladiatorId);
+    await expect(menuDialog(page, 'Arena')).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as unknown as { __profileCards: number }).__profileCards)).toBe(0);
+    await expect(page.locator('[data-profile-card]')).toHaveCount(0);
+    expect(live.count('public_profile_reads')).toBe(0);
+    // Anyone else's click still opens their card and reads their public profile (React's development mode runs the
+    // card's read effect twice). The Arena menu closes first: on a phone its sheet covers the camp.
+    await closeMenu(page);
+    await clickInCamp(page, trainee.gladiatorId);
+    await expect(profileCard(page, 'Corvina')).toBeVisible();
+    await expect.poll(() => live.count('public_profile_reads')).toBeGreaterThan(0);
+    expect(await page.evaluate(() => (window as unknown as { __profileCards: number }).__profileCards)).toBe(1);
   });
 });
 
@@ -220,7 +265,8 @@ test.describe('live results and a signed-in player through a slot end', () => {
     expect(live.count('recent_results')).toBeGreaterThan(0);
     expect(live.requests.every(r => r.reader === null)).toBe(true);
     await list.getByRole('button', { name: 'Replay: Varro won an Arena bout' }).click();
-    await expect(page).toHaveURL(new RegExp(`/replay/\\?activity=${bout}$`));
+    await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/game/\\?view=replay&activity=${bout}$`));
     expect(commands).toEqual([]);
   });
 

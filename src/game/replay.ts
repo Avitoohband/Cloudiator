@@ -231,6 +231,18 @@ export function replayViewOf(timeline: RevealedTimeline, stageId?: string | null
   return { kind: 'unavailable', reason: 'not-revealed' };
 }
 
+/** When a battle's fight ends: its start plus the logged duration (the server publishes this as a bout's end). */
+export const battleEndMs = (battle: ReplayBattle) => battle.stage.startedAtMs + battle.log.durationMs;
+
+/**
+ * The battles of a replay view that ended by the display time `nowMs` (Task 15 review Minor 2). A battle's log is
+ * revealed when the fight starts, so one still in progress (and a fixture's later one) is never offered, nor its
+ * server label, which names the outcome. A saved outcome or an unavailable view has none.
+ */
+export function replayBattles(view: ReplayView, nowMs: number): ReplayBattle[] {
+  return view.kind === 'replay' ? view.battles.filter(battle => battleEndMs(battle) <= nowMs) : [];
+}
+
 /** One timeline read and nothing else: replays never send commands. */
 export async function loadReplayView(gateway: Pick<GameGateway, 'timeline'>, activityId: string, stageId?: string | null): Promise<ReplayView> {
   try {

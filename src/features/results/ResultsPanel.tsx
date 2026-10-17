@@ -3,9 +3,11 @@
 // The "Results" menu's list of recent results (spec "Menus": recent results and replays, the same public list for a
 // player and a visitor). It reads `recent()` 50 rows at a time, with "More" for the next page, and marks the viewer's
 // own rows "You". A row holds only public fields (who, what happened, how it ended, when, whether its replay is kept),
-// never a reward or receipt. A kept replay offers "Replay", which calls `onWatch` (the camp opens it; Task 13.8 moves
-// it over the camp). It reads once each time the menu opens and never sends a command. Names render as React text.
+// never a reward or receipt. A kept replay offers "Replay", which calls `onWatch` with the result's kind (the camp opens
+// it over itself as that kind's scene, Task 13.8). It reads once each time the menu opens and never sends a command.
+// Names render as React text.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { PublicActivitySummary } from '@contracts/events';
 import type { ResultRow } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import { resultKind, resultLine, resultTime } from './result-text';
@@ -42,7 +44,7 @@ export function ResultsView({ model, viewerId, onMore, onRetry, onWatch, loading
   viewerId: string | null;
   onMore(): void;
   onRetry(): void;
-  onWatch(activityId: string): void;
+  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
   loadingMore?: boolean;
   moreFailed?: boolean;
   /** Tests only: the time zone of the settlement times (the viewer's own otherwise). */
@@ -66,7 +68,7 @@ export function ResultsView({ model, viewerId, onMore, onRetry, onWatch, loading
                     <p className={styles.when}>{resultKind(row)} · {resultTime(row.summary.settledAtMs, timeZone)}</p>
                   </div>
                   {line.replay && (
-                    <button type="button" className={styles.watch} aria-label={`Replay: ${line.text}`} onClick={() => onWatch(row.summary.activityId)}>Replay</button>
+                    <button type="button" className={styles.watch} aria-label={`Replay: ${line.text}`} onClick={() => onWatch(row.summary.activityId, row.summary.resolvedKind)}>Replay</button>
                   )}
                 </li>
               );
@@ -81,7 +83,7 @@ export function ResultsPanel({ reads, viewerId, onWatch }: {
   reads: ResultsReader;
   viewerId: string | null;
   /** Watches a result's kept replay. */
-  onWatch(activityId: string): void;
+  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
 }) {
   const [list, setList] = useState<ResultsList | null>(null);
   const [status, setStatus] = useState<ResultsModel['status']>('loading');

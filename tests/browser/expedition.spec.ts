@@ -351,11 +351,14 @@ test.describe('followable expedition scenes', () => {
       let d = await expeditionFlow.scene(page);
       expect(d.returned, key).toBe(false);
       expect(d.gladiator, key).toMatchObject({ x: where.x + 0.5, y: where.y + 0.5, visible: true, alpha: 1, labelVisible: true });
+      const waiting = d.gladiator!.action;
+      expect(waiting, key).toMatch(key === 'woodland' ? /^idle$/ : /^(sit|sleep)$/);
       await expect(banner()).toHaveCount(0);
-      // Arriving, it fades out where it stood...
+      // Arriving, it fades out where it stood, in the pose it waited or rested in (Task 15 review: never standing up first)...
       await expeditionFlow.holdAt(page, arrival + 750);
       d = await expeditionFlow.scene(page);
       expect(d.returned, key).toBe(true);
+      expect(d.gladiator!.action, key).toBe(waiting);
       expect(d.gladiator!.alpha, key).toBeGreaterThan(0.2);
       expect(d.gladiator!.alpha, key).toBeLessThan(0.8);
       // ...and is gone: the scene says it returned, in agreement with the text.
@@ -404,10 +407,13 @@ test.describe('followable expedition scenes', () => {
     expect(still.gladiator).toEqual(paused.gladiator);
     expect(still.camera).toEqual(paused.camera);
     expect(await reads()).toBe(readsHidden);
-    // Back in view: one refresh, and the scene jumps to the current display time instead of resuming where it paused.
+    // Back in view: the scene jumps to the current display time instead of resuming where it paused. The shared sync
+    // controller asks for the revision again (Task 13.8); the fixture's never changes and no reveal mark passed, so the
+    // timeline is not read again.
     await setHidden(false);
     await expect.poll(async () => (await expeditionFlow.scene(page)).displayNowMs! - paused.displayNowMs!, { timeout: 5_000 }).toBeGreaterThan(800);
-    await expect.poll(reads, { timeout: 5_000 }).toBe(readsHidden + 1);
+    await page.waitForTimeout(700);
+    expect(await reads()).toBe(readsHidden);
     const d = await expeditionFlow.scene(page);
     const s = await expeditionFlow.state(page);
     expect(Math.abs(s.displayNowMs - d.displayNowMs!)).toBeLessThan(500);
@@ -415,43 +421,62 @@ test.describe('followable expedition scenes', () => {
     expect(Math.hypot(d.gladiator!.x - pose.x, d.gladiator!.y - pose.y)).toBeLessThan(0.01);
   });
 
-  test('re-reads every 30 seconds while a due stage or the owner\'s summary is awaited, and stops once it arrives', async ({ page }) => {
+  test('never re-reads on a timer of its own while a due stage or the owner\'s summary is awaited', async ({ page }) => {
+    // Task 13.8 replaces the view's 30-second poll (Task 15) with the shared sync controller's revision (Task 10 gate):
+    // a held display clock that passes no reveal mark reads nothing more, however long "Preparing" or "Processing results"
+    // lasts. The fixture's revision never changes; the live test below changes it.
     const reads = () => page.evaluate(() => window.__cloudiatorExpedition!.reads());
     // A held display clock ticks four times a second; give it a few ticks before counting.
     const readsAt = async (ms: number) => { await expeditionFlow.holdAt(page, ms); await page.waitForTimeout(700); return reads(); };
-    // Preparing (encounter 2 is overdue): at most one read per 30 s of display time, for as long as it lasts.
+    // Preparing (encounter 2 is overdue), until the minute-60 mark.
     await expeditionFlow.open(page, 'delayed', 45);
     const t0 = startOf('delayed') + 46 * MIN;
     const r0 = await readsAt(t0);
-    for (const s of [10, 20, 29.5]) expect(await readsAt(t0 + s * 1000), `+${s} s`).toBe(r0);
-    expect(await readsAt(t0 + 30_000)).toBe(r0 + 1);
-    expect(await readsAt(t0 + 45_000)).toBe(r0 + 1);
-    expect(await readsAt(t0 + 60_000)).toBe(r0 + 2);
-    expect(await readsAt(t0 + 89_500)).toBe(r0 + 2);
-    // Preparing before anything is revealed, then the departure appears: the reads stop.
-    const s0 = startOf('woodland');
-    await expeditionFlow.open(page, 'woodland', 1);
-    const r1 = await readsAt(s0 - 2 * MIN);
+    for (const s of [30, 60, 90, 600]) expect(await readsAt(t0 + s * 1000), `+${s} s`).toBe(r0);
     expect((await expeditionFlow.state(page)).phase).toBe('preparing');
-    expect(await readsAt(s0 - 2 * MIN + 29_500)).toBe(r1);
-    expect(await readsAt(s0 - 2 * MIN + 30_000)).toBe(r1 + 1);
-    expect(await readsAt(s0 + 1_000)).toBe(r1 + 1);
-    expect((await expeditionFlow.state(page)).phase).toBe('depart');
-    for (const s of [31, 61, 91]) expect(await readsAt(s0 + s * 1000), `departed +${s} s`).toBe(r1 + 1);
-    // The owner's summary is awaited after minute 80 ("Processing results"): reads every 30 s until it is settled.
+    // The owner's summary is awaited after minute 80 ("Processing results"); the summary settles in the timeline it has.
+    const s0 = startOf('woodland');
     const settled = TIMELINES.woodland.summary!.settledAtMs;
     await expeditionFlow.open(page, 'woodland', 80);
     await expect(result(page)).toContainText('Processing results');
     const r2 = await readsAt(s0 + 80 * MIN);
-    expect(await readsAt(s0 + 80 * MIN + 29_500)).toBe(r2);
-    expect(await readsAt(s0 + 80 * MIN + 30_000)).toBe(r2 + 1);
-    expect(await readsAt(settled)).toBe(r2 + 1);
+    for (const s of [30, 60, 90]) expect(await readsAt(s0 + 80 * MIN + s * 1000), `minute 80 +${s} s`).toBe(r2);
+    expect(await readsAt(settled)).toBe(r2);
     await expect(result(page)).not.toContainText('Processing results');
-    for (const s of [30, 60, 90]) expect(await readsAt(settled + s * 1000), `settled +${s} s`).toBe(r2 + 1);
-    // A spectator never waits for a summary, so nothing is re-read after its arrival.
-    await expeditionFlow.open(page, 'spectator', 85);
-    const r3 = await readsAt(startOf('spectator') + 85 * MIN);
-    for (const s of [30, 60, 90]) expect(await readsAt(startOf('spectator') + 85 * MIN + s * 1000), `spectator +${s} s`).toBe(r3);
+  });
+
+  test('re-reads the timeline when the shared revision changes, and reads nothing for an unchanged one', async ({ page, context }) => {
+    // Live, as a visitor: the Woodland Path departed 45 minutes ago and its encounter 2 (minute 40) is overdue.
+    const now = Date.now();
+    const source = TIMELINES.woodland;
+    const delta = now - 45 * MIN - source.stages[0].startedAtMs;
+    const full: RevealedTimeline = { activityId: source.activityId, serverNowMs: now, visibleThroughMs: now,
+      stages: source.stages.map(s => ({ ...s, revealedAtMs: s.revealedAtMs + delta, startedAtMs: s.startedAtMs + delta, endsAtMs: s.endsAtMs + delta })) };
+    const late: RevealedTimeline = { ...full, stages: full.stages.filter(s => s.startedAtMs < now - 5 * MIN) };
+    const world = { ...emptyWorld(now), revision: 'live-1' };
+    const live = await routeLiveReads(context, { world, timelines: { [full.activityId]: late } });
+    const reads = () => page.evaluate(() => window.__cloudiatorExpedition!.reads());
+    await page.goto(`/expedition/?activity=${full.activityId}`);
+    await page.waitForFunction(() => !!window.__cloudiatorExpedition?.state(), null, { timeout: 45_000 });
+    await expect(phase(page)).toContainText('Preparing');
+    await expect(logItems(page)).toHaveCount(3);
+    await page.waitForTimeout(700);
+    const r0 = await reads();
+    // A revision poll (here on focus) that finds the same revision reads nothing.
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect.poll(() => live.count('world_revision'), { timeout: 5_000 }).toBeGreaterThan(1);
+    await page.waitForTimeout(700);
+    expect(await reads()).toBe(r0);
+    // The worker publishes encounter 2: the revision changes, and the next poll's new revision reads the timeline once.
+    live.setTimelines({ [full.activityId]: full });
+    live.setWorld({ ...world, revision: 'live-2' });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect.poll(reads, { timeout: 5_000 }).toBe(r0 + 1);
+    await expect(phase(page)).not.toContainText('Preparing');
+    await expect(logItems(page).filter({ hasText: 'Encounter 2' })).toHaveCount(1);
+    await page.waitForTimeout(700);
+    expect(await reads()).toBe(r0 + 1);
+    expect(live.requests.every(r => r.reader === null)).toBe(true);
   });
 
   test('follows the gladiator by default and pans freely after a drag', async ({ page }) => {
@@ -584,7 +609,7 @@ test.describe('followable expedition scenes', () => {
     await expect(page.getByRole('button', { name: 'Follow the gladiator' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('reads only the timeline, once per reveal mark and on focus, and sends no command or remote request', async ({ page }) => {
+  test('reads the timeline once per reveal mark, not on focus alone, and sends no command or remote request', async ({ page }) => {
     const requests: Request[] = [];
     page.on('request', request => requests.push(request));
     await expeditionFlow.open(page, 'woodland', 39);
@@ -600,8 +625,10 @@ test.describe('followable expedition scenes', () => {
     await expect.poll(reads, { timeout: 5_000 }).toBe(first + 1);
     await page.waitForTimeout(1200);
     expect(await reads()).toBe(first + 1);
+    // Focus refreshes the shared revision (Task 13.8); the fixture's is unchanged, so the timeline is not read again.
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect.poll(reads, { timeout: 5_000 }).toBe(first + 2);
+    await page.waitForTimeout(700);
+    expect(await reads()).toBe(first + 1);
     // Camera controls change nothing on the server.
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await page.getByRole('button', { name: 'Follow the gladiator' }).click();
@@ -622,11 +649,10 @@ test.describe('followable expedition scenes', () => {
     expect(text).not.toMatch(/Encounter [23]|Return to camp|Arrive at camp|light boots|salvage|\+\d+ money/i);
   });
 
-  test('explains an unknown, malformed or live expedition without reading or drawing one', async ({ page, context }) => {
+  test('explains an unknown, malformed or unreadable expedition without drawing one, reading only public data', async ({ page, context }) => {
     // Since Task 13.2 the live page reads a visitor's public timeline, so its Data API reads are routed to the test
     // transport (never the local Supabase stack). Here the live read fails on the server: the live page cannot read the
-    // expedition and must explain it. (An unknown live expedition the server answers reads as "Preparing", as for any
-    // expedition not yet revealed.)
+    // expedition and must explain it. (An unknown live expedition the server answers is "not available yet": scenes.spec.)
     const live = await routeLiveReads(context, { world: emptyWorld() });
     live.fail('world_revision');
     const requests: string[] = [];

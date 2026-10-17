@@ -10,8 +10,12 @@ export type SceneEvents = {
   'select-character': { gladiatorId: string; screen: Point | null };
   /** Scene to UI: a click on a merchant's stall or the merchant (Task 13.7 opens that merchant's shop tab). */
   'open-merchant': { merchant: 'weapons' | 'armor' };
+  /**
+   * Scene or UI to the shell (Task 13.8): open an expedition, or a battle replay (at one stage, or the first), as a
+   * full-screen scene over the camp; `return-camp` closes it (the scene's "Back to camp").
+   */
   'view-expedition': { activityId: string };
-  'view-replay': { activityId: string };
+  'view-replay': { activityId: string; stageId?: string | null };
   'return-camp': Record<string, never>;
   'follow-character': { gladiatorId: string | null };
   /** UI to scene: zoom buttons and character search. */

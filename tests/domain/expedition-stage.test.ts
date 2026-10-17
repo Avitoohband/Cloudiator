@@ -4,9 +4,11 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { EXPEDITION_FIXTURE_TIMELINES as T } from '../fixtures/expeditions';
 import { reduceReplay, REPLAY_OUTRO_MS } from '@/game/replay';
 import { planStage, stageAt, type StageLayout } from '@/game/battle-stage';
-import { loadAssetManifest } from '@/game/assets';
+import { loadAssetManifest, type MapData } from '@/game/assets';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import { gladiatorPose, journeyMap } from '@/game/expedition-path';
 import {
-  EXPEDITION_APPROACH_MS, JOURNEY, expeditionRevealMarks, renderExpeditionStage, type ExpeditionSceneState,
+  EXPEDITION_APPROACH_MS, EXPEDITION_ENCOUNTERS, JOURNEY, expeditionRevealMarks, renderExpeditionStage, type ExpeditionSceneState,
 } from '@/game/expedition-stage';
 
 const MIN = 60_000;
@@ -80,11 +82,16 @@ describe('expedition minute table', () => {
       const failed = t.stages.some(s => s.kind === 'return' && s.endsAtMs > s.startedAtMs);
       const from = failed ? 'safe' : 'end';
       // Just before arrival it still waits at the trail's end or rests at the safe point.
-      expect(renderExpeditionStage(t, arrival.startedAtMs - 1).route).toMatchObject({ to: from, then: failed ? 'rest' : 'wait' });
+      const before = renderExpeditionStage(t, arrival.startedAtMs - 1).route!;
+      expect(before).toMatchObject({ to: from, then: failed ? 'rest' : 'wait' });
       for (const after of [0, 1_000, 5 * MIN]) {
         const s = renderExpeditionStage(t, arrival.startedAtMs + after);
         expect(s.phase === 'arrived' || s.phase === 'settled', t.activityId).toBe(true);
-        expect(s.route).toEqual({ segment: from === 'end' ? JOURNEY.indexOf('end') : 0, from, to: from, walkedMs: after, then: 'leave' });
+        const { rest, ...route } = s.route!;
+        expect(route).toEqual({ segment: from === 'end' ? JOURNEY.indexOf('end') : 0, from, to: from, walkedMs: after, then: 'leave' });
+        // After a defeat it carries the rest it leaves from, run on to the same display time (its pose holds as it fades).
+        if (failed) expect(rest, t.activityId).toEqual({ ...before, walkedMs: before.walkedMs + 1 + after });
+        else expect(rest, t.activityId).toBeUndefined();
       }
     }
   });
@@ -309,6 +316,36 @@ describe('journey and progress', () => {
     expect(at(t, 85).route).toMatchObject({ from: 'end', to: 'end', walkedMs: 5 * MIN, then: 'leave' });
     const lost = encounterStage(T.outpost, 2);
     expect(renderExpeditionStage(T.outpost, lost.endsAtMs + REPLAY_OUTRO_MS + 4_000).route).toEqual({ segment: 4, from: 'encounter-2', to: 'safe', walkedMs: 4_000, then: 'rest' });
+  });
+
+  it('names the number of encounters on every expedition once (Task 15 review Minor 3)', () => {
+    expect(EXPEDITION_ENCOUNTERS).toBe(3);
+    for (const expedition of Object.values(CATALOG_V1.expeditions)) expect(expedition.encounters, expedition.id).toBe(EXPEDITION_ENCOUNTERS);
+    expect(JOURNEY.filter(point => point.startsWith('encounter-'))).toHaveLength(EXPEDITION_ENCOUNTERS);
+  });
+
+  it('keeps the rest pose while leaving from the safe point after a defeat', () => {
+    // Task 15 review round 2 Minor 2: at minute 80 the gladiator stood up from its rest at full opacity, then faded.
+    const manifest = loadAssetManifest();
+    const journeyOf = (id: string) => journeyMap(manifest.maps.find(m => m.id === id) as MapData);
+    const journey = journeyOf('outpost');
+    const speed = manifest.actors.gladiator.walk.tilesPerSecond;
+    const arrival = T.outpost.stages.at(-1)!.startedAtMs;
+    const pose = (ms: number) => gladiatorPose(journey, renderExpeditionStage(T.outpost, ms).route!, speed);
+    const resting = pose(arrival - 1_000);
+    expect(['sit', 'sleep']).toContain(resting.action);
+    for (const after of [0, 750, 1_500]) {
+      const leaving = renderExpeditionStage(T.outpost, arrival + after);
+      // The scene fades the gladiator out over the leave route's walked time...
+      expect(leaving.route).toMatchObject({ from: 'safe', to: 'safe', walkedMs: after, then: 'leave' });
+      // ...in the pose it rested in, where it rested.
+      expect(pose(arrival + after), `+${after} ms`).toMatchObject({ action: resting.action, x: journey.points.safe.x + 0.5, y: journey.points.safe.y + 0.5, walking: false });
+    }
+    // A success leaves from the trail's end, standing where it waited.
+    const home = T.woodland.stages.at(-1)!.startedAtMs;
+    const woodland = journeyOf('woodland');
+    expect(gladiatorPose(woodland, renderExpeditionStage(T.woodland, home + 750).route!, speed))
+      .toMatchObject({ action: 'idle', x: woodland.points.end.x + 0.5, y: woodland.points.end.y + 0.5 });
   });
 
   it('lists the moments when a fresh read can reveal more', () => {

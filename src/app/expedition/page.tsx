@@ -1,25 +1,28 @@
 'use client';
 
-// Fixed expedition page for the static export: /expedition/?activity=<id>. It follows one expedition's
-// revealed timeline and only reads (timeline, world, owner); it never sends commands. Fixture mode
-// (?mode=fixture in a fixture-enabled build) may add &minute=<0..90> to open the sample at that minute.
+// Fixed expedition page for the static export: /expedition/?activity=<id>, a deep link (the camp opens the same
+// expedition as a scene over itself, Task 13.8). It follows one expedition's revealed timeline and only reads; it never
+// sends commands. The page mounts the shared game state: its sync controller's revision re-reads the timeline (the
+// view has no poll of its own), and its world and owner name the gladiator. Fixture mode (?mode=fixture in a
+// fixture-enabled build) may add &minute=<0..90> to open the sample at that minute.
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { createLiveGateway } from '../../lib/api/gateway';
-import { ExpeditionView, ExpeditionUnavailable, type ExpeditionReads } from '../../features/character/ExpeditionView';
+import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
+import { useGameState } from '../../features/character/useGameState';
+import { ExpeditionView, ExpeditionUnavailable } from '../../features/character/ExpeditionView';
 import { expeditionQuery } from '../../features/character/expedition-query';
 
 function ExpeditionShell() {
   const search = useSearchParams();
   const { requested, fixture, activityId, minute } = expeditionQuery(search, process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true');
-  const [loaded, setLoaded] = useState<{ fixture: boolean; reads: ExpeditionReads } | null>(null);
+  const [loaded, setLoaded] = useState<{ fixture: boolean; reads: GameGateway } | null>(null);
 
   useEffect(() => {
     let active = true;
     (async () => {
       // The fixture gateway is only reachable when the build enables fixtures, so production exports drop it.
-      const reads: ExpeditionReads = process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true' && fixture
+      const reads: GameGateway = process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true' && fixture
         ? (await import('../../lib/api/fixture-gateway')).createFixtureGateway()
         : createLiveGateway();
       if (active) setLoaded({ fixture, reads });
@@ -28,6 +31,8 @@ function ExpeditionShell() {
   }, [fixture]);
 
   const reads = loaded?.fixture === fixture ? loaded.reads : null;
+  // Without a well-formed activity there is nothing to show, so nothing is read or polled.
+  const game = useGameState(activityId ? reads : null, { fixture });
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
@@ -37,7 +42,8 @@ function ExpeditionShell() {
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page">
       {!activityId ? <ExpeditionUnavailable fixture={fixture} reason="not-found" />
-        : reads ? <ExpeditionView key={`${fixture}|${activityId}|${minute}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute} />
+        : reads ? <ExpeditionView key={`${fixture}|${activityId}|${minute}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute}
+          revision={game.revision} world={game.world} worldFailed={!game.world && game.syncError !== null} owner={game.owner} />
           : <p role="status">Loading the expedition…</p>}
     </main>
     <footer className="game-footer">CLOUDIATOR <span>Expeditions show only revealed stages; watching never changes their result.</span></footer>

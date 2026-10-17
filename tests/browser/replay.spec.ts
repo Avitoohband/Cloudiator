@@ -173,7 +173,8 @@ test.describe('battle-log replay', () => {
     expect(await page.locator('canvas').count()).toBe(0);
     await expect(page.getByRole('link', { name: 'Back to camp' })).toHaveAttribute('href', '/game/');
     expect(live.requests.length).toBeGreaterThan(0);
-    expect(live.requests.every(r => r.reader === null && ['world_revision', 'visible_events', 'recent_results'].includes(r.table))).toBe(true);
+    // The timeline, and since Task 13.8 the shared sync controller's revision and world (the page's display clock).
+    expect(live.requests.every(r => r.reader === null && ['world_revision', 'world_actor_reads', 'visible_events', 'recent_results'].includes(r.table))).toBe(true);
   });
 
   test('plays at normal speed to the logged result in real time', async ({ page }) => {

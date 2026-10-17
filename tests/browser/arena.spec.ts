@@ -568,19 +568,23 @@ test.describe('the Arena card and league standings', () => {
     expect((await arenaState(page))!.owner).toBe(false);
   });
 
-  test('opens the selected bout as an expanded replay and returns to the camp', async ({ page }) => {
+  test('opens the selected bout as an expanded replay over the camp and returns to the camp', async ({ page }) => {
     await arenaFlow.openAtMinute(page, 61, 'ownerNpcWin');
     await page.getByRole('button', { name: 'Watch replay' }).click();
-    await page.waitForURL(url => url.pathname === '/replay/');
+    // Task 13.8: the replay is a scene over the camp, a history entry on the camp's own route (plan Decision 4).
+    const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(scene).toBeVisible();
     const url = new URL(page.url());
-    expect(Object.fromEntries(url.searchParams)).toEqual({ mode: 'fixture', activity: arenaActivityId('ownerNpcWin'), stage: `${arenaActivityId('ownerNpcWin')}:1` });
-    await expect(page.getByRole('heading', { level: 1, name: 'Aster vs Iron Warden' })).toBeVisible({ timeout: 45_000 });
-    await page.getByRole('link', { name: 'Back to camp' }).click();
-    await page.waitForURL(u => u.pathname === '/game/');
-    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
-    expect(await page.evaluate(() => window.__cloudiatorCamp!.canvases())).toBe(1);
-    await openSample(page, 'ownerNpcWin');
+    expect(url.pathname).toBe('/game/');
+    expect(Object.fromEntries(url.searchParams)).toEqual({ mode: 'fixture', view: 'replay', activity: arenaActivityId('ownerNpcWin'), stage: `${arenaActivityId('ownerNpcWin')}:1` });
+    await expect(scene.getByRole('heading', { level: 2, name: 'Aster vs Iron Warden' })).toBeVisible({ timeout: 45_000 });
+    await scene.getByRole('button', { name: 'Back to camp' }).click();
+    await expect(scene).toHaveCount(0);
+    expect(new URL(page.url()).search).toBe('?mode=fixture');
+    expect(await page.evaluate(() => ({ ready: window.__cloudiatorCamp!.state()!.ready, canvases: window.__cloudiatorCamp!.canvases() }))).toEqual({ ready: true, canvases: 1 });
+    // The card is where it was, and the focus is back on its button.
     await expect(page.getByRole('button', { name: 'Watch replay' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Watch replay' })).toBeFocused();
   });
 
   test('reads Arena timelines for the camp only once bouts are due, and pauses while the tab is hidden', async ({ page }) => {
@@ -796,7 +800,12 @@ test.describe('the Arena card and league standings', () => {
     await expect(watch).toBeEnabled();
     await watch.focus();
     await page.keyboard.press('Enter');
-    await page.waitForURL(url => url.pathname === '/replay/');
+    // The replay opens over the camp (Task 13.8) with Back to camp focused; Escape closes it and gives the focus back.
+    const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(scene.getByRole('button', { name: 'Back to camp' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(scene).toHaveCount(0);
+    await expect(watch).toBeFocused();
   });
 
   test('fits a 360 px phone with reduced motion', async ({ page }, testInfo) => {

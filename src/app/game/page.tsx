@@ -1,12 +1,15 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { CampShell, type SignInResult } from '../../features/shell/CampShell';
+import { sceneOf } from '../../features/shell/scene-url';
 
 /**
  * Reads the preview options from the URL: `?mode=fixture` (fixture-enabled builds only) and, with it, `?as=visitor`;
- * and `?signin=cancelled|failed`, a Google sign-in that returned without completing (plan Decision 6).
+ * `?signin=cancelled|failed`, a Google sign-in that returned without completing (plan Decision 6); and
+ * `?view=replay|expedition&activity=…`, a scene over the camp (plan Decision 4), which the shell opens and closes with
+ * `history.pushState` and Back (the App Router keeps `useSearchParams` in step with them).
  */
 function GameRoute() {
   const search = useSearchParams();
@@ -16,7 +19,8 @@ function GameRoute() {
   const previewAs = fixture && search.get('as') === 'visitor' ? 'visitor' : undefined;
   const signin = search.get('signin');
   const signInResult: SignInResult | null = signin === 'cancelled' || signin === 'failed' ? signin : null;
-  return <CampShell fixture={fixture} previewAs={previewAs} fixtureRefused={requested && !fixture} signInResult={signInResult} />;
+  const scene = useMemo(() => sceneOf(search), [search]);
+  return <CampShell fixture={fixture} previewAs={previewAs} fixtureRefused={requested && !fixture} signInResult={signInResult} scene={scene} />;
 }
 
 /** The full-screen camp. The site root renders this same page, so a shared link opens straight onto the camp. */

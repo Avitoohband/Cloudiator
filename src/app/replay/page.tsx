@@ -1,13 +1,15 @@
 'use client';
 
-// Fixed replay page for the static export: /replay/?activity=<id>[&stage=<stage id>].
-// It reads one revealed timeline and plays its battle log locally; it never sends commands.
+// Fixed replay page for the static export: /replay/?activity=<id>[&stage=<stage id>], a deep link (the camp opens the
+// same replay as a scene over itself, Task 13.8). It reads one revealed timeline and plays its battle log locally; it
+// never sends commands. The page mounts the shared game state for its display clock (Task 15 review Minor 2): only the
+// battles that ended by the server's time are offered, so a fight in progress never shows its outcome.
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { createLiveGateway } from '../../lib/api/gateway';
-import { loadReplayView, type ReplayView } from '../../game/replay';
-import { BattleReplay } from '../../features/arena/BattleReplay';
+import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
+import { useGameState } from '../../features/character/useGameState';
+import { ActivityReplay, BattleReplay } from '../../features/arena/BattleReplay';
 
 function ReplayShell() {
   const search = useSearchParams();
@@ -15,25 +17,25 @@ function ReplayShell() {
   const fixture = requested && process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true';
   const activityId = search.get('activity');
   const stageId = search.get('stage');
-  const [loaded, setLoaded] = useState<{ key: string; view: ReplayView } | null>(null);
-  const key = `${fixture}|${activityId}|${stageId}`;
+  const [loaded, setLoaded] = useState<{ fixture: boolean; reads: GameGateway } | null>(null);
 
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!activityId) return { kind: 'unavailable', reason: 'not-found' } as const;
       // The fixture gateway is only reachable when the build enables fixtures, so production exports drop it.
-      const gateway = process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true' && fixture
+      const reads: GameGateway = process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true' && fixture
         ? (await import('../../lib/api/fixture-gateway')).createFixtureGateway()
         : createLiveGateway();
-      return loadReplayView(gateway, activityId, stageId);
-    })()
-      .catch((): ReplayView => ({ kind: 'unavailable', reason: 'unavailable' }))
-      .then(view => { if (active) setLoaded({ key, view }); });
+      if (active) setLoaded({ fixture, reads });
+    })().catch(() => { if (active) setLoaded({ fixture, reads: createLiveGateway() }); });
     return () => { active = false; };
-  }, [activityId, fixture, key, stageId]);
+  }, [fixture]);
 
-  const view = loaded?.key === key ? loaded.view : null;
+  const reads = loaded?.fixture === fixture ? loaded.reads : null;
+  // Without an activity there is nothing to show, so nothing is read or polled.
+  const game = useGameState(activityId ? reads : null, { fixture });
+  // The display clock has a server time once the shared sync has read the world (or it never will: the device's clock).
+  const clock = game.world || game.syncError ? game.clock : null;
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
@@ -42,7 +44,8 @@ function ReplayShell() {
     {fixture && <p className="fixture-banner" role="status">Fixture mode — sample replays from the local preview</p>}
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page">
-      {view ? <BattleReplay key={key} view={view} /> : <p role="status">Loading the replay…</p>}
+      {!activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
+        : <ActivityReplay key={`${fixture}|${activityId}|${stageId}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock} />}
     </main>
     <footer className="game-footer">CLOUDIATOR <span>Replays show the recorded fight; they never change its result.</span></footer>
   </div>;

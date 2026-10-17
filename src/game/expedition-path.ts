@@ -54,6 +54,8 @@ function arrivalFacing(journey: JourneyMap, to: JourneyPoint): Direction {
 
 /** Where the gladiator is and what it does for a route progress, at `tilesPerSecond`. */
 export function gladiatorPose(journey: JourneyMap, route: RouteProgress, tilesPerSecond: number): GladiatorPose {
+  // Leaving after a defeat: it keeps the pose of its rest at the safe point while the scene fades it out.
+  if (route.then === 'leave' && route.rest) return gladiatorPose(journey, route.rest, tilesPerSecond);
   const target = journey.points[route.to];
   const arrived = (restMs: number): GladiatorPose => {
     const facing = arrivalFacing(journey, route.to);

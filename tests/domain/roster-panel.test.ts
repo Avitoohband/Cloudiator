@@ -36,6 +36,17 @@ describe('Gladiators', () => {
     expect(new RegExp(`id="${id}"[^>]*>([^<]*)<`).exec(unavailable)![1]).toContain('The camp view is unavailable');
   });
 
+  it('offers an away gladiator’s expedition to watch over the camp (Task 13.8)', () => {
+    const away = { ...actor('Corvina', 'expedition:woodland'), activityId: 'expedition-1' };
+    const html = panel({ world: { ...WORLD, actors: [WORLD.actors[0], away] } });
+    expect(button(html, 'Watch Corvina&#x27;s expedition')).not.toBe('');
+    expect(html).not.toContain('aria-label="Find Corvina"');
+    // Without a public activity there is nothing to open: it only says where they are.
+    const unknown = panel();
+    expect(unknown).not.toContain('Watch Corvina');
+    expect(unknown).toContain('On an expedition');
+  });
+
   it('opens each gladiator’s profile card from its name (the keyboard path of a camp click)', () => {
     const html = panel();
     for (const name of ['Aster', 'Brutus', 'Corvina']) expect(html).toContain(`aria-label="Profile: ${name}"`);

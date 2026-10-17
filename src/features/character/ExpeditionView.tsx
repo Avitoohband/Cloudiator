@@ -4,16 +4,25 @@
 // health read from the battle logs, an activity log of revealed stages with replay links, camera
 // controls and a Camp button. Everything shown comes from the revealed timeline at the display clock
 // (src/game/expedition-stage.ts); results and rewards come only from a settled summary. The view only
-// reads (timeline, then world and owner once) and never sends a command. Names and labels render as
-// React text. The character's name comes from the public world actor (or the owner's own record),
-// never from a battle log, whose gladiator participant Task 9 names "Gladiator".
+// reads its timeline and never sends a command. Names and labels render as React text. The character's
+// name comes from the public world actor (or the owner's own record), never from a battle log, whose
+// gladiator participant Task 9 names "Gladiator".
+//
+// Task 13.8: the shared game state (`useGameState`, on the page or in the camp) gives the view its world, its
+// owner and the world revision. The timeline is read on entry, once at each reveal mark the display clock
+// passes, and again whenever the shared sync controller's revision changes (its 30-second poll, and on focus):
+// the view has no timer of its own. Over the camp it is a scene (`overCamp`): its headings start at h2, Watch
+// replay opens the replay scene, and Back to camp replaces its Camp link. A guessed or unknown activity, with no
+// revealed stage and no world actor on it, is "not available yet": never an endless "Preparing", never an error.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { ActivitySummary, RevealedTimeline } from '@contracts/events';
-import type { PublicActor } from '@contracts/reads';
+import type { OwnerState, PublicActor } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import { CATALOG_V1 } from '@domain/catalog-v1';
-import { EXPEDITION_MS, expeditionRevealMarks, renderExpeditionStage, type ExpeditionSceneState, type VisibleStage } from '../../game/expedition-stage';
+import {
+  EXPEDITION_ENCOUNTERS, EXPEDITION_MS, expeditionRevealMarks, renderExpeditionStage, type ExpeditionSceneState, type VisibleStage,
+} from '../../game/expedition-stage';
 import type { ExpeditionEnvironment, GladiatorLook } from '../../game/expedition-scene';
 import { ExpeditionViewport } from '../../game/ExpeditionViewport';
 import { createSceneBridge } from '../../game/bridge';
@@ -21,7 +30,7 @@ import { layersFor, tintFor } from '../../game/actors';
 import { prefersReducedMotion } from '../../game/webgl';
 import styles from './ExpeditionView.module.css';
 
-export type ExpeditionReads = Pick<GameGateway, 'timeline' | 'world' | 'owner'>;
+export type ExpeditionReads = Pick<GameGateway, 'timeline'>;
 
 /** Fixture builds only (NEXT_PUBLIC_FIXTURE_ENABLED): browser tests read the view and hold its clock. */
 export type ExpeditionTestHook = {
@@ -46,8 +55,6 @@ declare global {
 const ENVIRONMENTS: ExpeditionEnvironment[] = ['woodland', 'outpost', 'mountain'];
 const MARKERS = [0, 20, 40, 60, 80];
 const TICK_MS = 250;
-/** Spec 10.5's poll interval, used while a due stage or the owner's summary is awaited. */
-const POLL_MS = 30_000;
 /** Encounter numbers in words: a health or phase text never repeats a log line's "Encounter N". */
 const ORDINALS = ['first', 'second', 'third'];
 let activeLoops = 0;
@@ -107,29 +114,26 @@ function healthText(state: ExpeditionSceneState): { label: string; recovers: boo
   const which = ORDINALS[state.hp.encounter - 1] ?? `number ${state.hp.encounter}`;
   return {
     label: `Health ${fight?.inProgress ? 'during' : 'after'} the ${which} encounter`,
-    // After a won non-final encounter the server heals the gladiator before the next one.
-    recovers: fight?.outcome === 'victory' && state.hp.encounter < ORDINALS.length,
+    // After a won encounter that is not the last the server heals the gladiator before the next one.
+    recovers: fight?.outcome === 'victory' && state.hp.encounter < EXPEDITION_ENCOUNTERS,
   };
 }
 
 /**
- * Timeline reads. Task 10 replaces this with the shared sync controller: one read on entry, the reads
- * `readDue` asks for while the tab is visible, and one when the tab regains focus. `onRead` hears every
- * read. A failed later read keeps the last revealed timeline.
+ * Timeline reads: one on entry, then whatever `read` is asked for (a reveal mark, a new shared revision). `onFirst`
+ * hears the first timeline. A failed later read keeps the last revealed timeline; only the latest read lands.
  */
-function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (timeline: RevealedTimeline) => void, onRead: () => void) {
+function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (timeline: RevealedTimeline) => void) {
   const [timeline, setTimeline] = useState<RevealedTimeline | null>(null);
   const [failure, setFailure] = useState<'unavailable' | 'not-found' | null>(null);
   const count = useRef(0);
   const request = useRef(0);
   const first = useRef(onFirst);
-  const heard = useRef(onRead);
   const loaded = useRef(false);
-  useEffect(() => { first.current = onFirst; heard.current = onRead; }, [onFirst, onRead]);
+  useEffect(() => { first.current = onFirst; }, [onFirst]);
   const read = useCallback(async () => {
     const mine = ++request.current;
     count.current += 1;
-    heard.current();
     try {
       const next = await reads.timeline(activityId);
       if (mine !== request.current) return;
@@ -142,58 +146,61 @@ function useTimelineReads(reads: ExpeditionReads, activityId: string, onFirst: (
   }, [activityId, reads]);
   useEffect(() => {
     void read();
-    const onFocus = () => { if (document.visibilityState === 'visible') void read(); };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-    return () => {
-      request.current += 1;
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
-    };
+    return () => { request.current += 1; };
   }, [read]);
   return { timeline, failure, read, count };
 }
 
-type ReadSchedule = { pending: number[]; done: Set<number>; lastReadMs: number | null };
-
 /**
- * When the display clock (ticking only while the tab is visible) next needs a fresh timeline read; the
- * one swappable piece Task 10's sync controller replaces. True once for each reveal mark passed (the
- * current stage's end and each 20-minute mark), and, while a due stage is unpublished (Preparing) or
- * the owner's summary is awaited (Processing results), whenever POLL_MS have passed since the last read
- * of any kind. Those polls stop as soon as the stage or the summary is there. A spectator never waits
- * for a summary.
+ * Whether the display clock (ticking only while the tab is visible) has passed a reveal mark it had ahead of it at an
+ * earlier tick: the current stage's end and each 20-minute mark. Each mark asks for one read; nothing is due once the
+ * expedition is complete. Everything else a read could bring arrives with a new shared revision.
  */
-function readDue(schedule: ReadSchedule, state: ExpeditionSceneState, owner: boolean): boolean {
-  const t = state.displayNowMs;
-  const passed = schedule.pending.filter(mark => mark <= t && !schedule.done.has(mark));
+function passedRevealMark(schedule: { pending: number[]; done: Set<number> }, state: ExpeditionSceneState): boolean {
+  const passed = schedule.pending.filter(mark => mark <= state.displayNowMs && !schedule.done.has(mark));
   for (const mark of passed) schedule.done.add(mark);
   schedule.pending = expeditionRevealMarks(state);
-  // The entry read happened just before the first tick; a held fixture clock may also move back.
-  if (schedule.lastReadMs === null || schedule.lastReadMs > t) schedule.lastReadMs = t;
-  const waiting = state.phase === 'preparing' || (owner && state.awaitingSummary);
-  return passed.length > 0 || (waiting && t - schedule.lastReadMs >= POLL_MS);
+  return passed.length > 0;
 }
 
-/** Shown for a missing, malformed or unreadable expedition: nothing is drawn or read further. */
-export function ExpeditionUnavailable({ fixture, reason }: { fixture: boolean; reason: 'not-found' | 'unavailable' }) {
+type HeadingLevel = 1 | 2;
+const titleTag = (level: HeadingLevel) => (level === 1 ? 'h1' : 'h2');
+const sectionTag = (level: HeadingLevel) => (level === 1 ? 'h2' : 'h3');
+
+/**
+ * Shown for a missing, malformed or unreadable expedition (nothing is drawn or read further), and for a guessed or
+ * unknown one (`not-yet`), which shows no summary at all. Over the camp there is no Camp link (the scene has Back to
+ * camp) and the title is an h2.
+ */
+export function ExpeditionUnavailable({ fixture, reason, overCamp = false }: { fixture: boolean; reason: 'not-found' | 'unavailable' | 'not-yet'; overCamp?: boolean }) {
   const titleId = useId();
+  const Title = titleTag(overCamp ? 2 : 1);
   return <section className={`${styles.card} ${styles.missing}`} aria-labelledby={titleId}>
-    <h1 id={titleId}>This expedition is not available</h1>
-    <p>{reason === 'not-found'
-      ? 'No expedition matches this link.'
-      : 'It may not exist, or expedition scenes cannot be loaded in this build yet. Only revealed stages of an expedition are ever shown.'}</p>
-    <Link className={styles.camp} href={fixture ? '/game/?mode=fixture' : '/game/'}>Camp</Link>
+    <Title id={titleId}>{reason === 'not-yet' ? 'This expedition is not available yet' : 'This expedition is not available'}</Title>
+    <p>{reason === 'not-yet' ? 'Nothing has been revealed for it. Only the revealed stages of an expedition are ever shown, as they happen.'
+      : reason === 'not-found' ? 'No expedition matches this link.'
+        : 'It may not exist, or expedition scenes cannot be loaded in this build yet. Only revealed stages of an expedition are ever shown.'}</p>
+    {!overCamp && <Link className={styles.camp} href={fixture ? '/game/?mode=fixture' : '/game/'}>Camp</Link>}
   </section>;
 }
 
-export function ExpeditionView({ reads, activityId, fixture, startMinute = null }: {
+export function ExpeditionView({ reads, activityId, fixture, startMinute = null, revision, world, worldFailed = false, owner, overCamp }: {
   reads: ExpeditionReads;
   activityId: string;
   /** Fixture preview: links keep mode=fixture. */
   fixture: boolean;
   /** Fixture preview only: open at this minute of the expedition, then run in real time. */
   startMinute?: number | null;
+  /** The shared world revision (`useGameState`): each change re-reads the timeline. */
+  revision: string | null;
+  /** The shared public world, for names, the look and whose expedition this is; null while it loads. */
+  world: { actors: readonly PublicActor[] } | null;
+  /** The world could not be read, so no actor is known to be on this activity. */
+  worldFailed?: boolean;
+  /** The signed-in viewer's own gladiator, or null (a visitor, or an owner still loading). */
+  owner: Pick<OwnerState, 'gladiatorId' | 'name'> | null;
+  /** Over the camp: Watch replay opens the replay scene (at an encounter's stage), and there is no Camp link. */
+  overCamp?: { onWatch(stageId: string): void };
 }) {
   const [bridge] = useState(createSceneBridge);
   const clock = useRef<{ anchorMs: number; at: number; frozen: number | null } | null>(null);
@@ -207,29 +214,23 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
     const start = startMinute !== null && departure !== undefined ? departure + startMinute * 60_000 : timeline.serverNowMs;
     clock.current = { anchorMs: start, at: performance.now(), frozen: null };
   }, [startMinute]);
-  const schedule = useRef<ReadSchedule>({ pending: [], done: new Set(), lastReadMs: null });
-  // Every read (entry, schedule or focus) restarts the poll interval at the display time it was made.
-  const onRead = useCallback(() => { schedule.current.lastReadMs = clock.current ? now() : null; }, [now]);
-  const { timeline, failure, read, count } = useTimelineReads(reads, activityId, anchor, onRead);
+  const marks = useRef<{ pending: number[]; done: Set<number> }>({ pending: [], done: new Set() });
+  const { timeline, failure, read, count } = useTimelineReads(reads, activityId, anchor);
   const timelineRef = useRef(timeline);
-  const ownerRef = useRef(false);
   const [displayMs, setDisplayMs] = useState<number | null>(null);
-  const [world, setWorld] = useState<{ actors: readonly PublicActor[] } | null>(null);
-  const [ownerState, setOwnerState] = useState<{ id: string; name: string } | null>(null);
   const [reduced, setReduced] = useState(prefersReducedMotion);
   const titleId = useId();
   const resultId = useId();
   const logId = useId();
-  const loadedOnce = !!timeline;
 
-  // Public names and look, and whose expedition this is: optional reads, made once the expedition exists.
+  // A new shared revision (never the first one the view sees: the entry read is fresh) may carry a published stage or
+  // the owner's settled summary.
+  const seenRevision = useRef(revision);
   useEffect(() => {
-    if (!loadedOnce) return;
-    let alive = true;
-    reads.world().then(next => { if (alive) setWorld({ actors: next.actors }); }).catch(() => {});
-    reads.owner().then(owner => { if (alive) setOwnerState({ id: owner.gladiatorId, name: owner.name }); }).catch(() => {});
-    return () => { alive = false; };
-  }, [loadedOnce, reads]);
+    const previous = seenRevision.current;
+    seenRevision.current = revision;
+    if (previous !== null && revision !== null && revision !== previous) void read();
+  }, [revision, read]);
 
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -256,7 +257,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
       if (document.visibilityState !== 'visible' || !timelineRef.current || !clock.current) return;
       const t = now();
       setDisplayMs(t);
-      if (readDue(schedule.current, renderExpeditionStage(timelineRef.current, t), ownerRef.current)) void read();
+      if (passedRevealMark(marks.current, renderExpeditionStage(timelineRef.current, t))) void read();
     };
     const timer = window.setInterval(tick, TICK_MS);
     return () => { window.clearInterval(timer); activeLoops -= 1; };
@@ -270,9 +271,8 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   const environment = environmentOf(timeline, byActivity);
   // Only the owner's timeline carries a summary (counted once it is due, like every stage); otherwise
   // compare the owner's id with the expedition's. Before either is known, nobody is named.
-  const owner = !!state?.summary || (!!ownerState && ownerState.id === gladiatorId);
-  useEffect(() => { ownerRef.current = owner; }, [owner]);
-  const name = byActivity?.name ?? byId?.name ?? (owner ? ownerState?.name ?? null : null);
+  const isOwner = !!state?.summary || (!!owner && owner.gladiatorId === gladiatorId);
+  const name = byActivity?.name ?? byId?.name ?? (isOwner ? owner?.name ?? null : null);
   const silhouettes = (byActivity?.equipmentSilhouettes ?? state?.gladiator?.equipmentSilhouettes ?? []).join('|');
   const look = useMemo<GladiatorLook>(() => ({
     key: gladiatorId ?? activityId, name: name ?? 'Gladiator',
@@ -290,7 +290,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
         return {
           activityId: s.activityId, phase: s.phase, displayNowMs: s.displayNowMs, minute: s.progress?.minute ?? null, labels: s.stages.map(x => x.label),
           current: s.current?.label ?? null, hp: s.hp, route: s.route, replays: s.stages.filter(x => x.replay).map(x => x.id), complete: s.complete,
-          outcome: s.outcome, settled: !!s.summary, owner, name, environment,
+          outcome: s.outcome, settled: !!s.summary, owner: isOwner, name, environment,
         };
       },
       freeze: ms => {
@@ -304,11 +304,19 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
       loops: () => activeLoops,
     };
     return () => { delete window.__cloudiatorExpedition; };
-  }, [bridge, count, environment, name, now, owner]);
+  }, [bridge, count, environment, name, now, isOwner]);
 
-  if (failure) return <ExpeditionUnavailable fixture={fixture} reason={failure} />;
+  if (failure) return <ExpeditionUnavailable fixture={fixture} reason={failure} overCamp={!!overCamp} />;
   if (!timeline || !state) return <p role="status">Loading the expedition…</p>;
+  // A guessed or unknown activity: nothing revealed, and nobody in the world on it (Review Focus 3).
+  if (!state.stages.length && !byActivity) {
+    return world || worldFailed ? <ExpeditionUnavailable fixture={fixture} reason="not-yet" overCamp={!!overCamp} />
+      : <p role="status">Loading the expedition…</p>;
+  }
 
+  const level: HeadingLevel = overCamp ? 2 : 1;
+  const Title = titleTag(level);
+  const Section = sectionTag(level);
   const campHref = fixture ? '/game/?mode=fixture' : '/game/';
   const expedition = environment ? CATALOG_V1.expeditions[environment].name : 'Expedition';
   const text = phaseText(state, expedition);
@@ -318,15 +326,15 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
   const replayHref = (stage: VisibleStage) => `/replay/?${fixture ? 'mode=fixture&' : ''}activity=${encodeURIComponent(activityId)}&stage=${encodeURIComponent(stage.id)}`;
   const summary = state.summary;
   const encounters = state.stages.some(s => s.encounter !== null);
-  const who = name ?? (owner ? 'Your gladiator' : gladiatorId ? "Another gladiator's journey" : null);
+  const who = name ?? (isOwner ? 'Your gladiator' : gladiatorId ? "Another gladiator's journey" : null);
   return (
     <section className={styles.view} aria-labelledby={titleId}>
       <header className={styles.header}>
         <div className={styles.heading}>
           <p className="eyebrow">{who ? `EXPEDITION · ${who}` : 'EXPEDITION'}</p>
-          <h1 id={titleId}>{expedition}</h1>
+          <Title id={titleId}>{expedition}</Title>
         </div>
-        <Link className={styles.camp} href={campHref}>Camp</Link>
+        {!overCamp && <Link className={styles.camp} href={campHref}>Camp</Link>}
       </header>
 
       {environment ? <ExpeditionViewport environment={environment} state={sceneState} look={look} bridge={bridge} reducedMotion={reduced}
@@ -362,12 +370,12 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
 
       <div className={styles.columns}>
         <section className={styles.card} role="region" aria-labelledby={resultId}>
-          <h2 id={resultId}>Result</h2>
+          <Section id={resultId}>Result</Section>
           {state.phase === 'safe-return' ? <p>No rewards: a defeat ends the remaining encounters, and the gladiator keeps all gear.</p>
             : !state.complete ? <p className={styles.note}>The result is known when the expedition returns at minute 80.</p>
               : <>
                 <p className={styles.verdict}>{state.outcome === 'failure' ? 'Defeated' : 'Success'}</p>
-                {!owner ? <p className={styles.note}>Another gladiator&apos;s expedition: only its revealed journey is shown.</p>
+                {!isOwner ? <p className={styles.note}>Another gladiator&apos;s expedition: only its revealed journey is shown.</p>
                   : summary ? <>
                     {summary.success ? <><p className={styles.note}>Credited rewards</p>
                       <ul className={styles.rewards}>{rewardLines(summary).map((line, i) => <li key={`${i}-${line}`}>{line}</li>)}</ul></>
@@ -380,13 +388,15 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null 
         </section>
 
         <section className={styles.card} aria-labelledby={logId}>
-          <h2 id={logId}>Activity log</h2>
+          <Section id={logId}>Activity log</Section>
           <ol className={styles.log} aria-label="Activity log">
             {state.stages.map(stage => <li key={stage.id} aria-current={stage.id === state.current?.id ? 'step' : undefined} className={stage.id === state.current?.id ? styles.current : undefined}>
               <time dateTime={new Date(stage.startedAtMs).toISOString()}>{clockTime(stage.startedAtMs)}</time>
               <span className={styles.logLabel}>{stage.label}</span>
               {stage.inProgress && <span className={styles.badge}>in progress</span>}
-              {stage.replay && <Link className={styles.replay} href={replayHref(stage)} aria-label={`Watch the replay of encounter ${stage.encounter}`}>Watch replay</Link>}
+              {stage.replay && (overCamp
+                ? <button type="button" className={styles.replay} aria-label={`Watch the replay of encounter ${stage.encounter}`} onClick={() => overCamp.onWatch(stage.id)}>Watch replay</button>
+                : <Link className={styles.replay} href={replayHref(stage)} aria-label={`Watch the replay of encounter ${stage.encounter}`}>Watch replay</Link>)}
             </li>)}
           </ol>
         </section>

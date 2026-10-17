@@ -17,7 +17,7 @@ import {
 import { assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, spectatorSpots, type CampTournamentRole, type SpectatorSpot } from './tournament-camp';
 import { LABEL_BASE, NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageFrame, type StageLayout, type StagePlan } from './battle-stage';
 import { NPC_ROUTINES, facingFor, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
-import { clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
+import { CLICK_TRAVEL_PX, clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
 import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
 import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
 import { lightingAt } from './lighting';
@@ -114,8 +114,8 @@ const WHEEL_STEP = 100;
 const WHEEL_LINE = 40;
 /** A pause this long ends a wheel gesture; leftover delta does not carry into the next one. */
 const WHEEL_IDLE_MS = 250;
-/** Pointer travel (CSS px) before a press becomes a drag. */
-const DRAG_THRESHOLD = 6;
+/** Pointer travel (CSS px) before a press becomes a drag: the shell's camp-click travel too (13.7 review). */
+const DRAG_THRESHOLD = CLICK_TRAVEL_PX;
 const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', critical: '#ffe48f', guard: '#8edcf4', miss: '#d4d4d8' };
 /** Nameplates sit this far over the feet, and an NPC tag this far when its nameplate shows too (art px). */
 const PLATE_LIFT = 46;

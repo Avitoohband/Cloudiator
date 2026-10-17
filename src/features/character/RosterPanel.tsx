@@ -2,7 +2,8 @@
 
 // The "Gladiators" menu: everyone in the shared world, with a name filter, and Find (centre the camera on them) and
 // Follow (keep them in view) for each gladiator drawn in the camp; a player also gets Find and Follow for their own.
-// Gladiators away on an expedition say so instead (the link to their expedition arrives in Task 13.8). Each name opens
+// Gladiators away on an expedition offer "Watch expedition" instead, which opens their expedition as a scene over the
+// camp (the bridge's `view-expedition`, Task 13.8); the menu stays open beneath it to come back to. Each name opens
 // that gladiator's profile card (Task 13.7). Every world click has this keyboard path. Without a camp view (no WebGL,
 // art that failed to load), or for a gladiator the camp does not draw, the buttons stay, disabled with the reason.
 // Names render as React text.
@@ -72,7 +73,12 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
                   <span>{classLine(actor)} · {placeOf(actor)}</span>
                   {absent && <span id={`${absentId}-${actor.gladiatorId}`}>Not in the camp right now.</span>}
                 </p>
-                {away ? <span className={styles.away}>On an expedition</span> : (
+                {away ? (actor.activityId ? (
+                  <span className={styles.actions}>
+                    <button type="button" aria-label={`Watch ${actor.name}'s expedition`}
+                      onClick={() => bridge.emit('view-expedition', { activityId: actor.activityId! })}>Watch expedition</button>
+                  </span>
+                ) : <span className={styles.away}>On an expedition</span>) : (
                   <span className={styles.actions}>
                     <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Find ${actor.name}`} onClick={() => find(actor.gladiatorId)}>Find</button>
                     <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Follow ${actor.name}`}

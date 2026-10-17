@@ -12,7 +12,9 @@ import { REPLAY_OUTRO_MS, reduceReplay } from './replay';
 
 /** One expedition fills one shared slot: depart at minute 0, encounters at 20, 40 and 60, arrival at 80. */
 export const EXPEDITION_MS = RULES_V1.clock.slotMs;
-export const ENCOUNTER_INTERVAL_MS = EXPEDITION_MS / 4;
+/** Encounters on every expedition (the catalog's `encounters`); after the last one the gladiator heads home. */
+export const EXPEDITION_ENCOUNTERS = 3;
+export const ENCOUNTER_INTERVAL_MS = EXPEDITION_MS / (EXPEDITION_ENCOUNTERS + 1);
 /** The gladiator leaves its search spot this long before the next encounter is due, to wait at the spot. */
 export const EXPEDITION_APPROACH_MS = 45_000;
 
@@ -34,6 +36,11 @@ export type RouteProgress = {
   readonly to: JourneyPoint;
   readonly walkedMs: number;
   readonly then: 'search' | 'wait' | 'fight' | 'rest' | 'leave';
+  /**
+   * Leaving after a defeat only: the rest route it was on at the safe point (at the same display time). The gladiator
+   * keeps that rest pose while the scene fades it out, instead of standing up first (Task 15 review round 2 Minor 2).
+   */
+  readonly rest?: RouteProgress;
 };
 
 export type VisibleStage = {
@@ -133,25 +140,28 @@ const segmentOf = (from: JourneyPoint) => Math.max(0, JOURNEY.indexOf(from as (t
  * walk to the next search spot and search there, then walk on and wait at the next encounter spot (or
  * the route's end) shortly before it is due. A fight happens at its encounter spot; after a defeat the
  * gladiator walks back to the safe point and rests there. Once the expedition arrives at camp, the
- * gladiator leaves the scene from where it waited (the trail's end) or rested (the safe point).
+ * gladiator leaves the scene from where it waited (the trail's end) or rested (the safe point), in the
+ * pose it had there.
  */
 function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToCurrent: RevealedStage[], encounterOf: Map<RevealedStage, number>, failed: boolean): RouteProgress {
   const go = (from: JourneyPoint, to: JourneyPoint, since: number, then: RouteProgress['then']): RouteProgress =>
     ({ segment: segmentOf(from), from, to, walkedMs: Math.max(0, t - since), then });
-  if (current.final) {
-    const at: JourneyPoint = failed ? 'safe' : 'end';
-    return go(at, at, stage.startedAtMs, 'leave');
-  }
   const last = [...upToCurrent].reverse().find(s => s.kind === 'encounter');
   const n = last ? encounterOf.get(last)! : 0;
   const here: JourneyPoint = n ? point(`encounter-${n}`) : 'start';
-  if (stage === last) return go(here, here, stage.startedAtMs, 'fight');
   // The fighters finish their result poses before the gladiator moves on.
   const leave = last ? last.endsAtMs + REPLAY_OUTRO_MS : stage.startedAtMs;
+  if (current.final) {
+    if (!failed) return go('end', 'end', stage.startedAtMs, 'leave');
+    // It has rested at the safe point since the walk back that began after its defeat (or with the return stage).
+    const restFrom = last ? leave : upToCurrent.find(s => s.kind === 'return' && !isFinal(s))?.startedAtMs ?? stage.startedAtMs;
+    return { ...go('safe', 'safe', stage.startedAtMs, 'leave'), rest: go(here, 'safe', restFrom, 'rest') };
+  }
+  if (stage === last) return go(here, here, stage.startedAtMs, 'fight');
   if (last && t < leave) return go(here, here, last.startedAtMs, 'fight');
   if (stage.kind === 'return') return go(here, 'safe', leave, 'rest');
   const spot = point(`search-${n + 1}`);
-  const next = point(n >= 3 ? 'end' : `encounter-${n + 1}`);
+  const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
   const approach = Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS);
   return t < approach ? go(here, spot, leave, 'search') : go(spot, next, approach, 'wait');
 }
@@ -253,7 +263,8 @@ export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: 
  */
 export function expeditionRevealMarks(state: ExpeditionSceneState): number[] {
   if (state.complete || !state.progress) return [];
-  const marks = [1, 2, 3, 4].map(k => state.progress!.startMs + k * ENCOUNTER_INTERVAL_MS);
+  // Each encounter's start, and the arrival after the last one.
+  const marks = Array.from({ length: EXPEDITION_ENCOUNTERS + 1 }, (_, i) => state.progress!.startMs + (i + 1) * ENCOUNTER_INTERVAL_MS);
   if (state.current) marks.push(state.current.endsAtMs);
   return [...new Set(marks)].filter(mark => mark > state.displayNowMs).sort((a, b) => a - b);
 }

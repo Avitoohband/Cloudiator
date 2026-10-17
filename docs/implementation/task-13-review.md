@@ -242,3 +242,46 @@ Range `43573b9..0332c2a`: `6f5730c` (feature) and `0332c2a` (review fixes). [Imp
 - **Product choices for Avi:**
   - My gladiator opens after creation, where the mockup shows a welcome toast;
   - the creation dialog reopens on each visit until a gladiator exists.
+
+## 13.7: Results, profile cards and merchants
+
+Range `8b423f7..2268aff`: `2268aff` (feature). [Implementer report](task-13.7-report.md).
+
+**Implementer evidence:**
+- Unit tests 965/965; typecheck clean.
+- `test:db` 177/177 with the Edge start time unchanged.
+- Build and `verify:static` clean; development browser suite 352 passed, 22 skipped; production gate 16 passed.
+
+**Controller ruling:** a camp click on an Arena entrant keeps opening its Arena bout card, not the profile card. Every other gladiator opens the profile card, and an entrant's profile card (with "Watch bout") opens from the Gladiators list and the standings.
+
+**Verdicts (full review: spec, quality and visual):** spec compliant; quality Approved; no Critical or Important findings.
+
+**What the reviewer confirmed:**
+- **Results:** pages of 50 with "More" and "You" marks.
+- **Training and Rest:** they never offer a replay or say "no longer kept" (Tasks 7 and 9).
+- **Profile card:**
+  - It opens from `select-character`, and the Gladiators and standings names are keyboard paths to it.
+  - It sits near the actor on desktop and is a sheet on touch.
+  - It reads the public profile on demand, with an "unavailable" fallback.
+  - The viewer's own card adds shortcuts.
+- **Merchants:** a click opens the matching shop tab for a player, and the sign-in prompt for anyone else.
+- **Privacy:** no private value reaches a visitor; this is tested with anonymous reads and no command sent.
+- **Carried Minors:**
+  - the synthetic fixture rows moved to idle slots;
+  - roster rows explain a disabled Find or Follow;
+  - joining and camp-click handling moved into hooks.
+- **Visual:** faithful to the mockup's card and rows.
+
+**Deferred Minors:**
+- **Carried to 13.8:**
+  - skip Arena entrants in the profile-card listener, with a regression test (today it fires one discarded profile read);
+  - route Results "Replay" by kind (expeditions to the expedition scene).
+- **Carried to 13.9:** the fixture Results still show duplicate Aster rows.
+- **Other:**
+  - Results do not refresh while open;
+  - a latent page cap in `readResults`;
+  - the "record" label wording;
+  - `CampShell.tsx` has grown to 294 lines;
+  - two helper tests were written after the code (they pin exact branches);
+  - no 360 px or live-visitor card test;
+  - visual polish: generic result lines and "Now" text, a blur behind the card, and a wrapping "You" tag.

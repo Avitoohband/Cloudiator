@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { emptyWorld, routeLiveReads } from './live-routes';
-import { openMenu, railMenus, revealRail } from './shell-helpers';
+import { joinButton, openMenu, railMenus, revealRail } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
+/** A visitor's My gladiator panel and its sign-in button (Task 13.6). */
+const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
 
 test('management shell labels local fixture data and exposes an accessible schedule', async ({ page }, testInfo) => {
   test.skip(production, 'Fixture data is deliberately unavailable in production.');
@@ -23,13 +25,15 @@ test('normal entry exposes Google sign-in with an explicit configuration state',
   // The live camp reads the public world; in development it is answered here, never by the local Supabase stack.
   if (!production) await routeLiveReads(context, { world: emptyWorld() });
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
+  // The visitor's chip offers sign-in; My gladiator says how to join, and whether sign-in is configured.
+  await expect(joinButton(page)).toBeVisible();
+  const mine = await openMenu(page, 'My gladiator');
+  await expect(mine.getByText('You’re watching as a visitor.')).toBeVisible();
   if (production) {
-    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeDisabled();
+    await expect(mine.getByRole('button', { name: VISITOR_PROMPT })).toBeDisabled();
     await expect(page.getByText('Google sign-in is unavailable until the project is configured.')).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeEnabled();
+    await expect(mine.getByRole('button', { name: VISITOR_PROMPT })).toBeEnabled();
   }
   await expect(page.getByText('Fixture mode — progress is not saved online')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('normal-shell.png'), fullPage: true });
@@ -40,15 +44,15 @@ test('production refuses fixture mode even when requested in the URL', async ({ 
   await page.goto('/game/?mode=fixture');
   await expect(page.getByText('Fixture preview is unavailable in this build.')).toBeVisible();
   await expect(page.getByText('Fixture mode — progress is not saved online')).toHaveCount(0);
-  await openMenu(page, 'My gladiator');
-  await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
+  const mine = await openMenu(page, 'My gladiator');
+  await expect(mine.getByRole('button', { name: VISITOR_PROMPT })).toBeVisible();
 });
 
 test('static callback safely handles a canceled OAuth return without an application server', async ({ page }) => {
   test.skip(!production, 'Checks the exported fixed callback route.');
   await page.goto('/auth/callback/?error=access_denied&error_description=Untrusted%20text&next=https://example.invalid/');
-  await expect(page.locator('p[role=alert]')).toContainText('was canceled');
+  // Back to the fixed camp route with a short message (plan Decision 6), never to `next`, and never with provider text.
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:\d+\/game\/$/);
+  await expect(page.getByRole('status').filter({ hasText: 'Google sign-in was canceled.' })).toBeVisible();
   await expect(page.getByText('Untrusted text')).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Return to the camp' })).toHaveAttribute('href', '/game/');
-  await expect(page).toHaveURL(/\/auth\/callback\/$/);
 });

@@ -1,8 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { MENUS } from '../../src/features/shell/menus';
-import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { cornerChip, expectOwnerShown, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
 // bottom sheets on touch) opens one floating menu at a time; the corner chip sits top right.
@@ -434,6 +434,28 @@ test.describe('live failures in the shell', () => {
     expect(intersects(await boxOf(lost), await boxOf(cornerChip(page)))).toBe(false);
     live.fail('world_revision', false);
     await page.clock.fastForward(30_000);
+    await expect(lost).toHaveCount(0);
+  });
+
+  test('never says the connection is lost while a rejected session is signed out', async ({ page, context }) => {
+    // 13.5 review: the sync's `unauthenticated` (a stored session the server rejects) is no lost connection; the session
+    // is signed out locally and the camp reads on as a visitor's. The sign-out is held here so that window stays open.
+    await seedSession(context);
+    const world = { ...worldFixture, revision: 'live-1' };
+    const live = await routeLiveReads(context, { world, owner: ownerFixture });
+    live.rejectSessions();
+    let signingOut = false;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await context.route(`${SUPABASE_URL}/auth/v1/logout**`, async route => { signingOut = true; await held; await route.fallback(); });
+    await page.goto('/game/');
+    await expect.poll(() => signingOut, { timeout: 45_000 }).toBe(true);
+    const lost = page.getByText('Connection lost — showing the last known camp');
+    await nextFrames(page);
+    await expect(lost).toHaveCount(0);
+    release();
+    await expect(joinButton(page)).toBeVisible();
+    await page.waitForFunction(n => window.__cloudiatorCamp?.world()?.actors.length === n, world.actors.length, { timeout: 45_000 });
     await expect(lost).toHaveCount(0);
   });
 

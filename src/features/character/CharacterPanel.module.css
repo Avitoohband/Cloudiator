@@ -198,3 +198,42 @@
   font-size: 0.74rem;
   color: #c9b4e6;
 }
+
+/* Without a gladiator (Task 13.6): signed in, the offer to create one; a failed owner read, its retry. */
+.join {
+  padding: 10px 12px;
+  border: 1px solid rgba(230, 180, 80, 0.35);
+  border-radius: 10px;
+  background: rgba(230, 180, 80, 0.12);
+}
+
+.join p {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+}
+
+.create {
+  min-height: 40px;
+  padding: 0.45rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: #e6b450;
+  color: #2a1d05;
+  font-weight: 600;
+}
+
+.retry {
+  min-height: 36px;
+  padding: 0.3rem 0.8rem;
+  color: var(--ink);
+  background: #ffffff12;
+  border: 1px solid #ffffff2a;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.create:focus-visible,
+.retry:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}

@@ -77,7 +77,7 @@ test('signs a rejected stored session out locally and keeps the camp running for
   await page.goto('/game/');
   await waitForCamp(page, world.actors.length);
   await openMenu(page, 'My gladiator');
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in with Google to create your gladiator' })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
   expect(live.requests.some(r => r.reader === user.id && r.table === 'world_revision')).toBe(true);
   const loads = live.requests.filter(r => r.table === 'world_actor_reads');
@@ -116,7 +116,7 @@ test('retries a failed local sign-out of a rejected session on the next sync pub
   await expect.poll(() => page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
   await waitForCamp(page, world.actors.length);
   await openMenu(page, 'My gladiator');
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in with Google to create your gladiator' })).toBeVisible();
   // Both attempts signed out this browser only.
   expect(logouts().map(r => r.query.get('scope'))).toEqual(['local', 'local']);
   const loads = live.requests.filter(r => r.table === 'world_actor_reads');
@@ -136,7 +136,7 @@ test('drops the rejected session locally even when the server refuses its sign-o
   await waitForCamp(page, world.actors.length);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
   await openMenu(page, 'My gladiator');
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in with Google to create your gladiator' })).toBeVisible();
   expect(live.authRequests.filter(r => r.path === '/auth/v1/logout').map(r => r.query.get('scope'))).toEqual(['local']);
 });
 

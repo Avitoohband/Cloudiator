@@ -115,6 +115,8 @@
 .close:focus-visible,
 .chipButton:focus-visible,
 .join:focus-visible,
+.create:focus-visible,
+.dismiss:focus-visible,
 .chipMenu button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -246,13 +248,19 @@
   grid-template-columns: 1fr;
 }
 
-/* ---- The corner chip, the fixture pill and the connection notice. */
+/* ---- The corner chip, the fixture pill and the notices below the chip (a lost connection, a sign-in that did not complete). */
 .chip {
   position: absolute;
   right: 12px;
   top: 12px;
   z-index: 9;
   max-width: calc(100% - 24px);
+}
+
+.chipRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .chipButton,
@@ -271,13 +279,45 @@
   white-space: nowrap;
 }
 
+/* A visitor's chip (the mockup): the Google "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). */
 .join {
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 11px;
   font-weight: 600;
 }
 
 .join:hover,
 .chipButton:hover {
   background: rgba(30, 28, 40, 0.95);
+}
+
+.narrow {
+  display: none;
+}
+
+/* Signed in without a gladiator: the offer beside the account button. */
+.create {
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chipAlert {
+  max-width: 260px;
+  margin: 6px 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #a3584a;
+  border-radius: 10px;
+  background: rgba(70, 30, 26, 0.92);
+  color: #ffd9cf;
+  font-size: 12.5px;
 }
 
 .chipSep {
@@ -333,12 +373,18 @@
   pointer-events: none;
 }
 
-.notice {
+.notices {
   position: absolute;
   right: 12px;
   top: 58px;
   z-index: 9;
+  display: grid;
+  justify-items: end;
+  gap: 6px;
   max-width: min(320px, calc(100% - 24px));
+}
+
+.notice {
   margin: 0;
   padding: 6px 12px;
   border: 1px solid #a3584a;
@@ -346,6 +392,39 @@
   background: rgba(70, 30, 26, 0.92);
   color: #ffd9cf;
   font-size: 12.5px;
+}
+
+.signInNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--glass);
+  font-size: 12.5px;
+}
+
+.signInNotice p {
+  margin: 0;
+}
+
+.dismiss {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.dismiss:hover {
+  background: var(--glass-2);
+  color: var(--ink);
 }
 
 /* A narrow window with a pointer: the pill moves beside the rail, clear of the chip. */
@@ -478,7 +557,8 @@
 
   .chipButton,
   .chipNote,
-  .join {
+  .join,
+  .create {
     gap: 8px;
     padding: 6px 10px;
     font-size: 12.5px;
@@ -488,11 +568,15 @@
     display: none;
   }
 
+  .narrow {
+    display: inline;
+  }
+
   .pill {
     top: 56px;
   }
 
-  .notice {
+  .notices {
     top: 52px;
   }
 }

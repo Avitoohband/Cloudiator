@@ -12,6 +12,10 @@ export const menuDialog = (page: Page, label: string) => page.getByRole('dialog'
 export const railMenus = (page: Page) => page.getByRole('navigation', { name: 'Game menus' });
 /** The corner chip, top right. */
 export const cornerChip = (page: Page) => page.getByTestId('corner-chip');
+/** A visitor's corner chip button: "Sign in with Google to join", or "Sign in to join" in the touch layout (Task 13.6). */
+export const joinButton = (page: Page) => cornerChip(page).getByRole('button', { name: /^Sign in (with Google )?to join$/ });
+/** The "Create your gladiator" dialog over the camp (signed in without a gladiator, Task 13.6). */
+export const creationDialog = (page: Page) => page.getByRole('dialog', { name: 'Create your gladiator', exact: true });
 
 /** Shows the rail: the pointer at the left edge on desktop, the ☰ button on touch (an open sheet hides it, so it closes). */
 export async function revealRail(page: Page) {
@@ -47,10 +51,13 @@ export async function closeMenu(page: Page) {
   }
 }
 
+/** The signed-in corner chip's account button, which opens its small menu (a viewer without a gladiator also has "Create your gladiator"). */
+export const chipToggle = (page: Page) => cornerChip(page).locator('button[aria-expanded]');
+
 /** Opens the corner chip's small menu (Sign out) and returns it. */
 export async function openChipMenu(page: Page): Promise<Locator> {
   const chip = cornerChip(page);
-  const toggle = chip.getByRole('button').first();
+  const toggle = chipToggle(page);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   const menu = chip.getByRole('group', { name: 'Account' });
   await expect(menu).toBeVisible();

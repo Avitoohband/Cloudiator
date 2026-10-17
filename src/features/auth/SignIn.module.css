@@ -1,0 +1,51 @@
+/* Google sign-in (Task 13.6, the approved mockup): the "G" mark, and a visitor's prompt in My gladiator. */
+.mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #4285f4;
+  font: 700 12px/1 Arial, sans-serif;
+}
+
+.note {
+  padding: 10px 12px;
+  border: 1px solid rgba(230, 180, 80, 0.35);
+  border-radius: 10px;
+  background: rgba(230, 180, 80, 0.12);
+}
+
+.note p {
+  margin: 0;
+}
+
+.note :global(.muted) {
+  margin: 6px 0 10px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 11px;
+  background: rgba(21, 19, 28, 0.86);
+  color: var(--ink);
+  font-weight: 600;
+  text-align: left;
+}
+
+.button:hover:not(:disabled) {
+  background: rgba(30, 28, 40, 0.95);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}

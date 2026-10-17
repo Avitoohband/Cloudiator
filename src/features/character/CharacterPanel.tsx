@@ -2,16 +2,16 @@
 
 // The "My gladiator" menu. A player sees a summary (name, class, level, league, stamina, wallets and the activity line
 // from `activityStatus`) and the build planner; with a refresh that failed it keeps the last loaded summary and says so.
-// Without a gladiator it holds the joining path the camp page always had: Google sign-in, the creation form, and the
-// session and owner-load states. Names render as React text.
-import { useEffect, useId, useState } from 'react';
+// Without a gladiator it holds the joining path (Task 13.6): a visitor is told everything is open to watch and offered
+// "Sign in with Google to create your gladiator"; signed in without one, "Create your gladiator" reopens the creation
+// dialog over the camp; and the session and owner-load states. Names render as React text.
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
-import { CreateCharacter } from './CreateCharacter';
 import { activityStatus } from './activity-status';
 import type { Viewer } from './useGameState';
 import styles from './CharacterPanel.module.css';
@@ -63,20 +63,22 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, onRetry }: {
   );
 }
 
-export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner }: {
+export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
   ownerError: 'unavailable' | null;
   slotIndex: number | null;
   clock: DisplayClock;
-  /** The live gateway: creation and build commands always go online. */
+  /** The live gateway: build commands always go online. */
   gateway: GameGateway;
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** Fixture mode: the fixture gateway could not be loaded. */
   previewFailed: boolean;
   refreshOwner(): Promise<void>;
+  /** Opens the "Create your gladiator" dialog over the camp (signed in without a gladiator). */
+  onCreate(): void;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   if (owner) {
@@ -86,22 +88,29 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
         : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} />}
     </>;
   }
-  const noCharacter = viewer === 'no-gladiator';
+  let joining: ReactNode;
+  if (fixture) {
+    joining = previewAs === 'visitor' ? <SignIn unavailable="This preview cannot sign in." />
+      : <p role="status">{previewFailed || viewer === 'unavailable' ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
+  } else if (session.status === 'loading') joining = <p role="status">Checking your session…</p>;
+  else if (session.status !== 'signed-in') {
+    joining = <SignIn unavailable={session.status === 'signed-out' ? null : 'Google sign-in is unavailable until the project is configured.'} />;
+  } else if (ownerError) {
+    // A failed read is never "no gladiator": it offers no creation.
+    joining = <><p role="alert">Your character could not be loaded. Please retry before creating a gladiator.</p>
+      <button type="button" className={styles.retry} onClick={retry}>Retry owner load</button></>;
+  } else if (viewer === 'no-gladiator') {
+    joining = <div className={styles.join}>
+      <p>You’re signed in. Create your gladiator to join; the camp keeps running while you choose.</p>
+      <button type="button" className={styles.create} onClick={onCreate}>Create your gladiator</button>
+    </div>;
+  } else joining = <p role="status">Loading your gladiator…</p>;
   return (
     <section className={styles.summary} aria-label="Your gladiator">
       <p className="eyebrow">YOUR GLADIATOR</p>
       <h2 className={styles.name}>A legend awaits</h2>
       <p className={styles.class}>One fighter. Your choices.</p>
-      {fixture ? previewAs !== 'visitor' && <p role="status">{previewFailed || viewer === 'unavailable' ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>
-        : <>
-          {session.status === 'loading' ? <p role="status">Checking your session…</p>
-            : session.status !== 'signed-in' ? <SignIn available={session.status === 'signed-out'} />
-              : ownerError ? <><p role="alert">Your character could not be loaded. Please retry before creating a gladiator.</p><button type="button" onClick={retry}>Retry owner load</button></>
-                : !noCharacter ? <p role="status">Loading your gladiator…</p> : null}
-          {(noCharacter || session.status === 'signed-out' || session.status === 'unavailable') && (
-            <CreateCharacter key={session.userId ?? 'signed-out'} gateway={gateway} onCreated={retry} />
-          )}
-        </>}
+      {joining}
     </section>
   );
 }

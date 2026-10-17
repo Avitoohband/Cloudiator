@@ -5,6 +5,12 @@
 // shell owns the shared game state (`useGameState`), the scene bridge and the menus' contents, which are the existing
 // panels, re-housed. Keyboard: the first Tab reveals the rail and focuses its first icon; Escape closes the open menu
 // and returns the focus to its icon. Menus render outside the camp view's element, so its keys never see their typing.
+//
+// Task 13.6, visitors and joining: anyone watches the camp and its public menus; the chip starts Google sign-in. Signed in
+// without a gladiator, the "Create your gladiator" dialog opens over the running camp (once per account and page load;
+// the chip and My gladiator offer it again). When the viewer stops being a player (sign-out, expiry, another account),
+// a private menu that is open closes. A cancelled or failed sign-in comes back as `?signin=cancelled|failed` (plan
+// Decision 6): the shell shows a short message and removes the parameter.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Phase } from '@contracts/commands';
@@ -12,6 +18,7 @@ import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../character/useGameState';
 import { CharacterPanel } from '../character/CharacterPanel';
+import { CreateCharacter } from '../character/CreateCharacter';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { InventoryPanel } from '../inventory/InventoryPanel';
@@ -26,6 +33,13 @@ import { MenuSurface } from './MenuSurface';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import styles from './shell.module.css';
+
+/** How a Google sign-in that did not complete came back (`AuthCallback`, plan Decision 6). */
+export type SignInResult = 'cancelled' | 'failed';
+const SIGN_IN_MESSAGES: Record<SignInResult, string> = {
+  cancelled: 'Google sign-in was canceled. You can keep watching the camp.',
+  failed: 'Google sign-in could not be completed. Please try again.',
+};
 
 type SampleLink = { activityId: string; label: string };
 type Samples = { replays: readonly SampleLink[]; expeditions: readonly SampleLink[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
@@ -73,11 +87,13 @@ function ResultsMenu({ fixture, samples, previewFailed }: { fixture: boolean; sa
   </>;
 }
 
-export function CampShell({ fixture, previewAs, fixtureRefused = false }: {
+export function CampShell({ fixture, previewAs, fixtureRefused = false, signInResult = null }: {
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** `?mode=fixture` was asked for in a build without the preview: say so over the live camp. */
   fixtureRefused?: boolean;
+  /** `?signin=`: a Google sign-in that was cancelled or failed has returned to the camp. */
+  signInResult?: SignInResult | null;
 }) {
   const [bridge] = useState(createSceneBridge);
   const [gateway] = useState(createLiveGateway);
@@ -107,10 +123,40 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false }: {
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
   const send = useCallback((event: RailEvent) => setRail(state => railReducer(state, event)), []);
-  // A menu the viewer no longer has (a player's menu after the session ends) is closed.
+  // A menu the viewer no longer has (a player's menu after the session ends) is not shown, and is closed, so the rail
+  // can slide away again (13.5 review).
   const open = rail.open !== null && menus.some(m => m.id === rail.open) ? rail.open : null;
   const openRef = useRef(open);
   useEffect(() => { openRef.current = open; });
+  const lost = rail.open !== null && open === null;
+  useEffect(() => { if (lost) send('escape'); }, [lost, send]);
+  const show = useCallback((id: MenuId) => { if (openRef.current !== id) send({ toggle: id }); }, [send]);
+
+  // Joining: signed in without a gladiator, the creation dialog opens over the camp once per account (and page load).
+  const [creating, setCreating] = useState(false);
+  const offered = useRef<string | null>(null);
+  const { viewer, refreshOwner } = game;
+  const account = game.session.userId;
+  useEffect(() => {
+    if (viewer === 'visitor') offered.current = null;
+    if (viewer !== 'no-gladiator') { setCreating(false); return; }
+    if (account !== null && offered.current !== account) { offered.current = account; setCreating(true); }
+  }, [viewer, account]);
+  // Created: the dialog closes, and My gladiator shows the new gladiator once its owner state is read.
+  const created = useCallback(() => {
+    setCreating(false);
+    void refreshOwner().catch(() => undefined).finally(() => show('gladiator'));
+  }, [refreshOwner, show]);
+
+  // A sign-in that did not complete: keep its message, and take the parameter out of the address.
+  const [signInNotice, setSignInNotice] = useState<SignInResult | null>(signInResult);
+  useEffect(() => {
+    if (!signInResult) return;
+    setSignInNotice(signInResult);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('signin');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [signInResult]);
 
   // Close a menu and give the focus back to its icon (the ☰ button when the touch row is hidden).
   const [focusBack, setFocusBack] = useState<MenuId | null>(null);
@@ -166,7 +212,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false }: {
   const content = (id: MenuId) => {
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={game.viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
-        clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner} />;
+        clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
+        onCreate={() => setCreating(true)} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} />
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} preview={fixture} /> : null;
@@ -186,10 +233,17 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false }: {
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={game.viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock}
-        onOpenMenu={id => { if (openRef.current !== id) send({ toggle: id }); }} />
+        onOpenMenu={show} onCreate={() => setCreating(true)} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
-      {!fixture && game.syncError && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
+      <div className={styles.notices}>
+        {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review). */}
+        {!fixture && game.syncError === 'unavailable' && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
+        {signInNotice && <div className={styles.signInNotice} role="status">
+          <p>{SIGN_IN_MESSAGES[signInNotice]}</p>
+          <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setSignInNotice(null)}>×</button>
+        </div>}
+      </div>
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
@@ -203,6 +257,9 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false }: {
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={owner?.gladiatorId ?? null} clock={clock} timelines={reads} tournaments={reads}
           onStatus={game.setSceneStatus} />
       </main>
+      {creating && viewer === 'no-gladiator' && (
+        <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={created} onDismiss={() => setCreating(false)} />
+      )}
     </div>
   );
 }

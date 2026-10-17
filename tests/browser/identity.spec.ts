@@ -4,7 +4,10 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads } from './live-routes';
-import { cornerChip, openChipMenu, openMenu, signOutFromChip } from './shell-helpers';
+import { chipToggle, creationDialog, joinButton, openMenu, signOutFromChip } from './shell-helpers';
+
+/** A visitor's My gladiator panel (Task 13.6). */
+const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
 
 // Explicitly test-only HTTP identity transport. Production uses the unchanged Supabase SDK.
 // Task 4 owns real Auth/database authority; hosted Google consent is Task 24's release gate.
@@ -115,52 +118,63 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
     },
     conflict: (value: boolean) => { forceConflict = value; },
     failOwner: (value: boolean) => { readsFail = value; },
+    /** Signs in from the visitor's corner chip (Task 13.6); without a gladiator the creation dialog then opens over the camp. */
     async signIn(page: Page) {
-      await openMenu(page, 'My gladiator');
-      await page.getByRole('button', { name: 'Continue with Google' }).click();
+      await joinButton(page).click();
       await page.getByRole('link', { name: 'Approve test Google' }).click();
       await expect(page).toHaveURL(/\/game\/$/);
-      await expect((await openChipMenu(page)).getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
-      await cornerChip(page).getByRole('button').first().click();
-      await openMenu(page, 'My gladiator');
+      await expect(chipToggle(page)).toBeVisible();
     },
+    /** Starts a sign-in from the chip and cancels it: back on the camp as a visitor, with a short message (plan Decision 6). */
     async cancelGoogleAndReturn(page: Page) {
-      await openMenu(page, 'My gladiator');
-      await page.getByRole('button', { name: 'Continue with Google' }).click();
+      await joinButton(page).click();
       await page.getByRole('link', { name: 'Cancel test Google' }).click();
-      await expect(page.getByText('Google sign-in was canceled. Your creation draft is safe.')).toBeVisible();
+      await expect(page).toHaveURL(/\/game\/$/);
+      await expect(page.getByRole('status').filter({ hasText: 'Google sign-in was canceled.' })).toBeVisible();
       await expect(page.getByText('Untrusted provider text')).toHaveCount(0);
-      await page.reload();
-      await page.getByRole('link', { name: 'Return to the camp' }).click();
+      await expect(joinButton(page)).toBeVisible();
     },
   };
+}
+
+/** Closes the creation dialog with "Not now" (it is modal), then signs out from the corner chip. */
+async function dismissAndSignOut(page: Page) {
+  await creationDialog(page).getByRole('button', { name: 'Not now', exact: true }).click();
+  await expect(creationDialog(page)).toBeHidden();
+  await signOutFromChip(page);
+  await expect(joinButton(page)).toBeVisible();
 }
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Mock HTTP transport is development-only.'); });
 
 test('retains creation draft through canceled OAuth, back and refresh', async ({ page, context }) => {
+  // Task 13.6: the draft is written in the creation dialog after sign-in, and kept on this device through a later
+  // canceled sign-in, the Back button and a refresh.
   const flow = await identityFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Avi Fighter');
-  await page.getByLabel('Duelist', { exact: true }).check();
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await dialog.getByLabel('Gladiator name').fill('Avi Fighter');
+  await dialog.getByLabel('Duelist', { exact: true }).check();
+  await dismissAndSignOut(page);
   await flow.cancelGoogleAndReturn(page);
-  await openMenu(page, 'My gladiator');
-  await expect(page.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
-  await expect(page.getByLabel('Duelist', { exact: true })).toBeChecked();
-  await page.reload();
-  await openMenu(page, 'My gladiator');
-  await expect(page.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
+  // The canceled return replaced the callback in history (plan Decision 6): Back leaves the camp, never to the callback.
   await page.goBack();
-  await expect(page).toHaveURL(/\/auth\/callback\//);
+  await expect(page).not.toHaveURL(/\/auth\/callback\//);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/game\/$/);
+  await flow.signIn(page);
+  await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
+  await expect(dialog.getByLabel('Duelist', { exact: true })).toBeChecked();
+  await page.reload();
+  await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
 });
 
 test('retries a lost response with the same operation ID and reloads online owner after refresh', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Avi Fighter');
   await flow.signIn(page);
+  await creationDialog(page).getByLabel('Gladiator name').fill('Avi Fighter');
   flow.loseNextResponse();
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).dblclick();
   await expect(page.locator('p[role=alert]')).toContainText('could not be confirmed');
@@ -171,6 +185,7 @@ test('retries a lost response with the same operation ID and reloads online owne
   await page.reload();
   await openMenu(page, 'My gladiator');
   await expect(page.locator('p[role=alert]')).toContainText('could not be loaded');
+  await expect(creationDialog(page)).toHaveCount(0);
   flow.failOwner(false);
   await page.getByRole('button', { name: 'Retry owner load' }).click();
   await expect(page.getByRole('heading', { name: 'Avi Fighter', exact: true })).toBeVisible();
@@ -182,14 +197,14 @@ test('retries a lost response with the same operation ID and reloads online owne
 test('a command retry retains its ID and editing a conflicted draft obtains a fresh ID', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Name Taken');
   await flow.signIn(page);
+  await creationDialog(page).getByLabel('Gladiator name').fill('Name Taken');
   flow.conflict(true);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
+  // After a reload the dialog opens again over the camp, with the saved attempt.
   await page.reload();
-  await openMenu(page, 'My gladiator');
+  await expect(creationDialog(page)).toBeVisible();
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
   expect(flow.commands[1].operationId).toBe(flow.commands[0].operationId);
@@ -203,20 +218,21 @@ test('a command retry retains its ID and editing a conflicted draft obtains a fr
 test('two signed-in tabs converge on one online character and sign-out clears both views', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Twin Fighter');
   await flow.signIn(page);
+  await creationDialog(page).getByLabel('Gladiator name').fill('Twin Fighter');
   const other = await context.newPage();
   await other.goto('/game/');
-  await openMenu(other, 'My gladiator');
+  // The second tab is signed in too, so its creation dialog opens over its camp, with the shared draft.
+  await expect(creationDialog(other).getByLabel('Gladiator name')).toHaveValue('Twin Fighter');
   await expect(other.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();
   await Promise.all([page.getByRole('button', { name: 'Create gladiator', exact: true }).click(), other.getByRole('button', { name: 'Create gladiator', exact: true }).click()]);
   await expect(page.getByRole('heading', { name: 'Twin Fighter', exact: true })).toBeVisible();
   await expect(other.getByRole('heading', { name: 'Twin Fighter', exact: true })).toBeVisible();
   expect(flow.characterCount()).toBe(1);
   await signOutFromChip(other);
-  await expect(other.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  // Both tabs return to the visitor view: My gladiator, still open, offers sign-in instead of the gladiator.
+  await expect(other.getByRole('button', { name: VISITOR_PROMPT })).toBeVisible();
+  await expect(page.getByRole('button', { name: VISITOR_PROMPT })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Twin Fighter', exact: true })).toHaveCount(0);
 });
 
@@ -224,6 +240,7 @@ test('validates names and finite whole-point allocation, derives starters and pe
   const flow = await identityFlow(context);
   await page.goto('/game/');
   await flow.signIn(page);
+  await expect(creationDialog(page)).toBeVisible();
   await page.getByLabel('Gladiator name').fill('!bad');
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('3–20');
@@ -248,12 +265,11 @@ test('validates names and finite whole-point allocation, derives starters and pe
 test('expiry removes private owner and requires sign-in when refresh fails', async ({ page, context }) => {
   const flow = await identityFlow(context, { expiresIn: 5 });
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Short Session');
   await flow.signIn(page);
+  await creationDialog(page).getByLabel('Gladiator name').fill('Short Session');
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Short Session', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('button', { name: VISITOR_PROMPT })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('heading', { name: 'Short Session', exact: true })).toHaveCount(0);
 });
 
@@ -261,34 +277,39 @@ test('owner read errors do not offer creation and callback failure has safe fixe
   const flow = await identityFlow(context, { ownerError: true });
   await page.goto('/game/');
   await flow.signIn(page);
+  const mine = await openMenu(page, 'My gladiator');
   await expect(page.locator('p[role=alert]')).toContainText('could not be loaded');
   await expect(page.getByRole('button', { name: 'Create gladiator', exact: true })).toHaveCount(0);
+  await expect(mine.getByRole('button', { name: 'Create your gladiator' })).toHaveCount(0);
+  await expect(creationDialog(page)).toHaveCount(0);
+  // A failed callback returns to the fixed camp route with a short message (plan Decision 6), never to `next`.
   await page.goto('/auth/callback/?code=invalid&next=https://example.invalid/');
-  await expect(page.locator('p[role=alert]')).toContainText('could not be completed');
-  await expect(page.getByRole('link', { name: 'Return to the camp' })).toHaveAttribute('href', '/game/');
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:\d+\/game\/$/);
+  await expect(page.getByRole('status').filter({ hasText: 'Google sign-in could not be completed.' })).toBeVisible();
 });
 
-test('fragment OAuth errors are canceled safely and cannot display provider text', async ({ page }) => {
+test('fragment OAuth errors are canceled safely and cannot display provider text', async ({ page, context }) => {
+  // The callback returns to the live camp, whose public reads are answered here.
+  await routeLiveReads(context, { world: emptyWorld() });
   await page.goto('/auth/callback/#error=access_denied&error_description=Untrusted%20fragment');
-  await expect(page.locator('p[role=alert]')).toContainText('was canceled');
+  await expect(page.getByRole('status').filter({ hasText: 'Google sign-in was canceled.' })).toBeVisible();
   await expect(page.getByText('Untrusted fragment')).toHaveCount(0);
-  await expect(page).toHaveURL(/\/auth\/callback\/$/);
+  await expect(page).toHaveURL(/\/game\/$/);
 });
 
 test('account changes cannot reuse another account creation attempt', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Account Draft');
   await flow.signIn(page);
+  await creationDialog(page).getByLabel('Gladiator name').fill('Account Draft');
   flow.conflict(true);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
   const firstId = flow.commands[0].operationId;
-  await signOutFromChip(page);
+  await dismissAndSignOut(page);
   flow.switchAccount();
   await flow.signIn(page);
-  await expect(page.getByLabel('Gladiator name')).toHaveValue('Account Draft');
+  await expect(creationDialog(page).getByLabel('Gladiator name')).toHaveValue('Account Draft');
   flow.conflict(false);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Account Draft', exact: true })).toBeVisible();
@@ -299,9 +320,8 @@ test('account changes cannot reuse another account creation attempt', async ({ p
 test('a slow no-character focus read cannot replace the confirmed creation owner', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
-  await page.getByLabel('Gladiator name').fill('Confirmed Fighter');
   await flow.signIn(page);
+  await creationDialog(page).getByLabel('Gladiator name').fill('Confirmed Fighter');
   await expect(page.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();
   const held = flow.holdNextOwnerRead();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));

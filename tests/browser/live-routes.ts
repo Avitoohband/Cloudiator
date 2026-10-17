@@ -2,7 +2,9 @@
 // Supabase configuration). `routeLiveReads` answers the Data API the way PostgREST answers the readers in
 // src/lib/api/reads.ts, with rows built from the existing fixture DTOs; `seedSession` stores a signed-in session the
 // way supabase-js keeps one. A page with no stored session reads as a visitor (`anon`), and the private objects deny it.
-import { randomUUID } from 'node:crypto';
+// A visitor's Google sign-in goes through the same test-only consent page as identity.spec.ts (Approve or Cancel test
+// Google), and its PKCE exchange signs in `LiveTransport.googleUser`.
+import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { OwnerState, PublicProfile, ResultRow, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
@@ -63,6 +65,8 @@ export type LiveData = {
   owner?: OwnerState | null;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
   serverNowMs?: () => number;
+  /** The account a Google sign-in through the test-only consent page signs in (a new `testUser` by default). */
+  googleUser?: TestUser;
 };
 
 export type LiveRequest = { table: string; reader: string | null; query: URLSearchParams };
@@ -94,6 +98,8 @@ export type LiveTransport = {
   /** Rejects every signed-in request as PostgREST rejects a token it no longer accepts (a stale stored session). */
   rejectSessions(reject?: boolean): void;
   serverNowMs(): number;
+  /** The account the test-only Google consent page signs in ("Approve test Google"). */
+  readonly googleUser: TestUser;
 };
 
 type Row = Record<string, unknown>;
@@ -103,7 +109,7 @@ const INVALID_READER = 'invalid-token';
 /**
  * Routes `${SUPABASE_URL}/**` for `context`: the public projections for visitors and signed-in readers alike, the owner
  * state and owner-only activity summaries for signed-in readers only (a visitor is refused, as `anon` is), and the
- * Auth calls of a stored session. Commands and any other request fail the test. Register a spec's own handler for
+ * Auth calls of a stored session or of a test-only Google sign-in. Commands and any other request fail the test. Register a spec's own handler for
  * commands or special reads after this one; it runs first, and `route.fallback()` hands everything else here.
  */
 export async function routeLiveReads(context: BrowserContext, initial: LiveData): Promise<LiveTransport> {
@@ -117,6 +123,8 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
   const delays = new Map<string, number>();
   const holds = new Map<string, Promise<void>>();
   const failing = new Set<string>();
+  const google: GoogleSignIn = { user: data.googleUser ?? testUser('google@example.invalid'), challenges: new Map() };
+  users.set(google.user.id, google.user);
   await context.route(`${SUPABASE_URL}/**`, async route => {
     const request = route.request(), url = new URL(request.url());
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
@@ -126,7 +134,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
         failedLogouts -= 1;
         return json(route, { code: 503, error_code: 'unexpected_failure', msg: 'Service unavailable' }, 503);
       }
-      return auth(route, url, readerOf(request), rejecting);
+      return auth(route, url, readerOf(request), rejecting, google);
     }
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
     if (!table || request.method() !== 'GET') throw new Error(`Unexpected live transport request ${request.method()} ${url.pathname}`);
@@ -166,6 +174,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     failLogout: (times = 1) => { failedLogouts = times; },
     rejectSessions: (reject = true) => { rejecting = reject; },
     serverNowMs: now,
+    googleUser: google.user,
   };
 }
 
@@ -178,13 +187,45 @@ function readerOf(request: Request): string | null {
   try { return String(JSON.parse(Buffer.from(bearer.split('.')[1], 'base64').toString('utf8')).sub); } catch { return INVALID_READER; }
 }
 
-/** A stored session's Auth calls: its user, a local or global sign-out, and a refresh that is always refused. */
-function auth(route: Route, url: URL, reader: string | null, rejecting: boolean) {
+/** The test-only Google sign-in: the account it signs in, and each issued code's PKCE challenge. */
+type GoogleSignIn = { user: TestUser; challenges: Map<string, string> };
+let codes = 0;
+
+/** A session for `user` as the Auth API returns one; its access token names the user (`readerOf`). */
+function sessionFor(user: TestUser, expiresIn = 3600) {
+  const exp = Math.floor(Date.now() / 1000) + expiresIn;
+  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return { access_token: `${part({ alg: 'HS256' })}.${part({ sub: user.id, exp })}.test-only`, refresh_token: 'test-only', token_type: 'bearer',
+    expires_in: expiresIn, expires_at: exp, user };
+}
+
+/**
+ * A stored session's Auth calls: its user, a local or global sign-out, and a refresh that is always refused. A Google
+ * sign-in goes through the test-only consent page (as identity.spec.ts), whose links return to the app's callback with
+ * a code or a cancellation (with provider text the app must never show); the code's PKCE exchange signs in `google.user`.
+ */
+function auth(route: Route, url: URL, reader: string | null, rejecting: boolean, google: GoogleSignIn) {
   if (url.pathname === '/auth/v1/user') {
     const user = reader === null ? undefined : users.get(reader);
     return user && !rejecting ? json(route, user) : json(route, { code: 401, error_code: 'bad_jwt', msg: 'invalid JWT' }, 401);
   }
   if (url.pathname === '/auth/v1/logout') return rejecting ? json(route, { code: 401, error_code: 'bad_jwt', msg: 'invalid JWT' }, 401) : route.fulfill({ status: 204, headers: CORS });
+  if (url.pathname === '/auth/v1/authorize') {
+    const callback = new URL(url.searchParams.get('redirect_to') ?? '');
+    if (url.searchParams.get('provider') !== 'google' || callback.pathname !== '/auth/callback/') throw new Error(`Unexpected sign-in ${url.search}`);
+    const code = `test-code-${++codes}`;
+    google.challenges.set(code, url.searchParams.get('code_challenge') ?? '');
+    return route.fulfill({ contentType: 'text/html', body: `<html><body><h1>Test-only Google consent</h1><a href="${callback.origin}/auth/callback/?code=${code}">Approve test Google</a> <a href="${callback.origin}/auth/callback/?error=access_denied&error_description=Untrusted%20provider%20text">Cancel test Google</a></body></html>` });
+  }
+  if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'pkce') {
+    const body = JSON.parse(route.request().postData() ?? '{}') as { auth_code?: string; code_verifier?: string };
+    const challenge = google.challenges.get(body.auth_code ?? '');
+    if (!challenge || createHash('sha256').update(body.code_verifier ?? '').digest('base64url') !== challenge) {
+      return json(route, { code: 400, error_code: 'flow_state_not_found', msg: 'invalid flow state, no valid flow state found' }, 400);
+    }
+    google.challenges.delete(body.auth_code!);
+    return json(route, sessionFor(google.user));
+  }
   if (url.pathname === '/auth/v1/token') return json(route, { code: 400, error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token: Refresh Token Not Found' }, 400);
   throw new Error(`Unexpected live transport Auth request ${url.pathname}`);
 }

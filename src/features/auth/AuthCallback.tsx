@@ -1,18 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useEffect } from 'react';
 import { completeGoogleSignIn } from '../../lib/api/client';
 
+/**
+ * The Google sign-in return. Success, a cancellation and a failure all go back to the camp at the fixed `/game/` route,
+ * replacing this entry in history: a cancellation as `?signin=cancelled` and a failure as `?signin=failed`, which the
+ * camp turns into a short message (plan Decision 6). Provider text and any other parameter are never shown or followed.
+ */
 export function AuthCallback() {
-  const [error, setError] = useState<'canceled' | 'failed' | null>(null);
   useEffect(() => {
     let active = true;
     void completeGoogleSignIn().then(() => { if (active) window.location.replace('/game/'); })
-      .catch((failure: unknown) => { if (active) setError(failure instanceof Error && failure.message === 'canceled' ? 'canceled' : 'failed'); });
+      .catch((failure: unknown) => {
+        if (active) window.location.replace(`/game/?signin=${failure instanceof Error && failure.message === 'canceled' ? 'cancelled' : 'failed'}`);
+      });
     return () => { active = false; };
   }, []);
-  return <main id="main" className="callback"><p className="eyebrow">CLOUDIATOR</p><h1>{error ? 'Return to your story' : 'Completing Google sign-in…'}</h1>
-    {error ? <><p role="alert">{error === 'canceled' ? 'Google sign-in was canceled. Your creation draft is safe.' : 'Google sign-in could not be completed. Return to the camp and try again.'}</p><Link className="primary-link" href="/game/">Return to the camp</Link></> : <p role="status">Checking your sign-in…</p>}
+  return <main id="main" className="callback"><p className="eyebrow">CLOUDIATOR</p><h1>Completing Google sign-in…</h1>
+    <p role="status">Checking your sign-in…</p>
   </main>;
 }

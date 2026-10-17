@@ -450,7 +450,8 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * or, for a visitor or a viewer without a gladiator, in the league the viewer picks (Bronze first). A signed-in player
  * whose owner is still loading gets no picker and reads nothing until its league is known. Without a reader it says
  * brackets cannot be shown yet. Every time is the shared display clock's; until it has the server's time the panel waits,
- * or says brackets cannot be loaded while the sync fails to read the revision.
+ * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
+ * else sees the countdown and the brackets (spec "Menus", the Visitor column).
  */
 export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer }: {
   reads: TournamentReads | null;
@@ -462,7 +463,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   refresh?: () => Promise<void>;
   /** The shared sync's error (`GameUiState.syncError`): while the clock has no server time, a failed revision read. */
   syncError: 'unavailable' | 'unauthenticated' | null;
-  /** The game state's viewer kind: only a visitor or a viewer without a gladiator picks a league. */
+  /** The game state's viewer kind: only a visitor or a viewer without a gladiator picks a league, only a player registers. */
   viewer: Viewer;
 }) {
   /** The shared clock's time, and whether it has the server's time yet (or is held), read together at each tick. */
@@ -556,8 +557,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
         <span className="tag">Wed &amp; Sat · 17:20 UTC</span>
       </div>
       <TournamentScheduleView now={now} />
-      <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now,
-        owner: owner ? { afternoon: owner.schedule.afternoon, stamina: owner.stamina.current } : null }} onToggle={() => void toggle()} />
+      {viewer === 'player' && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now,
+        owner: owner ? { afternoon: owner.schedule.afternoon, stamina: owner.stamina.current } : null }} onToggle={() => void toggle()} />}
       <section className={styles.brackets} aria-labelledby={bracketsId}>
         <h3 id={bracketsId}>Brackets</h3>
         {fixture && samples.length > 0 && (

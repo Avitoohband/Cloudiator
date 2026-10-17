@@ -1,12 +1,14 @@
 'use client';
 
 // The corner chip, top right. A player sees their name, stamina, money, renown and the time to the next slot boundary
-// (on touch only the name and the countdown), and the chip opens a small menu with "Sign out". A visitor's chip opens
-// My gladiator, where Google sign-in lives (Task 13.6 makes it start sign-in itself). Names render as React text.
+// (on touch only the name and the countdown), and the chip opens a small menu with "Sign out". A visitor's chip starts
+// Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
+// gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text.
 import { useEffect, useId, useRef, useState } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
 import { signOut, type SessionState } from '../../lib/api/session';
+import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
 import type { MenuId } from './menus';
@@ -38,7 +40,7 @@ function Countdown({ clock }: { clock: DisplayClock }) {
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, onOpenMenu }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, onOpenMenu, onCreate }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -46,9 +48,12 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   previewAs?: 'visitor' | 'player';
   clock: DisplayClock;
   onOpenMenu(id: MenuId): void;
+  /** Opens the "Create your gladiator" dialog (signed in without a gladiator). */
+  onCreate(): void;
 }) {
   const [open, setOpen] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
+  const google = useGoogleSignIn();
   const chip = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -74,24 +79,34 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   if (!account) {
     const note = fixture ? (previewAs === 'visitor' ? null : viewer === 'unavailable' ? 'The fixture preview could not be loaded.' : 'Loading local preview…')
       : session.status === 'loading' ? 'Checking your session…' : null;
+    // Where sign-in cannot start (the fixture preview, or a build without it configured), My gladiator says why.
+    const live = !fixture && session.status === 'signed-out';
     return <div ref={chip} className={styles.chip} data-testid="corner-chip">
       {note ? <p className={styles.chipNote} role="status">{note}</p>
-        : <button type="button" className={styles.join} onClick={() => onOpenMenu('gladiator')}>Sign in with Google to join</button>}
+        : <button type="button" className={styles.join} disabled={google.busy} onClick={() => (live ? void google.begin() : onOpenMenu('gladiator'))}>
+          <GoogleMark />
+          {google.busy ? <span>Opening Google…</span>
+            : <><span className={styles.wide}>Sign in with Google to join</span><span className={styles.narrow}>Sign in to join</span></>}
+        </button>}
+      {google.failed && <p className={styles.chipAlert} role="alert">{SIGN_IN_NOT_STARTED}</p>}
     </div>;
   }
   return (
     <div ref={chip} className={styles.chip} data-testid="corner-chip">
-      <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)}>
-        {owner ? <>
-          <b data-testid="chip-name">{owner.name}</b>
-          <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
-          <span className={styles.wide} data-testid="chip-stamina" title="Stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
-          <span className={styles.wide} data-testid="chip-money" title="Money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Money </span>{owner.wallets.money}</span>
-          <span className={styles.wide} data-testid="chip-renown" title="Renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
-          <span className={styles.chipSep} aria-hidden="true">|</span>
-          <Countdown clock={clock} />
-        </> : <span>{viewer === 'no-gladiator' ? 'Signed in · no gladiator yet' : 'Signed in'}</span>}
-      </button>
+      <div className={styles.chipRow}>
+        {viewer === 'no-gladiator' && <button type="button" className={styles.create} onClick={onCreate}>Create your gladiator</button>}
+        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)}>
+          {owner ? <>
+            <b data-testid="chip-name">{owner.name}</b>
+            <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
+            <span className={styles.wide} data-testid="chip-stamina" title="Stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
+            <span className={styles.wide} data-testid="chip-money" title="Money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Money </span>{owner.wallets.money}</span>
+            <span className={styles.wide} data-testid="chip-renown" title="Renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
+            <span className={styles.chipSep} aria-hidden="true">|</span>
+            <Countdown clock={clock} />
+          </> : <span>Signed in</span>}
+        </button>
+      </div>
       {open && (
         <div id={menuId} className={styles.chipMenu} role="group" aria-label="Account">
           {signedIn ? <button type="button" onClick={() => {

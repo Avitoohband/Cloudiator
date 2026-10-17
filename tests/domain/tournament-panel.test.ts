@@ -350,6 +350,23 @@ describe('the live Tournaments panel before the shared clock has the server’s 
     expect(html({ viewer: 'player', owner: ownerFixture })).not.toContain('aria-label="League"');
   });
 
+  it('shows Registration to a player only: everyone else sees the countdown and brackets (13.4 review M5)', () => {
+    const clock = unsynced();
+    clock.sync(start + 10 * MIN);
+    const html = (props: Partial<PanelProps>) => renderToStaticMarkup(createElement(TournamentPanel,
+      { reads, owner: null, clock, fixture: false, syncError: null, ...props } as PanelProps));
+    for (const viewer of ['visitor', 'no-gladiator', 'loading', 'unavailable'] as const) {
+      const markup = html({ viewer });
+      expect(markup, viewer).not.toContain('>Registration</h3>');
+      expect(text(markup), viewer).not.toContain('Automatically enter tournaments');
+      expect(text(markup), viewer).toContain('Next tournament');
+      expect(markup, viewer).toContain('>Brackets</h3>');
+    }
+    const player = html({ viewer: 'player', owner: ownerFixture });
+    expect(player).toContain('>Registration</h3>');
+    expect(text(player)).toContain('Automatically enter tournaments');
+  });
+
   it('says brackets cannot be shown without a reader, whatever the clock and the sync', () => {
     for (const syncError of [null, 'unavailable'] as const) {
       const words = panel({ reads: null, syncError });

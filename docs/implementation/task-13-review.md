@@ -331,3 +331,39 @@ Range `6ed5364..7480cd3`: `d6fa86c` (feature) and `7480cd3` (review fixes). [Imp
   - `CampShell.tsx` has grown to 317 lines;
   - no in-progress replay or 360 px scene browser test;
   - visual: scenes are page-like rather than the mockup's full-bleed view, and an open menu stays open behind a scene.
+
+## 13.9: Live-ready tournament rings, final gates and the Task 13 report
+
+Range `2bfac50..b54d361`: `427c426` (feature) and `b54d361` ([Task 13 report](task-13-report.md)). [Implementer report](task-13.9-report.md).
+
+**Implementer evidence:**
+- Unit tests 989/989; typecheck and asset check clean.
+- `test:db` 177/177 with the Edge start time unchanged.
+- Build and `verify:static`: 5 routes, 90 assets.
+- Development browser suite 384 passed, 22 skipped, 0 failed.
+- Isolated production gate with the repo's own `playwright.config.ts`: 16 passed, 0 failed.
+- A late joiner loads 8 of 34 revealed bout logs (current and next ring windows): 73.6 KB instead of 304.7 KB.
+
+**Verdicts:** spec compliant; quality Approved; no Critical or Important findings.
+
+**What the reviewer confirmed:**
+- R4 is fixed at its root. Rings are scheduled from the fight summary, so log arrival order never changes a layout; the server ordering this relies on was checked.
+- `scheduleArenaRings` cannot reshuffle a ring already playing.
+- Log loading is bounded to the current and next ring windows, through the shared cache.
+- `forgetLeft` pruning is in place.
+- `isTournamentSlot` lives in an engine-free module, with an import-walk test.
+- The carried Minors are fixed:
+  - a visitor live-camp test with Arena and tournament entrants;
+  - deduplicated fixture results;
+  - bracket replays hide the rewards line from non-fighters.
+- The Task 13 report covers all 25 gates with accurate outcomes.
+
+**Controller ruling:** ratified `tournamentLogsDue(view, nowMs, windowMs, rings)` and the unchanged `isTournamentSlot(slot, rules?)` signature.
+
+**Deferred Minors:**
+- **For Task 23:**
+  - multi-league view arrival order can still decide ring layouts when leagues share reveal times;
+  - a failed log leaves its pair idle in the ring for 30 s.
+- **Test gaps:** the summary-timed ring path without a log; a positive check of the fighter's rewards line; `forgetLeft` driven through the real world effect.
+- **Report nits:** small inaccuracies in the Task 13 report.
+- **File size:** `GameViewport.tsx` and `camp-scene.ts` keep growing.

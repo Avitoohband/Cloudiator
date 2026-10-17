@@ -285,3 +285,49 @@ Range `8b423f7..2268aff`: `2268aff` (feature). [Implementer report](task-13.7-re
   - two helper tests were written after the code (they pin exact branches);
   - no 360 px or live-visitor card test;
   - visual polish: generic result lines and "Now" text, a blur behind the card, and a wrapping "You" tag.
+
+## 13.8: Replays and expeditions over the camp
+
+Range `6ed5364..7480cd3`: `d6fa86c` (feature) and `7480cd3` (review fixes). [Implementer report](task-13.8-report.md).
+
+**Implementer evidence:**
+- Unit tests 978/978; typecheck clean.
+- `test:db` 177/177 on the second run. The first run hit the known `arena.test.ts:642` coordinator race; the Edge start time was unchanged in both runs.
+- Development browser suite 376 passed, 22 skipped, after the fixes; production gate 16 passed.
+- The controller re-ran the build and static scan after the fix round: 5 routes, 91 assets, clean.
+
+**Controller ruling:** a guessed or unknown live expedition shows "This expedition is not available yet" with no summary. It never shows an endless "Preparing" and never an error page.
+
+**Round 1 (full review: spec, quality and visual).** Verdicts: spec compliant; quality Needs fixes.
+- **What it confirmed:**
+  - Overlays push `?view=…&activity=…` entries on the current route (Decision 4). Back to camp and the browser Back button close them, and the deep links still work.
+  - The reserved bridge events are wired.
+  - Gladiators' away rows link to the expedition.
+  - `ExpeditionView` reads on revision changes and reveal marks instead of its own 30-second poll.
+  - The replay shows only battles that have ended by display time.
+  - The Task 15 Minors are fixed in their real files.
+  - Results "Replay" routes by kind, and Arena entrants are skipped by the profile-card listener (regression-tested).
+  - Visitors never see an owner summary in a scene; this is tested live.
+- **I1 (Important):** scene WebGL contexts were never released. Inside the long-lived camp document, Chromium could have force-lost the camp's own context.
+
+**Controller ruling:** four small user-facing Minors joined the fix round:
+- "Watch replay" was enabled mid-bout;
+- an expired visitor replay said "not available yet";
+- visitors saw the rewards line in the replay;
+- focus was lost on an in-dialog scene change, and the fixture sample links left the camp.
+
+**Round 2 (scoped re-review of `7480cd3`):** all ADDRESSED, no new breakage.
+- Closed scenes release their context after Phaser's destroy, never touching the camp's. A test opens more than 20 scenes and checks that the camp's context stays live.
+- The disclosed leftovers are accepted: Phaser's one-time probe context, and a unit test written after the browser test had already failed first.
+
+**Deferred Minors:**
+- **Carried to 13.9:** tournament bracket replays still show the rewards line to non-fighters (`TournamentPanel` passes no `viewerId`).
+- **Other:**
+  - "Bout ended" has two definitions;
+  - a double-open history race;
+  - a scene remount on the first viewer change;
+  - no activity-id shape check in the overlay;
+  - `/replay/` makes extra world and owner reads (Task 23);
+  - `CampShell.tsx` has grown to 317 lines;
+  - no in-progress replay or 360 px scene browser test;
+  - visual: scenes are page-like rather than the mockup's full-bleed view, and an open menu stays open behind a scene.

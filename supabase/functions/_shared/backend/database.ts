@@ -67,6 +67,36 @@ export function prepareItemSale(command: Extract<InventoryCommand, { kind: 'sell
   const unitValue = item ? npcSaleValue(item, CATALOG_V1) : null;
   return item && unitValue !== null ? { catalogId: item.catalogId, catalogVersion: item.catalogVersion, unitValue } : null;
 }
+export type MarketCommand = Extract<GameCommand, { kind: 'create-listing' | 'cancel-listing' | 'buy-listing' }>;
+/** `create-listing`: the new listing and when it expires (seven days of database time after it is listed). */
+export type ListingCreateValue = { listingId: string; expiresAtMs: number };
+/** `cancel-listing`: the closed listing and the item returned to its seller. */
+export type ListingCancelValue = { listingId: string; itemId: string };
+/** `buy-listing`: the bought listing, its item, the price the buyer paid and the fee kept from the seller's credit. */
+export type ListingPurchaseValue = { listingId: string; itemId: string; price: number; fee: number };
+export type MarketValue = ListingCreateValue | ListingCancelValue | ListingPurchaseValue;
+/** The buyer's historical strength before and after acquiring the listed item. SQL compares the baseline under its locks. */
+export type ListingPurchasePreparation = { baselinePeakStrength: number; nextPeakStrength: number };
+/**
+ * Task 18 Decision 8: the buyer's new historical strength over its server-read inventory plus the listed item, read from the
+ * public offer (its catalog fields and stats are copied from the item when it is listed and never change). A listed item is
+ * never renown gear (SQL refuses to list one), so it scores without the Arena modifier. Without an open offer (sold,
+ * cancelled, expired or unknown) nothing is acquired: the baseline stands, and SQL answers `sold`, `expired` or `not-found`
+ * from the listing itself.
+ */
+export function prepareListingPurchase(state: OwnerState, listed: Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'stats'> | null): ListingPurchasePreparation {
+  const baseline = state.progression.peakStrength;
+  if (!listed) return { baselinePeakStrength: baseline, nextPeakStrength: baseline };
+  const item = { catalogId: listed.catalogId, catalogVersion: listed.catalogVersion, stats: listed.stats, origin: 'shop' as const };
+  return { baselinePeakStrength: baseline, nextPeakStrength: historicalGearScore([...state.inventory, item], baseline) };
+}
+/**
+ * PostgreSQL aborted the transaction as a deadlock victim (40P01) or a serialization failure (40001). It rolled back whole: no
+ * receipt was written and no money or item moved, so the same operation can simply be sent again. A purchase takes both
+ * account locks in `boundary_start`'s order, but a boundary does not always take its locks in global order (Task 18.1
+ * review), so a residual deadlock is answered as a retryable `processing`.
+ */
+const RETRYABLE_ABORTS: readonly string[] = ['40P01', '40001'];
 export type OptInCommand = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
 /** The saved automatic-entry setting and the database time it was received (Task 19). */
 export type OptInValue = { enabled: boolean; receivedAtMs: number };
@@ -127,6 +157,32 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc(rpc, { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
       if (error) throw new Error('inventory-unavailable');
       return data as CommandResult<InventoryValue>;
+    },
+    /**
+     * Task 18: create, cancel and buy a fixed-price listing. Ids are canonical lowercase, as SQL compares them. A purchase is
+     * prepared from the buyer's owner state and the public offer; even a missing or stale preparation reaches SQL, which
+     * replays a committed receipt first. A deadlock or serialization abort is a retryable `processing`.
+     */
+    async market(actor: Actor, original: MarketCommand): Promise<CommandResult<MarketValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase(),
+        ...('itemId' in original ? { itemId: original.itemId.toLowerCase() } : { listingId: original.listingId.toLowerCase() }) } as MarketCommand;
+      let prepared: ListingPurchasePreparation | null = null;
+      if (command.kind === 'buy-listing') {
+        // The owner aggregate holds all 60 items in one row; the offer row carries the listed item's catalog fields and stats.
+        const [owner, offer] = await Promise.all([client.from('owner_state').select('state').eq('owner_id', actor.userId).maybeSingle(),
+          client.from('market_offers').select('item').eq('id', command.listingId).maybeSingle()]);
+        if (owner.error || offer.error) throw new Error('market-unavailable');
+        // Malformed stored items cannot be scored; SQL still replays a committed receipt first.
+        try { if (owner.data) prepared = prepareListingPurchase(owner.data.state as OwnerState, offer.data ? offer.data.item as ItemInstance : null); }
+        catch { prepared = null; }
+      }
+      const rpc = command.kind === 'create-listing' ? 'create_listing' : command.kind === 'cancel-listing' ? 'cancel_listing' : 'buy_listing';
+      const { data, error } = await client.rpc(rpc, { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
+      if (error) {
+        if (RETRYABLE_ABORTS.includes(error.code)) return { ok: false, code: 'processing', retryAfterMs: 1000 };
+        throw new Error('market-unavailable');
+      }
+      return data as CommandResult<MarketValue>;
     },
     /** Task 19: the automatic tournament entry flag. SQL replays receipts first and answers `processing` while the world is behind. */
     async setTournamentOptIn(actor: Actor, original: OptInCommand): Promise<CommandResult<OptInValue>> {

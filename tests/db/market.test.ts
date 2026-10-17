@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { sql, account, resetIdentity, admin, anonymous, creation, request } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge } from '../fixtures/db.ts';
+import { readMarket } from '../../src/lib/api/reads';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
@@ -11,7 +12,8 @@ import { historicalGearScore } from '../../supabase/functions/_shared/domain/inv
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 
 // Task 18.1 (M14): fixed-price listings, purchases and expiry in the database. The market commands are called as the
-// backend calls them (service_role RPC with the `{command, prepared}` envelope); Task 18.2 routes them through the handler.
+// backend calls them (service_role RPC with the `{command, prepared}` envelope). Task 18.2 routes them through the handler
+// and its `market` adapter (the real Edge runtime case, the residual deadlock) and serves the public `market` read.
 type Outcome = { ok: boolean; code?: string; receiptId?: string; retryAfterMs?: number; value?: Record<string, unknown> };
 declare module 'vitest' {
   interface Matchers<R extends void | Promise<void> = void | Promise<void>, T = unknown> { toHaveCode(code: string): R }
@@ -504,7 +506,7 @@ describe('marketplace listings in the database', () => {
     });
   }, 60_000);
 
-  it('takes both account locks in gladiator order so a purchase cannot deadlock a boundary', async () => {
+  it("takes both account locks in gladiator order, which matches boundary_start's order; a residual deadlock aborts atomically and the same operation can be retried", async () => {
     const x = await fighter(), y = await fighter();
     const [low, high] = x.gid < y.gid ? [x, y] : [y, x];
     // The higher gladiator buys from the lower one: a buyer-first order would hold the higher account and wait for the lower.
@@ -543,7 +545,168 @@ describe('marketplace listings in the database', () => {
       contender.release();
     }
     expect(await itemRow(sword.id)).toMatchObject({ owner: high.gid, item: { ownerId: high.gid, reservation: null } });
+
+    // A residual deadlock (Task 18.1 review): a boundary does not always take its account locks in global order. Here session
+    // B holds the higher account; the purchase, sent through the backend adapter, takes the lower one and waits for the
+    // higher; B then asks for the lower. PostgreSQL aborts the purchase (only it runs the deadlock check: B's is pushed far
+    // out), and the adapter answers a retryable `processing`.
+    const axe = await low.add('axe:1:common');
+    const second = listingId(await list(low, axe.id, 40));
+    const retried = buyCommand(second);
+    const wallets = async () => [await high.wallet(), await low.wallet()];
+    const before = await wallets();
+    let holding!: (pid: number) => void, proceed!: () => void;
+    const held = new Promise<number>(resolve => { holding = resolve; });
+    const go = new Promise<void>(resolve => { proceed = resolve; });
+    const reversed = sql.begin(async tx => {
+      await tx`set local deadlock_timeout='30s'`;
+      await tx`set local lock_timeout='15s'`;
+      await tx`select pg_advisory_xact_lock(hashtextextended(${high.id}::text,0))`;
+      const [{ pid }] = await tx`select pg_backend_pid() as pid`;
+      holding(pid); await go;
+      await tx`select pg_advisory_xact_lock(hashtextextended(${low.id}::text,0))`;
+      return 'both';
+    });
+    const reversedPid = await held;
+    let purchase: Promise<unknown> | undefined;
+    try {
+      purchase = database.market({ userId: high.id }, retried);
+      // Some session (the Data API's) waits on B's lock while holding the lower account.
+      let waiting = false;
+      for (let n = 0; n < 300 && !waiting; n++) {
+        [{ waiting }] = await sql`select exists(select 1 from pg_locks l where not l.granted and l.locktype='advisory'
+          and ${reversedPid}::int = any(pg_blocking_pids(l.pid))) as waiting`;
+        if (!waiting) await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+      proceed();
+      expect(await purchase).toEqual({ ok: false, code: 'processing', retryAfterMs: 1000 });
+      expect(await reversed).toBe('both');
+    } finally {
+      proceed();
+      await reversed.catch(() => undefined);
+      await purchase?.catch(() => undefined);
+    }
+    // Atomic: no receipt, no money, no item moved; the listing is still open.
+    expect(await receipts(retried.operationId)).toBe(0);
+    expect(await saleReceipts(second)).toBe(0);
+    expect(await wallets()).toEqual(before);
+    expect(await listingRow(second)).toMatchObject({ status: 'open', buyer: null, receipt: null });
+    expect(await itemRow(axe.id)).toMatchObject({ owner: low.gid, item: { reservation: { kind: 'listing', referenceId: second } } });
+    // The same operation, sent again, completes once.
+    const done = await database.market({ userId: high.id }, retried);
+    expect(done).toMatchObject({ ok: true, value: { listingId: second, itemId: axe.id, price: 40, fee: 2 } });
+    expect(await database.market({ userId: high.id }, retried)).toEqual(done);
+    expect(await itemRow(axe.id)).toMatchObject({ owner: high.gid, item: { ownerId: high.gid, reservation: null } });
   });
+
+  it('skips a seller whose account lock or listing row is held, without waiting, and expires the listing once it is free', async () => {
+    await withClock(async () => {
+      await sweep();
+      const seller = await fighter();
+      const bow = await seller.add('bow:1:common');
+      const due = listingId(await listAt(seller, bow.id, 40, (await nowMs()) - WEEK - 1_000));
+      for (const hold of ['account lock', 'listing row'] as const) {
+        let locked!: () => void, release!: () => void;
+        const ready = new Promise<void>(resolve => { locked = resolve; });
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const holder = sql.begin(async tx => {
+          if (hold === 'account lock') await tx`select pg_advisory_xact_lock(hashtextextended(${seller.id}::text,0))`;
+          else await tx`select 1 from private.market_listings where id=${due} for update`;
+          locked(); await held;
+        });
+        await ready;
+        try {
+          // A sweep that waited would fail on its lock timeout instead of returning.
+          const started = Date.now();
+          const [{ n }] = await sql.begin(async tx => {
+            await tx`set local lock_timeout='2s'`;
+            return tx`select private.expire_listings(private.planning_now_ms()) as n`;
+          });
+          expect(n, hold).toBe(0);
+          expect(Date.now() - started, hold).toBeLessThan(2_000);
+          expect(await listingRow(due), hold).toMatchObject({ status: 'open' });
+          expect(await offerRow(due), hold).toMatchObject({ id: due });
+          expect(await itemRow(bow.id), hold).toMatchObject({ item: { reservation: { kind: 'listing', referenceId: due } } });
+        } finally { release(); await holder; }
+      }
+      // Free again: the next sweep expires it and returns the item.
+      expect(await sweep()).toBe(1);
+      expect(await listingRow(due)).toMatchObject({ status: 'expired', receipt: null, buyer: null });
+      expect(await itemRow(bow.id)).toMatchObject({ owner: seller.gid, item: { reservation: null } });
+      expect(await offerRow(due)).toBeUndefined();
+    });
+  });
+
+  it('buys a listing through the real authenticated Edge runtime', async () => {
+    const seller = await fighter(), buyer = await fighter(), late = await fighter();
+    const armor = await seller.add('heavy-armor:10:rare'), bow = await seller.add('bow:1:common');
+    // Listing through the runtime; the adapter canonicalizes ids in any letter case.
+    const created = directEdge(seller.token, { kind: 'create-listing', operationId: randomUUID().toUpperCase(), itemId: armor.id.toUpperCase(), price: 200 });
+    expect(created).toMatchObject({ status: 200, origin: 'http://127.0.0.1:3000', body: { ok: true, receiptId: expect.any(String),
+      value: { listingId: expect.any(String), expiresAtMs: expect.any(Number) } } });
+    const id = created.body.value.listingId as string;
+    // A price above 1,000,000,000 is refused by the parser, before any transaction or receipt.
+    const dear = { kind: 'create-listing', operationId: randomUUID(), itemId: bow.id, price: 1_000_000_001 };
+    expect(directEdge(seller.token, dear)).toMatchObject({ status: 400, body: { ok: false, code: 'invalid' } });
+    expect(await receipts(dear.operationId)).toBe(0);
+    // Visitors read the offer, with its listing time.
+    const [{ name }] = await sql`select name from public.gladiators where id=${seller.gid}`;
+    const listed = await listingRow(id);
+    expect(await readMarket(anonymous, undefined, seller.gid)).toEqual({ nextCursor: null, rows: [{ listingId: id, seller: { gladiatorId: seller.gid, name },
+      item: { catalogId: 'heavy-armor:10:rare', catalogVersion: 'v1', tier: 10, rarity: 'rare', stats: armor.stats, quantity: 1 }, price: 200,
+      listedAtMs: listed.listed, expiresAtMs: listed.expires }] });
+    // The purchase: exact origins only, and the buyer's historical strength prepared from its owner state and the offer
+    // (tier 10 rare heavy armor, 2 x 15.6 = 31.2, replaces light armor's 4 beside the starter sword's 24).
+    const command = { kind: 'buy-listing', operationId: randomUUID(), listingId: id.toUpperCase() };
+    expect(directEdge(buyer.token, command, 'https://evil.example').status).toBe(403);
+    const bought = directEdge(buyer.token, command);
+    expect(bought).toMatchObject({ status: 200, origin: 'http://127.0.0.1:3000', body: { ok: true, receiptId: expect.any(String),
+      value: { listingId: id, itemId: armor.id, price: 200, fee: 10 } } });
+    expect(await buyer.peak()).toBe(55.2);
+    expect(directEdge(buyer.token, command)).toMatchObject({ status: 200, body: bought.body });
+    // A stale page: the next buyer gets `sold`.
+    expect(directEdge(late.token, { kind: 'buy-listing', operationId: randomUUID(), listingId: id })).toMatchObject({ status: 409, body: { ok: false, code: 'sold' } });
+    expect(await itemRow(armor.id)).toMatchObject({ owner: buyer.gid, item: { ownerId: buyer.gid, reservation: null } });
+    expect([await buyer.wallet(), await seller.wallet(), await late.wallet()]).toEqual([800, 1190, 1000]);
+    expect(await buyer.ledger()).toEqual([{ money: -200, reason: 'market-purchase', receipt: bought.body.receiptId }]);
+    expect((await readMarket(anonymous, undefined, seller.gid)).rows).toEqual([]);
+    // Cancelling through the runtime returns the item to its seller.
+    const relisted = directEdge(seller.token, { kind: 'create-listing', operationId: randomUUID(), itemId: bow.id, price: 30 });
+    const other = relisted.body.value.listingId as string;
+    expect(directEdge(seller.token, { kind: 'cancel-listing', operationId: randomUUID(), listingId: other }))
+      .toMatchObject({ status: 200, body: { ok: true, value: { listingId: other, itemId: bow.id } } });
+    expect(await itemRow(bow.id)).toMatchObject({ owner: seller.gid, item: { reservation: null } });
+    expect((await readMarket(anonymous, undefined, seller.gid)).rows).toEqual([]);
+  });
+
+  it('pages the public offers newest first through the visitor Data API, 50 at a time', async () => {
+    const sellers = [];
+    for (let n = 0; n < 11; n++) sellers.push(await fighter());
+    for (const seller of sellers) for (let n = 0; n < 5; n++) listingId(await list(seller, (await seller.add('sword:1:common')).id, 10 + n));
+    // Every visible offer (other tests' open listings included), in the live read's order.
+    const expected = (await sql`select id::text from public.market_offers where expires_at_ms>floor(extract(epoch from clock_timestamp())*1000)
+      order by listed_at_ms desc, id`).map(row => row.id as string);
+    expect(expected.length).toBeGreaterThan(50);
+    const seen: string[] = [], sizes: number[] = [];
+    for (let cursor: string | undefined, n = 0; n < 10; n++) {
+      const page = await readMarket(anonymous, cursor);
+      sizes.push(page.rows.length);
+      seen.push(...page.rows.map(row => row.listingId));
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    expect(sizes[0]).toBe(50);
+    expect(sizes.every(size => size <= 50)).toBe(true);
+    expect(seen).toEqual(expected);
+    // One seller's open listings only, in the same order.
+    const own = (await sql`select id::text from public.market_offers where seller_gladiator_id=${sellers[3].gid} order by listed_at_ms desc, id`).map(row => row.id);
+    const mine = await readMarket(anonymous, undefined, sellers[3].gid);
+    expect(mine.rows.map(row => row.listingId)).toEqual(own);
+    expect(own).toHaveLength(5);
+    expect(new Set(mine.rows.map(row => row.seller.gladiatorId))).toEqual(new Set([sellers[3].gid]));
+    await expect(readMarket(anonymous, 'not-a-cursor')).rejects.toMatchObject({ code: 'unavailable' });
+  }, 60_000);
 
   it('returns processing while either character is behind the current slot', async () => {
     const seller = await fighter(), buyer = await fighter();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { readRecent, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
+import { readMarket, readRecent, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
 function transport(rows: Record<string, unknown>, calls: string[]) {
@@ -38,6 +38,53 @@ describe('protected Data API adapters', () => {
     expect(await readRecent(client)).toEqual({ rows: [], nextCursor: null }); expect(calls[0]).toContain('limit=50');
     // An empty cursor is no cursor: the first page, with no cursor filter.
     expect(await readRecent(client, '')).toEqual({ rows: [], nextCursor: null }); expect(calls[1]).not.toContain('reveal_at_ms.lt');
+  });
+  it('pages open offers newest first, 50 at a time, and filters by seller', async () => {
+    const SELLER = '0d5f8471-d919-428f-9ab7-058c95821757', WEEK = 604_800_000;
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const stats = { damage: 6, armor: 0, weight: 4, intervalMs: 1000, attributes: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 } };
+    // The projection's row; an unexpected item field never crosses into the listing.
+    const row = (n: number) => ({ id: id(n), seller_gladiator_id: SELLER, seller_name: 'Aster', price: 10 + n, listed_at_ms: 1_000_000 - n, expires_at_ms: 1_000_000 - n + WEEK,
+      item: { catalogId: 'sword:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', stats, quantity: 1, origin: 'shop' } });
+    const calls: string[] = [];
+    const offers = (rows: unknown[]) => createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async (input) => {
+      const url = new URL(String(input)); calls.push(decodeURIComponent(url.pathname + url.search));
+      return new Response(JSON.stringify(rows), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } } });
+    // A full page of 50 names its last row as the cursor `listedAtMs:listingId`; a server answering more is still cut to 50.
+    const first = await readMarket(offers(Array.from({ length: 51 }, (_, n) => row(n))));
+    expect(first.rows).toHaveLength(50);
+    expect(first.nextCursor).toBe(`${1_000_000 - 49}:${id(49)}`);
+    expect(first.rows[0]).toEqual({ listingId: id(0), seller: { gladiatorId: SELLER, name: 'Aster' }, price: 10, listedAtMs: 1_000_000, expiresAtMs: 1_000_000 + WEEK,
+      item: { catalogId: 'sword:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', stats, quantity: 1 } });
+    // Newest first, then by id; only the sanitized projection's columns; at most 50 rows; no seller filter by default.
+    const query = new URL(`http://local${calls[0]}`);
+    expect(query.pathname).toBe('/rest/v1/market_offers');
+    expect(query.searchParams.get('select')).toBe('id,seller_gladiator_id,seller_name,item,price,listed_at_ms,expires_at_ms');
+    expect(query.searchParams.get('order')).toBe('listed_at_ms.desc,id.asc');
+    expect(query.searchParams.get('limit')).toBe('50');
+    expect([query.searchParams.has('or'), query.searchParams.has('seller_gladiator_id')]).toEqual([false, false]);
+    // The next page starts strictly after the cursor's row; a short page ends the list.
+    expect(await readMarket(offers([row(50)]), first.nextCursor!)).toEqual({ rows: [expect.objectContaining({ listingId: id(50) })], nextCursor: null });
+    expect(calls[1]).toContain(`or=(listed_at_ms.lt.${1_000_000 - 49},and(listed_at_ms.eq.${1_000_000 - 49},id.gt.${id(49)}))`);
+    // One seller's open listings only (a gladiator id in any letter case), and its own pages.
+    expect(await readMarket(offers([row(1)]), undefined, SELLER.toUpperCase())).toMatchObject({ rows: [{ listingId: id(1) }], nextCursor: null });
+    expect(calls[2]).toContain(`seller_gladiator_id=eq.${SELLER}`);
+    await readMarket(offers([]), first.nextCursor!, SELLER);
+    expect(calls[3]).toContain(`seller_gladiator_id=eq.${SELLER}`);
+    expect(calls[3]).toContain(`id.gt.${id(49)}`);
+    // An empty cursor is no cursor.
+    expect(await readMarket(offers([]), '')).toEqual({ rows: [], nextCursor: null });
+    expect(calls[4]).not.toContain('or=');
+    // A malformed cursor or seller is refused before any query.
+    calls.length = 0;
+    for (const cursor of ['bad,filter', `1:${id(1)},id.neq.x`, '1:not-a-uuid', `99999999999999999:${id(1)}`, `x:${id(1)}`]) {
+      await expect(readMarket(offers([]), cursor), cursor).rejects.toMatchObject({ code: 'unavailable' });
+    }
+    for (const seller of ['', 'g1', `${SELLER},id.neq.x`, `${SELLER})`]) {
+      await expect(readMarket(offers([]), undefined, seller), seller).rejects.toMatchObject({ code: 'unavailable' });
+    }
+    expect(calls).toEqual([]);
   });
   /** The standings view answers the latest-season probe and the rank page separately. */
   function standings(season: { season_index: number }[], rows: unknown[], calls: string[]) {

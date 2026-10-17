@@ -15,7 +15,7 @@ Deno.test('Edge runtime loads canonical domain modules and enforces the command 
     allowedOrigins: [], verifyActor: async () => ({ userId: id }),
     database: { plan: async () => { throw new Error('Untrusted command reached mutation'); }, inventory: async () => { throw new Error('Untrusted command reached mutation'); },
       consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('Untrusted command reached mutation'); },
-      setTournamentOptIn: async () => { throw new Error('Untrusted command reached mutation'); } },
+      market: async () => { throw new Error('Untrusted command reached mutation'); }, setTournamentOptIn: async () => { throw new Error('Untrusted command reached mutation'); } },
   });
   if (response.status !== 400 || (await response.json()).code !== 'invalid') throw new Error('Authority rejection failed');
 });

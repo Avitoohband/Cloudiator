@@ -2,8 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
 import type { BattleLog, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView,
-  WorldSnapshot,
+  MarketListing, MarketPage, OwnerState, PublicActor, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentBout, TournamentEntrant,
+  TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
@@ -90,6 +90,44 @@ export async function readRecent(client: SupabaseClient, cursor?: string): Promi
   const rows = checked(await query);
   return { rows: rows.map(row => ({ gladiatorId: row.gladiator_id, name: row.name, summary: row.summary })),
     nextCursor: rows.length === 50 ? `${rows.at(-1)!.reveal_at_ms}:${rows.at(-1)!.activity_id}` : null };
+}
+const MARKET_PAGE = 50;
+const GLADIATOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * The market read's options, checked before any query is built: the cursor `listedAtMs:listingId` follows the results
+ * cursor's rules (none when absent, null or empty; `unavailable` when malformed), and a seller, when given, must be a
+ * gladiator id (lowercased here; anything else is `unavailable`, so an empty one never widens to every seller). The fixture
+ * gateway applies the same rules.
+ */
+export function parseMarketRead(cursor?: string | null, seller?: string | null): { after: { time: string; id: string } | null; seller: string | null } {
+  const after = parseResultsCursor(cursor);
+  if (seller === undefined || seller === null) return { after, seller: null };
+  if (typeof seller !== 'string' || !GLADIATOR_ID.test(seller)) throw new GatewayReadError('unavailable');
+  return { after, seller: seller.toLowerCase() };
+}
+type OfferRow = { id: string; seller_gladiator_id: string; seller_name: string; item: MarketListing['item']; price: number; listed_at_ms: number; expires_at_ms: number };
+/**
+ * One page of open fixed-price offers from the public `market_offers` projection, which visitors read as `anon` (its RLS
+ * hides an offer from its expiry time on). Newest listing first, then by listing id, at most 50 rows; with `seller`, only that
+ * gladiator's offers. A full page names its last row as the next cursor. The item crosses only its six sanitized fields.
+ */
+export async function readMarket(client: SupabaseClient, cursor?: string, seller?: GladiatorId): Promise<MarketPage> {
+  const options = parseMarketRead(cursor, seller);
+  let query = client.from('market_offers').select('id,seller_gladiator_id,seller_name,item,price,listed_at_ms,expires_at_ms')
+    .order('listed_at_ms', { ascending: false }).order('id').limit(MARKET_PAGE);
+  if (options.seller) query = query.eq('seller_gladiator_id', options.seller);
+  if (options.after) query = query.or(`listed_at_ms.lt.${options.after.time},and(listed_at_ms.eq.${options.after.time},id.gt.${options.after.id})`);
+  // The Data API caps a response at 50 rows (config max_rows), so a full page is what signals a possible next page.
+  const rows = (checked(await query) as OfferRow[]).slice(0, MARKET_PAGE);
+  const last = rows.at(-1);
+  return {
+    rows: rows.map(row => {
+      const { catalogId, catalogVersion, tier, rarity, stats, quantity } = row.item;
+      return { listingId: row.id, seller: { gladiatorId: row.seller_gladiator_id, name: row.seller_name },
+        item: { catalogId, catalogVersion, tier, rarity, stats, quantity }, price: Number(row.price), listedAtMs: Number(row.listed_at_ms), expiresAtMs: Number(row.expires_at_ms) };
+    }),
+    nextCursor: last && rows.length === MARKET_PAGE ? `${last.listed_at_ms}:${last.id}` : null,
+  };
 }
 const LEAGUES: readonly string[] = ['bronze', 'silver', 'gold', 'champion'];
 const STANDINGS_PAGE = 50;

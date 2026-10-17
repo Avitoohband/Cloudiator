@@ -1,6 +1,6 @@
 import type { GameCommand, Attributes } from '../contracts/commands.ts';
 import type { Actor } from './auth.ts';
-import type { CommandDatabase, InventoryCommand, OptInCommand, PlanningCommand } from './database.ts';
+import type { CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
@@ -40,7 +40,8 @@ export function parseCommand(value: unknown): GameCommand | null {
       && (Object.hasOwn(CATALOG_V1.items, value.catalogId) || Object.hasOwn(CATALOG_V1.cosmetics, value.catalogId))
       && value.catalogVersion === CATALOG_V1.version && integer(value.quantity, 1, 999); break;
     case 'sell-item': case 'discard-item': valid = shape('itemId', 'quantity') && uuid(value.itemId) && integer(value.quantity, 1, 999); break;
-    case 'create-listing': valid = shape('itemId', 'price') && uuid(value.itemId) && integer(value.price, 1); break;
+    // Whole prices from 1 to 1,000,000,000 (Task 18 Decision 2); SQL enforces the same range.
+    case 'create-listing': valid = shape('itemId', 'price') && uuid(value.itemId) && integer(value.price, 1, RULES_V1.marketplace.maximumPrice); break;
     case 'cancel-listing': case 'buy-listing': valid = shape('listingId') && uuid(value.listingId); break;
     case 'set-tournament-opt-in': valid = shape('enabled') && typeof value.enabled === 'boolean'; break;
   }
@@ -49,9 +50,10 @@ export function parseCommand(value: unknown): GameCommand | null {
 
 const PLANNING_KINDS: readonly string[] = ['edit-schedule', 'queue-build', 'cancel-build'];
 const INVENTORY_KINDS: readonly string[] = ['buy-shop', 'sell-item', 'discard-item'];
+const MARKET_KINDS: readonly string[] = ['create-listing', 'cancel-listing', 'buy-listing'];
 export type CommandDependencies = {
   verifyActor(request: Request): Promise<Actor>;
-  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'setTournamentOptIn'>;
+  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn'>;
   allowedOrigins: readonly string[];
 };
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
@@ -75,11 +77,12 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, 'create-character', 'set-tournament-opt-in'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
     const result = command.kind === 'create-character' ? await deps.database.createGladiator(actor, command)
       : command.kind === 'set-tournament-opt-in' ? await deps.database.setTournamentOptIn(actor, command as OptInCommand)
         : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)
-          : await deps.database.plan(actor, command as PlanningCommand);
+          : MARKET_KINDS.includes(command.kind) ? await deps.database.market(actor, command as MarketCommand)
+            : await deps.database.plan(actor, command as PlanningCommand);
     return jsonResponse(result, result.ok ? 200 : statusFor(result.code), origin);
   } catch { return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin); }
 }

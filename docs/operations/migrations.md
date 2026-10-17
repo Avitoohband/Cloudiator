@@ -25,10 +25,20 @@ It adds fixed-price listings ([plan](../superpowers/plans/2026-10-17-task-18-mar
 
 **Lock order.** Create and cancel take the actor's account lock, then the gladiator row, the wallet, the items in id order
 and the listing row. Buy first reads the listing's seller without a lock. It then takes both account locks in gladiator
-order, as `boundary_start` does, then both gladiator rows, both wallets, the buyer's items and the listed item (while the
-seller still owns it), and the listing row. `private.planning_now_ms()` is sampled after all of these locks. Each command
-expires its seller's own due listings first. The sweep try-locks each seller's account lock, skips a busy seller, and uses
-`FOR UPDATE SKIP LOCKED`.
+order, then both gladiator rows, both wallets, the buyer's items and the listed item (while the seller still owns it), and
+the listing row. `private.planning_now_ms()` is sampled after all of these locks. Each command expires its seller's own due
+listings first. The sweep try-locks each seller's account lock, skips a busy seller, and uses `FOR UPDATE SKIP LOCKED`.
+
+**Deadlocks (corrected by Task 18.2).** The purchase's account-lock order matches `boundary_start`'s order; a residual
+deadlock aborts atomically and the same operation can be retried. A boundary does not always take its account locks in
+global `gladiator_id` order, so PostgreSQL may still abort one side with SQLSTATE 40P01. The aborted transaction writes no
+receipt and moves no money or item. The backend's `market` adapter answers 40P01 (and 40001) with
+`{ ok: false, code: 'processing', retryAfterMs: 1000 }`, and the client sends the same `operationId` again.
+- `tests/db/market.test.ts` produces a real deadlock through the adapter, then checks the retry. It holds the higher
+  account's lock and lets the purchase take the lower one. It then asks for the lower lock, so the purchase is the aborted
+  side.
+- The older comment "a purchase cannot deadlock a boundary" in `private.market_command` (`12-market.sql` line 166, M14
+  line 271) overstates this. It is left as it is: M14 is immutable, and the source must stay identical to it.
 
 **Transfer.** A sale is two UPDATEs: clear the reservation, then change `gladiator_id` and `item.ownerId` together. This is
 required by `guard_reserved_item` and the item CHECK.
@@ -51,8 +61,9 @@ come before `private.market_command`, which is safe under the draft's `check_fun
 its function. No backfill or initialization is needed: both tables are new and nothing wrote a listing before M14. The
 existing `cloudiator-coordinate` cron job already runs `cron_tick`, so no registration changes.
 
-**Release (Task 24).** M14 does not depend on the worker. Ship it before (or with) the Task 18.2 command routing; until 18.2,
-the handler answers the three market commands with `unavailable`. The sweep runs only once Task 24 enables
+**Release (Task 24).** M14 does not depend on the worker. Ship it before (or with) the Task 18.2 command routing. Before
+18.2, the handler answered the three market commands with `unavailable`; 18.2 routes them to these functions and serves the
+public `market` read. The sweep runs only once Task 24 enables
 `private.scheduler`. Until then, each seller's own commands and any purchase expire due listings, and the offers policy
 hides them from readers.
 

@@ -3,13 +3,13 @@ import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings, readTournament, readTournamentLog,
+  GatewayReadError, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings, readTournament, readTournamentLog,
 } from './reads';
 export { GatewayReadError } from './reads';
 
 /**
- * Public projections (world, revision, timeline, profile, standings, tournament, tournament log, recent results) can be
- * read without a session. `owner()` and `command()` require a signed-in account.
+ * Public projections (world, revision, timeline, profile, market offers, standings, tournament, tournament log, recent
+ * results) can be read without a session. `owner()` and `command()` require a signed-in account.
  */
 export interface GameGateway {
   /** Session identity changes invalidate pending reads and synchronized caches. */
@@ -20,7 +20,12 @@ export interface GameGateway {
   revision(): Promise<RevisionState>;
   timeline(id: ActivityId): Promise<RevealedTimeline>;
   profile(id: GladiatorId): Promise<PublicProfile>;
-  market(cursor?: string): Promise<MarketPage>;
+  /**
+   * One page of open fixed-price offers, newest listing first, at most 50 rows; `cursor` is a page's `nextCursor`, and
+   * `seller` keeps only that gladiator's offers. A malformed cursor or seller is `unavailable`. Loaded on demand: offers
+   * never change the world revision.
+   */
+  market(cursor?: string, seller?: GladiatorId): Promise<MarketPage>;
   standings(league: LeagueId, cursor?: string): Promise<StandingsPage>;
   /** A polled read: each fought result carries its fight summary, never its battle log. */
   tournament(id: string): Promise<TournamentView>;
@@ -39,7 +44,6 @@ type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
  * session (visitors read as `anon`), while the owner's state and every command need a signed-in account.
  */
 export function createLiveGateway(): GameGateway {
-  const unavailable = async (): Promise<never> => { throw new GatewayReadError('unavailable'); };
   let epoch = 0;
   /** Loaded (or loading) tournament logs, shared by every viewer; a failed load is forgotten so it can be asked again. */
   const logs = new Map<string, Promise<BattleLog>>();
@@ -97,7 +101,8 @@ export function createLiveGateway(): GameGateway {
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       const client = getBrowserClient();
       if (!client) return { ok: false, code: 'unavailable' };
-      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'set-tournament-opt-in'].includes(input.kind)) {
+      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
+        'buy-listing', 'set-tournament-opt-in'].includes(input.kind)) {
         return { ok: false, code: 'unavailable' };
       }
       try {
@@ -133,6 +138,6 @@ export function createLiveGateway(): GameGateway {
       pending.catch(() => { if (logs.get(boutId) === pending) logs.delete(boutId); });
       return pending;
     },
-    market: unavailable,
+    market: (cursor, seller) => publicRead(client => readMarket(client, cursor, seller)),
   };
 }

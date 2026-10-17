@@ -1,11 +1,12 @@
 import type { GameGateway } from './gateway';
-import { parseResultsCursor } from './reads';
+import { parseMarketRead, parseResultsCursor } from './reads';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
 import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
 import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
 import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
+import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
@@ -61,6 +62,15 @@ export function createFixtureGateway(): GameGateway {
       if (after !== null && previous < 0) return { rows: [], nextCursor: null };
       return structuredClone(RESULTS_FIXTURE[previous + 1]);
     },
-    market: unavailable,
+    // Open offers, newest first, paged as the live read is, with its cursor and seller rules: a malformed cursor or seller is
+    // refused as `unavailable`, a seller keeps only its own offers, and a well-formed cursor that no page issued ends the list.
+    market: async (cursor, seller) => {
+      const read = parseMarketRead(cursor, seller);
+      const pages = read.seller === null ? FIXTURE_MARKET
+        : marketPages(FIXTURE_MARKET.flatMap(page => page.rows).filter(row => row.seller.gladiatorId === read.seller));
+      const previous = read.after === null ? -1 : pages.findIndex(page => page.nextCursor === cursor);
+      if (read.after !== null && previous < 0) return { rows: [], nextCursor: null };
+      return structuredClone(pages[previous + 1]);
+    },
   };
 }

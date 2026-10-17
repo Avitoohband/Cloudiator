@@ -44,10 +44,14 @@ export type WorldSnapshot = RevisionState & { actors: PublicActor[] };
 export type PublicProfile = { actor: PublicActor; combatStrength: number | null; rating: number; prestige: string[] };
 /** Producers enforce <= 50 rows. Cursors are opaque strings. */
 export type CursorPage<T> = { rows: T[]; nextCursor: string | null };
+/** One open fixed-price offer from the public projection: never the item's id, owner, origin, binding or reservation. */
 export type MarketListing = {
   listingId: string; seller: Pick<PublicActor, 'gladiatorId' | 'name'>;
   item: Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'stats' | 'quantity'>;
-  price: number; expiresAtMs: number;
+  price: number;
+  /** Database time the listing was created; pages run newest first by it, then by listing id. */
+  listedAtMs: number;
+  expiresAtMs: number;
 };
 export type MarketPage = CursorPage<MarketListing>;
 export type StandingRow = {

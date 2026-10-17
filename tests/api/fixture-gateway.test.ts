@@ -41,7 +41,6 @@ test('fixture public actors omit private owner management state', async () => {
 
 test('unimplemented fixture reads reject explicitly as unavailable', async () => {
   const gateway = createFixtureGateway();
-  await expect(gateway.market()).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.timeline('9fce3cd5-e831-4a66-8ca1-16b4576b1499')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.profile('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
   await expect(gateway.tournament('1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).rejects.toMatchObject({ code: 'unavailable' });
@@ -319,4 +318,64 @@ test('fixture recent results follow the live cursor rules, and callers get copie
   expect(pages.map(p => p.nextCursor)).toEqual([last(0), last(1), null]);
   expect(resultPages(rows.slice(0, 3), 2).map(p => [p.rows.length, p.nextCursor === null])).toEqual([[2, false], [1, true]]);
   expect(resultPages([], 2)).toEqual([{ rows: [], nextCursor: null }]);
+});
+
+// Task 18.2: the fixture marketplace, read as the live `market` read pages it.
+test('fixture market pages open offers newest first, 50 at a time, and filters by seller', async () => {
+  const { FIXTURE_MARKET, marketPages } = await import('../fixtures/market');
+  const { CATALOG_V1 } = await import('../../supabase/functions/_shared/domain/catalog-v1');
+  const { worldFixture } = await import('../fixtures/domain');
+  const { GatewayReadError } = await import('../../src/lib/api/gateway');
+  const gateway = createFixtureGateway();
+  const owner = await gateway.owner();
+  const page = await gateway.market();
+  expect(page).toEqual(FIXTURE_MARKET[0]);
+  expect(page.nextCursor).toBeNull();
+  const rows = [...page.rows];
+  // At least six offers, across tiers, rarities and sellers, one of them the fixture owner's.
+  expect(rows.length).toBeGreaterThanOrEqual(6);
+  expect(new Set(rows.map(r => r.item.tier))).toEqual(new Set([1, 5, 10]));
+  expect(new Set(rows.map(r => r.item.rarity))).toEqual(new Set(['common', 'uncommon', 'rare']));
+  expect(new Set(rows.map(r => r.seller.gladiatorId)).size).toBeGreaterThanOrEqual(3);
+  expect(rows.filter(r => r.seller.gladiatorId === owner.gladiatorId).map(r => r.seller.name)).toEqual([owner.name]);
+  // The live read's order (newest listing first, then by id), one row per listing.
+  const keys = rows.map(r => [r.listedAtMs, r.listingId] as const);
+  expect(keys).toEqual([...keys].sort((a, b) => b[0] - a[0] || (a[1] < b[1] ? -1 : 1)));
+  expect(new Set(keys.map(k => k[1])).size).toBe(rows.length);
+  // Each offer is open at the fixture time, lasts seven days, is priced within the market's range, and carries exactly the
+  // sanitized projection's fields: its catalog entry's tier, rarity and stats, never an item id, owner, origin or reservation.
+  for (const row of rows) {
+    expect(row.listedAtMs, row.listingId).toBeLessThanOrEqual(worldFixture.serverNowMs);
+    expect(row.expiresAtMs - row.listedAtMs, row.listingId).toBe(604_800_000);
+    expect(row.expiresAtMs, row.listingId).toBeGreaterThan(worldFixture.serverNowMs);
+    expect(Number.isSafeInteger(row.price) && row.price >= 1 && row.price <= 1_000_000_000, row.listingId).toBe(true);
+    const entry = CATALOG_V1.items[row.item.catalogId];
+    expect(row.item, row.listingId).toEqual({ catalogId: entry.id, catalogVersion: 'v1', tier: entry.tier, rarity: entry.rarity, stats: entry.stats, quantity: 1 });
+    expect(entry.binding, row.listingId).toBe('tradable');
+    expect(row.price, row.listingId).toBeGreaterThan(entry.npcSellValue!);
+    expect(Object.keys(row).sort()).toEqual(['expiresAtMs', 'item', 'listedAtMs', 'listingId', 'price', 'seller']);
+  }
+  // One seller's offers only, as the live read filters them.
+  const own = await gateway.market(undefined, owner.gladiatorId);
+  expect(own).toEqual({ rows: rows.filter(r => r.seller.gladiatorId === owner.gladiatorId), nextCursor: null });
+  expect(await gateway.market(undefined, '1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).toEqual({ rows: [], nextCursor: null });
+  // The live cursor rules: a well-formed cursor that no page issued ends the list; a malformed cursor or seller is refused.
+  expect(await gateway.market(`${worldFixture.serverNowMs}:${rows[0].listingId}`)).toEqual({ rows: [], nextCursor: null });
+  for (const [cursor, seller] of [['bad,filter', undefined], ['1:not-a-uuid', undefined], [undefined, 'g1'], [undefined, '']] as const) {
+    const read = gateway.market(cursor, seller);
+    await expect(read, `${cursor} ${seller}`).rejects.toBeInstanceOf(GatewayReadError);
+    await expect(read, `${cursor} ${seller}`).rejects.toMatchObject({ code: 'unavailable' });
+  }
+  // Callers get copies.
+  page.rows[0].price = -1;
+  page.rows.length = 0;
+  expect(await gateway.market()).toEqual(FIXTURE_MARKET[0]);
+  expect(FIXTURE_MARKET[0].rows[0].price).not.toBe(-1);
+  // The pager: a full page names its last row as `listedAtMs:listingId`, and the next page follows it.
+  const pages = marketPages(rows.slice(0, 5), 2);
+  expect(pages.map(p => p.rows.length)).toEqual([2, 2, 1]);
+  expect(pages.map(p => p.nextCursor)).toEqual([`${rows[1].listedAtMs}:${rows[1].listingId}`, `${rows[3].listedAtMs}:${rows[3].listingId}`, null]);
+  // Fixture commands still never trade.
+  expect(await gateway.command({ kind: 'buy-listing', operationId: 'd43f7844-52e0-4302-b8e4-740035047765', listingId: rows[0].listingId }))
+    .toEqual({ ok: false, code: 'unavailable' });
 });

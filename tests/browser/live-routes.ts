@@ -66,9 +66,13 @@ export type LiveData = {
 };
 
 export type LiveRequest = { table: string; reader: string | null; query: URLSearchParams };
+/** One Auth API call of a stored session: its path (`/auth/v1/logout`), query (`scope=local`) and reader. */
+export type AuthRequest = { path: string; reader: string | null; query: URLSearchParams };
 export type LiveTransport = {
   /** Every Data API request so far, with the reader: a user id, or null for a visitor. */
   readonly requests: readonly LiveRequest[];
+  /** Every Auth API request so far (`/auth/v1/user`, `/auth/v1/logout`, `/auth/v1/token`). */
+  readonly authRequests: readonly AuthRequest[];
   count(table: string): number;
   setWorld(world: WorldSnapshot): void;
   setOwner(owner: OwnerState | null): void;
@@ -80,8 +84,13 @@ export type LiveTransport = {
   delay(table: string, ms: number): void;
   /** Holds a table's requests until the returned release is called (then answers them, and later ones, at once). */
   hold(table: string): () => void;
-  /** Answers a table's requests with a server error (500, which supabase-js does not retry): a read the backend cannot serve. */
-  fail(table: string): void;
+  /**
+   * Answers a table's requests with a server error (500, which supabase-js does not retry): a read the backend cannot
+   * serve. `fail(table, false)` serves the table again.
+   */
+  fail(table: string, failing?: boolean): void;
+  /** Answers the next `times` sign-out requests with a server error (503), as a failed `/auth/v1/logout`. */
+  failLogout(times?: number): void;
   /** Rejects every signed-in request as PostgREST rejects a token it no longer accepts (a stale stored session). */
   rejectSessions(reject?: boolean): void;
   serverNowMs(): number;
@@ -103,13 +112,22 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
   const started = Date.now(), base = data.world.serverNowMs;
   const now = data.serverNowMs ?? (() => base + (Date.now() - started));
   const requests: LiveRequest[] = [];
+  const authRequests: AuthRequest[] = [];
+  let failedLogouts = 0;
   const delays = new Map<string, number>();
   const holds = new Map<string, Promise<void>>();
   const failing = new Set<string>();
   await context.route(`${SUPABASE_URL}/**`, async route => {
     const request = route.request(), url = new URL(request.url());
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
-    if (url.pathname.startsWith('/auth/v1/')) return auth(route, url, readerOf(request), rejecting);
+    if (url.pathname.startsWith('/auth/v1/')) {
+      authRequests.push({ path: url.pathname, reader: readerOf(request), query: url.searchParams });
+      if (url.pathname === '/auth/v1/logout' && failedLogouts > 0) {
+        failedLogouts -= 1;
+        return json(route, { code: 503, error_code: 'unexpected_failure', msg: 'Service unavailable' }, 503);
+      }
+      return auth(route, url, readerOf(request), rejecting);
+    }
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
     if (!table || request.method() !== 'GET') throw new Error(`Unexpected live transport request ${request.method()} ${url.pathname}`);
     const reader = readerOf(request);
@@ -132,6 +150,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
   });
   return {
     requests,
+    authRequests,
     count: table => requests.filter(r => r.table === table).length,
     setWorld: next => { world = next; },
     setOwner: next => { owner = next; },
@@ -143,7 +162,8 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
       holds.set(table, new Promise<void>(resolve => { release = resolve; }));
       return () => { holds.delete(table); release(); };
     },
-    fail: table => { failing.add(table); },
+    fail: (table, on = true) => { if (on) failing.add(table); else failing.delete(table); },
+    failLogout: (times = 1) => { failedLogouts = times; },
     rejectSessions: (reject = true) => { rejecting = reject; },
     serverNowMs: now,
   };

@@ -5,6 +5,13 @@
   min-width: 0;
 }
 
+/* At the top of the Arena menu nothing comes before it to divide from. */
+.panel:first-child {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
 .title {
   font-family: Georgia, serif;
   font-size: 1.15rem;
@@ -183,4 +190,35 @@
   color: var(--muted);
   background: #1b2336;
   border-color: #4b5872;
+}
+
+/* The Arena menu's ring-fight buttons (keyboard and touch equivalents of clicking a fighting pair in the camp). */
+.rings {
+  margin-bottom: 1rem;
+}
+
+.fights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fights button {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-height: 40px;
+  font: 600 13px/1.1 system-ui, sans-serif;
+  color: #f4e8cb;
+  background: #241d2b;
+  border: 1px solid #b5a07a;
+  border-radius: 6px;
+  padding: 4px 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.fights button:focus-visible {
+  outline: 3px solid #ffe48f;
+  outline-offset: 1px;
 }

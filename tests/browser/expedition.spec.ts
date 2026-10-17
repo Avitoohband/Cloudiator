@@ -9,6 +9,7 @@ import { worldToScreen } from '../../src/game/iso';
 import { drawSlices, hidesActor } from '../../src/game/depth';
 import type { MapData } from '../../src/game/assets';
 import { emptyWorld, routeLiveReads } from './live-routes';
+import { openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -221,6 +222,7 @@ test.describe('followable expedition scenes', () => {
     expect(base).toMatchObject({ loops: 1, canvases: 1 });
     await page.getByRole('link', { name: 'Camp', exact: true }).click();
     await page.waitForURL(/\/game\/\?mode=fixture/);
+    await openMenu(page, 'Results');
     await page.getByRole('navigation', { name: 'Sample expeditions' }).getByRole('link', { name: EXPEDITION_FIXTURES.mountain.label }).click();
     await ready('mountain');
     expect(await counts()).toEqual(base);
@@ -743,6 +745,7 @@ test.describe('exported expedition route', () => {
     // The fixture camp page lists no sample expeditions in an export.
     await page.goto('/game/?mode=fixture');
     await expect(page.getByText('Fixture preview is unavailable in this build.')).toBeVisible();
+    await openMenu(page, 'Results');
     await expect(page.getByRole('navigation', { name: 'Sample expeditions' })).toHaveCount(0);
     // Only same-origin static reads (the exported router also prefetches linked pages with HEAD, and the camp's art loads
     // through in-page blob URLs of this origin); no data source at all.

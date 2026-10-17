@@ -1,0 +1,200 @@
+/* My gladiator (CharacterPanel) and Gladiators (RosterPanel), inside the camp's floating menus. */
+.summary {
+  min-width: 0;
+  margin-bottom: 1rem;
+}
+
+.name {
+  font-family: Georgia, serif;
+  font-size: 1.5rem;
+  margin: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+
+.class {
+  color: #bbafda;
+  font-size: 0.78rem;
+  margin-bottom: 1rem;
+}
+
+.stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #a3734a;
+  border-radius: 10px;
+  background: #3b2a1fcc;
+  color: #ffd9b8;
+  font-size: 0.8rem;
+}
+
+.stale p {
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
+.stale button,
+.findMine button,
+.row button {
+  min-height: 36px;
+  padding: 0.3rem 0.8rem;
+  color: var(--ink);
+  background: #ffffff12;
+  border: 1px solid #ffffff2a;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.activity {
+  background: #111b2dcc;
+  border-left: 3px solid #7daaa0;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.activity p {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.status {
+  color: #b9e6d4;
+}
+
+.stamina {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #c4dcd1;
+}
+
+.bar {
+  appearance: none;
+  width: 100%;
+  height: 9px;
+  border: 0;
+  margin: 0.45rem 0 1rem;
+}
+
+.bar::-webkit-progress-bar {
+  background: #111a29;
+}
+
+.bar::-webkit-progress-value {
+  background: #7dbfa2;
+}
+
+.bar::-moz-progress-bar {
+  background: #7dbfa2;
+}
+
+.wallets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+}
+
+.wallets dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.wallets dd {
+  margin: 0;
+  font-weight: 700;
+  color: var(--gold);
+  font-size: 1.2rem;
+}
+
+/* Gladiators */
+.filter {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0.4rem 0.6rem;
+  color: var(--ink);
+  background: #0000004d;
+  border: 1px solid #ffffff2a;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.filter input:focus-visible,
+.row button:focus-visible,
+.findMine button:focus-visible,
+.stale button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.findMine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.findMine button[aria-pressed='true'],
+.row button[aria-pressed='true'] {
+  background: #5b4a1e;
+  border-color: var(--gold);
+}
+
+.reason {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid #ffffff10;
+  min-width: 0;
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.who span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  gap: 0.3rem;
+}
+
+.away {
+  flex: none;
+  font-size: 0.74rem;
+  color: #c9b4e6;
+}

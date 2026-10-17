@@ -3,6 +3,7 @@ import type { WorldSnapshot } from '../../supabase/functions/_shared/contracts/r
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { SLOT_MS, routeLiveReads, seedSession } from './live-routes';
+import { openMenu } from './shell-helpers';
 
 // Task 13.3: the game page mounts the camp in live mode from the public reads, with one sync controller owning the
 // shared display clock (`window.__cloudiatorShell.clock`, fixture-enabled builds only) and the owner state.
@@ -75,12 +76,68 @@ test('signs a rejected stored session out locally and keeps the camp running for
   live.rejectSessions();
   await page.goto('/game/');
   await waitForCamp(page, world.actors.length);
+  await openMenu(page, 'My gladiator');
   await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
   expect(live.requests.some(r => r.reader === user.id && r.table === 'world_revision')).toBe(true);
   const loads = live.requests.filter(r => r.table === 'world_actor_reads');
   expect(loads.length).toBeGreaterThan(0);
   expect(loads.every(r => r.reader === null)).toBe(true);
+  // The sign-out was this browser's only (scope=local), never the account's other sessions.
+  const logouts = live.authRequests.filter(r => r.path === '/auth/v1/logout');
+  expect(logouts.map(r => r.query.get('scope'))).toEqual(['local']);
+});
+
+test('retries a failed local sign-out of a rejected session on the next sync publish, then reads as a visitor', async ({ page, context }) => {
+  // 13.3 review: a sign-out that fails and keeps the stored session must not leave a signed-in view over an empty camp.
+  // Here the browser's storage refuses the first removal of the session, so the first sign-out fails with it stored.
+  await context.addInitScript(() => {
+    const original = Storage.prototype.removeItem;
+    let refused = false;
+    Storage.prototype.removeItem = function (this: Storage, key: string) {
+      if (!refused && key === 'sb-127-auth-token') { refused = true; throw new Error('storage unavailable (test)'); }
+      return original.call(this, key);
+    };
+  });
+  await seedSession(context);
+  const world = liveWorld();
+  const live = await routeLiveReads(context, { world, owner: ownerFixture });
+  live.rejectSessions();
+  await page.clock.install();
+  await page.goto('/game/');
+  const logouts = () => live.authRequests.filter(r => r.path === '/auth/v1/logout');
+  await expect.poll(() => logouts().length).toBe(1);
+  await page.waitForTimeout(1_000);
+  // The failed sign-out keeps the stored session; nothing asks again before the next sync publish.
+  expect(logouts()).toHaveLength(1);
+  expect(await page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).not.toBeNull();
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => logouts().length).toBe(2);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
+  await waitForCamp(page, world.actors.length);
+  await openMenu(page, 'My gladiator');
+  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  // Both attempts signed out this browser only.
+  expect(logouts().map(r => r.query.get('scope'))).toEqual(['local', 'local']);
+  const loads = live.requests.filter(r => r.table === 'world_actor_reads');
+  expect(loads.length).toBeGreaterThan(0);
+  expect(loads.every(r => r.reader === null)).toBe(true);
+});
+
+test('drops the rejected session locally even when the server refuses its sign-out', async ({ page, context }) => {
+  // Observed with supabase-js 2.117.3: a failed /auth/v1/logout (503) still removes the local session, so one attempt
+  // is enough and the reads continue as a visitor's.
+  await seedSession(context);
+  const world = liveWorld();
+  const live = await routeLiveReads(context, { world, owner: ownerFixture });
+  live.rejectSessions();
+  live.failLogout(1);
+  await page.goto('/game/');
+  await waitForCamp(page, world.actors.length);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sb-127-auth-token'))).toBeNull();
+  await openMenu(page, 'My gladiator');
+  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  expect(live.authRequests.filter(r => r.path === '/auth/v1/logout').map(r => r.query.get('scope'))).toEqual(['local']);
 });
 
 test('a signed-in player sees the camp on their gladiator and re-reads the owner on a new revision, slot or focus', async ({ page, context }) => {
@@ -93,7 +150,9 @@ test('a signed-in player sees the camp on their gladiator and re-reads the owner
   await page.clock.install();
   await page.goto('/game/');
   await waitForCamp(page, world.actors.length);
+  await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible();
+  await openMenu(page, 'Gladiators');
   await expect(page.getByRole('button', { name: 'Find my gladiator' })).toBeVisible();
   const owners = () => live.count('owner_state');
   const revisions = () => live.count('world_revision');
@@ -121,6 +180,7 @@ test('a signed-in player sees the camp on their gladiator and re-reads the owner
 test('the fixture preview keeps its owner, and previews the visitor view with ?as=visitor', async ({ page }) => {
   await page.goto('/game/?mode=fixture');
   await waitForCamp(page);
+  await openMenu(page, 'Gladiators');
   await expect(page.getByRole('button', { name: 'Find my gladiator' })).toBeVisible();
   // The shared clock runs from the fixture's server time, not this browser's wall clock.
   const shown = await shownTime(page);
@@ -128,6 +188,8 @@ test('the fixture preview keeps its owner, and previews the visitor view with ?a
   expect(shown).toBeLessThan(worldFixture.serverNowMs + 600_000);
   await page.goto('/game/?mode=fixture&as=visitor');
   await waitForCamp(page);
+  await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'A legend awaits' })).toBeVisible();
+  await openMenu(page, 'Gladiators');
   await expect(page.getByRole('button', { name: 'Find my gladiator' })).toHaveCount(0);
 });

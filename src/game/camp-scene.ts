@@ -548,7 +548,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       this.input.on(P.Input.Events.POINTER_MOVE, (pointer: PhaserNS.Input.Pointer) => {
         const p1 = this.input.pointer1;
         const p2 = this.input.pointer2;
-        if (p1?.isDown && p2?.isDown) {
+        if (p1?.isDown && p2?.isDown && !offCanvas(p1) && !offCanvas(p2)) {
           const distance = P.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
           if (!pinch || pinch.distance < 1) { pinch = { distance, zoom: view.zoom }; return; }
           const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
@@ -557,7 +557,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           return;
         }
         pinch = null;
-        if (!pointer.isDown) return;
+        if (!pointer.isDown || offCanvas(pointer)) return;
         // A press with a little jitter is a click, not a drag, and keeps a follow going.
         if (!dragging && P.Math.Distance.Between(pointer.downX, pointer.downY, pointer.x, pointer.y) <= DRAG_THRESHOLD) return;
         dragging = true;
@@ -1070,8 +1070,18 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     return { frame: frame.slice(frame.indexOf('/') + 1), flip };
   }
 
+  /**
+   * Whether a press is no click on a camp object: it moved further than the drag threshold, or it began or ended off the
+   * game canvas, on the page's own controls over the camp (its menus, rail and chip), which Phaser also hears through
+   * its window listeners.
+   */
   function dragged(pointer: PhaserNS.Input.Pointer): boolean {
+    if (offCanvas(pointer) || pointer.upElement !== scene.game.canvas) return true;
     return P.Math.Distance.Between(pointer.downX, pointer.downY, pointer.upX, pointer.upY) > DRAG_THRESHOLD;
+  }
+  /** A press that began on the page's controls over the camp, never on the canvas: it neither pans nor pinches. */
+  function offCanvas(pointer: PhaserNS.Input.Pointer): boolean {
+    return pointer.downElement !== scene.game.canvas;
   }
 
   const scene = new CampScene();

@@ -27,21 +27,32 @@ describe('activity status', () => {
   });
 
   it('otherwise follows the activity times: Scheduled, In progress, then Completed', () => {
-    const current = owner('active');
+    // Completed needs a checkpoint that has reached the slot of the display time (here the one after the activity's).
+    const current = owner('active', slot + 1);
     expect(labels(current, slot)).toEqual(['In progress', 'Completed', 'Completed']);
     expect(activityStatus(current, slot, end - 1)).toEqual({ status: 'in-progress', label: 'In progress', endsAtMs: end });
     expect(activityStatus(current, slot, end)).toEqual({ status: 'completed', label: 'Completed', endsAtMs: null });
     // A settled activity whose slot the checkpoint has reached reads Completed too.
-    expect(activityStatus(owner('completed'), slot, end + 1).label).toBe('Completed');
+    expect(activityStatus(owner('completed', slot + 1), slot, end + 1).label).toBe('Completed');
     const queued = owner('queued', slot, start + 1000);
     expect([start + 999, start + 1000, start + 1001].map(now => activityStatus(queued, slot, now).label)).toEqual(['Scheduled', 'In progress', 'In progress']);
     expect(activityStatus(queued, slot, start)).toEqual({ status: 'scheduled', label: 'Scheduled', endsAtMs: end });
   });
 
   it('does not show processing before the end, nor when the checkpoint has already reached the slot', () => {
-    expect(activityStatus(owner('active', slot), slot, end + 1).status).toBe('completed');
     expect(activityStatus(owner('active', slot + 1), slot + 1, end + 1).status).toBe('completed');
     expect(activityStatus(owner('active', slot - 1), slot, end - 1).status).toBe('in-progress');
+  });
+
+  it('reads a slot index up to 30 s old as the slot of the display time, so an ended activity never reads Completed early', () => {
+    // The last revision read (20 s before the boundary) still names the activity's slot; the display clock is past it.
+    for (const now of [end, end + 10_000, end + 30_000]) {
+      expect(activityStatus(owner('active'), slot, now), `${now - end} ms after the end`).toEqual({ status: 'processing', label: 'Processing results', endsAtMs: null });
+      expect(activityStatus(owner('completed'), slot, now).status).toBe('preparing');
+    }
+    // Before the boundary the stale index is the current slot, and a slot index ahead of the display time still counts.
+    expect(activityStatus(owner('active'), slot, end - 1).status).toBe('in-progress');
+    expect(activityStatus(owner('completed', slot), slot + 1, end - 1).status).toBe('preparing');
   });
 
   it('shows Preparing your next activity while no activity has been published yet', () => {

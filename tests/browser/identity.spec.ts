@@ -4,6 +4,7 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads } from './live-routes';
+import { cornerChip, openChipMenu, openMenu, signOutFromChip } from './shell-helpers';
 
 // Explicitly test-only HTTP identity transport. Production uses the unchanged Supabase SDK.
 // Task 4 owns real Auth/database authority; hosted Google consent is Task 24's release gate.
@@ -115,12 +116,16 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
     conflict: (value: boolean) => { forceConflict = value; },
     failOwner: (value: boolean) => { readsFail = value; },
     async signIn(page: Page) {
+      await openMenu(page, 'My gladiator');
       await page.getByRole('button', { name: 'Continue with Google' }).click();
       await page.getByRole('link', { name: 'Approve test Google' }).click();
       await expect(page).toHaveURL(/\/game\/$/);
-      await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
+      await expect((await openChipMenu(page)).getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
+      await cornerChip(page).getByRole('button').first().click();
+      await openMenu(page, 'My gladiator');
     },
     async cancelGoogleAndReturn(page: Page) {
+      await openMenu(page, 'My gladiator');
       await page.getByRole('button', { name: 'Continue with Google' }).click();
       await page.getByRole('link', { name: 'Cancel test Google' }).click();
       await expect(page.getByText('Google sign-in was canceled. Your creation draft is safe.')).toBeVisible();
@@ -136,12 +141,15 @@ test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Moc
 test('retains creation draft through canceled OAuth, back and refresh', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Avi Fighter');
   await page.getByLabel('Duelist', { exact: true }).check();
   await flow.cancelGoogleAndReturn(page);
+  await openMenu(page, 'My gladiator');
   await expect(page.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
   await expect(page.getByLabel('Duelist', { exact: true })).toBeChecked();
   await page.reload();
+  await openMenu(page, 'My gladiator');
   await expect(page.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
   await page.goBack();
   await expect(page).toHaveURL(/\/auth\/callback\//);
@@ -150,6 +158,7 @@ test('retains creation draft through canceled OAuth, back and refresh', async ({
 test('retries a lost response with the same operation ID and reloads online owner after refresh', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Avi Fighter');
   await flow.signIn(page);
   flow.loseNextResponse();
@@ -160,6 +169,7 @@ test('retries a lost response with the same operation ID and reloads online owne
   // Hide the owner read just for the reload, then retry the same original command.
   flow.failOwner(true);
   await page.reload();
+  await openMenu(page, 'My gladiator');
   await expect(page.locator('p[role=alert]')).toContainText('could not be loaded');
   flow.failOwner(false);
   await page.getByRole('button', { name: 'Retry owner load' }).click();
@@ -172,12 +182,14 @@ test('retries a lost response with the same operation ID and reloads online owne
 test('a command retry retains its ID and editing a conflicted draft obtains a fresh ID', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Name Taken');
   await flow.signIn(page);
   flow.conflict(true);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
   await page.reload();
+  await openMenu(page, 'My gladiator');
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
   expect(flow.commands[1].operationId).toBe(flow.commands[0].operationId);
@@ -191,16 +203,18 @@ test('a command retry retains its ID and editing a conflicted draft obtains a fr
 test('two signed-in tabs converge on one online character and sign-out clears both views', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Twin Fighter');
   await flow.signIn(page);
   const other = await context.newPage();
   await other.goto('/game/');
+  await openMenu(other, 'My gladiator');
   await expect(other.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();
   await Promise.all([page.getByRole('button', { name: 'Create gladiator', exact: true }).click(), other.getByRole('button', { name: 'Create gladiator', exact: true }).click()]);
   await expect(page.getByRole('heading', { name: 'Twin Fighter', exact: true })).toBeVisible();
   await expect(other.getByRole('heading', { name: 'Twin Fighter', exact: true })).toBeVisible();
   expect(flow.characterCount()).toBe(1);
-  await other.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await signOutFromChip(other);
   await expect(other.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Twin Fighter', exact: true })).toHaveCount(0);
@@ -234,6 +248,7 @@ test('validates names and finite whole-point allocation, derives starters and pe
 test('expiry removes private owner and requires sign-in when refresh fails', async ({ page, context }) => {
   const flow = await identityFlow(context, { expiresIn: 5 });
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Short Session');
   await flow.signIn(page);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
@@ -263,13 +278,14 @@ test('fragment OAuth errors are canceled safely and cannot display provider text
 test('account changes cannot reuse another account creation attempt', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Account Draft');
   await flow.signIn(page);
   flow.conflict(true);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
   const firstId = flow.commands[0].operationId;
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await signOutFromChip(page);
   flow.switchAccount();
   await flow.signIn(page);
   await expect(page.getByLabel('Gladiator name')).toHaveValue('Account Draft');
@@ -283,6 +299,7 @@ test('account changes cannot reuse another account creation attempt', async ({ p
 test('a slow no-character focus read cannot replace the confirmed creation owner', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Gladiator name').fill('Confirmed Fighter');
   await flow.signIn(page);
   await expect(page.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();

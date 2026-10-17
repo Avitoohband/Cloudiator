@@ -4,6 +4,7 @@ import type { RevealedStage, RevealedTimeline } from '../../supabase/functions/_
 import type { PublicProfile, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads, seedSession, testUser } from './live-routes';
+import { openMenu } from './shell-helpers';
 
 // Live mode (Task 16 phase 2b): the Arena card and the Standings panel receive the live gateway, so they read the
 // protected Data API (intercepted here with development-only identity transport) instead of saying "not available".
@@ -32,11 +33,13 @@ test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Liv
 test('gives the live Arena card and Standings panel the live gateway reads', async ({ page, context }) => {
   const { live, user } = await liveArena(context);
   await page.goto('/game/');
+  // The Arena menu holds the Arena card and the league standings (Task 13.5).
+  await openMenu(page, 'Arena');
   const arena = page.getByRole('region', { name: 'Arena bouts' });
   await arena.getByRole('button', { name: 'Your arena bout' }).click();
   await expect(arena.getByText('Warming up', { exact: true })).toBeVisible();
   await expect(arena).not.toContainText('not available in this build');
-  await page.getByRole('button', { name: 'Standings', exact: true }).click();
+  await openMenu(page, 'Arena');
   const table = page.getByRole('table', { name: 'Bronze league standings' });
   await expect(table.getByRole('row', { name: /Aster/ })).toContainText('1012');
   await expect(table.getByRole('row', { name: /Varro/ })).toContainText('0–1');

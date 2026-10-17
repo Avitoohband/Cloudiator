@@ -13,6 +13,37 @@
   touch-action: none;
 }
 
+/* chrome: 'none' — the view fills its parent, with no frame (the full-screen camp). */
+.fill {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+}
+
+.fillViewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #1c3f24;
+  touch-action: none;
+}
+
+/* Over the full-screen camp the notice sits in the upper part, clear of a bottom sheet and beside a panel. */
+.fillViewport .fallback {
+  align-content: start;
+  padding-top: max(96px, 20vh);
+}
+
+.fillViewport .fallback,
+.fillViewport .status {
+  z-index: 1;
+}
+
+.fillViewport .status {
+  left: 20px;
+  top: 16px;
+}
+
 .canvas {
   position: absolute;
   inset: 0;

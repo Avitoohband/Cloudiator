@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ownerFixture } from '../fixtures/domain';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { emptyWorld, routeLiveReads } from './live-routes';
+import { openMenu } from './shell-helpers';
 
 async function planningFlow(context: BrowserContext) {
   let state = structuredClone(ownerFixture);
@@ -64,7 +65,7 @@ test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Liv
 test('queues, confirms and cancels pending builds without optimistic current replacement', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');
-  await page.getByRole('button', { name: 'Gladiator', exact: true }).click();
+  await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'Current build', exact: true })).toBeVisible();
   await page.getByLabel('Class', { exact: true }).selectOption('berserker');
   await expect(page.getByText('Estimated reservation: 100 money')).toBeVisible();
@@ -84,7 +85,7 @@ test('queues, confirms and cancels pending builds without optimistic current rep
 test('reuses immutable operation after unknown outcome and reloads a version conflict', async ({ page, context }) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');
-  await page.getByRole('button', { name: 'Gladiator', exact: true }).click();
+  await openMenu(page, 'My gladiator');
   await page.getByLabel('Class', { exact: true }).selectOption('berserker');
   flow.loseNext();
   await page.getByRole('button', { name: 'Queue build' }).click();
@@ -103,6 +104,7 @@ test('reuses immutable operation after unknown outcome and reloads a version con
 test('edits future repeating phases and retries processing without local authority', async ({ page, context }) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'Schedule');
   await page.getByLabel('morning activity').selectOption('arena');
   flow.processing(true);
   await page.getByRole('button', { name: 'Save morning' }).click();
@@ -117,6 +119,7 @@ test('edits future repeating phases and retries processing without local authori
 test('re-estimates the next start after a boundary passes while the panel stays open', async ({ page, context }) => {
   await planningFlow(context);
   await page.goto('/game/');
+  await openMenu(page, 'Schedule');
   const starts = page.locator('.planning-form p').filter({ hasText: /^Estimated next start:/ });
   await expect(starts).toHaveCount(3);
   // The shared clock has its server time from the first revision read.

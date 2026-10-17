@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { emptyWorld, routeLiveReads } from './live-routes';
+import { openMenu, railMenus, revealRail } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 
@@ -7,9 +8,11 @@ test('management shell labels local fixture data and exposes an accessible sched
   test.skip(production, 'Fixture data is deliberately unavailable in production.');
   await page.goto('/game/?mode=fixture');
   await expect(page.getByText('Fixture mode — progress is not saved online')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Schedule', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Schedule', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Repeating schedule' })).toBeVisible();
+  // The Schedule rail icon (Task 13.5); opening it shows the sample plan.
+  await revealRail(page);
+  await expect(railMenus(page).getByRole('button', { name: 'Schedule', exact: true })).toBeVisible();
+  const schedule = await openMenu(page, 'Schedule');
+  await expect(schedule.getByRole('heading', { name: 'Repeating schedule' })).toBeVisible();
   await expect(page.getByText('Woodland Path', { exact: true })).toBeVisible();
   await expect(page.getByText('This preview cannot save schedule changes.')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -20,6 +23,7 @@ test('normal entry exposes Google sign-in with an explicit configuration state',
   // The live camp reads the public world; in development it is answered here, never by the local Supabase stack.
   if (!production) await routeLiveReads(context, { world: emptyWorld() });
   await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
   if (production) {
     await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeDisabled();
@@ -36,6 +40,7 @@ test('production refuses fixture mode even when requested in the URL', async ({ 
   await page.goto('/game/?mode=fixture');
   await expect(page.getByText('Fixture preview is unavailable in this build.')).toBeVisible();
   await expect(page.getByText('Fixture mode — progress is not saved online')).toHaveCount(0);
+  await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'Your story starts here' })).toBeVisible();
 });
 

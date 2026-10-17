@@ -5,7 +5,8 @@
 // synchronously and destroys the game. With a timeline reader, the host also reads the
 // timelines of Arena entrants once their bouts are due (src/game/arena-layout.ts), so the
 // camp can stage revealed fights, forgets those of activities no longer in the world, and
-// lists the ring fights as keyboard buttons below the camp view. With a tournament reader it
+// lists the ring fights as keyboard buttons below the camp view (with `chrome: 'none'` the page shell lists them, from the
+// bridge's `arena-fights` event, and holds the camera buttons). With a tournament reader it
 // reads the tournaments of entrants in camp during their slot (src/game/tournament-camp.ts),
 // so they wait, fight and spectate by the revealed bracket. Tournament views carry no battle
 // logs: the host loads each staged bout's log on demand, once per session, and merges it in.
@@ -79,7 +80,7 @@ declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
 
-export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus }: {
+export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus, chrome = 'framed' }: {
   world: WorldSnapshot | null;
   bridge: SceneBridge;
   focusGladiatorId?: string | null;
@@ -97,6 +98,12 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   tournaments?: (Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'tournamentLog'>>) | null;
   /** Hears the scene's availability: loading, ready, or unavailable (no WebGL, art that failed to load, a stopped scene). */
   onStatus?(status: 'loading' | 'ready' | 'unavailable'): void;
+  /**
+   * `framed` (the default): a bordered view with its camera buttons and the ring-fight buttons below it. `none`: the view
+   * fills its parent with neither, for a page shell that offers them itself (zoom on its menu rail, Find and Follow in
+   * its Gladiators menu, the fights in its Arena menu).
+   */
+  chrome?: 'framed' | 'none';
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
@@ -344,9 +351,10 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   };
 
   const unavailable = status.kind === 'unavailable';
+  const framed = chrome === 'framed';
   return (
-    <div className={styles.frame}>
-      <div className={styles.viewport}>
+    <div className={framed ? styles.frame : styles.fill}>
+      <div className={framed ? styles.viewport : styles.fillViewport}>
         <div
           ref={host}
           className={styles.canvas}
@@ -358,7 +366,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
           // Phaser cancels the default pointerdown, so focus the host ourselves for the arrow keys.
           onPointerDown={() => host.current?.focus({ preventScroll: true })}
         />
-        {!unavailable && (
+        {framed && !unavailable && (
           <div className={styles.controls} role="group" aria-label="Camera controls">
             <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'in' })} aria-label="Zoom in">+</button>
             <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'out' })} aria-label="Zoom out">−</button>
@@ -377,12 +385,12 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
             )}
           </div>
         )}
-        <p id={statusId} className={unavailable ? styles.fallback : styles.status} role="status">
+        <p id={statusId} className={unavailable ? styles.fallback : styles.status} role="status" data-camp-fallback={unavailable ? '' : undefined}>
           {status.kind === 'loading' ? 'Opening the camp…' : unavailable ? status.message : ''}
         </p>
       </div>
       {/* Keyboard and touch equivalents of clicking a fighting pair, below the view so they never cover it. */}
-      {!unavailable && fights.length > 0 && (
+      {framed && !unavailable && fights.length > 0 && (
         <div className={styles.fights} role="group" aria-label="Arena bouts in the rings">
           {fights.map(f => {
             const { label, entrant } = arenaFightButton(f);

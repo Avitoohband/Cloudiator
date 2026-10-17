@@ -334,7 +334,21 @@ describe('the live Tournaments panel before the shared clock has the server’s 
   const unsynced = () => createDisplayClock(() => 0, () => start + 10 * MIN);
   type PanelProps = Parameters<typeof TournamentPanel>[0];
   const panel = (props: Partial<PanelProps>) => text(renderToStaticMarkup(createElement(TournamentPanel,
-    { reads, owner: null, clock: unsynced(), fixture: false, syncError: null, ...props } as PanelProps)));
+    { reads, owner: null, clock: unsynced(), fixture: false, syncError: null, viewer: 'visitor', ...props } as PanelProps)));
+
+  it('offers the league picker only to a visitor or a viewer without a gladiator, never while a player’s owner loads (13.4 M4)', () => {
+    const clock = unsynced();
+    clock.sync(start + 10 * MIN);
+    const html = (props: Partial<PanelProps>) => renderToStaticMarkup(createElement(TournamentPanel,
+      { reads, owner: null, clock, fixture: false, syncError: null, ...props } as PanelProps));
+    for (const viewer of ['visitor', 'no-gladiator'] as const) expect(html({ viewer }), viewer).toContain('aria-label="League"');
+    // A signed-in player whose owner is still loading: no picker, and no Bronze card read before the owner's league is known.
+    const loading = html({ viewer: 'loading' });
+    expect(loading).not.toContain('aria-label="League"');
+    expect(text(loading)).toContain('Loading your gladiator’s tournament…');
+    expect(text(loading)).not.toContain('Loading the tournament…');
+    expect(html({ viewer: 'player', owner: ownerFixture })).not.toContain('aria-label="League"');
+  });
 
   it('says brackets cannot be shown without a reader, whatever the clock and the sync', () => {
     for (const syncError of [null, 'unavailable'] as const) {

@@ -4,6 +4,7 @@ import { ownerFixture, itemFixture } from '../fixtures/domain';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { emptyWorld, routeLiveReads } from './live-routes';
+import { openMenu } from './shell-helpers';
 
 async function inventoryFlow(context: BrowserContext) {
   const state = structuredClone(ownerFixture);
@@ -61,7 +62,7 @@ test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Liv
 test('buys through the live gateway, refreshes inventory, and confirms bound discard without a cash reward', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);
   await page.goto('/game/');
-  await page.getByRole('button', { name: 'Inventory', exact: true }).click();
+  const menu = await openMenu(page, 'Inventory and shops');
   await expect(page.getByText('3 / 60 slots')).toBeVisible();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.getByText('4 / 60 slots')).toBeVisible();
@@ -80,12 +81,12 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await page.getByRole('button', { name: 'Buy Arena banner', exact: true }).click();
   await expect(page.getByText('Arena banner · Owned · Account-bound')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.locator('#management-panel').screenshot({ path: info.outputPath('inventory-shops.png') });
+  await menu.screenshot({ path: info.outputPath('inventory-shops.png') });
 });
 
 test('retries the same operation after a lost response and explains processing without optimistic changes', async ({ page, context }) => {
   const flow = await inventoryFlow(context);
-  await page.goto('/game/'); await page.getByRole('button', { name: 'Inventory', exact: true }).click();
+  await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
   flow.loseNext();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.locator('.inventory-panel').getByRole('alert')).toContainText('could not be confirmed');
@@ -101,7 +102,7 @@ test('retries the same operation after a lost response and explains processing w
 
 test('shows level locks and reservation restrictions with both currencies', async ({ page, context }) => {
   const flow = await inventoryFlow(context);
-  await page.goto('/game/'); await page.getByRole('button', { name: 'Inventory', exact: true }).click();
+  await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
   const equipped = page.getByTestId(`item-${flow.state.inventory[2].id}`);
   await expect(equipped.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await expect(equipped.getByRole('button', { name: 'Discard' })).toBeDisabled();
@@ -115,7 +116,7 @@ test('shows level locks and reservation restrictions with both currencies', asyn
 
 test('fixture inventory and shops remain read-only alongside the camp', async ({ page }) => {
   await page.goto('/game/?mode=fixture');
-  await page.getByRole('button', { name: 'Inventory', exact: true }).click();
+  await openMenu(page, 'Inventory and shops');
   await expect(page.getByRole('heading', { name: 'Shops', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'unavailable in this preview' })).toBeVisible();

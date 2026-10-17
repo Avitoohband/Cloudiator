@@ -8,6 +8,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { worldToScreen } from '../../src/game/iso';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote, remoteRequest } from './remote';
+import { closeMenu, expectOwnerShown, menuDialog, openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -64,7 +65,9 @@ test.describe('arena staging and sparring rings in the camp', () => {
       expect([a.walking, a.action], a.name).toEqual([false, 'practice']);
     }
     expect(state.actors.some(a => a.kind === 'arena-npc')).toBe(false);
+    await openMenu(page, 'Arena');
     await expect(page.getByRole('group', { name: 'Arena bouts in the rings' })).toHaveCount(0);
+    await closeMenu(page);
     await page.evaluate(() => window.__cloudiatorCamp!.centerOn(23, 23, 2));
     await nextFrames(page);
     await page.screenshot({ path: testInfo.outputPath('arena-minute-40-warm-up.png') });
@@ -86,6 +89,9 @@ test.describe('arena staging and sparring rings in the camp', () => {
       const log = LOGS[bout];
       const first = attacks(log)[0];
       expect(fight.boutStartMs).toBe(S + 60 * MIN);
+      // The scene draws (and poses) only what is in view: bring this ring into the full-screen view first.
+      const inRing = state.actors.find(x => x.id === (fight.fighters[0] ?? fight.npc!))!;
+      await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: inRing.x, y: inRing.y });
       await freezeAt(page, fight.boutStartMs + first.elapsedMs + 20);
       state = await campState(page);
       const live = state.arena.fights.find(f => f.battleId === fight.battleId)!;
@@ -179,20 +185,26 @@ test.describe('arena staging and sparring rings in the camp', () => {
   test('lists the fights in the rings as buttons that find the pair', async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openArena(page, 60.25);
+    const menu = await openMenu(page, 'Arena');
+    await menu.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
     const group = page.getByRole('group', { name: 'Arena bouts in the rings' });
     await expect(group.getByRole('button')).toHaveCount(6);
     await expect(group.getByRole('button', { name: 'Bellator vs Corvina' })).toBeVisible();
     await expect(group.getByRole('button', { name: /^(Valeria vs Iron Warden|Cato vs Stone Gladius) \(NPC\)$/ }).first()).toBeVisible();
-    // Below the camp view, never over its top rows (nameplates, clicks), and every button fits without scrolling.
-    const canvasBox = (await page.locator('canvas').boundingBox())!;
+    // In the Arena menu (Task 13.5: no longer below the camp view, which now fills the window), never over the corner
+    // chip, and every button fits without scrolling.
+    const menuBox = (await menu.boundingBox())!;
     const groupBox = (await group.boundingBox())!;
-    expect(groupBox.y, 'bout buttons below the camp view').toBeGreaterThanOrEqual(canvasBox.y + canvasBox.height - 1);
+    expect(groupBox.y, 'bout buttons inside the Arena menu').toBeGreaterThanOrEqual(menuBox.y);
+    expect(groupBox.x + groupBox.width, 'bout buttons inside the Arena menu').toBeLessThanOrEqual(menuBox.x + menuBox.width + 1);
+    const chipBox = (await page.getByTestId('corner-chip').boundingBox())!;
+    expect(menuBox.x + menuBox.width <= chipBox.x || menuBox.y >= chipBox.y + chipBox.height, 'the menu leaves the corner chip clear').toBe(true);
     for (const b of await group.getByRole('button').all()) {
       const box = (await b.boundingBox())!;
       expect(box.x, await b.textContent() ?? '').toBeGreaterThanOrEqual(groupBox.x - 1);
       expect(box.x + box.width, await b.textContent() ?? '').toBeLessThanOrEqual(groupBox.x + groupBox.width + 1);
     }
-    await page.locator('section.camp-area').screenshot({ path: testInfo.outputPath('arena-bout-buttons-below-camp.png') });
+    await menu.screenshot({ path: testInfo.outputPath('arena-bout-buttons-in-menu.png') });
     const button = group.getByRole('button', { name: 'Bellator vs Corvina' });
     await button.focus();
     await page.keyboard.press('Enter');
@@ -208,8 +220,8 @@ test.describe('arena staging and sparring rings in the camp', () => {
         const a = state.actors.find(x => x.id === id)!;
         await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: a.x, y: a.y });
         await nextFrames(page);
-        // Each click opens that fighter's Arena card, which scrolls the page to it: bring the camp back first.
-        await page.locator('canvas').scrollIntoViewIfNeeded();
+        // Each click opens that fighter's Arena card in the Arena menu (a bottom sheet on touch): close it first.
+        await closeMenu(page);
         const box = (await page.locator('canvas').boundingBox())!;
         const at = (await page.evaluate(x => window.__cloudiatorCamp!.screenOf(x), id))!;
         // The head (about 40 art px over the feet): nobody standing in front of a fighter reaches that high.
@@ -442,14 +454,16 @@ const arenaState = (page: Page) => page.evaluate(() => window.__cloudiatorArena!
 
 async function openGame(page: Page) {
   await page.goto('/game/?mode=fixture');
-  await expect(page.getByRole('heading', { name: 'Arena bouts' })).toBeVisible({ timeout: 45_000 });
   // The section also shows for spectators (Task 13.4), so it can appear before the fixture owner, whose page these tests
-  // are, and before its test hook is installed.
-  await expect(page.getByRole('heading', { name: 'Aster', exact: true, level: 2 })).toBeVisible({ timeout: 45_000 });
+  // are (the corner chip names it once loaded), and before its test hook is installed.
+  await expectOwnerShown(page, 'Aster');
+  await openMenu(page, 'Arena');
+  await expect(page.getByRole('heading', { name: 'Arena bouts' })).toBeVisible({ timeout: 45_000 });
   await page.waitForFunction(() => !!window.__cloudiatorArena);
 }
-/** Opens a sample Arena activity in the card. */
+/** Opens a sample Arena activity in the card (in the Arena menu). */
 async function openSample(page: Page, key: ArenaActivityKey) {
+  await openMenu(page, 'Arena');
   await page.getByRole('button', { name: labelOf(key), exact: true }).click();
   await page.waitForFunction(id => window.__cloudiatorArena?.state()?.activityId === id, arenaActivityId(key));
 }
@@ -597,6 +611,7 @@ test.describe('the Arena card and league standings', () => {
       await page.goto('/game/?mode=fixture');
       await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
       await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN + 12_000);
+      await openMenu(page, 'Arena');
       const fights = page.getByRole('group', { name: 'Arena bouts in the rings' });
       await expect(fights.getByRole('button')).toHaveCount(6, { timeout: 15_000 });
       const heading = (name: string) => card(page).getByRole('heading', { name });
@@ -606,8 +621,8 @@ test.describe('the Arena card and league standings', () => {
       // Reduced motion jumps (no smooth scroll); otherwise the scroll may still be running.
       if (motion === 'reduce') expect(await inView('Bellator')).toBe(true);
       await expect(heading('Bellator')).toBeInViewport();
-      // A click on a fighter in its ring, after scrolling back to the camp.
-      await page.locator('canvas').scrollIntoViewIfNeeded();
+      // A click on a fighter in its ring, after closing the menu over the camp.
+      await closeMenu(page);
       await expect(heading('Bellator')).not.toBeInViewport();
       const id = ARENA_GLADIATORS.lucilla.id;
       const lucilla = (await campState(page)).actors.find(a => a.id === id)!;
@@ -623,27 +638,38 @@ test.describe('the Arena card and league standings', () => {
     });
   }
 
-  test('leaves the page where it is when a camp bout opens a card that is already in view (desktop)', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'desktop', 'The desktop layout shows the card beside the camp.');
+  test('leaves the menu where it is when a camp bout opens a card that is already in view (desktop)', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'The desktop layout shows the card in a panel beside the rail.');
     await page.emulateMedia({ reducedMotion: 'reduce' }); // a scroll would be an instant jump
     await page.goto('/game/?mode=fixture');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN + 12_000);
+    const menu = await openMenu(page, 'Arena');
     const selection = { activityId: arenaActivityId('bellator'), gladiatorId: ARENA_GLADIATORS.bellator.id };
     await page.evaluate(next => window.__cloudiatorArena!.open(next), selection);
     const heading = card(page).getByRole('heading', { name: 'Bellator' });
     await expect(card(page).getByRole('status')).toHaveText('Bout in progress');
-    // Scroll so the whole card shows below the top of the view, as when a player reads it beside the camp.
-    await card(page).evaluate(el => { const r = el.getBoundingClientRect(); window.scrollTo(0, window.scrollY + r.top - Math.max(40, (window.innerHeight - r.height) / 2)); });
-    const box = () => card(page).evaluate(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, view: window.innerHeight, scrollY: window.scrollY }; });
+    // The menu scrolls internally (Task 13.5): scroll it so the whole card shows below its top, as when a player reads it.
+    const body = menu.getByTestId('menu-body');
+    await card(page).evaluate(el => {
+      const scroller = el.closest('[data-testid="menu-body"]')!;
+      const r = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
+      scroller.scrollTop += r.top - s.top - Math.max(20, (s.height - r.height) / 2);
+    });
+    const box = () => card(page).evaluate(el => {
+      const scroller = el.closest('[data-testid="menu-body"]')!;
+      const r = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
+      return { top: r.top - s.top, bottom: r.bottom, view: s.bottom, scrollY: scroller.scrollTop };
+    });
     const before = await box();
-    expect(before.top, 'the card starts below the top of the view').toBeGreaterThan(20);
+    expect(before.top, 'the card starts below the top of the menu').toBeGreaterThan(20);
     expect(before.bottom, 'the whole card is in view').toBeLessThanOrEqual(before.view);
     // The event a fighter click or a bout button sends.
     await page.evaluate(next => window.__cloudiatorCamp!.emit('open-arena', next), selection);
     await expect(heading).toBeFocused();
+    await expect(body).toBeVisible();
     await nextFrames(page);
-    expect((await box()).scrollY, 'the page did not scroll').toBe(before.scrollY);
+    expect((await box()).scrollY, 'the menu did not scroll').toBe(before.scrollY);
   });
 
   test('ends the ring fight when its card shows the result, never before', async ({ page }) => {
@@ -676,6 +702,7 @@ test.describe('the Arena card and league standings', () => {
     await page.goto('/game/?mode=fixture');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN + 15_000);
+    await openMenu(page, 'Arena');
     const fights = page.getByRole('group', { name: 'Arena bouts in the rings' });
     await expect(fights.getByRole('button')).toHaveCount(6, { timeout: 15_000 });
     await fights.getByRole('button', { name: 'Bellator vs Corvina' }).focus();
@@ -688,8 +715,8 @@ test.describe('the Arena card and league standings', () => {
     const lucilla = (await campState(page)).actors.find(a => a.id === id)!;
     await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: lucilla.x, y: lucilla.y });
     await nextFrames(page);
-    // Opening Bellator's card scrolled the page to it; the camp comes back into view for the click.
-    await page.locator('canvas').scrollIntoViewIfNeeded();
+    // Bellator's card is open in the Arena menu (a bottom sheet on touch); the menu closes for the camp click.
+    await closeMenu(page);
     const at = (await page.evaluate(x => window.__cloudiatorCamp!.screenOf(x), id))!;
     const box = (await page.locator('canvas').boundingBox())!;
     await page.mouse.click(box.x + at.x, box.y + at.y - 40);
@@ -700,7 +727,8 @@ test.describe('the Arena card and league standings', () => {
   test('pages league standings and shows the owner’s rating, renown and current strength apart from them', async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await openGame(page);
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
+    // The standings live in the Arena menu, below the Arena card (Task 13.5).
+    await openMenu(page, 'Arena');
     const table = page.getByRole('table', { name: 'Bronze league standings' });
     await expect(table.locator('tbody tr')).toHaveCount(50);
     await expect(table).toContainText('Promoted');
@@ -719,7 +747,7 @@ test.describe('the Arena card and league standings', () => {
     await expect(page.getByText('No standings in the Champion league yet.')).toBeVisible();
     await page.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Bronze' }).click();
     await expect(table.locator('tbody tr')).toHaveCount(50);
-    await page.getByRole('region', { name: 'Gladiator management' }).screenshot({ path: testInfo.outputPath('standings-bronze.png') });
+    await menuDialog(page, 'Arena').screenshot({ path: testInfo.outputPath('standings-bronze.png') });
     expect(remote).toEqual([]);
   });
 
@@ -729,7 +757,9 @@ test.describe('the Arena card and league standings', () => {
     // The visitor preview: the fixture camp and reads, with no owner.
     await page.goto('/game/?mode=fixture&as=visitor');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await openMenu(page, 'My gladiator');
     await expect(page.getByRole('heading', { name: 'A legend awaits' })).toBeVisible();
+    await openMenu(page, 'Arena');
     const arena = page.getByRole('region', { name: 'Arena bouts' });
     await expect(arena).toBeVisible();
     await expect(arena.getByRole('button', { name: 'Your arena bout' })).toHaveCount(0);
@@ -777,7 +807,7 @@ test.describe('the Arena card and league standings', () => {
     expect(await wide()).toBeLessThanOrEqual(0);
     await card(page).scrollIntoViewIfNeeded();
     await card(page).screenshot({ path: testInfo.outputPath('width360-arena-card.png') });
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
+    await openMenu(page, 'Arena');
     await expect(page.getByRole('table', { name: 'Bronze league standings' }).locator('tbody tr')).toHaveCount(50);
     expect(await wide()).toBeLessThanOrEqual(0);
     await page.getByRole('region', { name: 'Your standing' }).screenshot({ path: testInfo.outputPath('width360-standings.png') });
@@ -803,7 +833,7 @@ test.describe('live league standings', () => {
     const live = await routeLiveReads(context, { world, owner, standings: [standingsPage([standingRow(owner.gladiatorId, 'Aster', 1, 1000), standingRow(varro, 'Varro', 2, 990)])] });
     await page.clock.install();
     await page.goto('/game/');
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
+    await openMenu(page, 'Arena');
     const table = page.getByRole('table', { name: 'Bronze league standings' });
     await expect(table.getByRole('row', { name: /Aster/ })).toContainText('1000');
     const own = page.getByRole('region', { name: 'Your standing' }).getByRole('definition');
@@ -835,7 +865,7 @@ test.describe('live league standings', () => {
     const live = await routeLiveReads(context, { world, standings: [standingsPage(ARENA_STANDINGS.bronze)] });
     await page.clock.install();
     await page.goto('/game/');
-    await page.getByRole('button', { name: 'Standings', exact: true }).click();
+    await openMenu(page, 'Arena');
     const table = page.getByRole('table', { name: 'Bronze league standings' });
     await expect(table.locator('tbody tr')).toHaveCount(50);
     await page.getByRole('button', { name: 'More', exact: true }).click();

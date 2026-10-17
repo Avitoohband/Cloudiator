@@ -49,7 +49,8 @@ const codeOf = (error: unknown) => (error && typeof error === 'object' && 'code'
  * - The owner is read when the account changes, the revision changes, the server slot advances or the tab regains focus,
  *   and on `refreshOwner()`, which rejects when its read fails. Only the latest read lands.
  * - A stored session the server rejects: while the session says signed in and the sync reports `unauthenticated` (the
- *   public reads carried the stale token), the session is signed out locally, so the reads continue as a visitor's.
+ *   public reads carried the stale token), the session is signed out locally, so the reads continue as a visitor's. A
+ *   sign-out that fails and keeps the session is tried again at each later publish that still reports it.
  */
 export function useGameState(gateway: GameGateway | null, options: { fixture: boolean; previewAs?: 'visitor' | 'player' }): GameUiState {
   const { fixture, previewAs } = options;
@@ -114,10 +115,14 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   }, [gateway, account, loadOwner]);
 
   const syncError = sync?.error ?? null;
+  // One local sign-out attempt per completed sync publish that reports the stored session rejected, so a sign-out that
+  // failed and kept the session is tried again at the next poll (never two at once, never on a refresh in progress).
+  const signingOut = useRef(false);
   useEffect(() => {
-    if (fixture || session.status !== 'signed-in' || syncError !== 'unauthenticated') return;
-    void signOut({ scope: 'local' }).catch(() => undefined);
-  }, [fixture, session.status, syncError]);
+    if (fixture || session.status !== 'signed-in' || sync?.error !== 'unauthenticated' || sync.refreshing || signingOut.current) return;
+    signingOut.current = true;
+    void signOut({ scope: 'local' }).catch(() => undefined).finally(() => { signingOut.current = false; });
+  }, [fixture, session.status, sync]);
 
   // `refreshOwner` is `loadOwner` itself unless a fixture-enabled test renews its identity (never in production).
   const [renewals, setRenewals] = useState(0);

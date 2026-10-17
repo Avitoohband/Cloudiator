@@ -7,6 +7,7 @@ import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from
 import { tournamentCampActors } from '../fixtures/tournament-build';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
+import { closeMenu, expectOwnerShown, openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -24,7 +25,7 @@ const panelState = (page: Page) => page.evaluate(() => window.__cloudiatorTourna
 
 async function openTournaments(page: Page) {
   await page.goto('/game/?mode=fixture');
-  await page.getByRole('button', { name: 'Tournaments', exact: true }).click();
+  await openMenu(page, 'Tournaments');
   await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible({ timeout: 45_000 });
 }
 /**
@@ -426,7 +427,7 @@ const inLeague = (view: TournamentView, league: TournamentView['league']): Tourn
   JSON.parse(JSON.stringify(view).replaceAll(`:${view.league}`, `:${league}`).replace(`"league":"${view.league}"`, `"league":"${league}"`)) as TournamentView;
 const OPENING_SLOT = startOf('opening') / SLOT_MS;
 const tournamentsPanel = async (page: Page) => {
-  await page.getByRole('button', { name: 'Tournaments', exact: true }).click();
+  await openMenu(page, 'Tournaments');
   const panel = page.getByRole('region', { name: 'Tournaments', exact: true });
   await expect(panel).toBeVisible({ timeout: 45_000 });
   return panel;
@@ -444,7 +445,7 @@ test.describe('the live Tournaments panel', () => {
     const live = await routeLiveReads(context, { world: emptyWorld(at), owner, serverNowMs: () => at });
     await page.clock.install();
     await page.goto('/game/');
-    await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+    await expectOwnerShown(page, 'Aster');
     const panel = await tournamentsPanel(page);
     await expect(panel.getByRole('status').filter({ hasText: 'Tournament being prepared' })).toBeVisible();
     const views = () => live.count('tournament_views'), owners = () => live.count('owner_state');
@@ -493,7 +494,7 @@ test.describe('the live Tournaments panel', () => {
         owner: viewer === 'gladiator' ? { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT } : null });
       await page.clock.install();
       await page.goto('/game/');
-      if (viewer === 'gladiator') await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+      if (viewer === 'gladiator') await expectOwnerShown(page, 'Aster');
       const panel = await tournamentsPanel(page);
       const preparing = panel.getByRole('status').filter({ hasText: 'Tournament being prepared' });
       const missing = panel.getByRole('status').filter({ hasText: 'No tournament matches this selection.' });
@@ -579,7 +580,7 @@ test.describe('the live Tournaments panel', () => {
     const live = await routeLiveReads(context, { world, owner, tournaments: [VIEWS.opening, inLeague(VIEWS.opening, 'silver')], serverNowMs: () => at });
     await page.clock.install();
     await page.goto('/game/');
-    await expect(page.getByRole('heading', { name: 'Aster', exact: true })).toBeVisible({ timeout: 45_000 });
+    await expectOwnerShown(page, 'Aster');
     const panel = await tournamentsPanel(page);
     const bracket = panel.locator('article[data-status]');
     await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
@@ -656,7 +657,9 @@ test.describe('tournament entrants in the camp', () => {
     expect(new Set(state.arena.fights.map(f => f.ring)).size).toBe(4);
     expect(state.actors.some(a => a.kind === 'arena-npc')).toBe(false);
     // Tournament bouts are followed in the Tournaments panel, not listed as Arena bouts.
+    await openMenu(page, 'Arena');
     await expect(page.getByRole('group', { name: 'Arena bouts in the rings' })).toHaveCount(0);
+    await closeMenu(page);
     await page.evaluate(() => window.__cloudiatorCamp!.centerOn(23, 22.5, 2));
     await nextFrames(page);
     await page.screenshot({ path: testInfo.outputPath('camp-tournament-round-1.png') });

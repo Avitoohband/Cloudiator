@@ -7,7 +7,8 @@ const source = ts.transpileModule(readFileSync('src/lib/api/sync.ts','utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
 }).outputText.replace(/^export /gm,'');
 test('real browser revision polling honors visibility, skew, outage and focus recovery', async ({ page }) => {
-  await page.goto('/'); await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  // A route that mounts no camp, reads and polls nothing of its own (the site root is the live camp since Task 13.5).
+  await page.goto('/replay/'); await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.addScriptTag({ content: `${source}\nwindow.createTestSync = createSync;` });
   await page.evaluate(() => {
     const scope = window as unknown as { createTestSync: Function; sync: {start():Promise<void>}; states: unknown[]; revisionReads:number; worldReads:number; revision:string; down:boolean; hidden:boolean };

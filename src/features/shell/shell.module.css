@@ -1,0 +1,492 @@
+/*
+ * The full-screen camp shell (spec "Screen", the approved mockup): the camp fills the window; a 5 px grip and a hidden
+ * icon rail on the left edge; one floating panel at a time beside the rail; the corner chip top right. Touch devices
+ * (no hover, plan Decision 3) get a ☰ button, a row of the same icons and bottom sheets instead, and so does a pointer
+ * window narrower than 481 px, where a panel beside the rail would be too narrow for the menus' content.
+ */
+.shell {
+  --glass: rgba(21, 19, 28, 0.86);
+  --glass-2: rgba(255, 255, 255, 0.07);
+  --glass-line: rgba(255, 255, 255, 0.13);
+  --ink-dim: rgba(243, 238, 221, 0.66);
+  --accent: #e6b450;
+  --accent-ink: #2a1d05;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #1c3f24;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.camp {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- The left edge: a 12 px reveal zone, the grip and the rail. */
+.edge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  z-index: 5;
+}
+
+.grip {
+  position: absolute;
+  left: 0;
+  top: calc(50% - 28px);
+  width: 5px;
+  height: 56px;
+  border-radius: 0 4px 4px 0;
+  background: rgba(255, 255, 255, 0.38);
+  z-index: 6;
+  transition: opacity 0.2s;
+}
+
+.shell[data-rail='shown'] .grip {
+  opacity: 0;
+}
+
+.rail {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translate(calc(-100% - 12px), -50%);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  transition: transform 0.22s ease;
+}
+
+.rail[data-revealed='true'] {
+  transform: translate(0, -50%);
+}
+
+.menus,
+.camera {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.railButton {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: var(--glass-2);
+  color: var(--ink);
+  font-size: 19px;
+  line-height: 1;
+}
+
+.railButton:hover,
+.railButton:focus-visible {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.railButton:focus-visible,
+.burger:focus-visible,
+.close:focus-visible,
+.chipButton:focus-visible,
+.join:focus-visible,
+.chipMenu button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.railButton[aria-expanded='true'] {
+  background: var(--accent);
+}
+
+.zoom {
+  font: 600 15px/1 system-ui, sans-serif;
+}
+
+.zoomReset {
+  font-size: 12px;
+}
+
+.sep {
+  height: 1px;
+  margin: 3px 2px;
+  background: var(--glass-line);
+}
+
+.tip {
+  position: absolute;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+  z-index: 9;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  font-size: 12.5px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.burger {
+  display: none;
+}
+
+/* ---- Panels: beside the rail, below the chip row, one at a time, scrolling internally. */
+.surface {
+  position: absolute;
+  left: 66px;
+  top: 64px;
+  width: min(380px, calc(100vw - 96px));
+  max-height: calc(100% - 88px);
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: 14px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  animation: pop 0.16s ease;
+}
+
+.surface[hidden] {
+  display: none;
+}
+
+.surface:focus {
+  outline: none;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+.top {
+  flex: none;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.grab {
+  display: none;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 8px 14px;
+}
+
+.title {
+  margin: 0;
+  font: 600 1.05rem/1.2 Georgia, 'Palatino Linotype', serif;
+  letter-spacing: 0.02em;
+}
+
+.title span {
+  margin-right: 0.4rem;
+}
+
+.close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.close:hover {
+  background: var(--glass-2);
+  color: var(--ink);
+}
+
+.body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 12px 14px 16px;
+}
+
+/* Existing panels laid out for a wide page, kept to one column in a 380 px panel. */
+.body :global(.schedule-grid) {
+  grid-template-columns: 1fr;
+}
+
+/* ---- The corner chip, the fixture pill and the connection notice. */
+.chip {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 9;
+  max-width: calc(100% - 24px);
+}
+
+.chipButton,
+.chipNote,
+.join {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+  background: var(--glass);
+  color: var(--ink);
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.join {
+  font-weight: 600;
+}
+
+.join:hover,
+.chipButton:hover {
+  background: rgba(30, 28, 40, 0.95);
+}
+
+.chipSep {
+  opacity: 0.35;
+}
+
+.chipMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 200px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+  background: var(--glass);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+.chipMenu p {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.chipMenu button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: 8px;
+  background: var(--glass-2);
+  color: var(--ink);
+  text-align: left;
+}
+
+.pill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 12px;
+  z-index: 9;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto;
+  padding: 6px 14px;
+  border: 1px solid #88683d;
+  border-radius: 999px;
+  background: rgba(71, 54, 35, 0.92);
+  color: #ffe1a3;
+  font-size: 12.5px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.notice {
+  position: absolute;
+  right: 12px;
+  top: 58px;
+  z-index: 9;
+  max-width: min(320px, calc(100% - 24px));
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid #a3584a;
+  border-radius: 10px;
+  background: rgba(70, 30, 26, 0.92);
+  color: #ffd9cf;
+  font-size: 12.5px;
+}
+
+/* A narrow window with a pointer: the pill moves beside the rail, clear of the chip. */
+@media (hover: hover) and (min-width: 481px) and (max-width: 924px) {
+  .pill {
+    left: 66px;
+    right: auto;
+    margin: 0;
+  }
+}
+
+/* ---- Touch (and very narrow windows): a ☰ button, the icons as a row, bottom sheets, and a smaller chip. */
+@media (hover: none), (max-width: 480px) {
+  .edge,
+  .grip,
+  .tip {
+    display: none;
+  }
+
+  .burger {
+    position: absolute;
+    left: 12px;
+    bottom: 14px;
+    z-index: 7;
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--glass-line);
+    border-radius: 50%;
+    background: var(--glass);
+    color: var(--ink);
+    font-size: 20px;
+  }
+
+  .rail {
+    display: none;
+    left: 70px;
+    right: auto;
+    max-width: calc(100% - 80px);
+    top: auto;
+    bottom: 14px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 5px;
+    border-radius: 14px;
+    transform: none;
+    transition: none;
+  }
+
+  .rail[data-revealed='true'] {
+    display: flex;
+    transform: none;
+  }
+
+  .menus,
+  .camera {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .railButton {
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+  }
+
+  /* The menus fill the first row; the camera buttons wrap to a second. */
+  .sep {
+    display: none;
+  }
+
+  .shell[data-sheet='open'] .burger,
+  .shell[data-sheet='open'] .rail {
+    visibility: hidden;
+  }
+
+  .surface {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: 62%;
+    max-height: none;
+    z-index: 10;
+    border-width: 1px 0 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.45);
+    animation: rise 0.2s ease;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0.3;
+      transform: translateY(40%);
+    }
+  }
+
+  .top {
+    touch-action: none;
+  }
+
+  .grab {
+    display: block;
+    padding-top: 8px;
+  }
+
+  .grab span {
+    display: block;
+    width: 42px;
+    height: 5px;
+    margin: 0 auto;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .body {
+    touch-action: pan-y;
+  }
+
+  .chipButton,
+  .chipNote,
+  .join {
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+
+  .wide {
+    display: none;
+  }
+
+  .pill {
+    top: 56px;
+  }
+
+  .notice {
+    top: 52px;
+  }
+}

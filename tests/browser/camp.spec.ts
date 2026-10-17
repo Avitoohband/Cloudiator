@@ -8,6 +8,7 @@ import { NPC_ROUTINES, npcPostTiles, planNpcPosition } from '../../src/game/npcs
 import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
 import { createDemoWorld } from '../../src/game/demo-world';
+import { closeMenu, openMenu, revealRail } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -49,7 +50,7 @@ test.describe('living isometric camp', () => {
     await page.screenshot({ path: testInfo.outputPath('camp-overview.png') });
   });
 
-  test('opens on the owner and finds or follows them from the camera buttons', async ({ page }) => {
+  test('opens on the owner and finds or follows them from the Gladiators menu', async ({ page }) => {
     await openCamp(page);
     const ownerId = await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors[0].gladiatorId);
     const near = async () => {
@@ -65,18 +66,23 @@ test.describe('living isometric camp', () => {
     await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5, { steps: 5 });
     await page.mouse.up();
     expect(await near()).toBeGreaterThan(100);
-    await page.getByRole('button', { name: 'Find my gladiator' }).click();
+    // Find and Follow live in the Gladiators menu (Task 13.5), which hands the view back to the camp after each.
+    await (await openMenu(page, 'Gladiators')).getByRole('button', { name: 'Find my gladiator' }).click();
     expect(await near()).toBeLessThan(40);
     expect((await campState(page)).selected).toBe(ownerId);
     const follow = page.getByRole('button', { name: 'Follow my gladiator' });
+    await openMenu(page, 'Gladiators');
     await follow.click();
+    await openMenu(page, 'Gladiators');
     await expect(follow).toHaveAttribute('aria-pressed', 'true');
     expect((await campState(page)).following).toBe(ownerId);
+    await closeMenu(page);
     // Dragging the map ends the follow and the toggle says so.
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3, { steps: 5 });
     await page.mouse.up();
+    await openMenu(page, 'Gladiators');
     await expect(follow).toHaveAttribute('aria-pressed', 'false');
     expect((await campState(page)).following).toBeNull();
     // A click with a few pixels of jitter is not a drag and keeps the follow.
@@ -85,6 +91,7 @@ test.describe('living isometric camp', () => {
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.5 + 3, box.y + box.height * 0.6 + 2, { steps: 3 });
     await page.mouse.up();
+    await openMenu(page, 'Gladiators');
     await expect(follow).toHaveAttribute('aria-pressed', 'true');
     expect((await campState(page)).following).toBe(ownerId);
   });
@@ -111,6 +118,7 @@ test.describe('living isometric camp', () => {
   test('disables Find and Follow while the owner is away, and never shows a follow that did not happen', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // departures leave at once
     await openCamp(page);
+    await openMenu(page, 'Gladiators');
     const find = page.getByRole('button', { name: 'Find my gladiator' });
     const follow = page.getByRole('button', { name: 'Follow my gladiator' });
     await expect(find).toBeEnabled();
@@ -171,6 +179,8 @@ test.describe('living isometric camp', () => {
   test('zooms in fixed steps from buttons, keys and the wheel, and leaves browser shortcuts alone', async ({ page }, testInfo) => {
     await openCamp(page);
     const zoom = async () => (await campState(page)).camera.zoom;
+    // The zoom buttons sit at the bottom of the menu rail (Task 13.5).
+    await revealRail(page);
     const zoomIn = page.getByRole('button', { name: 'Zoom in' });
     for (let i = 0; i < 12; i += 1) await zoomIn.click();
     expect(await zoom()).toBeCloseTo(3, 5);
@@ -389,12 +399,14 @@ test.describe('living isometric camp', () => {
     await openCamp(page);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.canvases())).toBe(1);
     const listeners = await page.evaluate(() => window.__cloudiatorCamp!.listeners());
-    await page.getByRole('link', { name: /CLOUDIATOR/ }).first().click();
+    // Leave through a link in the page (the shell has no header: a sample replay in Results), then come back.
+    await (await openMenu(page, 'Results')).getByRole('navigation', { name: 'Sample replays' }).getByRole('link').first().click();
     await page.waitForURL(url => !url.pathname.startsWith('/game'));
     await page.goBack();
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     expect(await page.evaluate(() => window.__cloudiatorCamp!.canvases())).toBe(1);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.listeners())).toBe(listeners);
+    await revealRail(page);
     await page.getByRole('button', { name: 'Zoom in' }).click();
     expect((await campState(page)).camera.zoom).toBeCloseTo(1.25, 5);
   });
@@ -427,6 +439,7 @@ test.describe('living isometric camp', () => {
     await page.route('**/assets/**/*.png', route => route.abort());
     await page.goto('/game/?mode=fixture');
     await expect(page.getByText(/camp art could not load/)).toBeVisible({ timeout: 30_000 });
+    await revealRail(page);
     await expect(page.getByRole('button', { name: 'Schedule', exact: true })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
   });
@@ -441,6 +454,7 @@ test.describe('living isometric camp', () => {
     await page.goto('/game/?mode=fixture');
     await expect(page.getByText(/needs WebGL/)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByLabel('Camp view unavailable')).toBeVisible();
+    await revealRail(page);
     await expect(page.getByRole('button', { name: 'Schedule', exact: true })).toBeEnabled();
   });
 });

@@ -4,6 +4,7 @@ import type { BattleAction, BattleLog } from '../../supabase/functions/_shared/c
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { emptyWorld, routeLiveReads } from './live-routes';
+import { openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -316,6 +317,8 @@ test.describe('battle-log replay', () => {
     expect(base).toMatchObject({ loops: 1, canvases: 1 });
     await page.getByRole('link', { name: 'Back to camp' }).click();
     await page.waitForURL(/\/game\//);
+    // The sample replays are listed in the camp's Results menu (Task 13.5).
+    await openMenu(page, 'Results');
     await page.getByRole('link', { name: REPLAY_FIXTURES.npc.label }).click();
     await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, REPLAY_FIXTURES.npc.battleId, { timeout: 45_000 });
     await sceneReady(page);

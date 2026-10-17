@@ -219,14 +219,17 @@ test('fixture recent results list public completions of every kind, newest first
   expect(keys).toEqual([...keys].sort((a, b) => b[0] - a[0] || (a[1] < b[1] ? -1 : 1)));
   expect(new Set(keys.map(k => k[1])).size).toBe(keys.length);
   // A row is the public part of its timeline: a settled Arena bout by its summary, a tournament by its own completion.
-  const bout = page.rows.find(row => row.summary.activityId === arenaActivityId('ownerHumanWin'))!;
-  const { activityId, resolvedKind, result, success, settledAtMs, replayExpiry } = ARENA_TIMELINES[arenaActivityId('ownerHumanWin')].summary!;
+  const { REPLAY_FIXTURES, REPLAY_TIMELINES } = await import('../fixtures/battles');
+  const bout = page.rows.find(row => row.summary.activityId === REPLAY_FIXTURES.pvp.activityId)!;
+  const { activityId, resolvedKind, result, success, settledAtMs, replayExpiry } = REPLAY_TIMELINES[REPLAY_FIXTURES.pvp.activityId].summary!;
   expect(bout).toEqual({ gladiatorId: ARENA_GLADIATORS.aster.id, name: 'Aster', summary: { activityId, resolvedKind, result, success, settledAtMs, replayExpiry } });
+  // The Arena sample that says the same at the same time ("Aster won an Arena bout") is listed once (13.7 review).
+  expect(ARENA_TIMELINES[arenaActivityId('ownerHumanWin')].summary).toMatchObject({ resolvedKind, result, settledAtMs });
+  expect(page.rows.some(row => row.summary.activityId === arenaActivityId('ownerHumanWin'))).toBe(false);
   for (const timeline of Object.values(TOURNAMENT_OWNER_TIMELINES)) {
     expect(page.rows.find(row => row.summary.activityId === timeline.activityId)?.summary).toEqual(timeline.completion);
   }
   // A bout whose rewards are not yet credited has no result yet.
-  const { REPLAY_FIXTURES } = await import('../fixtures/battles');
   expect(page.rows.some(row => row.summary.activityId === REPLAY_FIXTURES.tie.activityId)).toBe(false);
 });
 
@@ -270,6 +273,21 @@ test('fixture Training and Rest results fall in slots where their gladiators did
     expect(row.summary.settledAtMs % SLOT_MS, label).toBe(0);
     expect(slot, label).toBeLessThan(worldFixture.slotIndex);
   }
+});
+
+test('fixture recent results show each gladiator at most once a slot and never the same row twice (13.7 review)', async () => {
+  const { RESULTS_FIXTURE } = await import('../fixtures/results');
+  const SLOT_MS = 4_800_000;
+  const rows = RESULTS_FIXTURE[0].rows;
+  // A result settles at its slot's end or shortly after it (an expedition's return), so the latest slot boundary at or
+  // before its settlement names its slot.
+  const slots = new Map<string, number[]>();
+  for (const row of rows) slots.set(row.gladiatorId, [...(slots.get(row.gladiatorId) ?? []), Math.floor(row.summary.settledAtMs / SLOT_MS)]);
+  for (const [gladiator, held] of slots) expect(new Set(held).size, `${rows.find(r => r.gladiatorId === gladiator)!.name}: ${held}`).toBe(held.length);
+  const shown = rows.map(r => `${r.name} ${r.summary.resolvedKind} ${r.summary.result} at ${r.summary.settledAtMs}`);
+  expect(new Set(shown).size, shown.join('\n')).toBe(shown.length);
+  // Still one or more of every kind.
+  for (const kind of ['arena', 'expedition', 'tournament', 'training', 'rest'] as const) expect(rows.some(r => r.summary.resolvedKind === kind), kind).toBe(true);
 });
 
 test('fixture recent results follow the live cursor rules, and callers get copies', async () => {

@@ -25,7 +25,7 @@ import type { BattleLog } from '@contracts/events';
 import type { TournamentBout, TournamentEntrant, TournamentFightSummary, TournamentView } from '@contracts/reads';
 import { slotAt } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
-import { isTournamentSlot } from '@domain/tournament';
+import { isTournamentSlot } from '@domain/tournament-slot';
 import { tournamentLookupId, tournamentSlotOf } from '../lib/tournament-id';
 
 /** One tournament lasts one 80-minute slot; its rewards settle at the end. */

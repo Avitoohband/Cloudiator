@@ -8,7 +8,7 @@ import { REPLAY_OUTRO_MS } from '@/game/replay';
 import { ARENA_REVEAL_MS, ARENA_SLOT_MS, renderArenaStage } from '@/game/arena-stage';
 import {
   ARENA_ENTRY_MS, ARENA_GATE, ARENA_JOG_PACE, ARENA_RESULT_HOLD_MS, arenaFightButton, arenaRings, arenaReadsDue, campArenaFights, fightStatus, ringTiles, scheduleArenaRings,
-  type CampFight, type RingSlot,
+  updateRingSchedule, type CampFight, type RingSlot,
 } from '@/game/arena-layout';
 import type { ArenaFightSummary } from '@/game/bridge';
 import { ARENA_BATTLE_LOGS, ARENA_GLADIATORS, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaBattleId } from '../fixtures/arena';
@@ -178,6 +178,38 @@ describe('ring schedule', () => {
     expect([...next.values()].filter(s => s.ring === late.ring && s !== late).every(s => s.leaveAtMs <= late.enterAtMs || s.enterAtMs >= late.leaveAtMs)).toBe(true);
     // A fight that is no longer revealed drops out.
     expect(scheduleArenaRings(early.slice(1), 6, { previous: first, knownAtMs }).has(early[0].battleId)).toBe(false);
+  });
+
+  it('plans fights in start, then battle-id order, whatever order they are given in', () => {
+    const shuffled = [fights[3], fights[6], fights[0], fights[5], fights[1], fights[4], fights[2]];
+    expect(scheduleArenaRings(shuffled, 6)).toEqual(schedule);
+    expect(scheduleArenaRings([...fights].reverse(), 3)).toEqual(scheduleArenaRings(fights, 3));
+  });
+
+  it('plans fights still queued again with the ones learned later, so the queue converges on one order (Task 19 R4)', () => {
+    // Eleven bouts revealed together: six fit the rings, the rest queue. One viewer learns all of them at once; another
+    // learns eight first and three a second later, before any queued bout has entered its ring.
+    const eleven = 'abcdefghijk'.split('').map((letter, i): CampFight => ({ ...fights[i % fights.length], startedAtMs: S + ARENA_REVEAL_MS, battleId: `bout-${letter}` }));
+    const late = new Set(['bout-g', 'bout-i', 'bout-k']);
+    const whole = scheduleArenaRings(eleven, 6);
+    const first = scheduleArenaRings(eleven.filter(f => !late.has(f.battleId)), 6);
+    const knownAtMs = S + ARENA_REVEAL_MS + 1000;
+    expect([...first.values()].filter(s => s.enterAtMs > knownAtMs).map(s => s.battleId)).toEqual(['bout-h', 'bout-j']);
+    const next = scheduleArenaRings(eleven, 6, { previous: first, knownAtMs });
+    // The six in the rings stay where they are; the queue is the same as the first viewer's.
+    for (const id of 'abcdef') expect(next.get(`bout-${id}`)).toEqual(first.get(`bout-${id}`));
+    expect(next).toEqual(whole);
+  });
+
+  it('keeps the fights still shown when the camp’s fights change, and plans the first ones from their logged times', () => {
+    // The camp scene's rule (camp-scene.ts): the first fights the camp learns show where their logged times put them.
+    expect(updateRingSchedule(new Map(), fights, 6, S + 70 * MIN)).toEqual(schedule);
+    // Later, a fight that is no longer shown drops out, the others keep their rings, and a new one starts no earlier than now.
+    const now = S + ARENA_REVEAL_MS + 4000;
+    const shown = updateRingSchedule(scheduleArenaRings(fights.slice(1, 4), 6), fights.slice(0, 3), 6, now);
+    expect([...shown.keys()].sort()).toEqual(fights.slice(0, 3).map(f => f.battleId).sort());
+    for (const f of fights.slice(1, 3)) expect(shown.get(f.battleId)).toEqual(scheduleArenaRings(fights.slice(1, 4), 6).get(f.battleId));
+    expect(shown.get(fights[0].battleId)!.enterAtMs).toBe(now);
   });
 
   it('walks in, plays the bout at its real time from the arrival, holds the result and returns to staging', () => {

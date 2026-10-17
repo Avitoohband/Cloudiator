@@ -3,16 +3,17 @@
 // state; it never decides outcomes or rewards. Arena entrants warm up in staging; a revealed
 // bout (from the entrants' timelines) jogs its pair into a sparring ring and plays the
 // battle log there, seeked to the display time (src/game/arena-layout.ts, battle-stage.ts).
-// Tournament entrants wait in staging, fight their revealed bouts in the same rings and, once
-// eliminated, watch from spectator spots outside the arena wall (src/game/tournament-camp.ts).
+// Tournament entrants wait in staging, fight their revealed bouts in the same rings (scheduled from
+// the fight summary, the log played once it has loaded) and, once eliminated, watch from spectator
+// spots outside the arena wall (src/game/tournament-camp.ts).
 import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/reads';
-import type { RevealedTimeline } from '@contracts/events';
+import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
 import { layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import {
-  ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, scheduleArenaRings, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
+  ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, updateRingSchedule, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
 } from './arena-layout';
 import { assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, spectatorSpots, type CampTournamentRole, type SpectatorSpot } from './tournament-camp';
 import { LABEL_BASE, NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageFrame, type StageLayout, type StagePlan } from './battle-stage';
@@ -50,6 +51,11 @@ export type CampSceneHandle = {
   setTimelines(timelines: ReadonlyMap<string, RevealedTimeline>): void;
   /** Public tournament views by id, for the entrants' waiting, fighting and spectating roles. */
   setTournaments(views: ReadonlyMap<string, TournamentView>): void;
+  /**
+   * The ring windows of the fights the camp shows now, by battle id: the host loads a tournament bout's log only while
+   * its window is current or about to start (Task 19 live-camp gate). Empty until the scene has run.
+   */
+  ringSchedule(): ReadonlyMap<string, RingSlot>;
   setReducedMotion(reduced: boolean): void;
   /** Removes the scene's bridge listeners. Idempotent; also runs when the game destroys the scene. */
   dispose(): void;
@@ -103,6 +109,8 @@ export type CampDebugState = {
 export type CampDebugFight = {
   battleId: string; ring: number; status: FightStatus; positionMs: number; fighters: [string | null, string | null];
   boutStartMs: number; boutEndsAtMs: number; enterAtMs: number; fightStartMs: number; leaveAtMs: number; npc: string | null;
+  /** Whether its battle log has loaded (a tournament bout is staged from its fight summary before that). */
+  logged: boolean;
 };
 export type PropDebug = { id: string; frame: string; x: number; y: number; occludes: boolean; slices: { left: number; width: number; depth: number }[]; alpha: number };
 
@@ -709,13 +717,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const key = next.map(f => f.battleId).join('|');
         if (key !== fightsKey) {
           fightsKey = key;
-          const kept = new Map([...schedule].filter(([id]) => next.some(f => f.battleId === id)));
-          // The first bouts the camp learns show where their logged times put them; later ones never move them.
-          schedule = scheduleArenaRings(next, rings.length, kept.size ? { previous: kept, knownAtMs: now } : {});
-          fights = next;
+          // The first bouts the camp learns show where their logged times put them; later ones never move a fight in
+          // its ring. A tournament bout is a fight from its reveal, so its log loading never changes this (Task 19 R4).
+          schedule = updateRingSchedule(schedule, next, rings.length, now);
           // A bout that left the camp (its fighters left, or their timelines were dropped) drops its stage plan too.
           for (const id of [...plans.keys()]) if (!schedule.has(id)) plans.delete(id);
         }
+        // The same fights may carry logs that have loaded since.
+        fights = next;
       }
       type Active = { fight: CampFight; slot: RingSlot; status: FightStatus; positionMs: number };
       const active: Active[] = [];
@@ -767,12 +776,13 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       const npcSeen = new Set<string>();
       for (const { fight, slot, status } of active) {
         const side = fight.fighters[0] === null ? 0 : fight.fighters[1] === null ? 1 : -1;
-        if (side === -1) continue;
+        // Only an Arena bout has an NPC side, and its log always comes with the entrant's timeline.
+        if (side === -1 || !fight.log) continue;
         npcSeen.add(fight.battleId);
         if (npcFighters.has(fight.battleId)) continue;
         const r = rings[slot.ring];
         const spot = side === 0 ? r.a : r.b;
-        const npc = this.createArenaNpc(fight, side, spot);
+        const npc = this.createArenaNpc(fight, fight.log, side, spot);
         if (status === 'entering') this.walkTo(npc, spot, now, { action: 'idle', facing: spot.facing }, { from: ARENA_GATE, pace: ARENA_JOG_PACE });
         else this.standAt(npc, spot, 'idle', spot.facing);
       }
@@ -792,7 +802,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       let labels = 0;
       drawnCount = 0;
       for (const { fight, slot, status, positionMs } of active) {
-        if (status === 'entering') continue;
+        // A tournament bout whose log is still loading: its pair stands in the ring until the log arrives.
+        if (status === 'entering' || !fight.log) continue;
         const r = rings[slot.ring];
         let plan = plans.get(fight.battleId);
         if (!plan) { plan = planStage(fight.log, manifest); plans.set(fight.battleId, plan); }
@@ -855,7 +866,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           status: status as ArenaFightSummary['status'],
           sides: ([0, 1] as const).map(side => {
             const id = fight.fighters[side];
-            const logged = fight.log.participants[side].name;
+            const logged = fight.log?.participants[side].name ?? '';
             return { gladiatorId: id, name: id ? views.get(id)?.name ?? logged : logged, activityId: fight.activities[side], npc: !id };
           }) as ArenaFightSummary['sides'],
         })) });
@@ -894,8 +905,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     /** An NPC fallback opponent: the entrant's mirrored gear in the neutral NPC grey, with an "NPC" tag. */
-    createArenaNpc(fight: CampFight, side: 0 | 1, spot: RingSpot): ActorView {
-      const p = fight.log.participants[side];
+    createArenaNpc(fight: CampFight, log: BattleLog, side: 0 | 1, spot: RingSpot): ActorView {
+      const p = log.participants[side];
       const id = `arena-npc:${fight.battleId}`;
       const old = views.get(id);
       if (old) this.removeView(old);
@@ -984,9 +995,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     deps.bridge.emit('follow-character', { gladiatorId: null });
   }
 
-  /** A fight's status now: the jog-in ends early once both fighters stand on their ring spots. */
+  /**
+   * A fight's status now: the jog-in ends early once both fighters stand on their ring spots. A tournament bout whose
+   * log is still loading lasts its fight summary's duration, the time from its reveal to its decision.
+   */
   function statusOf(fight: CampFight, slot: RingSlot, now: number) {
-    return fightStatus(slot, fight.log.durationMs, now, pairArrived(fight, slot));
+    return fightStatus(slot, fight.log?.durationMs ?? fight.endsAtMs - fight.startedAtMs, now, pairArrived(fight, slot));
   }
 
   function pairArrived(fight: CampFight, slot: RingSlot): boolean {
@@ -1040,7 +1054,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const { status, positionMs } = statusOf(fight, slot, now);
         const npc = fight.fighters.includes(null) ? `arena-npc:${fight.battleId}` : null;
         return [{ battleId: fight.battleId, ring: slot.ring, status, positionMs, fighters: [fight.fighters[0], fight.fighters[1]] as [string | null, string | null],
-          boutStartMs: slot.boutStartMs, boutEndsAtMs: slot.boutEndsAtMs, enterAtMs: slot.enterAtMs, fightStartMs: slot.fightStartMs, leaveAtMs: slot.leaveAtMs, npc }];
+          boutStartMs: slot.boutStartMs, boutEndsAtMs: slot.boutEndsAtMs, enterAtMs: slot.enterAtMs, fightStartMs: slot.fightStartMs, leaveAtMs: slot.leaveAtMs, npc,
+          logged: fight.log !== null }];
       }),
       effects,
       labels,
@@ -1149,6 +1164,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       tournaments = next;
       arenaDirty = true;
     },
+    ringSchedule: () => schedule,
     setReducedMotion(reduced) {
       reducedMotion = reduced;
     },

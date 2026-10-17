@@ -4,7 +4,7 @@ import type { PublicActor, TournamentView } from '../../supabase/functions/_shar
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
-import { tournamentCampActors } from '../fixtures/tournament-build';
+import { largeTournament, tournamentCampActors } from '../fixtures/tournament-build';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
 import { closeMenu, expectOwnerShown, openMenu } from './shell-helpers';
@@ -115,7 +115,8 @@ test.describe('tournament registration and brackets', () => {
     await page.waitForFunction(() => window.__cloudiatorReplay?.state().battleId === 'tournament:373009:bronze:3:0');
     await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(999_999); });
     await expect(replay.getByRole('region', { name: 'Result' })).toContainText('Varro wins');
-    await expect(replay).toContainText('Rewards are credited when the activity settles.');
+    // Aster was eliminated in round 1 and only watches: the rewards line is a fighter's only (13.8 review).
+    await expect(replay).not.toContainText('Rewards are credited when the activity settles.');
     expect(new URL(page.url()).pathname).toBe('/game/');
     await card(page).screenshot({ path: testInfo.outputPath('tournament-spectator-replay.png') });
     await replay.getByRole('button', { name: 'Close replay' }).click();
@@ -592,6 +593,50 @@ test.describe('the live Tournaments panel', () => {
     await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
     expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:silver`)).toBe(true);
   });
+
+  test('a viewer joining late loads at most the logs of the current and next ring window', async ({ page, context }, testInfo) => {
+    // Task 19's live-camp gate: a 50-entrant tournament (a 64-slot bracket: 18 fought bouts in round 1, 16 in round 2),
+    // joined 10 s after round 2 shows. Task 19's camp asked for the log of every revealed bout of its entrants (34 here);
+    // now the camp asks only for the bouts whose ring window is current or starts within 10 s, at most two per ring.
+    const templates = Object.values(VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
+    const start = startOf('opening');
+    const { view, actors } = largeTournament(50, { startsAtMs: start, league: 'bronze', templates });
+    const at = start + Math.ceil(80 * MIN * 2 / 7) + 10_000;
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(at), actors }, tournaments: [view], serverNowMs: () => at });
+    // Hold the shared display clock at the join time from the moment the camp exists, so the count is exact.
+    await context.addInitScript(t => {
+      let hook: { freezeClock(ms: number): void } | undefined;
+      Object.defineProperty(window, '__cloudiatorCamp', { configurable: true, get: () => hook, set: value => { hook = value; value?.freezeClock(t); } });
+    }, at);
+    const logReads = () => live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id')).map(r => r.query.get('bout_id')!.replace(/^eq\./, ''));
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.length > 0, null, { timeout: 30_000 });
+    await expect.poll(() => logReads().length).toBeGreaterThan(0);
+    await page.waitForTimeout(3_000);
+    const state = await campState(page);
+    // Every revealed bout is scheduled from its fight summary; only the windows now and next asked for their logs, once each.
+    const revealed = view.bouts.filter(b => b.round <= 2 && !b.revealedResult!.bye).map(b => b.id);
+    expect(state.arena.fights.map(f => f.battleId).sort()).toEqual([...revealed].sort());
+    const due = state.arena.fights.filter(f => f.leaveAtMs > at && f.enterAtMs <= at + 10_000);
+    expect([...logReads()].sort()).toEqual(due.map(f => f.battleId).sort());
+    expect(due.every(f => f.logged)).toBe(true);
+    for (let ring = 0; ring < 6; ring += 1) expect(due.filter(f => f.ring === ring).length, `ring ${ring}`).toBeLessThanOrEqual(2);
+    const measured = `${logReads().length} of ${revealed.length} revealed bouts (${due.filter(f => f.enterAtMs <= at).length} current, ${due.filter(f => f.enterAtMs > at).length} next)`;
+    testInfo.annotations.push({ type: 'late-joiner log reads', description: measured });
+    console.log(`late-joiner log reads: ${measured}`);
+    // The Tournaments panel reads its replays through the same reader and its one log cache: the replay of a bout whose
+    // log the camp loaded opens without another log read once the bout is decided.
+    const shared = due.find(f => f.enterAtMs <= at)!;
+    await page.evaluate(t => window.__cloudiatorCamp!.freezeClock(t), shared.boutEndsAtMs + 1000);
+    const panel = await tournamentsPanel(page);
+    const bout = view.bouts.find(b => b.id === shared.battleId)!;
+    const names = bout.revealedResult!.participants.map(p => p.name).join(' vs ');
+    await panel.locator('article[data-status]').getByRole('button', { name: `Watch replay of ${names}` }).click();
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, bout.id, { timeout: 30_000 });
+    expect(logReads().filter(id => id === bout.id)).toHaveLength(1);
+    expect(live.requests.every(r => r.reader === null)).toBe(true);
+  });
 });
 
 // ------------------------------------------------------------------ tournament roles in the camp
@@ -764,9 +809,11 @@ test.describe('tournament entrants in the camp', () => {
     await page.waitForTimeout(1500);
     // Before round 1 nothing is staged, so no log is asked for.
     expect([await logReads(), await page.evaluate(() => window.__cloudiatorCamp!.state()!.arena.fights.length)]).toEqual([0, 0]);
-    // Round 1: its four bouts' logs load, and then the bouts are staged in rings.
+    // Round 1: its four bouts are staged in rings from their fight summaries (Task 19 R4), and their logs load while the
+    // rings show them.
     await freezeCamp(page, revealOf('completed', 1) + 500);
     await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.length === 4);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.every(f => f.logged));
     const round1 = VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.id).sort();
     expect((await page.evaluate(() => window.__cloudiatorCamp!.tournamentLogs())).sort()).toEqual(round1);
     expect(await logReads()).toBe(4);
@@ -775,7 +822,53 @@ test.describe('tournament entrants in the camp', () => {
     expect(await logReads()).toBe(4);
     await freezeCamp(page, revealOf('completed', 2) + 500);
     await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.length === 6);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.every(f => f.logged));
     await page.waitForTimeout(1500);
     expect(await logReads()).toBe(6);
+  });
+
+  test('changes a tournament ring and the panel over at the same moment', async ({ page }) => {
+    // Task 20 review: the ring shows a bout's result from the stage core's decision, the moment the Tournaments panel
+    // shows its winner, on the one shared clock. The camp reads the polled view itself, so the ring is scheduled from
+    // the fight summary; the pairs take their ring spots at once with reduced motion.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openCampTournament(page, 5, false);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.tournamentReads() === 1);
+    await openMenu(page, 'Tournaments');
+    await page.getByRole('button', { name: TOURNAMENTS.completed.label, exact: true }).click();
+    const round1 = VIEWS.completed.bouts.filter(b => b.round === 1);
+    const bout = round1.reduce((p, q) => (q.revealedResult!.battleLog!.durationMs < p.revealedResult!.battleLog!.durationMs ? q : p));
+    const end = revealOf('completed', 1) + bout.revealedResult!.battleLog!.durationMs;
+    const names = bout.revealedResult!.participants.map(p => p.name).join(' vs ');
+    const shown = card(page).getByRole('tabpanel').getByRole('listitem').filter({ hasText: names });
+    const ring = async () => (await campState(page)).arena.fights.find(f => f.battleId === bout.id)?.status ?? null;
+    for (const [t, panel, rings] of [[end - 1000, 'fighting', 'fighting'], [end - 1, 'fighting', 'fighting'], [end, 'decided', 'result'], [end + 1000, 'decided', 'result']] as const) {
+      await page.evaluate(ms => window.__cloudiatorTournaments!.freeze(ms), t);
+      await expect(shown, `${t - end} ms`).toHaveAttribute('data-status', panel);
+      await expect.poll(ring, { message: `${t - end} ms` }).toBe(rings);
+      // Both still agree once the frame has been drawn at that time.
+      await nextFrames(page);
+      expect([await shown.getAttribute('data-status'), await ring()], `${t - end} ms`).toEqual([panel, rings]);
+    }
+  });
+
+  test('forgets tournament views whose entrants have left the camp', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openCampTournament(page, 5, false);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.tournamentViews().length === 1);
+    expect(await page.evaluate(() => window.__cloudiatorCamp!.tournamentViews())).toEqual([VIEWS.completed.id]);
+    const withEntrants = await page.evaluate(() => window.__cloudiatorCamp!.world()!);
+    // The slot is over and the entrants have moved on: the camp drops the view (and with it their roles), and reads nothing.
+    await page.evaluate(() => { const hook = window.__cloudiatorCamp!; const world = hook.world()!; hook.setWorld({ ...world, actors: world.actors.filter(a => a.location !== 'tournament') }); });
+    await nextFrames(page);
+    expect(await page.evaluate(() => window.__cloudiatorCamp!.tournamentViews())).toEqual([]);
+    expect((await campState(page)).tournament.roles).toEqual({});
+    const reads = await page.evaluate(() => window.__cloudiatorCamp!.tournamentReads());
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => window.__cloudiatorCamp!.tournamentReads())).toBe(reads);
+    // Its read record went with it: entrants back in camp during the slot have the tournament read afresh.
+    await page.evaluate(world => window.__cloudiatorCamp!.setWorld(world), withEntrants);
+    await page.waitForFunction(n => window.__cloudiatorCamp!.tournamentReads() === n + 1, reads);
+    await page.waitForFunction(() => window.__cloudiatorCamp!.tournamentViews().length === 1);
   });
 });

@@ -48,7 +48,11 @@ export function ringTiles(map: MapData): Set<string> {
 
 export type CampFight = {
   readonly battleId: string;
-  readonly log: BattleLog;
+  /**
+   * The battle log, or null while a tournament bout's log is still loading (Task 19 R4): the bout is scheduled from its
+   * fight summary's times as soon as it is revealed, and its pair stands in the ring until the log arrives.
+   */
+  readonly log: BattleLog | null;
   /** The authoritative bout start (minute 60). */
   readonly startedAtMs: number;
   /** The bout stage's end: the ring shows the result from here, as the Arena card does. */
@@ -59,15 +63,20 @@ export type CampFight = {
   readonly activities: readonly [string, string];
 };
 
+/** An Arena bout: its log always comes with the entrant's timeline. */
+export type ArenaCampFight = CampFight & { readonly log: BattleLog };
+
 const isArena = (actor: PublicActor) => actor.location === 'arena' && !!actor.activityId;
+/** Start, then battle id: the one order in which the camp lists and schedules its fights. */
+export const byStart = (p: CampFight, q: CampFight) => p.startedAtMs - q.startedAtMs || (p.battleId < q.battleId ? -1 : p.battleId > q.battleId ? 1 : 0);
 
 /**
  * Revealed bouts of the camp's Arena entrants at the display time. A human pair needs both fighters in the arena;
  * either entrant's timeline is enough, since both carry the same battle. Ordered by start, then battle id.
  */
-export function campArenaFights(actors: readonly PublicActor[], timelines: ReadonlyMap<string, RevealedTimeline>, displayNowMs: number): CampFight[] {
+export function campArenaFights(actors: readonly PublicActor[], timelines: ReadonlyMap<string, RevealedTimeline>, displayNowMs: number): ArenaCampFight[] {
   const entrants = new Map(actors.filter(isArena).map(a => [a.gladiatorId, a]));
-  const fights = new Map<string, CampFight>();
+  const fights = new Map<string, ArenaCampFight>();
   for (const actor of entrants.values()) {
     const timeline = timelines.get(actor.activityId!);
     if (!timeline) continue;
@@ -82,7 +91,7 @@ export function campArenaFights(actors: readonly PublicActor[], timelines: Reado
       fighters: ids, activities: [activityOf(ids[0]), activityOf(ids[1])],
     });
   }
-  return [...fights.values()].sort((p, q) => p.startedAtMs - q.startedAtMs || (p.battleId < q.battleId ? -1 : p.battleId > q.battleId ? 1 : 0));
+  return [...fights.values()].sort(byStart);
 }
 
 export type RingSlot = {
@@ -101,16 +110,20 @@ export type RingSlot = {
 /**
  * Assigns each fight a ring and a window: it enters when its bout starts and a ring is free, plays from its arrival
  * (at the latest after the jog-in), and leaves after the bout stage's end, the outro and the result hold (or, when it
- * arrives after the bout ended, after its arrival and the hold). `previous` keeps already scheduled fights unchanged;
- * fights new to it go after them and never before `knownAtMs`, so a late reveal never moves a running fight.
+ * arrives after the bout ended, after its arrival and the hold). Fights are planned in start, then battle-id order,
+ * whatever order they are given in. `previous` keeps the fights that have entered their ring by `knownAtMs` unchanged,
+ * so a late reveal never moves a running fight; fights new to it, and those it still has queued in staging, are
+ * planned again after them, in that order and never before `knownAtMs`, so a queue converges on the same order however
+ * its fights became known (Task 19 R4).
  */
 export function scheduleArenaRings(fights: readonly CampFight[], ringCount: number, options: { previous?: ReadonlyMap<string, RingSlot>; knownAtMs?: number } = {}): Map<string, RingSlot> {
   const schedule = new Map<string, RingSlot>();
   const free = Array.from({ length: ringCount }, () => -Infinity);
   const fresh: CampFight[] = [];
-  for (const fight of fights) {
+  const entered = options.knownAtMs ?? Infinity;
+  for (const fight of [...fights].sort(byStart)) {
     const kept = options.previous?.get(fight.battleId);
-    if (kept && kept.ring < ringCount) {
+    if (kept && kept.ring < ringCount && kept.enterAtMs <= entered) {
       schedule.set(fight.battleId, kept);
       free[kept.ring] = Math.max(free[kept.ring], kept.leaveAtMs);
     } else fresh.push(fight);
@@ -125,6 +138,17 @@ export function scheduleArenaRings(fights: readonly CampFight[], ringCount: numb
     free[ring] = leaveAtMs;
   }
   return schedule;
+}
+
+/**
+ * The camp's ring schedule after its fights changed at display time `nowMs` (camp-scene.ts): the fights still shown keep
+ * their rings by `scheduleArenaRings`' rule, and the first fights the camp learns show where their logged times put
+ * them. Tournament bouts are fights from their reveal, logs or not, so their logs arriving never changes the schedule.
+ */
+export function updateRingSchedule(schedule: ReadonlyMap<string, RingSlot>, fights: readonly CampFight[], ringCount: number, nowMs: number): Map<string, RingSlot> {
+  const shown = new Set(fights.map(f => f.battleId));
+  const kept = new Map([...schedule].filter(([id]) => shown.has(id)));
+  return scheduleArenaRings(fights, ringCount, kept.size ? { previous: kept, knownAtMs: nowMs } : {});
 }
 
 export type FightStatus = 'queued' | 'entering' | 'fighting' | 'result' | 'done';

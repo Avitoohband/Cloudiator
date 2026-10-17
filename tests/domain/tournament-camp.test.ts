@@ -6,13 +6,13 @@ import { npcPostTiles } from '@/game/npcs';
 import { layoutCamp, planActorRoutine } from '@/game/actors';
 import { ringTiles } from '@/game/arena-layout';
 import {
-  TOURNAMENT_RETRY_MS, assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, recordTournamentRead, spectatorSpots,
-  tournamentIdOfActor, tournamentLogsDue, tournamentReadsDue, type TournamentRead,
+  TOURNAMENT_LOG_WINDOW_MS, TOURNAMENT_RETRY_MS, assignSpectators, campTournamentFights, campTournamentIds, campTournamentRoles, mergeCampFights,
+  recordTournamentRead, spectatorSpots, tournamentIdOfActor, tournamentLogsDue, tournamentReadsDue, type TournamentRead,
 } from '@/game/tournament-camp';
-import { withTournamentLogs, withoutTournamentLogs } from '@/game/tournament-stage';
-import { scheduleArenaRings, type CampFight } from '@/game/arena-layout';
+import { renderTournament, withTournamentLogs, withoutTournamentLogs } from '@/game/tournament-stage';
+import { ARENA_ENTRY_MS, ARENA_RESULT_HOLD_MS, scheduleArenaRings, updateRingSchedule, type CampFight, type RingSlot } from '@/game/arena-layout';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
-import { tournamentCampActors } from '../fixtures/tournament-build';
+import { largeTournament, tournamentCampActors } from '../fixtures/tournament-build';
 import { TOURNAMENT_VIEWS, TOURNAMENTS, tournamentId } from '../fixtures/tournaments';
 
 const MIN = 60_000;
@@ -181,8 +181,7 @@ describe('one malformed camp actor (2b review M3)', () => {
     expect(campTournamentFights(all, VIEWS, S + 30 * MIN)).toEqual(campTournamentFights(ACTORS, VIEWS, S + 30 * MIN));
     expect([...campTournamentRoles(all, VIEWS, S + 30 * MIN)]).toEqual([...campTournamentRoles(ACTORS, VIEWS, S + 30 * MIN)]);
     expect(tournamentReadsDue(all, new Map(), S + 5 * MIN)).toEqual([tournamentId('completed')]);
-    expect(tournamentLogsDue(all, new Map([[tournamentId('completed'), withoutTournamentLogs(TOURNAMENT_VIEWS.completed)]]), S + 30 * MIN))
-      .toEqual(tournamentLogsDue(ACTORS, new Map([[tournamentId('completed'), withoutTournamentLogs(TOURNAMENT_VIEWS.completed)]]), S + 30 * MIN));
+    expect(campTournamentIds(all)).toEqual(campTournamentIds(ACTORS));
   });
 });
 
@@ -231,22 +230,108 @@ describe('battle logs in the camp load on demand (2b review I1)', () => {
   const tid = tournamentId('completed');
   const polled = withoutTournamentLogs(TOURNAMENT_VIEWS.completed);
   const logOf = (boutId: string) => TOURNAMENT_VIEWS.completed.bouts.find(b => b.id === boutId)!.revealedResult!.battleLog!;
+  const ringsAt = (views: ReadonlyMap<string, TournamentView>, t: number, actors = ACTORS) => scheduleArenaRings(campTournamentFights(actors, views, t), 6);
 
-  it('asks for the log of each revealed bout of two camp entrants, once loaded never again, and stages it then', () => {
+  it('stages each revealed bout from its fight summary at once, and asks for the logs of the bouts it stages, once', () => {
     expect(polled.bouts.every(b => !b.revealedResult?.battleLog)).toBe(true);
     const views = new Map([[tid, polled]]);
-    expect(tournamentLogsDue(ACTORS, views, S + 19.99 * MIN)).toEqual([]);
+    expect(campTournamentFights(ACTORS, views, S + 19.99 * MIN)).toEqual([]);
     const round1 = TOURNAMENT_VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.id);
-    expect(tournamentLogsDue(ACTORS, views, S + 20 * MIN).sort()).toEqual([...round1].sort());
-    // Without its log a revealed bout is not staged in a ring yet.
-    expect(campTournamentFights(ACTORS, views, S + 20 * MIN)).toEqual([]);
-    const loaded = new Map(round1.map(id => [id, logOf(id)]));
-    const merged = new Map([[tid, withTournamentLogs(polled, loaded)]]);
-    expect(tournamentLogsDue(ACTORS, merged, S + 20 * MIN)).toEqual([]);
-    expect(campTournamentFights(ACTORS, merged, S + 20 * MIN)).toEqual(campTournamentFights(ACTORS, VIEWS, S + 20 * MIN));
-    // Round 2 adds only its own two bouts; a bout with an entrant outside the camp needs no log.
-    expect(tournamentLogsDue(ACTORS, merged, S + 40 * MIN)).toHaveLength(2);
+    // Without its log a revealed bout is staged all the same (Task 19 R4): its fight summary times it; the log attaches later.
+    const staged = campTournamentFights(ACTORS, views, S + 20 * MIN);
+    const full = campTournamentFights(ACTORS, VIEWS, S + 20 * MIN);
+    expect(staged.map(f => f.log)).toEqual([null, null, null, null]);
+    expect(staged.map(({ log: _log, ...fight }) => fight)).toEqual(full.map(({ log: _log, ...fight }) => fight));
+    const rings = ringsAt(views, S + 20 * MIN);
+    expect(tournamentLogsDue(polled, S + 20 * MIN, TOURNAMENT_LOG_WINDOW_MS, rings).sort()).toEqual([...round1].sort());
+    const merged = withTournamentLogs(polled, new Map(round1.map(b => [b, logOf(b)])));
+    expect(tournamentLogsDue(merged, S + 20 * MIN, TOURNAMENT_LOG_WINDOW_MS, rings)).toEqual([]);
+    expect(campTournamentFights(ACTORS, new Map([[tid, merged]]), S + 20 * MIN)).toEqual(full);
+    // Round 2 adds only its own two bouts; a bout with an entrant outside the camp has no ring, so it needs no log.
+    expect(tournamentLogsDue(merged, S + 40 * MIN, TOURNAMENT_LOG_WINDOW_MS, ringsAt(new Map([[tid, merged]]), S + 40 * MIN))).toHaveLength(2);
     const withoutAster = ACTORS.filter(a => a.gladiatorId !== id('aster'));
-    expect(tournamentLogsDue(withoutAster, views, S + 20 * MIN)).toHaveLength(3);
+    expect(tournamentLogsDue(polled, S + 20 * MIN, TOURNAMENT_LOG_WINDOW_MS, ringsAt(views, S + 20 * MIN, withoutAster))).toHaveLength(3);
+  });
+});
+
+describe('a large tournament in the camp (Task 19 R4 and the live-camp gate)', () => {
+  const TEMPLATES = Object.values(TOURNAMENT_VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
+  // A real tournament slot (Saturday 17:20 UTC) with 50 entrants: a 64-slot bracket of six rounds, 18 fought bouts in round 1.
+  const START = TOURNAMENTS.completed.startsAtMs;
+  const { view, actors } = largeTournament(50, { startsAtMs: START, league: 'silver', templates: TEMPLATES });
+  const polled = withoutTournamentLogs(view);
+  const reveal = (round: number) => START + Math.ceil(80 * MIN * round / 7);
+  const logs = new Map(view.bouts.flatMap(b => (b.revealedResult?.battleLog ? [[b.id, b.revealedResult.battleLog] as const] : [])));
+  const viewsWith = (loaded: Iterable<string>) => new Map([[view.id, withTournamentLogs(polled, new Map([...loaded].map(b => [b, logs.get(b)!])))]]);
+  const round1 = view.bouts.filter(b => b.round === 1 && !b.revealedResult!.bye).map(b => b.id);
+  /** What the camp schedules and asks for at display time `t`, its rings planned from scratch. */
+  const at = (t: number, loaded: readonly string[] = []) => {
+    const views = viewsWith(loaded);
+    const rings = scheduleArenaRings(campTournamentFights(actors, views, t), 6);
+    return { rings, due: tournamentLogsDue(views.get(view.id)!, t, TOURNAMENT_LOG_WINDOW_MS, rings) };
+  };
+
+  it('assigns the same rings whatever order the logs arrive in', () => {
+    expect([view.bracket!.size, view.bracket!.rounds, round1.length]).toEqual([64, 6, 18]);
+    /** The camp from round 1's reveal, its logs arriving six at a time (LOG_LOADS) in `order`, one batch a second, rescheduled by the scene's rule. */
+    const play = (order: readonly string[]) => {
+      let schedule: ReadonlyMap<string, RingSlot> = new Map(), key = '';
+      const loaded: string[] = [];
+      for (let step = 0; step <= 3; step += 1) {
+        const t = reveal(1) + 500 + step * 1000;
+        loaded.push(...order.slice(Math.max(0, step - 1) * 6, step * 6));
+        const fights = campTournamentFights(actors, viewsWith(loaded), t);
+        const next = fights.map(f => f.battleId).join('|');
+        if (next !== key) { key = next; schedule = updateRingSchedule(schedule, fights, 6, t); }
+      }
+      return schedule;
+    };
+    const forward = play(round1);
+    const backward = play([...round1].reverse());
+    expect(forward.size).toBe(18);
+    expect(backward).toEqual(forward);
+    // Both are the schedule of the whole round known at once: the logged times put the first six in the rings.
+    expect(forward).toEqual(scheduleArenaRings(campTournamentFights(actors, viewsWith(round1), reveal(1)), 6));
+    expect([...forward.values()].filter(s => s.enterAtMs === reveal(1))).toHaveLength(6);
+  });
+
+  it('asks for logs only for current and upcoming ring windows', () => {
+    expect(TOURNAMENT_LOG_WINDOW_MS).toBe(ARENA_ENTRY_MS + ARENA_RESULT_HOLD_MS);
+    expect(at(reveal(1) - 1).due).toEqual([]);
+    // Round 1 shows 18 bouts but the camp has six rings: only the six entering now are due.
+    const first = at(reveal(1));
+    expect(first.due).toHaveLength(6);
+    for (const b of first.due) expect(first.rings.get(b)!.enterAtMs).toBe(reveal(1));
+    // A loaded log is never asked for again.
+    expect(at(reveal(1), first.due).due).toEqual([]);
+    for (let t = reveal(1) - 2000; t < reveal(3) + 3 * MIN; t += 500) {
+      const { rings, due } = at(t);
+      // Exactly the windows that are current or start within the window, soonest first; never one that ended or starts later.
+      const expected = [...rings.values()].filter(s => s.enterAtMs <= t + TOURNAMENT_LOG_WINDOW_MS && s.leaveAtMs > t)
+        .sort((p, q) => p.enterAtMs - q.enterAtMs || (p.battleId < q.battleId ? -1 : 1)).map(s => s.battleId);
+      expect(due, `${t - START} ms`).toEqual(expected);
+      // So each ring asks for at most its current window and the next one.
+      for (let ring = 0; ring < 6; ring += 1) expect(due.filter(b => rings.get(b)!.ring === ring).length, `ring ${ring}`).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('a viewer joining late asks for at most the current and next ring window of each ring', () => {
+    // Joining 10 s after round 2 shows: rounds 1 and 2 hold 34 revealed fought bouts, all of which Task 19's camp loaded.
+    const t = reveal(2) + 10_000;
+    const revealed = renderTournament(polled, t).rounds.flatMap(r => r.bouts).filter(b => b.status === 'fighting' || b.status === 'decided');
+    expect(revealed).toHaveLength(34);
+    const { rings, due } = at(t);
+    expect(due.length).toBeGreaterThan(0);
+    expect(due.length).toBeLessThanOrEqual(12);
+    expect(due.every(b => b.startsWith(`${view.id}:2:`))).toBe(true);
+    expect(due.length).toBe([...rings.values()].filter(s => s.enterAtMs <= t + TOURNAMENT_LOG_WINDOW_MS && s.leaveAtMs > t).length);
+  });
+
+  it('names the tournaments with an entrant in camp, so the camp forgets the others', () => {
+    expect(campTournamentIds([...ACTORS, ...actors])).toEqual(new Set([tournamentId('completed'), view.id]));
+    // Once the large tournament's entrants have left the camp (their slot is over), only the other one is kept.
+    expect(campTournamentIds(ACTORS)).toEqual(new Set([tournamentId('completed')]));
+    expect(campTournamentIds(actors.map(a => ({ ...a, location: 'arena' as const })))).toEqual(new Set());
+    expect(campTournamentIds([])).toEqual(new Set());
   });
 });

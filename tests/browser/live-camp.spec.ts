@@ -1,8 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import type { WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import type { BattleLog } from '../../supabase/functions/_shared/contracts/events';
+import type { TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { ARENA_BOUTS, type ArenaBoutKey } from '../fixtures/arena-ids';
+import { buildArenaFixtures } from '../fixtures/arena-build';
+import { TOURNAMENTS } from '../fixtures/tournament-ids';
+import { tournamentCampActors } from '../fixtures/tournament-build';
 import { createDemoWorld } from '../../src/game/demo-world';
-import { SLOT_MS, routeLiveReads, seedSession } from './live-routes';
+import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { openMenu } from './shell-helpers';
 
 // Task 13.3: the game page mounts the camp in live mode from the public reads, with one sync controller owning the
@@ -47,6 +53,47 @@ test('mounts the camp from live public reads, polling only the revision every 30
   // A visitor: only anonymous public reads, never the owner state or a command.
   expect(live.requests.every(r => r.reader === null)).toBe(true);
   expect(new Set(live.requests.map(r => r.table))).toEqual(new Set(['world_revision', 'world_actor_reads']));
+});
+
+test('a visitor’s live camp reads Arena timelines and tournaments anonymously, from public tables only, and sends no command', async ({ page, context }) => {
+  // 13.3 review: the camp's live timeline and tournament reads were untested for a visitor. Minute 60 of the `completed`
+  // tournament's slot (5 s after the final shows), with two of the slot's Arena entrants whose bout is revealed then too.
+  const view = JSON.parse(readFileSync('tests/fixtures/tournaments/completed.json', 'utf8')) as TournamentView;
+  const start = TOURNAMENTS.completed.startsAtMs;
+  const at = start + 60 * 60_000 + 5_000;
+  const logs = Object.fromEntries((Object.keys(ARENA_BOUTS) as ArenaBoutKey[]).map(key => [key, JSON.parse(readFileSync(`tests/fixtures/arena/${key}.json`, 'utf8')) as BattleLog])) as Record<ArenaBoutKey, BattleLog>;
+  const arena = buildArenaFixtures(logs);
+  // The Bellator and Corvina pair, moved from the fixture world's slot into the tournament's.
+  const pair = arena.worldActors.filter(a => a.name === 'Bellator' || a.name === 'Corvina');
+  const shift = start - pair[0].startsAtMs!;
+  const moved = (t: number) => t + shift;
+  const entrants = pair.map(a => ({ ...a, startsAtMs: moved(a.startsAtMs!), endsAtMs: moved(a.endsAtMs!), visibleStage: null }));
+  const timelines = Object.fromEntries(pair.map(a => {
+    const timeline = arena.timelines[a.activityId!];
+    return [a.activityId!, { ...timeline, serverNowMs: at, visibleThroughMs: at,
+      stages: timeline.stages.map(s => ({ ...s, revealedAtMs: moved(s.revealedAtMs), startedAtMs: moved(s.startedAtMs), endsAtMs: moved(s.endsAtMs) })) }];
+  }));
+  const world: WorldSnapshot = { ...emptyWorld(at), revision: 'live-tournament', actors: [...tournamentCampActors('completed'), ...entrants] };
+  const live = await routeLiveReads(context, { world, tournaments: [view], timelines, serverNowMs: () => at });
+  const commands: string[] = [];
+  page.on('request', request => { if (request.url().includes('/functions/v1/')) commands.push(request.url()); });
+  await page.goto('/game/');
+  await waitForCamp(page, world.actors.length);
+  // The camp stages the Arena pair's bout and the final (with the earlier rounds' bouts, long over), each from public reads.
+  const final = view.bouts.find(b => b.round === 3)!.id;
+  await page.waitForFunction(({ final, bellator }) => {
+    const fights = window.__cloudiatorCamp!.state()!.arena.fights;
+    return fights.some(f => f.battleId === final) && fights.some(f => f.fighters.includes(bellator));
+  }, { final, bellator: pair.find(a => a.name === 'Bellator')!.gladiatorId }, { timeout: 30_000 });
+  await expect.poll(() => live.requests.some(r => r.table === 'tournament_bout_results' && r.query.get('bout_id') === `eq.${final}`)).toBe(true);
+  expect(live.count('visible_events')).toBeGreaterThan(0);
+  expect(live.count('tournament_views')).toBeGreaterThan(0);
+  // Only the public projections, every read anonymous, no command and no Auth call.
+  const PUBLIC = new Set(['world_revision', 'world_actor_reads', 'visible_events', 'recent_results', 'tournament_views', 'tournament_bout_results', 'tournament_placements']);
+  expect(live.requests.filter(r => !PUBLIC.has(r.table)).map(r => r.table)).toEqual([]);
+  expect(live.requests.filter(r => r.reader !== null)).toEqual([]);
+  expect(commands).toEqual([]);
+  expect(live.authRequests).toEqual([]);
 });
 
 test('shows the camp when the first world arrives late', async ({ page, context }) => {

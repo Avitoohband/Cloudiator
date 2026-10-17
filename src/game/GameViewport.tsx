@@ -8,8 +8,10 @@
 // lists the ring fights as keyboard buttons below the camp view (with `chrome: 'none'` the page shell lists them, from the
 // bridge's `arena-fights` event, and holds the camera buttons). With a tournament reader it
 // reads the tournaments of entrants in camp during their slot (src/game/tournament-camp.ts),
-// so they wait, fight and spectate by the revealed bracket. Tournament views carry no battle
-// logs: the host loads each staged bout's log on demand, once per session, and merges it in.
+// so they wait, fight and spectate by the revealed bracket, and forgets a tournament once its
+// entrants have left the camp. Tournament views carry no battle logs: the scene stages a revealed
+// bout from its fight summary, and the host loads its log, through the reader's log cache that the
+// Tournaments panel shares, only while its ring window is current or about to start.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
@@ -18,7 +20,7 @@ import type { Point } from './iso';
 import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
 import { arenaFightButton, arenaReadsDue, type ArenaRead } from './arena-layout';
-import { recordTournamentRead, tournamentLogsDue, tournamentReadsDue, type TournamentRead } from './tournament-camp';
+import { TOURNAMENT_LOG_WINDOW_MS, campTournamentIds, recordTournamentRead, tournamentLogsDue, tournamentReadsDue, type TournamentRead } from './tournament-camp';
 import { TOURNAMENT_RETRY_MS, withTournamentLogs } from './tournament-stage';
 import { createDisplayClock, type DisplayClock } from './display-clock';
 import { prefersReducedMotion, supportsWebGL } from './webgl';
@@ -27,7 +29,7 @@ import styles from './GameViewport.module.css';
 
 /** How often the host checks for due Arena timeline reads (display ms pass in real time). */
 const ARENA_CHECK_MS = 1000;
-/** At most this many tournament battle logs load at once (a camp that learns a late bracket asks for many). */
+/** At most this many tournament battle logs load at once (each ring asks for at most its current and next bout). */
 const LOG_LOADS = 6;
 
 /** Keeps every battle log a view already carries (a scene test's view, an older reader) so it is never asked for. */
@@ -47,6 +49,22 @@ function forgetLeft<V>(kept: Map<string, V>, world: WorldSnapshot | null): boole
   const live = new Set(world.actors.map(a => a.activityId));
   let dropped = false;
   for (const id of [...kept.keys()]) if (!live.has(id)) { kept.delete(id); dropped = true; }
+  return dropped;
+}
+/**
+ * Drops the tournament views, and the logs of their bouts, of tournaments with no entrant left in the world (Task 20
+ * review minor 4); true when something was dropped. Logs stay in the reader's cache, so nothing is read twice.
+ */
+function forgetLeftTournaments(views: Map<string, TournamentView>, logs: Map<string, BattleLog>, world: WorldSnapshot | null): boolean {
+  if (!world) return false;
+  const live = campTournamentIds(world.actors);
+  let dropped = false;
+  for (const [id, view] of [...views]) {
+    if (live.has(id)) continue;
+    views.delete(id);
+    for (const bout of view.bouts) logs.delete(bout.id);
+    dropped = true;
+  }
   return dropped;
 }
 
@@ -72,6 +90,8 @@ export type CampTestHook = {
   /** Tournament view reads so far, and handing views straight to the scene (scene tests without a reader). */
   tournamentReads(): number;
   setTournaments(views: TournamentView[]): void;
+  /** The tournaments whose views the camp keeps. */
+  tournamentViews(): string[];
   /** Tournament battle logs asked for on demand so far, and the bouts whose logs the camp holds. */
   tournamentLogReads(): number;
   tournamentLogs(): string[];
@@ -93,7 +113,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   timelines?: Pick<GameGateway, 'timeline'> | null;
   /**
    * Reads tournament views so camp entrants take their roles, and the logs of the bouts it stages; without it they wait
-   * in staging (and without `tournamentLog` only logs a view already carries are staged).
+   * in staging (and without `tournamentLog` a revealed bout's pair stands in its ring unless its view carries the log).
    */
   tournaments?: (Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'tournamentLog'>>) | null;
   /** Hears the scene's availability: loading, ready, or unavailable (no WebGL, art that failed to load, a stopped scene). */
@@ -118,7 +138,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   const arenaReadCount = useRef(0);
   const tournamentViews = useRef(new Map<string, TournamentView>());
   const tournamentReadCount = useRef(0);
-  /** Battle logs of staged tournament bouts, loaded once for the session (results are immutable). */
+  /** Battle logs of staged tournament bouts of the kept views (the reader's cache holds them for the session). */
   const tournamentLogs = useRef(new Map<string, BattleLog>());
   const tournamentLogReadCount = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
@@ -137,6 +157,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
     if (syncsClock.current) clock.current.sync(world.serverNowMs);
     handle.current?.setWorld(world);
     if (forgetLeft(arenaTimelines.current, world)) handle.current?.setTimelines(new Map(arenaTimelines.current));
+    if (forgetLeftTournaments(tournamentViews.current, tournamentLogs.current, world)) handle.current?.setTournaments(withLogs(tournamentViews.current, tournamentLogs.current));
   }, [world]);
 
   // Arena timelines: read once an entrant's bout is due, retried while it is missing; paused in hidden tabs.
@@ -179,7 +200,10 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   // Tournament views: read once an entrant is in camp during its slot, again after each reveal mark, every 30 s while
   // a read failed, and while a due round is unpublished after 30 s, 60 s, 120 s, 240 s and then every 5 minutes (back to
   // 30 s once it is not processing); paused in hidden tabs, with one re-read of a processing tournament on coming back.
-  // The views carry no battle logs: each staged bout's log loads on demand, at most LOG_LOADS at a time, once.
+  // A tournament whose entrants have all left the camp is forgotten. The views carry no battle logs: a bout's log loads
+  // only while its ring window is current or starts within TOURNAMENT_LOG_WINDOW_MS (the scene's ring schedule), at most
+  // LOG_LOADS at a time, through the reader's session cache that the Tournaments panel shares, so a viewer who joins
+  // late asks only for what the rings show now and next (Task 19 live-camp gate).
   useEffect(() => {
     if (!tournaments) return;
     let alive = true;
@@ -189,10 +213,14 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
     /** Display time of each bout's last failed log load: asked again only after the retry interval. */
     const logFailedAt = new Map<string, number>();
     const publish = () => handle.current?.setTournaments(withLogs(tournamentViews.current, tournamentLogs.current));
+    /** Whether a tournament still has an entrant in the world, so a read or log that lands late is kept. */
+    const inCamp = (id: string) => campTournamentIds(latestWorld.current?.actors ?? []).has(id);
     const check = (focused = false) => {
       const current = latestWorld.current;
       if (!current || document.visibilityState !== 'visible') return;
       const now = clock.current.now();
+      const live = campTournamentIds(current.actors);
+      for (const id of [...known.keys()]) if (!live.has(id)) known.delete(id);
       for (const id of tournamentReadsDue(current.actors, known, now, { focused })) {
         if (inFlight.has(id)) continue;
         inFlight.add(id);
@@ -200,22 +228,28 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
         known.set(id, { ...previous, view: previous?.view ?? null, readAtMs: now });
         tournamentReadCount.current += 1;
         tournaments.tournament(id).then(view => {
-          if (!alive) return;
+          if (!alive || !inCamp(id)) return;
           known.set(id, recordTournamentRead(previous, view, clock.current.now()));
           keepLogs(view, tournamentLogs.current);
           tournamentViews.current.set(id, view);
           publish();
-        }, () => { if (alive) known.set(id, recordTournamentRead(previous, null, clock.current.now())); }).finally(() => inFlight.delete(id));
+        }, () => { if (alive && inCamp(id)) known.set(id, recordTournamentRead(previous, null, clock.current.now())); }).finally(() => inFlight.delete(id));
       }
       const loadLog = tournaments.tournamentLog;
-      if (!loadLog) return;
-      for (const boutId of tournamentLogsDue(current.actors, withLogs(tournamentViews.current, tournamentLogs.current), now)) {
+      const rings = handle.current?.ringSchedule();
+      if (!loadLog || !rings) return;
+      const due = [...withLogs(tournamentViews.current, tournamentLogs.current).values()]
+        .flatMap(view => tournamentLogsDue(view, now, TOURNAMENT_LOG_WINDOW_MS, rings))
+        .sort((p, q) => rings.get(p)!.enterAtMs - rings.get(q)!.enterAtMs);
+      for (const boutId of due) {
         if (logsInFlight.size >= LOG_LOADS) break;
         if (logsInFlight.has(boutId) || tournamentLogs.current.has(boutId) || now - (logFailedAt.get(boutId) ?? -Infinity) < TOURNAMENT_RETRY_MS) continue;
         logsInFlight.add(boutId);
         tournamentLogReadCount.current += 1;
         loadLog(boutId).then(log => {
-          if (!alive) return;
+          logFailedAt.delete(boutId);
+          // A log of a tournament the camp has forgotten meanwhile is not kept (the reader's cache still holds it).
+          if (!alive || ![...tournamentViews.current.values()].some(view => view.bouts.some(bout => bout.id === boutId))) return;
           tournamentLogs.current.set(boutId, log);
           publish();
         }, () => { logFailedAt.set(boutId, clock.current.now()); }).finally(() => logsInFlight.delete(boutId));
@@ -311,6 +345,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
             latestWorld.current = next;
             handle.current?.setWorld(next);
             if (forgetLeft(arenaTimelines.current, next)) handle.current?.setTimelines(new Map(arenaTimelines.current));
+            if (forgetLeftTournaments(tournamentViews.current, tournamentLogs.current, next)) handle.current?.setTournaments(withLogs(tournamentViews.current, tournamentLogs.current));
           },
           freezeClock: ms => clock.current.freeze(ms),
           arenaReads: () => arenaReadCount.current,
@@ -325,6 +360,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
             for (const view of views) { keepLogs(view, tournamentLogs.current); tournamentViews.current.set(view.id, view); }
             handle.current?.setTournaments(withLogs(tournamentViews.current, tournamentLogs.current));
           },
+          tournamentViews: () => [...tournamentViews.current.keys()],
           tournamentLogReads: () => tournamentLogReadCount.current,
           tournamentLogs: () => [...tournamentLogs.current.keys()],
         };

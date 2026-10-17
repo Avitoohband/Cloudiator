@@ -13,7 +13,8 @@
 import type { TournamentGraph, TournamentOutcome } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { ActivitySummary, BattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events.ts';
 import type { PublicActor, TournamentBout, TournamentEntrant, TournamentView } from '../../supabase/functions/_shared/contracts/reads.ts';
-import { ARENA_GLADIATORS, fixtureUuid } from './arena-ids.ts';
+import type { LeagueId } from '../../supabase/functions/_shared/contracts/commands.ts';
+import { ARENA_GLADIATORS, fixtureUuid, type ArenaGladiatorKey } from './arena-ids.ts';
 import {
   TOURNAMENT_LOOKS, TOURNAMENT_SLOT_MS, TOURNAMENTS, gladiatorKeyOf, tournamentActivityId, tournamentId, tournamentSlotIndex,
   type TournamentKey,
@@ -126,4 +127,67 @@ export function tournamentCampActors(key: TournamentKey): PublicActor[] {
     phase: 'afternoon', location: 'tournament', activityId: tournamentActivityId(key, g), activityStatus: 'active',
     startsAtMs, endsAtMs: startsAtMs + TOURNAMENT_SLOT_MS, visibleStage: null,
   }));
+}
+
+/**
+ * A large league tournament for scale checks (Task 13.9: the Task 19 R4 ring schedule and the late-joiner log
+ * measurement): `count` synthetic entrants in the tournament slot that starts at `startsAtMs`, the round-1 pairs seated
+ * first and one bye for each remaining pair (so 50 entrants fight 18 round-1 bouts in a 64-slot bracket), and every
+ * result published, each bout's first seat winning. Each fought result carries a battle log cloned from `templates` in
+ * turn, its two combatants renamed to the bout's entrants and its participants in the log's order, as Task 19 writes
+ * them. Real engine logs, built without the engine, so browser specs can use it. The stage core hides each result until
+ * its round's reveal, and a live route serves only the rows that are due.
+ */
+export function largeTournament(count: number, options: { startsAtMs: number; league: LeagueId; templates: readonly BattleLog[] }): { view: TournamentView; actors: PublicActor[] } {
+  const { startsAtMs, league, templates } = options;
+  const slotIndex = startsAtMs / TOURNAMENT_SLOT_MS;
+  const id = `tournament:${slotIndex}:${league}`;
+  const keys = Object.keys(TOURNAMENT_LOOKS) as ArenaGladiatorKey[];
+  const seeded: TournamentEntrant[] = Array.from({ length: count }, (_, i) => ({
+    gladiatorId: fixtureUuid(`large-${id}-${i}`), name: `Entrant ${String(i + 1).padStart(2, '0')}`, classId: TOURNAMENT_LOOKS[keys[i % keys.length]].classId,
+  }));
+  let size = 1, rounds = 0;
+  while (size < count) { size *= 2; rounds += 1; }
+  const fought = count - size / 2;
+  const slots = Array.from({ length: size / 2 }, (_, p) => (p < fought ? [seeded[2 * p], seeded[2 * p + 1]] : [seeded[fought + p], null])).flat();
+  const named = new Map(seeded.map(e => [e.gladiatorId, e]));
+  const winners = new Map<string, TournamentEntrant>();
+  const bouts: TournamentBout[] = [];
+  let used = 0;
+  for (let round = 1; round <= rounds; round += 1) {
+    for (let position = 0; position < size / 2 ** round; position += 1) {
+      const boutId = `${id}:${round}:${position}`;
+      const parentBoutIds = round === 1 ? [] : [`${id}:${round - 1}:${2 * position}`, `${id}:${round - 1}:${2 * position + 1}`];
+      const sides = round === 1 ? [slots[2 * position], slots[2 * position + 1]].filter((s): s is TournamentEntrant => s !== null) : parentBoutIds.map(p => winners.get(p)!);
+      winners.set(boutId, sides[0]);
+      if (sides.length === 1) {
+        bouts.push({ id: boutId, round, position, parentBoutIds, revealedResult: { participants: [{ ...sides[0] }], winnerId: sides[0].gladiatorId, bye: true } });
+        continue;
+      }
+      const log = renamedLog(templates[used % templates.length], boutId, sides[0], sides[1]);
+      used += 1;
+      bouts.push({ id: boutId, round, position, parentBoutIds,
+        revealedResult: { participants: log.participants.map(p => ({ ...named.get(p.gladiatorId!)! })), winnerId: log.winnerId, bye: false, battleLog: log } });
+    }
+  }
+  const view: TournamentView = { id, league, slotIndex, startsAtMs, endsAtMs: startsAtMs + TOURNAMENT_SLOT_MS, status: 'active',
+    bracket: { size, rounds, slots: slots.map(s => s?.gladiatorId ?? null) }, entrants: [...seeded].sort(byName), bouts, placements: [] };
+  const actors: PublicActor[] = seeded.map((e, i) => {
+    const look = TOURNAMENT_LOOKS[keys[i % keys.length]];
+    return { gladiatorId: e.gladiatorId, name: e.name, classId: look.classId, equipmentSilhouettes: [...look.silhouettes], league, level: look.level,
+      phase: 'afternoon', location: 'tournament', activityId: fixtureUuid(`large-activity-${id}-${i}`), activityStatus: 'active',
+      startsAtMs, endsAtMs: startsAtMs + TOURNAMENT_SLOT_MS, visibleStage: null };
+  });
+  return { view, actors };
+}
+
+/** `template` as bout `battleId`, its winner renamed to `winner` and its loser to `loser` (ids, names and every event). */
+function renamedLog(template: BattleLog, battleId: string, winner: TournamentEntrant, loser: TournamentEntrant): BattleLog {
+  const loserId = template.participants.find(p => p.id !== template.winnerId)!.id;
+  const to = new Map([[template.winnerId, winner], [loserId, loser]]);
+  const rename = (combatant: string) => to.get(combatant)!.gladiatorId;
+  const participants = template.participants.map(p => ({ ...structuredClone(p), id: rename(p.id), gladiatorId: rename(p.id), name: to.get(p.id)!.name })) as unknown as BattleLog['participants'];
+  const events = template.events.map(e => (e.kind === 'attack' ? { ...e, attackerId: rename(e.attackerId), defenderId: rename(e.defenderId) }
+    : { ...e, winnerId: rename(e.winnerId), loserId: rename(e.loserId) }));
+  return { ...structuredClone(template), battleId, participants, events, winnerId: winner.gladiatorId };
 }

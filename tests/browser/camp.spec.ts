@@ -8,7 +8,7 @@ import { NPC_ROUTINES, npcPostTiles, planNpcPosition } from '../../src/game/npcs
 import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
 import { createDemoWorld } from '../../src/game/demo-world';
-import { closeMenu, openMenu, revealRail } from './shell-helpers';
+import { closeMenu, openMenu, revealRail, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -25,6 +25,19 @@ async function openCamp(page: Page) {
   await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 }
 const campState = (page: Page) => page.evaluate(() => window.__cloudiatorCamp!.state()!);
+/**
+ * One zoom step in: the Zoom in button at the bottom of the menu rail (Task 13.5). The touch layout has no zoom buttons
+ * (it pinches), so there the camp's own + key takes the step.
+ */
+async function zoomInStep(page: Page) {
+  if (await touchLayout(page)) {
+    await page.getByRole('application').focus();
+    await page.keyboard.press('+');
+    return;
+  }
+  await revealRail(page);
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+}
 const nextFrames = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
 test.describe('living isometric camp', () => {
@@ -179,10 +192,7 @@ test.describe('living isometric camp', () => {
   test('zooms in fixed steps from buttons, keys and the wheel, and leaves browser shortcuts alone', async ({ page }, testInfo) => {
     await openCamp(page);
     const zoom = async () => (await campState(page)).camera.zoom;
-    // The zoom buttons sit at the bottom of the menu rail (Task 13.5).
-    await revealRail(page);
-    const zoomIn = page.getByRole('button', { name: 'Zoom in' });
-    for (let i = 0; i < 12; i += 1) await zoomIn.click();
+    for (let i = 0; i < 12; i += 1) await zoomInStep(page);
     expect(await zoom()).toBeCloseTo(3, 5);
     // Clicking the camp gives it keyboard focus.
     const box = (await page.locator('canvas').boundingBox())!;
@@ -406,8 +416,7 @@ test.describe('living isometric camp', () => {
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     expect(await page.evaluate(() => window.__cloudiatorCamp!.canvases())).toBe(1);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.listeners())).toBe(listeners);
-    await revealRail(page);
-    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await zoomInStep(page);
     expect((await campState(page)).camera.zoom).toBeCloseTo(1.25, 5);
   });
 

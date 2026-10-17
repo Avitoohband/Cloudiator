@@ -390,12 +390,17 @@
     top: auto;
     bottom: 14px;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 6px;
     padding: 5px;
     border-radius: 14px;
     transform: none;
     transition: none;
+    /* One row of icons, scrolling sideways inside its own box when it does not fit. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
   }
 
   .rail[data-revealed='true'] {
@@ -403,21 +408,22 @@
     transform: none;
   }
 
-  .menus,
-  .camera {
+  .menus {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 6px;
   }
 
   .railButton {
+    flex: none;
     width: 38px;
     height: 38px;
     font-size: 18px;
   }
 
-  /* The menus fill the first row; the camera buttons wrap to a second. */
-  .sep {
+  /* Touch zooms by pinching (and windows this narrow by the wheel and keys): the row holds the menu icons only. */
+  .sep,
+  .camera {
     display: none;
   }
 

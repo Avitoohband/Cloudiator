@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { MENUS } from '../../src/features/shell/menus';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { cornerChip, expectOwnerShown, menuDialog, openMenu, railMenus, revealRail } from './shell-helpers';
+import { cornerChip, expectOwnerShown, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
 // bottom sheets on touch) opens one floating menu at a time; the corner chip sits top right.
@@ -260,6 +260,30 @@ test.describe('the camp shell on any device', () => {
     await expect(openSurfaces(page)).toHaveCount(1);
   });
 
+  test('closes a menu without an error where checkVisibility is missing (Safari 16.4 to 17.3)', async ({ page }) => {
+    // Review I1: the project's browser floor is Safari 16.4; Element.checkVisibility arrived in Safari 17.4.
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript(() => { delete (Element.prototype as { checkVisibility?: unknown }).checkVisibility; });
+    await openCamp(page);
+    expect(await page.evaluate(() => 'checkVisibility' in Element.prototype)).toBe(false);
+    const touch = await touchLayout(page);
+    const menu = await openMenu(page, 'Results');
+    await menu.locator('[data-menu-close]').click();
+    await expect(menu).toBeHidden();
+    await nextFrames(page);
+    // The focus goes back to the menu's icon, and the camp and the menu control stay: no error page replaced them.
+    await expect(railMenus(page).getByRole('button', { name: 'Results', exact: true })).toBeFocused();
+    await expect(page.getByRole('application')).toBeVisible();
+    if (touch) await expect(page.getByRole('button', { name: 'Menus', exact: true })).toBeVisible();
+    else await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
+    // Escape and the first Tab use the same visibility check.
+    await openMenu(page, 'Gladiators');
+    await page.keyboard.press('Escape');
+    await expect(railMenus(page).getByRole('button', { name: 'Gladiators', exact: true })).toBeFocused();
+    expect(errors).toEqual([]);
+  });
+
   test('shows the rail and panels without sliding when reduced motion is preferred', async ({ page }, testInfo) => {
     await openCamp(page);
     await revealRail(page);
@@ -304,6 +328,32 @@ test.describe('the camp shell on touch', () => {
     const results = await openMenu(page, 'Results');
     await results.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(results).toBeHidden();
+  });
+
+  test('shows the menu icons as one row that scrolls sideways when it does not fit, without zoom buttons', async ({ page }) => {
+    // Spec "Phones and touch": tapping ☰ shows the icons as a row. Touch zooms by pinching, so the row has no zoom buttons.
+    await page.setViewportSize({ width: 360, height: 640 });
+    await openCamp(page);
+    await revealRail(page);
+    const icons = railMenus(page).getByRole('button');
+    await expect(icons).toHaveCount(LABELS.length);
+    const tops = await icons.evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size, `icon tops ${tops.join(', ')}`).toBe(1);
+    await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
+    // At 360 px the row scrolls inside its own box; the page never scrolls sideways.
+    const row = rail(page);
+    const [scrollWidth, clientWidth] = await row.evaluate(el => [el.scrollWidth, el.clientWidth]);
+    expect(scrollWidth).toBeGreaterThan(clientWidth);
+    const box = await boxOf(row);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await row.evaluate(el => { el.scrollLeft = el.scrollWidth; });
+    await expect.poll(() => row.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+    const last = await boxOf(icons.last());
+    expect(last.x + last.width).toBeLessThanOrEqual(box.x + box.width + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await icons.last().click();
+    await expect(menuDialog(page, LABELS.at(-1)!)).toBeVisible();
   });
 
   test('shrinks the player chip to the name and countdown on touch', async ({ page }) => {

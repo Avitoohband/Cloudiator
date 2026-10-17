@@ -33,8 +33,13 @@ const NO_SAMPLES: Samples = { replays: [], expeditions: [], arena: [], tournamen
 /** A click on the camp moves the pointer less than this; more is a drag, which leaves the menus open. */
 const CLICK_PX = 6;
 
-/** Whether an element is rendered and not hidden (a touch rail row hides while a sheet is open). */
-const shown = (element: HTMLElement | null): element is HTMLElement => !!element && element.checkVisibility({ visibilityProperty: true });
+/**
+ * Whether an element is rendered and not hidden (the touch row of icons hides while a sheet is open).
+ * `checkVisibility` arrived in Safari 17.4, below the project's Safari 16.4 floor, so it is feature-detected.
+ */
+const shown = (element: HTMLElement | null): element is HTMLElement => !!element && (typeof element.checkVisibility === 'function'
+  ? element.checkVisibility({ visibilityProperty: true })
+  : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
 
 /** The fixture preview's schedule: the sample plan, read-only. */
 function SchedulePreview({ owner }: { owner: OwnerState | null }) {

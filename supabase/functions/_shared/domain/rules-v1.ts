@@ -19,7 +19,7 @@ export const RULES_V1 = freezeDomain({
   rarities: { common: { stats: 1, lootChance: 0.7 }, uncommon: { stats: 1.15, lootChance: 0.25 }, rare: { stats: 1.3, lootChance: 0.05 } },
   inventory: { capacity: 60, salvageStack: 999, salvageSellValue: 10 },
   shops: { npcSellRate: 0.25, minimumSellValue: 1, renownArenaMultiplier: 1.1, bannerRenownPrice: 50 },
-  marketplace: { maximumListings: 5, expiryMs: 604_800_000, maximumPrice: Number.MAX_SAFE_INTEGER },
+  marketplace: { maximumListings: 5, expiryMs: 604_800_000, maximumPrice: 1_000_000_000 },
   stances: { offensive: { outgoing: 1.15, incoming: 1.1 }, balanced: { outgoing: 1, incoming: 1 }, defensive: { outgoing: 0.9, incoming: 0.85 } },
   combat: { strengthDamage: 0.5, agilityRate: 0.01, minimumIntervalMs: 250,
     hitBase: 0.7, hitPrecision: 0.005, hitDefenderAgility: 0.003, minimumHit: 0.1, maximumHit: 0.95,

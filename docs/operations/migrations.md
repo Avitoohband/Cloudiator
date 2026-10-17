@@ -1,5 +1,77 @@
 # Local identity backend and migrations
 
+## Task 18.1: marketplace listings (M14)
+
+M14 is `supabase/migrations/20261017144347_market.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull market --local --schema public,private --yes` from the tested `supabase/sql/12-market.sql`. M01–M13 are unchanged.
+A first draft, `20261017142821_market.sql`, was discarded before commit with local `migration repair --status reverted` and
+exact-file removal. A review before commit narrowed the purchase's item lock to the listed item while the seller still owns it.
+The source was changed, reapplied after a reset to M13 and retested, and M14 was generated again. The new draft differs from
+the first only in that statement.
+
+It adds fixed-price listings ([plan](../superpowers/plans/2026-10-17-task-18-marketplace.md), Decisions 2–9):
+- `private.market_listings`, the authoritative rows (`open`, `sold`, `cancelled` or `expired`). Backend-only, with a guard
+  trigger: only an open row changes, and only its terminal fields. `item_id` has no foreign key, because a sold item may
+  later be sold to an NPC or discarded.
+- `public.market_offers`, the sanitized projection of open listings: seller id and name, the item's catalog fields, stats and
+  quantity, the price and the times. `anon` and `authenticated` may SELECT it; only the backend writes it. Its one select
+  policy hides an offer from its expiry time on, before any sweep. It has no `projection_changed` trigger, so offers never
+  bump `world_revision`.
+- `public.create_listing`, `cancel_listing` and `buy_listing` `(actor_id uuid, operation_id uuid, input jsonb)`. They are
+  security invoker with an empty search path, and only `service_role` may EXECUTE them. Each is backed by
+  `private.market_command`.
+- `private.expire_listings(now_ms bigint)`, the sweep, granted to nobody. `private.cron_tick()` now calls it in its own
+  `begin … exception` block after coordination; its result gains an `expiry` field.
+
+**Lock order.** Create and cancel take the actor's account lock, then the gladiator row, the wallet, the items in id order
+and the listing row. Buy first reads the listing's seller without a lock. It then takes both account locks in gladiator
+order, as `boundary_start` does, then both gladiator rows, both wallets, the buyer's items and the listed item (while the
+seller still owns it), and the listing row. `private.planning_now_ms()` is sampled after all of these locks. Each command
+expires its seller's own due listings first. The sweep try-locks each seller's account lock, skips a busy seller, and uses
+`FOR UPDATE SKIP LOCKED`.
+
+**Transfer.** A sale is two UPDATEs: clear the reservation, then change `gladiator_id` and `item.ownerId` together. This is
+required by `guard_reserved_item` and the item CHECK.
+
+**Receipts and ledger.** A purchase writes the buyer's receipt and a seller receipt (`request {kind:'market-sale',
+listingId}`). It writes two ledger rows: `market-purchase` (−price) and `market-sale` (+price − fee). The fee is
+`price*5/100` in integer division. Prices are whole numbers from 1 to 1,000,000,000 (`RULES_V1.marketplace.maximumPrice`).
+
+The draft needed four completions before commit:
+- It created `public.market_offers` and its foreign key to `private.market_listings(id)` before that table existed. The private
+  table's block (create, RLS, indexes, constraints) now comes first.
+- It only added table grants. Source-equivalent `revoke all … from public, anon, authenticated, service_role` statements now
+  precede them on both tables. Without them the new public table would keep the platform's default client privileges.
+- It omitted every function ACL. The source's revoke/grant pair is appended, covering the eight new functions and the
+  replaced `cron_tick`. Only `service_role` may EXECUTE the commands and helpers; nobody may EXECUTE the sweep or the tick.
+- A provenance header and `notify pgrst` were added.
+
+The draft re-emits no unchanged function: the eight new functions and `cron_tick` are the only ones. The public SQL wrappers
+come before `private.market_command`, which is safe under the draft's `check_function_bodies = off`. The guard trigger follows
+its function. No backfill or initialization is needed: both tables are new and nothing wrote a listing before M14. The
+existing `cloudiator-coordinate` cron job already runs `cron_tick`, so no registration changes.
+
+**Release (Task 24).** M14 does not depend on the worker. Ship it before (or with) the Task 18.2 command routing; until 18.2,
+the handler answers the three market commands with `unavailable`. The sweep runs only once Task 24 enables
+`private.scheduler`. Until then, each seller's own commands and any purchase expire due listings, and the offers policy
+hides them from readers.
+
+**Retention (Task 22).** Delete an offer before its listing (foreign key). A listing references its seller and buyer
+gladiators and its terminal receipt, so prune it before those. Its item may already be gone.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M14, with no source applied afterwards.
+- The schema fingerprint (956 lines, the M13 coverage plus the singleton counts) matched the tested source exactly. It was
+  identical again after the tests.
+- `npm run test:db` passed **190/190** in ten files on the replay, with the Edge container's start time unchanged across
+  the run.
+- Lint is empty. Advisors, run after that test run, report eight INFO unused-index notices, four of them on the new tables
+  (`market_listings_buyer_idx`, `market_listings_receipt_idx`, `market_offers_listed_idx` for Task 18.2's page order, and
+  `market_offers_seller_idx`). There are no warnings or errors. `migration list --local` shows M01–M14.
+- Two mutations of the source each failed their owning test: sampling the clock before the row locks (the purchase then
+  sold an expired listing), and taking the buyer's account lock first (it held an account lock while waiting for the
+  lower one). The restored source passed both tests again.
+
 ## Task 13.1: visitor read access
 
 M13 is `supabase/migrations/20261016141628_visitor_access.sql`, generated with CLI 2.120.0 (engine `migra`) by

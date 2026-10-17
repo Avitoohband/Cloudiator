@@ -9,10 +9,13 @@ const commands = createDatabase(admin);
 beforeEach(async () => { await resetIdentity(); await sql`update private.scheduler set enabled=false where singleton`; });
 afterAll(() => sql.end());
 
-/** The public projections a visitor may SELECT: eight base tables, the five invoker views over them, and tournament_views. */
+/**
+ * The public projections a visitor may SELECT: eight base tables, the five invoker views over them, tournament_views, and
+ * the marketplace offers (Task 18.1, M14).
+ */
 const OPEN = ['world_revision_state', 'world_actors', 'public_profiles', 'recent_results', 'activity_stages', 'arena_standings',
   'tournament_bout_results', 'tournament_placements', 'visible_events', 'world_revision', 'world_actor_reads', 'public_profile_reads',
-  'arena_standing_reads', 'tournament_views'];
+  'arena_standing_reads', 'tournament_views', 'market_offers'];
 /** tournament_views is granted column by column: never its pairing job or publication time (Task 19 review M1). */
 const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms';
 /** Relations: tables, views, materialized views, partitioned and foreign tables. */

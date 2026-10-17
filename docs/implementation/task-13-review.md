@@ -147,3 +147,51 @@ Range `52c697f..d9a0d27`: `c035491` (feature) and `d9a0d27` (review fixes). [Imp
   - one extra profile read;
   - the unused `tournamentIdFor`;
   - `TournamentPanel.tsx` has grown to 577 lines.
+
+## 13.5: The full-screen shell, rail, panels and chip
+
+Range `1cd64eb..6bbbdbe`: `5c109f6` (feature) and `6bbbdbe` (review fixes). [Implementer report](task-13.5-report.md). The implementer was resumed once after a PC restart, from its uncommitted work.
+
+**Implementer evidence:**
+- Unit tests 948/948; typecheck clean.
+- `test:db` 177/177 with the Edge start time unchanged.
+- Development browser suite 321 passed, 19 skipped, 0 failed after the fixes; production gate 16 passed.
+- The controller re-ran the build and static scan after the fix round: 5 routes, 91 assets, clean.
+
+**Round 1 (full review: spec, quality and visual).** Verdicts: spec compliant; quality Needs fixes.
+- **What it confirmed:**
+  - The seven menus (no Marketplace) and the exact accessible names, including "Schedule".
+  - The Tab order: rail icons, zoom buttons, then the corner chip.
+  - Panels render outside the camp element, so typing in a field never moves the camera; this is tested.
+  - The camp stays visible when the scene is unavailable, with Find and Follow giving their reason.
+  - Touch scrolling inside a sheet never pans the camp; this is tested with real touch input.
+- **Carried Minors fixed, each with a test:**
+  - `activityStatus` is robust to a stale slot index;
+  - the shell shows sync, scene and owner-refresh failures;
+  - the stale-session local sign-out retries and is pinned to `scope=local`;
+  - the league picker shows only for visitors and gladiator-less viewers.
+- **Visual:** a close match to the approved mockup on desktop and the phone.
+- **I1 (Important):** closing any menu crashed the camp on Safari 16.4–17.3 (iOS 16.4–17.3), because `checkVisibility` is missing there.
+
+**Controller rulings:**
+- **Ratified:** the touch layout below 481 px pointer width, and the fixture pill's placement.
+- **Added to the fix round:** the phone menu became one horizontally scrollable row of menu icons, as the spec's "shows the icons as a row" requires. It had wrapped into a block with zoom buttons; touch keeps pinch zoom.
+
+**Round 2 (scoped re-review of `6bbbdbe`):** both ADDRESSED, no new breakage.
+- The visibility check falls back correctly, and a test deletes the API and closes menus.
+- The touch row is a single row at 360 px with no page overflow.
+
+**Deferred Minors:**
+- **Carried to 13.6:**
+  - after a sign-out, the rail can stay open on a menu the viewer lost;
+  - the "Connection lost" notice also shows during a stale-session sign-out;
+  - the visitor chip still needs the Google mark and the short phone label;
+  - capture visitor screenshots.
+- **Other:**
+  - the scene-unavailable notice can sit under an open panel at 1024 px;
+  - Find and Follow are disabled without a reason for some roster rows;
+  - the skip link is bypassed by the first Tab;
+  - a stale press start can carry across pointers;
+  - a duplicated countdown hook;
+  - no "Following …" feedback (mockup follow-up);
+  - the first-Tab fallback path and narrow pointer windows are untested.

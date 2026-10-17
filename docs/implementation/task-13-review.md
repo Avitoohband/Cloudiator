@@ -367,3 +367,66 @@ Range `2bfac50..b54d361`: `427c426` (feature) and `b54d361` ([Task 13 report](ta
 - **Test gaps:** the summary-timed ring path without a log; a positive check of the fighter's rewards line; `forgetLeft` driven through the real world effect.
 - **Report nits:** small inaccuracies in the Task 13 report.
 - **File size:** `GameViewport.tsx` and `camp-scene.ts` keep growing.
+
+## Final whole-branch review and fix wave
+
+Range `6f118cc..b54d361` (28 commits), reviewed on the most capable model. **Verdict: ready to merge, with no Critical or Important issues.**
+
+**What it confirmed across checkpoints:**
+- **Data and privacy:**
+  - M13 is minimal and correct;
+  - the gateway split cleanly separates owner reads from public reads;
+  - `useGameState` is one honest source of state;
+  - no owner-only value reaches a visitor anywhere.
+- **Shell and scenes:**
+  - keyboard and focus are coherent across the rail, panels, cards, the creation dialog and scenes;
+  - scenes are history entries, and their WebGL contexts are released;
+  - the ring schedule no longer depends on log arrival order.
+- **Release:** every fixture hook is gated.
+
+**Controller ruling:** one final fix wave (`30257f1`, [report](task-13-final-fix-report.md)) landed six of its Minors before the public launch:
+1. Scene and deep-link views are keyed by account, so a previous owner's rewards never outlive the session.
+2. A visitor whose public reads are refused sees "Connection lost" instead of a silent empty camp.
+3. A refused stored session tries one `refreshSession()` before the local sign-out.
+4. The fixture gateway import is guarded by the build constant. The 457 KB sample chunk is gone from `out/`, and `verify:static` pins it.
+5. A tab return makes one owner read, not two.
+6. Live read failures say "cannot be loaded right now". A malformed scene or replay id shows not-found without a read.
+
+**Scoped re-review:** all six ADDRESSED, no new breakage.
+
+**Fix-wave evidence:**
+- unit tests 995/995;
+- `verify:static` clean on `out/` and on `.next/browser-test` (89 assets each);
+- development browser suite 394 passed, 22 skipped;
+- production gate (repo config) 16 passed.
+
+**Carried to later tasks (final triage):**
+- **Task 23 (release, accessibility, capacity):**
+  - **Hardening:**
+    - revoke `anon` MAINTAIN on the 8 M01 owner tables and widen `anonWritable` (a migration, before the Task 24 launch);
+    - the flaky `arena.test.ts:642` timing test and the coordinator race;
+    - a server "published slot" signal to replace the five-minute grace.
+  - **Read volume and egress:**
+    - measure per-viewer egress, with the world and owner re-reads on each revision change as the main terms;
+    - extra standings and profile reads;
+    - `/replay/` deep-link world reads;
+    - an unbounded tournament log cache;
+    - the camp rendering under an opaque scene;
+    - multi-league ring arrival order;
+    - a failed-log idle ring.
+  - **Interaction and focus:**
+    - focus falling to `body` in a few places;
+    - the dead skip link;
+    - the two "bout ended" definitions;
+    - the double-open history race;
+    - a scene remount on a viewer change;
+    - a stale-closure race after a refresh;
+    - the "last known camp" wording when no world is shown.
+  - **Test gaps:** in-progress replay, 360 px scene, expiry and account-switch, narrow-window and positive-rewards tests.
+- **Task 24, Avi's product decisions:**
+  - the creation dialog reopens on every visit and over a shared-link scene;
+  - "Sign out" signs out all devices;
+  - an Arena-entrant click opens the bout card;
+  - My gladiator opens after creation instead of a welcome toast;
+  - creation happens only after sign-in.
+- **Task 18:** the Marketplace menu entry, its panel and its `anon` listing grants.

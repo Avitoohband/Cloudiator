@@ -1,12 +1,18 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
-import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
+import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { seasonAt } from '../../supabase/functions/_shared/domain/season.ts';
+import { isTournamentSlot, tournamentOutcomes } from '../../supabase/functions/_shared/domain/tournament.ts';
+import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
+import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 
-// Task 21.1: closing a season in the database. Each test seeds a season's private rating rows by SQL for real characters
-// and calls private.close_season(season, now) directly as the database owner. Task 21.2 wires the close into phase 2 of
-// the slot boundary.
+// Task 21.1: closing a season in the database. Each test of the first block seeds a season's private rating rows by SQL for
+// real characters and calls private.close_season(season, now) directly as the database owner. Task 21.2 (the second block)
+// closes seasons through real slot boundaries: phase 2, private.boundary_close_season.
 const commands = createDatabase(admin);
 const MAX = Number.MAX_SAFE_INTEGER;
 const SEASON_MS = RULES_V1.seasons.durationMs;
@@ -34,9 +40,10 @@ async function rate(f: Fighter, league: League, counters: Counters = {}, season 
   await sql`insert into private.arena_ratings(gladiator_id,league,season_index,rating,human_wins,human_losses)
     values(${f.gid},${league},${season},${counters.rating ?? 1000},${counters.wins ?? 0},${counters.losses ?? 0})`;
 }
-/** A season row with the launch-epoch-0 bounds of seasonAt (Task 21.2): 504 slots of 80 minutes. */
+/** A season row with seasonAt's launch-epoch-0 bounds (504 slots of 80 minutes), as boundary phase 2 writes it. */
 async function openSeason(index = 0) {
-  await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms) values(${index},${index * SEASON_MS},${(index + 1) * SEASON_MS})`;
+  const season = seasonAt(index * RULES_V1.seasons.durationSlots, 0);
+  await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms) values(${season.index},${season.startsAtMs},${season.endsAtMs})`;
 }
 async function close(season = 0, now = Date.now()): Promise<number> {
   return (await sql`select private.close_season(${season},${now}) as awards`)[0].awards;
@@ -363,6 +370,9 @@ describe('closing a season', () => {
     await expect(sql`update public.seasons set closed_at_ms=closed_at_ms+1 where season_index=0`).rejects.toThrow('immutable season');
     await expect(sql`update public.seasons set closed_at_ms=null where season_index=0`).rejects.toThrow('immutable season');
     await expect(sql`update public.seasons set starts_at_ms=1,ends_at_ms=${SEASON_MS + 1} where season_index=1`).rejects.toThrow('immutable season');
+    // The bounds clause alone: a valid first close (null → value) that also moves the bounds is still refused.
+    await expect(sql`update public.seasons set closed_at_ms=1,starts_at_ms=1,ends_at_ms=${SEASON_MS + 1} where season_index=1`)
+      .rejects.toThrow('immutable season');
     await expect(sql`delete from public.seasons where season_index=1`).rejects.toThrow('immutable season');
     await sql`update public.seasons set closed_at_ms=1 where season_index=1`;
     await expect(sql`update public.seasons set closed_at_ms=2 where season_index=1`).rejects.toThrow('immutable season');
@@ -419,7 +429,8 @@ describe('closing a season', () => {
       expect((await client.from('season_standings').delete().eq('gladiator_id', a.gid)).error).not.toBeNull();
       expect((await client.from('season_standings').insert({ season_index: 1, league: 'gold', rank: 1, gladiator_id: a.gid, name: 'Forged',
         rating: 1, human_wins: 0, human_losses: 0, promoted: false, inactive: true, reward_eligible: false })).error).not.toBeNull();
-      // Private awards and the close itself are unreachable.
+      // Exposure checks only, not privilege proof: the Data API serves only the public schema (supabase/config.toml), and no
+      // public close_season exists. The catalog checks below carry the privilege proof.
       expect((await client.schema('private').from('season_awards').select('*')).error).not.toBeNull();
       expect((await client.rpc('close_season', { season: 1, now_ms: now })).error).not.toBeNull();
       expect((await client.schema('private').rpc('close_season', { season: 1, now_ms: now })).error).not.toBeNull();
@@ -443,9 +454,12 @@ describe('closing a season', () => {
       has_function_privilege('anon',p.oid,'EXECUTE') as anon, has_function_privilege('authenticated',p.oid,'EXECUTE') as player,
       has_function_privilege('service_role',p.oid,'EXECUTE') as backend
       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='private' and p.proname in ('season_rules','guard_season','close_season') order by p.proname`;
-    expect(functions.map(r => ({ ...r }))).toEqual(['close_season', 'guard_season', 'season_rules'].map(proname =>
+      where n.nspname='private' and p.proname in ('season_rules','guard_season','close_season','boundary_close_season') order by p.proname`;
+    expect(functions.map(r => ({ ...r }))).toEqual(['boundary_close_season', 'close_season', 'guard_season', 'season_rules'].map(proname =>
       ({ proname, prosecdef: false, proconfig: ['search_path=""'], anon: false, player: false, backend: true })));
+    // Task 21.2: phase 2 writes, so it is a volatile PL/pgSQL function (Task 7's stub was stable SQL).
+    expect((await sql`select l.lanname as language, p.provolatile as volatility from pg_proc p join pg_language l on l.oid=p.prolang
+      where p.oid='private.boundary_close_season(bigint)'::regprocedure`).map(r => ({ ...r }))).toEqual([{ language: 'plpgsql', volatility: 'v' }]);
     // The worker coordinates boundaries as service_role, so a close must succeed in that role: archive, award, receipt,
     // ledger, wallet, the season row and (made immediate here) the deferred prestige projection. Rolled back afterwards.
     await rate(a, 'silver', { rating: 1000, ...QUALIFIED }, 1);
@@ -463,4 +477,405 @@ describe('closing a season', () => {
     expect((await sql`select closed_at_ms from public.seasons where season_index=1`)[0].closed_at_ms).toBeNull();
     expect((await sql`select count(*)::int as n from private.season_awards where season_index=1`)[0].n).toBe(0);
   });
+});
+
+// ===== Task 21.2: the close at slot-boundary phase 2, through real boundaries (helpers in the style of arena.test.ts) =====
+const SLOT = RULES_V1.clock.slotMs;
+const worker = createWorkerDatabase(admin);
+type Outcome = { ok: boolean; code?: string; [key: string]: unknown };
+async function rpc<T = Outcome>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  const { data, error } = await admin.rpc(name, args);
+  if (error) throw new Error(`${name}: ${error.message}`);
+  return data as T;
+}
+type Choices = { morning: unknown; afternoon: unknown; evening: unknown };
+const ARENA: Choices = { morning: { kind: 'arena' }, afternoon: { kind: 'arena' }, evening: { kind: 'arena' } };
+const TRAINING: Choices = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } };
+
+// Operator-only world controls for the isolated local test database (as arena.test.ts): the coordinator has published
+// `published`, no boundary row exists, rules v1 is active and the scheduler is off. resetIdentity ran before.
+async function resetBoundaries(published: number) {
+  await sql`truncate private.boundaries, private.boundary_work, private.dispatch_log`;
+  await sql`update private.coordinator set published_slot=${published}, lease_token=null, lease_until_ms=0, last_error=null,
+    last_failed_slot=null where singleton`;
+  await sql`update private.rules_versions set active=false where version<>'v1'`;
+  await sql`delete from private.rules_versions where version<>'v1'`;
+  await sql`update private.rules_versions set active=true where version='v1'`;
+  await sql`update private.scheduler set enabled=false where singleton`;
+}
+/**
+ * Real creation, then the operator places the character at a historical first slot (as arena.test.ts does): its checkpoint
+ * just before `firstSlot`, its schedule, its automatic tournament entry and its earned points (the starter build allocates
+ * 10; 105 places it in Silver at its next boundary).
+ */
+async function player(options: { firstSlot: number; schedule?: Choices; earned?: number; optIn?: boolean }): Promise<Fighter> {
+  const owner = await account(), name = 'Season ' + randomUUID().slice(0, 8);
+  const created = await commands.createGladiator({ userId: owner.id }, creation(name));
+  if (!created.ok) throw Error('creation failed');
+  const gid = created.value.gladiatorId, schedule = options.schedule ?? ARENA, earned = options.earned ?? 10;
+  const createdAt = (options.firstSlot - 1) * SLOT + 1;
+  await sql`update public.gladiators set created_at_ms=${createdAt},orientation_end_ms=${options.firstSlot * SLOT},
+    processed_slot_index=${options.firstSlot - 1},earned_points=${earned},unspent_points=${earned - 10},
+    tournament_opt_in=${options.optIn ?? false} where id=${gid}`;
+  await sql`update public.schedules set schedule=${sql.json(schedule as never)} where gladiator_id=${gid}`;
+  for (const phase of ['morning', 'afternoon', 'evening'] as const) {
+    await sql`update public.schedule_revisions set received_at_ms=${createdAt},effective_slot_index=${options.firstSlot},
+      choice=${sql.json(schedule[phase] as never)} where gladiator_id=${gid} and phase=${phase}`;
+  }
+  return { ...owner, name, gid };
+}
+/** `count` placed characters in gladiator id order. */
+const players = async (count: number, options: Parameters<typeof player>[0]) =>
+  (await Promise.all(Array.from({ length: count }, () => player(options)))).sort((p, q) => (p.gid < q.gid ? -1 : 1));
+
+async function coordinatorLease() {
+  const token = randomUUID();
+  await sql`update private.coordinator set lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
+  return token;
+}
+const advance = (target: number, token: string) => rpc('advance_boundary', { target_slot: target, coordinator_token: token });
+const claim = (kind: string, limit = 20) => rpc<JobLease[]>('claim_jobs', { worker_id: randomUUID(), kind, batch_limit: limit });
+const complete = (job: JobLease, result: unknown) => rpc('complete_job', { job_id: job.id, lease_token: job.token, result });
+async function completePreparations() {
+  for (let jobs = await claim('prepare'); jobs.length; jobs = await claim('prepare')) {
+    for (const job of jobs) expect(await complete(job, prepareActivityV1(job.snapshot as PreparationInput))).toMatchObject({ ok: true });
+  }
+}
+/** Runs boundary `target` to its end with canonical preparation and pairing; returns the last report. */
+async function runBoundary(target: number, token: string) {
+  let report = await advance(target, token);
+  if (report.wait === 'preparation') {
+    await completePreparations();
+    report = await advance(target, token);
+  }
+  if (report.wait === 'pairing') {
+    for (const job of await claim('pair')) expect(await complete(job, DEFAULT_EXECUTORS.v1.pair!(job))).toMatchObject({ ok: true });
+    report = await advance(target, token);
+  }
+  return report;
+}
+/** Every due simulation (Arena battles, and tournament bouts through their fenced read) and every reveal. */
+async function simulateAndReveal() {
+  for (let jobs = await claim('simulation', 5); jobs.length; jobs = await claim('simulation', 5)) {
+    for (const job of jobs) expect(await complete(job, await DEFAULT_EXECUTORS.v1.simulation!(job, { database: worker }))).toMatchObject({ ok: true });
+  }
+  for (let jobs = await claim('reveal'); jobs.length; jobs = await claim('reveal')) {
+    for (const job of jobs) expect(await complete(job, {})).toMatchObject({ ok: true });
+  }
+}
+type Settled = { ok: boolean; code?: string; newGrants?: number };
+const settle = async (job: JobLease) => await worker.settle(job.activityId!, job.token) as Settled;
+/** Claims every due settlement and settles each activity through the real worker RPC adapter, one at a time. */
+async function settleAll() {
+  const settled: Settled[] = [];
+  for (let jobs = await claim('settlement'); jobs.length; jobs = await claim('settlement')) {
+    for (const job of jobs) settled.push(await settle(job));
+  }
+  return settled;
+}
+
+type SeasonRow = { index: number; starts: number; ends: number; closed: number | null };
+const seasonRows = async () => (await sql`select season_index::int as index, starts_at_ms::float8 as starts, ends_at_ms::float8 as ends,
+  closed_at_ms::float8 as closed from public.seasons order by season_index`).map(r => ({ ...r }) as SeasonRow);
+/** The public.seasons row that seasonAt(slot, 0) describes. */
+function seasonOf(slot: number, closed: number | null = null): SeasonRow {
+  const season = seasonAt(slot, 0);
+  return { index: season.index, starts: season.startsAtMs, ends: season.endsAtMs, closed };
+}
+type RatingRow = { league: League; season: number; rating: number; wins: number; losses: number };
+const ratingsOf = async (f: Fighter) => (await sql`select league, season_index::int as season, rating::int as rating,
+  human_wins::int as wins, human_losses::int as losses from private.arena_ratings where gladiator_id=${f.gid}
+  order by season_index, array_position(array['bronze','silver','gold','champion'],league)`).map(r => ({ ...r }) as RatingRow);
+const cacheOf = async (f: Fighter) => ({ ...(await sql`select league, rating::int as rating from public.gladiators where id=${f.gid}`)[0] });
+const boundaryOf = async (slot: number) => (await sql`select opened_at_ms::float8 as opened, completed_at_ms::float8 as completed
+  from private.boundaries where slot_index=${slot}`)[0];
+const definitionOf = async (signature: string): Promise<string> =>
+  (await sql`select pg_get_functiondef(${signature}::regprocedure) as definition`)[0].definition;
+/** Every row a close writes: season rows, the archive, awards, season-award receipts and ledger rows, and prestige. */
+async function closeState() {
+  return {
+    seasons: await seasonRows(),
+    archive: (await sql`select season_index::int, league, rank::int, gladiator_id::text, name, rating::text, human_wins::text,
+      human_losses::text, promoted, inactive, reward_eligible, award_place from public.season_standings
+      order by season_index, league, rank`).map(r => ({ ...r })),
+    awards: (await sql`select season_index::int, gladiator_id::text, league, place, money::text, renown::text, title, badge,
+      receipt_id::text, awarded_at_ms::text from private.season_awards order by season_index, gladiator_id`).map(r => ({ ...r })),
+    receipts: (await sql`select receipt_id::text, owner_id::text, request, result from public.operation_receipts
+      where request->>'kind'='season-award' order by receipt_id`).map(r => ({ ...r })),
+    ledger: (await sql`select receipt_id::text, money_delta::text, renown_delta::text from public.wallet_ledger
+      where reason='season' order by receipt_id`).map(r => ({ ...r })),
+    prestige: (await sql`select gladiator_id::text, prestige from public.public_profiles order by gladiator_id`).map(r => ({ ...r })),
+  };
+}
+
+describe('closing each season at its slot boundary (phase 2)', () => {
+  it('creates each season row at its first boundary with seasonAt bounds', async () => {
+    await resetBoundaries(502);
+    // Rollback-only operator transaction: phase 2 under a nonzero epoch creates no season before the epoch, then
+    // seasonAt(700, 10)'s row.
+    const rollback = new Error('rollback');
+    await expect(sql.begin(async tx => {
+      await tx`alter table private.season_epoch disable trigger guard_frozen`;
+      await tx`update private.season_epoch set epoch_slot=10`;
+      expect((await tx`select private.boundary_close_season(9) as wait`)[0].wait).toBeNull();
+      expect((await tx`select count(*)::int as n from public.seasons`)[0].n).toBe(0);
+      expect((await tx`select private.boundary_close_season(700) as wait`)[0].wait).toBeNull();
+      const season = seasonAt(700, 10);
+      expect((await tx`select season_index::int as index, starts_at_ms::float8 as starts, ends_at_ms::float8 as ends,
+        closed_at_ms as closed from public.seasons`).map(r => ({ ...r })))
+        .toEqual([{ index: season.index, starts: season.startsAtMs, ends: season.endsAtMs, closed: null }]);
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect(await seasonRows()).toEqual([]);
+    // Real boundaries at epoch 0: boundary 503 opens season 0 before phase 4 creates its rating row.
+    const [trainee] = await players(1, { firstSlot: 503, schedule: TRAINING });
+    const token = await coordinatorLease();
+    expect(await runBoundary(503, token)).toMatchObject({ status: 'complete' });
+    expect(await seasonRows()).toEqual([seasonOf(503)]);
+    expect(await ratingsOf(trainee)).toEqual([{ league: 'bronze', season: 0, rating: 1000, wins: 0, losses: 0 }]);
+    expect(await settleAll()).toEqual([expect.objectContaining({ ok: true, newGrants: 1 })]);
+    // Boundary 504 closes season 0 at database time inside its own run and opens season 1.
+    expect(await advance(504, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
+    const rows = await seasonRows();
+    expect(rows).toEqual([seasonOf(503, rows[0].closed), seasonOf(504)]);
+    expect(rows[0].closed).toBeGreaterThanOrEqual((await boundaryOf(504)).opened);
+    expect(await runBoundary(504, token)).toMatchObject({ status: 'complete' });
+    expect(rows[0].closed).toBeLessThanOrEqual((await boundaryOf(504)).completed);
+    expect(await seasonRows()).toEqual(rows);
+    // A later boundary of season 1 adds no row and changes none.
+    expect(await settleAll()).toEqual([expect.objectContaining({ ok: true, newGrants: 1 })]);
+    expect(await runBoundary(505, token)).toMatchObject({ status: 'complete' });
+    expect(await seasonRows()).toEqual(rows);
+  }, 60_000);
+
+  it('counts a human bout started in slot 503 in season 0 and waits to close until it settles at 504', async () => {
+    await resetBoundaries(502);
+    const [a, b] = await players(2, { firstSlot: 503 });
+    const token = await coordinatorLease();
+    expect(await runBoundary(503, token)).toMatchObject({ status: 'complete' });
+    await simulateAndReveal();
+    // The bout started in slot 503, the last slot of season 0, so it belongs to season 0.
+    expect((await sql`select kind, season_index::int as season, slot_index::int as slot from private.arena_assignments`).map(r => ({ ...r })))
+      .toEqual([{ kind: 'human', season: 0, slot: 503 }]);
+    // Boundary 504 holds at phase 1 until both sides' minute-80 settlement: season 0 stays open and unarchived.
+    expect(await advance(504, token)).toMatchObject({ phase: 1, status: 'waiting', wait: 'settlement' });
+    const [first] = await claim('settlement', 1);
+    expect(await settle(first)).toMatchObject({ ok: true, newGrants: 1 });
+    expect(await advance(504, token)).toMatchObject({ phase: 1, status: 'waiting', wait: 'settlement' });
+    expect(await seasonRows()).toEqual([seasonOf(503)]);
+    expect(await archive(0)).toEqual([]);
+    expect(await settleAll()).toEqual([expect.objectContaining({ ok: true, newGrants: 1 })]);
+    const [winner, loser] = (await ratingsOf(a))[0].wins === 1 ? [a, b] : [b, a];
+    expect(await ratingsOf(winner)).toEqual([{ league: 'bronze', season: 0, rating: 1012, wins: 1, losses: 0 }]);
+    expect(await ratingsOf(loser)).toEqual([{ league: 'bronze', season: 0, rating: 988, wins: 0, losses: 1 }]);
+    // Settled: boundary 504 closes season 0 with the bout counted. One human bout is below the minimum, so nobody is paid.
+    expect(await advance(504, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
+    expect((await seasonRows()).map(r => [r.index, r.closed === null])).toEqual([[0, false], [1, true]]);
+    expect(await archive(0)).toEqual([entry('bronze', 1, winner, { rating: 1012, wins: 1, losses: 0 }),
+      entry('bronze', 2, loser, { rating: 988, wins: 0, losses: 1 })]);
+    expect(await awards(0)).toEqual([]);
+  }, 60_000);
+
+  it('closes season 0 at boundary 504 before phase 4 starts season 1 ratings at 1000', async () => {
+    await resetBoundaries(502);
+    const [a, b] = await players(2, { firstSlot: 503 });
+    const token = await coordinatorLease();
+    expect(await runBoundary(503, token)).toMatchObject({ status: 'complete' });
+    await simulateAndReveal();
+    await settleAll();
+    const seasonZero = await Promise.all([a, b].map(ratingsOf));
+    expect(seasonZero.map(rows => rows.map(r => r.season))).toEqual([[0], [0]]);
+    expect(seasonZero.map(([r]) => r.rating).sort((x, y) => x - y)).toEqual([988, 1012]);
+    // Phases 1-3 ran: season 0 is closed and archived from its settled rows, and no season 1 rating row exists yet. The
+    // character cache still holds the season 0 rating.
+    expect(await advance(504, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
+    expect((await seasonRows()).map(r => [r.index, r.closed === null])).toEqual([[0, false], [1, true]]);
+    const archived = await archive(0);
+    expect(archived.map(r => [r.gid, r.rating, r.wins, r.losses]).sort())
+      .toEqual(seasonZero.map(([r], i) => [[a, b][i].gid, r.rating, r.wins, r.losses]).sort());
+    expect(await sql`select count(*)::int as n from private.arena_ratings where season_index=1`).toEqual([{ n: 0 }]);
+    expect(await Promise.all([a, b].map(cacheOf))).toEqual(seasonZero.map(([r]) => ({ league: 'bronze', rating: r.rating })));
+    // Phase 4 then starts season 1 at 1000; slot 504's Arena entries start from it and are paired in season 1.
+    expect(await runBoundary(504, token)).toMatchObject({ status: 'complete' });
+    for (const [i, f] of [a, b].entries()) {
+      expect(await ratingsOf(f)).toEqual([...seasonZero[i], { league: 'bronze', season: 1, rating: 1000, wins: 0, losses: 0 }]);
+      expect(await cacheOf(f)).toEqual({ league: 'bronze', rating: 1000 });
+      expect((await sql`select s.snapshot->'starting'->'rating' as rating from private.activity_snapshots s
+        join public.activities x on x.id=s.activity_id where x.gladiator_id=${f.gid} and x.slot_index=504`)[0].rating).toBe(1000);
+    }
+    expect((await sql`select distinct season_index::int as season from private.arena_assignments where slot_index=504`).map(r => r.season)).toEqual([1]);
+    // Season 0 stays frozen with its archive.
+    await expect(sql`update private.arena_ratings set rating=rating+1 where gladiator_id=${a.gid} and season_index=0`)
+      .rejects.toThrow('immutable arena rating');
+    expect(await archive(0)).toEqual(archived);
+  }, 60_000);
+
+  it('places a gladiator promoted at boundary 504 in the new league only in season 1', async () => {
+    await resetBoundaries(502);
+    const [a, b] = await players(2, { firstSlot: 503 });
+    const token = await coordinatorLease();
+    expect(await runBoundary(503, token)).toMatchObject({ status: 'complete' });
+    // As if after four earlier human bouts this season, so the slot-503 bout is each one's fifth. The operator banks a's
+    // points only after boundary 503's phase 4, so a is promoted to Silver at boundary 504, after its last season 0 bout.
+    await sql`update private.arena_ratings set human_wins=2,human_losses=2 where season_index=0`;
+    await sql`update public.gladiators set earned_points=105,unspent_points=95 where id=${a.gid}`;
+    await simulateAndReveal();
+    await settleAll();
+    const [winner, loser] = (await ratingsOf(a))[0].wins === 3 ? [a, b] : [b, a];
+    expect(await advance(504, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
+    // Season 0 holds only Bronze rows: a is not promoted there and is rewarded in Bronze, its highest qualifying league.
+    const archived = [entry('bronze', 1, winner, { rating: 1012, wins: 3, losses: 2 }, { eligible: true, place: 1 }),
+      entry('bronze', 2, loser, { rating: 988, wins: 2, losses: 3 }, { eligible: true, place: 2 })];
+    expect(await archive(0)).toEqual(archived);
+    expect((await awards(0)).map(x => [x.gid, x.league, x.place])).toEqual([[winner.gid, 'bronze', 1], [loser.gid, 'bronze', 2]]);
+    expect(await runBoundary(504, token)).toMatchObject({ status: 'complete' });
+    // Season 1: a starts in Silver at 1000 and has no Bronze row; b stays in Bronze.
+    expect((await ratingsOf(a)).filter(r => r.season === 1)).toEqual([{ league: 'silver', season: 1, rating: 1000, wins: 0, losses: 0 }]);
+    expect((await ratingsOf(b)).filter(r => r.season === 1)).toEqual([{ league: 'bronze', season: 1, rating: 1000, wins: 0, losses: 0 }]);
+    expect(await cacheOf(a)).toEqual({ league: 'silver', rating: 1000 });
+    // The season 0 archive and a's one award stay in Bronze; the rest of boundary 504 paid nothing more.
+    expect(await archive(0)).toEqual(archived);
+    const place = a === winner ? 1 : 2, prize = PLACES[place - 1];
+    expect((await receiptsOf(a)).map(r => r.result)).toEqual([{ seasonIndex: 0, league: 'bronze', place, money: prize.money,
+      renown: prize.renown, title: prize.title, badge: prize.badge }]);
+    expect(await prestigeOf(a)).toEqual([{ seasonIndex: 0, league: 'bronze', place, badge: prize.badge, title: prize.title }]);
+  }, 60_000);
+
+  it('closes a season whose final slot held a tournament only after every entrant settled', async () => {
+    const T = 301; // Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot
+    expect(isTournamentSlot(slotAt(T * SLOT))).toBe(true);
+    const definition = await definitionOf('private.season_index(bigint)');
+    // Test-only stand-in, restored byte for byte below: season 0 ends with slot 301, so boundary 302 starts season 1.
+    await sql.unsafe(`create or replace function private.season_index(slot bigint) returns bigint language sql stable security invoker
+      set search_path='' as $stand$ select (slot-e.epoch_slot+202)/504 from private.season_epoch e where e.singleton and slot>=e.epoch_slot $stand$`);
+    try {
+      expect(await sql`select private.season_index(${T})::int as last, private.season_index(${T + 1})::int as next`).toEqual([{ last: 0, next: 1 }]);
+      await resetBoundaries(T - 1);
+      const entrants = await players(4, { firstSlot: T, optIn: true });
+      const token = await coordinatorLease();
+      expect(await runBoundary(T, token)).toMatchObject({ status: 'complete' });
+      const tournaments = (await sql`select id, season_index::int as season from private.tournaments`).map(r => ({ ...r }));
+      expect(tournaments).toEqual([{ id: expect.any(String), season: 0 }]);
+      await simulateAndReveal();
+      // Boundary 302 holds at phase 1 until every entrant's minute-80 settlement: season 0 stays open and unarchived.
+      expect(await advance(T + 1, token)).toMatchObject({ phase: 1, status: 'waiting', wait: 'settlement' });
+      const [first] = await claim('settlement', 1);
+      expect(await settle(first)).toMatchObject({ ok: true, newGrants: 1 });
+      expect(await advance(T + 1, token)).toMatchObject({ phase: 1, status: 'waiting', wait: 'settlement' });
+      expect((await seasonRows()).map(r => [r.index, r.closed])).toEqual([[0, null]]);
+      expect(await archive(0)).toEqual([]);
+      expect(await settleAll()).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ ok: true, newGrants: 1 })));
+      // Each settlement credited season 0, the season of the tournament's start.
+      const graph: TournamentGraph = (await sql`select private.tournament_graph(${tournaments[0].id}) as graph`)[0].graph;
+      const outcomes = tournamentOutcomes(graph);
+      expect(outcomes.map(o => o.gladiatorId).sort()).toEqual(entrants.map(f => f.gid));
+      expect(outcomes.reduce((sum, o) => sum + o.wins, 0)).toBe(3);
+      for (const o of outcomes) {
+        expect(await ratingsOf(entrants.find(f => f.gid === o.gladiatorId)!))
+          .toEqual([{ league: 'bronze', season: 0, rating: o.ratingAfter, wins: o.wins, losses: o.losses }]);
+      }
+      // Then boundary 302 closes season 0 after the last settlement, archiving the tournament's results.
+      expect(await advance(T + 1, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
+      const [seasonZero] = await seasonRows();
+      const [{ settled }] = await sql`select max(settled_at_ms)::float8 as settled from public.activities where slot_index=${T}`;
+      expect(seasonZero.closed).toBeGreaterThanOrEqual(settled);
+      const archived = new Map((await archive(0)).map(r => [r.gid, r]));
+      expect(archived.size).toBe(4);
+      for (const o of outcomes) {
+        expect(archived.get(o.gladiatorId)).toMatchObject({ league: 'bronze', rating: o.ratingAfter, wins: o.wins, losses: o.losses });
+      }
+    } finally {
+      await sql.unsafe(definition);
+    }
+    expect(await definitionOf('private.season_index(bigint)')).toBe(definition);
+  }, 120_000);
+
+  it('closes the season at the next boundary run when coordinate_work skips boundary 504', async () => {
+    // Operator-placed world: season 0 is open with rating rows, the coordinator has published slot 503, and no character is
+    // due at boundary 504: both checkpoints are at slot 509, so coordinate_work skips to boundary 510.
+    await resetBoundaries(503);
+    const [a, b] = await players(2, { firstSlot: 510, schedule: TRAINING });
+    await openSeason(0);
+    await rate(a, 'bronze', { rating: 1100, ...QUALIFIED });
+    await rate(b, 'bronze', { rating: 1000, wins: 1, losses: 0 });
+    // The worker's call, as service_role.
+    expect(await rpc('coordinate_work')).toMatchObject({ ok: true, publishedSlot: 509,
+      boundaries: [{ ok: true, slotIndex: 510, phase: 4, status: 'waiting', wait: 'preparation' }] });
+    expect((await sql`select slot_index::int as slot from private.boundaries`).map(r => r.slot)).toEqual([510]);
+    const rows = await seasonRows();
+    expect(rows[0].closed).not.toBeNull();
+    expect(rows).toEqual([seasonOf(503, rows[0].closed), seasonOf(510)]);
+    expect(await archive(0)).toEqual([entry('bronze', 1, a, { rating: 1100, ...QUALIFIED }, { eligible: true, place: 1 }),
+      entry('bronze', 2, b, { rating: 1000, wins: 1, losses: 0 })]);
+    expect((await awards(0)).map(x => [x.gid, x.place])).toEqual([[a.gid, 1]]);
+  }, 60_000);
+
+  it('rolls back a failed close entirely and pays once on the retry', async () => {
+    await resetBoundaries(503);
+    const trio = await players(3, { firstSlot: 504, schedule: TRAINING });
+    await openSeason(0);
+    for (const [i, f] of trio.entries()) await rate(f, 'bronze', { rating: 1200 - i * 100, ...QUALIFIED });
+    const before = { state: await closeState(), wallets: await Promise.all(trio.map(walletOf)) };
+    // Test-only failure, always dropped below: the close's second award row raises after the first award was fully paid.
+    await sql.unsafe(`create function private.test_fail_second_award() returns trigger language plpgsql set search_path='' as $fail$
+      begin
+        if (select count(*) from private.season_awards x where x.season_index=new.season_index)>=2 then raise exception 'injected close failure'; end if;
+        return new;
+      end $fail$`);
+    try {
+      await sql.unsafe(`create trigger test_fail_second_award after insert on private.season_awards for each row
+        execute function private.test_fail_second_award()`);
+      expect(await rpc('coordinate_work')).toMatchObject({ ok: true, publishedSlot: 503,
+        boundaries: [{ ok: false, code: 'boundary-failed', slotIndex: 504, sqlstate: 'P0001' }] });
+      // Nothing of the boundary or the close remains: season 0 open, no season 1, archive, award, receipt, ledger row or credit.
+      expect(await closeState()).toEqual(before.state);
+      expect(await Promise.all(trio.map(walletOf))).toEqual(before.wallets);
+      expect(await sql`select count(*)::int as n from private.boundaries`).toEqual([{ n: 0 }]);
+      expect(await sql`select last_error, last_failed_slot::int as slot from private.coordinator`).toEqual([{ last_error: 'P0001', slot: 504 }]);
+    } finally {
+      await sql`drop trigger if exists test_fail_second_award on private.season_awards`;
+      await sql`drop function if exists private.test_fail_second_award()`;
+    }
+    // The next coordination retries the boundary: the close pays each award once.
+    expect(await rpc('coordinate_work')).toMatchObject({ ok: true, publishedSlot: 503,
+      boundaries: [{ ok: true, slotIndex: 504, phase: 4, status: 'waiting', wait: 'preparation' }] });
+    expect(await places()).toEqual(trio.map((f, i) => ['bronze', i + 1, f.gid]));
+    for (const [i, f] of trio.entries()) {
+      expect(await walletOf(f)).toEqual({ money: before.wallets[i].money + PLACES[i].money, renown: before.wallets[i].renown + PLACES[i].renown });
+      expect(await receiptsOf(f)).toHaveLength(1);
+      expect(await ledgerOf(f)).toHaveLength(1);
+    }
+    const paid = { state: await closeState(), wallets: await Promise.all(trio.map(walletOf)) };
+    expect(paid.state.seasons.map(r => [r.index, r.closed === null])).toEqual([[0, false], [1, true]]);
+    // Finishing boundary 504 (and reaching 505, which waits for slot 504's settlements) pays nothing more.
+    await completePreparations();
+    const finished = await rpc<{ boundaries: Outcome[] }>('coordinate_work');
+    expect(finished.boundaries[0]).toMatchObject({ ok: true, slotIndex: 504, status: 'complete' });
+    expect({ state: await closeState(), wallets: await Promise.all(trio.map(walletOf)) }).toEqual(paid);
+  }, 60_000);
+
+  it('replays a completed boundary with no new awards', async () => {
+    await resetBoundaries(503);
+    const trio = await players(3, { firstSlot: 504, schedule: TRAINING });
+    await openSeason(0);
+    for (const [i, f] of trio.entries()) await rate(f, 'bronze', { rating: 1200 - i * 100, ...QUALIFIED });
+    const token = await coordinatorLease();
+    expect(await runBoundary(504, token)).toMatchObject({ status: 'complete' });
+    const closed = await closeState();
+    expect(closed.awards).toHaveLength(3);
+    expect(closed.seasons.map(r => [r.index, r.closed === null])).toEqual([[0, false], [1, true]]);
+    // Replaying the completed boundary returns its completion and runs no phase.
+    expect(await advance(504, token)).toMatchObject({ ok: true, slotIndex: 504, phase: 9, status: 'complete', replayed: true });
+    expect(await closeState()).toEqual(closed);
+    // Phase 2 run again as the worker's role: season 0 is already closed, and season 1's row exists.
+    await sql.begin(async tx => {
+      await tx`set local role service_role`;
+      expect((await tx`select private.boundary_close_season(504) as wait`)[0].wait).toBeNull();
+    });
+    expect(await closeState()).toEqual(closed);
+    // The next boundary of season 1 runs phase 2 with nothing to close.
+    await settleAll();
+    expect(await runBoundary(505, token)).toMatchObject({ status: 'complete' });
+    expect(await closeState()).toEqual(closed);
+  }, 60_000);
 });

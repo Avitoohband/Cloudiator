@@ -1,5 +1,79 @@
 # Local identity backend and migrations
 
+## Tasks 21.1 and 21.2: seasons (M15)
+
+M15 is `supabase/migrations/20261018123715_seasons.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull seasons --local --schema public,private --yes` from the tested `supabase/sql/13-seasons.sql`, applied once to a clean
+M01–M14 reset. It covers Tasks 21.1 and 21.2 together; 21.1 had no migration of its own. M01–M14 are unchanged.
+
+It adds 28-day seasons of 504 slots ([plan](../superpowers/plans/2026-10-18-task-21-seasons.md), Decisions 3–6):
+- `public.seasons`, one row per season: its index, start, end (start + 2,419,200,000 ms) and close time. The `guard_season`
+  trigger refuses a delete, keeps the bounds fixed and lets `closed_at_ms` change once, from null to a value.
+- `public.season_standings`, the frozen archive: every rating row of a closed season with its rank, counters, the
+  promoted, inactive and reward-eligible flags, and its award place. It has no foreign key (archives outlive characters), and
+  `guard_frozen` refuses updates and deletes.
+- `private.season_awards`, one award per character and season: the money and renown actually credited, the title, the badge
+  and the receipt. `guard_frozen` protects it, and the deferred `project_changed_character` trigger republishes the
+  character's `public_profiles.prestige`.
+- Grants. `anon` and `authenticated` may SELECT `seasons` and `season_standings` (`player_read … using (true)`), nothing else.
+  `service_role` has select, insert and update on `seasons`, and select and insert on `season_standings` and
+  `season_awards`. `season_awards` is backend-only.
+- New functions: `private.season_rules()`, `private.guard_season()` and `private.close_season(bigint,bigint)`. Replaced:
+  `private.guard_arena_rating()` (a closed season's rating rows are frozen), `private.project_character(uuid)` (prestige)
+  and `private.boundary_close_season(bigint)` (phase 2, now `plpgsql volatile`). `public.arena_standing_reads` gains a last
+  column, `reward_eligible`, and stays `security_invoker`. Only `service_role` may EXECUTE the six functions, because the
+  worker coordinates boundaries as `service_role`.
+
+**Phase 2.** `boundary_close_season(T)` runs under `advance_boundary`'s coordinator and boundary row locks. It returns null
+and does nothing when no epoch covers slot T; phase 4 then waits with `epoch`. Otherwise it samples
+`private.planning_now_ms()` once and closes every open season with an index below `season_index(T)`, in ascending order. It
+then inserts T's own season row with the epoch bounds (`on conflict do nothing`), before phase 4 creates that season's rating
+rows. It always returns null and never holds the phase. It closes by season row, not at "the first boundary of a season", so
+when `coordinate_work` skips a season's first boundary because nobody is due, the next boundary it runs still closes the
+season. Phase 1 has already proven slot T − 1 settled. Settlement is globally ordered, so every Arena and tournament credit
+of the closing season, including a tournament's minute-80 settlement, committed before the close. An error rolls back the
+whole boundary subtransaction, and the next coordination retries it.
+
+The draft needed six completions before commit:
+- It created the `guard_season` trigger on `public.seasons` before `private.guard_season()`. The trigger now follows its
+  function.
+- Its `create or replace view public.arena_standing_reads` had no options. PostgreSQL replaces a view's options on
+  `CREATE OR REPLACE VIEW`, so the view would have lost `security_invoker`. `with (security_invoker=true)` is restored.
+- It only added table grants. Source-equivalent `revoke all … from public, anon, authenticated, service_role` statements now
+  precede them on all three tables. Without them the new public tables would keep the platform's default client privileges.
+- It had no view privileges, so the source's revoke/grant pair for `arena_standing_reads` is added.
+- It omitted every function ACL. The source's revoke/grant pair is appended for the six new or replaced functions.
+- It omitted the backfill (below). The backfill, a provenance header and `notify pgrst` were added.
+
+The draft re-emits no unchanged function: the six functions above are the only ones. Its other triggers reference the
+existing `private.guard_frozen()` and `private.project_changed_character()`.
+
+**Backfill.** M15 inserts a season row for every distinct season already in `private.arena_ratings`, with bounds
+`(epoch + 504 × index) × 4,800,000` ms (as `seasonAt` in `supabase/functions/_shared/domain/season.ts`) and `on conflict do
+nothing`. On a database without ratings, such as a fresh replay or production before Task 24 sets the epoch, it inserts
+nothing. The replay could not exercise it, so it was run separately on the replayed database, verbatim from M15, inside a
+`DO` block that always raises at its end. With ratings in seasons 0, 1, 3 and 7, it created exactly those four rows with the
+epoch-0 bounds. Run again, it added nothing. With the epoch at 10, the bounds followed the epoch.
+
+**Release (Task 24).** M15 needs no worker change: the close runs inside boundary phase 2. On a database whose ratings span
+earlier seasons, the next boundary after M15 closes, archives and awards every backfilled earlier season. Production
+deploys M15 before Task 24 sets the epoch, so nothing is backfilled there, and the first launch boundary creates season 0's
+row. `public_profiles.prestige`, always `[]` before, now holds award objects (`seasonIndex`, `league`, `place`, `badge`,
+`title`). Task 21.3 changes the `PublicProfile.prestige` type from `string[]`; no client reads it before then.
+
+**Retention (Task 22).** Keep `season_standings`, `seasons` and `season_awards` indefinitely (spec §11). A season award
+references its character and its receipt, so removing a character or a receipt must account for the award first.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M15, with no source applied afterwards.
+- The schema fingerprint (1029 lines, M14's coverage) matched the tested source byte for byte. It was identical again after
+  each test run, so the tests' `season_index` stand-in and injected failure trigger were removed. The fingerprint does not
+  record whether a trigger is enabled; a separate check found all 42 `public` and `private` triggers enabled.
+- `npm run test:db` passed **216/216** in eleven files on the replay, with the Edge container's start time unchanged across
+  the run.
+- Lint is empty. Advisors report five INFO unused-index notices, none on the new tables, and no warnings or errors.
+  `migration list --local` shows M01–M15.
+
 ## Task 18.1: marketplace listings (M14)
 
 M14 is `supabase/migrations/20261017144347_market.sql`, generated with CLI 2.120.0 (engine `migra`) by

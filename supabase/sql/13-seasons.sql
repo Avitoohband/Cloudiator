@@ -1,9 +1,15 @@
--- Task 21.1 reapplicable source. Committed M01-M14 are immutable; deploy only the separately generated migration (M15, which
--- Task 21.2 generates for 21.1 and 21.2 together).
--- Seasons (game design §8.3 and §11; plan 2026-10-18-task-21-seasons, Decisions 3-5): the public season rows, the frozen
+-- Tasks 21.1 and 21.2 reapplicable source. Committed M01-M14 are immutable; deploy only the separately generated migration
+-- M15, which covers both.
+-- Seasons (game design §8.3 and §11; plan 2026-10-18-task-21-seasons, Decisions 3-6): the public season rows, the frozen
 -- public standings archive, the private award records with their receipts and ledger rows, prestige on public profiles, the
--- live view's reward eligibility, frozen ratings of a closed season, and private.close_season. Task 21.2 calls the close from
--- boundary phase 2 (private.boundary_close_season stays Task 7's stub until then).
+-- live view's reward eligibility, frozen ratings of a closed season, private.close_season, and boundary phase 2
+-- (private.boundary_close_season), which closes every earlier open season and then opens the boundary's own season row.
+--
+-- Season rows. Phase 2 of a boundary inserts its season's row (bounds from the epoch: slots epoch + 504 × index, times
+-- 4,800,000 ms, as seasonAt in supabase/functions/_shared/domain/season.ts) before phase 4 creates that season's rating rows,
+-- so every season with ratings has a row. The backfill at the end of this source gives the seasons rated before it one.
+-- Phase 2 closes by season row, not by "the first boundary of a season": a boundary that coordinate_work skips (nobody due)
+-- leaves the close to the next boundary that runs.
 --
 -- Ranking. Within one season and league: rating descending, then human wins descending, then fewer human losses, then the
 -- gladiator id (spec 8.3), exactly public.arena_standing_reads' order.
@@ -14,12 +20,18 @@
 -- the lower league's places go to its next eligible rows; a league with fewer eligible rows awards only those places. A row
 -- is promoted when the character holds a higher league row in that season, and inactive when it has no human bout.
 --
--- Lock order of a close (private.close_season): the coordinator row (held by the caller, Task 21.2), then the season row FOR
--- UPDATE, then, for each award in gladiator_id order, that account's advisory lock hashtextextended(owner_id::text,0) (as
--- the boundary phases and every command take it) and then its wallet row. The receipt, ledger and award inserts follow; their
--- foreign keys take KEY SHARE on the gladiator row (and the receipt's auth.users row) while the account lock is held, as a
--- settlement's receipt does. Projection rows come last, through the deferred project_changed_character trigger at commit.
--- The archive insert reads ratings and names before any account lock and locks nothing but its own new rows.
+-- Lock order of a close (private.close_season): the coordinator row and the boundary row (held by advance_boundary, whose
+-- phase 2 calls it), then the season row FOR UPDATE, then, for each award in gladiator_id order, that account's advisory lock
+-- hashtextextended(owner_id::text,0) (as the boundary phases and every command take it) and then its wallet row. The receipt,
+-- ledger and award inserts follow; their foreign keys take KEY SHARE on the gladiator row (and the receipt's auth.users row)
+-- while the account lock is held, as a settlement's receipt does. Projection rows come last, through the deferred
+-- project_changed_character trigger at commit. The archive insert reads ratings and names before any account lock and locks
+-- nothing but its own new rows. Phase 2 samples database time once, after the coordinator lock, and closes the earlier open
+-- seasons in ascending order with it; the new season row is inserted last.
+--
+-- Errors. Any error in a close rolls back the whole boundary subtransaction (coordinate_work keeps only the SQLSTATE), and the
+-- next coordination retries the boundary: no partial archive and no second award. A completed boundary is never rerun, and
+-- a later boundary's phase 2 finds the season closed (close_season returns 0 for it).
 --
 -- No foreign key on the archive. public.season_standings and public.seasons reference nothing: archives outlive everything
 -- (spec §11 keeps season archives and prestige indefinitely), as private.settled_slots does. A foreign key to a character
@@ -34,11 +46,13 @@
 -- Accepted exceptions:
 -- 1. Restated rule constants. private.season_rules() restates RULES_V1.seasons' minimumHumanBouts and placements (a DB test
 --    compares them). The view restates the 5 and the league order, because a visitor's invoker read cannot call a private
---    function; 2419200000 in public.seasons is RULES_V1.seasons.durationMs. A rules version that changes them needs a new
---    source.
+--    function; 2419200000 in public.seasons is RULES_V1.seasons.durationMs; phase 2 and the backfill restate its 504 slots
+--    (durationSlots) of 4800000 ms (clock.slotMs). A rules version that changes them needs a new source.
 -- 2. guard_arena_rating reads the season row without locking it. Locking it would order a rating row before the season row,
 --    against the close's season-row-then-account order, and could deadlock a settlement with the close. The close cannot race
---    a settlement of its own season: Task 21.2 closes only after boundary phase 1 proved every earlier slot settled.
+--    a settlement of its own season: phase 2 runs only after boundary phase 1 proved slot target - 1 settled, and settlement
+--    is globally ordered (settle_activity_core refuses a slot while an earlier one is unsettled), so every Arena and
+--    tournament settlement of the closing season, including a tournament's minute-80 credits, committed before the close.
 begin;
 
 -- One row per season, created by boundary phase 2 (Task 21.2). Bounds are fixed; the row closes once.
@@ -222,14 +236,16 @@ begin
   insert into public.season_standings(season_index,league,rank,gladiator_id,name,rating,human_wins,human_losses,promoted,inactive,
       reward_eligible,award_place)
     with rated as (
-      select r.league,r.gladiator_id,g.name,r.rating,r.human_wins,r.human_losses,r.human_wins+r.human_losses>=minimum as qualifies
+      select r.league,private.league_rank(r.league) as league_order,r.gladiator_id,g.name,r.rating,r.human_wins,r.human_losses,
+        r.human_wins+r.human_losses>=minimum as qualifies
       from private.arena_ratings r join public.gladiators g on g.id=r.gladiator_id where r.season_index=season
     ), flagged as (
+      -- One pass per character (window aggregates): promoted when its highest league this season is above this row's, and
+      -- eligible when this row qualifies and is its highest qualifying league.
       select x.*,
-        exists(select 1 from rated h where h.gladiator_id=x.gladiator_id and private.league_rank(h.league)>private.league_rank(x.league)) as promoted,
-        x.qualifies and not exists(select 1 from rated h where h.gladiator_id=x.gladiator_id and h.qualifies
-          and private.league_rank(h.league)>private.league_rank(x.league)) as eligible
-      from rated x
+        max(x.league_order) over character_rows>x.league_order as promoted,
+        x.qualifies and x.league_order=max(case when x.qualifies then x.league_order end) over character_rows as eligible
+      from rated x window character_rows as (partition by x.gladiator_id)
     ), ranked as (
       select f.*,
         row_number() over (partition by f.league order by f.rating desc,f.human_wins desc,f.human_losses,f.gladiator_id) as standing,
@@ -267,9 +283,35 @@ begin
   return awarded;
 end $$;
 
+-- Boundary phase 2 (Decision 6), replacing Task 7's stub with the same signature. Runs under advance_boundary's coordinator
+-- and boundary row locks. Closes every earlier open season in ascending order at one database time sampled after those
+-- locks, then opens the boundary's own season row (bounds as seasonAt). Never holds the phase: it always returns null, and
+-- without an epoch covering the slot it does nothing (phase 4 then waits with 'epoch').
+create or replace function private.boundary_close_season(target bigint) returns text
+language plpgsql volatile security invoker set search_path='' as $$
+declare current_season bigint:=private.season_index(target); first_slot bigint; now_ms bigint; earlier bigint;
+begin
+  if current_season is null then return null; end if;
+  now_ms:=private.planning_now_ms();
+  for earlier in select s.season_index from public.seasons s where s.closed_at_ms is null and s.season_index<current_season
+    order by s.season_index loop
+    perform private.close_season(earlier,now_ms);
+  end loop;
+  select e.epoch_slot+504*current_season into first_slot from private.season_epoch e where e.singleton;
+  insert into public.seasons(season_index,starts_at_ms,ends_at_ms) values(current_season,first_slot*4800000,(first_slot+504)*4800000)
+    on conflict do nothing;
+  return null;
+end $$;
+
+-- Backfill (Decision 6): a row for every season already rated before this source, with its epoch bounds. Reapplicable.
+insert into public.seasons(season_index,starts_at_ms,ends_at_ms)
+  select r.season_index,(e.epoch_slot+504*r.season_index)*4800000,(e.epoch_slot+504*(r.season_index+1))*4800000
+  from (select distinct season_index from private.arena_ratings) r cross join private.season_epoch e where e.singleton
+  on conflict do nothing;
+
 revoke all on function private.season_rules(),private.guard_season(),private.guard_arena_rating(),private.project_character(uuid),
-  private.close_season(bigint,bigint) from public,anon,authenticated;
+  private.close_season(bigint,bigint),private.boundary_close_season(bigint) from public,anon,authenticated;
 grant execute on function private.season_rules(),private.guard_season(),private.guard_arena_rating(),private.project_character(uuid),
-  private.close_season(bigint,bigint) to service_role;
+  private.close_season(bigint,bigint),private.boundary_close_season(bigint) to service_role;
 notify pgrst,'reload schema';
 commit;

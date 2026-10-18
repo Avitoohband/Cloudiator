@@ -140,3 +140,47 @@ I found no functional issue.
 ### Deviations from the brief
 - The RED failure surfaced at `resetIdentity`'s truncate rather than at the `close_season` call (explained above).
 - Otherwise none.
+
+## Pre-review adjustment: grants for the boundary worker
+
+The controller ruled on concern 1 before review: the plan's grants were wrong. The fix follows the established pattern in `07-arena.sql:68-76/388-396` and `03-activities-jobs.sql:775-782`. Concern 1 is resolved. Concerns 2–4 are unchanged.
+
+- **Commit:** `61274dd fix: grant the season close to the boundary worker`. It is not pushed, and nothing already committed was amended.
+
+### Change (`supabase/sql/13-seasons.sql`)
+- **Functions.**
+  - `private.close_season(bigint,bigint)` and `private.season_rules()` are revoked from public, anon and authenticated, and service_role is granted EXECUTE on them.
+  - The other three functions keep the same grants.
+- **Tables (service_role).**
+  - `private.season_awards`: select, insert.
+  - `public.season_standings`: select, insert.
+  - `public.seasons`: select, insert, update.
+  - None of them grants delete. The guards refuse update and delete of the archive and the awards.
+- **Clients:** unchanged. Anon and authenticated may SELECT `seasons` and `season_standings` only, and nothing on `season_awards` or the functions.
+- **Header:** exception 3 ("granted to nobody") is replaced by a "Grants" paragraph.
+
+### Covering tests (`tests/db/seasons.test.ts`, the last test)
+- **Clients.** Anon and authenticated have no EXECUTE on `close_season`, `season_rules` or `guard_season`, and no privilege on `private.season_awards`. This is checked per role in the catalog and through the Data API: `season_awards` reads, the `close_season` RPC in both schemas, and every write to `seasons` and `season_standings` are refused.
+- **service_role's exact table privileges:**
+  - `season_awards`: `['SELECT','INSERT']`;
+  - `season_standings`: `['SELECT','INSERT']`;
+  - `seasons`: `['SELECT','INSERT','UPDATE']`.
+- **service_role can run a close.** Inside a transaction rolled back by a sentinel error, the test runs `set local role service_role` and `select private.close_season(1, now+1)`, which returns 1. After `set constraints all immediate` (so the deferred projection runs in that role), it checks:
+  - one season-1 award row;
+  - `closed_at_ms = now+1`;
+  - the prestige covers seasons `[0, 1]`.
+
+  After the rollback, season 1 is open and has no award.
+- **The view's 5-bout literal** was already pinned by "marks reward_eligible in the live view with the highest-league rule":
+  - a Bronze row with 4 human bouts (4 wins, 0 losses) gives `reward_eligible` false;
+  - a row with 5 (3 wins, 2 losses) gives true;
+  - a Silver row with 4 bouts does not block that character's eligible Bronze row.
+
+  No test was added.
+
+### Commands and output (Edge StartedAt before and after each test:db run)
+- Applied the source with `cat supabase/sql/13-seasons.sql | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1`. Exit 0.
+- `npm run test:db -- tests/db/seasons.test.ts tests/db/visitor-access.test.ts`: before and after `2026-10-18T11:14:16.442275829Z`. `Test Files 2 passed (2) / Tests 20 passed (20)`.
+- **Failing check against the old grants.** I revoked service_role's EXECUTE on `close_season` and its INSERT on `season_awards` on the local database, then ran `npm run test:db -- tests/db/seasons.test.ts -t "serves seasons"`: before and after unchanged. Result: `1 failed | 14 skipped`. The diff shows `private.season_awards` backend privileges `["SELECT"]` where `["SELECT","INSERT"]` was expected. I then reapplied the source (exit 0).
+- `npm run typecheck`: exit 0.
+- `npm run test:db` (all suites): before and after `2026-10-18T11:14:16.442275829Z`. `Test Files 11 passed (11) / Tests 208 passed (208)`, 216.8 s, with no warnings or errors in the output.

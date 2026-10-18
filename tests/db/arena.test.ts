@@ -1281,7 +1281,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       // Privacy: the read model has only public standing columns; no wallet, inventory, owner or loot.
       expect((await sql`select column_name from information_schema.columns where table_schema='public' and table_name='arena_standing_reads'
         order by ordinal_position`).map(c => c.column_name))
-        .toEqual(['league', 'season_index', 'gladiator_id', 'name', 'rating', 'human_wins', 'human_losses', 'rank', 'promoted']);
+        .toEqual(['league', 'season_index', 'gladiator_id', 'name', 'rating', 'human_wins', 'human_losses', 'rank', 'promoted', 'reward_eligible']);
       expect(JSON.stringify((await spectator.client.from('arena_standing_reads').select('*')).data)).not.toMatch(/money|renown|inventory|owner|item/);
       // Visitors (Task 13.1) read the same standings as a signed-in spectator.
       for (const league of ['bronze', 'silver', 'champion'] as const) {

@@ -47,6 +47,8 @@ export async function resetIdentity() {
   // No schema creation here: missing schema must produce an honest RED result.
   await sql`truncate public.gladiators cascade`;
   await sql`truncate private.command_attempts`;
+  // Season rows and the standings archive have no foreign key to characters (Task 21), so the cascade does not reach them.
+  await sql`truncate public.seasons, public.season_standings, private.season_awards`;
   // Local and test databases set the launch season epoch explicitly (Task 16). It is immutable once set, so a local
   // database with any other epoch would place historical test slots outside a season.
   await sql`insert into private.season_epoch(singleton,epoch_slot) values(true,0) on conflict(singleton) do nothing`;

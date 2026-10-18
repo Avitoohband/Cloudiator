@@ -169,3 +169,28 @@ I read the whole diff against the mockup, Decision 8, the brief and the controll
 4. The countdown redraws every 30 s while the tab is visible and whenever the display clock is held or moved; this is a display tick only, never a read.
 5. The promotion footnote considers the loaded rows only; a promoted qualifier beyond them is named once More loads it (this can matter only when fewer than three medals were awarded).
 6. No skill upkeep question: nothing reusable for a skill came up.
+
+### Fix round 1 (Task 21.4 review)
+
+**Finding (Important), from `.superpowers/sdd/2026-10-18-task-21-seasons/task-21.4-review.md`:** `promotionNote` (`src/features/seasons/season-text.ts`) named each promoted qualifier ranked above the last medal and said "…so Lucilla is rewarded there only". A promoted row with 5 or more human bouts that is not reward-eligible proves only that the gladiator qualified in a higher league, not that it placed there. In the plan's Review Focus 4 case (qualifies higher but places fourth there, so no reward in either league) the footnote would have claimed a reward the player never got.
+
+**Change (commit `bab7580 fix: word the promotion footnote without claiming a reward`):** this supersedes the footnote text quoted under "What I implemented".
+- Singular: "Lucilla was promoted and qualified in a higher league, so only that league can reward Lucilla, and the Bronze medals go to the next eligible gladiators."
+- Plural: "Lucilla and Severus were promoted and qualified in higher leagues, so only those leagues can reward Lucilla and Severus, and the Bronze medals go to the next eligible gladiators." The names are repeated instead of a pronoun; with more than three names, the list ends "and N more" in both places.
+- The function's doc comment says the same. The rule sentence (shown when no one is named), the selection of named rows and everything else are unchanged. The review's Minor items are left for the final review, as instructed.
+
+**Covering tests:**
+- `tests/domain/arena-panels.test.ts`: the singular and plural expectations use the new copy. A new check asserts that neither the named footnote of the fixture archive nor the plural case matches `/(is|are) rewarded/`.
+- `tests/browser/seasons.spec.ts`: the singular expectation for the fixture archive (Lucilla, line 119) and the live visitor test (Varro, line 224).
+
+**Commands and output:**
+
+| Command | Output |
+|---|---|
+| `npx vitest run tests/domain/season-text.test.ts tests/domain/arena-panels.test.ts` | `Test Files  2 passed (2)`, `Tests  37 passed (37)` |
+| `npx playwright test --config node_modules/.cache/pw-claude.config.mjs seasons.spec.ts` (desktop and mobile) | `18 passed (20.7s)` |
+| `npm test` | `Test Files  47 passed (47)`, `Tests  1056 passed (1056)` |
+| `npm run typecheck` | `tsc` and `deno check` clean; `ok \| 2 passed \| 0 failed` |
+| `git diff --check` | clean |
+
+**Screenshots refreshed** from that seasons run in `.superpowers/sdd/2026-10-18-task-21-seasons/shots/`: `seasons-desktop-archived-footnote.png` and `seasons-mobile-archived-footnote.png`. Both show the new footnote under the Bronze archive.

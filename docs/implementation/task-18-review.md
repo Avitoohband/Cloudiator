@@ -86,3 +86,41 @@ Range `a4523ae..ae5d0c3`: `ae5d0c3` (feature). [Implementer report](task-18.2-re
   - Buy is hidden for a signed-in account without a gladiator;
   - the fixture expiry comes from the rules.
 - **Other:** the deadlock test assumes the second session reaches its lock within the 1 s deadlock check; document that.
+
+## 18.3: The Marketplace menu
+
+Range `60f3a68..78104fd`: `32e73cf` (feature) and `78104fd` ([Task 18 report](task-18-report.md)). [Implementer report](task-18.3-report.md).
+
+**Implementer evidence:**
+- Unit tests 1015/1015; typecheck clean.
+- `test:db` 193/193 with the Edge start time unchanged.
+- Build and `verify:static` clean.
+- Development browser suite 410 passed, 22 skipped, 0 failed; production gate (repo config) 16 passed.
+- Three mutations proved the new tests: Buy shown to every viewer, a new operation id on retry, and the old Inventory wording.
+
+**Verdicts (spec, quality and visual):** spec compliant; quality Approved; no Critical or Important findings; visually faithful to the mockup's Marketplace panel.
+
+**What the reviewer confirmed:**
+- **Menu and listings.** The 💰 Marketplace menu sits between Inventory and shops and Arena. Offers show name, tier, rarity, stats, seller, price, NPC sale value and time left.
+- **Sell eligibility.** The Sell tab offers equipment only, and its eligibility is at least as strict as every SQL refusal.
+- **Closed listings.** `sold`, `expired` and `not-found` explain themselves and refresh the page and the owner.
+- **Retries.** The same `operationId` is kept on `processing`, `rate-limited` and `unavailable`.
+- **Fixtures.** The fixture owner's listed helmet matches the market fixture, and the fixture expiry comes from the rules.
+- **Who can trade.** Visitors and gladiator-less viewers see Browse only and never receive the command gateway; both cases are mutation-proven. Review Focus 4 and 5 are tested.
+
+**Deferred Minors:**
+- **Focus and copy:**
+  - focus falls to `body` after a trade;
+  - create-listing `not-found` uses the "no longer open" wording;
+  - "Create your gladiator to trade" is text, not a button.
+- **Test coverage:**
+  - disabled Buy (money or inventory full);
+  - disabled List at five listings;
+  - fractional and over-cap prices;
+  - a fixture-mode Marketplace spec.
+- **Consistency:**
+  - "2,000" in the market versus "2000" in the chip and Inventory;
+  - rarity capitalization differs.
+- **Accessibility polish:** price validation and the blocked-Buy reason are not linked to their controls.
+- **Code size:** `MarketPanel.tsx` (366 lines) and its 407-line CSS module could be split.
+- **Visual:** the visitor's sign-in prompt sits below the whole list, off-screen with several offers.

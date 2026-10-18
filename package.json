@@ -7,6 +7,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "test": "vitest run",
     "test:db": "node scripts/test-db.mjs",
+    "health": "node scripts/health.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit && deno check --frozen --config supabase/functions/deno.json supabase/functions/game-command/index.ts supabase/functions/game-worker/index.ts && deno test --frozen --config supabase/functions/deno.json tests/backend/edge.deno.ts",
     "build": "next build",

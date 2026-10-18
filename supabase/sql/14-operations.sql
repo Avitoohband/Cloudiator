@@ -1,5 +1,5 @@
--- Tasks 22.1 and 22.2 reapplicable source. Committed M01-M15 are immutable; deploy only the separately generated migration M16
--- (Task 22.3).
+-- Tasks 22.1, 22.2 and 22.3 reapplicable source. Committed M01-M15 are immutable; deploy only the generated migration M16
+-- (supabase/migrations/*_operations.sql, Task 22.3).
 -- Retention in the database (game design §11; plan 2026-10-18-task-22-retention-operations, Decisions 2-5 and the binding
 -- retention design): the retention state, the wallet checkpoints and the operations log; the permanent grant guards on
 -- receipts and public bout results; private.cleanup_history(now_ms), one bounded, watermark-driven pruning call; its hourly
@@ -7,6 +7,9 @@
 -- Task 22.2 (Decisions 6 and 7): durable ticks (the market sweep isolates each seller, and cron_tick isolates dispatch, each
 -- failure recorded as an operations event) and whole seasons (private.season_bounds, shared by boundary phase 2, phase 4 and
 -- the season row backfill; phase 4 also inserts the row of the season it rates). See "Durable ticks" and "Whole seasons" below.
+-- Task 22.3 (Decision 8): the owner-only health report private.health_report(now_ms) and its alerts (exception 8); the sweep
+-- keeps every distinct SQLSTATE of its failed sellers and sweeps at most 50 sellers per call, and a tick records a failure of
+-- its whole sweep (exception 6).
 --
 -- Restated rule constants (as 08-arena-bouts.sql exception 5): 604800000 is RULES_V1.retention.replayMs, 7776000000
 -- RULES_V1.retention.summaryMs, 4800000 the slot length (clock.slotMs) and 18 RULES_V1.matchmaking.recentPairingSlots, the
@@ -97,12 +100,19 @@
 -- 6. Durable ticks (Task 22.2, Decision 6). private.expire_listings sweeps each seller in its own subtransaction: a seller
 --    whose listings cannot be closed (for example an inconsistent listing whose item is gone) rolls back only that seller's
 --    work, and the sweep continues with the others. A sweep with failures records one operations event (source
---    'market-sweep', ok false, the first failure's SQLSTATE, detail {"failedSellers": n}); nothing else of the failure is
---    kept. The account try-lock is still taken outside the subtransaction and never waits (12-market.sql). cleanup_history's
---    backstop therefore no longer fails whole on one bad listing. private.cron_tick runs dispatch_workers() in its own
---    block: a dispatch failure records a 'dispatch' event (SQLSTATE only) and no longer rolls back the coordination and the
---    sweep committed by the same tick. PL/pgSQL's OTHERS does not trap query_canceled (57014): a canceled tick still aborts
---    whole and records no event.
+--    'market-sweep', ok false, the first failure's SQLSTATE, detail {"failedSellers": n, "sqlstates": [every distinct
+--    SQLSTATE, Task 22.3]}); nothing else of the failure is kept. The account try-lock is still taken outside the
+--    subtransaction and never waits (12-market.sql). cleanup_history's backstop therefore no longer fails whole on one bad
+--    listing. Task 22.3: one call sweeps at most 50 sellers, those whose listing has been due longest first; the others wait
+--    for the next minute's sweep. That bounds the subtransactions of one tick below the 64 sub-XIDs PostgreSQL caches per
+--    transaction (cron_tick: the coordination block and its at most 6 boundary blocks, the sweep block and its 50 sellers,
+--    the dispatch block). private.cron_tick runs dispatch_workers() in its own block: a dispatch failure records a 'dispatch'
+--    event (SQLSTATE only) and no longer rolls back the coordination and the sweep committed by the same tick. Task 22.3: a
+--    failure of the whole sweep (outside any seller's block, for example a lock timeout on the listings) records a
+--    'market-sweep' event with its SQLSTATE and no detail, so pg_cron's "succeeded" is not the only trace; a failure to
+--    record either event is itself contained and never rolls back the tick. PL/pgSQL's OTHERS does not trap query_canceled
+--    (57014): a canceled tick still aborts whole and records no event (the health report's cleanup-stale alert reads the
+--    retention state instead).
 -- 7. Whole seasons (Task 22.2, Decision 7; M15's known limit, docs/operations/migrations.md). private.season_bounds(index)
 --    restates 13-seasons.sql's bounds (exception 1 there: 504 slots of 4800000 ms from the epoch) once; it is STABLE, not
 --    IMMUTABLE, because it reads private.season_epoch. Phase 2 (private.boundary_close_season, 13-seasons.sql's body), the
@@ -111,6 +121,23 @@
 --    while its boundary waited at phase 4 ('epoch') has its row. The insert runs under advance_boundary's coordinator and
 --    boundary locks and locks no existing season row (close_season, the only writer of an existing row, runs under the
 --    same coordinator lock).
+-- 8. Health (Task 22.3, Decision 8). private.health_report(now_ms) is the owner-operated report for the operator CLI
+--    (scripts/health.mjs); EXECUTE is revoked from public, anon, authenticated and service_role, so no player or backend
+--    path reaches it. It only reads and takes no row lock (scripts/health.mjs also runs it in a read-only transaction): it
+--    reads the coordinator, boundaries, jobs, job attempts, the dispatch log, the retention state and the operations log as
+--    of its snapshot, and only pg_database_size and pg_total_relation_size (the ten largest tables, any schema) beyond
+--    them; those two make it VOLATILE (STABLE would misstate them; plpgsql_check flags it). Every value is a
+--    number, boolean, slot, time, job id or code: a free-text column is reported only when it has the shape of a SQLSTATE
+--    (coordinator and boundary last_error) or of a failure code (jobs.last_failure, job_attempts.failure_code), otherwise as
+--    'unrecognized'; an event's detail contributes only failedSellers and its SQLSTATEs. It never reads Vault, pg_net
+--    responses or cron run messages. Durations come from job_attempts (finished_at_ms - claimed_at_ms, completed attempts,
+--    percentile_disc); CPU is "not available" (the Edge runtime does not expose it per request); egress and function
+--    invocations are read from the hosting dashboard (runbook). private.health_alerts(report) derives the alerts from the
+--    report alone. Restated thresholds: 600000 (ten minutes: a boundary late into its slot, a boundary waiting since it
+--    opened, a job past due or past its lease), 3600000 (the last hour of tick failures), 86400000 (24 hours: attempts,
+--    latest failures, the cleanup backlog), 93600000 (26 hours without a successful cleanup), three cleanup failures in a
+--    row, and the 262144000-byte (250 MB) database budget: a warning from 80 %, an alert from 100 %. Lists hold at most 20
+--    entries (boundaries, overdue and operator jobs), oldest first, with totals for the jobs.
 begin;
 
 -- ===== State (Decision 3): backend-only; service_role may only read it, for the health report. =====
@@ -534,18 +561,24 @@ end $$;
 select cron.schedule('cloudiator-cleanup','23 * * * *','select private.cleanup_tick()');
 
 -- ===== Durable ticks (Decision 6, exception 6) =====
--- 12-market.sql's sweep, unchanged except that each seller's listings close in their own subtransaction and a sweep with
--- failed sellers records one operations event.
+-- 12-market.sql's sweep, unchanged except that each seller's listings close in their own subtransaction, a sweep with
+-- failed sellers records one operations event, and (Task 22.3) one call sweeps at most 50 sellers, the oldest due first.
 create or replace function private.expire_listings(now_ms bigint) returns integer
 language plpgsql security invoker set search_path='' as $$
-declare seller record; listing uuid; expired integer:=0; seller_expired integer; failed integer:=0; first_failure text;
+declare seller record; listing uuid; expired integer:=0; seller_expired integer; swept integer:=0; failed integer:=0;
+  first_failure text; failures text[]:='{}'::text[];
 begin
   if now_ms is null then raise exception 'invalid expiry time'; end if;
-  for seller in select distinct l.seller_gladiator_id as id,g.owner_id from private.market_listings l
+  -- Task 22.3: the sellers whose listing has been due longest come first.
+  for seller in select l.seller_gladiator_id as id,g.owner_id from private.market_listings l
     join public.gladiators g on g.id=l.seller_gladiator_id
-    where l.status='open' and l.expires_at_ms<=now_ms order by l.seller_gladiator_id loop
+    where l.status='open' and l.expires_at_ms<=now_ms
+    group by l.seller_gladiator_id,g.owner_id order by min(l.expires_at_ms),l.seller_gladiator_id loop
+    -- Task 22.3: at most 50 per-seller subtransactions per call (exception 6); the other sellers wait for the next sweep.
+    exit when swept>=50;
     -- A busy seller is skipped, never waited for.
     continue when not pg_try_advisory_xact_lock(hashtextextended(seller.owner_id::text,0));
+    swept:=swept+1;
     -- Task 22.2: a failure rolls back only this seller's listings; keep its SQLSTATE and count it, never its message.
     begin
       seller_expired:=0;
@@ -558,18 +591,20 @@ begin
     exception when others then
       failed:=failed+1;
       first_failure:=coalesce(first_failure,sqlstate);
+      if not sqlstate=any(failures) then failures:=failures||sqlstate; end if;
     end;
   end loop;
   if failed>0 then
     insert into private.operations_events(at_ms,source,ok,sqlstate,detail)
-      values(now_ms,'market-sweep',false,first_failure,jsonb_build_object('failedSellers',failed));
+      values(now_ms,'market-sweep',false,first_failure,jsonb_build_object('failedSellers',failed,'sqlstates',to_jsonb(failures)));
   end if;
   return expired;
 end $$;
 
--- 12-market.sql's minute tick, unchanged except that dispatch runs in its own block that records a 'dispatch' event.
+-- 12-market.sql's minute tick, unchanged except that dispatch runs in its own block that records a 'dispatch' event and
+-- (Task 22.3) a failure of the whole sweep records a 'market-sweep' event.
 create or replace function private.cron_tick() returns jsonb language plpgsql security invoker set search_path='' as $$
-declare coordination jsonb; expiry jsonb; dispatch jsonb; failure text;
+declare coordination jsonb; expiry jsonb; dispatch jsonb; failure text; sweep_failure text;
 begin
   if not coalesce((select enabled from private.scheduler where singleton),false) then return jsonb_build_object('ok',true,'skipped','disabled'); end if;
   begin
@@ -583,7 +618,15 @@ begin
   begin
     expiry:=jsonb_build_object('ok',true,'expired',private.expire_listings(private.planning_now_ms()));
   exception when others then
-    expiry:=jsonb_build_object('ok',false,'code','expiry-failed','sqlstate',sqlstate);
+    sweep_failure:=sqlstate;
+    expiry:=jsonb_build_object('ok',false,'code','expiry-failed','sqlstate',sweep_failure);
+    -- Task 22.3: the whole sweep failed (not one seller): keep its SQLSTATE as a 'market-sweep' event, so pg_cron's
+    -- "succeeded" is not the only trace. Failing to record it is contained and never rolls back the coordination above.
+    begin
+      insert into private.operations_events(at_ms,source,ok,sqlstate) values(private.planning_now_ms(),'market-sweep',false,sweep_failure);
+    exception when others then
+      null;
+    end;
   end;
   -- Task 22.2: dispatch in its own block. A failure rolls back only the dispatch and is kept as its SQLSTATE; the
   -- coordination and the sweep above still commit with this tick.
@@ -592,7 +635,12 @@ begin
   exception when others then
     failure:=sqlstate;
     dispatch:=jsonb_build_object('ok',false,'code','dispatch-failed','sqlstate',failure);
-    insert into private.operations_events(at_ms,source,ok,sqlstate) values(private.planning_now_ms(),'dispatch',false,failure);
+    -- Task 22.3: failing to record it is contained as well.
+    begin
+      insert into private.operations_events(at_ms,source,ok,sqlstate) values(private.planning_now_ms(),'dispatch',false,failure);
+    exception when others then
+      null;
+    end;
   end;
   return jsonb_build_object('ok',true,'coordination',coordination,'expiry',expiry,'dispatch',dispatch);
 end $$;
@@ -660,6 +708,207 @@ insert into public.seasons(season_index,starts_at_ms,ends_at_ms)
   cross join lateral private.season_bounds(r.season_index) b
   on conflict do nothing;
 
+-- ===== Health (Decision 8, Task 22.3, exception 8) =====
+-- The alerts of one report (private.health_report below), in this order: boundary-behind, boundary-waiting, operator-jobs,
+-- overdue-jobs, cleanup-stale, cleanup-failures, cleanup-backlog, tick-failures, database-size. A pure function of the
+-- report, so each threshold is testable on its own; a missing field counts as nothing to report. STABLE, not IMMUTABLE:
+-- jsonb_build_object is STABLE.
+create or replace function private.health_alerts(report jsonb) returns jsonb
+language plpgsql stable security invoker set search_path='' as $$
+declare
+  alerts jsonb:='[]'::jsonb; now_ms bigint:=(report->>'checkedAtMs')::bigint; current_slot bigint:=(report->>'currentSlot')::bigint;
+  published bigint:=(report->>'publishedSlot')::bigint; enabled boolean:=coalesce(report->'scheduler'->'enabled'='true'::jsonb,false);
+  n bigint; oldest bigint; longest bigint; last_run bigint; since bigint; bytes bigint; budget bigint; ticks jsonb;
+begin
+  -- boundary-behind: the oldest unpublished slot is more than 10 minutes into its slot; with the scheduler on, also when
+  -- nothing has been published yet.
+  if published is not null and published<current_slot and now_ms>(published+1)*4800000+600000 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','boundary-behind','severity','alert','detail',jsonb_build_object(
+      'publishedSlot',published,'currentSlot',current_slot,'lateMs',now_ms-(published+1)*4800000-600000)));
+  elsif published is null and enabled then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','boundary-behind','severity','alert','detail',jsonb_build_object(
+      'publishedSlot',null,'currentSlot',current_slot,'lateMs',null)));
+  end if;
+  -- boundary-waiting: a listed boundary has waited more than 10 minutes since it opened.
+  select count(*),min((b->>'slot')::bigint),max((b->>'waitingMs')::bigint) into n,oldest,longest
+    from jsonb_array_elements(coalesce(report->'boundaries','[]'::jsonb)) b where (b->>'waitingMs')::bigint>600000;
+  if n>0 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','boundary-waiting','severity','alert','detail',jsonb_build_object(
+      'count',n,'oldestSlot',oldest,'longestWaitMs',longest)));
+  end if;
+  -- operator-jobs: any job held for the operator.
+  n:=coalesce((report->'jobs'->>'operatorTotal')::bigint,0);
+  if n>0 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','operator-jobs','severity','alert','detail',jsonb_build_object('count',n)));
+  end if;
+  -- overdue-jobs: pending more than 10 minutes past due (or leased with a lease expired more than 10 minutes ago).
+  n:=coalesce((report->'jobs'->>'overdueTotal')::bigint,0);
+  if n>0 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','overdue-jobs','severity','alert','detail',jsonb_build_object(
+      'count',n,'oldestDueAtMs',report->'jobs'->'overdue'->0->'dueAtMs')));
+  end if;
+  -- cleanup-stale: the scheduler is on and no cleanup has succeeded for 26 hours (or ever). A canceled or failing tick
+  -- leaves last_run_at_ms unchanged, so this also covers ticks that recorded nothing.
+  last_run:=(report->'cleanup'->>'lastRunAtMs')::bigint;
+  if enabled and (last_run is null or last_run<now_ms-93600000) then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','cleanup-stale','severity','alert','detail',jsonb_build_object('lastRunAtMs',last_run)));
+  end if;
+  -- cleanup-failures: the last three or more cleanup ticks failed.
+  n:=coalesce((report->'cleanup'->'failures'->>'consecutive')::bigint,0);
+  if n>=3 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','cleanup-failures','severity','warn','detail',jsonb_build_object(
+      'consecutive',n,'sqlstates',coalesce(report->'cleanup'->'failures'->'sqlstates','[]'::jsonb))));
+  end if;
+  -- cleanup-backlog: every cleanup tick of the last 24 hours (at least) still had more to do.
+  since:=(report->'cleanup'->>'moreSinceMs')::bigint;
+  if since is not null and since<=now_ms-86400000 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','cleanup-backlog','severity','warn','detail',jsonb_build_object('moreSinceMs',since)));
+  end if;
+  -- tick-failures: market-sweep or dispatch failures in the last hour, aggregated per source (count and distinct SQLSTATEs).
+  select jsonb_object_agg(s.source,report->'events'->s.source->'lastHour') into ticks from (values ('market-sweep'),('dispatch')) s(source)
+    where coalesce((report->'events'->s.source->'lastHour'->>'failures')::bigint,0)>0;
+  if ticks is not null then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','tick-failures','severity','warn','detail',ticks));
+  end if;
+  -- database-size: a warning from 80 % of the budget, an alert from 100 %.
+  bytes:=(report->'resources'->>'databaseBytes')::bigint;
+  budget:=(report->'resources'->>'budgetBytes')::bigint;
+  if bytes is not null and budget is not null and bytes*5>=budget*4 then
+    alerts:=alerts||jsonb_build_array(jsonb_build_object('code','database-size','severity',case when bytes>=budget then 'alert' else 'warn' end,
+      'detail',jsonb_build_object('databaseBytes',bytes,'budgetBytes',budget)));
+  end if;
+  return alerts;
+end $$;
+
+-- The owner-only operator report at database time now_ms (header, exception 8): checkedAtMs, currentSlot, publishedSlot,
+-- slotsBehind, coordinator, scheduler, boundaries, jobs, attempts24h, dispatch, cleanup, events, resources, cpu and alerts.
+-- VOLATILE because pg_database_size and pg_total_relation_size are; it only reads (the CLI also runs it read-only).
+create or replace function private.health_report(now_ms bigint) returns jsonb
+language plpgsql volatile security invoker set search_path='' as $$
+declare
+  coord private.coordinator%rowtype; st private.retention_state%rowtype; enabled boolean; current_slot bigint; more boolean; more_since bigint;
+  failures bigint; failure_states jsonb; overdue_total bigint; operator_total bigint; v_boundaries jsonb; v_jobs jsonb; v_attempts jsonb;
+  v_dispatch jsonb; v_cleanup jsonb; v_events jsonb; v_resources jsonb; report jsonb;
+begin
+  if now_ms is null or now_ms<0 then raise exception 'invalid health time' using errcode='22023'; end if;
+  current_slot:=now_ms/4800000;
+  select * into coord from private.coordinator where singleton;
+  select * into st from private.retention_state where singleton;
+  enabled:=coalesce((select s.enabled from private.scheduler s where s.singleton),false);
+
+  -- Boundaries not yet complete (normally only the next one), lowest slot first, at most 20; waitingMs since it opened.
+  select coalesce(jsonb_agg(jsonb_build_object('slot',b.slot_index,'phase',b.phase,'status',b.status,'waitReason',b.wait_reason,
+      'lastError',case when b.last_error is null then null when b.last_error ~ '^[0-9A-Z]{5}$' then b.last_error else 'unrecognized' end,
+      'waitingMs',now_ms-b.opened_at_ms) order by b.slot_index),'[]'::jsonb)
+    into v_boundaries from (select * from private.boundaries x where x.status<>'complete' order by x.slot_index limit 20) b;
+
+  -- Jobs: counts by kind and status; overdue (pending more than 10 minutes past due, or leased with a lease expired more
+  -- than 10 minutes ago) and operator jobs, at most 20 each, oldest first, with their totals.
+  select count(*) into overdue_total from private.jobs j
+    where (j.status='pending' and j.due_at_ms<now_ms-600000) or (j.status='leased' and j.lease_until_ms<now_ms-600000);
+  select count(*) into operator_total from private.jobs j where j.status='operator';
+  v_jobs:=jsonb_build_object(
+    'counts',coalesce((select jsonb_object_agg(k.kind,k.statuses) from (select x.kind,jsonb_object_agg(x.status,x.n) as statuses
+      from (select j.kind,j.status,count(*) as n from private.jobs j group by j.kind,j.status) x group by x.kind) k),'{}'::jsonb),
+    'overdueTotal',overdue_total,
+    'overdue',coalesce((select jsonb_agg(jsonb_build_object('jobId',o.id,'kind',o.kind,'slot',o.slot_index,'status',o.status,
+        'dueAtMs',o.due_at_ms,'overdueMs',now_ms-o.due_at_ms,'attempts',o.attempts) order by o.due_at_ms,o.id) from (
+      select j.id,j.kind,j.slot_index,j.status,j.due_at_ms,j.attempts from private.jobs j
+      where (j.status='pending' and j.due_at_ms<now_ms-600000) or (j.status='leased' and j.lease_until_ms<now_ms-600000)
+      order by j.due_at_ms,j.id limit 20) o),'[]'::jsonb),
+    'operatorTotal',operator_total,
+    'operator',coalesce((select jsonb_agg(jsonb_build_object('jobId',o.id,'kind',o.kind,'slot',o.slot_index,'attempts',o.attempts,
+        'lastFailure',case when o.last_failure is null then null when o.last_failure ~ '^[a-z0-9][a-z0-9-]{0,63}$' then o.last_failure
+          else 'unrecognized' end) order by o.slot_index,o.id) from (
+      select j.id,j.kind,j.slot_index,j.attempts,j.last_failure from private.jobs j where j.status='operator'
+      order by j.slot_index,j.id limit 20) o),'[]'::jsonb));
+
+  -- Attempts claimed in the last 24 hours: their count, failures by code, and per-kind durations (finished_at_ms -
+  -- claimed_at_ms) of the completed ones. CPU time is not exposed per request by the Edge runtime (Decision 8).
+  with w as (
+    select a.outcome,a.failure_code,a.claimed_at_ms,a.finished_at_ms,j.kind from private.job_attempts a join private.jobs j on j.id=a.job_id
+    where a.claimed_at_ms>now_ms-86400000 and a.claimed_at_ms<=now_ms)
+  select jsonb_build_object('count',(select count(*) from w),'failed',(select count(*) from w where w.outcome in ('failed','expired')),
+    'failuresByCode',coalesce((select jsonb_object_agg(f.code,f.n) from (
+      select case when coalesce(w.failure_code,'unknown') ~ '^[a-z0-9][a-z0-9-]{0,63}$' then coalesce(w.failure_code,'unknown')
+        else 'unrecognized' end as code,count(*) as n from w where w.outcome in ('failed','expired') group by 1) f),'{}'::jsonb),
+    'durations',coalesce((select jsonb_object_agg(d.kind,jsonb_build_object('count',d.n,'p50Ms',d.p50,'p95Ms',d.p95,'maxMs',d.longest)) from (
+      select w.kind,count(*) as n,percentile_disc(0.5) within group (order by w.finished_at_ms-w.claimed_at_ms) as p50,
+        percentile_disc(0.95) within group (order by w.finished_at_ms-w.claimed_at_ms) as p95,max(w.finished_at_ms-w.claimed_at_ms) as longest
+      from w where w.outcome='completed' and w.finished_at_ms is not null group by w.kind) d),'{}'::jsonb))
+  into v_attempts;
+
+  v_dispatch:=jsonb_build_object('lastAtMs',(select max(d.dispatched_at_ms) from private.dispatch_log d where d.dispatched_at_ms<=now_ms),
+    'lastHour',(select count(*) from private.dispatch_log d where d.dispatched_at_ms>now_ms-3600000 and d.dispatched_at_ms<=now_ms));
+
+  -- Cleanup: the watermarks and the last successful run's result (its durations surface the growth of each pass); since
+  -- when every cleanup tick has still had more to do; the failed cleanup ticks since the last successful one.
+  more:=coalesce(st.last_result->'detail'->'more'='true'::jsonb,false) or coalesce(st.last_result->'summary'->'more'='true'::jsonb,false)
+    or coalesce(st.last_result->'ledger'->'more'='true'::jsonb,false);
+  if more then
+    with ev as (
+      select e.id,e.at_ms,coalesce(e.detail->'detail'->'more'='true'::jsonb,false) or coalesce(e.detail->'summary'->'more'='true'::jsonb,false)
+        or coalesce(e.detail->'ledger'->'more'='true'::jsonb,false) as more
+      from private.operations_events e where e.source='cleanup' and e.ok and e.at_ms<=now_ms)
+    select min(ev.at_ms) into more_since from ev where ev.more and ev.id>coalesce((select max(x.id) from ev x where not x.more),0);
+  end if;
+  with streak as (
+    select e.sqlstate from private.operations_events e where e.source='cleanup' and not e.ok and e.at_ms<=now_ms
+      and e.id>coalesce((select max(x.id) from private.operations_events x where x.source='cleanup' and x.ok and x.at_ms<=now_ms),0))
+  select (select count(*) from streak),(select coalesce(jsonb_agg(x.sqlstate order by x.sqlstate collate "C"),'[]'::jsonb)
+    from (select distinct s.sqlstate from streak s where s.sqlstate is not null) x)
+  into failures,failure_states;
+  v_cleanup:=jsonb_build_object('lastRunAtMs',st.last_run_at_ms,'detailThroughSlot',st.detail_through_slot,
+    'summaryThroughSlot',st.summary_through_slot,'more',more,
+    'durationMs',case when jsonb_typeof(st.last_result->'durationMs')='number' then st.last_result->'durationMs' end,
+    'detail',jsonb_build_object('more',coalesce(st.last_result->'detail'->'more'='true'::jsonb,false),
+      'blockedSlot',case when jsonb_typeof(st.last_result->'detail'->'blockedSlot')='number' then st.last_result->'detail'->'blockedSlot' end,
+      'durationMs',case when jsonb_typeof(st.last_result->'detail'->'durationMs')='number' then st.last_result->'detail'->'durationMs' end),
+    'summary',jsonb_build_object('more',coalesce(st.last_result->'summary'->'more'='true'::jsonb,false),
+      'durationMs',case when jsonb_typeof(st.last_result->'summary'->'durationMs')='number' then st.last_result->'summary'->'durationMs' end),
+    'ledger',jsonb_build_object('more',coalesce(st.last_result->'ledger'->'more'='true'::jsonb,false)),
+    'moreSinceMs',more_since,'failures',jsonb_build_object('consecutive',failures,'sqlstates',failure_states));
+
+  -- Events per source: the latest failure in 24 hours, and the failures of the last hour aggregated (count and distinct
+  -- SQLSTATEs, including those a sweep keeps in its detail), never one entry per row.
+  with w as (
+    select e.id,e.source,e.at_ms,e.sqlstate,e.detail from private.operations_events e
+    where not e.ok and e.at_ms>now_ms-86400000 and e.at_ms<=now_ms
+  ), codes as (
+    select w.id,w.sqlstate as code from w where w.sqlstate is not null
+    union
+    select w.id,t.code from w cross join lateral jsonb_array_elements_text(case when jsonb_typeof(w.detail->'sqlstates')='array'
+      then w.detail->'sqlstates' else '[]'::jsonb end) t(code)
+  ), valid as (
+    select c.id,c.code from codes c where c.code ~ '^[0-9A-Z]{5}$'
+  )
+  select jsonb_object_agg(s.source,jsonb_build_object(
+    'latestFailure',(select jsonb_build_object('atMs',l.at_ms,
+        'sqlstates',(select coalesce(jsonb_agg(v.code order by v.code collate "C"),'[]'::jsonb) from valid v where v.id=l.id),
+        'failedSellers',case when jsonb_typeof(l.detail->'failedSellers')='number' then l.detail->'failedSellers' end)
+      from w l where l.source=s.source order by l.at_ms desc,l.id desc limit 1),
+    'lastHour',jsonb_build_object('failures',(select count(*) from w h where h.source=s.source and h.at_ms>now_ms-3600000),
+      'sqlstates',(select coalesce(jsonb_agg(x.code order by x.code collate "C"),'[]'::jsonb) from (
+        select distinct v.code from valid v join w h on h.id=v.id where h.source=s.source and h.at_ms>now_ms-3600000) x))))
+  into v_events from (values ('market-sweep'),('dispatch'),('cleanup')) s(source);
+
+  -- Resources against the 250 MB budget; egress and function invocations are read from the hosting dashboard.
+  v_resources:=jsonb_build_object('databaseBytes',pg_database_size(current_database()),'budgetBytes',262144000,
+    'largestTables',coalesce((select jsonb_agg(jsonb_build_object('name',t.name,'bytes',t.bytes) order by t.bytes desc,t.name collate "C") from (
+      select n.nspname||'.'||r.relname as name,pg_total_relation_size(r.oid) as bytes from pg_class r join pg_namespace n on n.oid=r.relnamespace
+      where r.relkind in ('r','m') and n.nspname not in ('pg_catalog','information_schema') and n.nspname not like 'pg\_toast%'
+        and n.nspname not like 'pg\_temp%'
+      order by 2 desc,1 limit 10) t),'[]'::jsonb));
+
+  report:=jsonb_build_object('checkedAtMs',now_ms,'currentSlot',current_slot,'publishedSlot',coord.published_slot,
+    'slotsBehind',current_slot-coord.published_slot,
+    'coordinator',jsonb_build_object('lastError',case when coord.last_error is null then null when coord.last_error ~ '^[0-9A-Z]{5}$' then coord.last_error
+        else 'unrecognized' end,'lastFailedSlot',coord.last_failed_slot,'leaseHeld',coalesce(coord.lease_token is not null and coord.lease_until_ms>now_ms,false)),
+    'scheduler',jsonb_build_object('enabled',enabled),'boundaries',v_boundaries,'jobs',v_jobs,'attempts24h',v_attempts,'dispatch',v_dispatch,
+    'cleanup',v_cleanup,'events',v_events,'resources',v_resources,'cpu','not available');
+  return report||jsonb_build_object('alerts',private.health_alerts(report));
+end $$;
+
 -- Cleanup and its tick are granted to nobody: only the owner (pg_cron, an operator) runs them. Guards and the projector keep
 -- the backend's EXECUTE, as every earlier guard and projector does.
 revoke all on function private.cleanup_history(bigint),private.cleanup_tick() from public,anon,authenticated,service_role;
@@ -674,5 +923,7 @@ revoke all on function private.season_bounds(bigint),private.boundary_close_seas
   from public,anon,authenticated;
 grant execute on function private.season_bounds(bigint),private.boundary_close_season(bigint),private.boundary_recompute_leagues(bigint)
   to service_role;
+-- Task 22.3: the health report and its alerts are the owner's (the operator's CLI): nobody else may EXECUTE them.
+revoke all on function private.health_report(bigint),private.health_alerts(jsonb) from public,anon,authenticated,service_role;
 notify pgrst,'reload schema';
 commit;

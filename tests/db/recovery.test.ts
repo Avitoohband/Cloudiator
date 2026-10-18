@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import type { Sql, TransactionSql } from 'postgres';
 import { sql, account, resetIdentity, admin, creation } from '../fixtures/db.ts';
 import { createDatabase, createWorkerDatabase, prepareBuild, prepareShopPurchase } from '../../supabase/functions/_shared/backend/database.ts';
@@ -23,6 +23,7 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 
 const SLOT = RULES_V1.clock.slotMs;
 const MINUTE = 60_000;
+const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const WEEK = RULES_V1.marketplace.expiryMs;
 const SUMMARY_MS = RULES_V1.retention.summaryMs;
@@ -320,6 +321,12 @@ let world: { arena: Fighter[]; expedition: Fighter; trainee: Fighter; all: Fight
   items: Record<string, unknown>[] };
 let first: Run;
 
+// The cases share this one world and run in file order; a single case (-t) cannot run alone (Task 22.2 review M6):
+// - the sweep case reads the first catch-up's ticks (beforeAll);
+// - the mid-catch-up cleanup case runs the second catch-up to LATER, and its real-time cleanup expires and then deletes the
+//   world's fresh listing (its 1970 expiry is long past), so no listing is open afterwards;
+// - the market-sweep, sweep-cap and whole-sweep cases rely on that (no open listing of their own sellers) and the dispatch
+//   case on the coordinator having published LATER; each checks its precondition first.
 describe('Task 22.2: robust ticks, season rows and recovery', () => {
   beforeAll(async () => {
     await resetWorld(FIRST - 1);
@@ -408,6 +415,13 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
     for (const { itemId, seller } of [early, later]) {
       const rows = (await sql`select gladiator_id::text as owner, item from public.item_instances where id=${itemId}`).map(row => ({ ...row }));
       expect(rows).toEqual([{ owner: seller.gid, item: { ...original(itemId).item, reservation: null } }]);
+      // No replacement row either (review M5): the seller holds as many items of that catalog id and origin as at setup.
+      const { catalogId, origin } = original(itemId).item as { catalogId: string; origin: string };
+      const atSetup = world.items.filter(row => row.owner === seller.gid && (row.item as { catalogId: string }).catalogId === catalogId
+        && (row.item as { origin: string }).origin === origin).length;
+      expect(atSetup).toBeGreaterThan(0);
+      expect(await sql`select count(*)::int as n from public.item_instances where gladiator_id=${seller.gid} and item->>'catalogId'=${catalogId}
+        and item->>'origin'=${origin}`).toEqual([{ n: atSetup }]);
     }
     // The listing that is not yet due stays open, offered and reserved.
     expect(await listing(fresh.listingId)).toEqual([{ status: 'open', terminal_receipt_id: null, buyer_gladiator_id: null }]);
@@ -539,6 +553,8 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
 
   it('records a market-sweep failure for one seller and still expires the others', () => withClock(() => rollback(async tx => {
     const now = await dbNow();
+    // Precondition (file order): the mid-catch-up cleanup left no open listing, so only this case's listings are due.
+    expect(await tx`select count(*)::int as n from private.market_listings where status='open'`).toEqual([{ n: 0 }]);
     // One seller whose due listing is inconsistent (its item is gone, so closing it raises) between two whose due listings are
     // sound, in the sweep's seller order (gladiator id): the sweep goes on past the failure.
     const [lowest, lower, higher, highest] = [...world.all].sort((p, q) => (p.gid < q.gid ? -1 : 1));
@@ -562,8 +578,10 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
     expect((await tx`select private.expire_listings(${now}) as n`)[0].n).toBe(2);
     expect([await status(broken.id), ...await Promise.all(sound.map(s => status(s.id)))]).toEqual(['open', 'expired', 'expired']);
     for (const s of sound) expect(await released(s.itemId)).toBeNull();
-    // One secret-free event: the failure's SQLSTATE and the number of sellers that failed; never its message or an id.
-    expect(await events()).toEqual([...before, { source: 'market-sweep', ok: false, sqlstate: 'P0001', detail: { failedSellers: 1 } }]);
+    // One secret-free event: the first failure's SQLSTATE, the number of sellers that failed and their distinct SQLSTATEs
+    // (Task 22.3); never a message or an id.
+    expect(await events()).toEqual([...before, { source: 'market-sweep', ok: false, sqlstate: 'P0001',
+      detail: { failedSellers: 1, sqlstates: ['P0001'] } }]);
     // The cleanup backstop no longer fails whole on an inconsistent listing: with a second failing seller, it expires the
     // sound listing, records both failures in one event and completes.
     const alsoBroken = await due(highest, false), again = await due(higher, true);
@@ -571,13 +589,83 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
     expect(result).toMatchObject({ ok: true, market: { expired: 1 } });
     expect([await status(broken.id), await status(alsoBroken.id), await status(again.id)]).toEqual(['open', 'open', 'expired']);
     expect(await released(again.itemId)).toBeNull();
-    expect((await events()).slice(before.length + 1)).toEqual([{ source: 'market-sweep', ok: false, sqlstate: 'P0001', detail: { failedSellers: 2 } }]);
+    expect((await events()).slice(before.length + 1)).toEqual([{ source: 'market-sweep', ok: false, sqlstate: 'P0001',
+      detail: { failedSellers: 2, sqlstates: ['P0001'] } }]);
   })), 60_000);
+
+  it('sweeps at most fifty sellers per call, the oldest due first', () => withClock(() => rollback(async tx => {
+    const now = await dbNow();
+    // Precondition (file order): no open listing of the world's sellers.
+    expect(await tx`select count(*)::int as n from private.market_listings where status='open'`).toEqual([{ n: 0 }]);
+    // Fifty-one sellers with one sound due listing each, seller 0 due first. Operator setup inside this rolled-back
+    // transaction: the accounts and characters are plain rows (no Auth service call) and none of them is ever committed.
+    const entry = CATALOG_V1.items['axe:1:common'];
+    const sellers: { gid: string; listing: string }[] = [];
+    for (let i = 0; i < 51; i++) {
+      const owner = randomUUID(), gid = randomUUID(), listing = randomUUID(), itemId = randomUUID(), due = now - HOUR + i * 1_000;
+      await tx`insert into auth.users(id) values(${owner})`;
+      await tx`insert into public.gladiators(id,owner_id,name,stamina_current,stamina_maximum,processed_slot_index,created_at_ms,orientation_end_ms)
+        values(${gid},${owner},${`Cap ${i} ${gid.slice(0, 6)}`},10,10,0,0,${SLOT})`;
+      const item = { id: itemId, ownerId: gid, catalogId: 'axe:1:common', catalogVersion: 'v1', tier: entry.tier, rarity: entry.rarity,
+        stats: entry.stats, quantity: 1, origin: 'shop', binding: entry.binding, reservation: { kind: 'listing', referenceId: listing } };
+      await tx`insert into public.item_instances(id,gladiator_id,item) values(${itemId},${gid},${tx.json(item as never)})`;
+      await tx`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status)
+        values(${listing},${gid},${itemId},10,${due - WEEK},${due},'open')`;
+      sellers.push({ gid, listing });
+    }
+    const failures = async () => (await tx`select count(*)::int as n from private.operations_events where source='market-sweep'`)[0].n;
+    const failuresBefore = await failures();
+    // One call opens at most fifty per-seller subtransactions (the subxid cache holds 64); the newest-due seller waits for
+    // the next minute's sweep.
+    expect((await tx`select private.expire_listings(${now}) as n`)[0].n).toBe(50);
+    expect((await tx`select seller_gladiator_id::text as gid from private.market_listings where status='open'`).map(r => r.gid))
+      .toEqual([sellers[50].gid]);
+    expect((await tx`select private.expire_listings(${now}) as n`)[0].n).toBe(1);
+    expect(await tx`select count(*)::int as n from private.market_listings where status='open'`).toEqual([{ n: 0 }]);
+    expect(await failures()).toBe(failuresBefore);
+  })), 60_000);
+
+  it('records a market-sweep event when the whole sweep of a tick fails', () => withClock(async () => {
+    // Precondition (file order): the coordinator has published LATER, so a tick at LATER coordinates nothing.
+    expect(await sql`select published_slot::int as published from private.coordinator`).toEqual([{ published: LATER }]);
+    const tickAtMs = at(LATER);
+    // Another session holds the listings table; the tick's sweep cannot read it within the tick's lock timeout, so the whole
+    // sweep fails outside any per-seller block. pg_cron would still record the tick as succeeded.
+    const { tick, events } = await holding(tx => tx`lock table private.market_listings in access exclusive mode`, () => rollback(async tx => {
+      await tx.unsafe(`set local cloudiator.test_now_ms = '${tickAtMs}'`);
+      await tx`set local lock_timeout = '200ms'`;
+      await tx`update private.scheduler set enabled=true where singleton`;
+      const [{ last }] = await tx`select coalesce(max(id),0)::int as last from private.operations_events`;
+      const [{ tick: ran }] = await tx`select private.cron_tick() as tick`;
+      const added = (await tx`select at_ms::float8, source, ok, sqlstate, detail from private.operations_events where id>${last} order by id`)
+        .map(row => ({ ...row }));
+      return { tick: ran as Tick, events: added };
+    }));
+    expect(tick).toMatchObject({ ok: true, coordination: { ok: true, publishedSlot: LATER, boundaries: [] },
+      expiry: { ok: false, code: 'expiry-failed', sqlstate: '55P03' }, dispatch: { ok: true, dispatched: 0, reason: 'unconfigured' } });
+    // The whole-sweep failure is recorded like a per-seller one: its SQLSTATE only (Task 22.3).
+    expect(events).toEqual([{ at_ms: tickAtMs, source: 'market-sweep', ok: false, sqlstate: '55P03', detail: null }]);
+    // A failure to record a failure is contained too: with the operations log, the listings and the dispatch lock all held,
+    // the sweep and the dispatch fail, neither can be recorded, and the tick still returns (its coordination would commit).
+    const contained = await holding(async tx => {
+      await tx`lock table private.market_listings, private.operations_events in access exclusive mode`;
+      await tx`select pg_advisory_xact_lock(hashtextextended('cloudiator:dispatch',3))`;
+    }, () => rollback(async tx => {
+      await tx.unsafe(`set local cloudiator.test_now_ms = '${tickAtMs}'`);
+      await tx`set local lock_timeout = '200ms'`;
+      await tx`update private.scheduler set enabled=true where singleton`;
+      return (await tx`select private.cron_tick() as tick`)[0].tick as Tick;
+    }));
+    expect(contained).toMatchObject({ ok: true, coordination: { ok: true, publishedSlot: LATER },
+      expiry: { ok: false, code: 'expiry-failed', sqlstate: '55P03' }, dispatch: { ok: false, code: 'dispatch-failed', sqlstate: '55P03' } });
+  }), 60_000);
 
   it('keeps the committed coordination when dispatch fails in the same tick', () => withClock(async () => {
     // The next slot's tick: its coordination opens boundary LATER + 1 (waiting for preparation) while dispatch cannot get its
     // lock within the tick's lock timeout (another session holds it), as pg_cron would run it, in its own transaction.
     const next = LATER + 1, tickAtMs = at(next);
+    // Precondition (file order): the mid-catch-up cleanup case left the coordinator at LATER (review M6).
+    expect(await sql`select published_slot::int as published from private.coordinator`).toEqual([{ published: LATER }]);
     const [{ eventsBefore }] = await sql`select count(*)::int as "eventsBefore" from private.operations_events`;
     const tick = await holding(tx => tx`select pg_advisory_xact_lock(hashtextextended('cloudiator:dispatch',3))`, () => sql.begin(async tx => {
       await tx.unsafe(`set local cloudiator.test_now_ms = '${tickAtMs}'`);
@@ -660,4 +748,20 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
     });
     expect(await definitionOf('private.season_bounds(bigint)')).toBe(definition);
   }, 60_000);
+
+  it('ships the season row backfill in M16 after season_bounds exists', () => {
+    // The statement this file runs from the source (above) is the one M16 applies, once private.season_bounds exists
+    // (Task 22.2 review M4).
+    const dir = new URL('../../supabase/migrations/', import.meta.url);
+    const files = readdirSync(dir).filter(name => name.endsWith('_operations.sql'));
+    expect(files).toHaveLength(1);
+    const m16 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');
+    const statement = backfillStatement().replace(/\r\n/g, '\n');
+    const at = m16.indexOf(statement);
+    expect(at).toBeGreaterThan(0);
+    expect(m16.indexOf(statement, at + 1)).toBe(-1);
+    const created = m16.search(/create or replace function "?private"?\."?season_bounds"?\(/i);
+    expect(created).toBeGreaterThan(0);
+    expect(at).toBeGreaterThan(created);
+  });
 });

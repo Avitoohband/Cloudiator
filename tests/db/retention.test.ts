@@ -686,13 +686,18 @@ describe('Task 22.1: retention in the database', () => {
       await tx`select pg_advisory_xact_lock(hashtextextended(${owner.id},0))`;
     }, () => rollback(async tx => {
       const listing = await dueListing(tx);
+      const sweepFailures = async () => (await tx`select count(*)::int as n from private.operations_events where source='market-sweep'`)[0].n;
+      const failuresBefore = await sweepFailures();
       const started = Date.now();
       const result = await cleanup(tx, SEVEN_DAYS_LATER);
       expect(Date.now() - started).toBeLessThan(5_000);
       expect(result.replay.flipped).toBe(18);
-      // The busy owner is skipped, not waited for: its listing stays open for a later sweep.
+      // The busy owner is skipped, not waited for: its listing stays open for a later sweep. A sweep that waited for the lock
+      // inside its per-seller block would give up after 500 ms (55P03) with the same counts, but would record that seller as
+      // a market-sweep failure: none is recorded (Task 22.2 review M1).
       expect(result.market).toMatchObject({ expired: 0 });
       expect(await tx`select status from private.market_listings where id=${listing}`).toEqual([{ status: 'open' }]);
+      expect(await sweepFailures()).toBe(failuresBefore);
       expect(await tx`select lease_token, published_slot::int as published from private.coordinator`).toEqual([{ lease_token: null, published: LAST }]);
     }));
     // Control: with the account lock free, the same call expires that listing.

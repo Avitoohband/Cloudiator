@@ -1,67 +1,173 @@
 # Local identity backend and migrations
 
-## Task 22.1: retention in the database (draft for M16)
+## Tasks 22.1–22.3: retention, durable ticks, whole seasons and operator health (M16)
 
-**Draft.** M16 is generated in Task 22.3, from `supabase/sql/14-operations.sql` once Tasks 22.1–22.3 are in it. Task 22.1 has
-no migration of its own. M01–M15 are unchanged. The source was applied to the local stack with the psql fallback above and
-tested there. That is source evidence only, not migration-artifact proof.
+M16 is `supabase/migrations/20261018191110_operations.sql`, generated with CLI 2.120.0 (engine `migra`) by
+`db pull operations --local --schema public,private --yes` from the tested `supabase/sql/14-operations.sql`, applied once
+to a clean M01–M15 reset. It covers Tasks 22.1, 22.2 and 22.3 together; 22.1 and 22.2 had no migration of their own.
+M01–M15 are unchanged.
 
-It adds retention ([plan](../superpowers/plans/2026-10-18-task-22-retention-operations.md), Decisions 2–5 and the retention
-design):
-- Three backend-only tables. RLS is on, and `service_role` may only SELECT them, for the health report:
+**Source iteration.** During Tasks 22.1–22.3 the source was applied to the local stack with the psql fallback documented in
+"SQL source iteration and deployment artifact" below, after confirming that the container belongs to the local Cloudiator
+stack:
+
+```powershell
+docker inspect -f '{{index .Config.Labels "com.supabase.cli.project"}}' supabase_db_Cloudiator   # must print Cloudiator
+Get-Content supabase/sql/14-operations.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1
+```
+
+From Git Bash the same input is `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q <
+supabase/sql/14-operations.sql`; check the exit status. Source application is iteration evidence only; the replay below is the
+migration-artifact proof.
+
+**A first draft was discarded.** The first draft, `20261018190708_operations.sql`, replayed cleanly, but `db lint` on it
+reported plpgsql_check warnings in three new function bodies: an untyped `'{}'` array initializer in `expire_listings`,
+`health_alerts` marked IMMUTABLE although `jsonb_build_object` is STABLE, and `health_report` marked STABLE although
+`pg_database_size` and `pg_total_relation_size` are VOLATILE. It was never committed. It was removed with local
+`migration repair --status reverted 20261018190708` and exact-file removal. The source was fixed, the database reset to
+M01–M15, the source applied once more and M16 generated again. The new draft differs from the first only in those three lines.
+
+It adds ([plan](../superpowers/plans/2026-10-18-task-22-retention-operations.md), Decisions 2–8 and the retention design):
+- **State.** Three backend-only tables. RLS is on, and `service_role` may only SELECT them (`backend_only` policy):
   - `private.retention_state`, a singleton holding the two watermarks (`detail_through_slot`, `summary_through_slot`, seed
     `-1`), `last_run_at_ms` and `last_result`;
   - `private.wallet_checkpoints`, the folded part of each wallet. Invariant: `wallets.money = coalesce(cp.money,0) +
     Σ wallet_ledger.money_delta`, and the same for renown. Its guard refuses a delete and any update that does not increase
     `ledger_rows`;
-  - `private.operations_events`, holding a SQLSTATE and never raw text, kept 30 days. Task 22.1 writes `cleanup` rows; 22.2 adds
-    `market-sweep` and `dispatch`.
-- Two indexes: `wallet_ledger(created_at)` for the fold, and a partial `activities(slot_index)` index on still-available
-  replays for the flip. `operations_events(at_ms)` also has one.
-- Two new guards:
+  - `private.operations_events` (`cleanup`, `market-sweep` and `dispatch` events), holding a SQLSTATE and never raw text, kept
+    30 days.
+- **Indexes.** `wallet_ledger(created_at)` for the fold, a partial `activities(slot_index)` index on still-available replays
+  for the flip, and `operations_events(at_ms)` for the window prune and the health report.
+- **Guards.**
   - `private.guard_receipt` (BEFORE UPDATE OR DELETE on `public.operation_receipts`) refuses every delete. It allows one update
     only: a settlement receipt's `result`, once, to `{"compactedAtMs":n}`.
   - `private.guard_tournament_bout_result` replaces `guard_frozen` on `public.tournament_bout_results`. It allows only the
     compaction of `result.battleLog` to `result.fight` (`durationMs`, `victoryReason`, `tieBreakReason`). Deletes stay allowed.
-- Projection cost:
-  - (a) `project_changed_character` is dropped from `public.activity_stages`; `projection_changed` stays.
-  - (b) `private.project_character` is 13's body with an anti-join before the `recent_results` upsert. It writes the same rows,
-    but an unchanged row is no longer written or locked.
-- `private.cleanup_history(now_ms bigint) returns jsonb`: one bounded transaction, `lock_timeout` 500 ms, never ahead of
-  `private.planning_now_ms()`. Its header documents the matrix, the step order and the locks.
-- `private.cleanup_tick()`: inert while the scheduler is disabled. Otherwise it writes one `operations_events` row per call,
-  ok or the failure's SQLSTATE.
-- `cron.schedule('cloudiator-cleanup','23 * * * *','select private.cleanup_tick()')`. pg_cron 1.6.4 upserts a job by name, so
-  the statement is reapplicable.
-- Grants: nobody may EXECUTE `cleanup_history` or `cleanup_tick`, including `service_role`. The three guards and the projector
-  keep `service_role` EXECUTE, as every earlier guard does.
+- **Projection cost.** (a) `project_changed_character` is dropped from `public.activity_stages`; `projection_changed` stays.
+  (b) `private.project_character` is M15's body with an anti-join before the `recent_results` upsert: the same rows, but an
+  unchanged row is no longer written or locked.
+- **Cleanup.** `private.cleanup_history(now_ms bigint) returns jsonb` is one bounded transaction with `lock_timeout` 500 ms,
+  never ahead of `private.planning_now_ms()`. `private.cleanup_tick()` is inert while the scheduler is disabled; otherwise it
+  writes one `cleanup` event per call (ok, or the failure's SQLSTATE). `cron.schedule('cloudiator-cleanup','23 * * * *',
+  'select private.cleanup_tick()')` registers it hourly; pg_cron 1.6.4 upserts a job by name.
+- **Durable ticks.**
+  - `private.expire_listings` closes each seller's due listings in its own subtransaction. It sweeps at most 50 sellers per
+    call, the longest due first; the rest wait for the next minute. That keeps one tick's subtransactions below PostgreSQL's
+    64 cached sub-XIDs.
+  - A sweep with failed sellers writes one `market-sweep` event: the first SQLSTATE, plus `{"failedSellers": n, "sqlstates":
+    [...]}` with every distinct SQLSTATE.
+  - `private.cron_tick` runs `dispatch_workers()` in its own block and records a `dispatch` event on failure. It also records a
+    `market-sweep` event (SQLSTATE, no detail) when its whole sweep fails, so pg_cron's "succeeded" is not the only trace.
+  - A failure to record either event is contained, so it never rolls back the tick's coordination.
+- **Whole seasons.** `private.season_bounds(index)` (STABLE: it reads `private.season_epoch`) gives boundary phase 2
+  (`private.boundary_close_season`), phase 4 (`private.boundary_recompute_leagues`) and the season row backfill their bounds.
+  Phase 4 also inserts the row of the season it rates, which removes M15's known limit (M15 itself is unchanged).
+- **Health (Task 22.3).** `private.health_report(now_ms bigint) returns jsonb` and `private.health_alerts(report jsonb)`;
+  see "Operator health report" below.
+- **Grants.**
+  - Nobody may EXECUTE `cleanup_history`, `cleanup_tick`, `expire_listings`, `cron_tick`, `health_report` or `health_alerts`,
+    including `service_role`. Only the owner may: pg_cron and the operator.
+  - The three guards, the projector, `season_bounds` and the two boundary phases keep `service_role` EXECUTE, because the worker
+    coordinates boundaries as `service_role`.
 
-**Task 22.2 (same draft).** Decisions 6 and 7, also in `14-operations.sql` and applied the same way:
-- `private.expire_listings` closes each seller's due listings in its own subtransaction. A sweep with failed sellers writes one
-  `operations_events` row (`market-sweep`, `ok` false, the first SQLSTATE, `{"failedSellers": n}`), so the cleanup backstop no
-  longer fails whole on one inconsistent listing.
-- `private.cron_tick` runs `dispatch_workers()` in its own block. A failure writes a `dispatch` event (SQLSTATE only), and the
-  tick's coordination and sweep still commit.
-- `private.season_bounds(index)` gives boundary phase 2 (`private.boundary_close_season`), phase 4
-  (`private.boundary_recompute_leagues`) and the season row backfill their bounds. It is STABLE, because it reads
-  `private.season_epoch`. Phase 4 also inserts the row of the season it rates, which removes M15's known limit (M15 itself is
-  unchanged).
-- Tests: `tests/db/recovery.test.ts`.
+**The draft needed seven completions before commit** (the generator's omissions recorded from M03 to M15, checked one by one
+against the tested source):
+- It created the `guard_receipt` and `guard_tournament_bout_result` triggers at the top, before either function existed; both
+  now follow `private.guard_tournament_bout_result()`. (`guard_wallet_checkpoint` was already after its function.)
+- It omitted the `retention_state` seed row; `insert into private.retention_state(singleton) values(true) on conflict do
+  nothing` now follows the table's constraints.
+- It only added table grants. Source-equivalent `revoke all … from public, anon, authenticated, service_role` statements now
+  precede them on all three tables.
+- It omitted every function ACL. The source's revoke/grant pairs for the thirteen new or replaced functions are appended.
+- It omitted the season row backfill. The source's statement is appended after `private.season_bounds` exists (the
+  `tests/db/recovery.test.ts` case "ships the season row backfill in M16 after season_bounds exists" checks the text and its
+  position).
+- It omitted the `cloudiator-cleanup` pg_cron registration, which is appended.
+- A provenance header and `notify pgrst` were added.
 
-**Expected draft completions (Task 22.3).** From M03 to M15 the generator has omitted these. Check each one against the
-tested source:
-- the `retention_state` seed row (`insert … on conflict do nothing`);
-- the season row backfill (`insert into public.seasons … cross join lateral private.season_bounds(…) … on conflict do
-  nothing`, Task 22.2);
-- the `cron.schedule` registration;
-- every function ACL;
-- the `revoke all … from public, anon, authenticated, service_role` before the table grants;
-- triggers placed after their functions;
-- the two dropped triggers (`guard_frozen` on `tournament_bout_results`, `project_changed_character` on `activity_stages`).
+The draft did contain both dropped triggers (`project_changed_character` on `activity_stages`, `guard_frozen` on
+`tournament_bout_results`), the RLS, the three `backend_only` policies, the indexes and `set check_function_bodies = off`.
+It re-emits no unchanged function: its thirteen functions are exactly the source's. Their bodies are byte-identical to the
+source text (compared function by function), including the five replaced ones: `project_character`, `expire_listings`,
+`cron_tick`, `boundary_close_season` and `boundary_recompute_leagues`.
 
-**Retention (Task 22).** The FK order the cleanup follows is documented per table in the sections below. The 90-day pass
-deletes activities last, so a forgotten referencing row fails the whole call. `net._http_response` is left to pg_net:
-`pg_net.ttl` is `6 hours` on the local stack (verified for Task 22.1), so cleanup adds no delete for it.
+**Retention order and pg_net.** The cleanup's FK-safe step order, table by table, is in the header of
+`supabase/sql/14-operations.sql` ("Step order of one call"). The 90-day pass deletes activities last, so a forgotten
+referencing row fails the whole call closed. `net._http_response` is left to pg_net. On the local stack (pg_net 0.20.4),
+`pg_net.ttl` is `6 hours`, so cleanup adds no delete for it. The hosted value is a Task 24 check.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` replayed M01–M16, with no source applied afterwards. Before generation, the
+  M01–M15 reset matched M15's recorded fingerprint byte for byte (1029 lines).
+- The schema fingerprint (1127 lines) matched the source-applied fingerprint byte for byte. It extends M15's coverage with
+  every `public`/`private` trigger's enabled state and the `retention_state` seed row. It was identical again after the test
+  run.
+- Inspection of the replay:
+  - ACLs: the six owner-only functions grant only `postgres`; the seven backend functions also grant `service_role`.
+  - Triggers: all are enabled (`O`). `activity_stages` keeps only `projection_changed`.
+  - The three tables have RLS and `service_role=r` only.
+  - Both cron jobs are active (`cloudiator-coordinate` every minute, `cloudiator-cleanup` at minute 23).
+  - The retention seed row is present.
+- The backfill cannot run on an empty replay (no ratings), so it was checked separately on the replayed database, verbatim
+  from M16, inside a `DO` block that always raises. With ratings in seasons 0, 1, 3 and 7 at epoch 0, it created exactly those
+  four rows with `seasonAt`'s bounds. Run again, it added nothing. Afterwards the database had no epoch, season, character or
+  rating row.
+- `npm run test:db` passed **252/252** in 14 files on the replay, with the Edge container's start time unchanged across the
+  run.
+- Lint is empty. Advisors report four INFO unused-index notices (`jobs_gladiator_idx`, `tournament_entries_gladiator_idx`,
+  `market_listings_buyer_idx`, `market_listings_receipt_idx`), none on M16's tables, and no warnings or errors.
+  `migration list --local` shows M01–M16.
+
+### Operator health report
+
+`npm run health` (`node scripts/health.mjs`) prints `private.health_report(private.planning_now_ms())` as JSON.
+- **Exit codes.** `0` healthy, `1` alerts, `2` failure. On a failure it prints `{"ok":false,"code":…}`, plus a SQLSTATE when
+  the database gave one. It never prints the connection string, a key or raw error text.
+- **Connection.**
+  - By default it discovers this checkout's local stack in memory, as `scripts/test-db.mjs` does, and refuses a non-loopback
+    database.
+  - An operator connection is passed only through `CLOUDIATOR_DB_URL`, the database owner's connection string. A non-loopback
+    host also needs `--remote`, and then SSL is required unless the URL sets `sslmode`.
+  - The report runs in one read-only transaction (`statement_timeout` 30 s, `lock_timeout` 5 s).
+
+The report holds:
+- the checkpoint: `checkedAtMs`, `currentSlot`, `publishedSlot`, `slotsBehind`;
+- `coordinator` (`lastError` as a SQLSTATE, `lastFailedSlot`, `leaseHeld`) and `scheduler.enabled`;
+- `boundaries`: up to 20 incomplete boundaries with their phase, wait reason and time since they opened;
+- `jobs`: counts by kind and status; up to 20 overdue jobs and up to 20 operator jobs, with their totals and job ids (for
+  `private.resume_operator_job`);
+- `attempts24h`: count, failures by code, and per-kind p50/p95/max durations of completed attempts;
+- `dispatch`: `lastAtMs`, `lastHour`;
+- `cleanup`: the watermarks, the last run's durations and `more` flags, `moreSinceMs`, and the current failure streak;
+- `events`: per source, the latest failure in 24 hours and the last hour's failures with their distinct SQLSTATEs;
+- `resources`: database size against the 250 MB budget and the ten largest tables;
+- `cpu: "not available"`;
+- `alerts`.
+
+Alerts:
+- `boundary-behind`: the next slot is more than 10 minutes late, or nothing is published while the scheduler is on;
+- `boundary-waiting`: a boundary has been open for more than 10 minutes;
+- `operator-jobs`;
+- `overdue-jobs`: pending more than 10 minutes past due, or leased with a lease expired more than 10 minutes ago;
+- `cleanup-stale`: the scheduler is on and no successful cleanup for 26 hours, or never;
+- `cleanup-failures`: the last three or more cleanup ticks failed;
+- `cleanup-backlog`: `more` for 24 hours;
+- `tick-failures`: sweep or dispatch failures in the last hour, aggregated;
+- `database-size`: a warning from 80 % of the budget, an alert from 100 %.
+
+Free-text columns appear only as SQLSTATEs or failure codes, otherwise as `unrecognized`. Monthly egress (3 GB) and function
+invocations (300,000) are read from the hosting dashboard; the Edge runtime exposes no per-request CPU.
+
+**Release (Task 24).**
+- Deploy M16 together with Task 22.5's client change. After seven days, the cleanup turns a public bout result's `battleLog`
+  into `fight`, and `src/lib/api/reads.ts` must read `fight` before then.
+- Set the season epoch first (M09's note). Enable `private.scheduler` only after the epoch is set.
+- Then verify that `select jobname, schedule, active from cron.job` lists `cloudiator-coordinate` (`* * * * *`) and
+  `cloudiator-cleanup` (`23 * * * *`), both active.
+- Check the hosted `current_setting('pg_net.ttl', true)`. If it is absent, add the guarded `net._http_response` delete from the
+  retention design.
+- Run `CLOUDIATOR_DB_URL=… npm run health -- --remote`. `cleanup-stale` stays on until the first hourly cleanup, unless the
+  operator runs `select private.cleanup_tick()` once after enabling the scheduler.
 
 ## Tasks 21.1 and 21.2: seasons (M15)
 

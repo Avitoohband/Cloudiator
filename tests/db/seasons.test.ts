@@ -426,23 +426,41 @@ describe('closing a season', () => {
     }
     expect((await sql`select closed_at_ms from public.seasons where season_index=1`)[0].closed_at_ms).toBeNull();
     expect((await sql`select count(*)::int as n from public.season_standings`)[0].n).toBe(1);
-    // Privileges: public reads for clients, writes and award reads for the backend only; close_season is granted to nobody.
+    // Privileges: clients read seasons and the archive only, and nothing of the awards or the functions. The backend (the
+    // boundary worker) holds exactly the DML the close needs; the guards refuse any update or delete of the archive and awards.
     const tables = await sql`select c.oid::regclass::text as name, c.relrowsecurity as rls,
       has_table_privilege('anon',c.oid,'SELECT') as anon, has_table_privilege('authenticated',c.oid,'SELECT') as player,
       has_table_privilege('anon',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') or has_table_privilege('authenticated',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') as write,
-      has_table_privilege('service_role',c.oid,'SELECT') as backend_read, has_table_privilege('service_role',c.oid,'INSERT,UPDATE,DELETE') as backend_write
+      array(select x.p from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) with ordinality x(p,i)
+        where has_table_privilege('service_role',c.oid,x.p) order by x.i) as backend
       from pg_class c where c.oid in ('public.seasons'::regclass,'public.season_standings'::regclass,'private.season_awards'::regclass)
       order by c.oid::regclass::text collate "C"`;
     expect(tables.map(r => ({ ...r }))).toEqual([
-      { name: 'private.season_awards', rls: true, anon: false, player: false, write: false, backend_read: true, backend_write: false },
-      { name: 'season_standings', rls: true, anon: true, player: true, write: false, backend_read: true, backend_write: true },
-      { name: 'seasons', rls: true, anon: true, player: true, write: false, backend_read: true, backend_write: true }]);
+      { name: 'private.season_awards', rls: true, anon: false, player: false, write: false, backend: ['SELECT', 'INSERT'] },
+      { name: 'season_standings', rls: true, anon: true, player: true, write: false, backend: ['SELECT', 'INSERT'] },
+      { name: 'seasons', rls: true, anon: true, player: true, write: false, backend: ['SELECT', 'INSERT', 'UPDATE'] }]);
     const functions = await sql`select p.proname, p.prosecdef, p.proconfig,
-      has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE') as client,
+      has_function_privilege('anon',p.oid,'EXECUTE') as anon, has_function_privilege('authenticated',p.oid,'EXECUTE') as player,
       has_function_privilege('service_role',p.oid,'EXECUTE') as backend
       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='private' and p.proname in ('season_rules','guard_season','close_season') order by p.proname`;
     expect(functions.map(r => ({ ...r }))).toEqual(['close_season', 'guard_season', 'season_rules'].map(proname =>
-      ({ proname, prosecdef: false, proconfig: ['search_path=""'], client: false, backend: proname !== 'close_season' })));
+      ({ proname, prosecdef: false, proconfig: ['search_path=""'], anon: false, player: false, backend: true })));
+    // The worker coordinates boundaries as service_role, so a close must succeed in that role: archive, award, receipt,
+    // ledger, wallet, the season row and (made immediate here) the deferred prestige projection. Rolled back afterwards.
+    await rate(a, 'silver', { rating: 1000, ...QUALIFIED }, 1);
+    const rollback = new Error('rollback');
+    await expect(sql.begin(async tx => {
+      await tx`set local role service_role`;
+      expect((await tx`select private.close_season(1,${now + 1}) as awards`)[0].awards).toBe(1);
+      await tx`set constraints all immediate`;
+      expect((await tx`select count(*)::int as n from private.season_awards where season_index=1`)[0].n).toBe(1);
+      expect((await tx`select closed_at_ms::float8 as closed from public.seasons where season_index=1`)[0].closed).toBe(now + 1);
+      expect((await tx`select prestige from public.public_profiles where gladiator_id=${a.gid}`)[0].prestige.map((p: { seasonIndex: number }) => p.seasonIndex))
+        .toEqual([0, 1]);
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect((await sql`select closed_at_ms from public.seasons where season_index=1`)[0].closed_at_ms).toBeNull();
+    expect((await sql`select count(*)::int as n from private.season_awards where season_index=1`)[0].n).toBe(0);
   });
 });

@@ -26,6 +26,11 @@
 -- would either block a later removal or cascade the history away, and each archive row carries the name frozen at close.
 -- private.season_awards keeps its foreign keys: an award is a grant tied to its character and its receipt.
 --
+-- Grants follow 03-activities-jobs.sql and 07-arena.sql. The boundary runs as service_role when the worker coordinates, so
+-- service_role executes the private functions (revoked from public, anon and authenticated) and holds only the DML the close
+-- needs: seasons select, insert and update; season_standings and season_awards select and insert (their guards refuse any
+-- update or delete). Clients read seasons and season_standings only, and nothing of season_awards or the functions.
+--
 -- Accepted exceptions:
 -- 1. Restated rule constants. private.season_rules() restates RULES_V1.seasons' minimumHumanBouts and placements (a DB test
 --    compares them). The view restates the 5 and the league order, because a visitor's invoker read cannot call a private
@@ -34,8 +39,6 @@
 -- 2. guard_arena_rating reads the season row without locking it. Locking it would order a rating row before the season row,
 --    against the close's season-row-then-account order, and could deadlock a settlement with the close. The close cannot race
 --    a settlement of its own season: Task 21.2 closes only after boundary phase 1 proved every earlier slot settled.
--- 3. Grants (Decisions 3 and 5). private.close_season is granted to nobody and private.season_awards grants service_role
---    SELECT only; Task 21.1's tests call the close as the database owner.
 begin;
 
 -- One row per season, created by boundary phase 2 (Task 21.2). Bounds are fixed; the row closes once.
@@ -80,20 +83,20 @@ create table if not exists private.season_awards (
 );
 create index if not exists season_awards_gladiator_idx on private.season_awards(gladiator_id);
 
--- Revoke all from everyone first. Seasons and the archive: anyone reads, only the backend writes.
+-- Revoke all from everyone first. Seasons and the archive: anyone reads; the backend writes only what the close needs.
 do $$ declare t text; begin
   foreach t in array array['seasons','season_standings'] loop
     execute format('alter table public.%I enable row level security',t);
     execute format('revoke all on public.%I from public,anon,authenticated,service_role',t);
     execute format('grant select on public.%I to anon,authenticated',t);
-    execute format('grant select,insert,update,delete on public.%I to service_role',t);
+    execute format('grant %s on public.%I to service_role',case t when 'seasons' then 'select,insert,update' else 'select,insert' end,t);
     execute format('drop policy if exists player_read on public.%I',t);
     execute format('create policy player_read on public.%I for select to anon,authenticated using (true)',t);
   end loop;
 end $$;
 alter table private.season_awards enable row level security;
 revoke all on private.season_awards from public,anon,authenticated,service_role;
-grant select on private.season_awards to service_role;
+grant select,insert on private.season_awards to service_role;
 drop policy if exists backend_only on private.season_awards;
 create policy backend_only on private.season_awards to service_role using (true) with check (true);
 
@@ -265,8 +268,8 @@ begin
 end $$;
 
 revoke all on function private.season_rules(),private.guard_season(),private.guard_arena_rating(),private.project_character(uuid),
-  private.close_season(bigint,bigint) from public,anon,authenticated,service_role;
-grant execute on function private.season_rules(),private.guard_season(),private.guard_arena_rating(),private.project_character(uuid)
-  to service_role;
+  private.close_season(bigint,bigint) from public,anon,authenticated;
+grant execute on function private.season_rules(),private.guard_season(),private.guard_arena_rating(),private.project_character(uuid),
+  private.close_season(bigint,bigint) to service_role;
 notify pgrst,'reload schema';
 commit;

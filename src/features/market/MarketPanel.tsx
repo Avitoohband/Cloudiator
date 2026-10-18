@@ -13,9 +13,11 @@
 //
 // Commands follow InventoryPanel's retry rules: an identical retry keeps its operation id after `processing`,
 // `unavailable` or `rate-limited` (or a lost response), so a retry after a rolled-back deadlock replays the same operation
-// (Ruling 3); any other answer ends that operation. A purchase on a stale page (`sold`, `expired`, `not-found`) is
-// explained and the page and the owner are refreshed (Review Focus 4). Offers load on demand: each time the menu opens, a
-// tab is shown, a command settles or Refresh is pressed. Names render as React text.
+// (the Task 18.2 review's item carried to 18.3: keep the same operationId on `processing`); any other answer ends that
+// operation. A purchase on a stale page (`sold`, `expired`, `not-found`) is explained and the page and the owner are
+// refreshed (Review Focus 4). Offers load on demand: each time the menu opens, a tab is shown, a command settles or Refresh
+// is pressed. A trader's owner is read when the menu opens and on each Refresh too, because a sale or an expiry changes the
+// seller's wallet and inventory without a new world revision (final review I1). Names render as React text.
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { GameCommand } from '@contracts/commands';
 import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
@@ -26,7 +28,7 @@ import type { Viewer } from '../character/useGameState';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import {
   MARKET_FEE_PERCENT, MAXIMUM_LISTINGS, MAXIMUM_PRICE, RETRY_CODES, activeListings, amount, itemGrade, itemIcon, itemName, itemStats,
-  listableItems, marketErrorText, marketFee, money, npcValueText, sellerReceives, timeLeft, validPrice, type MarketKind,
+  listableItems, marketErrorText, marketFee, money, npcValueText, offerName, sellerReceives, timeLeft, validPrice, type MarketKind,
 } from './market-text';
 import styles from './MarketPanel.module.css';
 
@@ -63,6 +65,25 @@ export async function readOffers(reader: MarketReader, seller: string | null, lo
   }
   if (loaded && !fresh.length) return { ...loaded, nextCursor: null };
   return { rows: [...(loaded?.rows ?? []), ...fresh], nextCursor: page.nextCursor };
+}
+
+/**
+ * A trader's on-demand owner reads (final review I1). A sale or an expiry changes the seller's wallet and inventory without
+ * bumping the world revision (Ruling 2), so nothing else reads the owner again. The panel reads it once when it opens and
+ * again on each Refresh, so the listing count, the available money and the free slots match the server. `open` reads at
+ * most once, however often it runs (a development remount runs effects twice); a failed read keeps the owner last shown.
+ */
+export function ownerReads(read: () => Promise<void>): { open(): Promise<void>; refresh(): Promise<void> } {
+  let opened = false;
+  const refresh = () => read().catch(() => undefined);
+  return {
+    open: () => {
+      if (opened) return Promise.resolve();
+      opened = true;
+      return refresh();
+    },
+    refresh,
+  };
 }
 
 /** The display clock's time, twice a minute while the tab is visible and whenever the clock is held or moved. */
@@ -107,7 +128,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
       : status === 'loading' && rows.length === 0 ? <p className="muted" role="status">Loading listings…</p>
         : rows.length === 0 ? <p className="muted" role="status">{empty}</p>
           : <ul className={styles.list} aria-label={label}>{rows.map(row => {
-            const name = itemName(row.item), own = row.seller.gladiatorId === ownerId, expired = row.expiresAtMs <= now;
+            const name = offerName(row.item), own = row.seller.gladiatorId === ownerId, expired = row.expiresAtMs <= now;
             const poor = available !== null && row.price > available;
             const blocked = action === 'buy' && !own && !expired ? (poor ? 'Not enough available money' : full ? 'Your inventory is full' : null) : null;
             return <li key={row.listingId} className={styles.offer} data-testid={`listing-${row.listingId}`}>
@@ -135,9 +156,12 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
   </div>;
 }
 
-/** One list of offers, read on demand: anyone's (`seller` null) or one seller's. `version` changes re-read it. */
-function OfferList({ reads, seller, version, ...view }: {
-  reads: MarketReader; seller: string | null; version: number;
+/**
+ * One list of offers, read on demand: anyone's (`seller` null) or one seller's. `version` changes re-read it; Refresh re-reads
+ * it and calls `onRefresh` (a trader's owner read).
+ */
+function OfferList({ reads, seller, version, onRefresh, ...view }: {
+  reads: MarketReader; seller: string | null; version: number; onRefresh?(): void;
 } & Omit<Parameters<typeof MarketOffers>[0], 'model' | 'onMore' | 'onRetry' | 'loadingMore' | 'moreFailed'>) {
   const [list, setList] = useState<OffersList | null>(null);
   const [status, setStatus] = useState<OffersModel['status']>('loading');
@@ -178,7 +202,7 @@ function OfferList({ reads, seller, version, ...view }: {
   return <>
     <div className={styles.listHead}>
       <p className="eyebrow">{seller ? 'YOUR OPEN LISTINGS' : 'OPEN LISTINGS · NEWEST FIRST'}</p>
-      <button type="button" className={styles.refresh} onClick={() => setAttempt(n => n + 1)} disabled={status === 'loading'}>Refresh</button>
+      <button type="button" className={styles.refresh} onClick={() => { setAttempt(n => n + 1); onRefresh?.(); }} disabled={status === 'loading'}>Refresh</button>
     </div>
     <MarketOffers {...view} model={{ rows: list?.rows ?? [], nextCursor: list?.nextCursor ?? null, status }} onMore={() => void more()}
       onRetry={() => setAttempt(n => n + 1)} loadingMore={loadingMore} moreFailed={moreFailed} />
@@ -261,6 +285,12 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
   const tabsId = useId(), confirmId = useId();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { if (confirming && !dialog.current?.open) dialog.current?.showModal(); }, [confirming]);
+  // The owner is read through the latest `refreshOwner`, whose identity may change, without reading again for that.
+  const latestRefresh = useRef(refreshOwner);
+  useEffect(() => { latestRefresh.current = refreshOwner; });
+  const [owners] = useState(() => ownerReads(() => latestRefresh.current()));
+  useEffect(() => { if (trader) void owners.open(); }, [owners, trader]);
+  const refreshTrader = trader ? () => void owners.refresh() : undefined;
 
   const available = owner ? owner.wallets.money - owner.reservedFees.money : 0;
   const full = owner ? owner.inventory.length >= owner.inventoryCapacity : false;
@@ -321,7 +351,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     const listing = confirming;
     dialog.current?.close();
     setConfirming(null);
-    if (listing) void send({ kind: 'buy-listing', listingId: listing.listingId }, itemName(listing.item), listing.price);
+    if (listing) void send({ kind: 'buy-listing', listingId: listing.listingId }, offerName(listing.item), listing.price);
   };
 
   return <div className={styles.market}>
@@ -337,12 +367,12 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     </div>}
     <div className={styles.panel} id={`${tabsId}-panel`} role={trader ? 'tabpanel' : undefined} aria-labelledby={trader ? `${tabsId}-${shown}` : undefined}>
       {shown === 'browse' && <OfferList reads={reads} seller={null} version={version} action={trader ? 'buy' : null} ownerId={owner?.gladiatorId ?? null}
-        now={now} busy={busy} onAction={buy} available={trader ? available : null} full={trader && full} />}
+        now={now} busy={busy} onAction={buy} available={trader ? available : null} full={trader && full} onRefresh={refreshTrader} />}
       {shown === 'mine' && owner && <>
         <p className="muted">{`A listing lasts ${LISTING_DAYS} days. Cancel it, or let it expire, to return the item to your inventory.`}</p>
         <OfferList reads={reads} seller={owner.gladiatorId} version={version} action="cancel" ownerId={owner.gladiatorId} now={now} busy={busy}
-          label="Your open listings" empty="You have no open listings."
-          onAction={listing => void send({ kind: 'cancel-listing', listingId: listing.listingId }, itemName(listing.item), listing.price)} />
+          label="Your open listings" empty="You have no open listings." onRefresh={refreshTrader}
+          onAction={listing => void send({ kind: 'cancel-listing', listingId: listing.listingId }, offerName(listing.item), listing.price)} />
       </>}
       {shown === 'sell' && owner && <SellForm owner={owner} busy={busy} onList={(item, price) => void send({ kind: 'create-listing', itemId: item.id, price }, itemName(item), price)} />}
     </div>
@@ -354,7 +384,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     {trader && <dialog ref={dialog} className={styles.confirm} aria-labelledby={confirmId} onClose={() => setConfirming(null)}>
       <h2 id={confirmId}>Confirm purchase</h2>
       {confirming && <>
-        <p>{`Buy ${itemName(confirming.item)} (${itemGrade(confirming.item)}) from ${confirming.seller.name} for ${money(confirming.price)}?`}</p>
+        <p>{`Buy ${offerName(confirming.item)} (${itemGrade(confirming.item)}) from ${confirming.seller.name} for ${money(confirming.price)}?`}</p>
         <p className="muted">{`Available money after the purchase: ${money(Math.max(0, available - confirming.price))}.`}</p>
       </>}
       <div className={styles.actions}>

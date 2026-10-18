@@ -6,8 +6,11 @@ import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
 
-/** The sale fee, a whole percent of the price kept from the seller's credit (spec §9: 5%, rounded down). */
-export const MARKET_FEE_PERCENT = 5;
+/**
+ * The sale fee, a whole percent of the price kept from the seller's credit (spec §9: 5%, rounded down), from the rules'
+ * `fees.marketRate` (0.05). As a whole percent, the fee is exact integer math, as the database's bigint `price*5/100` is.
+ */
+export const MARKET_FEE_PERCENT = Math.round(RULES_V1.fees.marketRate * 100);
 /** Whole prices from 1 to 1,000,000,000 (plan Decision 2). */
 export const MAXIMUM_PRICE = RULES_V1.marketplace.maximumPrice;
 /** Active listings per seller (spec §9). */
@@ -56,19 +59,33 @@ export function itemStats(item: Pick<OfferItem, 'stats'>): string {
   const { damage, armor, weight } = item.stats;
   return [damage > 0 ? `Damage ${damage}` : null, armor > 0 ? `Armor ${armor}` : null, `Weight ${weight}`].filter(Boolean).join(' · ');
 }
-/** The item's slot icon (decorative). */
+/**
+ * An offer's item with its quantity when it is a stack ("12 × Salvage", as Inventory counts one), or its name alone. The
+ * database accepts a salvage stack, though the Sell tab offers equipment only, so Browse can show one.
+ */
+export const offerName = (item: Pick<OfferItem, 'catalogId' | 'quantity'>): string =>
+  item.quantity > 1 ? `${amount(item.quantity)} × ${itemName(item)}` : itemName(item);
+/** The item's slot icon (decorative), or a neutral one for anything that is not equipment (salvage). */
 export function itemIcon(item: Pick<OfferItem, 'catalogId'>): string {
   const slot = CATALOG_V1.items[item.catalogId]?.slot;
-  return slot === 'offHand' ? '🛡' : slot === 'head' ? '⛑' : slot === 'body' ? '🥋' : slot === 'feet' ? '🥾' : '🗡';
+  return slot === 'offHand' ? '🛡' : slot === 'head' ? '⛑' : slot === 'body' ? '🥋' : slot === 'feet' ? '🥾' : slot === 'weapon' ? '🗡' : '📦';
 }
-/** What an NPC merchant pays for this catalog variant, for comparison (spec §9), or null when NPCs do not buy it. */
-export function npcValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity'>): number | null {
+/** What an NPC merchant pays for one unit of this catalog variant (salvage too), or null when NPCs do not buy it. */
+function npcUnitValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity'>): number | null {
+  if (item.catalogVersion !== CATALOG_V1.version) return null;
+  if (item.catalogId === CATALOG_V1.salvage.id) return CATALOG_V1.salvage.npcSellValue;
   const entry = CATALOG_V1.items[item.catalogId];
-  return entry && item.catalogVersion === CATALOG_V1.version && entry.tier === item.tier && entry.rarity === item.rarity ? entry.npcSellValue : null;
+  return entry && entry.tier === item.tier && entry.rarity === item.rarity ? entry.npcSellValue : null;
+}
+/** What an NPC merchant pays for the whole offer (per unit times quantity), for comparison (spec §9), or null when NPCs do not buy it. */
+export function npcValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'quantity'>): number | null {
+  const unit = npcUnitValue(item);
+  return unit === null ? null : unit * item.quantity;
 }
 export const npcValueText = (item: Parameters<typeof npcValue>[0]): string => {
   const value = npcValue(item);
-  return value === null ? 'NPC merchants do not buy this item' : `NPC sale value: ${money(value)}`;
+  return value === null ? 'NPC merchants do not buy this item'
+    : `NPC sale value: ${money(value)}${item.quantity > 1 ? ` (${amount(value / item.quantity)} each)` : ''}`;
 };
 
 /**
@@ -92,7 +109,10 @@ export const activeListings = (owner: OwnerState): number => owner.inventory.fil
 
 /** Refusals that mean the page was stale: the listing is closed, so the panel refreshes it (Review Focus 4). */
 export const STALE_CODES: readonly ApiErrorCode[] = ['sold', 'expired', 'not-found'];
-/** Refusals that leave the same request worth sending again, with the same operation id (Ruling 3). */
+/**
+ * Refusals that leave the same request worth sending again, with the same operation id (the Task 18.2 review's item
+ * carried to 18.3: keep the same operationId on `processing`).
+ */
 export const RETRY_CODES: readonly ApiErrorCode[] = ['processing', 'unavailable', 'rate-limited'];
 
 /** What a refused market command means, in a sentence or two (plan Decision 9). */
@@ -106,7 +126,10 @@ export function marketErrorText(code: ApiErrorCode, kind: MarketKind): string {
     case 'inventory-full': return 'Your inventory is full. Clear a slot, then try again.';
     case 'sold': return 'This listing was already sold. The listings have been refreshed.';
     case 'expired': return 'This listing has expired. The listings have been refreshed.';
-    case 'not-found': return 'This listing is no longer open. The listings have been refreshed.';
+    // A create's `not-found` is its item, gone from the seller's inventory; a cancel's or a buy's is the listing.
+    case 'not-found': return kind === 'create-listing'
+      ? 'That item is no longer in your inventory. Your inventory has been refreshed.'
+      : 'This listing is no longer open. The listings have been refreshed.';
     case 'conflict': return 'Your inventory changed while this was sent. Review the refreshed state, then try again.';
     case 'invalid': return kind === 'create-listing'
       ? `This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price, with at most ${MAXIMUM_LISTINGS} active listings.`

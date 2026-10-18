@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ItemInstance, OwnerState } from '@contracts/reads';
+import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
+import { RULES_V1 } from '@domain/rules-v1';
 import { createDisplayClock } from '@/game/display-clock';
-import { listableItems, marketErrorText, marketFee, sellerReceives, timeLeft } from '@/features/market/market-text';
-import { MarketOffers, MarketPanel, type OffersModel } from '@/features/market/MarketPanel';
+import { MARKET_FEE_PERCENT, listableItems, marketErrorText, marketFee, sellerReceives, timeLeft } from '@/features/market/market-text';
+import { MarketOffers, MarketPanel, ownerReads, type OffersModel } from '@/features/market/MarketPanel';
 import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 
@@ -23,6 +24,48 @@ describe('market fees (plan Decision 2)', () => {
     expect(marketFee(999_999_999)).toBe(49_999_999);
     expect(marketFee(1_000_000_000)).toBe(50_000_000);
     expect(sellerReceives(1_000_000_000)).toBe(950_000_000);
+  });
+
+  it('takes the rate from the rules as a whole percent, with exact integer floor math (final review M-b)', async () => {
+    // The rules' rate is a whole percent, so `floor(price × percent / 100)` matches the database's bigint `price*5/100`.
+    expect(MARKET_FEE_PERCENT / 100).toBe(RULES_V1.fees.marketRate);
+    const prices = [1, 19, 20, 101, 1_000_000_000];
+    expect(prices.map(marketFee)).toEqual([0, 0, 1, 5, 50_000_000]);
+    // Another rate in the rules changes the panel's fee with it: nothing is hard-coded.
+    vi.resetModules();
+    vi.doMock('@domain/rules-v1', async importOriginal => {
+      const actual = await importOriginal<typeof import('@domain/rules-v1')>();
+      return { RULES_V1: { ...actual.RULES_V1, fees: { ...actual.RULES_V1.fees, marketRate: 0.1 } } };
+    });
+    try {
+      const ruled = await import('@/features/market/market-text');
+      expect(ruled.MARKET_FEE_PERCENT).toBe(10);
+      expect(prices.map(ruled.marketFee)).toEqual([0, 1, 2, 10, 100_000_000]);
+    } finally {
+      vi.doUnmock('@domain/rules-v1');
+      vi.resetModules();
+    }
+  });
+});
+
+describe('a trader’s owner reads (final review I1)', () => {
+  it('reads the owner once when the panel opens, however often opening runs, and again on each Refresh', async () => {
+    let reads = 0;
+    const owner = ownerReads(async () => { reads += 1; });
+    await owner.open();
+    // A development remount runs the opening effect twice: still one read.
+    await owner.open();
+    expect(reads).toBe(1);
+    await owner.refresh();
+    expect(reads).toBe(2);
+    await owner.refresh();
+    expect(reads).toBe(3);
+  });
+
+  it('keeps the owner last shown when a read fails', async () => {
+    const owner = ownerReads(() => Promise.reject(new Error('offline')));
+    await expect(owner.open()).resolves.toBeUndefined();
+    await expect(owner.refresh()).resolves.toBeUndefined();
   });
 });
 
@@ -77,6 +120,13 @@ describe('market refusals (plan Decision 9)', () => {
     expect(marketErrorText('invalid', 'create-listing')).toMatch(/cannot be listed/i);
     expect(marketErrorText('invalid', 'buy-listing')).toMatch(/cannot buy/i);
     for (const code of ['unauthenticated', 'conflict'] as const) expect(marketErrorText(code, 'buy-listing')).not.toMatch(/rejected/i);
+  });
+
+  it('says a listing was not created because the item is gone, not that a listing closed (final review M-a)', () => {
+    // `create_listing` answers `not-found` when the actor no longer owns the item (12-market.sql).
+    const said = marketErrorText('not-found', 'create-listing');
+    expect(said).toMatch(/^That item is no longer in your inventory\./);
+    expect(said).not.toMatch(/listing is no longer open/i);
   });
 });
 
@@ -153,6 +203,28 @@ describe('the Marketplace panel', () => {
       const html = offers({ model: { ...model, rows: [bow] }, action: 'buy', now: bow.expiresAtMs });
       expect(text(html)).toContain('Expired');
       expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Buy</);
+    });
+
+    it('describes a salvage stack listed through the command endpoint by its quantity and NPC value (final review M-d)', () => {
+      // The database accepts a salvage stack (only the Sell tab offers equipment alone), so Browse can show one.
+      const units = 12, unitValue = RULES_V1.inventory.salvageSellValue;
+      const stack: MarketListing = { listingId: 'salvage-offer', seller: { gladiatorId: 'cassia-id', name: 'Cassia' },
+        item: { catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version, tier: 1, rarity: 'common', stats: structuredClone(CATALOG_V1.salvage.stats), quantity: units },
+        price: 150, listedAtMs: NOW - HOUR, expiresAtMs: NOW + DAY };
+      const html = offers({ model: { ...model, rows: [stack] }, action: 'buy', ownerId: null });
+      expect(text(html)).toContain(`${units} × Salvage`);
+      expect(html).toContain(`aria-label="Buy ${units} × Salvage for 150 money"`);
+      expect(text(html)).toContain(`NPC sale value: ${units * unitValue} money (${unitValue} each)`);
+      expect(text(html)).not.toContain('NPC merchants do not buy');
+      // A neutral glyph, not a weapon's.
+      expect(html).not.toContain('🗡');
+      expect(html).toContain('aria-hidden="true">📦</span>');
+      // Equipment keeps its slot glyph and shows no quantity of one.
+      const spearRow = offers({ model: { ...model, rows: [spear] } });
+      expect(spearRow).toContain('aria-hidden="true">🗡</span>');
+      expect(text(spearRow)).not.toContain('×');
+      expect(text(spearRow)).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} money`);
+      expect(text(spearRow)).not.toContain(' each)');
     });
 
     it('says when there are no offers, and when they could not be loaded', () => {

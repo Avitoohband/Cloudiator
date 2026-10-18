@@ -47,6 +47,10 @@ required by `guard_reserved_item` and the item CHECK.
 listingId}`). It writes two ledger rows: `market-purchase` (−price) and `market-sale` (+price − fee). The fee is
 `price*5/100` in integer division. Prices are whole numbers from 1 to 1,000,000,000 (`RULES_V1.marketplace.maximumPrice`).
 
+**Rule literals.** The SQL repeats the market rules as literals: the fee `5/100` (`RULES_V1.fees.marketRate`), the expiry
+`604800000` (`marketplace.expiryMs`), the price cap `1000000000` (`maximumPrice`) and the five-listing limit
+(`maximumListings`). The panel and the Edge parser read the rules, so changing any of them needs a new migration.
+
 The draft needed four completions before commit:
 - It created `public.market_offers` and its foreign key to `private.market_listings(id)` before that table existed. The private
   table's block (create, RLS, indexes, constraints) now comes first.

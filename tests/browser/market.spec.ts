@@ -44,6 +44,13 @@ type Flow = {
   close(listing: MarketListing, code: 'sold' | 'expired' | 'not-found'): void;
   /** The next response is lost after the server committed it (a retry replays the stored receipt). */
   loseNext(): void;
+  /** A listing the player made before the page loaded: its item is in her inventory, reserved by its open offer. */
+  listed(catalogId: string, price: number): { listing: MarketListing; item: ItemInstance };
+  /**
+   * Another buyer bought the player's own listing: the item leaves her inventory and she is credited the price less the fee,
+   * with no new world revision (Ruling 2).
+   */
+  soldElsewhere(listing: MarketListing): void;
 };
 
 /**
@@ -126,6 +133,24 @@ async function marketFlow(context: BrowserContext): Promise<Flow> {
     answerNext: code => { next.push(code); },
     close: (listing, code) => { refusals.set(listing.listingId, code); take(listing.listingId); publish(); },
     loseNext: () => { lose = true; },
+    listed: (catalogId, price) => {
+      const listingId = randomUUID(), listedAtMs = live.serverNowMs() - 60_000;
+      const item: ItemInstance = { ...itemFixture(CATALOG_V1.items[catalogId]), id: randomUUID(), ownerId: state.gladiatorId,
+        reservation: { kind: 'listing', referenceId: listingId } };
+      state.inventory.push(item);
+      const { catalogVersion, tier, rarity, stats, quantity } = item;
+      const listing: MarketListing = { listingId, seller: { gladiatorId: state.gladiatorId, name: state.name },
+        item: { catalogId, catalogVersion, tier, rarity, stats, quantity }, price, listedAtMs, expiresAtMs: listedAtMs + RULES_V1.marketplace.expiryMs };
+      offers.push(listing);
+      publish();
+      return { listing, item };
+    },
+    soldElsewhere: listing => {
+      take(listing.listingId);
+      state.inventory = state.inventory.filter(i => !(i.reservation?.kind === 'listing' && i.reservation.referenceId === listing.listingId));
+      state.wallets.money += listing.price - Math.floor(listing.price * 5 / 100);
+      publish();
+    },
   };
 }
 
@@ -308,12 +333,55 @@ test('explains sold and expired results and refreshes the page', async ({ page, 
   expect(flow.bought).toEqual([]);
 });
 
+test('reads the owner when the menu opens and on Refresh, after listings sold elsewhere', async ({ page, context }) => {
+  // Final review I1: a sale changes the seller's wallet and inventory without a new world revision (Ruling 2), so nothing
+  // else reads her owner state again. Aster has 1,000 money and five listings; two sell while the menu is closed.
+  const flow = await marketFlow(context);
+  flow.state.wallets.money = 1_000;
+  const [hood, sword, , boots] = ([['leather-hood:5:common', 200], ['sword:5:common', 300], ['bow:1:common', 400], ['light-boots:1:uncommon', 500]] as const)
+    .map(([catalogId, price]) => flow.listed(catalogId, price));
+  const owners = () => flow.live.count('owner_state');
+  await page.goto('/game/');
+  await expectOwnerShown(page, 'Aster');
+  const read = owners();
+  expect(read).toBeGreaterThan(0);
+  flow.soldElsewhere(sword.listing);
+  flow.soldElsewhere(boots.listing);
+  const market = await openMenu(page, 'Marketplace');
+  // My listings counts three, and so does Sell, whose List for sale is enabled again.
+  await market.getByRole('tab', { name: 'My listings', exact: true }).click();
+  await expect(market.getByRole('tabpanel', { name: 'My listings' }).getByRole('listitem')).toHaveCount(3);
+  await market.getByRole('tab', { name: 'Sell', exact: true }).click();
+  const sell = market.getByRole('tabpanel', { name: 'Sell' });
+  await expect(sell).toContainText('Active listings: 3 of 5');
+  await sell.getByRole('radio', { name: /^Axe/ }).check();
+  await sell.getByLabel('Price in money').fill('100');
+  await expect(sell.getByRole('button', { name: 'List for sale', exact: true })).toBeEnabled();
+  // The available money includes the proceeds (1,000 + 285 + 475), so Cassia's bow at 1,250 can be bought.
+  await expect(market.getByText('Available money: 1,760')).toBeVisible();
+  await market.getByRole('tab', { name: 'Browse', exact: true }).click();
+  await expect(row(market, offer('bow:10:common')).getByRole('button', { name: /^Buy/ })).toBeEnabled();
+  // One owner read for the opening, however many tabs were shown since.
+  expect(owners()).toBe(read + 1);
+  // A third listing sells while the menu is open: Refresh reads the owner again, once.
+  flow.soldElsewhere(hood.listing);
+  await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(market.getByText('Available money: 1,950')).toBeVisible();
+  await market.getByRole('tab', { name: 'Sell', exact: true }).click();
+  await expect(sell).toContainText('Active listings: 2 of 5');
+  expect(owners()).toBe(read + 2);
+  expect(flow.commands).toEqual([]);
+  // Inventory shows the same owner: the sold items are gone.
+  const inventory = await openMenu(page, 'Inventory and shops');
+  for (const sold of [sword, boots, hood]) await expect(inventory.getByTestId(`item-${sold.item.id}`)).toHaveCount(0);
+});
+
 test('keeps a failed purchase input for a retry with the same operation', async ({ page, context }) => {
   const flow = await marketFlow(context);
   const market = await openMarket(page);
   const alert = market.getByRole('alert');
   // The world is processing (a slot behind, or a deadlock the server rolled back): nothing changes, and Retry replays the
-  // same operation (Ruling 3).
+  // same operation (the Task 18.2 review's item carried to 18.3: keep the same operationId on `processing`).
   flow.answerNext('processing');
   await buy(page, market, SHIELD);
   await expect(alert).toContainText('processing');

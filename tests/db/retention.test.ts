@@ -287,7 +287,11 @@ describe('Task 22.1: retention in the database', () => {
     expect(await sql`select slot_index::int as slot from private.tournaments`).toEqual([{ slot: TOURNAMENT }]);
     expect(await sql`select count(*)::int as n from public.tournament_bout_results where result ? 'battleLog'`).toEqual([{ n: 2 }]);
   }, 600_000);
-  afterAll(() => sql.end());
+  // The ledger case commits real commands; leave no committed state behind for a single-file run.
+  afterAll(async () => {
+    await resetIdentity();
+    await sql.end();
+  });
 
   it('flips available replays to expired once their expiry passes and reprojects recent results', () => rollback(async tx => {
     const available = await tx`select id, slot_index::int as slot, (summary->'replayExpiry'->>'expiresAtMs')::float8 as expires
@@ -590,12 +594,23 @@ describe('Task 22.1: retention in the database', () => {
       expect((await tx`select runid::int from cron.job_run_details where runid in ${tx([oldRun.runid, newRun.runid])}`).map(r => r.runid)).toEqual([Number(newRun.runid)]);
     });
     // The cron step runs in its own block: a contended run row reports its SQLSTATE and the rest of the call still commits.
-    await withClock(() => holding(tx => tx`select runid from cron.job_run_details where end_time is not null order by end_time limit 1 for update`,
-      () => rollback(async tx => {
+    // The held row is a committed, fabricated run that ended in 1970 (the oldest by end_time, so the step's batch of 1000
+    // always reaches it, even on a fresh stack with no finished pg_cron run); it is removed afterwards.
+    const held = -1_000_003;
+    await sql`insert into cron.job_run_details(jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time)
+      values(0,${held},0,'postgres','postgres','select 1','succeeded','1 row',to_timestamp(0),to_timestamp(1))`;
+    try {
+      await withClock(() => holding(async tx => {
+        const locked = await tx`select runid from cron.job_run_details where runid=${held} for update`;
+        if (locked.length !== 1) throw new Error('the fabricated run row was not locked');
+      }, () => rollback(async tx => {
         const result = await cleanup(tx, (await dbNow()) + 8 * DAY);
         expect(result.ok).toBe(true);
         expect(result.operational.cronRunDetails).toEqual({ ok: false, sqlstate: '55P03' });
       })));
+    } finally {
+      await sql`delete from cron.job_run_details where runid=${held}`;
+    }
   }, 60_000);
 
   it('refuses a now_ms in the future and gives no client role execute', async () => {
@@ -616,6 +631,8 @@ describe('Task 22.1: retention in the database', () => {
       and c.relname in ('retention_state','wallet_checkpoints','operations_events') order by 1`;
     expect(tables.map(row => ({ ...row }))).toEqual(['operations_events', 'retention_state', 'wallet_checkpoints'].map(relname =>
       ({ relname, rls: true, select: true, write: false, client: false })));
+    // Exposure checks only (the privileges are proven above): neither function is reachable through the Data API, because
+    // `public` has no such function and `private` is not an exposed schema.
     const owner = world.trainee;
     for (const client of [owner.client, anonymous, admin]) {
       expect((await client.rpc('cleanup_history', { now_ms: now })).error).not.toBeNull();
@@ -653,14 +670,37 @@ describe('Task 22.1: retention in the database', () => {
 
   it('never waits for the coordinator row or an account lock, and gives up a contended row lock after 500 ms', async () => {
     const owner = world.arena[0];
+    // A due listing of the owner: the market backstop is the only step that asks for an account lock, and it only tries it
+    // (as market.test.ts:605-634 proves for the sweep alone).
+    const dueListing = async (tx: Sql) => {
+      const [template] = await tx`select item from public.item_instances where gladiator_id=${owner.gid} limit 1`;
+      const listing = randomUUID(), item = randomUUID();
+      await tx`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status)
+        values(${listing},${owner.gid},${item},10,${SEVEN_DAYS_LATER - 8 * DAY},${SEVEN_DAYS_LATER - DAY},'open')`;
+      await tx`insert into public.item_instances(id,gladiator_id,item) values(${item},${owner.gid},${tx.json({ ...template.item, id: item, origin: 'shop',
+        reservation: { kind: 'listing', referenceId: listing } })})`;
+      return listing;
+    };
     await holding(async tx => {
       await tx`select 1 from private.coordinator where singleton for update`;
       await tx`select pg_advisory_xact_lock(hashtextextended(${owner.id},0))`;
     }, () => rollback(async tx => {
+      const listing = await dueListing(tx);
+      const started = Date.now();
       const result = await cleanup(tx, SEVEN_DAYS_LATER);
+      expect(Date.now() - started).toBeLessThan(5_000);
       expect(result.replay.flipped).toBe(18);
+      // The busy owner is skipped, not waited for: its listing stays open for a later sweep.
+      expect(result.market).toMatchObject({ expired: 0 });
+      expect(await tx`select status from private.market_listings where id=${listing}`).toEqual([{ status: 'open' }]);
       expect(await tx`select lease_token, published_slot::int as published from private.coordinator`).toEqual([{ lease_token: null, published: LAST }]);
     }));
+    // Control: with the account lock free, the same call expires that listing.
+    await rollback(async tx => {
+      const listing = await dueListing(tx);
+      expect((await cleanup(tx, SEVEN_DAYS_LATER)).market).toMatchObject({ expired: 1 });
+      expect(await tx`select status from private.market_listings where id=${listing}`).toEqual([{ status: 'expired' }]);
+    });
     await holding(tx => tx`select 1 from public.activities where gladiator_id=${owner.gid} and slot_index=${FIRST} for update`, async () => {
       const started = Date.now();
       await expect(rollback(tx => cleanup(tx, SEVEN_DAYS_LATER))).rejects.toMatchObject({ code: '55P03' });

@@ -194,3 +194,30 @@ I read the whole diff against the mockup, Decision 8, the brief and the controll
 | `git diff --check` | clean |
 
 **Screenshots refreshed** from that seasons run in `.superpowers/sdd/2026-10-18-task-21-seasons/shots/`: `seasons-desktop-archived-footnote.png` and `seasons-mobile-archived-footnote.png`. Both show the new footnote under the Bronze archive.
+
+### Final fix wave (whole-branch review)
+
+The whole-branch review (`.superpowers/sdd/2026-10-18-task-21-seasons/final-review.md`) found the branch ready to merge; the controller selected these items for the wave before the push. Commits: `1ef320f fix: name the league in season progress and polish the standings pills` (items 1 to 4) and `ce9f4fa docs: record the season-row launch limit for Task 24 and M16` (item 5). No SQL behavior, migration, Edge function or dependency changed.
+
+| # | Finding | Change | Covering tests |
+|---|---|---|---|
+| 1 | Minor 1: an owner promoted mid-season with five or more lower-league human bouts read "N more human bouts to qualify for season rewards" although they already qualify there. | `qualifyText` (`src/features/seasons/season-text.ts`) names the league of the standing row it reads: "2 more human bouts in the Bronze league to qualify there. NPC bouts do not count." (singular "1 more human bout in the Bronze league…"). The qualified form already named the league and is unchanged. No pronoun for a gladiator. This supersedes the "N more human bout(s) to qualify for season rewards" wording quoted under "What I implemented". | `tests/domain/season-text.test.ts` (three literals); `tests/domain/arena-panels.test.ts` (two literals, plus a new Silver case: an owner whose read league is Silver with two bouts reads "3 more human bouts in the Silver league to qualify there." and never "to qualify for season rewards"); `tests/browser/seasons.spec.ts` (fixture and live literals). |
+| 2 | Minor 4: "✓ ELIGIBLE" rendered uppercase; the mockup and footnote say "✓ Eligible". | `text-transform: none` on `.eligible` (`src/features/arena/StandingsPanel.module.css`), as `.medal` already has. | `seasons.spec.ts`: the eligible pill has computed `text-transform: none`. |
+| 3 | Minor 5: the medal pill's emoji was read aloud before "1st · Champion". | `placeParts(place)` returns the medal and the words; `placeText` is their one-line join (unchanged output). A new `MedalPill` renders `<span aria-hidden="true">🥇</span> 1st · Champion`, so the visible text is identical and the place is heard once. | `arena-panels.test.ts`: markup of the 1st and 2nd pills, and the text with aria-hidden spans removed has the place words and no medal emoji; `seasons.spec.ts`: the Severus notes cell's accessible name is "1st · Champion". |
+| 4 | Minor 2: the `standings` gateway doc said an unknown season id is `unavailable`, but beside a cursor it is ignored. | `src/lib/api/gateway.ts` doc: "a season id that is malformed or (without a cursor) names no season, is `unavailable`; beside a cursor a well-formed season id that names no season is ignored." Comment only. | None needed (comment). |
+| 5 | Important 1, documentation part: phase 2 runs before the epoch gate, so "every season with ratings has a row" holds only when the epoch is set before any boundary with members reaches phase 2. | The code change is carried to M16 (Task 22), as the controller ruled. Docs: Task 24 Step 3 of the implementation plan now says to set the season epoch before any boundary with members exists (no gladiators before launch), never in the past, and that a boundary already waiting at phase 4 `'epoch'` must not be the last slot of a season under the chosen epoch; `docs/operations/migrations.md` M15 has a "Known limit (carried to M16)" paragraph (defensive `insert into public.seasons … on conflict do nothing` in `private.boundary_recompute_leagues`, and a `private.season_bounds(index)` helper shared by phase 2, the backfill and phase 4); the `supabase/sql/13-seasons.sql` header comment, which stated the invariant unconditionally, now says "when the epoch is set before the first boundary with members" and points to that note. M15 and every SQL statement are untouched. | None (documentation and a header comment). No database run: the SQL source changed only in a comment, so the Edge start time and DB tests were not touched. |
+
+**Commands and output:**
+
+| Command | Output |
+|---|---|
+| `npx vitest run tests/domain/season-text.test.ts tests/domain/arena-panels.test.ts` | `Test Files  2 passed (2)`, `Tests  37 passed (37)` |
+| `npx playwright test --config node_modules/.cache/pw-claude.config.mjs tests/browser/seasons.spec.ts` (desktop and mobile) | `18 passed (20.7s)` |
+| `npx playwright test --config node_modules/.cache/pw-claude.config.mjs tests/browser/arena.spec.ts tests/browser/arena-live.spec.ts` (regression; no expectation changed) | `65 passed`, `1 skipped (1.4m)` |
+| `npm test` | `Test Files  47 passed (47)`, `Tests  1056 passed (1056)` |
+| `npm run typecheck` | `tsc` and `deno check` clean; `ok \| 2 passed \| 0 failed` |
+| `git diff --check` | clean (only the usual LF-to-CRLF notices) |
+
+**Screenshots refreshed** from the seasons run in `.superpowers/sdd/2026-10-18-task-21-seasons/shots/`: `seasons-desktop-current-standing.png` and `seasons-mobile-current-standing.png` (Your standing now reads "2 more human bouts in the Bronze league to qualify there. NPC bouts do not count."; the ✓ Eligible pill is mixed case), plus `seasons-desktop-archived.png` and `seasons-desktop-current.png`. No other screenshot changed meaning.
+
+**Concerns:** none. The medal pill's accessible name was checked on the notes cell (Playwright computes it from content); a screen reader's own announcement of the pill was not tried.

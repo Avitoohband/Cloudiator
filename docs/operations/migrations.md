@@ -1,5 +1,54 @@
 # Local identity backend and migrations
 
+## Task 22.1: retention in the database (draft for M16)
+
+**Draft.** M16 is generated in Task 22.3, from `supabase/sql/14-operations.sql` once Tasks 22.1–22.3 are in it. Task 22.1 has
+no migration of its own. M01–M15 are unchanged. The source was applied to the local stack with the psql fallback above and
+tested there. That is source evidence only, not migration-artifact proof.
+
+It adds retention ([plan](../superpowers/plans/2026-10-18-task-22-retention-operations.md), Decisions 2–5 and the retention
+design):
+- Three backend-only tables. RLS is on, and `service_role` may only SELECT them, for the health report:
+  - `private.retention_state`, a singleton holding the two watermarks (`detail_through_slot`, `summary_through_slot`, seed
+    `-1`), `last_run_at_ms` and `last_result`;
+  - `private.wallet_checkpoints`, the folded part of each wallet. Invariant: `wallets.money = coalesce(cp.money,0) +
+    Σ wallet_ledger.money_delta`, and the same for renown. Its guard refuses a delete and any update that does not increase
+    `ledger_rows`;
+  - `private.operations_events`, holding a SQLSTATE and never raw text, kept 30 days. Task 22.1 writes `cleanup` rows; 22.2 adds
+    `market-sweep` and `dispatch`.
+- Two indexes: `wallet_ledger(created_at)` for the fold, and a partial `activities(slot_index)` index on still-available
+  replays for the flip. `operations_events(at_ms)` also has one.
+- Two new guards:
+  - `private.guard_receipt` (BEFORE UPDATE OR DELETE on `public.operation_receipts`) refuses every delete. It allows one update
+    only: a settlement receipt's `result`, once, to `{"compactedAtMs":n}`.
+  - `private.guard_tournament_bout_result` replaces `guard_frozen` on `public.tournament_bout_results`. It allows only the
+    compaction of `result.battleLog` to `result.fight` (`durationMs`, `victoryReason`, `tieBreakReason`). Deletes stay allowed.
+- Projection cost:
+  - (a) `project_changed_character` is dropped from `public.activity_stages`; `projection_changed` stays.
+  - (b) `private.project_character` is 13's body with an anti-join before the `recent_results` upsert. It writes the same rows,
+    but an unchanged row is no longer written or locked.
+- `private.cleanup_history(now_ms bigint) returns jsonb`: one bounded transaction, `lock_timeout` 500 ms, never ahead of
+  `private.planning_now_ms()`. Its header documents the matrix, the step order and the locks.
+- `private.cleanup_tick()`: inert while the scheduler is disabled. Otherwise it writes one `operations_events` row per call,
+  ok or the failure's SQLSTATE.
+- `cron.schedule('cloudiator-cleanup','23 * * * *','select private.cleanup_tick()')`. pg_cron 1.6.4 upserts a job by name, so
+  the statement is reapplicable.
+- Grants: nobody may EXECUTE `cleanup_history` or `cleanup_tick`, including `service_role`. The three guards and the projector
+  keep `service_role` EXECUTE, as every earlier guard does.
+
+**Expected draft completions (Task 22.3).** From M03 to M15 the generator has omitted these. Check each one against the
+tested source:
+- the `retention_state` seed row (`insert … on conflict do nothing`);
+- the `cron.schedule` registration;
+- every function ACL;
+- the `revoke all … from public, anon, authenticated, service_role` before the table grants;
+- triggers placed after their functions;
+- the two dropped triggers (`guard_frozen` on `tournament_bout_results`, `project_changed_character` on `activity_stages`).
+
+**Retention (Task 22).** The FK order the cleanup follows is documented per table in the sections below. The 90-day pass
+deletes activities last, so a forgotten referencing row fails the whole call. `net._http_response` is left to pg_net:
+`pg_net.ttl` is `6 hours` on the local stack (verified for Task 22.1), so cleanup adds no delete for it.
+
 ## Tasks 21.1 and 21.2: seasons (M15)
 
 M15 is `supabase/migrations/20261018123715_seasons.sql`, generated with CLI 2.120.0 (engine `migra`) by

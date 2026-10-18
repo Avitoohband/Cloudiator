@@ -49,6 +49,9 @@ export async function resetIdentity() {
   await sql`truncate private.command_attempts`;
   // Season rows and the standings archive have no foreign key to characters (Task 21), so the cascade does not reach them.
   await sql`truncate public.seasons, public.season_standings, private.season_awards`;
+  // Retention state (Task 22): the operations log and wallet checkpoints start empty, and both watermarks at their seed (-1).
+  await sql`truncate private.operations_events, private.wallet_checkpoints`;
+  await sql`update private.retention_state set detail_through_slot=-1, summary_through_slot=-1, last_run_at_ms=null, last_result=null where singleton`;
   // Local and test databases set the launch season epoch explicitly (Task 16). It is immutable once set, so a local
   // database with any other epoch would place historical test slots outside a season.
   await sql`insert into private.season_epoch(singleton,epoch_slot) values(true,0) on conflict(singleton) do nothing`;

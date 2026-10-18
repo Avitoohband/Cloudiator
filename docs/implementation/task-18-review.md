@@ -124,3 +124,65 @@ Range `60f3a68..78104fd`: `32e73cf` (feature) and `78104fd` ([Task 18 report](ta
 - **Accessibility polish:** price validation and the blocked-Buy reason are not linked to their controls.
 - **Code size:** `MarketPanel.tsx` (366 lines) and its 407-line CSS module could be split.
 - **Visual:** the visitor's sign-in prompt sits below the whole list, off-screen with several offers.
+
+## Final whole-branch review and fix wave
+
+Range `925d125..78104fd` (7 commits). **Verdict: ready to merge with one fix.** No Critical findings.
+
+**What it confirmed across checkpoints:**
+- **Money:** every layer agrees on whole prices from 1 to 1,000,000,000 and on the floored 5 % fee. Only the fee leaves the money supply, and held fees are excluded from spendable money.
+- **Concurrency:**
+  - the purchase takes both account locks in gladiator order and samples the clock after its locks;
+  - the sweep never waits;
+  - no other writer of items or reservations can disturb an open listing;
+  - a deadlock is retried with the same operation id.
+- **Privacy:** offers carry no private item, owner or reservation data; the visitor-access set is pinned.
+- **Read volume:** market reads happen on demand only.
+- **Production export:** no fixture market ships.
+- **Migration:** M14 matches the source.
+
+**Important finding I1:** the Marketplace panel decided from a stale owner after the player's own listings sold or expired. Sales do not bump the world revision (Ruling 2), so a seller could be wrongly blocked from listing or buying.
+
+**Controller ruling:** one final fix wave (`248debe`, [report](task-18-final-fix-report.md)) landed I1 and four small Minors in the same area:
+- the owner is read when the panel opens and on Refresh;
+- create-specific `not-found` copy;
+- the fee derived from `RULES_V1.fees.marketRate`, plus a note that SQL's market literals need a new migration when the rules change;
+- corrected comment citations;
+- non-equipment offers show their quantity, the correct NPC value and a neutral glyph.
+
+**Scoped re-review:** all five ADDRESSED, no new breakage.
+
+**Fix-wave evidence:**
+- unit tests 1020/1020;
+- development browser suite 412 passed, 22 skipped;
+- production gate 16 passed.
+
+**Carried to later tasks:**
+- **Task 22:**
+  - the expiry sweep runs in one exception block and leaves no durable error record; move to one subtransaction per seller with a stored error;
+  - terminal listings are never pruned.
+- **Task 23:**
+  - accessibility: focus after a trade, controls not linked to their validation and reasons;
+  - coverage gaps: disabled Buy and List states, fractional and over-cap prices, a fixture-mode Marketplace spec, My listings' Refresh;
+  - the deadlock test needs a superuser-settable `deadlock_timeout` in CI.
+- **Polish:**
+  - money format ("2,000" versus "2000") and rarity capitalization should be decided app-wide;
+  - "Create your gladiator to trade" should become a button;
+  - `MarketPanel.tsx` and its CSS module could be split;
+  - Inventory has unreachable `sold`/`expired` copy;
+  - the visitor sign-in prompt sits below the list;
+  - a salvage offer shows "Level 1 · Common · Weight 0".
+- **Recorded:**
+  - Inventory opened on its own can show a sold item as "Listed for sale" until the next owner read (Ruling 2);
+  - the purchase's stale check covers peak strength only, which heals at the next acquisition;
+  - a lost response followed by closing the menu shows "already sold" for the buyer's own purchase, as Inventory does.
+
+## Appendix: every controller ruling (from the execution ledger)
+
+Each line gives what was decided, why, and what it costs if wrong. They are copied verbatim from the ledger before its deletion.
+
+- Ruling 1: the purchase's processing gate covers both buyer and seller (Decision 6) — the seller's wallet and items change too, and the boundary must not interleave with an unprocessed seller — cost if wrong: buys retry for up to a boundary's duration when the seller lags.
+- Ruling 2: market_offers do not bump world_revision (Decision 3) — a bump reloads every client's whole world; offers load on demand per spec §10.5 — cost if wrong: a seller's wallet updates only on the next owner re-read.
+- Ruling: 18.3's Sell tab offers equipment only (no salvage stacks), though the database allows listing a stack — the plan goal and spec talk about trading equipment, and salvage has a fixed NPC value — cost if wrong: one filter to drop later.
+- Ruling: 18.3 refreshes the page on not-found too (a cancelled listing returns not-found per Decision 9, while Review Focus 4 said sold/expired) — cost if wrong: none.
+- Ruling: the Task 18 final fix wave lands I1 plus four small Minors in the same area: create-listing not-found copy; fee rate from RULES_V1.fees.marketRate; fix the comments citing a nonexistent 'Ruling 3'; show quantity and the correct NPC value (salvage per unit) for non-equipment offers in Browse — cost if wrong: one fix wave.

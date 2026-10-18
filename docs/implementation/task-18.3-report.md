@@ -43,7 +43,7 @@
 - **No gladiator:** Browse only with "Create your gladiator to trade."; no trading control, no prompt to sign in.
 - **Commands** (`create-listing`, `cancel-listing`, `buy-listing`) follow InventoryPanel: an identical retry reuses the kept
   operation id while the last answer was `processing`, `unavailable` or `rate-limited` (or the response was lost); any other
-  answer drops it (Ruling 3). Success: a receipt line ("Purchase confirmed: Spear for 450 money, now in your inventory.
+  answer drops it (the 18.2 review's item carried to 18.3). Success: a receipt line ("Purchase confirmed: Spear for 450 money, now in your inventory.
   Receipt 1a2b3c4d."), then the page re-reads and `refreshOwner` runs (a failed owner read does not hide the receipt).
   A final refusal: the words for its code, and the same re-read; `sold`, `expired` and `not-found` say the listings were
   refreshed (Ruling 2). The fixture preview browses and says actions are unavailable.

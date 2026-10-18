@@ -216,6 +216,13 @@ Range `69ed674..6b00f3f` (15 commits, 38 files, +4838/−170), reviewed read-onl
 - A boundary with members waiting at phase 4 `'epoch'` can wait forever if the epoch is set above its target slot: Task 16's design and Task 24's launch procedure.
 - **Pending Avi:** the proposed migration-guide upkeep (fingerprint records trigger enablement and singleton rows; rollback-only checks run as raising `DO` blocks) from the 21.2 incident.
 
+## Pre-push gates (final tree `d03401f`)
+
+- `npm test` 1056/1056 (47 files); `npm run typecheck` clean (`tsc`, `deno check`, 2 Deno tests).
+- `npm run build` (7 static pages) and `npm run verify:static` (5 fixed routes, 89 assets) pass.
+- Isolated production gate (repo `playwright.config.ts`, port 4173): the first run had one failure, `[mobile] shell.spec.ts:42 production refuses fixture mode even when requested in the URL`; five reruns each passed 16, with 436 skipped. The test does not touch Task 21 code. It is recorded as an intermittent first-run flake for Task 23's flake triage.
+- `git diff --check 69ed674..HEAD` clean. No DB run after the final fix wave: its only SQL change is a comment (last DB run 218/218 with Edge stable; clean M01–M15 replay 216/216 with an identical fingerprint at 21.2).
+
 ## Appendix: every controller ruling (from the execution ledger)
 
 Each line gives what was decided, why, and what it costs if wrong. They are copied verbatim from the ledger, in ledger order, before its deletion.

@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import type { MarketListing, OwnerState, PublicProfile, ResultRow, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import type { MarketListing, OwnerState, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 
 export const SUPABASE_URL = 'http://127.0.0.1:54321';
@@ -53,8 +53,10 @@ export type LiveData = {
   world: WorldSnapshot;
   /** Public profiles by gladiator id. */
   profiles?: Readonly<Record<string, PublicProfile>>;
-  /** Current-season standings pages, one league each. */
+  /** Standings pages, one league each: an open season's pages are the live view, an `archived` page's season is closed and its rows the frozen archive. */
   standings?: readonly StandingsPage[];
+  /** The public seasons, in any order; by default one per standings page's season (closed for an archived page). */
+  seasons?: readonly SeasonView[];
   /** Public tournament views; their round results, logs and placements become the polled and on-demand rows. */
   tournaments?: readonly TournamentView[];
   /** Activity timelines by activity id: their stages, public completion and (for a signed-in reader) owner summary. */
@@ -304,15 +306,25 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
     }
   }
   const due = (rows: Row[]) => rows.filter(row => Number(row.reveal_at_ms) <= now);
+  const pages = data.standings ?? [];
+  const seasons: SeasonView[] = data.seasons ? [...data.seasons] : [...new Map(pages.filter(page => page.seasonId !== '').map(page => [page.seasonId, page.archived] as const))]
+    .map(([seasonId, archived]) => ({ seasonId, startsAtMs: 0, endsAtMs: RULES_V1.seasons.durationMs, closedAtMs: archived ? RULES_V1.seasons.durationMs : null }));
   return {
     world_revision: { rows: [{ revision: world.revision, server_now_ms: now, slot_index: Math.floor(now / SLOT_MS) }] },
     world_actor_reads: { rows: world.actors.map(actor => ({ gladiator_id: actor.gladiatorId, actor })) },
-    public_profile_reads: { rows: Object.entries(data.profiles ?? {}).map(([gladiator_id, profile]) => ({ gladiator_id, profile })) },
+    // The projection keeps each award with its season index (a number); the read maps it to a PrestigeAward with a string season id.
+    public_profile_reads: { rows: Object.entries(data.profiles ?? {}).map(([gladiator_id, profile]) => ({ gladiator_id,
+      profile: { ...profile, prestige: (profile.prestige ?? []).map(({ seasonId, ...award }) => ({ seasonIndex: Number(seasonId), ...award })) } })) },
     visible_events: { rows: due(timelines.flatMap(t => t.stages.map((stage, ordinal) => ({ id: stage.id, activity_id: t.activityId, ordinal, reveal_at_ms: stage.revealedAtMs, stage })))) },
     recent_results: { rows: due([...recent.values()]) },
-    arena_standings: { rows: (data.standings ?? []).flatMap(page => page.rows.map(() => ({ season_index: Number(page.seasonId), league: page.league }))) },
-    arena_standing_reads: { rows: (data.standings ?? []).flatMap(page => page.rows.map(row => ({ league: page.league, season_index: Number(page.seasonId),
-      gladiator_id: row.gladiatorId, name: row.name, rating: row.rating, human_wins: row.humanWins, human_losses: row.humanLosses, rank: row.rank, promoted: row.promoted }))) },
+    seasons: { rows: seasons.map(s => ({ season_index: Number(s.seasonId), starts_at_ms: s.startsAtMs, ends_at_ms: s.endsAtMs, closed_at_ms: s.closedAtMs })) },
+    arena_standings: { rows: pages.filter(page => !page.archived).flatMap(page => page.rows.map(() => ({ season_index: Number(page.seasonId), league: page.league }))) },
+    arena_standing_reads: { rows: pages.filter(page => !page.archived).flatMap(page => page.rows.map(row => ({ league: page.league, season_index: Number(page.seasonId),
+      gladiator_id: row.gladiatorId, name: row.name, rating: row.rating, human_wins: row.humanWins, human_losses: row.humanLosses, rank: row.rank, promoted: row.promoted,
+      reward_eligible: row.rewardEligible }))) },
+    season_standings: { rows: pages.filter(page => page.archived).flatMap(page => page.rows.map(row => ({ league: page.league, season_index: Number(page.seasonId),
+      gladiator_id: row.gladiatorId, name: row.name, rating: row.rating, human_wins: row.humanWins, human_losses: row.humanLosses, rank: row.rank, promoted: row.promoted,
+      inactive: row.inactive, reward_eligible: row.rewardEligible, award_place: row.awardPlace }))) },
     tournament_views: { rows: tournamentViews },
     tournament_bout_results: { rows: due(boutResults) },
     tournament_placements: { rows: placements },

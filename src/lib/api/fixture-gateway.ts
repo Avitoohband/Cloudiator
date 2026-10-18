@@ -1,5 +1,5 @@
 import type { GameGateway } from './gateway';
-import { parseMarketRead, parseResultsCursor } from './reads';
+import { GatewayReadError, parseMarketRead, parseResultsCursor, parseStandingsRead } from './reads';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
@@ -7,6 +7,7 @@ import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORL
 import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
 import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
 import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
+import { FIXTURE_SEASONS } from '../../../tests/fixtures/seasons';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
@@ -40,8 +41,18 @@ export function createFixtureGateway(): GameGateway {
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
     profile: async id => (Object.hasOwn(ARENA_PROFILES, id) ? structuredClone(ARENA_PROFILES[id]) : unavailable()),
-    // Pages of at most 50 rows; the optional cursor (absent from GameGateway.standings) selects the next page.
-    standings: async (league, cursor?: string) => arenaStandingsPage(league, cursor),
+    // The seasons newest first: the current one (open) and the closed season before it, built with seasonAt.
+    seasons: async () => structuredClone([...FIXTURE_SEASONS]),
+    // Pages of at most 50 rows, with the live read's rules: the season is the cursor's (`season:rank`), else the named one, else
+    // the current season; a closed season serves its archive. A malformed league, cursor or season id, or a named season the
+    // fixtures lack, is `unavailable`; a well-formed cursor of another season ends the list with an empty page.
+    standings: async (league, cursor, seasonId) => {
+      if (!['bronze', 'silver', 'gold', 'champion'].includes(league)) throw new GatewayReadError('unavailable');
+      const read = parseStandingsRead(cursor, seasonId);
+      if (read.cursor === null && read.seasonId !== null && !FIXTURE_SEASONS.some(s => s.seasonId === String(read.seasonId))) throw new GatewayReadError('unavailable');
+      return arenaStandingsPage(league, read.cursor ? String(read.cursor.season) : read.seasonId !== null ? String(read.seasonId) : FIXTURE_SEASONS[0].seasonId,
+        read.cursor?.after ?? 0);
+    },
     // Public tournament views, each projected at its own server time (no clock here): the panel shows only the results
     // its display time has reached. As the live read, a view carries each fought bout's fight summary and no battle log;
     // the log of a revealed bout loads on demand. Every other tournament id stays unavailable.

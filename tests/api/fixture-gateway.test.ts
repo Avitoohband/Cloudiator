@@ -140,10 +140,9 @@ test('fixture Arena timelines pair both entrants of a bout and keep spectators f
 test('fixture standings page each league at most 50 rows, and profiles carry the standings rating', async () => {
   const gateway = createFixtureGateway();
   const first = await gateway.standings('bronze');
-  expect(first).toMatchObject({ league: 'bronze', archived: false });
+  expect(first).toMatchObject({ league: 'bronze', seasonId: '1', archived: false, nextCursor: '1:50' });
   expect(first.rows).toHaveLength(50);
-  const read = gateway.standings as (league: 'bronze', cursor?: string) => ReturnType<typeof gateway.standings>;
-  const second = await read('bronze', first.nextCursor!);
+  const second = await gateway.standings('bronze', first.nextCursor!);
   expect(second.rows[0].rank).toBe(51);
   expect(second.nextCursor).toBeNull();
   expect((await gateway.standings('champion')).rows).toEqual([]);
@@ -155,6 +154,155 @@ test('fixture standings page each league at most 50 rows, and profiles carry the
   expect([owner.progression.rating, owner.wallets.renown]).toEqual([aster.rating, 25]);
   first.rows[0].rating = -1;
   expect((await gateway.standings('bronze')).rows[0].rating).not.toBe(-1);
+});
+
+// Task 21.3: the fixture seasons, read as the live `seasons` and `standings` reads serve them.
+test('serves the fixture seasons, archive and Aster prestige', async () => {
+  const { FIXTURE_EPOCH_SLOT, FIXTURE_SEASONS } = await import('../fixtures/seasons');
+  const { ARENA_GLADIATORS, ARENA_PROFILES, ARENA_STANDINGS } = await import('../fixtures/arena');
+  const { worldFixture } = await import('../fixtures/domain');
+  const { seasonAt } = await import('../../supabase/functions/_shared/domain/season');
+  const { RULES_V1 } = await import('../../supabase/functions/_shared/domain/rules-v1');
+  const { GatewayReadError } = await import('../../src/lib/api/gateway');
+  const gateway = createFixtureGateway();
+  type League = 'bronze' | 'silver' | 'gold' | 'champion';
+  const LEAGUES: League[] = ['bronze', 'silver', 'gold', 'champion'];
+
+  // Two seasons, newest first, built with seasonAt from one fixture epoch: season '1' is current and holds the fixture world's slot.
+  const seasons = await gateway.seasons();
+  expect(seasons).toEqual(FIXTURE_SEASONS);
+  expect(seasons.map(s => s.seasonId)).toEqual(['1', '0']);
+  const [current, previous] = [seasonAt(worldFixture.slotIndex, FIXTURE_EPOCH_SLOT), seasonAt(FIXTURE_EPOCH_SLOT, FIXTURE_EPOCH_SLOT)];
+  expect([current.index, previous.index]).toEqual([1, 0]);
+  expect(seasons[0]).toEqual({ seasonId: '1', startsAtMs: current.startsAtMs, endsAtMs: current.endsAtMs, closedAtMs: null });
+  expect(seasons[1]).toMatchObject({ seasonId: '0', startsAtMs: previous.startsAtMs, endsAtMs: previous.endsAtMs });
+  // Season 0 closed at its end (the coordinator closes it just after the boundary); season 1 begins where it ends.
+  expect(seasons[1].closedAtMs!).toBeGreaterThanOrEqual(seasons[1].endsAtMs);
+  expect(seasons[1].closedAtMs!).toBeLessThan(seasons[1].endsAtMs + 60_000);
+  expect(seasons[1].endsAtMs).toBe(seasons[0].startsAtMs);
+  for (const s of seasons) expect(s.endsAtMs - s.startsAtMs).toBe(RULES_V1.seasons.durationMs);
+  // The fixture world's own time is inside the current season, away from both edges (its Arena bouts are all in season 1).
+  expect(worldFixture.serverNowMs).toBeGreaterThanOrEqual(seasons[0].startsAtMs);
+  expect(worldFixture.serverNowMs).toBeLessThan(seasons[0].endsAtMs);
+  expect(worldFixture.serverNowMs - seasons[0].startsAtMs).toBeGreaterThan(10 * RULES_V1.clock.slotMs);
+  expect(seasons[0].endsAtMs - worldFixture.serverNowMs).toBeGreaterThan(10 * RULES_V1.clock.slotMs);
+  // Callers get copies.
+  seasons[0].closedAtMs = 1;
+  seasons.length = 0;
+  expect(await gateway.seasons()).toEqual(FIXTURE_SEASONS);
+
+  // The current season is the default and season '1': the rows the fixture world shows, open, with no award places.
+  for (const league of LEAGUES) {
+    const page = await gateway.standings(league);
+    expect(page, league).toMatchObject({ league, seasonId: '1', archived: false });
+    expect(page.rows, league).toEqual(ARENA_STANDINGS[league].slice(0, 50));
+    expect(await gateway.standings(league, undefined, '1'), league).toEqual(page);
+    expect(page.rows.every(r => r.awardPlace === null), league).toBe(true);
+  }
+
+  // The closed season's archive: all four leagues, paged at most 50 rows, in the live ranking order, flagged as the close flags it.
+  const archive: Record<League, Awaited<ReturnType<typeof gateway.standings>>['rows']> = { bronze: [], silver: [], gold: [], champion: [] };
+  for (const league of LEAGUES) {
+    let page = await gateway.standings(league, undefined, '0');
+    expect(page, league).toMatchObject({ league, seasonId: '0', archived: true });
+    for (let pages = 1; ; pages++) {
+      expect(page.rows.length, league).toBeLessThanOrEqual(50);
+      archive[league].push(...page.rows);
+      if (!page.nextCursor) break;
+      expect(page.nextCursor, league).toBe(`0:${page.rows.at(-1)!.rank}`);
+      // The cursor keeps its season, even beside another season id.
+      page = await gateway.standings(league, page.nextCursor, '1');
+      expect(page, league).toMatchObject({ league, seasonId: '0', archived: true });
+      expect(pages).toBeLessThan(5);
+    }
+  }
+  expect(archive.bronze.length).toBeGreaterThan(50);
+  expect(archive.champion).toEqual([]);
+  expect((await gateway.standings('bronze', undefined, '0')).nextCursor).toBe('0:50');
+  for (const league of LEAGUES) {
+    const rows = archive[league];
+    rows.forEach((row, i) => expect(row.rank, league).toBe(i + 1));
+    for (let i = 1; i < rows.length; i++) {
+      const [p, q] = [rows[i - 1], rows[i]];
+      expect(q.rating - p.rating || q.humanWins - p.humanWins || p.humanLosses - q.humanLosses || p.gladiatorId.localeCompare(q.gladiatorId),
+        `${league} ${p.name} before ${q.name}`).toBeLessThan(0);
+    }
+    // Eligible rows have the minimum bouts; inactive rows have none; places 1-3 go to the first eligible rows of the league, in order.
+    const eligible = rows.filter(r => r.rewardEligible);
+    for (const r of rows) {
+      expect(r.inactive, `${league} ${r.name}`).toBe(r.humanWins + r.humanLosses === 0);
+      if (r.rewardEligible) expect(r.humanWins + r.humanLosses, `${league} ${r.name}`).toBeGreaterThanOrEqual(RULES_V1.seasons.minimumHumanBouts);
+      if (r.promoted) expect(r.inactive).toBe(false);
+    }
+    expect(rows.filter(r => r.awardPlace !== null).map(r => r.awardPlace), league).toEqual(eligible.slice(0, 3).map((_, i) => i + 1));
+    expect(eligible.slice(0, 3).map(r => r.awardPlace), league).toEqual(eligible.slice(0, 3).map((_, i) => i + 1));
+    expect(eligible.slice(3).every(r => r.awardPlace === null), league).toBe(true);
+  }
+  // A character is eligible in only one league of the season, and no character holds two medals.
+  const eligibleIds = LEAGUES.flatMap(l => archive[l].filter(r => r.rewardEligible).map(r => r.gladiatorId));
+  expect(new Set(eligibleIds).size).toBe(eligibleIds.length);
+
+  // Medals by name. Bronze: Lucilla ranks first but was promoted to Silver and is rewarded there, so the three Bronze places go to the
+  // next eligible rows (ranks 2 to 4); Aster is third. Silver has three medals, Gold only two eligible rows.
+  const named = (league: League, place: number) => archive[league].find(r => r.awardPlace === place);
+  const nameOf = (league: League, place: number) => named(league, place)?.name;
+  expect([1, 2, 3].map(p => nameOf('bronze', p))).toEqual(['Severus', 'Nerva', 'Aster']);
+  expect([1, 2, 3].map(p => named('bronze', p)!.rank)).toEqual([2, 3, 4]);
+  expect([1, 2].map(p => nameOf('silver', p))).toEqual(['Lucilla', 'Marcellus']);
+  expect(named('silver', 3)).toBeDefined();
+  expect(nameOf('gold', 1)).toBe('Valeria');
+  expect(named('gold', 2)).toBeDefined();
+  expect(named('gold', 3)).toBeUndefined();
+  expect(archive.gold.filter(r => r.rewardEligible)).toHaveLength(2);
+  const lucillaBronze = archive.bronze.find(r => r.name === 'Lucilla')!;
+  expect(lucillaBronze).toMatchObject({ rank: 1, promoted: true, rewardEligible: false, awardPlace: null });
+  expect(lucillaBronze.humanWins + lucillaBronze.humanLosses).toBeGreaterThanOrEqual(RULES_V1.seasons.minimumHumanBouts);
+  expect(archive.silver.find(r => r.name === 'Lucilla')).toMatchObject({ promoted: false, rewardEligible: true, awardPlace: 1 });
+  expect(archive.silver.find(r => r.name === 'Valeria')).toMatchObject({ promoted: true, rewardEligible: false, awardPlace: null });
+  // Inactive rows: no human bout, never eligible.
+  expect(archive.bronze.filter(r => r.inactive).length).toBeGreaterThan(0);
+  expect(archive.bronze.filter(r => r.inactive).every(r => !r.rewardEligible && !r.promoted && r.awardPlace === null)).toBe(true);
+  // A qualifying row below the medals is eligible with no place; a row below the minimum is neither.
+  expect(archive.bronze.some(r => r.rewardEligible && r.awardPlace === null)).toBe(true);
+  expect(archive.bronze.some(r => !r.inactive && !r.rewardEligible)).toBe(true);
+
+  // Prestige: Aster holds the bronze badge of season '0', which her archive row earned; the champions hold the title.
+  const aster = await gateway.profile(ARENA_GLADIATORS.aster.id);
+  expect(aster.prestige).toEqual([{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }]);
+  expect(archive.bronze.find(r => r.gladiatorId === ARENA_GLADIATORS.aster.id)).toMatchObject({ awardPlace: 3, rewardEligible: true, name: 'Aster' });
+  const placed = LEAGUES.flatMap(league => archive[league].filter(r => r.awardPlace !== null).map(r => ({ league, row: r })));
+  for (const { league, row } of placed) {
+    const placement = RULES_V1.seasons.placements[row.awardPlace! - 1];
+    const profile = Object.values(ARENA_PROFILES).find(p => p.actor.gladiatorId === row.gladiatorId);
+    // Medals held by the named fixture gladiators show on their profiles, with the rule's badge and title.
+    if (profile) expect(profile.prestige, row.name).toEqual([{ seasonId: '0', league, place: row.awardPlace, badge: placement.badge, title: placement.title }]);
+    else expect(Object.values(ARENA_GLADIATORS).some(g => g.id === row.gladiatorId)).toBe(false);
+  }
+  // And only they: every other named gladiator has none.
+  const medalists = new Set(placed.map(p => p.row.gladiatorId));
+  for (const g of Object.values(ARENA_GLADIATORS)) {
+    const profile = await gateway.profile(g.id);
+    if (!medalists.has(g.id)) expect(profile.prestige, g.name).toEqual([]);
+    else expect(profile.prestige, g.name).toHaveLength(1);
+  }
+  expect((await gateway.profile(ARENA_GLADIATORS.severus.id)).prestige).toEqual([{ seasonId: '0', league: 'bronze', place: 1, badge: 'gold', title: 'champion' }]);
+  // Callers get copies.
+  aster.prestige.length = 0;
+  (await gateway.standings('bronze', undefined, '0')).rows[0].name = 'Changed';
+  expect((await gateway.profile(ARENA_GLADIATORS.aster.id)).prestige).toHaveLength(1);
+  expect((await gateway.standings('bronze', undefined, '0')).rows[0].name).toBe('Lucilla');
+
+  // The live read's rules: a malformed or unknown season id, or a malformed cursor, is unavailable (as the live read throws it);
+  // a well-formed cursor that no page issued ends the list.
+  for (const [cursor, seasonId] of [[undefined, '7'], [undefined, 'fixture-season-1'], [undefined, '01'], [undefined, ''], [undefined, '-1'], ['bad,filter', undefined],
+    ['0', undefined], ['0:', undefined], ['x:1', undefined], ['', undefined], ['0:50', 'x'], ['99999999999999999:1', undefined]] as const) {
+    const read = gateway.standings('bronze', cursor, seasonId);
+    await expect(read, `${cursor} ${seasonId}`).rejects.toBeInstanceOf(GatewayReadError);
+    await expect(read, `${cursor} ${seasonId}`).rejects.toMatchObject({ code: 'unavailable' });
+  }
+  await expect(gateway.standings('platinum' as never)).rejects.toMatchObject({ code: 'unavailable' });
+  expect(await gateway.standings('bronze', '9:50')).toEqual({ league: 'bronze', seasonId: '9', archived: false, rows: [], nextCursor: null });
+  expect(await gateway.standings('silver', '1:50')).toEqual({ league: 'silver', seasonId: '1', archived: false, rows: [], nextCursor: null });
 });
 
 test('fixture tournaments serve each sample view by id as a copy, without logs as the live read does, and each log on demand; unknown ids stay unavailable', async () => {

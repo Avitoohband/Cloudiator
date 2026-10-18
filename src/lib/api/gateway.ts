@@ -1,14 +1,14 @@
 import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
-import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readStandings, readTournament, readTournamentLog,
+  GatewayReadError, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandings, readTournament, readTournamentLog,
 } from './reads';
 export { GatewayReadError } from './reads';
 
 /**
- * Public projections (world, revision, timeline, profile, market offers, standings, tournament, tournament log, recent
+ * Public projections (world, revision, timeline, profile, market offers, seasons, standings, tournament, tournament log, recent
  * results) can be read without a session. `owner()` and `command()` require a signed-in account.
  */
 export interface GameGateway {
@@ -26,7 +26,14 @@ export interface GameGateway {
    * never change the world revision.
    */
   market(cursor?: string, seller?: GladiatorId): Promise<MarketPage>;
-  standings(league: LeagueId, cursor?: string): Promise<StandingsPage>;
+  /** The seasons, newest first, at most 50 rows. A season is closed when its `closedAtMs` is set; the first one is the current season. */
+  seasons(): Promise<SeasonView[]>;
+  /**
+   * One page of a league's standings, at most 50 rows. The season is the cursor's (a page's `nextCursor`, `season:rank`), else
+   * `seasonId` (a `SeasonView.seasonId`), else the latest season; a closed season reads its frozen archive (`archived: true`). A
+   * malformed cursor, or a season id that is malformed or names no season, is `unavailable`.
+   */
+  standings(league: LeagueId, cursor?: string, seasonId?: string): Promise<StandingsPage>;
   /** A polled read: each fought result carries its fight summary, never its battle log. */
   tournament(id: string): Promise<TournamentView>;
   /**
@@ -127,7 +134,8 @@ export function createLiveGateway(): GameGateway {
     timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),
     profile: id => publicRead(client => readProfile(client, id)),
     recent: cursor => publicRead(client => readRecent(client, cursor)),
-    standings: (league, cursor) => publicRead(client => readStandings(client, league, cursor)),
+    seasons: () => publicRead(readSeasons),
+    standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),
     tournament: id => publicRead(client => readTournament(client, id)),
     tournamentLog: boutId => {
       // A due log is public and immutable, so a cached one is served without a session check; an account change clears the cache.

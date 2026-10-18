@@ -305,6 +305,8 @@ describe('arena fixture standings', () => {
         expect(order, `${league} ${p.name} before ${q.name}`).toBeLessThan(0);
       }
       for (const row of rows) expect(row.rewardEligible).toBe(row.humanWins + row.humanLosses >= RULES_V1.seasons.minimumHumanBouts);
+      // The current season is open: no award place yet.
+      for (const row of rows) expect(row.awardPlace).toBeNull();
     }
     expect(ARENA_STANDINGS.bronze.length).toBeGreaterThan(50);
     expect(ARENA_STANDINGS.silver.length).toBeGreaterThan(0);
@@ -313,24 +315,27 @@ describe('arena fixture standings', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('pages each league at most 50 rows at a time with an opaque cursor', () => {
+  it('pages each league at most 50 rows at a time after a rank, with the live season:rank cursor', () => {
     for (const league of LEAGUES) {
       const rows = [];
-      let cursor: string | undefined;
+      let after = 0;
       for (let pages = 0; pages < 5; pages += 1) {
-        const page = arenaStandingsPage(league, cursor);
-        expect(page).toMatchObject({ league, archived: false });
+        const page = arenaStandingsPage(league, '1', after);
+        expect(page).toMatchObject({ league, seasonId: '1', archived: false });
         expect(page.rows.length).toBeLessThanOrEqual(50);
         rows.push(...page.rows);
         if (!page.nextCursor) break;
-        cursor = page.nextCursor;
+        after = page.rows.at(-1)!.rank;
+        expect(page.nextCursor).toBe(`1:${after}`);
       }
       expect(rows).toEqual(ARENA_STANDINGS[league]);
     }
+    // The current season is the default.
     expect(arenaStandingsPage('bronze').rows).toHaveLength(50);
-    expect(arenaStandingsPage('bronze', arenaStandingsPage('bronze').nextCursor!).nextCursor).toBeNull();
-    // An unknown or another league's cursor starts again at the first page.
-    expect(arenaStandingsPage('silver', arenaStandingsPage('bronze').nextCursor!).rows[0].rank).toBe(1);
-    expect(arenaStandingsPage('bronze', 'bogus').rows[0].rank).toBe(1);
+    expect(arenaStandingsPage('bronze').nextCursor).toBe('1:50');
+    expect(arenaStandingsPage('bronze', '1', 50).nextCursor).toBeNull();
+    // A league past its end, or a season the fixtures do not have, is an empty page.
+    expect(arenaStandingsPage('silver', '1', 50).rows).toEqual([]);
+    expect(arenaStandingsPage('bronze', '9', 0)).toEqual({ league: 'bronze', seasonId: '9', archived: false, rows: [], nextCursor: null });
   });
 });

@@ -18,8 +18,8 @@ async function liveArena(context: BrowserContext) {
   const staging: RevealedStage = { id: `${activity}:0`, kind: 'staging', revealedAtMs: start, startedAtMs: start, endsAtMs: start + 60 * MINUTE, label: 'Warming up' };
   const timeline: RevealedTimeline = { activityId: activity, serverNowMs: start + 10 * MINUTE, visibleThroughMs: start + 10 * MINUTE, stages: [staging] };
   const standings: StandingsPage = { league: 'bronze', seasonId: '3', archived: false, nextCursor: null, rows: [
-    { rank: 1, gladiatorId: state.gladiatorId, name: 'Aster', rating: 1012, humanWins: 1, humanLosses: 0, promoted: false, inactive: false, rewardEligible: false },
-    { rank: 2, gladiatorId: randomUUID(), name: 'Varro', rating: 988, humanWins: 0, humanLosses: 1, promoted: false, inactive: false, rewardEligible: false },
+    { rank: 1, gladiatorId: state.gladiatorId, name: 'Aster', rating: 1012, humanWins: 1, humanLosses: 0, promoted: false, inactive: false, rewardEligible: false, awardPlace: null },
+    { rank: 2, gladiatorId: randomUUID(), name: 'Varro', rating: 988, humanWins: 0, humanLosses: 1, promoted: false, inactive: false, rewardEligible: false, awardPlace: null },
   ] };
   const profile = { actor: {}, combatStrength: 931.75, rating: 1012, prestige: [] } as unknown as PublicProfile;
   const user = await seedSession(context, testUser('arena-live@example.invalid'));
@@ -46,7 +46,7 @@ test('gives the live Arena card and Standings panel the live gateway reads', asy
   await expect(page.getByText('Standings are not available in this build yet.')).toHaveCount(0);
   // "Your standing" shows the current combat strength from the live public profile read.
   await expect(page.getByRole('region', { name: 'Your standing' })).toContainText('931.75');
-  expect(live.requests.map(r => r.table)).toEqual(expect.arrayContaining(['visible_events', 'arena_standings', 'arena_standing_reads', 'public_profile_reads']));
+  expect(live.requests.map(r => r.table)).toEqual(expect.arrayContaining(['visible_events', 'seasons', 'arena_standing_reads', 'public_profile_reads']));
   // Every read carried the signed-in session.
   expect(live.requests.every(r => r.reader === user.id)).toBe(true);
 });

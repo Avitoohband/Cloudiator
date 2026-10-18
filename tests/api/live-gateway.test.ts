@@ -9,7 +9,7 @@ afterEach(() => { holder.client = null; vi.unstubAllGlobals(); vi.restoreAllMock
 test('without a configured backend, every live read and command fails explicitly instead of returning fixture authority', async () => {
   const gateway = createLiveGateway();
   const reads = [gateway.world(), gateway.revision(), gateway.timeline('activity'), gateway.profile('gladiator'),
-    gateway.market(), gateway.standings('bronze'), gateway.tournament('tournament'), gateway.tournamentLog('tournament:301:bronze:1:0'), gateway.recent()];
+    gateway.market(), gateway.standings('bronze'), gateway.standings('bronze', undefined, '0'), gateway.seasons(), gateway.tournament('tournament'), gateway.tournamentLog('tournament:301:bronze:1:0'), gateway.recent()];
   await Promise.all(reads.map(read => expect(read).rejects.toMatchObject({ code: 'unavailable' })));
   await expect(gateway.command({ kind: 'edit-schedule', operationId: 'd43f7844-52e0-4302-b8e4-740035047765',
     expectedVersion: 1, phase: 'morning', choice: { kind: 'arena' } })).resolves.toEqual({ ok: false, code: 'unavailable' });
@@ -72,3 +72,48 @@ test('sends the listing commands to the authenticated command endpoint and keeps
     { ok: false, code: 'processing', retryAfterMs: 1000 }]);
   expect(sent).toEqual(commands.map(body => ({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body })));
 });
+
+// Task 21.3: seasons are public reads too.
+const SEASON_MS = 2_419_200_000;
+const seasonRows = [{ season_index: 1, starts_at_ms: SEASON_MS, ends_at_ms: 2 * SEASON_MS, closed_at_ms: null },
+  { season_index: 0, starts_at_ms: 0, ends_at_ms: SEASON_MS, closed_at_ms: SEASON_MS + 4_000 }];
+const archived = { gladiator_id: SELLER, name: 'Aster', rating: 1074, human_wins: 8, human_losses: 5, rank: 4, promoted: false, inactive: false, reward_eligible: true, award_place: 3 };
+const open = { gladiator_id: SELLER, name: 'Aster', rating: 1015, human_wins: 2, human_losses: 1, rank: 9, promoted: false, reward_eligible: false };
+/** A browser client over a fake Data API that answers the public season objects, filtering seasons by an `eq` season index. */
+function seasonApi(session: Session | null) {
+  const requests: string[] = [];
+  const client = createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async input => {
+    const url = new URL(String(input)), table = url.pathname.split('/').at(-1)!;
+    requests.push(table);
+    const named = url.searchParams.get('season_index')?.replace('eq.', '');
+    const body = table === 'seasons' ? seasonRows.filter(r => named === undefined || String(r.season_index) === named).slice(0, Number(url.searchParams.get('limit') ?? 50))
+      : table === 'season_standings' ? [archived] : table === 'arena_standing_reads' ? [open] : null;
+    return body === null ? new Response(JSON.stringify({ code: '42501', message: 'permission denied' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
+      : new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+  } } });
+  vi.spyOn(client.auth, 'getSession').mockResolvedValue(session ? { data: { session }, error: null } : { data: { session: null }, error: null });
+  holder.client = client;
+  return requests;
+}
+
+test.each([['a visitor', null], ['a signed-in reader', { user: { id: 'first' }, access_token: 'first', expires_at: Math.floor(Date.now() / 1000) + 3600 } as Session]])(
+  'reads seasons, the current season and a finished season for %s, without any command or private table', async (_who, session) => {
+    const requests = seasonApi(session);
+    const sent = vi.fn();
+    vi.stubGlobal('fetch', sent);
+    const gateway = createLiveGateway();
+    expect(await gateway.seasons()).toEqual([{ seasonId: '1', startsAtMs: SEASON_MS, endsAtMs: 2 * SEASON_MS, closedAtMs: null },
+      { seasonId: '0', startsAtMs: 0, endsAtMs: SEASON_MS, closedAtMs: SEASON_MS + 4_000 }]);
+    // No season named: the latest one, which is open and reads the live view.
+    expect(await gateway.standings('bronze')).toMatchObject({ league: 'bronze', seasonId: '1', archived: false,
+      rows: [{ rank: 9, gladiatorId: SELLER, rewardEligible: false, awardPlace: null }] });
+    // A finished season, named: the frozen archive, with its award place.
+    expect(await gateway.standings('bronze', undefined, '0')).toEqual({ league: 'bronze', seasonId: '0', archived: true, nextCursor: null,
+      rows: [{ rank: 4, gladiatorId: SELLER, name: 'Aster', rating: 1074, humanWins: 8, humanLosses: 5, promoted: false, inactive: false, rewardEligible: true, awardPlace: 3 }] });
+    // An unknown or malformed season is unavailable; the unknown one costs a lookup, the malformed one nothing.
+    await expect(gateway.standings('bronze', undefined, '7')).rejects.toMatchObject({ code: 'unavailable' });
+    expect(requests).toEqual(['seasons', 'seasons', 'arena_standing_reads', 'seasons', 'season_standings', 'seasons']);
+    await expect(gateway.standings('bronze', undefined, 'fixture-season-1')).rejects.toMatchObject({ code: 'unavailable' });
+    expect(requests).toHaveLength(6);
+    expect(sent).not.toHaveBeenCalled();
+  });

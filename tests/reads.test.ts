@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { readMarket, readRecent, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
+import { readMarket, readProfile, readRecent, readSeasons, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
 function transport(rows: Record<string, unknown>, calls: string[]) {
@@ -86,52 +86,179 @@ describe('protected Data API adapters', () => {
     }
     expect(calls).toEqual([]);
   });
-  /** The standings view answers the latest-season probe and the rank page separately. */
-  function standings(season: { season_index: number }[], rows: unknown[], calls: string[]) {
+  /**
+   * A Data API over fixed bodies by table (the seasons rows, the open `arena_standing_reads` view, the archived
+   * `season_standings`, the legacy `arena_standings` probe and the profile view); `calls` records each decoded request.
+   */
+  function seasonApi(bodies: Record<string, unknown>, calls: string[]) {
     return createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async (input) => {
       const url = new URL(String(input)); calls.push(decodeURIComponent(url.pathname + url.search));
-      const body = url.searchParams.get('select') === 'season_index' ? season : rows;
-      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify(bodies[url.pathname.split('/').at(-1)!] ?? []), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } } });
   }
-  it('reads one league of the latest season in rank pages of at most 50 with an opaque season:rank cursor', async () => {
+  const SEASON_MS = 2_419_200_000;
+  const season = (index: number, closed: number | null = null) => ({ season_index: index, starts_at_ms: index * SEASON_MS, ends_at_ms: (index + 1) * SEASON_MS, closed_at_ms: closed });
+  const openRow = (i: number) => ({ gladiator_id: `g${i}`, name: `N${i}`, rating: 1100 - i, human_wins: i % 6, human_losses: i % 2 ? 1 : 0, rank: i + 1,
+    promoted: i === 3, reward_eligible: i % 6 + (i % 2 ? 1 : 0) >= 5 && i !== 11 });
+  const archivedRow = (i: number) => ({ gladiator_id: `g${i}`, name: `N${i}`, rating: 1100 - i, human_wins: i % 6, human_losses: i % 2 ? 1 : 0, rank: i + 1,
+    promoted: i === 0, inactive: i === 7, reward_eligible: i !== 0 && i !== 7, award_place: i >= 1 && i <= 3 ? i : null });
+  it('reads seasons newest first, without a session', async () => {
     const calls: string[] = [];
-    const rows = Array.from({ length: 51 }, (_, i) => ({ gladiator_id: `g${i}`, name: `N${i}`, rating: 1100 - i, human_wins: i % 6, human_losses: i % 2 ? 1 : 0,
-      rank: i + 1, promoted: i === 3 }));
-    const page = await readStandings(standings([{ season_index: 4 }], rows, calls), 'silver');
-    expect(page).toMatchObject({ league: 'silver', seasonId: '4', archived: false, nextCursor: '4:50' });
-    expect(page.rows).toHaveLength(50);
-    expect(page.rows[0]).toEqual({ rank: 1, gladiatorId: 'g0', name: 'N0', rating: 1100, humanWins: 0, humanLosses: 0, promoted: false, inactive: true, rewardEligible: false });
-    expect(page.rows[3]).toMatchObject({ promoted: true, inactive: false, rewardEligible: false });
-    // Five human bouts in the league are the season's reward threshold.
-    expect(page.rows[5]).toMatchObject({ humanWins: 5, humanLosses: 1, rewardEligible: true });
+    // A server that answered more than 50 rows is still cut to 50, newest first as ordered.
+    const rows = Array.from({ length: 51 }, (_, i) => season(50 - i, i === 0 ? null : (51 - i) * SEASON_MS + 5_000));
+    const seasons = await readSeasons(seasonApi({ seasons: rows }, calls));
+    expect(seasons).toHaveLength(50);
+    expect(seasons[0]).toEqual({ seasonId: '50', startsAtMs: 50 * SEASON_MS, endsAtMs: 51 * SEASON_MS, closedAtMs: null });
+    expect(seasons[1]).toEqual({ seasonId: '49', startsAtMs: 49 * SEASON_MS, endsAtMs: 50 * SEASON_MS, closedAtMs: 50 * SEASON_MS + 5_000 });
+    expect(seasons.map(s => s.seasonId)).toEqual(Array.from({ length: 50 }, (_, i) => String(50 - i)));
+    // One request to the public seasons table: its four columns, newest first, at most 50 rows.
+    expect(calls).toHaveLength(1);
+    const query = new URL(`http://local${calls[0]}`);
+    expect(query.pathname).toBe('/rest/v1/seasons');
+    expect(query.searchParams.get('select')).toBe('season_index,starts_at_ms,ends_at_ms,closed_at_ms');
+    expect(query.searchParams.get('order')).toBe('season_index.desc');
+    expect(query.searchParams.get('limit')).toBe('50');
+    // No season yet: an empty list, not an error.
+    expect(await readSeasons(seasonApi({ seasons: [] }, []))).toEqual([]);
+  });
+  it('reads the latest season when no season is named, and the archive with awardPlace for a closed one', async () => {
+    const calls: string[] = [], rows = Array.from({ length: 51 }, (_, i) => openRow(i));
+    // The latest season is open: its ranked view, with the reward eligibility the view computes (not the bout count).
+    const open = await readStandings(seasonApi({ seasons: [season(4)], arena_standing_reads: rows }, calls), 'silver');
+    expect(open).toMatchObject({ league: 'silver', seasonId: '4', archived: false, nextCursor: '4:50' });
+    expect(open.rows).toHaveLength(50);
+    expect(open.rows[0]).toEqual({ rank: 1, gladiatorId: 'g0', name: 'N0', rating: 1100, humanWins: 0, humanLosses: 0, promoted: false, inactive: true,
+      rewardEligible: false, awardPlace: null });
+    expect(open.rows[3]).toMatchObject({ promoted: true, inactive: false, rewardEligible: false, awardPlace: null });
+    // g5 has five human bouts and the view says eligible; g11 also has five but the view says it is not (a higher league row).
+    expect(open.rows[5]).toMatchObject({ humanWins: 5, humanLosses: 1, rewardEligible: true });
+    expect(open.rows[11]).toMatchObject({ humanWins: 5, humanLosses: 1, rewardEligible: false });
+    expect(open.rows.every(row => row.awardPlace === null)).toBe(true);
     expect(calls).toHaveLength(2);
-    // The latest-season probe reads the base table, whose index leads with season_index, not the ranked view (which would
-    // evaluate its window function and promotion check over every row).
-    expect(calls[0]).toContain('/arena_standings?select=season_index&order=season_index.desc&limit=1');
+    // The latest season is the newest public.seasons row; the open page reads the ranked view for it.
+    const latest = new URL(`http://local${calls[0]}`);
+    expect([latest.pathname, latest.searchParams.get('select'), latest.searchParams.get('order'), latest.searchParams.get('limit')])
+      .toEqual(['/rest/v1/seasons', 'season_index,closed_at_ms', 'season_index.desc', '1']);
     expect(calls[1]).toContain('/arena_standing_reads?');
+    expect(new URL(`http://local${calls[1]}`).searchParams.get('select')).toBe('gladiator_id,name,rating,human_wins,human_losses,rank,promoted,reward_eligible');
     expect(calls[1]).toMatch(/league=eq\.silver/);
     expect(calls[1]).toMatch(/season_index=eq\.4/);
     expect(calls[1]).toMatch(/rank=gt\.0/);
     // The Data API caps responses at 50 rows, so a full page of 50 is what yields the next cursor.
     expect(calls[1]).toContain('limit=50');
-    // A later page stays in the cursor's season and starts after its rank, with no season probe.
+    // A closed latest season reads the frozen archive: archived, with award places, the frozen flags and no live view.
     calls.length = 0;
-    const later = await readStandings(standings([{ season_index: 9 }], rows.slice(50), calls), 'silver', '4:50');
-    expect(later).toMatchObject({ seasonId: '4', nextCursor: null, rows: [{ rank: 51, gladiatorId: 'g50' }] });
+    const archived = await readStandings(seasonApi({ seasons: [season(3, 3 * SEASON_MS + 9_000)], season_standings: Array.from({ length: 8 }, (_, i) => archivedRow(i)),
+      arena_standing_reads: [{ gladiator_id: 'live' }] }, calls), 'silver');
+    expect(archived).toMatchObject({ league: 'silver', seasonId: '3', archived: true, nextCursor: null });
+    expect(archived.rows.map(r => r.awardPlace)).toEqual([null, 1, 2, 3, null, null, null, null]);
+    expect(archived.rows[0]).toEqual({ rank: 1, gladiatorId: 'g0', name: 'N0', rating: 1100, humanWins: 0, humanLosses: 0, promoted: true, inactive: false,
+      rewardEligible: false, awardPlace: null });
+    expect(archived.rows[1]).toMatchObject({ rewardEligible: true, awardPlace: 1, promoted: false, inactive: false });
+    // The frozen inactive flag is read as stored.
+    expect(archived.rows[7]).toMatchObject({ inactive: true, rewardEligible: false, awardPlace: null });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain('/season_standings?');
+    expect(new URL(`http://local${calls[1]}`).searchParams.get('select'))
+      .toBe('gladiator_id,name,rating,human_wins,human_losses,rank,promoted,inactive,reward_eligible,award_place');
+    expect(calls[1]).toMatch(/league=eq\.silver/);
+    expect(calls[1]).toMatch(/season_index=eq\.3/);
+    expect(calls[1]).toMatch(/rank=gt\.0/);
+    expect(calls[1]).toContain('limit=50');
+    expect(calls.some(c => c.includes('arena_standing_reads'))).toBe(false);
+    // A full archived page names its last rank in the same season:rank cursor.
+    const full = await readStandings(seasonApi({ seasons: [season(3, 1)], season_standings: Array.from({ length: 50 }, (_, i) => archivedRow(i)) }, []), 'bronze');
+    expect(full).toMatchObject({ seasonId: '3', archived: true, nextCursor: '3:50' });
+    // With no public.seasons row yet, the latest season is the maximum of the projection table, which is open.
+    calls.length = 0;
+    const legacy = await readStandings(seasonApi({ seasons: [], arena_standings: [{ season_index: 6 }], arena_standing_reads: [openRow(0)] }, calls), 'bronze');
+    expect(legacy).toMatchObject({ seasonId: '6', archived: false, rows: [{ rank: 1, gladiatorId: 'g0', awardPlace: null }] });
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toContain('/seasons?select=season_index,closed_at_ms&order=season_index.desc&limit=1');
+    expect(calls[1]).toContain('/arena_standings?select=season_index&order=season_index.desc&limit=1');
+    expect(calls[2]).toContain('/arena_standing_reads?');
+    expect(calls[2]).toMatch(/season_index=eq\.6/);
+  });
+  it('keeps a cursor inside its season and rejects an unknown or malformed season id', async () => {
+    const rows = Array.from({ length: 51 }, (_, i) => openRow(i)).slice(50);
+    // A later page stays in the cursor's season and starts after its rank; the cursor wins over a named season and over the latest.
+    const calls: string[] = [];
+    const later = await readStandings(seasonApi({ seasons: [season(4), season(9)], arena_standing_reads: rows }, calls), 'silver', '4:50', '9');
+    expect(later).toMatchObject({ seasonId: '4', archived: false, nextCursor: null, rows: [{ rank: 51, gladiatorId: 'g50', awardPlace: null }] });
+    expect(calls).toHaveLength(2);
+    const lookup = new URL(`http://local${calls[0]}`);
+    expect([lookup.pathname, lookup.searchParams.get('select'), lookup.searchParams.get('season_index'), lookup.searchParams.get('limit')])
+      .toEqual(['/rest/v1/seasons', 'season_index,closed_at_ms', 'eq.4', '1']);
+    expect(lookup.searchParams.has('order')).toBe(false);
+    expect(calls[1]).toMatch(/season_index=eq\.4/);
+    expect(calls[1]).toMatch(/rank=gt\.50/);
+    // A cursor into a closed season keeps reading the archive.
+    calls.length = 0;
+    const archived = await readStandings(seasonApi({ seasons: [season(3, 1)], season_standings: [archivedRow(50)] }, calls), 'bronze', '3:50');
+    expect(archived).toMatchObject({ seasonId: '3', archived: true, nextCursor: null, rows: [{ rank: 51, awardPlace: null }] });
+    expect(calls[1]).toContain('/season_standings?');
+    expect(calls[1]).toMatch(/season_index=eq\.3/);
+    expect(calls[1]).toMatch(/rank=gt\.50/);
+    // A cursor was issued by this read for a season it served: with no season row at all (a world before the seasons table
+    // was filled) it still reads that season, open, as the first page did.
+    calls.length = 0;
+    expect(await readStandings(seasonApi({ seasons: [], arena_standing_reads: [] }, calls), 'bronze', '1:50'))
+      .toEqual({ league: 'bronze', seasonId: '1', archived: false, rows: [], nextCursor: null });
+    expect(calls.map(c => c.split('?')[0].split('/').at(-1))).toEqual(['seasons', 'arena_standing_reads']);
+    // A named season, closed or open, with no cursor: its own lookup and its own source.
+    calls.length = 0;
+    const named = await readStandings(seasonApi({ seasons: [season(2, 1)], season_standings: [archivedRow(0)] }, calls), 'gold', undefined, '2');
+    expect(named).toMatchObject({ seasonId: '2', archived: true });
+    expect(new URL(`http://local${calls[0]}`).searchParams.get('season_index')).toBe('eq.2');
+    calls.length = 0;
+    expect(await readStandings(seasonApi({ seasons: [season(0)], arena_standing_reads: [openRow(0)] }, calls), 'gold', undefined, '0'))
+      .toMatchObject({ seasonId: '0', archived: false });
+    expect(new URL(`http://local${calls[0]}`).searchParams.get('season_index')).toBe('eq.0');
+    // A season id that names no public.seasons row is unavailable, after exactly one lookup and no standings query.
+    calls.length = 0;
+    await expect(readStandings(seasonApi({ seasons: [] }, calls), 'bronze', undefined, '7')).rejects.toMatchObject({ code: 'unavailable' });
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatch(/season_index=eq\.4/);
-    expect(calls[0]).toMatch(/rank=gt\.50/);
+    // A malformed season id, whatever else is given, is refused before any query. Only a canonical non-negative integer counts.
+    calls.length = 0;
+    const client = seasonApi({ seasons: [season(4)] }, calls);
+    for (const bad of ['', '-1', '01', '1.5', '1e3', 'x', ' 1', '1 ', '99999999999999999', '4,rating.lt.0', 'fixture-season-1', '4)', 4 as never, null as never]) {
+      await expect(readStandings(client, 'bronze', undefined, bad), String(bad)).rejects.toMatchObject({ code: 'unavailable' });
+      await expect(readStandings(client, 'bronze', '4:50', bad), String(bad)).rejects.toMatchObject({ code: 'unavailable' });
+    }
+    expect(calls).toHaveLength(0);
   });
   it('rejects malformed standings cursors and leagues before any query and reports a world with no season yet', async () => {
-    const calls: string[] = [], client = standings([], [], calls);
+    const calls: string[] = [], client = seasonApi({ seasons: [], arena_standings: [] }, calls);
     for (const cursor of ['4:50,rating.lt.0', '4', 'x:1', '99999999999999999:1', '']) {
       await expect(readStandings(client, 'bronze', cursor)).rejects.toMatchObject({ code: 'unavailable' });
     }
     await expect(readStandings(client, 'platinum' as never)).rejects.toMatchObject({ code: 'unavailable' });
     expect(calls).toHaveLength(0);
+    // No public.seasons row and no projection row: no season yet.
     expect(await readStandings(client, 'gold')).toEqual({ league: 'gold', seasonId: '', archived: false, rows: [], nextCursor: null });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+  });
+  it('maps prestige into PrestigeAward with a string seasonId', async () => {
+    const actor = { gladiatorId: 'g1', name: 'Aster' };
+    const calls: string[] = [];
+    const prestige = [{ seasonIndex: 0, league: 'bronze', place: 3, badge: 'bronze', title: null },
+      { seasonIndex: 12, league: 'silver', place: 1, badge: 'gold', title: 'champion' }];
+    const profile = await readProfile(seasonApi({ public_profile_reads: { profile: { actor, combatStrength: 410, rating: 1012, prestige } } }, calls), 'g1');
+    expect(profile).toEqual({ actor, combatStrength: 410, rating: 1012, prestige: [
+      { seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null },
+      { seasonId: '12', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] });
+    expect(calls[0]).toContain('/public_profile_reads?select=profile&gladiator_id=eq.g1');
+    // No award is an empty list.
+    expect((await readProfile(seasonApi({ public_profile_reads: { profile: { actor, combatStrength: null, rating: 1000, prestige: [] } } }, []), 'g1')).prestige).toEqual([]);
+    // Anything that is not the projection's award list (the earlier string badges, a missing or malformed entry) is unavailable.
+    const bad: unknown[] = [['gold'], null, undefined, 'gold', [{ seasonIndex: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }],
+      [{ seasonIndex: -1, league: 'bronze', place: 3, badge: 'bronze', title: null }], [{ seasonIndex: 0, league: 'platinum', place: 3, badge: 'bronze', title: null }],
+      [{ seasonIndex: 0, league: 'bronze', place: 4, badge: 'bronze', title: null }], [{ seasonIndex: 0, league: 'bronze', place: 3, badge: 'copper', title: null }],
+      [{ seasonIndex: 0, league: 'bronze', place: 3, badge: 'bronze', title: 'king' }], [{ seasonIndex: 0, league: 'bronze', place: 3, badge: 'bronze' }], [null]];
+    for (const value of bad) {
+      await expect(readProfile(seasonApi({ public_profile_reads: { profile: { actor, combatStrength: 1, rating: 1, prestige: value } } }, []), 'g1'), JSON.stringify(value))
+        .rejects.toMatchObject({ code: 'unavailable' });
+    }
   });
   /** The public tournament rows of one view: the frame row, due results, placements and their public completions. */
   function tournament(tables: Record<string, unknown>, calls: string[], now: number) {

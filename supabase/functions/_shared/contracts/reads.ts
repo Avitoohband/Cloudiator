@@ -41,7 +41,12 @@ export type PublicActor = {
 };
 export type RevisionState = { revision: string; serverNowMs: number; slotIndex: number };
 export type WorldSnapshot = RevisionState & { actors: PublicActor[] };
-export type PublicProfile = { actor: PublicActor; combatStrength: number | null; rating: number; prestige: string[] };
+/**
+ * One season award on a public profile (Task 21), oldest season first. `seasonId` is the season index as text (players see
+ * "Season index + 1"); `title` is the champion title of a first place, null for second and third.
+ */
+export type PrestigeAward = { seasonId: string; league: LeagueId; place: 1 | 2 | 3; badge: 'gold' | 'silver' | 'bronze'; title: 'champion' | null };
+export type PublicProfile = { actor: PublicActor; combatStrength: number | null; rating: number; prestige: PrestigeAward[] };
 /** Producers enforce <= 50 rows. Cursors are opaque strings. */
 export type CursorPage<T> = { rows: T[]; nextCursor: string | null };
 /** One open fixed-price offer from the public projection: never the item's id, owner, origin, binding or reservation. */
@@ -57,8 +62,16 @@ export type MarketPage = CursorPage<MarketListing>;
 export type StandingRow = {
   rank: number; gladiatorId: GladiatorId; name: string; rating: number;
   humanWins: number; humanLosses: number; promoted: boolean; inactive: boolean; rewardEligible: boolean;
+  /** The place (1 to 3) the row's award took when its season closed; always null for an open season. */
+  awardPlace: 1 | 2 | 3 | null;
 };
+/**
+ * One league's standings page of one season. `archived` is true for a closed season, whose rows are the frozen archive
+ * (flags and award places as fixed at the close); an open season's rows are live. The cursor `season:rank` stays in its season.
+ */
 export type StandingsPage = CursorPage<StandingRow> & { league: LeagueId; seasonId: string; archived: boolean };
+/** A season of 28 days (504 slots). `seasonId` is its index as text; `closedAtMs` is null until the season is closed. */
+export type SeasonView = { seasonId: string; startsAtMs: number; endsAtMs: number; closedAtMs: number | null };
 export type TournamentEntrant = { gladiatorId: GladiatorId; name: string; classId: ClassId };
 /** A fought bout's public facts from its log: how long it plays and how its winner won (Task 19 phase 2b review I1). */
 export type TournamentFightSummary = Pick<BattleLog, 'durationMs' | 'victoryReason' | 'tieBreakReason'>;

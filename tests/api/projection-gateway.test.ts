@@ -39,15 +39,15 @@ describe('live projection session guards', () => {
     const paths: string[] = [];
     const client=createClient('http://127.0.0.1:54321','test-key',{auth:{persistSession:false},global:{fetch:async input=>{
       const url=new URL(String(input));paths.push(url.pathname);
-      const body=url.searchParams.get('select')==='season_index'?[{season_index:2}]
-        :[{gladiator_id:'g1',name:'Aster',rating:1012,human_wins:1,human_losses:0,rank:1,promoted:false}];
+      const body=url.pathname.endsWith('/seasons')?[{season_index:2,closed_at_ms:null}]
+        :[{gladiator_id:'g1',name:'Aster',rating:1012,human_wins:1,human_losses:0,rank:1,promoted:false,reward_eligible:false}];
       return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
     }}});
     vi.spyOn(client.auth,'getSession').mockResolvedValue({data:{session:{user:{id:'first'},access_token:'first'} as Session},error:null});holder.client=client;
     expect(await createLiveGateway().standings('bronze')).toEqual({league:'bronze',seasonId:'2',archived:false,nextCursor:null,
-      rows:[{rank:1,gladiatorId:'g1',name:'Aster',rating:1012,humanWins:1,humanLosses:0,promoted:false,inactive:false,rewardEligible:false}]});
-    // The latest-season probe reads the indexed projection table; the ranked page reads the public view.
-    expect(paths).toEqual(['/rest/v1/arena_standings','/rest/v1/arena_standing_reads']);
+      rows:[{rank:1,gladiatorId:'g1',name:'Aster',rating:1012,humanWins:1,humanLosses:0,promoted:false,inactive:false,rewardEligible:false,awardPlace:null}]});
+    // The latest season is the newest public.seasons row (open); the ranked page reads the public view.
+    expect(paths).toEqual(['/rest/v1/seasons','/rest/v1/arena_standing_reads']);
   });
   it('serves the live tournament read through the account-guarded Data API reads', async () => {
     const paths: string[] = [];
@@ -127,8 +127,8 @@ describe('public projection reads without a session', () => {
       case 'public_profile_reads': return json({ profile });
       case 'visible_events': return json([{ ordinal: 0, stage: { id: 's1', kind: 'staging', revealedAtMs: 0, startedAtMs: 0, endsAtMs: 1, label: 'Warm-up' } }]);
       case 'recent_results': return json([{ activity_id: 'act', gladiator_id: 'g1', name: 'Aster', summary: completion, reveal_at_ms: 5 }]);
-      case 'arena_standings': return json([{ season_index: 2 }]);
-      case 'arena_standing_reads': return json([{ gladiator_id: 'g1', name: 'Aster', rating: 1012, human_wins: 1, human_losses: 0, rank: 1, promoted: false }]);
+      case 'seasons': return json([{ season_index: 2, closed_at_ms: null }]);
+      case 'arena_standing_reads': return json([{ gladiator_id: 'g1', name: 'Aster', rating: 1012, human_wins: 1, human_losses: 0, rank: 1, promoted: false, reward_eligible: false }]);
       case 'tournament_views': return json(tournament);
       case 'tournament_bout_results': return json(url.searchParams.get('select')?.startsWith('battleLog:') ? { battleLog: log } : []);
       case 'tournament_placements': return json([]);

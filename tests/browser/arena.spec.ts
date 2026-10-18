@@ -833,7 +833,7 @@ test.describe('the Arena card and league standings', () => {
 
 const standingsPage = (rows: StandingRow[]): StandingsPage => ({ league: 'bronze', seasonId: '3', archived: false, nextCursor: null, rows });
 const standingRow = (gladiatorId: string, name: string, rank: number, rating: number): StandingRow =>
-  ({ rank, gladiatorId, name, rating, humanWins: 1, humanLosses: 0, promoted: false, inactive: false, rewardEligible: false });
+  ({ rank, gladiatorId, name, rating, humanWins: 1, humanLosses: 0, promoted: false, inactive: false, rewardEligible: false, awardPlace: null });
 
 test.describe('live league standings', () => {
   test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');

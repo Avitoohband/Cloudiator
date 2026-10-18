@@ -9,6 +9,7 @@ import type { ClassId, LeagueId } from '../../supabase/functions/_shared/contrac
 import type { EquipmentSilhouette, OwnerState, PublicActor, PublicProfile, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { ownerFixture, worldFixture } from './domain.ts';
 import { ASTER_LISTED_ITEM } from './market.ts';
+import { FIXTURE_ARCHIVE, FIXTURE_CURRENT_SEASON, fixturePrestige } from './seasons.ts';
 import {
   ARENA_ACTIVITIES, ARENA_BOUTS, ARENA_CAMP_KEYS, ARENA_GLADIATORS, ARENA_SAMPLE_KEYS, arenaActivityId, fixtureUuid,
   type ArenaActivityKey, type ArenaBoutKey, type ArenaGladiatorKey,
@@ -141,7 +142,8 @@ export function buildArenaFixtures(logs: Readonly<Record<ArenaBoutKey, BattleLog
       ?? worldFixture.actors.find(a => a.gladiatorId === g.id)
       ?? { gladiatorId: g.id, name: g.name, classId: info.classId, equipmentSilhouettes: [...info.silhouettes], league: info.league, level: info.level,
         phase: worldFixture.actors[0].phase, location: 'rest', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null };
-    return [g.id, { actor, combatStrength: info.combatStrength, rating: info.rating, prestige: [] }];
+    // Season awards from the closed season's archive (Aster: a bronze badge from season '0').
+    return [g.id, { actor, combatStrength: info.combatStrength, rating: info.rating, prestige: fixturePrestige(g.id) }];
   }));
   return { timelines, worldActors, profiles };
 }
@@ -182,22 +184,25 @@ function leagueRows(league: LeagueId): StandingRow[] {
     promoted: i >= named.length && (i - named.length) % 17 === 3,
     inactive: row.humanWins + row.humanLosses === 0,
     rewardEligible: row.humanWins + row.humanLosses >= 5,
+    // The season is open: no award place until it closes.
+    awardPlace: null,
   })));
 }
 
-/** Current-season standings of every league, already ranked. */
+/** Current-season (open, season '1') standings of every league, already ranked. */
 export const ARENA_STANDINGS: Record<LeagueId, StandingRow[]> = {
   bronze: leagueRows('bronze'), silver: leagueRows('silver'), gold: leagueRows('gold'), champion: leagueRows('champion'),
 };
 
 const PAGE = 50;
-const SEASON = 'fixture-season-1';
-/** One standings page of at most 50 rows; the cursor is opaque, and a foreign or unknown cursor starts again. */
-export function arenaStandingsPage(league: LeagueId, cursor?: string): StandingsPage {
-  const all = ARENA_STANDINGS[league];
-  const match = /^fixture-standings:([a-z]+):(\d+)$/.exec(cursor ?? '');
-  const offset = match && match[1] === league && Number(match[2]) < all.length ? Number(match[2]) : 0;
-  const rows = all.slice(offset, offset + PAGE);
-  const next = offset + PAGE < all.length ? `fixture-standings:${league}:${offset + PAGE}` : null;
-  return { league, seasonId: SEASON, archived: false, rows: structuredClone(rows), nextCursor: next };
+/**
+ * One league's standings page of at most 50 rows of a fixture season, after rank `after`: the current season (the default;
+ * its rows are ARENA_STANDINGS) or a closed one (its archive, `archived`). A season the fixtures do not have has no rows.
+ * A full page issues the live read's cursor `season:rank` (the gateway parses and validates cursors and season ids).
+ */
+export function arenaStandingsPage(league: LeagueId, seasonId: string = FIXTURE_CURRENT_SEASON, after = 0): StandingsPage {
+  const archived = Object.hasOwn(FIXTURE_ARCHIVE, seasonId);
+  const all = seasonId === FIXTURE_CURRENT_SEASON ? ARENA_STANDINGS[league] : archived ? FIXTURE_ARCHIVE[seasonId][league] : [];
+  const rows = all.filter(row => row.rank > after).slice(0, PAGE);
+  return { league, seasonId, archived, rows: structuredClone(rows), nextCursor: rows.length === PAGE ? `${seasonId}:${rows.at(-1)!.rank}` : null };
 }

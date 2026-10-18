@@ -9,6 +9,7 @@ import { StandingsView, readStandingsPages, type StandingsModel } from '@/featur
 import { NO_INJURY, NPC_DISCLOSURE, arenaUnavailableText, creditedLines, replayHref, resultText } from '@/features/arena/arena-text';
 import { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_STANDINGS, ARENA_TIMELINES, arenaActivityId, arenaStandingsPage, type ArenaActivityKey } from '../fixtures/arena';
 import { worldFixture } from '../fixtures/domain';
+import { createFixtureGateway } from '@/lib/api/fixture-gateway';
 
 const MIN = 60_000;
 const NOW = worldFixture.serverNowMs;
@@ -199,11 +200,11 @@ describe('Arena standings', () => {
 });
 
 describe('standings pages', () => {
-  const reader = { standings: async (league: LeagueId, cursor?: string) => arenaStandingsPage(league, cursor) };
+  const reader = createFixtureGateway();
 
   it('reads as many pages as were loaded, so a refresh keeps the rows loaded with More', async () => {
     const one = await readStandingsPages(reader, 'bronze', 1);
-    expect(one).toMatchObject({ league: 'bronze', pages: 1, seasonId: 'fixture-season-1', archived: false });
+    expect(one).toMatchObject({ league: 'bronze', pages: 1, seasonId: '1', archived: false });
     expect(one.rows).toEqual(ARENA_STANDINGS.bronze.slice(0, 50));
     expect(one.nextCursor).not.toBeNull();
     const two = await readStandingsPages(reader, 'bronze', 2);

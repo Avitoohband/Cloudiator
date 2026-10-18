@@ -1271,12 +1271,12 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       const rows: StandingRow[] = [...first.rows, ...second.rows];
       expect(rows).toEqual(expected.map((r, i): StandingRow => ({ rank: i + 1, gladiatorId: r.gid, name: names[r.gid], rating: r.rating,
         humanWins: r.wins, humanLosses: r.losses, promoted: r.gid === bronze[1].gid, inactive: r.wins + r.losses === 0,
-        rewardEligible: r.wins + r.losses >= RULES_V1.seasons.minimumHumanBouts })));
+        rewardEligible: r.wins + r.losses >= RULES_V1.seasons.minimumHumanBouts, awardPlace: null })));
       expect(rows.filter(r => r.rewardEligible).length).toBeGreaterThan(0);
       expect(rows.filter(r => r.inactive).length).toBeGreaterThan(0);
       expect(await readStandings(spectator.client, 'silver')).toEqual({ league: 'silver', seasonId: '1', archived: false, nextCursor: null,
         rows: [{ rank: 1, gladiatorId: bronze[1].gid, name: names[bronze[1].gid], rating: 1003, humanWins: 1, humanLosses: 0, promoted: false,
-          inactive: false, rewardEligible: false }] });
+          inactive: false, rewardEligible: false, awardPlace: null }] });
       expect(await readStandings(spectator.client, 'champion')).toEqual({ league: 'champion', seasonId: '1', archived: false, rows: [], nextCursor: null });
       // Privacy: the read model has only public standing columns; no wallet, inventory, owner or loot.
       expect((await sql`select column_name from information_schema.columns where table_schema='public' and table_name='arena_standing_reads'

@@ -6,6 +6,7 @@ import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_
 import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { seasonAt } from '../../supabase/functions/_shared/domain/season.ts';
+import { readProfile, readSeasons, readStandings } from '../../src/lib/api/reads.ts';
 import { isTournamentSlot, tournamentOutcomes } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
@@ -476,6 +477,51 @@ describe('closing a season', () => {
     })).rejects.toBe(rollback);
     expect((await sql`select closed_at_ms from public.seasons where season_index=1`)[0].closed_at_ms).toBeNull();
     expect((await sql`select count(*)::int as n from private.season_awards where season_index=1`)[0].n).toBe(0);
+  });
+
+  // Task 21.3: the client read layer against the real database, as a visitor (the anonymous client) and as a signed-in player.
+  it('reads seasons, an archived season and prestige through readSeasons, readStandings and readProfile after a real close', async () => {
+    const [p, b1, b2, b3, b4, idle] = await fighters(6);
+    // p qualifies in Bronze (first) and Silver, so it is rewarded in Silver and Bronze's places go to b1 to b3; b4 qualifies without a place.
+    await rate(p, 'bronze', { rating: 1500, ...QUALIFIED });
+    await rate(p, 'silver', { rating: 1200, ...QUALIFIED });
+    for (const [x, rating] of [[b1, 1400], [b2, 1300], [b3, 1200], [b4, 1100]] as const) await rate(x, 'bronze', { rating, ...QUALIFIED });
+    await rate(idle, 'bronze', { rating: 1000 });
+    await openSeason(0);
+    await openSeason(1);
+    const now = Date.now();
+    expect(await close(0, now)).toBe(4);
+    const player = await account();
+    const [season0, season1] = [seasonAt(0, 0), seasonAt(RULES_V1.seasons.durationSlots, 0)];
+    const seasons = [{ seasonId: '1', startsAtMs: season1.startsAtMs, endsAtMs: season1.endsAtMs, closedAtMs: null },
+      { seasonId: '0', startsAtMs: season0.startsAtMs, endsAtMs: season0.endsAtMs, closedAtMs: now }];
+    // The archive as the database holds it, in the read's row shape (50 rows or fewer per league here).
+    const frozen = async (league: League) => (await archive(0)).filter(r => r.league === league).map(r => ({ rank: r.rank, gladiatorId: r.gid,
+      name: r.name, rating: r.rating, humanWins: r.wins, humanLosses: r.losses, promoted: r.promoted, inactive: r.inactive,
+      rewardEligible: r.eligible, awardPlace: r.place }));
+    for (const client of [anonymous, player.client]) {
+      expect(await readSeasons(client)).toEqual(seasons);
+      // No season named: the latest, season 1, is open and has no rating rows yet.
+      expect(await readStandings(client, 'bronze')).toEqual({ league: 'bronze', seasonId: '1', archived: false, rows: [], nextCursor: null });
+      // The finished season: frozen ranks, flags and award places, by league.
+      const bronze = await readStandings(client, 'bronze', undefined, '0');
+      expect(bronze).toEqual({ league: 'bronze', seasonId: '0', archived: true, nextCursor: null, rows: await frozen('bronze') });
+      expect(bronze.rows.map(r => [r.gladiatorId, r.rank, r.promoted, r.inactive, r.rewardEligible, r.awardPlace])).toEqual([
+        [p.gid, 1, true, false, false, null], [b1.gid, 2, false, false, true, 1], [b2.gid, 3, false, false, true, 2], [b3.gid, 4, false, false, true, 3],
+        [b4.gid, 5, false, false, true, null], [idle.gid, 6, false, true, false, null]]);
+      expect(await readStandings(client, 'silver', undefined, '0')).toEqual({ league: 'silver', seasonId: '0', archived: true, nextCursor: null, rows: await frozen('silver') });
+      expect((await readStandings(client, 'silver', undefined, '0')).rows).toMatchObject([{ gladiatorId: p.gid, rank: 1, rewardEligible: true, awardPlace: 1 }]);
+      expect((await readStandings(client, 'gold', undefined, '0')).rows).toEqual([]);
+      // A cursor stays in its season and starts after its rank; it wins over another season id.
+      expect(await readStandings(client, 'bronze', '0:2', '1')).toEqual({ league: 'bronze', seasonId: '0', archived: true, nextCursor: null, rows: (await frozen('bronze')).slice(2) });
+      // An unknown season is unavailable; a closed season is read-only data, so the same read repeats exactly.
+      await expect(readStandings(client, 'bronze', undefined, '5')).rejects.toMatchObject({ code: 'unavailable' });
+      expect(await readStandings(client, 'bronze', undefined, '0')).toEqual(bronze);
+      // The award's prestige on its public profile; a gladiator with no award has none.
+      expect((await readProfile(client, p.gid)).prestige).toEqual([{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }]);
+      expect((await readProfile(client, b3.gid)).prestige).toEqual([{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }]);
+      expect((await readProfile(client, b4.gid)).prestige).toEqual([]);
+    }
   });
 });
 

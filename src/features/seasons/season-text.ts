@@ -84,8 +84,9 @@ export const ELIGIBLE_NOTE = `✓ Eligible: has ${RULES_V1.seasons.minimumHumanB
 
 /**
  * A finished season's footnote on promotion. A row with the minimum human bouts that is not reward-eligible qualified in
- * a higher league (the archive marks it promoted), so it is rewarded there only and this league's medals pass to the next
- * eligible rows: such rows ranked above the last medal are named (up to three). Otherwise the rule is stated.
+ * a higher league (the archive marks it promoted), so only that league could reward it (it may have placed outside the
+ * medals there) and this league's medals pass to the next eligible rows: such rows ranked above the last medal are named
+ * (up to three), without claiming a reward. Otherwise the rule is stated.
  */
 export function promotionNote(rows: readonly StandingRow[], league: LeagueId): string {
   const { minimumHumanBouts, placements } = RULES_V1.seasons;
@@ -97,9 +98,10 @@ export function promotionNote(rows: readonly StandingRow[], league: LeagueId): s
     return `A gladiator promoted during the season is rewarded only in their highest league with at least ${minimumHumanBouts} human bouts; a lower league’s medals then go to its next eligible gladiators.`;
   }
   const medalsGo = `and the ${leagueWord(league)} medals go to the next eligible gladiators.`;
-  if (skipped.length === 1) return `${skipped[0]} was promoted and qualified in a higher league, so ${skipped[0]} is rewarded there only, ${medalsGo}`;
+  if (skipped.length === 1) return `${skipped[0]} was promoted and qualified in a higher league, so only that league can reward ${skipped[0]}, ${medalsGo}`;
   const named = skipped.length > 3 ? [...skipped.slice(0, 3), `${skipped.length - 3} more`] : skipped;
-  return `${named.slice(0, -1).join(', ')} and ${named.at(-1)} were promoted and qualified in a higher league, so they are rewarded there only, ${medalsGo}`;
+  const names = `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`;
+  return `${names} were promoted and qualified in higher leagues, so only those leagues can reward ${names}, ${medalsGo}`;
 }
 
 /** The owner's progress to the minimum human bouts in its league this season (NPC bouts never count). */

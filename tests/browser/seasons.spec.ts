@@ -116,7 +116,7 @@ test.describe('seasons in the fixture preview', () => {
       else await expect(rowOf(page, 'Bronze', 'Aster')).toContainText('You');
       await expect(rowOf(page, 'Bronze', 'Gallus')).toContainText('Inactive');
       await expect(table(page, 'Bronze')).not.toContainText('✓ Eligible');
-      await expect(section).toContainText('Lucilla was promoted and qualified in a higher league, so Lucilla is rewarded there only, and the Bronze medals go to the next eligible gladiators.');
+      await expect(section).toContainText('Lucilla was promoted and qualified in a higher league, so only that league can reward Lucilla, and the Bronze medals go to the next eligible gladiators.');
       // Read-only: the section offers the leagues, the names, the picker and paging, and nothing else.
       const buttons = await section.getByRole('button').allTextContents();
       expect(buttons.filter(name => !['Bronze', 'Silver', 'Gold', 'Champion', 'More'].includes(name) && !bronze.some(r => r.name === name))).toEqual([]);
@@ -221,7 +221,7 @@ test.describe('seasons in live mode', () => {
     await expect(rowOf(page, 'Bronze', 'Livia')).toContainText('🥇 1st · Champion');
     await expect(rowOf(page, 'Bronze', 'Brutus')).toContainText('🥉 3rd');
     await expect(rowOf(page, 'Bronze', 'Nerva')).toContainText('Inactive');
-    await expect(standings(page)).toContainText('Varro was promoted and qualified in a higher league, so Varro is rewarded there only, and the Bronze medals go to the next eligible gladiators.');
+    await expect(standings(page)).toContainText('Varro was promoted and qualified in a higher league, so only that league can reward Varro, and the Bronze medals go to the next eligible gladiators.');
     await expect(standings(page).getByRole('region', { name: 'Your standing' })).toHaveCount(0);
     // The archive was read from the frozen table for that season, as a visitor; no owner state, no gladiator row read.
     const archived = live.requests.filter(r => r.table === 'season_standings');

@@ -281,7 +281,7 @@ describe('Arena standings', () => {
     expect(html).toContain(`2 Severus ${severus.rating} ${severus.humanWins}–${severus.humanLosses} 🥇 1st · Champion`);
     expect(html).toContain('3 Nerva 1098 9–4 🥈 2nd');
     expect(html).toContain('4 Aster 1074 8–5 You 🥉 3rd');
-    expect(html).toContain('Lucilla was promoted and qualified in a higher league, so Lucilla is rewarded there only, and the Bronze medals go to the next eligible gladiators.');
+    expect(html).toContain('Lucilla was promoted and qualified in a higher league, so only that league can reward Lucilla, and the Bronze medals go to the next eligible gladiators.');
     // A visitor's view of it is the same, without You.
     expect(text(view({ ...archivedModel, ownerId: null, own: null }))).toContain('4 Aster 1074 8–5 🥉 3rd');
   });
@@ -290,7 +290,10 @@ describe('Arena standings', () => {
     const [lucilla, severus, nerva, aster, varro] = archive.rows;
     const two = text(view({ ...archivedModel, rows: [lucilla, { ...severus, promoted: true, rewardEligible: false, awardPlace: null }, { ...nerva, awardPlace: 1 },
       { ...aster, awardPlace: 2 }, { ...varro, awardPlace: 3 }] }));
-    expect(two).toContain('Lucilla and Severus were promoted and qualified in a higher league, so they are rewarded there only, and the Bronze medals go to the next eligible gladiators.');
+    expect(two).toContain('Lucilla and Severus were promoted and qualified in higher leagues, so only those leagues can reward Lucilla and Severus, and the Bronze medals go to the next eligible gladiators.');
+    // Qualifying higher does not mean placing there (plan Review Focus 4: fourth in the higher league, no reward anywhere),
+    // so a named footnote never claims a reward.
+    for (const html of [two, text(view(archivedModel))]) expect(html).not.toMatch(/(is|are) rewarded/);
     const silver = arenaStandingsPage('silver', '0');
     const rule = text(view({ ...archivedModel, league: 'silver', rows: silver.rows, nextCursor: null }));
     expect(rule).toContain('A gladiator promoted during the season is rewarded only in their highest league with at least 5 human bouts; a lower league’s medals then go to its next eligible gladiators.');

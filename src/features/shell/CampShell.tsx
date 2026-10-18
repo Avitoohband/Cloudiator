@@ -19,6 +19,8 @@
 // entry on the camp's route (`?view=…`, plan Decision 4, `useSceneHistory`). The bridge carries them: `view-replay` and
 // `view-expedition` open one (the Arena card's Watch replay, the Gladiators list's away rows), `return-camp` closes it
 // (the scene's "Back to camp"); Results opens each result by its kind. The camp keeps running beneath a scene.
+//
+// Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
@@ -31,6 +33,7 @@ import { RosterPanel, type Roster } from '../character/RosterPanel';
 import { ProfileLayer } from '../character/ProfileCard';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { InventoryPanel } from '../inventory/InventoryPanel';
+import { MarketPanel } from '../market/MarketPanel';
 import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
@@ -272,6 +275,10 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} preview={fixture}
         initialMerchant={shop?.merchant} merchantRequest={shop?.request} /> : null;
+      // Anyone browses; the command gateway is a player's only, so a visitor's or a new account's panel cannot send one.
+      case 'market': return reads ? <MarketPanel key={ownerId ?? viewer} reads={reads} gateway={viewer === 'player' ? gateway : null} owner={owner} viewer={viewer}
+        clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} />
+        : <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
       case 'arena': return <ArenaMenu open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
         onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;

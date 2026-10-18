@@ -123,8 +123,9 @@ test.describe('the camp shell with a pointer', () => {
       return el?.closest('[data-testid="corner-chip"]') ? 'corner chip' : el?.getAttribute('aria-label') ?? el?.tagName ?? null;
     });
     const order = [await focused()];
-    for (let i = 0; i < 10; i++) { await page.keyboard.press('Tab'); order.push(await focused()); }
-    expect(order).toEqual([...LABELS, 'Zoom in', 'Zoom out', 'Reset zoom', 'corner chip']);
+    const expected = [...LABELS, 'Zoom in', 'Zoom out', 'Reset zoom', 'corner chip'];
+    for (let i = 1; i < expected.length; i++) { await page.keyboard.press('Tab'); order.push(await focused()); }
+    expect(order).toEqual(expected);
     // Back to Schedule: Enter opens its panel and moves the focus into it; Escape closes it and returns the focus.
     await icons.nth(1).focus();
     await page.keyboard.press('Enter');

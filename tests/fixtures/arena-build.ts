@@ -8,6 +8,7 @@ import type { ActivitySummary, BattleLog, RevealedStage, RevealedTimeline } from
 import type { ClassId, LeagueId } from '../../supabase/functions/_shared/contracts/commands.ts';
 import type { EquipmentSilhouette, OwnerState, PublicActor, PublicProfile, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { ownerFixture, worldFixture } from './domain.ts';
+import { ASTER_LISTED_ITEM } from './market.ts';
 import {
   ARENA_ACTIVITIES, ARENA_BOUTS, ARENA_CAMP_KEYS, ARENA_GLADIATORS, ARENA_SAMPLE_KEYS, arenaActivityId, fixtureUuid,
   type ArenaActivityKey, type ArenaBoutKey, type ArenaGladiatorKey,
@@ -62,10 +63,12 @@ const INFO: Record<ArenaGladiatorKey, PublicInfo> = {
 
 /**
  * The fixture owner after the credited Arena bouts above: Aster's rating after her latest human bout and the renown
- * of all five credited bouts (10 + 0 + 3 + 2 + 10). Everything else is the shared owner fixture.
+ * of all five credited bouts (10 + 0 + 3 + 2 + 10). Her inventory holds the Iron helmet her fixture market offer sells,
+ * reserved by that listing (Task 18.3). Everything else is the shared owner fixture.
  */
 export const ARENA_OWNER: OwnerState = {
   ...ownerFixture,
+  inventory: [structuredClone(ASTER_LISTED_ITEM)],
   wallets: { ...ownerFixture.wallets, renown: ownerFixture.wallets.renown + 25 },
   progression: { ...ownerFixture.progression, rating: INFO.aster.rating },
 };

@@ -358,6 +358,17 @@ test('fixture market pages open offers newest first, 50 at a time, and filters b
   // One seller's offers only, as the live read filters them.
   const own = await gateway.market(undefined, owner.gladiatorId);
   expect(own).toEqual({ rows: rows.filter(r => r.seller.gladiatorId === owner.gladiatorId), nextCursor: null });
+  // The fixture owner and the fixture market agree (18.2 review): each of the owner's offers sells an item in the owner's
+  // inventory, reserved by that listing and with the offer's catalog fields, and each listing-reserved item has its offer.
+  expect(own.rows.length).toBeGreaterThan(0);
+  const listed = owner.inventory.filter(item => item.reservation?.kind === 'listing');
+  expect(listed.map(item => item.reservation!.referenceId).sort()).toEqual(own.rows.map(r => r.listingId).sort());
+  for (const offer of own.rows) {
+    const held = listed.find(item => item.reservation!.referenceId === offer.listingId)!;
+    const { catalogId, catalogVersion, tier, rarity, stats, quantity } = held;
+    expect({ catalogId, catalogVersion, tier, rarity, stats, quantity }, offer.listingId).toEqual(offer.item);
+    expect(held, offer.listingId).toMatchObject({ ownerId: owner.gladiatorId, binding: 'tradable', origin: 'shop' });
+  }
   expect(await gateway.market(undefined, '1f205d8f-cd7b-4631-9b4d-a22ef6614e70')).toEqual({ rows: [], nextCursor: null });
   // The live cursor rules: a well-formed cursor that no page issued ends the list; a malformed cursor or seller is refused.
   expect(await gateway.market(`${worldFixture.serverNowMs}:${rows[0].listingId}`)).toEqual({ rows: [], nextCursor: null });

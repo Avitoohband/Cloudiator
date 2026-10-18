@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import type { OwnerState, PublicProfile, ResultRow, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import type { MarketListing, OwnerState, PublicProfile, ResultRow, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 
 export const SUPABASE_URL = 'http://127.0.0.1:54321';
@@ -61,6 +61,8 @@ export type LiveData = {
   timelines?: Readonly<Record<string, RevealedTimeline>>;
   /** Recent public results, newest first. */
   recent?: readonly ResultRow[];
+  /** Open marketplace offers (the public `market_offers` projection), in any order. */
+  market?: readonly MarketListing[];
   /** The signed-in reader's owner state; null or absent is an account with no gladiator. */
   owner?: OwnerState | null;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
@@ -86,6 +88,8 @@ export type LiveTransport = {
   setTournaments(views: readonly TournamentView[]): void;
   /** Replaces the activity timelines (the server published a stage that was late). */
   setTimelines(timelines: Readonly<Record<string, RevealedTimeline>>): void;
+  /** Replaces the open marketplace offers (a listing was created, bought, cancelled or swept). */
+  setMarket(offers: readonly MarketListing[]): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
   delay(table: string, ms: number): void;
   /** Holds a table's requests until the returned release is called (then answers them, and later ones, at once). */
@@ -193,6 +197,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setStandings: pages => { data.standings = pages; },
     setTournaments: views => { data.tournaments = views; },
     setTimelines: timelines => { data.timelines = timelines; },
+    setMarket: offers => { data.market = offers; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {
       let release!: () => void;
@@ -311,6 +316,9 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
     tournament_views: { rows: tournamentViews },
     tournament_bout_results: { rows: due(boutResults) },
     tournament_placements: { rows: placements },
+    // Open offers, readable by visitors too; RLS hides an offer from its expiry time on, swept or not.
+    market_offers: { rows: (data.market ?? []).filter(o => o.expiresAtMs > now).map(o => ({ id: o.listingId, seller_gladiator_id: o.seller.gladiatorId,
+      seller_name: o.seller.name, item: o.item, price: o.price, listed_at_ms: o.listedAtMs, expires_at_ms: o.expiresAtMs })) },
     // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all.
     owner_state: { private: true, rows: reader !== null && owner ? [{ state: owner }] : [] },
     activities: { private: true, rows: timelines.filter(t => t.summary).map(t => ({ id: t.activityId, status: 'completed', settled_at_ms: t.summary!.settledAtMs, summary: t.summary })) },

@@ -3,16 +3,18 @@
 // sanitized fields (seller, the item's catalog fields, stats and quantity, the price and the times), never an item id, owner,
 // origin or reservation. The items are tradable catalog equipment; prices are above each one's NPC sale value. Listing
 // times count back from the fixture world's server time, so every offer is open there (seven days from listing).
-// No JSON imports, so browser specs can import this module directly.
-import type { MarketListing, MarketPage } from '../../supabase/functions/_shared/contracts/reads.ts';
+// The fixture owner's own offer sells an item in the owner fixture's inventory, reserved by that listing (`ASTER_LISTED_ITEM`,
+// Task 18.3). No JSON imports, so browser specs can import this module directly.
+import type { ItemInstance, MarketListing, MarketPage } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
+import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { worldFixture } from './domain.ts';
 import { ARENA_GLADIATORS, fixtureUuid, type ArenaGladiatorKey } from './arena-ids.ts';
 
 const MARKET_PAGE = 50;
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
-/** Seven days, `RULES_V1.marketplace.expiryMs`. */
-const LISTING_MS = 7 * DAY;
+/** How long a listing stays open: seven days. */
+const LISTING_MS = RULES_V1.marketplace.expiryMs;
 const NOW = worldFixture.serverNowMs;
 
 /** Each offer: who listed which catalog item, at what price, and how long before the fixture time. */
@@ -36,6 +38,17 @@ function offerOf({ key, seller, catalogId, price, listedAgoMs }: (typeof OFFERS)
     item: { catalogId: entry.id, catalogVersion: CATALOG_V1.version, tier: entry.tier, rarity: entry.rarity, stats: structuredClone(entry.stats), quantity: 1 },
     price, listedAtMs, expiresAtMs: listedAtMs + LISTING_MS };
 }
+
+/**
+ * The item Aster's own offer sells: her tier 5 uncommon Iron helmet, held in the owner fixture's inventory and reserved by
+ * that listing (plan Decision 4), so it cannot be equipped, sold to an NPC, discarded or listed again.
+ */
+export const ASTER_LISTED_ITEM: ItemInstance = (() => {
+  const entry = CATALOG_V1.items['iron-helmet:5:uncommon'];
+  return { id: fixtureUuid('market-item-aster-helmet'), ownerId: ARENA_GLADIATORS.aster.id, catalogId: entry.id, catalogVersion: CATALOG_V1.version,
+    tier: entry.tier, rarity: entry.rarity, stats: structuredClone(entry.stats), quantity: 1, origin: 'shop', binding: entry.binding,
+    reservation: { kind: 'listing', referenceId: fixtureUuid('market-listing-aster-helmet') } };
+})();
 
 /** Newest listing first, then by listing id: the order of the live read. */
 const newestFirst = (a: MarketListing, b: MarketListing) => b.listedAtMs - a.listedAtMs || (a.listingId < b.listingId ? -1 : 1);

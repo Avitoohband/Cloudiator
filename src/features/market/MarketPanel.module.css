@@ -1,0 +1,407 @@
+/*
+ * The 💰 Marketplace menu (the approved mockup's rows: the item, its seller and time left, then the price and Buy). It fits
+ * a 380 px panel and a 360 px bottom sheet: text wraps inside its column and the price column never shrinks. No motion of
+ * its own, so reduced motion needs nothing more here.
+ */
+.market {
+  min-width: 0;
+}
+
+.browsing,
+.create {
+  margin: 0 0 8px;
+}
+
+.create {
+  padding: 8px 10px;
+  border: 1px solid rgba(230, 180, 80, 0.35);
+  border-radius: 10px;
+  background: rgba(230, 180, 80, 0.12);
+  font-size: 0.86rem;
+}
+
+.wallet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin-bottom: 8px;
+}
+
+.wallet p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+/* The mockup's tabs: small pills, the shown one gold. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tabs button {
+  min-height: 36px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--glass-2, rgba(255, 255, 255, 0.07));
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.tabs button[aria-selected='true'] {
+  background: var(--gold);
+  color: var(--accent-ink, #2a1d05);
+  font-weight: 600;
+}
+
+.panel {
+  min-width: 0;
+}
+
+.listHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.listHead :global(.eyebrow) {
+  margin: 0;
+}
+
+.offers {
+  min-width: 0;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.offer:last-child {
+  border-bottom: 0;
+}
+
+.what {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.icon {
+  margin-right: 0.35rem;
+}
+
+.detail,
+.blocked {
+  display: block;
+  margin: 0;
+  color: var(--ink-dim, var(--muted));
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.blocked {
+  color: #f0c27a;
+}
+
+.yours {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(230, 180, 80, 0.92);
+  color: var(--accent-ink, #2a1d05);
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.deal {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.price {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.act,
+.more,
+.refresh,
+.retry,
+.failed button,
+.actions button,
+.google,
+.primary {
+  min-height: 36px;
+  padding: 5px 11px;
+  border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.13));
+  border-radius: 8px;
+  background: var(--glass-2, rgba(255, 255, 255, 0.07));
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.act:hover:not(:disabled),
+.more:hover:not(:disabled),
+.refresh:hover:not(:disabled),
+.retry:hover:not(:disabled),
+.actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.primary,
+.actions .primary {
+  border-color: transparent;
+  background: var(--gold);
+  color: var(--accent-ink, #2a1d05);
+  font-weight: 600;
+}
+
+.primary:hover:not(:disabled),
+.actions .primary:hover:not(:disabled) {
+  background: #f6d48c;
+}
+
+.tabs button:focus-visible,
+.act:focus-visible,
+.more:focus-visible,
+.refresh:focus-visible,
+.retry:focus-visible,
+.actions button:focus-visible,
+.google:focus-visible,
+.primary:focus-visible,
+.choice input:focus-visible,
+.priceInput:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.refresh {
+  min-height: 32px;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+}
+
+.more,
+.retry {
+  margin-top: 10px;
+}
+
+.failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.failed p,
+.failedNote {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.message,
+.error {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.message {
+  background: rgba(120, 200, 150, 0.12);
+  border: 1px solid rgba(120, 200, 150, 0.35);
+}
+
+.error {
+  background: rgba(230, 110, 90, 0.12);
+  border: 1px solid rgba(230, 110, 90, 0.4);
+}
+
+/* Sell: the items as radio choices, the price, then the terms. */
+.sell {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sell p {
+  margin: 0;
+}
+
+.count {
+  font-size: 0.86rem;
+}
+
+.nothing {
+  font-size: 0.82rem;
+}
+
+.items {
+  min-width: 0;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.13));
+  border-radius: 10px;
+}
+
+.items legend {
+  padding: 0 4px;
+  font-size: 0.8rem;
+  color: var(--ink-dim, var(--muted));
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.choice input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--gold);
+}
+
+.choiceText {
+  min-width: 0;
+}
+
+.priceLabel {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.priceInput {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid #65718a;
+  border-radius: 6px;
+  background: #111c2d;
+  color: #f4ead5;
+  font: inherit;
+}
+
+.terms {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--glass-2, rgba(255, 255, 255, 0.07));
+  font-size: 0.82rem;
+}
+
+.receive {
+  font-weight: 600;
+}
+
+/* A visitor's sign-in, the mockup's "Sign in to trade" button below the listings. */
+.signIn {
+  margin-top: 12px;
+}
+
+.signIn p {
+  margin: 6px 0 0;
+}
+
+.google {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 11px;
+  background: rgba(21, 19, 28, 0.86);
+  font-weight: 600;
+  text-align: left;
+}
+
+.google:hover:not(:disabled) {
+  background: rgba(30, 28, 40, 0.95);
+}
+
+/* The purchase confirmation: a modal dialog over the camp, inside a 360 px window too. */
+.confirm {
+  width: min(400px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 18px;
+  border: 1px solid rgba(230, 180, 80, 0.6);
+  border-radius: 12px;
+  background: #172338;
+  color: var(--ink);
+}
+
+.confirm::backdrop {
+  background: rgba(7, 11, 23, 0.73);
+}
+
+.confirm h2 {
+  margin: 0 0 8px;
+  font: 600 1.05rem/1.2 Georgia, 'Palatino Linotype', serif;
+}
+
+.confirm p {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sell .primary {
+  justify-self: start;
+}
+
+/* Words for screen readers only ("money" after a price shown as "💰 450"). */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

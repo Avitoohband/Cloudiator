@@ -114,11 +114,31 @@ test('shows level locks and reservation restrictions with both currencies', asyn
   expect(flow.commands).toHaveLength(0);
 });
 
+test('explains Marketplace outcomes for an item in words, with nothing to retry', async ({ page, context }) => {
+  // Task 18.3: an item that a Marketplace sale or expiry changed is explained in words, never as a raw code.
+  const flow = await inventoryFlow(context);
+  await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
+  const axe = page.getByTestId(`item-${flow.state.inventory[0].id}`);
+  const alert = page.locator('.inventory-panel').getByRole('alert');
+  for (const [code, words] of [['sold', 'sold on the Marketplace'], ['expired', 'listing has expired']] as const) {
+    flow.reject(code);
+    await axe.getByRole('button', { name: 'Sell' }).click();
+    await expect(alert).toContainText(words);
+    await expect(alert).not.toContainText('rejected');
+    await expect(page.getByRole('button', { name: 'Retry request' })).toHaveCount(0);
+  }
+});
+
 test('fixture inventory and shops remain read-only alongside the camp', async ({ page }) => {
   await page.goto('/game/?mode=fixture');
   await openMenu(page, 'Inventory and shops');
   await expect(page.getByRole('heading', { name: 'Shops', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'unavailable in this preview' })).toBeVisible();
-  await expect(page.getByText('0 / 60 slots')).toBeVisible();
+  // The fixture owner's Iron helmet is listed in the fixture market (Task 18.3): reserved, so it cannot be sold or discarded.
+  await expect(page.getByText('1 / 60 slots')).toBeVisible();
+  const helmet = page.locator('.inventory-item').filter({ hasText: 'Iron helmet' });
+  await expect(helmet).toContainText('Listed for sale');
+  await expect(helmet.getByRole('button', { name: 'Sell' })).toBeDisabled();
+  await expect(helmet.getByRole('button', { name: 'Discard' })).toBeDisabled();
 });

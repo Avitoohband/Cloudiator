@@ -48,9 +48,11 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false, initi
             : result.code === 'inventory-full' ? 'Your inventory is full. Clear enough slots and try again.'
               : result.code === 'insufficient-funds' ? 'Not enough available currency. Held fees cannot be spent.'
                 : result.code === 'conflict' ? 'Your inventory changed or this cosmetic is already owned. Review the refreshed state.'
-                  : `Request rejected: ${result.code}.`);
+                  : result.code === 'sold' ? 'This item was sold on the Marketplace. Review the refreshed inventory.'
+                    : result.code === 'expired' ? 'Its Marketplace listing has expired and the item is back. Review the refreshed inventory.'
+                      : `Request rejected: ${result.code}.`);
         if (!transient) attempt.current = null;
-        if (['conflict', 'not-found', 'inventory-full'].includes(result.code)) await refresh();
+        if (['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code)) await refresh();
       }
     } catch {
       if (mounted.current) { setError('This request could not be confirmed. Retry the same request.'); setRetry(true); }
@@ -68,7 +70,7 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false, initi
       return <article className="inventory-item" key={item.id} data-testid={`item-${item.id}`}>
         <h3>{itemName(item)}</h3><p>Level {item.tier} · {item.rarity} · {item.binding === 'bound' ? 'Account-bound' : 'Tradable'}</p>
         <p>Damage {item.stats.damage} · Armor {item.stats.armor} · Weight {item.stats.weight}</p>
-        <p>{item.quantity} owned · {reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
+        <p>{item.quantity} owned · {item.reservation?.kind === 'listing' ? 'Listed for sale' : reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
         <p>{value === null ? 'Cannot sell to NPCs' : `NPC sell value: ${value} money each`}</p>
         {item.quantity > 1 && <label>Quantity for {itemName(item)}<input type="number" min="1" max={item.quantity} step="1" value={quantity || ''} onChange={e => setQuantities(values => ({ ...values, [item.id]: Number(e.target.value) }))} /></label>}
         <div className="item-actions"><button disabled={busy || reserved || value === null || !valid} onClick={() => void send({ kind: 'sell-item', itemId: item.id, quantity })}>Sell</button>

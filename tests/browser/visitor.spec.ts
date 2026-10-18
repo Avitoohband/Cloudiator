@@ -12,7 +12,7 @@ import {
 // running camp. A cancelled sign-in comes back to the visitor view with a short message (plan Decision 6), and a
 // session that ends closes any private menu and leaves no private value on screen (Review Focus 2).
 
-const PUBLIC_MENUS = ['My gladiator', 'Arena', 'Tournaments', 'Results', 'Gladiators'];
+const PUBLIC_MENUS = ['My gladiator', 'Marketplace', 'Arena', 'Tournaments', 'Results', 'Gladiators'];
 const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
 
 /** A live camp from fixture DTOs: the owner fixture's actor and a training and resting crowd (no Arena or tournament entrants). */
@@ -81,6 +81,12 @@ test('lets a visitor watch the camp and open every public menu without sending a
       await expect(menu.getByRole('heading', { name: 'Brackets', exact: true })).toBeVisible();
       await expect(menu.getByRole('region', { name: 'Registration' })).toHaveCount(0);
       await expect(menu.getByLabel('Automatically enter tournaments')).toHaveCount(0);
+    }
+    if (label === 'Marketplace') {
+      // Browse listings only (Task 18.3): a sign-in prompt, and no Buy, Sell or My listings.
+      await expect(menu.getByRole('button', { name: 'Sign in with Google to trade' })).toBeVisible();
+      await expect(menu.getByRole('tab')).toHaveCount(0);
+      await expect(menu.getByRole('button', { name: /^Buy/ })).toHaveCount(0);
     }
     if (label === 'Gladiators') {
       await expect(menu.getByRole('button', { name: `Find ${world.actors[0].name}`, exact: true }).first()).toBeVisible();

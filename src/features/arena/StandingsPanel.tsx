@@ -365,14 +365,15 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
   useEffect(() => { void load(league, chosen, false); }, [league, chosen, load]);
   useEffect(() => { void loadSeasons(); }, [loadSeasons]);
   // A new world revision (the sync controller polls it every 30 s, and on focus) re-reads the shown pages of an open season:
-  // credited results arrive with one. The first revision after opening is no change.
+  // credited results arrive with one. A finished season the viewer picked is frozen, so it is not read again; the current
+  // season is always read again (a boundary may have opened the next one). The first revision after opening is no change.
   const seen = useRef(revision);
   useEffect(() => {
     const previous = seen.current;
     seen.current = revision;
     if (previous === null || revision === null || revision === previous) return;
     const current = shown.current?.key === keyOf(league, chosen) ? shown.current : null;
-    if (!current?.archived) void load(league, chosen, true);
+    if (!(chosen !== null && current?.archived)) void load(league, chosen, true);
     if (seasonsFailed.current || seasonsStale(listed.current, current, clock.now())) void loadSeasons();
   }, [revision, league, chosen, load, loadSeasons, clock]);
 

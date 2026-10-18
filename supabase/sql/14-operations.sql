@@ -1,8 +1,12 @@
--- Task 22.1 reapplicable source. Committed M01-M15 are immutable; deploy only the separately generated migration M16 (Task 22.3).
+-- Tasks 22.1 and 22.2 reapplicable source. Committed M01-M15 are immutable; deploy only the separately generated migration M16
+-- (Task 22.3).
 -- Retention in the database (game design §11; plan 2026-10-18-task-22-retention-operations, Decisions 2-5 and the binding
 -- retention design): the retention state, the wallet checkpoints and the operations log; the permanent grant guards on
 -- receipts and public bout results; private.cleanup_history(now_ms), one bounded, watermark-driven pruning call; its hourly
 -- tick private.cleanup_tick(); and two projection changes that cut cleanup's commit-time cost.
+-- Task 22.2 (Decisions 6 and 7): durable ticks (the market sweep isolates each seller, and cron_tick isolates dispatch, each
+-- failure recorded as an operations event) and whole seasons (private.season_bounds, shared by boundary phase 2, phase 4 and
+-- the season row backfill; phase 4 also inserts the row of the season it rates). See "Durable ticks" and "Whole seasons" below.
 --
 -- Restated rule constants (as 08-arena-bouts.sql exception 5): 604800000 is RULES_V1.retention.replayMs, 7776000000
 -- RULES_V1.retention.summaryMs, 4800000 the slot length (clock.slotMs) and 18 RULES_V1.matchmaking.recentPairingSlots, the
@@ -90,6 +94,23 @@
 -- 5. Scheduling. private.cleanup_tick() is registered at minute 23 of every hour and is inert while private.scheduler is
 --    disabled, like private.cron_tick. Hourly bounded calls meet the specification's daily cleanup (the day becomes the
 --    maximum lateness). Each enabled tick records one private.operations_events row: ok, or the failure's SQLSTATE only.
+-- 6. Durable ticks (Task 22.2, Decision 6). private.expire_listings sweeps each seller in its own subtransaction: a seller
+--    whose listings cannot be closed (for example an inconsistent listing whose item is gone) rolls back only that seller's
+--    work, and the sweep continues with the others. A sweep with failures records one operations event (source
+--    'market-sweep', ok false, the first failure's SQLSTATE, detail {"failedSellers": n}); nothing else of the failure is
+--    kept. The account try-lock is still taken outside the subtransaction and never waits (12-market.sql). cleanup_history's
+--    backstop therefore no longer fails whole on one bad listing. private.cron_tick runs dispatch_workers() in its own
+--    block: a dispatch failure records a 'dispatch' event (SQLSTATE only) and no longer rolls back the coordination and the
+--    sweep committed by the same tick. PL/pgSQL's OTHERS does not trap query_canceled (57014): a canceled tick still aborts
+--    whole and records no event.
+-- 7. Whole seasons (Task 22.2, Decision 7; M15's known limit, docs/operations/migrations.md). private.season_bounds(index)
+--    restates 13-seasons.sql's bounds (exception 1 there: 504 slots of 4800000 ms from the epoch) once; it is STABLE, not
+--    IMMUTABLE, because it reads private.season_epoch. Phase 2 (private.boundary_close_season, 13-seasons.sql's body), the
+--    season row backfill and phase 4 (private.boundary_recompute_leagues, 07-arena.sql's body) take their bounds from it.
+--    Phase 4 also inserts the row of the season it rates (on conflict do nothing), so a season rated after the epoch was set
+--    while its boundary waited at phase 4 ('epoch') has its row. The insert runs under advance_boundary's coordinator and
+--    boundary locks and locks no existing season row (close_season, the only writer of an existing row, runs under the
+--    same coordinator lock).
 begin;
 
 -- ===== State (Decision 3): backend-only; service_role may only read it, for the health report. =====
@@ -512,6 +533,133 @@ begin
 end $$;
 select cron.schedule('cloudiator-cleanup','23 * * * *','select private.cleanup_tick()');
 
+-- ===== Durable ticks (Decision 6, exception 6) =====
+-- 12-market.sql's sweep, unchanged except that each seller's listings close in their own subtransaction and a sweep with
+-- failed sellers records one operations event.
+create or replace function private.expire_listings(now_ms bigint) returns integer
+language plpgsql security invoker set search_path='' as $$
+declare seller record; listing uuid; expired integer:=0; seller_expired integer; failed integer:=0; first_failure text;
+begin
+  if now_ms is null then raise exception 'invalid expiry time'; end if;
+  for seller in select distinct l.seller_gladiator_id as id,g.owner_id from private.market_listings l
+    join public.gladiators g on g.id=l.seller_gladiator_id
+    where l.status='open' and l.expires_at_ms<=now_ms order by l.seller_gladiator_id loop
+    -- A busy seller is skipped, never waited for.
+    continue when not pg_try_advisory_xact_lock(hashtextextended(seller.owner_id::text,0));
+    -- Task 22.2: a failure rolls back only this seller's listings; keep its SQLSTATE and count it, never its message.
+    begin
+      seller_expired:=0;
+      for listing in select l.id from private.market_listings l where l.seller_gladiator_id=seller.id and l.status='open'
+        and l.expires_at_ms<=now_ms order by l.id for update skip locked loop
+        perform private.market_close_listing(listing,'expired',null);
+        seller_expired:=seller_expired+1;
+      end loop;
+      expired:=expired+seller_expired;
+    exception when others then
+      failed:=failed+1;
+      first_failure:=coalesce(first_failure,sqlstate);
+    end;
+  end loop;
+  if failed>0 then
+    insert into private.operations_events(at_ms,source,ok,sqlstate,detail)
+      values(now_ms,'market-sweep',false,first_failure,jsonb_build_object('failedSellers',failed));
+  end if;
+  return expired;
+end $$;
+
+-- 12-market.sql's minute tick, unchanged except that dispatch runs in its own block that records a 'dispatch' event.
+create or replace function private.cron_tick() returns jsonb language plpgsql security invoker set search_path='' as $$
+declare coordination jsonb; expiry jsonb; dispatch jsonb; failure text;
+begin
+  if not coalesce((select enabled from private.scheduler where singleton),false) then return jsonb_build_object('ok',true,'skipped','disabled'); end if;
+  begin
+    coordination:=public.coordinate_work();
+  exception when others then
+    -- Record only the SQLSTATE; dispatch still proceeds so pending work keeps draining.
+    update private.coordinator set last_error=sqlstate,updated_at_ms=private.planning_now_ms() where singleton;
+    coordination:=jsonb_build_object('ok',false,'code','coordinator-failed');
+  end;
+  -- The sweep in its own block: a failure rolls back only the sweep and reports only its SQLSTATE.
+  begin
+    expiry:=jsonb_build_object('ok',true,'expired',private.expire_listings(private.planning_now_ms()));
+  exception when others then
+    expiry:=jsonb_build_object('ok',false,'code','expiry-failed','sqlstate',sqlstate);
+  end;
+  -- Task 22.2: dispatch in its own block. A failure rolls back only the dispatch and is kept as its SQLSTATE; the
+  -- coordination and the sweep above still commit with this tick.
+  begin
+    dispatch:=private.dispatch_workers();
+  exception when others then
+    failure:=sqlstate;
+    dispatch:=jsonb_build_object('ok',false,'code','dispatch-failed','sqlstate',failure);
+    insert into private.operations_events(at_ms,source,ok,sqlstate) values(private.planning_now_ms(),'dispatch',false,failure);
+  end;
+  return jsonb_build_object('ok',true,'coordination',coordination,'expiry',expiry,'dispatch',dispatch);
+end $$;
+
+-- ===== Whole seasons (Decision 7, exception 7) =====
+-- One season's bounds from the launch epoch: slots epoch + 504 × index up to epoch + 504 × (index + 1), times 4800000 ms
+-- (seasonAt in supabase/functions/_shared/domain/season.ts). No row without an epoch or for a negative index.
+create or replace function private.season_bounds(index bigint) returns table(starts_at_ms bigint, ends_at_ms bigint)
+language sql stable security invoker set search_path='' as $$
+  select (e.epoch_slot+504*season_bounds.index)*4800000,(e.epoch_slot+504*(season_bounds.index+1))*4800000
+  from private.season_epoch e where e.singleton and season_bounds.index>=0
+$$;
+
+-- Boundary phase 2: 13-seasons.sql's body, unchanged except that the boundary's own season row takes its bounds from
+-- private.season_bounds.
+create or replace function private.boundary_close_season(target bigint) returns text
+language plpgsql volatile security invoker set search_path='' as $$
+declare current_season bigint:=private.season_index(target); now_ms bigint; earlier bigint;
+begin
+  if current_season is null then return null; end if;
+  now_ms:=private.planning_now_ms();
+  for earlier in select s.season_index from public.seasons s where s.closed_at_ms is null and s.season_index<current_season
+    order by s.season_index loop
+    perform private.close_season(earlier,now_ms);
+  end loop;
+  insert into public.seasons(season_index,starts_at_ms,ends_at_ms)
+    select current_season,b.starts_at_ms,b.ends_at_ms from private.season_bounds(current_season) b
+    on conflict do nothing;
+  return null;
+end $$;
+
+-- Boundary phase 4: 07-arena.sql's body, unchanged except that the season it rates gets its row first (bounds from
+-- private.season_bounds), even when the epoch was set while this boundary waited here.
+create or replace function private.boundary_recompute_leagues(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare season bigint:=private.season_index(target); m record; g public.gladiators%rowtype; placed text; current_rating bigint;
+begin
+  if not exists(select 1 from private.boundary_members bm where bm.slot_index=target) then return null; end if;
+  if season is null then return 'epoch'; end if;
+  insert into public.seasons(season_index,starts_at_ms,ends_at_ms)
+    select season,b.starts_at_ms,b.ends_at_ms from private.season_bounds(season) b
+    on conflict do nothing;
+  for m in select bm.gladiator_id,bm.owner_id,j.result->>'league' as computed,(j.result->>'arenaStrength')::numeric as strength
+    from private.boundary_members bm join private.jobs j on j.dedupe_key='prepare:'||target||':'||bm.gladiator_id
+    where bm.slot_index=target order by bm.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+    select * into g from public.gladiators where id=m.gladiator_id for update;
+    placed:=case when private.league_rank(m.computed)>private.league_rank(g.league) then m.computed else g.league end;
+    insert into private.arena_ratings(gladiator_id,league,season_index) values(m.gladiator_id,placed,season) on conflict do nothing;
+    select r.rating into current_rating from private.arena_ratings r
+      where r.gladiator_id=m.gladiator_id and r.league=placed and r.season_index=season;
+    if g.league is distinct from placed or g.rating is distinct from current_rating then
+      update public.gladiators set league=placed,rating=current_rating where id=m.gladiator_id;
+    end if;
+    insert into public.public_profiles(gladiator_id,rating,combat_strength) values(m.gladiator_id,current_rating,m.strength)
+      on conflict (gladiator_id) do update set combat_strength=excluded.combat_strength
+      where public_profiles.combat_strength is distinct from excluded.combat_strength;
+  end loop;
+  return null;
+end $$;
+
+-- Season row backfill (Decision 7): M15's backfill through private.season_bounds, so it also gives a row to a season rated
+-- while its row was missing (M15's known limit). Reapplicable; a generated migration omits it (append it to M16).
+insert into public.seasons(season_index,starts_at_ms,ends_at_ms)
+  select r.season_index,b.starts_at_ms,b.ends_at_ms from (select distinct season_index from private.arena_ratings) r
+  cross join lateral private.season_bounds(r.season_index) b
+  on conflict do nothing;
+
 -- Cleanup and its tick are granted to nobody: only the owner (pg_cron, an operator) runs them. Guards and the projector keep
 -- the backend's EXECUTE, as every earlier guard and projector does.
 revoke all on function private.cleanup_history(bigint),private.cleanup_tick() from public,anon,authenticated,service_role;
@@ -519,5 +667,12 @@ revoke all on function private.guard_receipt(),private.guard_tournament_bout_res
   private.project_character(uuid) from public,anon,authenticated;
 grant execute on function private.guard_receipt(),private.guard_tournament_bout_result(),private.guard_wallet_checkpoint(),
   private.project_character(uuid) to service_role;
+-- Task 22.2: the sweep and the tick stay granted to nobody (12-market.sql); the season functions run inside the boundary,
+-- which the worker coordinates as service_role (13-seasons.sql, 07-arena.sql).
+revoke all on function private.expire_listings(bigint),private.cron_tick() from public,anon,authenticated,service_role;
+revoke all on function private.season_bounds(bigint),private.boundary_close_season(bigint),private.boundary_recompute_leagues(bigint)
+  from public,anon,authenticated;
+grant execute on function private.season_bounds(bigint),private.boundary_close_season(bigint),private.boundary_recompute_leagues(bigint)
+  to service_role;
 notify pgrst,'reload schema';
 commit;

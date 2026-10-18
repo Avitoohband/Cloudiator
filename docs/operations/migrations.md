@@ -36,9 +36,23 @@ design):
 - Grants: nobody may EXECUTE `cleanup_history` or `cleanup_tick`, including `service_role`. The three guards and the projector
   keep `service_role` EXECUTE, as every earlier guard does.
 
+**Task 22.2 (same draft).** Decisions 6 and 7, also in `14-operations.sql` and applied the same way:
+- `private.expire_listings` closes each seller's due listings in its own subtransaction. A sweep with failed sellers writes one
+  `operations_events` row (`market-sweep`, `ok` false, the first SQLSTATE, `{"failedSellers": n}`), so the cleanup backstop no
+  longer fails whole on one inconsistent listing.
+- `private.cron_tick` runs `dispatch_workers()` in its own block. A failure writes a `dispatch` event (SQLSTATE only), and the
+  tick's coordination and sweep still commit.
+- `private.season_bounds(index)` gives boundary phase 2 (`private.boundary_close_season`), phase 4
+  (`private.boundary_recompute_leagues`) and the season row backfill their bounds. It is STABLE, because it reads
+  `private.season_epoch`. Phase 4 also inserts the row of the season it rates, which removes M15's known limit (M15 itself is
+  unchanged).
+- Tests: `tests/db/recovery.test.ts`.
+
 **Expected draft completions (Task 22.3).** From M03 to M15 the generator has omitted these. Check each one against the
 tested source:
 - the `retention_state` seed row (`insert … on conflict do nothing`);
+- the season row backfill (`insert into public.seasons … cross join lateral private.season_bounds(…) … on conflict do
+  nothing`, Task 22.2);
 - the `cron.schedule` registration;
 - every function ACL;
 - the `revoke all … from public, anon, authenticated, service_role` before the table grants;

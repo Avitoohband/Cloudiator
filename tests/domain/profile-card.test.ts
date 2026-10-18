@@ -56,6 +56,31 @@ describe('profile card', () => {
     expect(/<button([^>]*)>Follow<\/button>/.exec(card({ following: true }))![1]).toContain('aria-pressed="true"');
   });
 
+  // Task 21.4: season prestige (plan Decision 8, the approved mockup).
+  it('shows the latest champion title under the name and a badge chip per season award, newest first', () => {
+    const champion = card({ profile: { ...PROFILE, prestige: [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] } });
+    expect(champion).toMatch(/<h2[^>]*>Aster<\/h2><p[^>]*>Champion · Season 1 Silver<\/p>/);
+    expect(champion).toMatch(/<ul[^>]*aria-label="Season badges"[^>]*><li[^>]*>🥇 Season 1 · Silver<\/li><\/ul>/);
+    const career = card({ profile: { ...PROFILE, prestige: [
+      { seasonId: '0', league: 'bronze', place: 1, badge: 'gold', title: 'champion' },
+      { seasonId: '2', league: 'silver', place: 1, badge: 'gold', title: 'champion' },
+      { seasonId: '3', league: 'gold', place: 3, badge: 'bronze', title: null }] } });
+    expect(text(career)).toContain('Champion · Season 3 Silver');
+    expect(text(career)).not.toContain('Champion · Season 1 Bronze');
+    expect([...career.matchAll(/<li[^>]*>([^<]*)<\/li>/g)].map(m => m[1])).toEqual(['🥉 Season 4 · Gold', '🥇 Season 3 · Silver', '🥇 Season 1 · Bronze']);
+    // A third place only: its badge and no title.
+    const third = card({ profile: { ...PROFILE, prestige: [{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }] } });
+    expect(text(third)).toContain('🥉 Season 1 · Bronze');
+    expect(text(third)).not.toContain('Champion ·');
+  });
+
+  it('shows nothing about seasons for a gladiator without prestige, or before the profile loads', () => {
+    for (const html of [card({ profile: PROFILE }), card(), card({ profileFailed: true })]) {
+      expect(html).not.toContain('Season badges');
+      expect(text(html)).not.toMatch(/Season \d|Champion/);
+    }
+  });
+
   it('is a labelled dialog with a close button, from the world actor or, outside the world, once the profile loads', () => {
     const layer = (world: WorldSnapshot | null, name = 'Aster') => renderToStaticMarkup(createElement(ProfileLayer, {
       target: { gladiatorId: ACTOR.gladiatorId, name, screen: null, record: { wins: 6, losses: 4 }, focus: false },

@@ -746,7 +746,9 @@ test.describe('the Arena card and league standings', () => {
     await expect(table.locator('tbody tr')).toHaveCount(58);
     await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
     const own = page.getByRole('region', { name: 'Your standing' });
-    await expect(own.getByRole('definition')).toHaveText(['Bronze', '1015', '25', '412']);
+    // Task 21.4 adds the owner's season rank and human bouts (2–1 this season) after the four figures.
+    const asterRank = ARENA_STANDINGS.bronze.find(row => row.name === 'Aster')!.rank;
+    await expect(own.getByRole('definition')).toHaveText(['Bronze', '1015', '25', '412', `#${asterRank}`, '3 of 5']);
     const rules = page.getByRole('region', { name: 'How leagues work' });
     for (const range of ['index below 25', 'index 25–59', 'index 60–119', 'index 120 and above']) await expect(rules).toContainText(range);
     await page.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Silver' }).click();
@@ -851,7 +853,8 @@ test.describe('live league standings', () => {
     await expect(table.getByRole('row', { name: /Aster/ })).toContainText('1000');
     const own = page.getByRole('region', { name: 'Your standing' }).getByRole('definition');
     await expect(own.nth(1)).toHaveText('1000');
-    const reads = () => live.count('arena_standing_reads');
+    // Page reads of the view; the owner's own one-row read (Task 21.4, filtered by gladiator) follows the revision as well.
+    const reads = () => live.requests.filter(r => r.table === 'arena_standing_reads' && !r.query.has('gladiator_id')).length;
     const first = reads();
     // No timer of its own: the shared clock passes a slot boundary and five minutes go by with the same revision.
     await page.evaluate(() => { const clock = window.__cloudiatorShell!.clock; clock.freeze((Math.floor(clock.now() / 4_800_000) + 1) * 4_800_000 + 1000); });

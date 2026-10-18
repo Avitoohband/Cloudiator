@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { readMarket, readProfile, readRecent, readSeasons, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
+import { readMarket, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
 function transport(rows: Record<string, unknown>, calls: string[]) {
@@ -237,6 +237,46 @@ describe('protected Data API adapters', () => {
     // No public.seasons row and no projection row: no season yet.
     expect(await readStandings(client, 'gold')).toEqual({ league: 'gold', seasonId: '', archived: false, rows: [], nextCursor: null });
     expect(calls).toHaveLength(2);
+  });
+  // Task 21.4: one gladiator's own row of the current season (the owner's "Your standing" when it is outside the loaded page).
+  it('reads one gladiator’s row of the current season from the ranked view, keeping its rank in the whole league', async () => {
+    const G = '0d5f8471-d919-428f-9ab7-058c95821757';
+    const row = { ...openRow(56), gladiator_id: G };
+    const calls: string[] = [];
+    expect(await readStandingOf(seasonApi({ seasons: [season(4)], arena_standing_reads: [row] }, calls), 'silver', G)).toEqual({
+      rank: 57, gladiatorId: G, name: 'N56', rating: 1044, humanWins: 2, humanLosses: 0, promoted: false, inactive: false, rewardEligible: false, awardPlace: null });
+    // The latest season, chosen as the standings read chooses it, then one row of its ranked view (the rank is the view's).
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('/seasons?select=season_index,closed_at_ms&order=season_index.desc&limit=1');
+    const query = new URL(`http://local${calls[1]}`);
+    expect([query.pathname, query.searchParams.get('select'), query.searchParams.get('league'), query.searchParams.get('season_index'),
+      query.searchParams.get('gladiator_id'), query.searchParams.get('limit')]).toEqual(['/rest/v1/arena_standing_reads',
+      'gladiator_id,name,rating,human_wins,human_losses,rank,promoted,reward_eligible', 'eq.silver', 'eq.4', `eq.${G}`, '1']);
+    expect(query.searchParams.has('rank')).toBe(false);
+    // No rating row in the current season: not ranked.
+    expect(await readStandingOf(seasonApi({ seasons: [season(4)], arena_standing_reads: [] }, []), 'silver', G)).toBeNull();
+    // The latest season is closed (no current season): nothing, without reading the view.
+    calls.length = 0;
+    expect(await readStandingOf(seasonApi({ seasons: [season(3, 1)], arena_standing_reads: [row] }, calls), 'silver', G)).toBeNull();
+    expect(calls).toHaveLength(1);
+    // With no public.seasons row yet, the latest season of the projection table, as the standings read does; with none, nothing.
+    calls.length = 0;
+    expect(await readStandingOf(seasonApi({ seasons: [], arena_standings: [{ season_index: 6 }], arena_standing_reads: [row] }, calls), 'bronze', G))
+      .toMatchObject({ rank: 57, gladiatorId: G });
+    expect(calls.map(c => c.split('?')[0].split('/').at(-1))).toEqual(['seasons', 'arena_standings', 'arena_standing_reads']);
+    expect(calls[2]).toMatch(/season_index=eq\.6/);
+    expect(await readStandingOf(seasonApi({ seasons: [], arena_standings: [] }, []), 'bronze', G)).toBeNull();
+    // An upper-case id reads as its canonical lower-case form; a malformed league or gladiator id is refused before any query.
+    calls.length = 0;
+    await readStandingOf(seasonApi({ seasons: [season(4)], arena_standing_reads: [] }, calls), 'bronze', G.toUpperCase());
+    expect(new URL(`http://local${calls[1]}`).searchParams.get('gladiator_id')).toBe(`eq.${G}`);
+    calls.length = 0;
+    const client = seasonApi({ seasons: [season(4)], arena_standing_reads: [row] }, calls);
+    for (const bad of ['', 'g1', `${G},rating.lt.0`, `${G})`, ` ${G}`, 'x'.repeat(36), 4 as never, null as never]) {
+      await expect(readStandingOf(client, 'bronze', bad), String(bad)).rejects.toMatchObject({ code: 'unavailable' });
+    }
+    await expect(readStandingOf(client, 'platinum' as never, G)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(calls).toHaveLength(0);
   });
   it('maps prestige into PrestigeAward with a string seasonId', async () => {
     const actor = { gladiatorId: 'g1', name: 'Aster' };

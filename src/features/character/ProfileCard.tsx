@@ -1,10 +1,11 @@
 'use client';
 
 // A gladiator's public profile card (spec "Clicking a gladiator", the approved mockup): name, class, level and league,
-// what they are doing now, their rating (and their record when a standings row opened the card) and their equipped
-// gear, with Follow and, for an Arena entrant, Watch bout. The viewer's own card adds the "My gladiator" and "Schedule"
-// shortcuts and no private value. The card renders from the public world actor at once and loads the public profile
-// (`gateway.profile`) on demand; a gladiator who is not in the world (a standings row) shows once that profile arrives.
+// their season champion title and badges (Task 21.4; nothing without prestige), what they are doing now, their rating
+// (and their record when a standings row opened the card) and their equipped gear, with Follow and, for an Arena entrant,
+// Watch bout. The viewer's own card adds the "My gladiator" and "Schedule" shortcuts and no private value. The card
+// renders from the public world actor at once and loads the public profile (`gateway.profile`) on demand; a gladiator who
+// is not in the world (a standings row) shows once that profile arrives.
 //
 // The layer is a labelled, non-modal dialog over the camp: on desktop beside the click that opened it, clear of the
 // gladiator (or beside the menus when a list row opened it); on touch a sheet above the ☰ button. A row (the keyboard
@@ -17,6 +18,7 @@ import type { MenuId } from '../shell/menus';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import type { Roster } from './RosterPanel';
 import { classLine, gearText, isAway, placeOf } from './actor-text';
+import { badgeText, titleText } from '../seasons/season-text';
 import styles from './ProfileCard.module.css';
 
 export type ProfileRecord = { wins: number; losses: number };
@@ -54,11 +56,16 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, record
   const reasonId = useId();
   const rating = profile ? String(profile.rating) : profileFailed ? 'Not available' : 'Loading…';
   const bout = actor.location === 'arena' ? actor.activityId : null;
+  // Season prestige (Task 21.4): the badges newest season first, and the title of the latest champion award.
+  const awards = [...(profile?.prestige ?? [])].sort((p, q) => Number(q.seasonId) - Number(p.seasonId));
+  const title = awards.map(titleText).find(text => text !== null) ?? null;
   return <>
     <div className={styles.head}>
       {own && <p className="eyebrow">YOUR GLADIATOR</p>}
       <h2 className={styles.name}>{actor.name}</h2>
+      {title && <p className={styles.title}>{title}</p>}
       <p className={styles.class}>{classLine(actor)}</p>
+      {awards.length > 0 && <ul className={styles.badges} aria-label="Season badges">{awards.map(award => <li key={award.seasonId}>{badgeText(award)}</li>)}</ul>}
     </div>
     <dl className={styles.facts}>
       <div><dt>Now</dt><dd>{placeOf(actor)}</dd></div>

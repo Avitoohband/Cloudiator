@@ -6,7 +6,7 @@ import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_
 import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { seasonAt } from '../../supabase/functions/_shared/domain/season.ts';
-import { readProfile, readSeasons, readStandings } from '../../src/lib/api/reads.ts';
+import { readProfile, readSeasons, readStandingOf, readStandings } from '../../src/lib/api/reads.ts';
 import { isTournamentSlot, tournamentOutcomes } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
@@ -522,6 +522,34 @@ describe('closing a season', () => {
       expect((await readProfile(client, b3.gid)).prestige).toEqual([{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }]);
       expect((await readProfile(client, b4.gid)).prestige).toEqual([]);
     }
+  });
+
+  // Task 21.4: the owner's "Your standing" reads its own row of the current season (GameGateway.standingOf).
+  it('reads one gladiator’s current-season row with its rank in the whole league, for a visitor and a player', async () => {
+    const f = await fighters(4);
+    await rate(f[0], 'bronze', { rating: 1300, ...QUALIFIED });
+    await rate(f[1], 'bronze', { rating: 1200, wins: 1 });
+    await rate(f[2], 'bronze', { rating: 1100, ...QUALIFIED });
+    // f[3] also qualifies in Silver, so its Bronze row is promoted and not reward-eligible.
+    await rate(f[3], 'bronze', { rating: 1000, ...QUALIFIED });
+    await rate(f[3], 'silver', { rating: 1000, ...QUALIFIED });
+    await openSeason(0);
+    const player = await account();
+    for (const client of [anonymous, player.client]) {
+      // Filtering on the gladiator keeps the view's rank over the whole league: f[2] is third, not first.
+      expect(await readStandingOf(client, 'bronze', f[2].gid)).toEqual({ rank: 3, gladiatorId: f[2].gid, name: f[2].name, rating: 1100, humanWins: 3,
+        humanLosses: 2, promoted: false, inactive: false, rewardEligible: true, awardPlace: null });
+      expect(await readStandingOf(client, 'bronze', f[1].gid)).toMatchObject({ rank: 2, humanWins: 1, humanLosses: 0, rewardEligible: false });
+      expect(await readStandingOf(client, 'bronze', f[3].gid)).toMatchObject({ rank: 4, promoted: true, rewardEligible: false });
+      expect(await readStandingOf(client, 'silver', f[3].gid)).toMatchObject({ rank: 1, promoted: false, rewardEligible: true });
+      // No row in that league this season: not ranked.
+      expect(await readStandingOf(client, 'silver', f[2].gid)).toBeNull();
+    }
+    // The season closes and the next one opens with no rating rows yet: nobody is ranked in the current season.
+    await openSeason(1);
+    expect(await close(0)).toBe(3);
+    expect(await readStandingOf(anonymous, 'bronze', f[2].gid)).toBeNull();
+    expect(await readStandingOf(player.client, 'silver', f[3].gid)).toBeNull();
   });
 });
 

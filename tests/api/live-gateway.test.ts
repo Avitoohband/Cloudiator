@@ -9,7 +9,8 @@ afterEach(() => { holder.client = null; vi.unstubAllGlobals(); vi.restoreAllMock
 test('without a configured backend, every live read and command fails explicitly instead of returning fixture authority', async () => {
   const gateway = createLiveGateway();
   const reads = [gateway.world(), gateway.revision(), gateway.timeline('activity'), gateway.profile('gladiator'),
-    gateway.market(), gateway.standings('bronze'), gateway.standings('bronze', undefined, '0'), gateway.seasons(), gateway.tournament('tournament'), gateway.tournamentLog('tournament:301:bronze:1:0'), gateway.recent()];
+    gateway.market(), gateway.standings('bronze'), gateway.standings('bronze', undefined, '0'), gateway.seasons(), gateway.standingOf('bronze', '0d5f8471-d919-428f-9ab7-058c95821757'),
+    gateway.tournament('tournament'), gateway.tournamentLog('tournament:301:bronze:1:0'), gateway.recent()];
   await Promise.all(reads.map(read => expect(read).rejects.toMatchObject({ code: 'unavailable' })));
   await expect(gateway.command({ kind: 'edit-schedule', operationId: 'd43f7844-52e0-4302-b8e4-740035047765',
     expectedVersion: 1, phase: 'morning', choice: { kind: 'arena' } })).resolves.toEqual({ ok: false, code: 'unavailable' });
@@ -115,5 +116,11 @@ test.each([['a visitor', null], ['a signed-in reader', { user: { id: 'first' }, 
     expect(requests).toEqual(['seasons', 'seasons', 'arena_standing_reads', 'seasons', 'season_standings', 'seasons']);
     await expect(gateway.standings('bronze', undefined, 'fixture-season-1')).rejects.toMatchObject({ code: 'unavailable' });
     expect(requests).toHaveLength(6);
+    // Task 21.4: one gladiator's row of the current season, from the same public view (its rank is the view's).
+    expect(await gateway.standingOf('bronze', SELLER)).toEqual({ rank: 9, gladiatorId: SELLER, name: 'Aster', rating: 1015, humanWins: 2, humanLosses: 1,
+      promoted: false, inactive: false, rewardEligible: false, awardPlace: null });
+    expect(requests.slice(6)).toEqual(['seasons', 'arena_standing_reads']);
+    await expect(gateway.standingOf('bronze', 'not-a-gladiator')).rejects.toMatchObject({ code: 'unavailable' });
+    expect(requests).toHaveLength(8);
     expect(sent).not.toHaveBeenCalled();
   });

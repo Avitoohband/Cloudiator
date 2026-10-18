@@ -181,11 +181,31 @@ async function seasonState(client: SupabaseClient, season: number | null): Promi
     Pick<SeasonRead, 'season_index' | 'closed_at_ms'>[];
   return rows.length ? { season: Number(rows[0].season_index), closed: rows[0].closed_at_ms !== null && rows[0].closed_at_ms !== undefined } : null;
 }
+/**
+ * The latest season: the newest `public.seasons` row; with no such row yet, the latest season of Task 16's projection table
+ * (which is open), or null when there is none.
+ */
+async function latestSeason(client: SupabaseClient): Promise<{ season: number; closed: boolean } | null> {
+  const latest = await seasonState(client, null);
+  if (latest) return latest;
+  // max(season_index) from the projection table, whose index leads with season_index; the ranked view would evaluate its
+  // window function and promotion check over every row first.
+  const probe = checked(await client.from('arena_standings').select('season_index').order('season_index', { ascending: false }).limit(1));
+  return probe.length ? { season: Number(probe[0].season_index), closed: false } : null;
+}
 /** The live view's columns, and the archive's: the same plus the flags and award place frozen at the close. */
 const LIVE_COLUMNS = 'gladiator_id,name,rating,human_wins,human_losses,rank,promoted,reward_eligible';
 const ARCHIVE_COLUMNS = 'gladiator_id,name,rating,human_wins,human_losses,rank,promoted,inactive,reward_eligible,award_place';
 type StandingRead = { gladiator_id: string; name: string; rating: number; human_wins: number; human_losses: number; rank: number; promoted: boolean;
   reward_eligible: boolean; inactive?: boolean; award_place?: number | null };
+/** One row of the live view (`closed` false) or of the archive: an open season has no award place and counts inactive from its bouts. */
+function standingRow(row: StandingRead, closed: boolean): StandingRow {
+  const humanWins = Number(row.human_wins), humanLosses = Number(row.human_losses);
+  const place = Number(row.award_place);
+  return { rank: Number(row.rank), gladiatorId: row.gladiator_id, name: row.name, rating: Number(row.rating), humanWins, humanLosses,
+    promoted: row.promoted === true, inactive: closed ? row.inactive === true : humanWins + humanLosses === 0, rewardEligible: row.reward_eligible === true,
+    awardPlace: closed && (place === 1 || place === 2 || place === 3) ? place : null };
+}
 /**
  * One league's standings of one season (spec §8.3 order: rating, human wins, fewer human losses, stable id), at most 50 rows
  * per page. The season is picked, in this order, by the cursor `season:rank` (later pages stay in their season and start
@@ -208,28 +228,41 @@ export async function readStandings(client: SupabaseClient, league: LeagueId, cu
     if (!named) throw new GatewayReadError('unavailable');
     ({ season, closed } = named);
   } else {
-    const latest = await seasonState(client, null);
+    const latest = await latestSeason(client);
     if (latest) ({ season, closed } = latest);
-    else {
-      // max(season_index) from the projection table, whose index leads with season_index; the ranked view would evaluate its
-      // window function and promotion check over every row first.
-      const probe = checked(await client.from('arena_standings').select('season_index').order('season_index', { ascending: false }).limit(1));
-      if (probe.length) season = Number(probe[0].season_index);
-    }
   }
   if (season === null) return { league, seasonId: '', archived: false, rows: [], nextCursor: null };
   // The Data API caps a response at 50 rows (config max_rows), so a full page is what signals a possible next page.
   const rows = checked(await client.from(closed ? 'season_standings' : 'arena_standing_reads').select(closed ? ARCHIVE_COLUMNS : LIVE_COLUMNS)
     .eq('league', league).eq('season_index', season).gt('rank', after).order('rank').limit(STANDINGS_PAGE)) as unknown as StandingRead[];
-  const page = rows.slice(0, STANDINGS_PAGE).map((row): StandingRow => {
-    const humanWins = Number(row.human_wins), humanLosses = Number(row.human_losses);
-    const place = Number(row.award_place);
-    return { rank: Number(row.rank), gladiatorId: row.gladiator_id, name: row.name, rating: Number(row.rating), humanWins, humanLosses,
-      promoted: row.promoted === true, inactive: closed ? row.inactive === true : humanWins + humanLosses === 0, rewardEligible: row.reward_eligible === true,
-      awardPlace: closed && (place === 1 || place === 2 || place === 3) ? place : null };
-  });
+  const page = rows.slice(0, STANDINGS_PAGE).map(row => standingRow(row, closed));
   return { league, seasonId: String(season), archived: closed, rows: page,
     nextCursor: page.length === STANDINGS_PAGE ? `${season}:${page.at(-1)!.rank}` : null };
+}
+
+/**
+ * One gladiator's row of a league in the current season (Task 21.4: the owner's season rank and human bouts in "Your
+ * standing", also when it is outside the loaded pages), or null when it has no rating row there. The current season is the
+ * one `readStandings` picks without a cursor or season id; when that latest season is already closed there is no current
+ * season, so null. The row comes from the public ranked view filtered by league, season and gladiator: the gladiator filter
+ * applies after the view's window, so the rank is the row's rank in the whole league. A malformed league or gladiator id
+ * is `unavailable` before any query.
+ */
+export async function readStandingOf(client: SupabaseClient, league: LeagueId, gladiatorId: GladiatorId): Promise<StandingRow | null> {
+  const id = parseStandingOf(league, gladiatorId);
+  const latest = await latestSeason(client);
+  if (!latest || latest.closed) return null;
+  const rows = checked(await client.from('arena_standing_reads').select(LIVE_COLUMNS).eq('league', league).eq('season_index', latest.season)
+    .eq('gladiator_id', id).limit(1)) as unknown as StandingRead[];
+  return rows.length ? standingRow(rows[0], false) : null;
+}
+/**
+ * The one-row standing read's options, checked before any query (the fixture gateway applies the same rule): a known league
+ * and a gladiator id, which is returned lowercased; anything else is `unavailable`.
+ */
+export function parseStandingOf(league: LeagueId, gladiatorId: GladiatorId): GladiatorId {
+  if (!LEAGUES.includes(league) || typeof gladiatorId !== 'string' || !GLADIATOR_ID.test(gladiatorId)) throw new GatewayReadError('unavailable');
+  return gladiatorId.toLowerCase();
 }
 
 const PAGE = 50;

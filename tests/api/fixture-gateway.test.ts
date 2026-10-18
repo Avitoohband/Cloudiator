@@ -305,6 +305,29 @@ test('serves the fixture seasons, archive and Aster prestige', async () => {
   expect(await gateway.standings('silver', '1:50')).toEqual({ league: 'silver', seasonId: '1', archived: false, rows: [], nextCursor: null });
 });
 
+// Task 21.4: one gladiator's row of the current season, as the live one-row read serves it.
+test('serves a gladiator’s own current-season row, or none, with the live read’s rules', async () => {
+  const { ARENA_GLADIATORS, ARENA_STANDINGS } = await import('../fixtures/arena');
+  const gateway = createFixtureGateway();
+  const aster = ARENA_GLADIATORS.aster.id;
+  const row = await gateway.standingOf('bronze', aster);
+  expect(row).toEqual(ARENA_STANDINGS.bronze.find(r => r.gladiatorId === aster));
+  expect(row).toMatchObject({ name: 'Aster', rating: 1015, humanWins: 2, humanLosses: 1, awardPlace: null });
+  // Ranked beyond the first page: its own rank in the whole league.
+  const last = ARENA_STANDINGS.bronze.at(-1)!;
+  expect(last.rank).toBeGreaterThan(50);
+  expect(await gateway.standingOf('bronze', last.gladiatorId)).toEqual(last);
+  // No row in that league this season, or an unknown gladiator: none.
+  expect(await gateway.standingOf('silver', aster)).toBeNull();
+  expect(await gateway.standingOf('bronze', '00000000-0000-4000-8000-000000000000')).toBeNull();
+  // A malformed league or gladiator id is unavailable, as the live read refuses it.
+  for (const bad of ['', 'aster', `${aster},rating.lt.0`]) await expect(gateway.standingOf('bronze', bad), bad).rejects.toMatchObject({ code: 'unavailable' });
+  await expect(gateway.standingOf('platinum' as never, aster)).rejects.toMatchObject({ code: 'unavailable' });
+  // Callers get copies.
+  row!.rank = -1;
+  expect((await gateway.standingOf('bronze', aster))!.rank).not.toBe(-1);
+});
+
 test('fixture tournaments serve each sample view by id as a copy, without logs as the live read does, and each log on demand; unknown ids stay unavailable', async () => {
   const { TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, tournamentId } = await import('../fixtures/tournaments');
   const { FIXTURE_TOURNAMENTS } = await import('../../src/lib/api/fixture-gateway');

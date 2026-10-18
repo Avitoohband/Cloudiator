@@ -1,15 +1,16 @@
 import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
-import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandings, readTournament, readTournamentLog,
+  GatewayReadError, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
+  readTournamentLog,
 } from './reads';
 export { GatewayReadError } from './reads';
 
 /**
- * Public projections (world, revision, timeline, profile, market offers, seasons, standings, tournament, tournament log, recent
- * results) can be read without a session. `owner()` and `command()` require a signed-in account.
+ * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
+ * tournament, tournament log, recent results) can be read without a session. `owner()` and `command()` require a signed-in account.
  */
 export interface GameGateway {
   /** Session identity changes invalidate pending reads and synchronized caches. */
@@ -34,6 +35,12 @@ export interface GameGateway {
    * malformed cursor, or a season id that is malformed or names no season, is `unavailable`.
    */
   standings(league: LeagueId, cursor?: string, seasonId?: string): Promise<StandingsPage>;
+  /**
+   * One gladiator's row of a league in the current season (the season `standings` picks with neither cursor nor season id),
+   * with its rank in the whole league; null when it has no rating row there or the latest season is closed. A malformed
+   * league or gladiator id is `unavailable`. The owner's "Your standing" reads it, so its season rank shows beyond the loaded pages.
+   */
+  standingOf(league: LeagueId, gladiatorId: GladiatorId): Promise<StandingRow | null>;
   /** A polled read: each fought result carries its fight summary, never its battle log. */
   tournament(id: string): Promise<TournamentView>;
   /**
@@ -136,6 +143,7 @@ export function createLiveGateway(): GameGateway {
     recent: cursor => publicRead(client => readRecent(client, cursor)),
     seasons: () => publicRead(readSeasons),
     standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),
+    standingOf: (league, gladiatorId) => publicRead(client => readStandingOf(client, league, gladiatorId)),
     tournament: id => publicRead(client => readTournament(client, id)),
     tournamentLog: boutId => {
       // A due log is public and immutable, so a cached one is served without a session check; an account change clears the cache.

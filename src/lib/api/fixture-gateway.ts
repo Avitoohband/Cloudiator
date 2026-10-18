@@ -1,9 +1,9 @@
 import type { GameGateway } from './gateway';
-import { GatewayReadError, parseMarketRead, parseResultsCursor, parseStandingsRead } from './reads';
+import { GatewayReadError, parseMarketRead, parseResultsCursor, parseStandingOf, parseStandingsRead } from './reads';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
-import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
+import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_STANDINGS, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
 import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
 import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
 import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
@@ -52,6 +52,13 @@ export function createFixtureGateway(): GameGateway {
       if (read.cursor === null && read.seasonId !== null && !FIXTURE_SEASONS.some(s => s.seasonId === String(read.seasonId))) throw new GatewayReadError('unavailable');
       return arenaStandingsPage(league, read.cursor ? String(read.cursor.season) : read.seasonId !== null ? String(read.seasonId) : FIXTURE_SEASONS[0].seasonId,
         read.cursor?.after ?? 0);
+    },
+    // One gladiator's row of the current season ('1', open: ARENA_STANDINGS), with its rank in the whole league, or null; a
+    // malformed league or gladiator id is `unavailable`, as the live read refuses it.
+    standingOf: async (league, gladiatorId) => {
+      const id = parseStandingOf(league, gladiatorId);
+      const row = ARENA_STANDINGS[league].find(r => r.gladiatorId === id);
+      return row ? structuredClone(row) : null;
     },
     // Public tournament views, each projected at its own server time (no clock here): the panel shows only the results
     // its display time has reached. As the live read, a view carries each fought bout's fight summary and no battle log;

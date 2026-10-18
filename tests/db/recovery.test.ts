@@ -321,12 +321,11 @@ let world: { arena: Fighter[]; expedition: Fighter; trainee: Fighter; all: Fight
   items: Record<string, unknown>[] };
 let first: Run;
 
-// The cases share this one world and run in file order; a single case (-t) cannot run alone (Task 22.2 review M6):
-// - the sweep case reads the first catch-up's ticks (beforeAll);
-// - the mid-catch-up cleanup case runs the second catch-up to LATER, and its real-time cleanup expires and then deletes the
-//   world's fresh listing (its 1970 expiry is long past), so no listing is open afterwards;
-// - the market-sweep, sweep-cap and whole-sweep cases rely on that (no open listing of their own sellers) and the dispatch
-//   case on the coordinator having published LATER; each checks its precondition first.
+// The cases share this one world and run in file order (Task 22.2 review M6). beforeAll builds the world and runs the first
+// catch-up, whose ticks the sweep case reads. The mid-catch-up cleanup case then runs the second catch-up to LATER, and its
+// real-time cleanup expires and deletes the world's fresh listing (its 1970 expiry is long past). The later cases depend on
+// that case: the market-sweep and sweep-cap cases on no listing being open, the whole-sweep and dispatch cases on the
+// coordinator having published LATER. Each checks its precondition first, so running one of them alone (-t) fails there.
 describe('Task 22.2: robust ticks, season rows and recovery', () => {
   beforeAll(async () => {
     await resetWorld(FIRST - 1);

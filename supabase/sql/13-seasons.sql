@@ -7,7 +7,9 @@
 --
 -- Season rows. Phase 2 of a boundary inserts its season's row (bounds from the epoch: slots epoch + 504 × index, times
 -- 4,800,000 ms, as seasonAt in supabase/functions/_shared/domain/season.ts) before phase 4 creates that season's rating rows,
--- so every season with ratings has a row. The backfill at the end of this source gives the seasons rated before it one.
+-- so every season with ratings has a row when the epoch is set before the first boundary with members (see
+-- docs/operations/migrations.md, M15, "Known limit"). The backfill at the end of this source gives the seasons rated before
+-- it one.
 -- Phase 2 closes by season row, not by "the first boundary of a season": a boundary that coordinate_work skips (nobody due)
 -- leaves the close to the next boundary that runs.
 --

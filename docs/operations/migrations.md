@@ -61,6 +61,13 @@ deploys M15 before Task 24 sets the epoch, so nothing is backfilled there, and t
 row. `public_profiles.prestige`, always `[]` before, now holds award objects (`seasonIndex`, `league`, `place`, `badge`,
 `title`). Task 21.3 changes the `PublicProfile.prestige` type from `string[]`; no client reads it before then.
 
+**Known limit (carried to M16).** Phase 2 creates a season's row only when the epoch is set at that boundary, so "every season
+with ratings has a row" holds only when the epoch is set before any boundary with members reaches phase 2. If the epoch is set
+while a boundary with members waits at phase 4 (`'epoch'`), phase 4 can rate a season before its row exists. M16, the next
+schema change (Task 22), adds a defensive `insert into public.seasons … on conflict do nothing` to phase 4
+(`private.boundary_recompute_leagues`) and a `private.season_bounds(index)` helper that phase 2, the backfill and phase 4
+share. M15 is never edited; Task 24's launch step sets the epoch before any boundary with members exists.
+
 **Retention (Task 22).** Keep `season_standings`, `seasons` and `season_awards` indefinitely (spec §11). A season award
 references its character and its receipt, so removing a character or a receipt must account for the award first.
 

@@ -539,7 +539,9 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
 
   it('records a market-sweep failure for one seller and still expires the others', () => withClock(() => rollback(async tx => {
     const now = await dbNow();
-    // Two sellers whose due listing is inconsistent (its item is gone), and one whose due listing is sound.
+    // One seller whose due listing is inconsistent (its item is gone, so closing it raises) between two whose due listings are
+    // sound, in the sweep's seller order (gladiator id): the sweep goes on past the failure.
+    const [lowest, lower, higher, highest] = [...world.all].sort((p, q) => (p.gid < q.gid ? -1 : 1));
     const due = async (seller: Fighter, sound: boolean) => {
       const id = randomUUID(), itemId = randomUUID();
       await tx`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status)
@@ -551,21 +553,24 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
       }
       return { id, itemId };
     };
-    const [broken, alsoBroken] = [await due(world.trainee, false), await due(world.arena[0], false)];
-    const sound = await due(world.arena[1], true);
+    const broken = await due(lower, false);
+    const sound = [await due(lowest, true), await due(higher, true)];
     const events = async () => (await tx`select source, ok, sqlstate, detail from private.operations_events order by id`).map(row => ({ ...row }));
     const status = async (id: string) => (await tx`select status from private.market_listings where id=${id}`)[0].status;
+    const released = async (itemId: string) => (await tx`select item->'reservation' as reservation from public.item_instances where id=${itemId}`)[0].reservation;
     const before = await events();
-    expect((await tx`select private.expire_listings(${now}) as n`)[0].n).toBe(1);
-    expect([await status(broken.id), await status(alsoBroken.id), await status(sound.id)]).toEqual(['open', 'open', 'expired']);
-    expect((await tx`select item->'reservation' as reservation from public.item_instances where id=${sound.itemId}`)[0].reservation).toBeNull();
-    // One secret-free event: the first failure's SQLSTATE and the number of sellers that failed.
-    expect(await events()).toEqual([...before, { source: 'market-sweep', ok: false, sqlstate: 'P0001', detail: { failedSellers: 2 } }]);
-    // The cleanup backstop no longer fails whole on the inconsistent listings: it expires the sound one and commits.
-    const again = await due(world.arena[1], true);
+    expect((await tx`select private.expire_listings(${now}) as n`)[0].n).toBe(2);
+    expect([await status(broken.id), ...await Promise.all(sound.map(s => status(s.id)))]).toEqual(['open', 'expired', 'expired']);
+    for (const s of sound) expect(await released(s.itemId)).toBeNull();
+    // One secret-free event: the failure's SQLSTATE and the number of sellers that failed; never its message or an id.
+    expect(await events()).toEqual([...before, { source: 'market-sweep', ok: false, sqlstate: 'P0001', detail: { failedSellers: 1 } }]);
+    // The cleanup backstop no longer fails whole on an inconsistent listing: with a second failing seller, it expires the
+    // sound listing, records both failures in one event and completes.
+    const alsoBroken = await due(highest, false), again = await due(higher, true);
     const result = await cleanup(tx, now);
     expect(result).toMatchObject({ ok: true, market: { expired: 1 } });
     expect([await status(broken.id), await status(alsoBroken.id), await status(again.id)]).toEqual(['open', 'open', 'expired']);
+    expect(await released(again.itemId)).toBeNull();
     expect((await events()).slice(before.length + 1)).toEqual([{ source: 'market-sweep', ok: false, sqlstate: 'P0001', detail: { failedSellers: 2 } }]);
   })), 60_000);
 

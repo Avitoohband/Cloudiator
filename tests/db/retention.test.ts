@@ -711,7 +711,7 @@ describe('Task 22.1: retention in the database', () => {
   it('folds ledger rows older than ninety days into checkpoints so wallets reconcile', () => withClock(async () => {
     // Every wallet-moving kind first. The history holds creation, expedition, Arena and tournament credits; real-clock
     // commands add a season award, a build fee, money and renown purchases, an NPC sale and a market sale.
-    await stableRealSlot(240_000);
+    await stableRealSlot(60_000);
     const [{ split }] = await sql`select floor(extract(epoch from clock_timestamp())*1000)::float8 as split`;
     const seller = await realFighter('Seller'), buyer = await realFighter('Buyer');
     await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms) values(9,${9 * 504 * SLOT},${9 * 504 * SLOT + 2_419_200_000})`;

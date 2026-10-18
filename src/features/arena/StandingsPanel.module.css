@@ -252,6 +252,7 @@
 .eligible {
   color: #a9f0b8;
   border-color: #3f8a57;
+  text-transform: none;
 }
 
 .medal {

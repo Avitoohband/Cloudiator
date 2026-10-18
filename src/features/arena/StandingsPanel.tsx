@@ -18,7 +18,7 @@ import type { OwnerState, SeasonView, StandingRow, StandingsPage } from '@contra
 import type { DisplayClock } from '../../game/display-clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import { leagueName, leagueRules } from './arena-text';
-import { ELIGIBLE_NOTE, medalOf, placeText, promotionNote, qualifyText, seasonEnds, seasonLabel, seasonName } from '../seasons/season-text';
+import { ELIGIBLE_NOTE, medalOf, placeParts, promotionNote, qualifyText, seasonEnds, seasonLabel, seasonName } from '../seasons/season-text';
 import styles from './StandingsPanel.module.css';
 
 /**
@@ -98,6 +98,12 @@ export type StandingsModel = {
   /** The shared display clock's time, for the current season's countdown. */
   nowMs: number;
 };
+
+/** An archived row's place: the medal is decoration (hidden from screen readers), so "1st · Champion" is heard once. */
+function MedalPill({ place }: { place: 1 | 2 | 3 }) {
+  const { medal, words } = placeParts(place);
+  return <span className={styles.medal}><span aria-hidden="true">{medal}</span> {words}</span>;
+}
 
 /** The current season's card: countdown, end time (local and UTC), prizes and the rule. */
 function CurrentSeason({ season, nowMs, timeZone }: { season: SeasonView; nowMs: number; timeZone?: string }) {
@@ -224,7 +230,7 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
                         <td>{row.humanWins}–{row.humanLosses}</td>
                         <td><span className={styles.notes}>
                           {row.gladiatorId === model.ownerId && <span className={styles.you}>You</span>}
-                          {archived && row.awardPlace !== null && <span className={styles.medal}>{placeText(row.awardPlace)}</span>}
+                          {archived && row.awardPlace !== null && <MedalPill place={row.awardPlace} />}
                           {row.promoted && <span className={styles.promoted}>Promoted</span>}
                           {row.inactive && <span className={styles.inactive}>Inactive</span>}
                           {!archived && row.rewardEligible && <span className={styles.eligible}>✓ Eligible</span>}

@@ -79,11 +79,13 @@ test.describe('seasons in the fixture preview', () => {
     const progress = own.getByRole('progressbar', { name: 'Human bouts toward season rewards' });
     await expect(progress).toHaveAttribute('aria-valuenow', '3');
     await expect(progress).toHaveAttribute('aria-valuemax', '5');
-    await expect(own).toContainText('2 more human bouts to qualify for season rewards. NPC bouts do not count.');
+    await expect(own).toContainText('2 more human bouts in the Bronze league to qualify there. NPC bouts do not count.');
     // Notes: You on the owner's row; ✓ Eligible on rows with five human bouts in their highest league; the footnote says so.
     await expect(rowOf(page, 'Bronze', 'Aster')).toContainText('You');
     await expect(rowOf(page, 'Bronze', 'Aster')).not.toContainText('✓ Eligible');
     await expect(rowOf(page, 'Bronze', 'Severus')).toContainText('✓ Eligible');
+    // The mark keeps its mixed case (as the mockup and the footnote write it), unlike the other pills.
+    await expect(rowOf(page, 'Bronze', 'Severus').getByText('✓ Eligible')).toHaveCSS('text-transform', 'none');
     await expect(table(page, 'Bronze')).not.toContainText(/1st|2nd|3rd/);
     await expect(section).toContainText('✓ Eligible: has 5 or more human bouts and this is their highest qualifying league.');
     await shot(page, testInfo, 'current', { top: section });
@@ -110,6 +112,8 @@ test.describe('seasons in the fixture preview', () => {
       await expect(table(page, 'Bronze').locator('tbody tr').first()).toContainText(`1Lucilla${bronze[0].rating}${bronze[0].humanWins}–${bronze[0].humanLosses}Promoted`);
       await expect(rowOf(page, 'Bronze', 'Lucilla')).not.toContainText(/1st|2nd|3rd/);
       await expect(rowOf(page, 'Bronze', 'Severus')).toContainText('🥇 1st · Champion');
+      // The medal is decoration: the notes cell's accessible name carries the place text once, without the emoji.
+      await expect(rowOf(page, 'Bronze', 'Severus').getByRole('cell').last()).toHaveAccessibleName('1st · Champion');
       await expect(rowOf(page, 'Bronze', 'Nerva')).toContainText('🥈 2nd');
       await expect(rowOf(page, 'Bronze', 'Aster')).toContainText('🥉 3rd');
       if (visitor) await expect(table(page, 'Bronze')).not.toContainText('You');
@@ -316,7 +320,7 @@ test.describe('seasons in live mode', () => {
     const own = standings(page).getByRole('region', { name: 'Your standing' });
     await expect(own.getByRole('definition').nth(4)).toHaveText('#57');
     await expect(own.getByRole('definition').nth(5)).toHaveText('4 of 5');
-    await expect(own).toContainText('1 more human bout to qualify for season rewards. NPC bouts do not count.');
+    await expect(own).toContainText('1 more human bout in the Bronze league to qualify there. NPC bouts do not count.');
     // One row of the current season's live view, for the owner's league and gladiator, read as the signed-in owner.
     const mine = live.requests.filter(r => r.table === 'arena_standing_reads' && r.query.has('gladiator_id'));
     expect(mine.length).toBeGreaterThan(0);

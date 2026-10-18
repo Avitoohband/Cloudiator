@@ -241,11 +241,15 @@ describe('Arena standings', () => {
     const html = view();
     expect(html).toMatch(/role="progressbar"[^>]*aria-label="Human bouts toward season rewards"/);
     expect(html).toMatch(/aria-valuenow="3"/);
-    expect(text(html)).toContain('2 more human bouts to qualify for season rewards. NPC bouts do not count.');
+    expect(text(html)).toContain('2 more human bouts in the Bronze league to qualify there. NPC bouts do not count.');
     // Not ranked in the current season yet (no rating row), still loading, or the row could not be read.
     const unranked = text(view({ own: { ...base.own!, season: { status: 'ready', row: null } } }));
     expect(unranked).toContain('Season rank Not ranked yet Human bouts 0 of 5');
-    expect(unranked).toContain('5 more human bouts to qualify');
+    expect(unranked).toContain('5 more human bouts in the Bronze league to qualify there.');
+    // Promoted mid-season: the message names the league of the standing it reads, never claiming the owner is unqualified everywhere.
+    const promoted = text(view({ own: { ...base.own!, league: 'silver', season: { status: 'ready', row: { ...asterRow, humanWins: 1, humanLosses: 1 } } } }));
+    expect(promoted).toContain('3 more human bouts in the Silver league to qualify there. NPC bouts do not count.');
+    expect(promoted).not.toContain('to qualify for season rewards');
     expect(text(view({ own: { ...base.own!, season: { status: 'loading' } } }))).toContain('Season rank Loading… Human bouts Loading…');
     const failed = view({ own: { ...base.own!, season: { status: 'unavailable' } } });
     expect(text(failed)).toContain('Season rank not available Human bouts not available');
@@ -281,6 +285,13 @@ describe('Arena standings', () => {
     expect(html).toContain(`2 Severus ${severus.rating} ${severus.humanWins}–${severus.humanLosses} 🥇 1st · Champion`);
     expect(html).toContain('3 Nerva 1098 9–4 🥈 2nd');
     expect(html).toContain('4 Aster 1074 8–5 You 🥉 3rd');
+    // The medal is decoration: it is hidden from screen readers, so the place text is heard once.
+    const raw = view(archivedModel);
+    expect(raw).toMatch(/<span class="[^"]*medal[^"]*"><span aria-hidden="true">🥇<\/span> 1st · Champion<\/span>/);
+    expect(raw).toMatch(/<span class="[^"]*medal[^"]*"><span aria-hidden="true">🥈<\/span> 2nd<\/span>/);
+    const heard = text(raw.replace(/<span aria-hidden="true">[^<]*<\/span>/g, ''));
+    expect(heard).toContain(`2 Severus ${severus.rating} ${severus.humanWins}–${severus.humanLosses} 1st · Champion`);
+    expect(heard).not.toMatch(/🥇|🥈|🥉/);
     expect(html).toContain('Lucilla was promoted and qualified in a higher league, so only that league can reward Lucilla, and the Bronze medals go to the next eligible gladiators.');
     // A visitor's view of it is the same, without You.
     expect(text(view({ ...archivedModel, ownerId: null, own: null }))).toContain('4 Aster 1074 8–5 🥉 3rd');

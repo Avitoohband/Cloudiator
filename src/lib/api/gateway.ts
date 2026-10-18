@@ -32,7 +32,8 @@ export interface GameGateway {
   /**
    * One page of a league's standings, at most 50 rows. The season is the cursor's (a page's `nextCursor`, `season:rank`), else
    * `seasonId` (a `SeasonView.seasonId`), else the latest season; a closed season reads its frozen archive (`archived: true`). A
-   * malformed cursor, or a season id that is malformed or names no season, is `unavailable`.
+   * malformed cursor, or a season id that is malformed or (without a cursor) names no season, is `unavailable`; beside a cursor a
+   * well-formed season id that names no season is ignored.
    */
   standings(league: LeagueId, cursor?: string, seasonId?: string): Promise<StandingsPage>;
   /**

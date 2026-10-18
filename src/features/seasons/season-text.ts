@@ -73,10 +73,19 @@ export function titleText(award: PrestigeAward): string | null {
   return award.title === 'champion' ? `Champion · ${seasonName(award.seasonId)} ${leagueWord(award.league)}` : null;
 }
 
-/** An archived row's place: "🥇 1st · Champion", "🥈 2nd", "🥉 3rd" (medal and title from RULES_V1's placements). */
-export function placeText(place: 1 | 2 | 3): string {
+/**
+ * An archived row's place as its medal and its words ("🥇" and "1st · Champion"; "🥈" and "2nd"; "🥉" and "3rd"), the medal and
+ * title from RULES_V1's placements. The pill shows the medal as decoration, so the words are read once.
+ */
+export function placeParts(place: 1 | 2 | 3): { medal: string; words: string } {
   const placement = RULES_V1.seasons.placements[place - 1];
-  return `${medalOf(placement.badge)} ${ORDINALS[place - 1]}${placement.title ? ` · ${capital(placement.title)}` : ''}`;
+  return { medal: medalOf(placement.badge), words: `${ORDINALS[place - 1]}${placement.title ? ` · ${capital(placement.title)}` : ''}` };
+}
+
+/** An archived row's place in one line: "🥇 1st · Champion", "🥈 2nd", "🥉 3rd". */
+export function placeText(place: 1 | 2 | 3): string {
+  const { medal, words } = placeParts(place);
+  return `${medal} ${words}`;
 }
 
 /** The current season's footnote on the ✓ Eligible mark (the database's reward_eligible rule). */
@@ -104,10 +113,13 @@ export function promotionNote(rows: readonly StandingRow[], league: LeagueId): s
   return `${names} were promoted and qualified in higher leagues, so only those leagues can reward ${names}, ${medalsGo}`;
 }
 
-/** The owner's progress to the minimum human bouts in its league this season (NPC bouts never count). */
+/**
+ * The owner's progress to the minimum human bouts in a league this season (NPC bouts never count). The league is named, since
+ * a gladiator promoted mid-season may already qualify in a lower one and be rewarded there if it places.
+ */
 export function qualifyText(humanBouts: number, league: LeagueId): string {
   const { minimumHumanBouts } = RULES_V1.seasons;
   const left = minimumHumanBouts - humanBouts;
-  if (left > 0) return `${left} more human ${left === 1 ? 'bout' : 'bouts'} to qualify for season rewards. NPC bouts do not count.`;
+  if (left > 0) return `${left} more human ${left === 1 ? 'bout' : 'bouts'} in the ${leagueWord(league)} league to qualify there. NPC bouts do not count.`;
   return `Qualified: at least ${minimumHumanBouts} human bouts in the ${leagueWord(league)} league, so a top-three place among its eligible gladiators wins a season reward.`;
 }

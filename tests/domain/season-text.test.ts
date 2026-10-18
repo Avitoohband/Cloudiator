@@ -69,9 +69,9 @@ describe('season text', () => {
   });
 
   it('says how many more human bouts qualify for season rewards, and when the owner qualifies', () => {
-    expect(qualifyText(0, 'bronze')).toBe('5 more human bouts to qualify for season rewards. NPC bouts do not count.');
-    expect(qualifyText(3, 'bronze')).toBe('2 more human bouts to qualify for season rewards. NPC bouts do not count.');
-    expect(qualifyText(4, 'bronze')).toBe('1 more human bout to qualify for season rewards. NPC bouts do not count.');
+    expect(qualifyText(0, 'bronze')).toBe('5 more human bouts in the Bronze league to qualify there. NPC bouts do not count.');
+    expect(qualifyText(3, 'bronze')).toBe('2 more human bouts in the Bronze league to qualify there. NPC bouts do not count.');
+    expect(qualifyText(4, 'bronze')).toBe('1 more human bout in the Bronze league to qualify there. NPC bouts do not count.');
     expect(qualifyText(5, 'silver')).toBe('Qualified: at least 5 human bouts in the Silver league, so a top-three place among its eligible gladiators wins a season reward.');
     expect(qualifyText(9, 'gold')).toBe(qualifyText(5, 'gold'));
   });

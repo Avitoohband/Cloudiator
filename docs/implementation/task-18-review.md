@@ -50,3 +50,39 @@ Range `a96c330..b052ea0`: `b052ea0` adds `supabase/sql/12-market.sql`, migration
 - **Other:**
   - a `1.0` price raises instead of returning `invalid` (unreachable through Edge);
   - the race tests do not assert that both terminal orders occurred.
+
+## 18.2: Market commands and pages
+
+Range `a4523ae..ae5d0c3`: `ae5d0c3` (feature). [Implementer report](task-18.2-report.md).
+
+**Implementer evidence:**
+- Unit tests 1002/1002; typecheck clean.
+- `test:db` 193/193 with the Edge start time unchanged.
+- Build and `verify:static` clean; development browser suite 394 passed.
+- Three mutations proved the new tests: the deadlock mapping, the sweep's try-lock, and `SKIP LOCKED`.
+
+**Verdicts:** spec compliant; quality Approved; no Critical or Important findings.
+
+**What the reviewer confirmed:**
+- **Prices:** the price cap (1,000,000,000) is enforced before any RPC.
+- **Ids:** they are lowercased, which SQL requires; this is tested end to end through the real Edge runtime.
+- **Buy preparation:** it matches `buy-shop`'s historical-strength preparation. A stale or null preparation still reaches SQL, so a committed receipt replays.
+- **Error mapping:** 40P01 and 40001 map to a retryable `processing`; `sold`, `expired` and `not-found` pass through. A real deadlock test proves nothing changes and the retry replays.
+- **`readMarket`:**
+  - newest first, with a `listedAtMs:id` cursor;
+  - at most 50 rows per page;
+  - an optional seller filter;
+  - read publicly without a session;
+  - paged through anonymous PostgREST in the DB test.
+- **Fixture market:** it has the live shape.
+- **Carried items from 18.1:**
+  - the deadlock claim is reworded in the guide and the test name only;
+  - the sweep is tested against a held seller lock and a locked row.
+
+**Deferred Minors:**
+- **Carried to 18.3:**
+  - the Marketplace panel keeps the same `operationId` on `processing`;
+  - the sample seller's listed item gets its listing reservation in the owner fixture;
+  - Buy is hidden for a signed-in account without a gladiator;
+  - the fixture expiry comes from the rules.
+- **Other:** the deadlock test assumes the second session reaches its lock within the 1 s deadlock check; document that.

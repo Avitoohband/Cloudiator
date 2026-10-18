@@ -1,6 +1,6 @@
 # Task 21.1 report: close a season in the database
 
-- **Status:** DONE_WITH_CONCERNS. Every gate passed. The main concern is about Task 21.2: the grants that Decisions 3 and 5 require block a boundary run as `service_role` (concern 1).
+- **Status:** DONE_WITH_CONCERNS. Every gate passed. The main concern was about Task 21.2: the grants that Decisions 3 and 5 required would block a boundary run as `service_role` (concern 1). *Resolved before review:* the controller's grant ruling and commit `61274dd` (see "Pre-review adjustment" at the end) supersede the grant lines below.
 - **Branch and base:** branch `claude/task-21` in `C:\Avi\Studies\Projects\Cloudiator-claude`, base `d8057c6`.
 - **Commit:** `ab4b1a0 feat: close seasons into a frozen archive with one-time rewards`. It is not pushed.
 - **No migration.** Task 21.2 generates M15. While iterating, I applied `supabase/sql/13-seasons.sql` to the local database with the tested psql fallback (below). `private.boundary_close_season` is still Task 7's stub.
@@ -31,8 +31,8 @@ The source is reapplicable: I applied it three times, and the second and later r
   - `guard_frozen` refuses UPDATE and DELETE.
   - An index on `gladiator_id` serves the foreign key and the prestige lookup.
 - **Grants**
-  - `seasons` and `season_standings`: RLS on; revoke all from public, anon, authenticated and service_role; SELECT to anon and authenticated with a `player_read … using (true)` policy; select/insert/update/delete to service_role.
-  - `season_awards`: RLS on; revoke all; service_role SELECT only, with the `backend_only` policy.
+  - `seasons` and `season_standings`: RLS on; revoke all from public, anon, authenticated and service_role; SELECT to anon and authenticated with a `player_read … using (true)` policy. *Superseded by the pre-review adjustment:* `ab4b1a0` gave service_role select/insert/update/delete; `61274dd` gives it select, insert and update on `seasons`, and select and insert on `season_standings`.
+  - `season_awards`: RLS on; revoke all; the `backend_only` policy. *Superseded by the pre-review adjustment:* `ab4b1a0` gave service_role SELECT only; `61274dd` gives it select and insert.
 
 **Functions**
 - **`private.season_rules()`** is immutable. It returns `{minimumHumanBouts: 5, placements: [...]}` with exactly `RULES_V1.seasons`' values. Service_role only.
@@ -45,7 +45,7 @@ The source is reapplicable: I applied it three times, and the second and later r
   - It is true when the row has at least 5 human bouts and no higher league row of the same character and season also has at least 5.
   - Still `security_invoker=true`.
   - Revoke all from everyone, then re-grant SELECT to anon, authenticated and service_role.
-- **`private.close_season(season bigint, now_ms bigint) returns integer`** (Decision 5). Granted to nobody.
+- **`private.close_season(season bigint, now_ms bigint) returns integer`** (Decision 5). Granted to nobody in `ab4b1a0`; *superseded by the pre-review adjustment:* service_role may EXECUTE it (`61274dd`).
   1. Locks the season row `FOR UPDATE`. It returns 0 when the season is already closed.
   2. Inserts one archive row per season rating row, with the name from `public.gladiators`:
      - `rank`: rating desc, human wins desc, human losses asc, gladiator_id;
@@ -127,7 +127,7 @@ I found no functional issue.
 
 ### Concerns
 
-1. **Grants for Task 21.2 (Decisions 3 and 5).**
+1. **Grants for Task 21.2 (Decisions 3 and 5).** *Resolved before review* by the controller's ruling and `61274dd` ("Pre-review adjustment" below); kept as written for the record.
    - As decided, `private.close_season` is granted to nobody and `private.season_awards` gives service_role SELECT only.
    - But the worker calls `public.coordinate_work()` as service_role through RPC, and service_role may execute it. The existing boundary tests also call `advance_boundary` as service_role. Every function is security invoker, so when phase 2 calls the close, it runs as service_role.
    - I verified this in a rolled-back transaction: `set local role service_role; select private.close_season(999,1)` failed with `ERROR: permission denied for function close_season`. In the catalog, `has_table_privilege('service_role','private.season_awards','INSERT')` is false and `has_function_privilege('service_role','public.coordinate_work()','EXECUTE')` is true.

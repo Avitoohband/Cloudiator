@@ -777,6 +777,50 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
         group by 1 order by 1`).toEqual([{ minute: 0, n: 5 }, { minute: 1, n: 5 }, { minute: 2, n: 5 }]);
     });
   });
+  it('claims a settlement with the due reveals it waits on, never splits them, and dispatches for it in the same tick (M19)', async () => {
+    // Task 23.3 latency fix: an expedition's settlement depends on its "Arrive at camp" reveal, which falls due exactly at
+    // the next cutoff. Counting only dependency-ready jobs, the cutoff tick dispatched for the reveals alone, and the
+    // settlements they released waited a minute, so the boundary published in the third tick (about 121.6 s). A settlement
+    // whose every unfinished prerequisite is a claimable due reveal is now dispatched for and claimed with those reveals.
+    const owner = await fighter();
+    const cutoff = (nowSlot() + 1) * SLOT;
+    await dispatchRolledBack(async (tx, dispatchAt) => {
+      const job = async (key: string, kind: string, due: number) => (await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,
+        rules_version,due_at_ms) values(${kind},${key},300,${owner.gid},'{}','v1',${due}) returning id`)[0].id as string;
+      const depends = (settlement: string, reveal: string) => tx`insert into private.job_dependencies(job_id,prerequisite_id) values(${settlement},${reveal})`;
+      // Fifty settlements, each waiting on its own reveal due at the cutoff, and one settlement already ready (due earlier).
+      const pairs: [string, string][] = [];
+      for (let n = 0; n < 50; n++) {
+        const reveal = await job(`m19:reveal:${n}`, 'reveal', cutoff), settlement = await job(`m19:settlement:${n}`, 'settlement', cutoff);
+        await depends(settlement, reveal);
+        pairs.push([reveal, settlement]);
+      }
+      pairs.sort((a, b) => (a[1] < b[1] ? -1 : 1));
+      const ready = await job('m19:ready', 'settlement', cutoff - 1);
+      // Never released: a settlement waiting on a reveal that is not due yet, and one whose reveal another worker holds.
+      const laterReveal = await job('m19:later-reveal', 'reveal', cutoff + 60_000), later = await job('m19:later', 'settlement', cutoff);
+      await depends(later, laterReveal);
+      const heldReveal = await job('m19:held-reveal', 'reveal', cutoff), held = await job('m19:held', 'settlement', cutoff);
+      await depends(held, heldReveal);
+      await tx`update private.jobs set status='leased',lease_token=gen_random_uuid(),lease_owner=gen_random_uuid(),leased_at_ms=${cutoff},
+        lease_until_ms=${cutoff + 120_000},attempts=1 where id=${heldReveal}`;
+      // Dispatch counts the 50 due reveals, the ready settlement and the 50 settlements those reveals release: 101 simple jobs
+      // want six invocations, and the per-minute ceiling of five holds (Task 23.2 Decision 5, unchanged).
+      expect(await dispatchAt(cutoff + 300)).toMatchObject({ ok: true, dispatched: 5, claimableSimple: 101, releasedSettlements: 50 });
+      // A settlement claim takes each released settlement with its reveal, reveal first, and never splits a pair across the cap.
+      await tx.unsafe(`set local cloudiator.test_now_ms = '${cutoff + 400}'`);
+      const claimed = async (limit: number) => ((await tx`select public.claim_jobs(${randomUUID()},'settlement',${limit}) as jobs`)[0].jobs as JobLease[])
+        .map(lease => [lease.kind, lease.id]);
+      expect(await claimed(4)).toEqual([['settlement', ready], ['reveal', pairs[0][0]], ['settlement', pairs[0][1]]]);
+      const next = await claimed(20);
+      expect(next).toEqual(pairs.slice(1, 11).flatMap(([reveal, settlement]) => [['reveal', reveal], ['settlement', settlement]]));
+      const ids = new Set(next.map(([, id]) => id));
+      for (const id of [later, laterReveal, held, heldReveal]) expect(ids.has(id)).toBe(false);
+      // Every claimed job is leased and logged as an attempt, as any claim.
+      expect(await tx`select count(*)::int as n from private.job_attempts a join private.jobs j on j.id=a.job_id
+        where j.dedupe_key like 'm19:%' and j.status='leased' and a.outcome is null`).toEqual([{ n: 23 }]);
+    });
+  });
 
   describe('real game-worker Edge runtime', () => {
     const secret = process.env.LOCAL_WORKER_SECRET ?? '';

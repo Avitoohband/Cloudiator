@@ -195,7 +195,7 @@ async function modeledRow(table: string): Promise<{ rows: number; tuple: number;
 
 // ---- The scheduled tick and the real worker --------------------------------------------------------------------------
 
-type Tick = { atMs: number; dispatched: number; statuses: number[]; reports: Report[]; workMs: number; revision: string };
+type Tick = { atMs: number; dispatched: number; claimableSimple: number; statuses: number[]; reports: Report[]; workMs: number; revision: string };
 /**
  * Runs `body` with the real private Edge worker reachable through pg_net (vault secrets) and a test-only stand-in for the
  * database clock, both removed and verified afterwards (tests/db/arena.test.ts). `tick(at)` is one scheduled minute: pg_cron's
@@ -231,7 +231,7 @@ async function withWorker<T>(body: (tick: (at: number) => Promise<Tick>) => Prom
     const workMs = performance.now() - began;
     const [{ revision }] = await sql`select revision from public.world_revision`;
     const reports = responses.filter(r => r.status_code === 200 && r.content).map(r => JSON.parse(r.content!) as Report);
-    return { atMs: at, dispatched: Number(result?.dispatch?.dispatched ?? 0), statuses: ids.map((_, i) => responses[i]?.status_code ?? 0),
+    return { atMs: at, dispatched: Number(result?.dispatch?.dispatched ?? 0), claimableSimple: Number(result?.dispatch?.claimableSimple ?? 0), statuses: ids.map((_, i) => responses[i]?.status_code ?? 0),
       reports, workMs, revision: revision as string };
   }
   await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
@@ -250,18 +250,24 @@ async function withWorker<T>(body: (tick: (at: number) => Promise<Tick>) => Prom
 
 type Window = { slot: number; tournament: boolean; dispatched: number; invocations: number; deferred: number; statuses: number[];
   changedMinutes: number; workMs: number[]; publishedMs: number | null; activities: Record<string, number>; tournamentEntrants: number;
-  byKind: Record<string, number>; rows: Record<string, number> };
+  byKind: Record<string, number>; rows: Record<string, number>;
+  /** The cutoff tick and the next two: what each dispatched, for how many claimable simple jobs. */
+  firstTicks: { k: number; dispatched: number; claimableSimple: number }[];
+  /** The previous slot's settlements, and how many of them the cutoff tick's invocations completed (before minute 1). */
+  previousSettlements: number; settledInCutoffTick: number };
 /** One slot of production cadence: a tick every minute of its 80, 300 ms into the minute, counting what the worker did. */
 async function runWindow(slot: number, tick: (at: number) => Promise<Tick>, tables: string[], before: Record<string, number>, revision: { value: string }) {
   const cutoff = slot * SLOT;
-  const w: Omit<Window, 'rows' | 'activities' | 'tournamentEntrants' | 'publishedMs'> = { slot, tournament: isTournamentSlot(slotAt(cutoff)),
-    dispatched: 0, invocations: 0, deferred: 0, statuses: [], changedMinutes: 0, workMs: [], byKind: {} };
+  const w: Omit<Window, 'rows' | 'activities' | 'tournamentEntrants' | 'publishedMs' | 'previousSettlements' | 'settledInCutoffTick'> = { slot,
+    tournament: isTournamentSlot(slotAt(cutoff)), dispatched: 0, invocations: 0, deferred: 0, statuses: [], changedMinutes: 0, workMs: [], byKind: {},
+    firstTicks: [] };
   const flagged: Report[] = [];
   for (let k = 0; k < RULES_V1.clock.slotMs / MINUTE; k++) {
     const t = await tick(cutoff + k * MINUTE + 300);
     w.dispatched += t.dispatched;
     w.invocations += t.reports.length;
     w.statuses.push(...t.statuses);
+    if (k < 3) w.firstTicks.push({ k, dispatched: t.dispatched, claimableSimple: t.claimableSimple });
     for (const r of t.reports) {
       w.deferred += r.deferred ?? 0;
       for (const [kind, n] of Object.entries(r.byKind)) w.byKind[kind] = (w.byKind[kind] ?? 0) + n;
@@ -273,11 +279,14 @@ async function runWindow(slot: number, tick: (at: number) => Promise<Tick>, tabl
     revision.value = t.revision;
   }
   const after = await counts(tables);
-  const [p] = await sql`select (select completed_at_ms from private.boundaries where slot_index=${slot})::float8 as published`;
+  const [p] = await sql`select (select completed_at_ms from private.boundaries where slot_index=${slot})::float8 as published,
+    (select count(*) from private.jobs where kind='settlement' and slot_index=${slot - 1})::int as previous,
+    (select count(*) from private.jobs where kind='settlement' and slot_index=${slot - 1} and completed_at_ms<${cutoff + MINUTE})::int as at_cutoff`;
   const activities = Object.fromEntries((await sql`select resolved_kind as kind, count(*)::int as n from public.activities where slot_index=${slot}
     group by 1`).map(r => [r.kind as string, r.n as number]));
   return { window: { ...w, rows: Object.fromEntries(tables.map(t => [t, after[t] - (before[t] ?? 0)])), activities,
-    tournamentEntrants: activities.tournament ?? 0, publishedMs: p.published === null ? null : Number(p.published) - cutoff } as Window, after, flagged };
+    tournamentEntrants: activities.tournament ?? 0, publishedMs: p.published === null ? null : Number(p.published) - cutoff,
+    previousSettlements: p.previous as number, settledInCutoffTick: p.at_cutoff as number } as Window, after, flagged };
 }
 
 // ---- Reads and their sizes -------------------------------------------------------------------------------------------
@@ -644,6 +653,21 @@ async function estimateWorkerBytes(windows: Window[], reads: Record<string, Role
   const owner = reads.owner?.player ?? reads.ownerStarter.player, lookup = reads.authLookup?.player;
   const perCommand = Object.fromEntries(ENCODINGS.map(e => [e, (lookup ? lookup[e] + lookup.headerBytes : 0) + owner[e] + owner.headerBytes + 2 * 600])) as Record<Encoding, number>;
   return { regularPerSlot, tournamentPerSlot, perCommand };
+}
+
+/**
+ * Boundary latency at production cadence (Task 23.3 latency fix): `players` characters on the new-character schedule run
+ * slots 300 (Training), 301 (Woodland) and 302 (Rest), so boundary 302 follows a slot of expeditions; then as many Arena-only
+ * characters (no tournament entry) run slots 300 and 301, the 23.2 case. Every tick is the real scheduled tick with the real
+ * worker, as in measureWorld.
+ */
+export async function measureCadence(players: number) {
+  const ARENA_ONLY: Choices = { morning: ARENA, afternoon: ARENA, evening: ARENA };
+  const expeditions = await runWorld(players, 3, [DEFAULT_SCHEDULE], false);
+  const arena = await runWorld(players, 2, [ARENA_ONLY], false);
+  const summary = (run: World) => run.windows.map(w => ({ slot: w.slot, activities: w.activities, publishedMs: w.publishedMs, firstTicks: w.firstTicks,
+    previousSettlements: w.previousSettlements, settledInCutoffTick: w.settledInCutoffTick, statusesOk: w.statuses.every(s => s === 200) }));
+  return { expeditions: summary(expeditions), arena: summary(arena), flagged: [...expeditions.flagged, ...arena.flagged].length };
 }
 
 // ---- Season close and standings ----------------------------------------------------------------------------------------

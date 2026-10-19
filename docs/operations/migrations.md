@@ -1,5 +1,93 @@
 # Local identity backend and migrations
 
+## Task 23.3: settlements released by due reveals (M19)
+
+M19 is `supabase/migrations/20261019124532_dispatch_released.sql`, the latency fix found by Task 23.3's capacity run.
+- **Generation.** CLI 2.120.0, `db pull dispatch_released --local --schema public,private --yes` (engine `migra`). The input
+  was the tested third part of `supabase/sql/15-release.sql`, applied once to a clean M01–M18 reset.
+- **Completion.** The draft was completed from that source; M01–M18 are unchanged.
+- **Decision.** The controller's ruling on the Task 23.3 report (2026-10-19).
+
+**Source iteration.** As for M17 and M18: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/15-release.sql`). The
+whole file is reapplicable.
+
+**The problem.** Every boundary after a slot of expeditions published at about 121.6 s, over spec §10.4's 120 s. Task 23.2's
+Arena-only cadence tests (about 61 s) could not see it.
+- An expedition's settlement depends on every reveal job of its plan, and its last stage, "Arrive at camp", falls due exactly
+  at the next cutoff.
+- `dispatch_workers()` counted only dependency-ready jobs, so at an all-expedition cutoff it dispatched three invocations for
+  the 50 reveals.
+- `runWorker` claims settlements before reveals, so the settlements those reveals released waited for the minute-1 tick, phase
+  1 with them, and preparation for minute 2.
+
+**What M19 changes.**
+- **`private.released_by_due_reveals(job, now_ms)`** (new, STABLE, invoker, `search_path=""`). A settlement is released when it
+  has an unfinished prerequisite, and every unfinished prerequisite is a reveal that is due, claimable (pending, or leased with
+  an expired lease and attempts left) and dependency-ready itself. EXECUTE is held by the owner and `service_role`, because
+  `claim_jobs` runs as `service_role`. The access matrix's pinned `service_role` snapshot gains this one line.
+- **`private.dispatch_workers()`.** It counts a released settlement as claimable simple work beside its reveals, and reports
+  `releasedSettlements`.
+  - Unchanged: the five invocations per scheduled minute and the per-scheduled-minute accounting (Task 23.2, Decision 5); the
+    batch limits; owner-only.
+  - At an all-expedition cutoff it now dispatches five (100 simple jobs) where it dispatched three.
+- **`public.claim_jobs`.**
+  - Every kind but settlement is claimed as before.
+  - A settlement claim walks the due settlements in due order and takes a released one only together with every reveal it
+    waits on. Each row is locked with SKIP LOCKED and re-checked after the lock, so a reveal another claim holds leaves its
+    settlement for later. A group is taken only while it fits the batch cap.
+  - Leases come back reveals first.
+  - The worker (`supabase/functions/_shared/backend/jobs.ts`, unchanged) runs each lease by its own kind, so the reveal
+    completes before the settlement settles in the same invocation. `settle_activity` still refuses a settlement whose
+    dependencies are unfinished.
+  - The lease statement is shared by every kind. It is the 07-arena.sql statement, fed from the ordered list.
+- **Result.** The cutoff tick settles the whole slot, and the boundary publishes in the next tick (61.5 s measured), as an
+  Arena-only boundary does.
+
+**The draft needed three completions** (checked one by one against the source):
+1. The order: the draft created `claim_jobs` first. The helper now comes before the two functions that call it, as in the source.
+2. The function ACLs: the source's revoke from public, anon and authenticated (and `service_role` for dispatch), and the
+   `service_role` grant for the claim and the helper.
+3. A provenance header and `notify pgrst`.
+
+The three function statements are as generated, line for line. M19 re-emits no unchanged function.
+
+**Tests.**
+- `tests/db/activities.test.ts` "claims a settlement with the due reveals it waits on, never splits them, and dispatches for it
+  in the same tick (M19)", on pinned database time in a rolled-back transaction:
+  - dispatch counts 101 (50 reveals, a ready settlement, 50 released) and stays at five;
+  - a claim with a cap of 4 takes the ready settlement and one pair, never half a pair;
+  - a later claim takes ten pairs, reveal first;
+  - a settlement whose reveal is not due, or is held by another worker, never comes;
+  - RED before M19: 3 dispatched for 51.
+- `tests/db/capacity.test.ts` "publishes within 120 s after a slot of expeditions, by the tick after the cutoff as an
+  Arena-only boundary does", with the real scheduled tick and Edge worker (50 characters each):
+  - Training, Woodland and Rest slots, then an Arena-only world;
+  - RED before M19: slot 302 published at 121,554 ms; the cutoff tick dispatched 3 for 50 jobs and settled none of slot 301's
+    50 expeditions;
+  - after M19: 61,535 ms; the cutoff tick dispatched 5 for 100 jobs and settled all 50; Arena-only 61.6 s, as before.
+- The capacity measurement's boundary check (every window of both scenarios under 120 s) is now always on; its budget checks
+  stay behind `CAPACITY_GATE=1`.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M18 matched Task 23.2's recorded M18 replay fingerprint byte for byte (1,134
+  lines).
+- The source-applied fingerprint differs from it only in the `claim_jobs` and `dispatch_workers` bodies and the new helper's
+  line.
+- A clean reset replayed M01–M19, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte (1,135 lines).
+- Inspection of the replay:
+  - `claim_jobs` and `released_by_due_reveals`: `{postgres=X/postgres,service_role=X/postgres}`; `dispatch_workers`:
+    `{postgres=X/postgres}`;
+  - all three invoker with `search_path=""`, the helper STABLE;
+  - 44/44 `public`/`private` triggers enabled; both cron jobs active; no function executable by anon or authenticated.
+- Lint is empty on the source and on the replay.
+- Advisors on the fresh replay: 36 INFO `unused_index` notices (no statistics yet), no warnings or errors.
+- `migration list --local` shows M01–M19.
+
+**Release (Task 24).** Deploy M19 with or after M18. It changes no client contract and no Edge code. Task 24 still measures the
+hosted `dispatch_log` spacing and worker CPU (C4).
+
 ## Task 23.2: timing correctness (M18)
 
 M18 is `supabase/migrations/20261019102324_timing.sql`. It was generated with CLI 2.120.0 by

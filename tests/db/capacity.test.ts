@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { sql, resetIdentity } from '../fixtures/db.ts';
-import { CAPACITY, measureSeasonClose, measureStandings, measureWorld, writeSection } from '../fixtures/capacity.ts';
+import { CAPACITY, measureCadence, measureSeasonClose, measureStandings, measureWorld, writeSection } from '../fixtures/capacity.ts';
 import { BUDGETS, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocations, share } from '../performance/capacity-model.ts';
 
 // Task 23.3 (Review Focus 3): the target load against the free-tier budgets, measured on the local stack.
@@ -11,9 +11,10 @@ import { BUDGETS, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocati
 //    tests/performance/capacity-model.ts; scripts/resource-report.mjs prints them as JSON.
 // 2. The synchronous season close of boundary phase 2 (C14) at four 50-player leagues, and at 500 rows a league.
 // 3. The standings page and the one-row standing read (C13) at 1,000 rows of one league and season, with their plans.
+// 4. Boundary latency after a slot of expeditions (the Task 23.3 latency fix, M19), beside the Arena-only case of Task 23.2.
 // Every case resets the world first; the file resets it again at the end, so no measurement row outlives the file.
 //
-// CAPACITY_GATE=1 enforces the budgets of case 1 (database, invocations, raw egress and boundary publication), each checked
+// CAPACITY_GATE=1 enforces the budgets of case 1 (database, invocations and raw egress), each checked
 // softly so one run names every one that fails. Without it (the default, as in a plain `npm run test:db`) case 1 still
 // measures and records every number and checks the run itself, but not the budgets: they are open blockers for Avi
 // (docs/operations/release-evidence.md, "Lane A: capacity"), and Task 23.6's release gate runs this file with the flag.
@@ -54,11 +55,12 @@ describe('Task 23.3: capacity against the free-tier budgets', () => {
       expect(w.statuses.every(status => status === 200)).toBe(true);
       expect(w.dispatched).toBeGreaterThan(0);
     }
+    // Spec §10.4 at representative load, always checked since the latency fix (M19): every boundary of both scenarios
+    // publishes within 120 s of its cutoff.
+    const late = [...world.windows, ...world.plainWindows].filter(w => w.publishedMs === null || w.publishedMs >= 120_000).map(w => [w.slot, w.publishedMs]);
+    expect(late, 'boundaries published at or after 120 s').toEqual([]);
     // The budgets (CAPACITY_GATE=1 only, see the header). Any over 100 % is a blocker for Avi; over 80 % is a named risk.
     if (!GATE) return;
-    // Spec §10.4 at representative load: every boundary of both scenarios publishes within 120 s of its cutoff.
-    const late = [...world.windows, ...world.plainWindows].filter(w => w.publishedMs === null || w.publishedMs >= 120_000).map(w => [w.slot, w.publishedMs]);
-    expect.soft(late, 'boundaries published at or after 120 s').toEqual([]);
     for (const [name, d] of [['mixed schedules', database], ['new-character schedule', databaseDefault]] as const) {
       expect.soft(share(d.at90Days.bytes, BUDGETS.databaseBytes), `database at 90 days, ${name}`).toBeLessThan(1);
       expect.soft(share(d.atOneYear.bytes, BUDGETS.databaseBytes), `database after one year, ${name}`).toBeLessThan(1);
@@ -92,5 +94,27 @@ describe('Task 23.3: capacity against the free-tier budgets', () => {
     expect(standings.plans.oneRow.executionMs).toBeLessThan(BUDGETS.standingsPlanMs);
     console.info(`Task 23.3 standings: ${JSON.stringify(standings)}`);
     writeSection('standings', standings);
+  }, 600_000);
+
+  it('publishes within 120 s after a slot of expeditions, by the tick after the cutoff as an Arena-only boundary does', async () => {
+    // An expedition's settlement waits on its "Arrive at camp" reveal, due exactly at the next cutoff. Before M19 the cutoff
+    // tick dispatched for the reveals only; the settlements they released waited for minute 1 and preparation for minute 2,
+    // so the boundary published at about 121.6 s. Now the cutoff tick dispatches and claims each such settlement with its
+    // reveal, settles the whole slot, and the boundary publishes in the next tick, as an Arena-only boundary always did.
+    const cadence = await measureCadence(CAPACITY.players);
+    console.info(`Task 23.3 cadence: ${JSON.stringify(cadence)}`);
+    writeSection('cadence', cadence);
+    expect(cadence.flagged).toBe(0);
+    const afterExpeditions = cadence.expeditions[2];
+    expect([afterExpeditions.slot, afterExpeditions.activities]).toEqual([302, { rest: CAPACITY.players }]);
+    // The cutoff tick: the slot's final reveals and the settlements they release, all of them settled before minute 1.
+    expect(afterExpeditions.firstTicks[0]).toMatchObject({ claimableSimple: 2 * CAPACITY.players,
+      dispatched: Math.min(5, Math.ceil(2 * CAPACITY.players / 20)) });
+    expect(afterExpeditions.settledInCutoffTick).toBe(afterExpeditions.previousSettlements);
+    for (const w of [...cadence.expeditions, ...cadence.arena]) {
+      expect(w.statusesOk).toBe(true);
+      // Published by the tick after the cutoff (Task 23.2: about 61.4 s), never in a third tick, and within spec §10.4's 120 s.
+      expect(w.publishedMs, `slot ${w.slot}`).toBeLessThan(90_000);
+    }
   }, 600_000);
 });

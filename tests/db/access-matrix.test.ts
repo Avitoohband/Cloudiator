@@ -158,6 +158,8 @@ const SERVICE_ROLE = [
   'function private.project_character(uuid): EXECUTE',
   'function private.projection_changed(): EXECUTE',
   'function private.publish_tournaments(bigint): EXECUTE',
+  // Task 23.3 latency fix (M19): public.claim_jobs, which runs as service_role, asks whether a settlement waits only on due reveals.
+  'function private.released_by_due_reveals(uuid, bigint): EXECUTE',
   'function private.resume_operator_job(uuid): EXECUTE',
   'function private.safe_battle_log(jsonb): EXECUTE',
   'function private.safe_integer(jsonb, numeric): EXECUTE',

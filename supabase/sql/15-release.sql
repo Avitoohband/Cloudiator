@@ -1,5 +1,6 @@
--- Task 23 reapplicable source. Committed M01-M17 are immutable; deploy only the generated migrations: M17
--- (supabase/migrations/*_release.sql, Task 23.1, access hardening) and M18 (*_timing.sql, Task 23.2, the second part below).
+-- Task 23 reapplicable source. Committed migrations are immutable; deploy only the generated migrations: M17
+-- (supabase/migrations/*_release.sql, Task 23.1, access hardening), M18 (*_timing.sql, Task 23.2, the second part below) and
+-- M19 (*_dispatch_released.sql, Task 23.3, the third part: settlements released by due reveals).
 -- Release access hardening (plan 2026-10-19-task-23-release-readiness, Task 23.1, and the controller's rulings on the access
 -- matrix's findings). tests/db/access-matrix.test.ts derives every expectation from the catalog through the exported audit
 -- scripts/access-audit.sql. On the M01-M16 replay it found these client privileges, all revoked here:
@@ -112,6 +113,143 @@ create or replace view public.world_revision with(security_invoker=true) as
     floor(extract(epoch from statement_timestamp())*1000/4800000)::bigint as slot_index,
     r.published_slot_index
   from public.world_revision_state r where singleton;
+
+-- ===== Task 23.3: settlements released by due reveals (M19) =====
+-- Task 23.3's capacity run (docs/operations/release-evidence.md, "Boundary latency") found every boundary after a slot of
+-- expeditions publishing at about 121.6 s, over spec §10.4's 120 s. An expedition's settlement depends on all of its reveal
+-- jobs (10-tournament-results.sql's plan acceptance), and its last stage, "Arrive at camp", falls due exactly at the next
+-- cutoff. The cutoff tick counted only dependency-ready jobs, so it dispatched for the reveals alone; the invocations claimed
+-- settlements first and reveals last, so the settlements those reveals released waited for the next tick (minute 1), phase 1
+-- with them, and preparation for minute 2.
+-- Now a settlement whose every unfinished prerequisite is a claimable due reveal ("released") is counted by the dispatch and
+-- claimed together with those reveals: claim_jobs(…,'settlement',…) returns the reveals first, then the settlement, never
+-- splitting the group across the batch cap, and the worker runs each lease by its own kind (supabase/functions/_shared/
+-- backend/jobs.ts, unchanged), so the reveal completes before the settlement settles in the same invocation. The cutoff tick
+-- then settles the whole slot and the boundary publishes in the next tick (about 61 s), as an Arena-only boundary did.
+-- Unchanged: Task 23.2's five invocations per scheduled minute (Decision 5), batch limits (20 simple, 5 combat), the
+-- dependency rule itself (a settlement still settles only after its reveals complete; settle_activity checks it again), and
+-- every other kind's claim.
+
+-- Whether a pending, due settlement waits only on reveals this tick can claim: it has an unfinished prerequisite, and every
+-- unfinished prerequisite is a reveal that is due by now_ms, claimable (pending, or leased with an expired lease and attempts
+-- left) and dependency-ready itself. A reveal another worker holds, a reveal not due yet or any other kind keeps it waiting.
+create or replace function private.released_by_due_reveals(job uuid,now_ms bigint) returns boolean
+language sql stable security invoker set search_path='' as $$
+  select exists(select 1 from private.job_dependencies d join private.jobs p on p.id=d.prerequisite_id
+      where d.job_id=released_by_due_reveals.job and p.status<>'completed')
+    and not exists(select 1 from private.job_dependencies d join private.jobs p on p.id=d.prerequisite_id
+      where d.job_id=released_by_due_reveals.job and p.status<>'completed'
+        and not (p.kind='reveal' and p.due_at_ms<=released_by_due_reveals.now_ms
+          and (p.status='pending' or (p.status='leased' and p.lease_until_ms<=released_by_due_reveals.now_ms and p.attempts<p.max_attempts))
+          and private.dependencies_ready(p.id)))
+$$;
+
+-- Task 23.2's dispatch (per scheduled minute), unchanged except that a released settlement counts as claimable simple work
+-- beside its reveals (both are leases of the same claim), and the answer reports how many there were.
+create or replace function private.dispatch_workers() returns jsonb language plpgsql security invoker set search_path='' as $$
+declare url text; secret text; now_ms bigint; minute_start bigint; simple integer; combat integer; released integer; spent integer;
+  budget integer; wanted integer; request bigint; requests jsonb:='[]'::jsonb;
+begin
+  perform pg_advisory_xact_lock(hashtextextended('cloudiator:dispatch',3));
+  now_ms:=private.planning_now_ms();
+  minute_start:=now_ms-now_ms%60000;
+  select decrypted_secret into url from vault.decrypted_secrets where name='game_worker_url';
+  select decrypted_secret into secret from vault.decrypted_secrets where name='game_worker_secret';
+  if url is null or secret is null then return jsonb_build_object('ok',true,'dispatched',0,'reason','unconfigured'); end if;
+  select count(*) filter (where kind<>'simulation'),count(*) filter (where kind='simulation'),
+    count(*) filter (where kind='settlement' and not private.dependencies_ready(id)) into simple,combat,released from private.jobs
+    where due_at_ms<=now_ms and (status='pending' or (status='leased' and lease_until_ms<=now_ms and attempts<max_attempts))
+      and (private.dependencies_ready(id) or (kind='settlement' and private.released_by_due_reveals(id,now_ms)));
+  select count(*) into spent from private.dispatch_log where dispatched_at_ms>=minute_start and dispatched_at_ms<minute_start+60000;
+  select max_dispatch_per_minute into budget from private.scheduler where singleton;
+  wanted:=greatest(0,least(coalesce(budget,5)-spent,ceil(simple/20.0)::integer+ceil(combat/5.0)::integer));
+  for i in 1..wanted loop
+    -- Positional (url, body, params, headers, timeout) avoids PL/pgSQL name capture in named arguments.
+    request:=net.http_post(url,'{}'::jsonb,'{}'::jsonb,
+      jsonb_build_object('Authorization','Bearer '||secret,'Content-Type','application/json'),30000);
+    insert into private.dispatch_log(dispatched_at_ms,request_id,claimable_simple,claimable_combat) values(now_ms,request,simple,combat);
+    requests:=requests||to_jsonb(request);
+  end loop;
+  return jsonb_build_object('ok',true,'dispatched',wanted,'requestIds',requests,'claimableSimple',simple,'claimableCombat',combat,
+    'releasedSettlements',released);
+end $$;
+-- Owner only (pg_cron runs it inside private.cron_tick), as before.
+revoke all on function private.dispatch_workers() from public, anon, authenticated, service_role;
+
+-- 07-arena.sql's claim, unchanged for every kind but settlement, now selected into an ordered list before one shared lease
+-- statement. A settlement claim walks the due settlements in due order; a released one is taken only together with every
+-- reveal it waits on (each locked with SKIP LOCKED and re-checked after the lock, so a reveal another claim holds leaves the
+-- settlement for later), only while the whole group fits the cap, reveals first. Leases are returned in that order, so the
+-- worker completes the reveals before it settles. Database time is sampled once, before any lock, as before.
+create or replace function public.claim_jobs(worker_id uuid,kind text,batch_limit integer) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare now_ms bigint:=private.planning_now_ms(); cap integer; leases jsonb; picked uuid[]:='{}'::uuid[]; candidate record; waits uuid[];
+  held uuid[]; settlement uuid;
+begin
+  if claim_jobs.worker_id is null or claim_jobs.kind is null or claim_jobs.kind not in ('prepare','pair','simulation','reveal','settlement')
+    or batch_limit is null or batch_limit<1 then
+    raise exception 'invalid claim' using errcode='22023';
+  end if;
+  cap:=least(batch_limit,case when claim_jobs.kind='simulation' then 5 else 20 end);
+  perform private.sweep_exhausted_leases(now_ms);
+  if claim_jobs.kind<>'settlement' then
+    select coalesce(array_agg(x.id order by x.due_at_ms,x.id),'{}'::uuid[]) into picked from (
+      select j.id,j.due_at_ms from private.jobs j
+      where j.kind=claim_jobs.kind and j.due_at_ms<=now_ms
+        and private.dependencies_ready(j.id)
+        and (j.status='pending' or (j.status='leased' and j.lease_until_ms<=now_ms and j.attempts<j.max_attempts))
+      order by j.due_at_ms,j.id limit cap for update skip locked) x;
+  else
+    for candidate in select j.id,private.dependencies_ready(j.id) as ready from private.jobs j
+      where j.kind='settlement' and j.due_at_ms<=now_ms
+        and (j.status='pending' or (j.status='leased' and j.lease_until_ms<=now_ms and j.attempts<j.max_attempts))
+        and (private.dependencies_ready(j.id) or private.released_by_due_reveals(j.id,now_ms))
+      order by j.due_at_ms,j.id loop
+      exit when cardinality(picked)>=cap;
+      waits:='{}'::uuid[];
+      if not candidate.ready then
+        select coalesce(array_agg(p.id order by p.due_at_ms,p.id),'{}'::uuid[]) into waits from private.job_dependencies d
+          join private.jobs p on p.id=d.prerequisite_id where d.job_id=candidate.id and p.status<>'completed';
+      end if;
+      continue when cardinality(picked)+cardinality(waits)+1>cap;
+      select j.id into settlement from private.jobs j where j.id=candidate.id and j.kind='settlement' and j.due_at_ms<=now_ms
+        and (j.status='pending' or (j.status='leased' and j.lease_until_ms<=now_ms and j.attempts<j.max_attempts))
+        for update skip locked;
+      continue when settlement is null;
+      if cardinality(waits)>0 then
+        select coalesce(array_agg(x.id order by x.due_at_ms,x.id),'{}'::uuid[]) into held from (
+          select p.id,p.due_at_ms from private.jobs p where p.id=any(waits) and p.kind='reveal' and p.due_at_ms<=now_ms
+            and (p.status='pending' or (p.status='leased' and p.lease_until_ms<=now_ms and p.attempts<p.max_attempts))
+            and private.dependencies_ready(p.id)
+          for update skip locked) x;
+        continue when cardinality(held)<>cardinality(waits);
+      end if;
+      picked:=picked||waits||settlement;
+    end loop;
+  end if;
+  with chosen as (
+    select x.id,x.ord from unnest(picked) with ordinality x(id,ord)
+  ), previous as (
+    select j.id,j.status as previous_status,j.attempts as previous_attempt from private.jobs j join chosen c on c.id=j.id
+  ), expired as (
+    update private.job_attempts a set finished_at_ms=now_ms,outcome='expired',failure_code='lease-expired'
+    from previous p where p.previous_status='leased' and a.job_id=p.id and a.attempt=p.previous_attempt and a.outcome is null
+  ), claimed as (
+    update private.jobs j set status='leased',lease_token=gen_random_uuid(),lease_owner=claim_jobs.worker_id,leased_at_ms=now_ms,
+      lease_until_ms=now_ms+120000,attempts=j.attempts+1
+    from chosen c where j.id=c.id
+    returning j.*,c.ord
+  ), logged as (
+    insert into private.job_attempts(job_id,attempt,worker_id,claimed_at_ms) select c.id,c.attempts,claim_jobs.worker_id,now_ms from claimed c
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'token',c.lease_token,'expiresAtMs',c.lease_until_ms,'kind',c.kind,
+    'activityId',c.activity_id,'gladiatorId',c.gladiator_id,'slotIndex',c.slot_index,'snapshot',c.input,'seed',c.seed,
+    'rulesVersion',c.rules_version,'attempt',c.attempts) order by c.ord),'[]'::jsonb) into leases from claimed c;
+  return leases;
+end $$;
+-- As 07-arena.sql: the backend claims, nobody else; the helper is the backend's too (claim_jobs runs as service_role).
+revoke all on function public.claim_jobs(uuid,text,integer), private.released_by_due_reveals(uuid,bigint) from public, anon, authenticated;
+grant execute on function public.claim_jobs(uuid,text,integer), private.released_by_due_reveals(uuid,bigint) to service_role;
 
 notify pgrst, 'reload schema';
 commit;

@@ -186,6 +186,10 @@ Follow the exact gate order in
 approved its database-test rule on 2026-10-14: run `npm run test:db` only
 while nothing else builds, browses or edits in the worktree that serves Edge,
 compare the Edge container's start time before and after, and discard and
-rerun a run during which it was recreated. Separate
+rerun a run during which it was recreated. Avi extended it on 2026-10-19:
+first refresh the last-access times of the Edge source and wait for a settled
+runtime (`npm run verify` does this), because the host's NTFS last-access
+updates otherwise make the Edge watcher recreate the container mid-run. Never
+change the host's last-access setting. Separate
 worktrees each have their own `.next` and may run in parallel on their own
 Playwright ports.

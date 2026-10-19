@@ -268,3 +268,118 @@ test('shows an unavailable replay in the production build', ...)
   - the budget arithmetic;
   - named Task 24 blockers: mobile 30 fps on the device, hosted CPU and dispatch spacing, hosted egress and compression, CORS parity, the remote export rehearsal.
 - [ ] **Step 5: Commit** `ops: add the release gate and its evidence`. Then commit `docs: report Task 23` with `docs/implementation/task-23-report.md`.
+---
+
+## Database budget (Tasks 23.7–23.9, added 2026-10-19)
+
+**Design:** [database budget design](../specs/2026-10-19-database-budget-design.md). Avi chose "A + C + D" on 2026-10-19 and the controller's recommendation that the structural compactions (settled-slot ranges, receipts older than 90 days to a fingerprint) wait until after launch. **Spec changes** made with these tasks (Avi's decision, recorded in the spec):
+- §11 :410 and this plan's Global Constraints: "below 250 MB database usage" becomes "below 500 MB database usage (warning at 400 MB)".
+- §4.3 :139: the schedule continues while the player is offline, **until the owner has sent no activity signal for 14 days**; then the character rests at home until the owner returns.
+
+**Constraints for 23.7–23.9** (in addition to the Global Constraints above):
+- SQL goes in a new part of `supabase/sql/15-release.sql` (no `16-*.sql`); migrations are M21 (23.7) and M22 (23.8). Never edit a committed migration; `tests/rule-retention.test.ts` rejects top-level `update private.jobs`, so data changes live in function bodies or a backfill the test allows explicitly.
+- MB means 2^20 bytes: the budget is **524,288,000 bytes**; the warning fires at **80 % = 419,430,400** (the existing `bytes*5 >= budget*4` rule), the alert at 100 %. Both read physical `pg_database_size`.
+- Players never see a change from A or D. C's visible copy is exactly:
+  - owner, My gladiator activity line: `Resting at home: back on your schedule at {time}` ({time} = the next boundary in the viewer's local time, formatted as the Schedule panel formats slot times);
+  - everyone, profile card "Now" and the Gladiators list: `Resting at home: back when {name}'s owner returns.`
+- Idle time is measured against **each boundary's scheduled start**, never the wall clock, so catch-up after an outage classifies every slot the same way it would have on time.
+
+**Review Focus (23.7–23.9):**
+- **A replay or retry after compaction.** A same-token settlement retry on a compacted job still answers `ok` with no new grants; replays, Arena results, tournament views and recent results read exactly as before. Test: 23.7.
+- **Catch-up across the 14-day line.** A boundary processed late uses its scheduled start: a character whose owner's last signal is 14 days minus 1 ms before that start plays, one at exactly 14 days rests. Test: 23.8.
+- **Deploy day.** Existing owners have no signal yet; the migration backfills the deploy time, so nobody rests on the first boundary after M22. Test: 23.8.
+- **Waking with queued changes.** A build or schedule change queued while resting applies at the first boundary after the owner returns; no reward, stamina or experience is granted for resting slots. Test: 23.8.
+- **An idle tournament entrant.** An opted-in resting character is left out of the bracket (its opt-in kept), and a bracket that falls below its minimum takes the existing insufficient-entrants path. Test: 23.8.
+
+**Order and lanes.** 23.7 → 23.8 serially in Lane A (`claude/task-23`, Cloudiator-claude). 23.8 commits its contract types first (`GameCommand` presence, `OwnerState.restingUntilSlot`, `WorldActor.resting`); Lane B (`claude/task-23-ui`, Cloudiator-replay, rebased on that commit) then builds 23.9 in parallel. Cherry-pick Lane B, run `npm run verify`, then the final whole-branch review.
+
+### Task 23.7: Trim completed jobs and the 500 MB budget (Lane A, M21)
+
+**Files:**
+- Modify: `supabase/sql/15-release.sql` (new part: `private.guard_job()` replaced, `private.cleanup_history(now_ms bigint)` re-emitted with a compaction step, `private.health_report()` re-emitted with the new budget and `cohort`); new migration M21 via `supabase db diff`, completed per AGENTS.md.
+- Modify: `tests/performance/capacity-model.ts` (budget, `private.jobs` compaction), `tests/fixtures/capacity.ts` (`shrink` map), `scripts/resource-report.mjs` (if it restates the budget).
+- Modify: `docs/superpowers/specs/2026-10-11-gladiator-arena-design.md:410`, `docs/superpowers/plans/2026-10-11-gladiator-arena-implementation.md:27,:541`, this plan's :27 and :41, `docs/operations/runbook.md`, `docs/operations/migrations.md` (new top section), `docs/operations/environment.md`, `docs/operations/release-evidence.md` (re-measured budget lines).
+- Test: `tests/db/retention.test.ts`, `tests/db/activities.test.ts`, `tests/db/health.test.ts`, `tests/performance/capacity-model.test.ts`, `tests/scripts/resource-report.test.ts`, `tests/db/access-matrix.test.ts`.
+
+**Interfaces:**
+- Produces: `cleanup_history` result `detail.compacted` gains `jobs: number`; health report `resources.budgetBytes = 524288000` and a new top-level `cohort: { activeCharacters: number }` (characters with an activity in the current slot; 23.8 adds `restingCharacters`).
+- The compacted job keeps its row and every column except: `input = '{"compacted": true}'`, `result = '{"ok": true, "compacted": true}'` (the settlement replay `j.result || {newGrants:0, replayed:true}` then still answers `ok`).
+
+- [ ] **Step 1: Write the failing tests:**
+
+```ts
+test('empties the input and result of completed jobs in settled slots and keeps the rows', ...)      // retention.test.ts: detail.compacted.jobs > 0, row count unchanged, FKs intact
+test('leaves the jobs of an unsettled or blocked slot untouched', ...)
+test('answers a same-token settlement retry on a compacted job with ok and no new grants', ...)     // activities.test.ts
+test('still refuses every other update of a completed job', ...)                                    // the existing :390-402 cases plus a compaction-shaped update outside cleanup
+test('reads Arena results, tournament views and recent results identically after compaction', ...)
+test('warns at 400 MB and alerts at 500 MB of physical database size', ...)                         // health.test.ts: 419_430_399 → no warning, 419_430_400 → warning, 524_288_000 → alert
+test('counts the characters with an activity in the current slot', ...)
+test('models compacted job rows and the 500 MB budget', ...)                                         // capacity-model.test.ts
+```
+
+- [ ] **Step 2: Run** them. Expected: FAIL (no compaction step; budget 262,144,000; no `cohort`).
+- [ ] **Step 3: Implement.** Compaction runs in `cleanup_history` after the existing settled-slot rules (the blocked-slot rule and the `detail_through_slot` watermark decide "settled"); it skips jobs whose payload a later read uses (find them per kind and pin each with a test). The guard allows exactly the compaction shape on a completed job, as `guard_receipt` does for receipts.
+- [ ] **Step 4: Run** `tests/db` for retention, activities, health, access-matrix, arena, tournaments, restore-world, then the clean M01–M21 replay with fingerprint, lint and advisors, then `CAPACITY_GATE=1` capacity. Expected: PASS, both scenarios under 100 % at 90 days; one-year figures recorded as risk with the after-launch compaction plan; the modeled size cross-checked against physical size after a `VACUUM FULL` inside the test only.
+- [ ] **Step 5: Commit** `feat: trim settled jobs and raise the database budget to 500 MB (M21)`, then `docs: report Task 23.7`.
+
+### Task 23.8: Idle characters rest at home (Lane A, M22)
+
+**Files:**
+- Modify: `supabase/sql/15-release.sql` (new part), new migration M22 (with the deploy-time backfill completed by hand, per AGENTS.md).
+- Modify: `supabase/functions/_shared/domain/rules-v1.ts` (`idle: { afterMs: 1_209_600_000 }`) and its SQL mirror documented in the part's header; `supabase/functions/_shared/contracts/commands.ts` (`{ kind: 'presence' }`), `supabase/functions/_shared/backend/commands.ts` (parse and dispatch), `supabase/functions/_shared/contracts/reads.ts` (`OwnerState.restingUntilSlot: number | null`, `WorldActor.resting: boolean`).
+- Modify: `docs/superpowers/specs/2026-10-11-gladiator-arena-design.md:139`, `docs/operations/migrations.md`.
+- Create: `tests/db/idle.test.ts`. Test: `tests/backend/commands.test.ts`, `tests/db/access-matrix.test.ts`, `tests/db/seasons.test.ts`, `tests/db/health.test.ts`.
+
+**Interfaces:**
+- Consumes: 23.7's health `cohort`.
+- Produces (commit these contract types first, alone, so Lane B can start 23.9):
+  - `GameCommand` gains `{ kind: 'presence' }`: no payload, no operation receipt, answers `{ ok: true }` after the rate check.
+  - `OwnerState.restingUntilSlot: number | null` — the slot whose boundary returns the character to its schedule, while it rests in the current slot; otherwise `null`.
+  - `WorldActor.resting: boolean` in the public world projection.
+  - Health `cohort.restingCharacters: number`.
+- **The activity signal:** a private per-owner `last_signal_ms`, written inside `consume_command_rate` (every command, presence included, for the verified actor), at most once an hour per owner.
+- **The rule:** at each boundary a character rests when `slot_start_ms(target) - last_signal_ms >= RULES_V1.idle.afterMs`. A resting character has no member row, preparation job, snapshot, activity, settled-slot row, pairing entry, bracket entry, or season rating row, but its `processed_slot_index` advances with the cohort's at `boundary_start`, so straggler waits, command `processing` answers, the cleanup checkpoint and `coordinate_work` behave as for everyone else. Queued changes stay queued until its first boundary back. Activities of the slot before it starts resting settle normally.
+
+- [ ] **Step 1: Write the failing tests** (`tests/db/idle.test.ts` unless noted):
+
+```ts
+test('keeps a character playing at 14 days minus 1 ms without a signal and rests it at 14 days', ...)
+test('classifies a late-processed boundary by its scheduled start, not the wall clock', ...)
+test('advances a resting character's processed slot with the cohort and writes no rows for it', ...)
+test('leaves a resting character out of Arena pairing and tournament brackets, keeping its opt-in', ...)
+test('returns a character to its schedule at the first boundary after a presence or any command', ...)
+test('applies changes queued while resting at that first boundary and grants nothing for resting slots', ...)
+test('backfills the deploy time for existing owners, so nobody rests on the first boundary after M22', ...)
+test('creates no season rating row for a character that rests through a whole season', ...)          // seasons.test.ts
+test('shows restingUntilSlot to the owner and resting to everyone', ...)
+test('answers a presence command with ok and writes no operation receipt', ...)                         // tests/backend/commands.test.ts + DB
+```
+
+- [ ] **Step 2: Run** them. Expected: FAIL (no signal, no rule, no presence kind).
+- [ ] **Step 3: Implement** the signal, the rule in the boundary phases (apply-changes, recompute, snapshot, pairing, start), the projections and the presence kind; revoke/grant every new function and add it to the access matrix.
+- [ ] **Step 4: Run** `npm test`, `npm run typecheck`, then `npm run test:db` (Edge rule), the clean M01–M22 replay with fingerprint, lint and advisors, then `CAPACITY_GATE=1` capacity. Expected: PASS.
+- [ ] **Step 5: Commit** `feat: rest idle characters at home after 14 days (M22)` (contract types already committed as `feat: add the resting and presence contracts`), then `docs: report Task 23.8`.
+
+### Task 23.9: Presence and the resting camp (Lane B, after 23.8's contract commit)
+
+**Files:**
+- Modify: `src/lib/api/gateway.ts` (allow-list `presence`; `sendPresence(): Promise<void>`, fire-and-forget, never reuses an operation id, swallows failures), `src/lib/api/fixture-gateway.ts` (presence stub; a fixture resting actor), `src/features/character/useGameState.ts` (presence once after sign-in or page load, then every 6 hours while the page is visible; none for visitors), `src/features/character/CharacterPanel.tsx` / `activity-status.ts` (owner line), `src/features/.../ProfileCard.tsx`, `src/features/.../RosterPanel.tsx` (public copy), `src/game/camp-scene.ts` (resting actors are not drawn).
+- Test: `tests/api/fixture-gateway.test.ts`, a unit test for the presence timer, `tests/browser/resting.spec.ts` (new; desktop and mobile; 360 px screenshots for Avi).
+
+**Interfaces:**
+- Consumes: 23.8's `GameCommand` presence, `OwnerState.restingUntilSlot`, `WorldActor.resting`.
+
+- [ ] **Step 1: Write the failing tests:**
+
+```ts
+test('sends one presence after sign-in and then every 6 hours while visible, never for a visitor', ...)
+test('shows the owner "Resting at home: back on your schedule at {time}" until that boundary', ...)
+test('shows everyone "Resting at home: back when {name}'s owner returns." on the profile card and the Gladiators list', ...)
+test('does not draw a resting gladiator in the camp', ...)
+```
+
+- [ ] **Step 2: Run** them. Expected: FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the units, typecheck, the dev browser suite and the production gate on the Lane B ports; capture the 360 px screenshots of the three resting states for Avi.
+- [ ] **Step 5: Commit** `feat: send presence and show resting gladiators`, then `docs: report Task 23.9`.

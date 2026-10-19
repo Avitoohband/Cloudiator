@@ -7,7 +7,9 @@ section; the controller merges them.
 
 **Status: the database budget fails (a blocker, pending Avi), egress fails only under a hosted condition (Task 24), and the
 dispatch ceiling is a named risk.**
-- The boundary-latency blocker this measurement found is fixed (M19, "Boundary latency" below).
+- The boundary-latency blocker this measurement found is fixed (M19, corrected by M20; "Boundary latency" below), but with
+  **zero headroom**: at 50 all-expedition characters the cutoff tick is exactly full, and a 51st character would bring the
+  121.6 s publication back (derived, not measured). It is a named risk (risk 5).
 - Task 23.3, measured on 2026-10-19 on the local stack. Nothing here is a hosted measurement: hosted CPU, compression and billing
   are Task 24 checks.
 
@@ -22,7 +24,13 @@ dispatch ceiling is a named risk.**
   budgets only with `CAPACITY_GATE=1`.
   - Without the flag (a plain `npm run test:db`), the case still measures and records every number and checks the run itself.
     The suite therefore stays green while the blockers are open.
-  - The boundary-publication check (every window under 120 s) has been on since the fix.
+  - The boundary-publication check (every window under 120 s) has been on since the fix, at up to 50 characters (spec §10.4's
+    load). With `--players` above 50 the windows are still recorded, and the report's boundary line gives their verdict.
+  - The cadence case (`publishes within 120 s after a slot of expeditions …`) always runs 50 characters, whatever `--players`
+    is (fix round 1).
+  - The measured sections are printed on the console only in a report or `CAPACITY_GATE=1` run; a plain `npm test` or
+    `npm run test:db` prints none of them (fix round 1). A measurement the suites did not produce is reported as `missing`
+    and fails the report, never `ok`.
   - Task 23.6's release gate runs the file with the flag, and fails until every blocker below is resolved.
   - The report's verdicts and exit code do not depend on the flag.
 - **Environment:**
@@ -138,7 +146,7 @@ bytes, before their headers.
 | Database after one year, mixed schedules | 685.2 MiB | 250 MiB | 274.1 % | **blocker (pending Avi)** |
 | Database at 90 days, new-character schedule | 376.2 MiB | 250 MiB | 150.5 % | **blocker (pending Avi)** |
 | Database after one year, new-character schedule | 568.5 MiB | 250 MiB | 227.4 % | **blocker (pending Avi)** |
-| Boundary publication at 50 characters (worst of 7 windows) | 61.6 s (before M19: 121.6 s) | 120 s | 51.3 % (before: 101.3 %) | ok (fixed, M19) |
+| Boundary publication at 50 characters (worst of 7 windows) | 61.6 s (before M19: 121.6 s) | 120 s | 51.3 % (before: 101.3 %) | **risk: zero headroom** (fixed by M19 at exactly 50; a 51st all-expedition character steps back to about 121.6 s, derived; risk 5) |
 | Egress raw, players and viewers, 31-day month | 2.371 GB | 3 GB | 79.0 % | ok, at the risk line |
 | Egress gzip, players and viewers, 31-day month | 0.571 GB | 3 GB | 19.0 % | ok |
 | Egress raw with backend traffic, 31-day month | 3.478 GB | 3 GB | 115.9 % | **blocker if hosted counts it uncompressed** |
@@ -236,6 +244,22 @@ Every boundary whose previous slot had expeditions took a third tick.
   activities of the previous slot.
 - The dedicated cadence test (`tests/db/capacity.test.ts`, 50 characters) publishes the post-expedition boundary at 61.5 s (it
   was 121.6 s): 5 invocations for 100 jobs, all 50 settled in the cutoff tick. The Arena-only boundaries stay at 61.6 s.
+
+**Headroom: none at 50 all-expedition characters** (Task 23.3 review, Important 1).
+- On the new-character schedule every character runs Woodland in the same slot, so the next cutoff tick carries two simple
+  jobs per character: the final "Arrive at camp" reveal and the settlement it releases.
+- That tick can take at most 5 invocations (the per-minute ceiling) × 20 simple jobs (`WORKER_LIMITS.simple`) = **100 jobs**.
+  At 50 characters it is exactly full: the cadence test measures `claimableSimple: 100, dispatched: 5`.
+- A **51st** character leaves one reveal and its settlement for minute 1, and preparation for minute 2: publication about
+  **121.6 s** (101 % of the target), as before M19. This is derived from the mechanism measured before M19, not measured.
+- The mixed schedules of scenario 1 put about a third of the characters on an expedition per slot (67 claimable jobs at the
+  cutoff, 4 invocations), so they have room; only a cohort that all goes on expedition together reaches the edge.
+- Risk 5 below names the watch and the mitigation options.
+
+**M20 (fix round 1).** When several settlements share one due reveal (every tournament entrant's settlement waits on the
+final's reveal), M19's claim listed that reveal once per settlement: it counted against the cap once per settlement and, under
+a hash-join plan, came back after the first settlement. M20 lists it once, before them. It changes nothing in the windows
+above (expedition settlements each wait on their own reveal); `docs/operations/migrations.md`, M20.
 
 ### Egress
 
@@ -345,4 +369,21 @@ beside the players for 3 always-on visitors.
    watch invocations.
 4. **Command receipts (carried from Task 22).** 787 B each, permanent: about 11 MiB a month at 10 commands a player a day.
    Part of risk 1.
-5. **Boundary latency:** resolved by M19 (61.5–61.6 s, measured). Hosted dispatch spacing is still C4 (Task 24).
+5. **Boundary latency: fixed at 50 characters with zero headroom (risk).**
+   - Measured: 61.5–61.6 s in every window after M19 (51.3 %).
+   - At 50 all-expedition characters the cutoff tick is exactly full: 5 invocations × 20 simple jobs = 100 jobs, the 50 final
+     reveals and the 50 settlements they release.
+   - A 51st character steps publication back to about 121.6 s (101 %): one pair waits for minute 1 and preparation for minute 2.
+     This is derived, not measured.
+   - **Watch:** the number of active characters (those with an activity in a slot). The health report does not count them yet;
+     until it does, its `boundaries` section (a boundary still waiting after the second tick) and `jobs.overdue` show the
+     symptom, and the count is a direct query.
+   - **Mitigation options when active characters approach 50 (none built):**
+     - make the final reveal fall due before the cutoff, so an earlier tick completes it and the cutoff tick carries only the
+       settlements (100 characters fit);
+     - fold the final reveal into the settlement job (one job per character at the cutoff);
+     - or raise the cutoff tick's capacity: a larger simple batch, or more invocations in the cutoff minute, within the
+       invocation budget (risk 3).
+   - Task 23.7's planned idle pause (a character whose owner has sent no activity signal for 14 days leaves the boundary
+     cohort) reduces the active cohort. Its design awaits Avi's approval; nothing of it is built.
+   - Hosted dispatch spacing is still C4 (Task 24).

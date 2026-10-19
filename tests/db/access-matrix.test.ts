@@ -517,26 +517,35 @@ describe('release access matrix', () => {
 
   it("never shows one account another owner's private state", { timeout: 60_000 }, async () => {
     const owner = await fighter(), other = await fighter();
-    // Each gladiator gets a published activity of its own (creation itself writes none).
+    // Creation writes no activity, fee reservation, pending build item or cosmetic, so each gladiator gets one of each, as a
+    // published activity, a queued build (its held fee and its reserved starter item, under one operation) and a bought
+    // banner would write them. resetIdentity's truncate removes them before the next case.
     const slot = Math.floor(Date.now() / 4_800_000) - 1;
-    const activity = async (gid: string) => {
-      const id = randomUUID();
+    const seed = async (gid: string) => {
+      const activityId = randomUUID(), operationId = randomUUID();
       await sql`insert into public.activities(id,gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,resolved_kind,status,published_at_ms)
-        values(${id},${gid},${slot},${slot * 4_800_000},${(slot + 1) * 4_800_000},'{"kind":"rest"}','rest','active',${slot * 4_800_000})`;
-      return [id];
+        values(${activityId},${gid},${slot},${slot * 4_800_000},${(slot + 1) * 4_800_000},'{"kind":"rest"}','rest','active',${slot * 4_800_000})`;
+      await sql`insert into public.reservations(gladiator_id,operation_id,money,renown,status) values(${gid},${operationId},10,0,'held')`;
+      const [{ item }] = await sql`select id as item from public.item_instances where gladiator_id=${gid} order by id limit 1`;
+      await sql`insert into public.pending_build_items(item_id,gladiator_id,operation_id) values(${item},${gid},${operationId})`;
+      await sql`insert into public.owned_cosmetics(gladiator_id,catalog_id,catalog_version,binding) values(${gid},'banner','v1','bound')`;
+      return [activityId];
     };
-    const [ownerActivities, otherActivities] = [await activity(owner.gid), await activity(other.gid)];
+    const [ownerActivities, otherActivities] = [await seed(owner.gid), await seed(other.gid)];
     // Every relation a signed-in player may read that is not an open projection: the owner-filtered state.
     const owned = (await signedInReadable()).filter(r => !OPEN.includes(r.name));
     expect(owned.length).toBeGreaterThan(0);
-    // The owner's own reads of them hold its account, gladiator and activity ids, so their absence below is not vacuous.
-    const ownerIds = [owner.owner.id, owner.gid, ...ownerActivities];
-    const mine = Object.values(await readAll(owner.owner.client, owned)).join('');
-    for (const id of ownerIds) expect(mine).toContain(id);
-    // The other account, with a gladiator of its own, reads its own state and, from no relation, the owner's.
+    const holding = (read: Record<string, string>, ids: string[]) =>
+      Object.entries(read).filter(([, text]) => ids.some(id => text.includes(id))).map(([name]) => name).sort();
+    const names = owned.map(r => r.name).sort();
+    // Each relation's own read holds an id of its reader (account, gladiator or activity), relation by relation, so the
+    // absence below is never vacuous: a relation that returns nothing to its owner fails here by name.
+    const ownerIds = [owner.owner.id, owner.gid, ...ownerActivities], otherIds = [other.owner.id, other.gid, ...otherActivities];
+    const mine = await readAll(owner.owner.client, owned);
+    expect(holding(mine, ownerIds), 'relations whose read by their owner holds no owner id').toEqual(names);
     const theirs = await readAll(other.owner.client, owned);
-    const own = Object.values(theirs).join('');
-    for (const id of [other.owner.id, other.gid, ...otherActivities]) expect(own).toContain(id);
-    expect(Object.entries(theirs).filter(([, text]) => ownerIds.some(id => text.includes(id))).map(([name]) => name)).toEqual([]);
+    expect(holding(theirs, otherIds), 'relations whose read by the other account holds none of its own ids').toEqual(names);
+    // The other account reads, from no relation, any id of the owner's.
+    expect(holding(theirs, ownerIds), "relations that showed the other account the owner's ids").toEqual([]);
   });
 });

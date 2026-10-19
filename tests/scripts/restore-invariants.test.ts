@@ -20,7 +20,14 @@ type Observed = Parameters<typeof compareRestore>[1];
 const observed = (over: Partial<Observed> = {}): Observed => ({
   counts: { ...manifest.tables }, checksums: { ...manifest.files }, invariants: passing(), ...over,
 });
-const replayed = { status: 'replayed', slot: 1009, duplicateGrants: 0, lostItems: 0 };
+/** The guard probes of scripts/restore-resume.sql as a passing restore reports them (Task 22.4 review, Important 1). */
+const probes = () => ({
+  secondSettlement: { expected: 'primary-key', observed: 'primary-key' },
+  deleteSettledSlot: { expected: 'guard', observed: 'guard' },
+  deleteReceipt: { expected: 'guard', observed: 'guard' },
+});
+const replayed = { replayCheck: 'structural', status: 'replayed', slot: 1009, probes: probes(), duplicateGrants: 0, lostItems: 0,
+  countsUnchanged: true };
 
 describe('compareRestore', () => {
   it('passes when every count, checksum and invariant matches', () => {
@@ -80,11 +87,32 @@ describe('compareRestore', () => {
   });
 
   it('requires a replayed resume with no duplicate grant and no lost item when a resume is given', () => {
-    expect(compareRestore(manifest, observed({ resume: replayed }))).toMatchObject({ ok: true, resume: { ...replayed, ok: true } });
+    expect(compareRestore(manifest, observed({ resume: replayed }))).toMatchObject({ ok: true, resume: { ...replayed, ok: true,
+      probes: { secondSettlement: { ok: true }, deleteSettledSlot: { ok: true }, deleteReceipt: { ok: true } } } });
     expect(compareRestore(manifest, observed({ resume: { ...replayed, duplicateGrants: 1 } }))).toMatchObject({ ok: false, resume: { ok: false } });
     expect(compareRestore(manifest, observed({ resume: { ...replayed, lostItems: 2 } }))).toMatchObject({ ok: false, resume: { ok: false } });
-    expect(compareRestore(manifest, observed({ resume: { status: 'lease-held', slot: null, duplicateGrants: 0, lostItems: 0 } })))
+    expect(compareRestore(manifest, observed({ resume: { ...replayed, countsUnchanged: false } }))).toMatchObject({ ok: false, resume: { ok: false } });
+    expect(compareRestore(manifest, observed({ resume: { ...replayed, status: 'lease-held', slot: null } })))
       .toMatchObject({ ok: false, resume: { ok: false, status: 'lease-held' } });
+  });
+
+  it('fails the resume when a guard probe was not refused as expected, or is missing', () => {
+    // A second settlement that went through: the settled-slot primary key is gone.
+    const accepted = { ...replayed, probes: { ...probes(), secondSettlement: { expected: 'primary-key', observed: 'accepted' } } };
+    expect(compareRestore(manifest, observed({ resume: accepted }))).toMatchObject({ ok: false,
+      resume: { ok: false, probes: { secondSettlement: { observed: 'accepted', ok: false }, deleteReceipt: { ok: true } } } });
+    // Refused, but by something other than the guard (here a foreign key): the guard itself is missing.
+    const foreignKey = { ...replayed, probes: { ...probes(), deleteReceipt: { expected: 'guard', observed: '23503' } } };
+    expect(compareRestore(manifest, observed({ resume: foreignKey }))).toMatchObject({ ok: false, resume: { probes: { deleteReceipt: { ok: false } } } });
+    // Nothing to probe, a missing probe, or a probe that reports its own (wrong) expectation.
+    const empty = { ...replayed, probes: { ...probes(), deleteSettledSlot: { expected: 'guard', observed: 'no-row' } } };
+    expect(compareRestore(manifest, observed({ resume: empty })).ok).toBe(false);
+    const { deleteReceipt: _dropped, ...two } = probes();
+    expect(compareRestore(manifest, observed({ resume: { ...replayed, probes: two } }))).toMatchObject({ ok: false,
+      resume: { probes: { deleteReceipt: { expected: 'guard', observed: null, ok: false } } } });
+    const relabelled = { ...replayed, probes: { ...probes(), deleteSettledSlot: { expected: 'accepted', observed: 'accepted' } } };
+    expect(compareRestore(manifest, observed({ resume: relabelled })).ok).toBe(false);
+    expect(compareRestore(manifest, observed({ resume: { ...replayed, probes: undefined } })).ok).toBe(false);
   });
 
   it('refuses a malformed manifest instead of passing it', () => {

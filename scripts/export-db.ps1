@@ -23,7 +23,9 @@
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-db.ps1
 .EXAMPLE
-  $env:CLOUDIATOR_EXPORT_DB_URL = '<owner connection string>'; powershell -NoProfile -File scripts/export-db.ps1 -Remote
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-db.ps1 -Remote
+  after setting CLOUDIATOR_EXPORT_DB_URL from a non-echoing prompt (docs/operations/runbook.md, "Entering a connection
+  string"); never type or paste the connection string into a command line, which PSReadLine saves to its history file.
 #>
 [CmdletBinding()]
 param(

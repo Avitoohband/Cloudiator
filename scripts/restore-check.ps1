@@ -16,8 +16,10 @@
        then checks every foreign key). The only objects left out are pg_cron's (RESTORE_EXCLUSIONS in
        scripts/restore-compare.mjs and docs/operations/runbook.md): pg_cron can exist only in the postgres database.
     4. scripts/restore-invariants.sql: every table's rows and the grant, ledger and ownership invariants.
-    5. scripts/restore-resume.sql: the coordinator lease as the code takes it, then advance_boundary on the last published
-       slot, which must answer 'replayed' with no new grant and no lost item.
+    5. scripts/restore-resume.sql: a structural replay (the coordinator lease as the code takes it, then advance_boundary
+       on the last published slot, which must answer 'replayed'; it returns before any grant table), then guard probes in
+       rolled-back subtransactions (a second settlement must hit the settled-slot primary key; deleting a settled slot or a
+       receipt must hit its guard), then unchanged counts, no new grant and no lost item.
     6. Drops cloudiator_restore_check (unless -Keep), then prints the JSON report of scripts/restore-compare.mjs.
 
   Output: the JSON report on stdout (counts, checksums, invariants, resume, duplicateGrants, lostItems: no connection

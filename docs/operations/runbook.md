@@ -13,11 +13,33 @@ Ground rules for every section:
   `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1` after checking the container's
   `com.supabase.cli.project` label is `Cloudiator` (see `docs/operations/environment.md`).
 
+### Entering a connection string
+
+Never type or paste a connection string into a command line. Windows PowerShell 5.1's PSReadLine saves every interactive
+command line in plain text (`(Get-PSReadLineOption).HistorySavePath`, by default
+`%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`), and Git Bash keeps `~/.bash_history`. Read it
+at a prompt that neither echoes it nor records it, set the variable for this session only, and remove it when done:
+
+```powershell
+$secure = Read-Host -AsSecureString 'Owner connection string'   # paste at the prompt; nothing is echoed or saved
+$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try { $env:CLOUDIATOR_DB_URL = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr); Remove-Variable secure, bstr }
+# … the commands that need it …
+Remove-Item Env:CLOUDIATOR_DB_URL
+```
+
+Use `CLOUDIATOR_EXPORT_DB_URL` in place of `CLOUDIATOR_DB_URL` for the export. In Git Bash the equivalent is
+`read -rs CLOUDIATOR_DB_URL && export CLOUDIATOR_DB_URL`, then `unset CLOUDIATOR_DB_URL`. After pasting from the dashboard's
+copy button, clear the clipboard. If a connection string ever reached a command line, delete that line from the history file
+and rotate the database password in the dashboard.
+
 ## Health check
 
 ```powershell
 npm run health                                   # the local stack, discovered in memory
-$env:CLOUDIATOR_DB_URL = '<owner connection string>'; npm run health -- --remote   # the hosted database
+# The hosted database: set CLOUDIATOR_DB_URL as in "Entering a connection string", then
+npm run health -- --remote
 Remove-Item Env:CLOUDIATOR_DB_URL
 ```
 
@@ -154,7 +176,8 @@ Rotating the worker secret (both sides must hold the same value):
    current `--help` first). The function picks it up on its next start.
 4. Update Vault with the same value in the SQL editor:
    `select vault.update_secret((select id from vault.secrets where name = 'game_worker_secret'), '<value>');`
-   Then delete the private file.
+   The editor keeps query text in its history and in saved snippets. Run it in a new, unsaved query; never save it as a
+   snippet; afterwards delete that query and its history entry, and clear the clipboard. Then delete the private file.
 5. Resume the scheduler and run the health check: `overdue-jobs` must stay clear and `attempts24h` must grow. A mismatch shows
    as jobs that stop draining, not as a SQL failure.
 
@@ -171,8 +194,7 @@ the players' accounts (`auth.users`, identities) and game state.
 ### Export
 
 ```powershell
-# Hosted (the database owner's connection string, from the dashboard; never an argument):
-$env:CLOUDIATOR_EXPORT_DB_URL = '<owner connection string>'
+# Hosted: set CLOUDIATOR_EXPORT_DB_URL as in "Entering a connection string" (never an argument, never a command line), then
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-db.ps1 -Remote
 Remove-Item Env:CLOUDIATOR_EXPORT_DB_URL
 # Local stack (default):
@@ -229,10 +251,20 @@ extensions, never resets the stack and downloads nothing. Steps:
    item names its owner, pending builds and open listings hold only their own character's items, one open listing per item;
    at most 60 items per character; season awards unique; no orphan under any public or private foreign key; the grant and
    ownership guard triggers present and no trigger disabled.
-5. `scripts/restore-resume.sql`: takes the coordinator lease exactly as `public.coordinate_work()` does, replays the last
-   published boundary with `public.advance_boundary(published_slot, token)`, releases the lease, and compares settled slots,
-   receipts, ledger rows, items, awards and wallets before and after. It must answer `replayed` with `duplicateGrants: 0` and
-   `lostItems: 0`. It refuses to run in any database but `cloudiator_restore_check`.
+5. `scripts/restore-resume.sql` (it refuses to run in any database but `cloudiator_restore_check`):
+   - **Structural replay** (`"replayCheck":"structural"`): it takes the coordinator lease exactly as
+     `public.coordinate_work()` does, calls `public.advance_boundary(published_slot, token)` and releases the lease. It must
+     answer `replayed`. For a published slot that function returns right after taking the coordinator row lock and reading
+     the clock, before any phase or grant table, so this step only proves the checkpoint was restored and the lease and the
+     function work; on its own it cannot show that no second grant happens.
+   - **Guard probes** (`resume.probes`), each in a subtransaction that is always rolled back, on the latest settled slot at
+     or below the published slot: a second settlement of that (character, slot) with a fresh activity and receipt must be
+     refused by the `private.settled_slots` primary key (`primary-key`); deleting that settled slot must be refused by
+     `guard_frozen` (`guard`); deleting an operation receipt must be refused by `guard_receipt` (`guard`). Anything else
+     (`accepted`, `no-row`, or another SQLSTATE such as a foreign key's `23503`) fails the check. These probes are what show
+     that the restored copy cannot grant a slot twice or lose its grant guards.
+   - **Counts:** settled slots, receipts, ledger rows, items, awards and wallets before the replay and after the probes must
+     be equal (`countsUnchanged`, `duplicateGrants: 0`, `lostItems: 0`).
 6. Drop `cloudiator_restore_check` (unless `-Keep`; drop it later with the same `drop database … with (force)` statement,
    that exact name only), then print the report: `counts`, `mismatches`, `checksums`, `invariants`, `resume`,
    `duplicateGrants`, `lostItems`, the excluded entries and the database state. Exit `0` when everything matches, `1` when a
@@ -256,8 +288,10 @@ script still drops the database (unless `-Keep`) and removes its temporary files
 If a check fails, do not trust that backup: run `scripts/restore-invariants.sql` against the source inside a read-only
 transaction to see whether the source itself violates the invariant, fix that first, and export again.
 
-**What the check proves and what it does not.** It proves the files are intact, every row came back, the guards and
-invariants hold in the copy, and the restored checkpoint resumes without a second grant. It is a separate database in the
+**What the check proves and what it does not.** It proves the files are intact, every row came back, the invariants hold in
+the copy, the restored checkpoint is published and replays structurally, and the grant guards (the settled-slot primary key,
+`guard_frozen` and `guard_receipt`) refuse a second settlement and a deletion in the copy. The replay alone is not that
+proof; the guard probes are. It is a separate database in the
 local cluster, so roles come from that cluster and pg_cron is absent. Restoring the hosted service itself (a new project,
 migrations, the data, the Vault secrets, the cron jobs) is Task 24's procedure.
 

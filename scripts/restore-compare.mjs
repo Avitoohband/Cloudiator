@@ -41,6 +41,13 @@ export const RESTORE_EXCLUSIONS = Object.freeze([
   { type: '*', schema: 'cron', name: '*' },
 ]);
 
+/**
+ * The behavioural guard probes of scripts/restore-resume.sql and the refusal each must observe (Task 22.4 review,
+ * Important 1). The structural replay (advance_boundary on a published slot) returns before any grant table is touched, so
+ * these probes are what show that a second grant cannot happen in the restored copy.
+ */
+export const PROBES = Object.freeze({ secondSettlement: 'primary-key', deleteSettledSlot: 'guard', deleteReceipt: 'guard' });
+
 const fail = message => { throw new TypeError(`invalid manifest: ${message}`); };
 const isCount = value => Number.isSafeInteger(value) && value >= 0;
 const SHA256 = /^[0-9a-f]{64}$/i;
@@ -49,10 +56,12 @@ const SHA256 = /^[0-9a-f]{64}$/i;
  * Compares a restore with its export manifest.
  *   manifest: {tables: {"schema.table": rows}, files: {"name": sha256}}
  *   observed: {counts: {"schema.table": rows}, checksums: {"name": sha256 | null}, invariants: {name: {ok, violations}},
- *              resume?: {status, slot, duplicateGrants, lostItems}}
+ *              resume?: {replayCheck, status, slot, probes: {name: {expected, observed}}, duplicateGrants, lostItems,
+ *                        countsUnchanged}}
  * Returns {ok, mismatches: [{table, expected, actual}], checksums: {file: ok}, invariants, resume?}. A table on only one side
- * is a mismatch with null on the other; a missing invariant fails; a resume must be 'replayed' with no new grant and no lost
- * item. A malformed manifest throws instead of passing.
+ * is a mismatch with null on the other; a missing invariant fails; a resume must be 'replayed' (structurally) with every
+ * guard probe refused as PROBES expects, no new grant, no lost item and unchanged counts. A malformed manifest throws
+ * instead of passing.
  */
 export function compareRestore(manifest, observed) {
   const tables = manifest?.tables, files = manifest?.files;
@@ -79,8 +88,15 @@ export function compareRestore(manifest, observed) {
   let resumed = true;
   if (observed && 'resume' in observed) {
     const resume = observed.resume ?? {};
-    const ok = resume.status === 'replayed' && resume.duplicateGrants === 0 && resume.lostItems === 0;
-    result.resume = { ...resume, ok };
+    const reportedProbes = resume.probes ?? {};
+    // Each probe is judged against its expectation here, not against what the SQL reported as expected.
+    const probes = Object.fromEntries(Object.entries(PROBES).map(([name, expected]) => {
+      const observedValue = typeof reportedProbes[name]?.observed === 'string' ? reportedProbes[name].observed : null;
+      return [name, { expected, observed: observedValue, ok: observedValue === expected && reportedProbes[name]?.expected === expected }];
+    }));
+    const ok = resume.status === 'replayed' && resume.duplicateGrants === 0 && resume.lostItems === 0 && resume.countsUnchanged === true
+      && Object.values(probes).every(probe => probe.ok);
+    result.resume = { ...resume, probes, ok };
     resumed = ok;
   }
   result.ok = mismatches.length === 0 && Object.values(checksums).every(Boolean) && Object.values(invariants).every(i => i.ok) && resumed;

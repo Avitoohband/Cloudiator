@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { compareRestore, countCopyRows, filterRestoreList, INVARIANTS, manifestCounts } from '../../scripts/restore-compare.mjs';
 
 // Task 22.4: the restore comparison module behind scripts/restore-check.ps1, tested on fixture manifests with no Docker.
@@ -229,5 +230,21 @@ describe('restore-compare.mjs verify (the checksum gate before anything is resto
     expect(verify(backup({ 'schema.dump': 'schema' }, listed))).toMatchObject({ status: 1, output: { checksums: { 'data.dump': false } } });
     // A manifest listing only one dump would let restore-check.ps1 restore the other unverified.
     expect(verify(backup(files, { 'schema.dump': sha('schema') }))).toEqual({ status: 2, output: { ok: false, code: 'manifest-invalid' } });
+  });
+});
+
+describe('restore-compare.mjs manifest commit', () => {
+  const directories: string[] = [];
+  afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true }); });
+
+  it("records this repository's commit wherever the operator runs the script from (final review, Minor 2)", () => {
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: resolve('.'), encoding: 'utf8' }).stdout.trim();
+    const elsewhere = mkdtempSync(join(tmpdir(), 'cloudiator-cwd-'));
+    directories.push(elsewhere);
+    const module = JSON.stringify(pathToFileURL(resolve('scripts/restore-compare.mjs')).href);
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `import { repositoryCommit } from ${module}; process.stdout.write(JSON.stringify(repositoryCommit()));`], { cwd: elsewhere, encoding: 'utf8' });
+    expect(head).toMatch(/^[0-9a-f]{40}$/);
+    expect(JSON.parse(run.stdout)).toEqual({ commit: head, dirty: expect.any(Boolean) });
   });
 });

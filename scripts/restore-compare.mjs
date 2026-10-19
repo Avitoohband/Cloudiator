@@ -187,9 +187,16 @@ function dumpCounts(dumpPath) {
   });
 }
 
+/** The repository this script belongs to: git runs there, whichever directory the operator runs the script from. */
+const REPOSITORY = fileURLToPath(new URL('..', import.meta.url));
 function git(args) {
-  const result = spawnSync('git', args, { encoding: 'utf8', windowsHide: true });
+  const result = spawnSync('git', args, { cwd: REPOSITORY, encoding: 'utf8', windowsHide: true });
   return result.status === 0 ? result.stdout.trim() : null;
+}
+/** The manifest's `commit` and `dirty`: the repository's HEAD and whether its tracked files differ from it (null without git). */
+export function repositoryCommit() {
+  const commit = git(['rev-parse', 'HEAD']);
+  return { commit, dirty: commit === null ? null : git(['status', '--porcelain', '--untracked-files=no']) !== '' };
 }
 /** JSON from a file written by psql, node or PowerShell (a UTF-8 byte order mark is ignored). */
 function readJson(path) {
@@ -225,13 +232,13 @@ const commands = {
     const counts = manifestCounts(await dumpCounts(dataDump));
     const files = {};
     for (const file of DUMPS) files[file] = await sha256(join(dir, file));
-    const commit = git(['rev-parse', 'HEAD']);
+    const { commit, dirty } = repositoryCommit();
     const manifest = {
       format: 1,
       createdAt: new Date().toISOString(),
       source,
       commit,
-      dirty: commit === null ? null : git(['status', '--porcelain', '--untracked-files=no']) !== '',
+      dirty,
       serverVersion: facts.serverVersion,
       migrations: facts.migrations,
       excludedData: EXPORT_DATA_EXCLUSIONS,
@@ -320,4 +327,3 @@ const invokedDirectly = () => {
   }
 };
 if (invokedDirectly()) main(process.argv.slice(2)).then(code => { process.exitCode = code; });
-

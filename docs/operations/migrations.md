@@ -30,7 +30,8 @@ are the OPEN visitor projections (`tests/fixtures/access.ts`, shared with `tests
 - that private seeds, plans and snapshots (activity snapshots and seeds, expedition plans, job inputs and seeds, Arena
   assignment seeds, build preparations) never appear in anything their owner can read.
 
-Each catalog case also proves, in a transaction that always rolls back, that the audit reports the violation it guards against.
+The visitor, row-security, function and default-privilege cases also prove, in a transaction that always rolls back, that the
+audit reports the violation they guard against.
 `anonWritable` in `tests/db/visitor-access.test.ts` now also counts REFERENCES, TRIGGER and MAINTAIN.
 
 **What the matrix found on the M01–M16 replay, and M17 revokes** (the two named items and controller rulings A–C):

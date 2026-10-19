@@ -9,8 +9,9 @@ import { OPEN, PUBLIC_TOURNAMENT_COLUMNS } from '../fixtures/access.ts';
 
 // Task 23.1 (M17): the release access matrix. Every expectation is derived from the catalog through the exported operator
 // audit (scripts/access-audit.sql, one read-only SELECT), except the OPEN list of visitor projections
-// (tests/fixtures/access.ts) and the pinned service_role snapshot below. Each catalog case also proves, inside a transaction
-// that always rolls back, that the audit reports the violation it guards against.
+// (tests/fixtures/access.ts) and the pinned service_role snapshot below. The visitor, row-security, function and
+// default-privilege cases also prove, inside a transaction that always rolls back, that the audit reports the violation they
+// guard against; the authenticated case reads the same sections for another role.
 const commands = createDatabase(admin);
 beforeEach(async () => { await resetIdentity(); await sql`update private.scheduler set enabled=false where singleton`; });
 afterAll(() => sql.end());

@@ -121,13 +121,26 @@ export function describeFailure(error) {
 
 /**
  * CLI for scripts/export-db.ps1 -Remote:
+ *   node scripts/operator-db.mjs check <ENV_NAME>
+ *     validates the connection string up front; prints {"ok":true,"local":…} or {"ok":false,"code":…} (exit 2).
  *   node scripts/operator-db.mjs exec <ENV_NAME> <command> [args...]
- * Parses the connection string in the environment variable <ENV_NAME> (never an argument), then runs <command> with the
- * parsed fields as PG* variables and without <ENV_NAME>. The command's standard output passes through; its standard error is
- * discarded, because libpq errors name the host and user. Exits with the command's status, or 2 with a short code on stderr.
+ *     parses the connection string in the environment variable <ENV_NAME> (never an argument), then runs <command> with the
+ *     parsed fields as PG* variables and without <ENV_NAME>. The command's standard output passes through; its standard
+ *     error is discarded, because libpq errors name the host and user. Exits with the command's status, or 2 with a short
+ *     code on stderr.
  */
 function main(argv) {
   const [verb, name, command, ...args] = argv;
+  if (verb === 'check' && /^[A-Z][A-Z0-9_]*$/.test(name ?? '') && command === undefined) {
+    try {
+      if (!process.env[name]) throw new Failure('remote-needs-url');
+      process.stdout.write(JSON.stringify({ ok: true, local: operatorTarget(process.env[name], { remote: true }).local }) + '\n');
+      return 0;
+    } catch (error) {
+      process.stdout.write(JSON.stringify(describeFailure(error)) + '\n');
+      return 2;
+    }
+  }
   if (verb !== 'exec' || !/^[A-Z][A-Z0-9_]*$/.test(name ?? '') || !command) {
     process.stderr.write(JSON.stringify({ ok: false, code: 'usage' }) + '\n');
     return 2;

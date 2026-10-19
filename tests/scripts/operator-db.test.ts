@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describeFailure, Failure, libpqEnvironment, operatorTarget, parseDatabaseUrl, postgresOptions } from '../../scripts/operator-db.mjs';
 
 // Task 22.4 carried fixes M1 and M2 (Task 22.3 review): the operator connection parser shared by scripts/health.mjs and
@@ -102,5 +105,37 @@ describe('describeFailure', () => {
     expect(describeFailure(new Failure('query-failed', '40001'))).toEqual({ ok: false, code: 'query-failed', sqlstate: '40001' });
     expect(describeFailure(new Error('postgres://u:secret@db.example.com'))).toEqual({ ok: false, code: 'report-failed' });
     expect(describeFailure(Object.assign(new Error('x'), { code: 'lowercase' }))).toEqual({ ok: false, code: 'report-failed' });
+  });
+});
+
+describe('operator-db.mjs CLI (scripts/export-db.ps1 -Remote)', () => {
+  const run = (args: string[], url: string | undefined) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, CLOUDIATOR_EXPORT_DB_URL: url };
+    if (url === undefined) delete env.CLOUDIATOR_EXPORT_DB_URL;
+    return spawnSync(process.execPath, [resolve('scripts/operator-db.mjs'), ...args], { encoding: 'utf8', env });
+  };
+
+  it('checks the URL from the environment without echoing it', () => {
+    const marker = randomUUID();
+    const valid = run(['check', 'CLOUDIATOR_EXPORT_DB_URL'], `postgresql://operator:pw-${marker}@db.example.com:5432/postgres`);
+    expect({ status: valid.status, out: JSON.parse(valid.stdout) }).toEqual({ status: 0, out: { ok: true, local: false } });
+    const evil = run(['check', 'CLOUDIATOR_EXPORT_DB_URL'], `postgres://u:pw-${marker}@evil.example,x@127.0.0.1/db`);
+    expect({ status: evil.status, out: JSON.parse(evil.stdout) }).toEqual({ status: 2, out: { ok: false, code: 'invalid-url' } });
+    const missing = run(['check', 'CLOUDIATOR_EXPORT_DB_URL'], undefined);
+    expect(JSON.parse(missing.stdout)).toEqual({ ok: false, code: 'remote-needs-url' });
+    for (const out of [valid, evil, missing]) expect(out.stdout + out.stderr).not.toContain(marker);
+  });
+
+  it('runs a command with the parsed PG* variables only, without the URL variable', () => {
+    const marker = randomUUID();
+    const probe = 'const e=process.env;process.stdout.write(JSON.stringify({host:e.PGHOST,port:e.PGPORT,user:e.PGUSER,db:e.PGDATABASE,'
+      + "ssl:e.PGSSLMODE,password:e.PGPASSWORD==='pw '+" + JSON.stringify(marker) + ',url:"CLOUDIATOR_EXPORT_DB_URL" in e}))';
+    const ran = run(['exec', 'CLOUDIATOR_EXPORT_DB_URL', process.execPath, '-e', probe], `postgresql://operator:pw%20${marker}@db.example.com:6543/app`);
+    expect(ran.status).toBe(0);
+    expect(JSON.parse(ran.stdout)).toEqual({ host: 'db.example.com', port: '6543', user: 'operator', db: 'app', ssl: 'require', password: true, url: false });
+    const refused = run(['exec', 'CLOUDIATOR_EXPORT_DB_URL', process.execPath, '-e', 'process.exit(0)'], `postgres://a@b@127.0.0.1/${marker}`);
+    expect(refused.status).toBe(2);
+    expect(JSON.parse(refused.stderr)).toEqual({ ok: false, code: 'invalid-url' });
+    expect(refused.stdout + refused.stderr).not.toContain(marker);
   });
 });

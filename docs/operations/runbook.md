@@ -1,0 +1,285 @@
+# Operator runbook
+
+Task 22.4 (plan `docs/superpowers/plans/2026-10-18-task-22-retention-operations.md`, Decisions 8 and 9). This is the
+owner-operated runbook for the Cloudiator backend: the health check, recovery, rules and scheduler changes, secret rotation,
+the weekly export and its restore check, and the hosted budgets. There is no player-facing admin flow: everything here runs
+as the database owner, from the operator's own shell or the hosting dashboard's SQL editor.
+
+Ground rules for every section:
+- Never print `supabase status`, keys, JWTs, connection strings or `.env*` contents. Secrets are named here, never shown.
+- Connection strings live only in the operator's shell environment (`CLOUDIATOR_DB_URL`, `CLOUDIATOR_EXPORT_DB_URL`), never in
+  a file in the repository, a command argument or a chat.
+- Where this guide says "SQL", run it as the database owner (`postgres`) in the hosted SQL editor, or locally with
+  `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1` after checking the container's
+  `com.supabase.cli.project` label is `Cloudiator` (see `docs/operations/environment.md`).
+
+## Health check
+
+```powershell
+npm run health                                   # the local stack, discovered in memory
+$env:CLOUDIATOR_DB_URL = '<owner connection string>'; npm run health -- --remote   # the hosted database
+Remove-Item Env:CLOUDIATOR_DB_URL
+```
+
+`scripts/health.mjs` prints `private.health_report(private.planning_now_ms())` as JSON from one read-only transaction
+(`statement_timeout` 30 s, `lock_timeout` 5 s). Exit `0` healthy, `1` alerts, `2` failure. The fields are listed in
+`docs/operations/migrations.md` ("Operator health report"). Run it daily, after every deployment, after a pause and after any
+recovery below.
+
+### Alerts and what to do
+
+| Alert | Meaning | Action |
+|---|---|---|
+| `boundary-behind` | The next slot is more than 10 minutes late, or nothing is published while the scheduler is on. | Check `scheduler.enabled` and `coordinator.lastError`/`lastFailedSlot` in the report. Check the hosted project is not paused (see "Free-tier pausing"). If `lastError` is set, a boundary failed in isolation: see `boundary-waiting`. Catch-up runs at most 6 boundaries per tick, so a long pause shows `slotsBehind` falling by up to 6 a minute. |
+| `boundary-waiting` | A boundary has been open more than 10 minutes. The report gives its phase and `waitReason`. | `preparation`/`pairing`/`settlement`/`integration`/`straggler`: jobs are not draining; see `overdue-jobs` and `operator-jobs`. `extension`: registered boundary work (for example a season close) is still pending. `operator`: an operator job holds it; see "Manual recovery". `error`: the report holds only the SQLSTATE; fix the cause (a deterministic data error, a missing rules version) and let the next tick retry. `epoch`: the season epoch is not set (`docs/operations/migrations.md`, M09 and M16 notes). |
+| `operator-jobs` | Jobs retained after three failures (or three expired leases). The report lists their ids and `lastFailure` codes. | "Manual recovery after three failures" below. |
+| `overdue-jobs` | A pending job is more than 10 minutes past due, or a lease expired more than 10 minutes ago without a reclaim. | The worker is not being invoked or is failing before it claims: check the scheduler, the Vault secrets and the Edge `GAME_WORKER_SECRET` match (see "Secret rotation"), and the function-invocation budget. `dispatch.lastAtMs` and `lastHour` show whether pg_net dispatched at all. |
+| `cleanup-stale` | The scheduler is on and no cleanup succeeded for 26 hours (or ever). | Right after enabling the scheduler this is expected until minute 23; run `select private.cleanup_tick();` once. Otherwise look at `events.cleanup` and `cleanup-failures`. |
+| `cleanup-failures` | The last three or more cleanup ticks failed. | The events carry only a SQLSTATE. `55P03` (lock timeout) means cleanup kept yielding to boundaries (it gives up a lock after 500 ms); it should clear when the backlog of boundaries ends. Anything else: run `select private.cleanup_history(private.planning_now_ms());` as the owner in a transaction you roll back, read the error there, fix the cause. |
+| `cleanup-backlog` | Cleanup has reported `more` for 24 hours. | Usually a long pause: each hourly call handles at most 3 slots per pass. If `blockedSlot` is set, an unfinished activity or job in that slot stops it: resolve the job first (see `operator-jobs`). |
+| `tick-failures` | Market-sweep or dispatch failures in the last hour, aggregated with their SQLSTATEs. | A sweep failure for one seller does not stop the others; repeated failures for the same SQLSTATE point to a data problem in that seller's listings. Dispatch failures usually mean pg_net or Vault problems. |
+| `database-size` | Warning from 80 % of the 250 MB budget, alert from 100 %. | Check `resources.largestTables`. Confirm cleanup is running (the 7-day detail and 90-day summary passes free most space). If the budget is still exceeded, plan the paid tier or a retention change before writes fail. |
+
+### Failure codes of the health CLI
+
+On exit `2` the CLI prints `{"ok":false,"code":…}` and, when the database gave one, a `sqlstate`. Nothing else of an error is
+printed, by design.
+
+| Code | Meaning | Action |
+|---|---|---|
+| `usage` | An argument other than `--remote`. | Run `npm run health` or `npm run health -- --remote`. |
+| `invalid-url` | `CLOUDIATOR_DB_URL` is not a plain `postgres://` or `postgresql://` URL: whitespace, a fragment, no user, a socket path, a `,` (host list) or more than one `@` in the authority, an unusual or percent-encoded host, a nested database path, a port outside 1–65535, or a query parameter other than `sslmode` (`disable`, `allow`, `prefer`, `require`, `verify-full`). | Percent-encode special characters in the password (`@` as `%40`, `:` as `%3A`). Use the direct database host, one host only. |
+| `remote-not-allowed` | The host is not loopback (`127.0.0.1`, `localhost`, `::1`) and `--remote` was not given. | Add `--remote` if the hosted database is intended. |
+| `remote-needs-url` | `--remote` without `CLOUDIATOR_DB_URL`. | Set the variable in the shell first. |
+| `discovery-failed` | Local discovery could not read the local stack (the CLI failed, or its output was unusable). | Start the local stack (`docs/operations/environment.md`); see `docs/operations/local-runtime.md` if Docker does not start. |
+| `discovery-not-local` | The local CLI reported a database that is not on a loopback host. | Refused on purpose: the default mode only reports on this checkout's local stack. Check the CLI configuration; use `CLOUDIATOR_DB_URL` with `--remote` for a hosted database. |
+| `connection-failed` | Network or TLS failure: refused, DNS, unreachable, timed out, connection closed or a broken pipe. | Check the host, port and that the project is not paused. With `sslmode=verify-full`, check the CA (see "Connections and TLS"). |
+| `auth-failed` | SQLSTATE `28P01`/`28000`: wrong user or password. | Copy the owner connection string again from the dashboard. |
+| `database-missing` | SQLSTATE `3D000`: the database name in the URL does not exist. | Use `postgres`. |
+| `report-missing` | SQLSTATE `42883`/`3F000`: `private.health_report` or the `private` schema is missing. | Migration M16 is not applied there (`docs/operations/migrations.md`). |
+| `permission-denied` | SQLSTATE `42501`: the role may not run the report (it is owner-only). | Connect as the database owner, not `service_role` or a client role. |
+| `timeout` | SQLSTATE `57014`: the report exceeded 30 s. | Retry; if repeated, the database is overloaded or very large (see `database-size`). |
+| `lock-timeout` | SQLSTATE `55P03`: a lock was not granted within 5 s. | Retry after the current boundary finishes. |
+| `query-failed` | Any other SQLSTATE (shown). | Look the SQLSTATE up; run the report in the SQL editor to see the message. |
+| `report-invalid` | The report returned no `alerts` array. | The function is not the M16 version; check the migration history. |
+| `report-failed` | Anything else (no detail by design). | Run the report in the SQL editor: `select private.health_report(private.planning_now_ms());`. |
+
+### Connections and TLS
+
+`scripts/health.mjs` and `scripts/export-db.ps1 -Remote` parse the connection string once (`scripts/operator-db.mjs`) and
+hand the drivers only the parsed host, port, user, password and database, so the loopback guard and the driver can never read
+different hosts. For a non-loopback host without `sslmode`, TLS is `require`: **the connection is encrypted but the server
+certificate is not verified**. To verify the hosted server:
+- Download the project's CA certificate from the hosting dashboard's database settings (SSL configuration).
+- Health (postgres.js): add `?sslmode=verify-full` to `CLOUDIATOR_DB_URL` and set `NODE_EXTRA_CA_CERTS` to the CA file's
+  path for that shell.
+- Export (libpq inside the local container, running as root): copy the CA to the path libpq reads by default,
+  `docker cp <ca file> supabase_db_Cloudiator:/root/.postgresql/root.crt` (create the directory first with
+  `docker exec supabase_db_Cloudiator mkdir -p /root/.postgresql`), and add `?sslmode=verify-full`. The copy lasts until the
+  container is recreated.
+
+Not yet tested against a hosted project (none exists before Task 24); Task 24 verifies both.
+
+## Manual recovery after three failures
+
+A job that fails three times (or whose lease expires three times) stays in `operator` status with a short `last_failure` code;
+its boundary waits (`waitReason: operator`). Its seed and input are immutable, so a retry recomputes exactly the same result.
+
+1. Read the job ids and failure codes from the health report (`jobs.operator`), or:
+   `select id, kind, slot_index, attempts, last_failure from private.jobs where status = 'operator' order by slot_index;`
+   and the attempts: `select attempt, outcome, failure_code, finished_at_ms - claimed_at_ms as ms from private.job_attempts where job_id = '<id>' order by attempt;`
+2. **Fix deterministic errors first.** A code such as `unsupported-rules`, `unsupported-executor`, `invalid-input` or an
+   invalid result will fail again with the same input: deploy the missing executor (see "Retained-rule deployments") or fix
+   the data or code that produced it. Only transient causes (timeouts, an outage, `lease-expired`) can be resumed as they are.
+3. Resume: `select private.resume_operator_job('<id>');` returns `{"ok":true}` and sets the job back to `pending` with three
+   more attempts. It answers `{"ok":false,"code":"invalid"}` for a job that is not in `operator` status.
+4. The next tick dispatches a worker; run the health check until `operator-jobs` and `boundary-waiting` clear.
+
+Never delete or edit a job, a settled slot or a receipt to "unstick" a boundary: the guards refuse it, and the settled-slot
+guard is what prevents a second grant.
+
+## Retained-rule deployments
+
+Every boundary, snapshot and job records its rules version (`private.rules_versions`, today only `v1`, active). A job always
+runs with the executors of its own version (`DEFAULT_EXECUTORS` in `supabase/functions/_shared/backend/jobs.ts`); a worker
+without that version fails it with `unsupported-rules`, and after three attempts it waits for an operator.
+
+To ship changed rules:
+1. Add the new version (for example `v2`) alongside the old one in the worker's executor registry and deploy the Edge
+   function. **Keep `v1`** until no unfinished job, boundary or snapshot uses it.
+2. Insert the version row: `insert into private.rules_versions(version, active) values ('v2', false);`
+3. Switch at a quiet moment, in one transaction and in this order (one version may be active):
+   `begin; update private.rules_versions set active = false where version = 'v1'; update private.rules_versions set active = true where version = 'v2'; commit;`
+   Boundaries opened afterwards use `v2`; jobs already created keep `v1`.
+4. Never delete a `rules_versions` row: boundaries, snapshots and jobs reference it. Remove `v1`'s executors only when
+   `select count(*) from private.jobs where rules_version = 'v1' and status <> 'completed';` is `0` and no boundary is open.
+
+## Pausing and resuming the scheduler
+
+pg_cron runs `cloudiator-coordinate` every minute and `cloudiator-cleanup` at minute 23. Both are inert while the scheduler is
+disabled:
+
+```sql
+update private.scheduler set enabled = false where singleton;   -- pause
+update private.scheduler set enabled = true  where singleton;   -- resume
+select jobname, schedule, active from cron.job;                 -- both jobs present and active
+```
+
+While paused, nothing coordinates, dispatches, sweeps the market or cleans up; commands still work. A worker invoked by hand
+still coordinates (`coordinate_work` does not read the flag), so do not invoke it while you want a full pause. After resuming,
+catch-up processes the missed slots in order (at most 6 boundaries per tick), sweeps the expired listings once and returns
+their items once; cleanup catches up hourly. Run the health check until `slotsBehind` is `0`. Do not unschedule the cron
+jobs to pause: re-registration is a migration step.
+
+## Secret rotation
+
+Names only; never print the values.
+- **Database (Vault):** `game_worker_url` (the worker endpoint) and `game_worker_secret`, read by `private.dispatch_workers`.
+  Without both, dispatch reports `unconfigured` and sends nothing.
+- **Edge function secrets:** `GAME_WORKER_SECRET` (at least 32 characters; the worker refuses any request without it) and
+  `GAME_ALLOWED_ORIGINS` (configuration, not a secret). Locally they live in the git-ignored `.env.edge.local`.
+  `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform.
+
+Rotating the worker secret (both sides must hold the same value):
+1. Pause the scheduler.
+2. Generate a new value without displaying it, for example into a private, git-ignored file outside the repository:
+   `node -e "process.stdout.write('GAME_WORKER_SECRET='+require('crypto').randomBytes(32).toString('base64url')+'\n')" > <private file>`
+3. Set the Edge secret from that file: `npx supabase secrets set --env-file <private file> --project-ref <ref>` (check the
+   current `--help` first). The function picks it up on its next start.
+4. Update Vault with the same value in the SQL editor:
+   `select vault.update_secret((select id from vault.secrets where name = 'game_worker_secret'), '<value>');`
+   Then delete the private file.
+5. Resume the scheduler and run the health check: `overdue-jobs` must stay clear and `attempts24h` must grow. A mismatch shows
+   as jobs that stop draining, not as a SQL failure.
+
+The publishable key, the service-role key and the JWT secret are rotated in the hosting dashboard; afterwards update the
+frontend build variable (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) and redeploy. A restored database never carries Vault
+values (see the export exclusions), so step 4 is also the step that re-creates the secrets after a restore.
+
+## Weekly export and the restore check
+
+Once a week (and before launch), export the hosted database to storage outside the free service, then prove the copy
+restores. `.backups/` is git-ignored; keep the copies on encrypted storage the operator controls, because a backup contains
+the players' accounts (`auth.users`, identities) and game state.
+
+### Export
+
+```powershell
+# Hosted (the database owner's connection string, from the dashboard; never an argument):
+$env:CLOUDIATOR_EXPORT_DB_URL = '<owner connection string>'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-db.ps1 -Remote
+Remove-Item Env:CLOUDIATOR_EXPORT_DB_URL
+# Local stack (default):
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-db.ps1 [-OutDir .backups]
+```
+
+It writes `.backups/<UTC yyyyMMddTHHmmssZ>/`:
+- `schema.dump`: `pg_dump --format=custom --schema-only` of the whole database (application, Auth and platform schemas).
+- `data.dump`: `pg_dump --format=custom --data-only`, including `auth.users`.
+- `manifest.json`: the git commit (and whether the tree was dirty), the server version, the applied migrations, the
+  excluded table data, the row count of every public and private table plus `auth.users` (counted from the COPY rows of
+  `data.dump` itself, so it describes exactly that file) and the SHA-256 of both dumps.
+
+The tools are the PostgreSQL 17 `pg_dump`/`psql` inside the local container `supabase_db_Cloudiator` (label verified first),
+so the local stack must be running even for a hosted export. In `-Remote` mode `scripts/operator-db.mjs` validates the URL
+first, then runs `pg_dump` with only `PG*` variables (`docker exec -e PGHOST …` takes the values from the environment, never
+from arguments) and discards libpq's error text, which names the host; a failure prints a short code
+(`schema-dump-failed`, `data-dump-failed`, …). The remote mode has been exercised only up to the connection (an unreachable
+host gives `schema-dump-failed` without printing it); Task 24 runs it against the hosted project. The schema and data dumps
+are two `pg_dump` runs: export outside a deployment window so no migration lands between them.
+
+**Excluded table data** (`EXPORT_DATA_EXCLUSIONS` in `scripts/restore-compare.mjs`, recorded in every manifest):
+- `vault.secrets`: Vault ciphertext is bound to the source server's root key and would not decrypt elsewhere; re-create the
+  two secrets by name after a restore ("Secret rotation", step 4).
+- `auth.sessions`, `auth.refresh_tokens`, `auth.mfa_amr_claims`, `auth.one_time_tokens`, `auth.flow_state`,
+  `auth.saml_relay_states`: sign-in sessions, refresh tokens and short-lived sign-in flow tokens. They are bearer material
+  with no game state, and the set is closed under its foreign keys. After a restore, players sign in again.
+
+Export failure codes (exit `2`): `remote-needs-url`, `invalid-url` (and the other URL codes above), `backup-exists`,
+`container-missing`, `container-not-verified`, `container-not-running`, `container-work-failed`, `exclusions-failed`,
+`schema-dump-failed`, `data-dump-failed`, `facts-failed`, `copy-failed`, `manifest-failed`, `export-failed`. A failed run
+removes the backup directory it created and its temporary files.
+
+### Restore check
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-check.ps1 -Backup .backups/<stamp> [-Keep]
+```
+
+It restores the backup into a separate database named exactly `cloudiator_restore_check` inside the local container
+`supabase_db_Cloudiator` (label `com.supabase.cli.project=Cloudiator` verified first). It refuses any other name (`-Database`
+must be exactly that), drops and creates only that database, never touches the `postgres` database's data, roles or
+extensions, never resets the stack and downloads nothing. Steps:
+1. Verify the SHA-256 of both dumps against the manifest. A mismatch stops here with exit `1` and
+   `{"ok":false,"code":"checksum-mismatch","checksums":{…}}`; nothing is restored.
+2. `drop database if exists cloudiator_restore_check with (force)`, then create it from `template0`.
+3. Restore the schema, then the data, each as one transaction with `psql -v ON_ERROR_STOP=1 --single-transaction` (any error
+   stops and rolls back). The data loads with `session_replication_role = replica`, so no trigger or foreign-key trigger fires
+   during the load; step 4 then checks every foreign key and guard explicitly.
+4. `scripts/restore-invariants.sql` (read-only): the row count of every public and private table plus `auth.users`, and the
+   invariants: settled slots unique per (character, slot), activity and receipt; every completed activity guarded by its
+   settled slot; one ledger row per receipt and every ledger receipt present; wallets equal checkpoint plus ledger; every
+   item names its owner, pending builds and open listings hold only their own character's items, one open listing per item;
+   at most 60 items per character; season awards unique; no orphan under any public or private foreign key; the grant and
+   ownership guard triggers present and no trigger disabled.
+5. `scripts/restore-resume.sql`: takes the coordinator lease exactly as `public.coordinate_work()` does, replays the last
+   published boundary with `public.advance_boundary(published_slot, token)`, releases the lease, and compares settled slots,
+   receipts, ledger rows, items, awards and wallets before and after. It must answer `replayed` with `duplicateGrants: 0` and
+   `lostItems: 0`. It refuses to run in any database but `cloudiator_restore_check`.
+6. Drop `cloudiator_restore_check` (unless `-Keep`; drop it later with the same `drop database … with (force)` statement,
+   that exact name only), then print the report: `counts`, `mismatches`, `checksums`, `invariants`, `resume`,
+   `duplicateGrants`, `lostItems`, the excluded entries and the database state. Exit `0` when everything matches, `1` when a
+   check fails.
+
+**The one exclusion list** (`RESTORE_EXCLUSIONS` in `scripts/restore-compare.mjs`; nothing else is ever left out, and no
+error is suppressed): pg_cron can only be created in the database named by `cron.database_name` (`postgres`), so
+`CREATE EXTENSION pg_cron` fails in `cloudiator_restore_check` with "can only create extension in database postgres". The
+restore therefore leaves out exactly: the `pg_cron` extension and its comment, the `cron` schema's ACL (and the schema and its
+comment if a dump lists them), and every entry inside the `cron` schema: its function and table ACLs, default privileges, the
+`cron.job` schedule and `cron.job_run_details` data, and the two sequence values. The local run left out 15 schema entries
+and 4 data entries. The schedules stay in the backup; a restore into a real `postgres` database (Task 24) keeps them.
+`pg_net`, `supabase_vault`, `pgcrypto`, `uuid-ossp` and `pg_stat_statements` restore normally.
+
+Restore-check failure codes (exit `2`): `database-not-allowed`, `backup-missing`, `manifest-missing`, `manifest-invalid`,
+`file-missing`, `json-invalid`, `container-missing`, `container-not-verified`, `container-not-running`,
+`container-work-failed`, `copy-failed`, `drop-failed`, `create-failed`, `list-failed`, `exclude-failed`, `sql-failed`,
+`schema-restore-failed`, `data-restore-failed`, `invariants-failed`, `resume-failed`, `restore-check-failed`. On a failure the
+script still drops the database (unless `-Keep`) and removes its temporary files.
+
+If a check fails, do not trust that backup: run `scripts/restore-invariants.sql` against the source inside a read-only
+transaction to see whether the source itself violates the invariant, fix that first, and export again.
+
+**What the check proves and what it does not.** It proves the files are intact, every row came back, the guards and
+invariants hold in the copy, and the restored checkpoint resumes without a second grant. It is a separate database in the
+local cluster, so roles come from that cluster and pg_cron is absent. Restoring the hosted service itself (a new project,
+migrations, the data, the Vault secrets, the cron jobs) is Task 24's procedure.
+
+**Seeding a local world for the check.** A fresh local database has no published boundary to replay. Build a small real world
+first with `npm run test:db -- tests/db/restore-world.test.ts` (four characters, an open listing and a catch-up through
+boundary 1009 that closes season 1); that file deliberately leaves its world in place. Follow the database-test rule in
+`docs/operations/verification-gates.md`.
+
+## Free-tier pausing
+
+The free tier can pause a project that looks inactive. pg_cron's own traffic runs inside the database and is not a guarantee
+that the project counts as active; do not rely on the scheduler to keep it awake. A paused project serves nothing: the health
+check fails with `connection-failed` and players cannot load the game.
+- Check the project's status in the hosting dashboard during the weekly export; the export itself is also activity.
+- After a restore from pause, run the health check. Catch-up processes the missed slots in order (tested in
+  `tests/db/recovery.test.ts`), sweeps the listings that expired during the pause once and returns their items once; cleanup
+  catches up hourly. Expect `boundary-behind` and possibly `cleanup-backlog` until it has caught up.
+- A long pause (weeks) means a long catch-up at 6 boundaries a minute; plan the paid tier before launch if that is not
+  acceptable.
+
+## Budgets in the hosting dashboard
+
+The free-tier budgets are 250 MB database, **3 GB monthly egress** and **300,000 monthly Edge Function invocations**. The
+health report covers only the database size (`resources`, the `database-size` alert); the Edge runtime exposes no
+per-request CPU (`cpu: "not available"`), and egress and invocations are read in the dashboard:
+- Open the organization's usage page in the Supabase dashboard for the current billing cycle.
+- **Egress:** compare the cycle's total with 3 GB, and the daily trend with 3 GB divided by the days in the cycle (about
+  100 MB a day). A sudden rise usually means a client polling too often or large replays being read.
+- **Edge Function invocations:** compare with 300,000 (about 10,000 a day). Dispatch sends at most 5 worker invocations a
+  minute (`private.scheduler.max_dispatch_per_minute`, at most 7,200 a day) and only for claimable work; the rest is player
+  commands. If the trend crosses the daily share, lower `max_dispatch_per_minute` (1–5) and check for clients retrying commands.
+- Record the three numbers with each weekly export.

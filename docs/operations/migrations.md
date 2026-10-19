@@ -12,13 +12,15 @@ M01–M15 are unchanged.
 stack:
 
 ```powershell
-docker inspect -f '{{index .Config.Labels "com.supabase.cli.project"}}' supabase_db_Cloudiator   # must print Cloudiator
+(docker inspect -f '{{json .Config.Labels}}' supabase_db_Cloudiator | ConvertFrom-Json).'com.supabase.cli.project'   # must print Cloudiator
 Get-Content supabase/sql/14-operations.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1
 ```
 
-From Git Bash the same input is `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q <
-supabase/sql/14-operations.sql`; check the exit status. Source application is iteration evidence only; the replay below is the
-migration-artifact proof.
+From Git Bash the label check can be `docker inspect -f '{{index .Config.Labels "com.supabase.cli.project"}}' supabase_db_Cloudiator`
+and the input `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q <
+supabase/sql/14-operations.sql`; check the exit status. Do not use the `index … "…"` template in Windows PowerShell 5.1: it
+strips the embedded quotes and docker fails with `function "com" not defined` (observed 2026-10-19, Task 22.4). Source
+application is iteration evidence only; the replay below is the migration-artifact proof.
 
 **A first draft was discarded.** The first draft, `20261018190708_operations.sql`, replayed cleanly, but `db lint` on it
 reported plpgsql_check warnings in three new function bodies: an untyped `'{}'` array initializer in `expire_listings`,
@@ -128,6 +130,10 @@ referencing row fails the whole call closed. `net._http_response` is left to pg_
     database.
   - An operator connection is passed only through `CLOUDIATOR_DB_URL`, the database owner's connection string. A non-loopback
     host also needs `--remote`, and then SSL is required unless the URL sets `sslmode`.
+  - Since Task 22.4 the URL is parsed once (`scripts/operator-db.mjs`) and the driver receives only the parsed fields; an
+    authority with `,` or more than one `@` is refused. `require` encrypts without verifying the server; the runbook's
+    "Connections and TLS" adds `sslmode=verify-full` with the hosted CA. Every failure code and what to do about each alert
+    are in `docs/operations/runbook.md` ("Health check").
   - The report runs in one read-only transaction (`statement_timeout` 30 s, `lock_timeout` 5 s).
 
 The report holds:

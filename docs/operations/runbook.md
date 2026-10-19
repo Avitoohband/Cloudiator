@@ -78,7 +78,13 @@ certificate is not verified**. To verify the hosted server:
   `docker exec supabase_db_Cloudiator mkdir -p /root/.postgresql`), and add `?sslmode=verify-full`. The copy lasts until the
   container is recreated.
 
-Not yet tested against a hosted project (none exists before Task 24); Task 24 verifies both.
+**Which connection string.** The hosted project's direct database host may resolve to IPv6 only, and the export's `pg_dump`
+runs inside a Docker container, which often has no IPv6 route. If the direct string gives `connection-failed` (health) or
+`schema-dump-failed` (export), use the dashboard's session-pooler connection string instead (session mode, port 5432; its
+user has the form `postgres.<project ref>`). The transaction pooler (port 6543) is not suitable for `pg_dump`.
+
+Not yet tested against a hosted project (none exists before Task 24); Task 24 verifies the TLS settings and the connection
+string choice.
 
 ## Manual recovery after three failures
 
@@ -195,7 +201,8 @@ are two `pg_dump` runs: export outside a deployment window so no migration lands
   `auth.saml_relay_states`: sign-in sessions, refresh tokens and short-lived sign-in flow tokens. They are bearer material
   with no game state, and the set is closed under its foreign keys. After a restore, players sign in again.
 
-Export failure codes (exit `2`): `remote-needs-url`, `invalid-url` (and the other URL codes above), `backup-exists`,
+Export failure codes (exit `2`): `remote-needs-url`, `invalid-url` (and the other URL codes above), `remote-is-local` (a
+loopback URL with `-Remote`: inside the container that host is the container itself, so use the default local mode), `backup-exists`,
 `container-missing`, `container-not-verified`, `container-not-running`, `container-work-failed`, `exclusions-failed`,
 `schema-dump-failed`, `data-dump-failed`, `facts-failed`, `copy-failed`, `manifest-failed`, `export-failed`. A failed run
 removes the backup directory it created and its temporary files.
@@ -264,7 +271,8 @@ boundary 1009 that closes season 1); that file deliberately leaves its world in 
 The free tier can pause a project that looks inactive. pg_cron's own traffic runs inside the database and is not a guarantee
 that the project counts as active; do not rely on the scheduler to keep it awake. A paused project serves nothing: the health
 check fails with `connection-failed` and players cannot load the game.
-- Check the project's status in the hosting dashboard during the weekly export; the export itself is also activity.
+- Check the project's status in the hosting dashboard during the weekly export and the daily health check. Which traffic
+  counts as activity is the host's rule, not ours; confirm the current policy in the hosting documentation at Task 24.
 - After a restore from pause, run the health check. Catch-up processes the missed slots in order (tested in
   `tests/db/recovery.test.ts`), sweeps the listings that expired during the pause once and returns their items once; cleanup
   catches up hourly. Expect `boundary-behind` and possibly `cleanup-backlog` until it has caught up.

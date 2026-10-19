@@ -89,6 +89,8 @@ try {
       if ($checked -match '"code":"([a-z-]+)"') { $code = $Matches[1] }
       Fail $code
     }
+    # pg_dump runs inside the container, where a loopback host is the container itself: the local stack uses the default mode.
+    if ($checked -match '"local":true') { Fail 'remote-is-local' }
   }
   if (-not [IO.Path]::IsPathRooted($OutDir)) { $OutDir = Join-Path $Root $OutDir }
   $backupDir = Join-Path $OutDir $Stamp

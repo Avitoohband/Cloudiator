@@ -160,6 +160,16 @@ export function machine() {
     release: release(), node: process.version, v8: process.versions.v8 };
 }
 
+/**
+ * Prints one measurement section on the console, for a report or gate run only: scripts/resource-report.mjs sets
+ * CAPACITY_REPORT_DIR, and Task 23.6's release gate sets CAPACITY_GATE=1. A plain `npm test` or `npm run test:db` prints
+ * nothing; writeSection's on-disk sections are unchanged.
+ */
+export function logSection(label: string, value: unknown) {
+  if (!process.env.CAPACITY_REPORT_DIR && process.env.CAPACITY_GATE !== '1') return;
+  console.info(`Task 23.3 ${label}: ${JSON.stringify(value)}`);
+}
+
 /** Writes one report section for scripts/resource-report.mjs when it set CAPACITY_REPORT_DIR; otherwise nothing. */
 export function writeSection(name: string, value: unknown) {
   const dir = process.env.CAPACITY_REPORT_DIR;

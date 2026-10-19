@@ -14,7 +14,7 @@ import { readMarket, readOwner, readProfile, readRecent, readRevision, readSeaso
   readTournamentLog, readWorld } from '../../src/lib/api/reads.ts';
 import { DISPATCH_PER_MINUTE, TABLE_CLASSES, type DatabaseMeasure, type EgressMeasure, type Encoding, type ReadSize, type RoleSizes,
   type TableMeasure } from '../performance/capacity-model.ts';
-export { writeSection } from '../performance/harness.ts';
+export { logSection, writeSection } from '../performance/harness.ts';
 
 // Task 23.3 measurement harness for tests/db/capacity.test.ts (run through `npm run test:db`, or scripts/resource-report.mjs).
 // It is local-only by construction: tests/fixtures/db.ts refuses anything but the loopback stack. Operator-only world

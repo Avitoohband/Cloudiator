@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
-import { BUDGET_MS, bracketPairingJob, expeditionJob, machine, timeOnce, timeRuns, tournamentFinalJob, worstCaseArenaJob, writeSection } from './harness.ts';
+import { BUDGET_MS, bracketPairingJob, expeditionJob, logSection, machine, timeOnce, timeRuns, tournamentFinalJob, worstCaseArenaJob, writeSection } from './harness.ts';
 
 // Task 23.3 (Review Focus 3, R7): worker CPU in pure code on this machine. Each measured run is what one Edge invocation does
 // for its jobs: the job lease is parsed from JSON and frozen as `runWorker` freezes it, the v1 executor runs, and the result
@@ -61,7 +61,7 @@ describe('Task 23.3: worker CPU in pure code (this machine; hosted Edge CPU is T
       expect(measured.maxMs).toBeLessThanOrEqual(BUDGET_MS);
     }
     const section = { budgetMs: BUDGET_MS, cpuMs: WORKER_LIMITS.cpuMs, machine: machine(), ...worker };
-    console.info(`Task 23.3 worker CPU: ${JSON.stringify(section)}`);
+    logSection('worker CPU', section);
     writeSection('worker', section);
   });
 });

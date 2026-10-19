@@ -57,6 +57,9 @@ migrations), and found no `cloudiator_restore_check` database, container temp di
     `public.coordinate_work()` does: a fresh token, 120 s from `planning_now_ms()`, only when no live lease is held. It then
     calls `public.advance_boundary(published_slot, token)`, releases the lease, and compares settled slots, receipts, ledger
     rows, items, awards and wallet balances before and after.
+    - **Corrected in Fix round 1.** For a published slot, `advance_boundary` returns before any grant table, so this
+      before/after comparison is structural only. Zero duplicate grants here is not proof that a replay grants nothing new.
+      The behavioural proof is the guard probes added in Fix round 1, below.
 - **Finish.** It drops the database unless `-Keep`, then prints the report from `node scripts/restore-compare.mjs compare`.
   Exit 0 when everything matches, 1 when a check fails, 2 when the procedure fails. On a failure the script still drops the
   database (unless `-Keep`) and removes its temp files.
@@ -301,3 +304,113 @@ output, ids differ:
      paragraph to say "verify the label with `{{json .Config.Labels}}` (the `index … "…"` template fails in Windows
      PowerShell 5.1)"? Every future label check in PowerShell would then work the first time.
 6. **The Edge container was not recreated** during any counted DB run (05:49:33Z throughout).
+
+## Fix round 1 (review: `.superpowers/sdd/2026-10-18-task-22-retention-operations/task-22.4-review.md`)
+
+Commit `cdeb641` fix: probe grant guards in the restore check and keep credentials out of history. The review's Minor items
+are deferred to the final review and were not changed.
+
+### I1: the resume comparison could not fail
+
+**What was wrong.** `public.advance_boundary(published_slot, token)` returns `replayed` right after it takes the coordinator
+row lock and reads the clock (`03-activities-jobs.sql:450-452`). It never reaches a phase function or a grant table. The
+before/after counts therefore measured a no-op, and `duplicateGrants: 0` / `lostItems: 0` were true by construction. The
+original report and runbook described this step as proving "no second grant". That was an overclaim, now corrected in both.
+
+**What changed:**
+- `scripts/restore-resume.sql`
+  - **The replay** stays, labelled `"replayCheck":"structural"`. It proves that the checkpoint was restored, that the lease
+    can be taken and released, and that the function runs.
+  - **Three probes** follow. Each runs in its own PL/pgSQL subtransaction that is always rolled back: an accepted write
+    raises this script's marker `RC001` to undo it. They target the latest settled slot at or below the published slot:
+
+    | Probe | The write | Expected refusal |
+    |---|---|---|
+    | `secondSettlement` | Insert a second `private.settled_slots` row for the same (character, slot), with a fresh activity and receipt id | `primary-key`: SQLSTATE `23505` on constraint `settled_slots_pkey` |
+    | `deleteSettledSlot` | Delete that settled slot | `guard`: `P0001` with `guard_frozen`'s message |
+    | `deleteReceipt` | Delete the newest operation receipt | `guard`: `P0001` with `guard_receipt`'s message |
+
+  - **What a probe reports.** An accepted write reports `accepted`, nothing to probe reports `no-row`, and any other refusal
+    reports its bare SQLSTATE. No error message is ever printed.
+  - **Counts.** The before counts are taken before the replay and the after counts after the probes, so the new
+    `countsUnchanged` must be `true`.
+- `scripts/restore-compare.mjs`
+  - `PROBES` fixes the expected outcome of each probe. `compareRestore` judges every probe against `PROBES`, not against
+    the expectation the SQL reports.
+  - A missing probe, any other outcome, or `countsUnchanged` not `true` sets `resume.ok` to `false`, and with it the overall
+    `ok` (exit 1).
+  - The report shows each probe as `{expected, observed, ok}`.
+- `tests/scripts/restore-invariants.test.ts`
+  - The resume case now carries the probes and `countsUnchanged`.
+  - A new case covers each failure mode: an accepted second settlement, a receipt delete refused by a foreign key (`23503`)
+    instead of the guard, `no-row`, a missing probe, a probe that relabels its own expectation, and `probes` absent.
+- The runbook (restore check step 5, "What the check proves") and the script headers now describe the replay as
+  structural, and the probes as the behavioural proof.
+
+### I2: credentials in shell history and in the SQL editor's history
+
+- **Connection strings.** A new runbook section, "Entering a connection string", replaces the `$env:… = '<owner connection
+  string>'` lines in the health and export blocks and in the export script's `.EXAMPLE`.
+  - **PowerShell.** It reads the string with `Read-Host -AsSecureString`, converts it through a BSTR into the session
+    variable, zero-frees the BSTR and removes both variables. That input is neither echoed nor written to PSReadLine's
+    history file.
+  - **Git Bash.** The equivalent is `read -rs` and `unset`.
+  - **Aftercare.** Clear the clipboard after pasting. If a string ever reached a command line, delete that history line and
+    rotate the password.
+- **The Vault value.** Secret rotation step 4 now says: run the `vault.update_secret` statement in a new, unsaved query,
+  never save it as a snippet, then delete the query and its history entry and clear the clipboard.
+
+### Covering checks
+
+- **RED.** I updated `tests/scripts/restore-invariants.test.ts` first and ran it against the old `compareRestore`: 2 of 16
+  tests failed (`expected { ok: true, … } to match object { ok: false, … }`). After the change: 16/16.
+  `npx vitest run tests/scripts` passes 28/28.
+- **The real restore check with the probes.** I ran it twice on the existing backup `.backups/20261019T060545Z` (54 tables,
+  2653 rows), the second time after the final header edits. Both exited 0, and the database was dropped afterwards.
+  Secret-free excerpt:
+  ```json
+  {"ok":true,"mismatched":0,"replayCheck":"structural","status":"replayed",
+   "probes":{"secondSettlement":{"expected":"primary-key","observed":"primary-key","ok":true},
+     "deleteSettledSlot":{"expected":"guard","observed":"guard","ok":true},
+     "deleteReceipt":{"expected":"guard","observed":"guard","ok":true}},
+   "countsUnchanged":true,"duplicateGrants":0,"lostItems":0,"resumeOk":true,"database":"dropped"}
+  ```
+- **The mutation proof (the check can fail).**
+  1. I restored with `-Keep`, captured `invariants.json` from the unmutated copy, and copied the two SQL files to
+     `/tmp/cloudiator-restore-mutation` in the container (label verified).
+  2. Inside `cloudiator_restore_check` only, I removed one guard at a time and reran `restore-resume.sql`.
+  3. For each case I ran the real `node scripts/restore-compare.mjs compare .backups/20261019T060545Z <work dir> kept`.
+
+  | Mutation in the restored copy | Probe outcome | `compare` |
+  |---|---|---|
+  | none (baseline) | all three as expected; `countsUnchanged=true` | exit 0, `ok=true`, `resume.ok=true` |
+  | `drop constraint settled_slots_pkey` | `secondSettlement: accepted` | exit 1, `ok=false`, `resume.ok=false`; only `secondSettlement` false |
+  | `disable trigger guard_frozen` on `private.settled_slots` (PK restored) | `deleteSettledSlot: accepted` | exit 1, `resume.ok=false`; only `deleteSettledSlot` false |
+  | `disable trigger guard_receipt` on `public.operation_receipts` (guard_frozen re-enabled) | `deleteReceipt: 23503` (the ledger foreign key refused it, not the guard) | exit 1, `resume.ok=false`; only `deleteReceipt` false |
+
+  - **The probes leave nothing behind.** `countsUnchanged` stayed `true` in every case: the accepted writes were rolled
+    back.
+  - **Cleanup.** Afterwards I removed the container temp directory, dropped `cloudiator_restore_check` (that exact name),
+    and `pg_database` is back to `_supabase, postgres, template0, template1`.
+  - **A failed first attempt.** It ran from Git Bash without `MSYS_NO_PATHCONV=1`, so MSYS rewrote the container `/tmp`
+    paths and the psql output files were not written. It touched only the throwaway database, and its ALTERs were dropped
+    with it. I reran with path conversion off.
+- **The I2 snippet.** I ran it non-interactively in Windows PowerShell 5.1.26100, with `ConvertTo-SecureString` standing in
+  for the prompt and a dummy URL:
+  - the variable was set and both helper variables were removed;
+  - `node scripts/health.mjs --remote` printed only `{"ok":false,"code":"connection-failed"}` for the dummy host;
+  - `Remove-Item` cleared the variable.
+
+  I did not exercise `Read-Host -AsSecureString` itself, because no terminal is attached.
+- **Gates.**
+  - `npm test`: 1084/1084 in 49 files.
+  - `npm run typecheck`: passes.
+  - `git diff --check`: clean.
+  - Refusals still work: `-Database postgres` → `database-not-allowed`; `-Remote` without a URL → `remote-needs-url`.
+  - No database test files changed, so `npm run test:db` was not rerun.
+
+### Remaining limit
+
+The probes show that the restored copy keeps its grant guards and that the primary key refuses a second settlement. They
+do not drive a real settlement through `settle_activity`'s `inserted=0` path. On a fully settled world no leased settlement
+job exists to drive it with.

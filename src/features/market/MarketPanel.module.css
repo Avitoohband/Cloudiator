@@ -313,7 +313,7 @@
   min-width: 0;
   min-height: 40px;
   padding: 6px 8px;
-  border: 1px solid #65718a;
+  border: 1px solid var(--field-line);
   border-radius: 6px;
   background: #111c2d;
   color: #f4ead5;

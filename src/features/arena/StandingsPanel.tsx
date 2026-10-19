@@ -196,8 +196,9 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
             <div><dt>Human bouts</dt><dd>{ownValue(`${ownBouts} of ${minimum}`)}</dd></div>
           </dl>
           {own.season.status === 'ready' && <>
+            {/* Read as "3 of 5 human bouts", not a bare percentage (Task 23.5, C17). */}
             <div className={styles.progress} role="progressbar" aria-label="Human bouts toward season rewards" aria-valuemin={0} aria-valuemax={minimum}
-              aria-valuenow={Math.min(ownBouts, minimum)}>
+              aria-valuenow={Math.min(ownBouts, minimum)} aria-valuetext={`${ownBouts} of ${minimum} human bouts`}>
               <span style={{ width: `${(Math.min(ownBouts, minimum) / minimum) * 100}%` }} />
             </div>
             <p className="muted">{qualifyText(ownBouts, own.league)}</p>

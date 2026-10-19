@@ -239,8 +239,16 @@ export function replayViewOf(timeline: RevealedTimeline, stageId?: string | null
   return { kind: 'unavailable', reason: 'not-revealed' };
 }
 
-/** When a battle's fight ends: its start plus the logged duration (the server publishes this as a bout's end). */
-export const battleEndMs = (battle: ReplayBattle) => battle.stage.startedAtMs + battle.log.durationMs;
+/**
+ * When a revealed fight stage (an Arena or tournament bout, an expedition encounter) has ended: its start plus the logged
+ * duration once its log is known (the server publishes exactly this as the stage's end), else its published end. This is
+ * the one definition of "the bout has ended" (Task 23.5, C19): the Arena card's result and Watch replay, its "Bout in
+ * progress" label, and the replay's offered battles all use it, so they never disagree.
+ */
+export const boutEndMs = (stage: Pick<RevealedStage, 'startedAtMs' | 'endsAtMs' | 'battleLog'>) =>
+  (stage.battleLog ? stage.startedAtMs + stage.battleLog.durationMs : stage.endsAtMs);
+/** When a battle's fight ends (`boutEndMs` of its stage, with its log). */
+export const battleEndMs = (battle: ReplayBattle) => boutEndMs({ ...battle.stage, battleLog: battle.log });
 
 /**
  * The battles of a replay view that ended by the display time `nowMs` (Task 15 review Minor 2). A battle's log is

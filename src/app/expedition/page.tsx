@@ -43,7 +43,7 @@ function ExpeditionShell() {
     </header>
     {fixture && <p className="fixture-banner" role="status">Fixture mode — sample expeditions from the local preview</p>}
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
-    <main id="main" className="replay-page">
+    <main id="main" className="replay-page" tabIndex={-1}>
       {!activityId ? <ExpeditionUnavailable fixture={fixture} reason="not-found" />
         : reads && game.session.status !== 'loading' ? <ExpeditionView key={`${fixture}|${activityId}|${minute}|${reader}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute}
           revision={game.revision} world={game.world} worldFailed={!game.world && game.syncError !== null} owner={game.owner} />
@@ -54,5 +54,5 @@ function ExpeditionShell() {
 }
 
 export default function ExpeditionPage() {
-  return <Suspense fallback={<main id="main" className="loading" role="status">Loading the expedition…</main>}><ExpeditionShell /></Suspense>;
+  return <Suspense fallback={<main id="main" className="loading" role="status" tabIndex={-1}>Loading the expedition…</main>}><ExpeditionShell /></Suspense>;
 }

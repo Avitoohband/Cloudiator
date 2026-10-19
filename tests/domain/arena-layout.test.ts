@@ -259,17 +259,21 @@ describe('ring schedule', () => {
     }
   });
 
-  it('changes ring and card over together at the bout stage’s end, even when it differs from the log’s duration', () => {
+  it('changes ring and card over together at the bout’s end, even when its stage publishes another end', () => {
+    // Task 23.5 (C19): one definition of an ended bout, `boutEndMs`, its logged end (the server publishes exactly that as
+    // the stage's end), shared by the ring, the card and the replay. A stage whose published end differs (as the replay
+    // fixtures' 60–80 minute bout stages do) changes nothing: ring and card still change over together, at the logged end.
     const bellator = ARENA_WORLD_ACTORS.find(a => a.name === 'Bellator')!;
     const pair = ARENA_WORLD_ACTORS.filter(a => a.name === 'Bellator' || a.name === 'Corvina');
     for (const shift of [-1500, 1500]) {
       const timeline: RevealedTimeline = structuredClone(ARENA_TIMELINES[bellator.activityId!]);
       const stage = timeline.stages.find(s => s.kind === 'bout')!;
-      stage.endsAtMs += shift;
       const end = stage.endsAtMs;
+      stage.endsAtMs += shift;
       const [fight] = fightsAt(S + 61 * MIN, pair, new Map([[bellator.activityId!, timeline]]));
       const duration = fight.log.durationMs;
-      expect(end - fight.startedAtMs - duration).toBe(shift);
+      expect(end - fight.startedAtMs - duration).toBe(0);
+      expect(stage.endsAtMs - end).toBe(shift);
       expect(fight.endsAtMs).toBe(end);
       const slot = scheduleArenaRings([fight], 6).get(fight.battleId)!;
       expect(slot.boutEndsAtMs).toBe(end);

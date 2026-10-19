@@ -3,8 +3,10 @@
 // The game screen (spec "Full-screen camp"): the camp fills the window, and everything else floats on it. A hidden rail
 // on the left edge opens one menu at a time, beside it (a bottom sheet on touch); the corner chip sits top right. The
 // shell owns the shared game state (`useGameState`), the scene bridge and the menus' contents, which are the existing
-// panels, re-housed. Keyboard: the first Tab reveals the rail and focuses its first icon; Escape closes the open menu
-// and returns the focus to its icon. Menus render outside the camp view's element, so its keys never see their typing.
+// panels, re-housed. Keyboard: the first Tab reaches the skip link and the next one the rail's first icon, which reveals
+// the rail (Task 23.5: the shell no longer takes the first Tab); Escape closes the open menu and returns the focus to its
+// icon. Menus render outside the camp view's element, so its keys never see their typing. The focus is never left on
+// <body>: a control that leaves the page gives it to the nearest panel or control (`useFocusRescue`, Task 23.5).
 //
 // Task 13.6, visitors and joining: anyone watches the camp and its public menus; the chip starts Google sign-in. Signed in
 // without a gladiator, the "Create your gladiator" dialog opens over the running camp (`useJoining`). When the viewer
@@ -50,6 +52,7 @@ import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
 import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
 import { useCampClicks } from './useCampClicks';
+import { useFocusRescue } from './useFocusRescue';
 import { useJoining } from './useJoining';
 import { useSceneHistory } from './useSceneHistory';
 import styles from './shell.module.css';
@@ -219,9 +222,9 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   useEffect(() => bridge.on('open-arena', () => setRail(state => (state.open === 'arena' ? state : railReducer(state, { toggle: 'arena' })))), [bridge]);
 
   // Escape closes the profile card when it has the focus or no menu is open, and otherwise the open menu (a native dialog
-  // inside a panel, such as a discard confirmation, handles its own); the first Tab from the page reveals the rail at its
-  // first icon. Both stand down while a modal dialog is open (the creation dialog, a discard confirmation): the page
-  // behind it is inert, and the dialog owns Tab and Escape even when the focus has fallen to <body> (13.6 review I1).
+  // inside a panel, such as a discard confirmation, handles its own). It stands down while a modal dialog is open (the
+  // creation dialog, a discard confirmation): the page behind it is inert, and the dialog owns Escape (13.6 review I1).
+  // Tab is the browser's: the first one reaches the skip link (Task 23.5, C19), and focusing a rail icon reveals the rail.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (modalOpen()) return;
@@ -236,21 +239,17 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
         if (!current) return;
         event.preventDefault();
         close(current);
-      } else if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
-        && (!document.activeElement || document.activeElement === document.body)) {
-        const first = document.querySelector<HTMLElement>('[data-menu-icon]');
-        if (!shown(first)) return;
-        event.preventDefault();
-        send('focus-in');
-        first.focus();
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [close, closeCard, send]);
+  }, [close, closeCard]);
+
+  const shellRef = useRef<HTMLDivElement>(null);
+  useFocusRescue(shellRef, focusCamp);
 
   // Scenes over the camp: a history entry each; the bridge opens and closes them.
-  const { open: openScene, close: closeScene } = useSceneHistory(scene);
+  const { open: openScene, close: closeScene } = useSceneHistory();
   useEffect(() => bridge.on('view-replay', ({ activityId, stageId }) => openScene(stageId ? { kind: 'replay', activityId, stageId } : { kind: 'replay', activityId })),
     [bridge, openScene]);
   useEffect(() => bridge.on('view-expedition', ({ activityId }) => openScene({ kind: 'expedition', activityId })), [bridge, openScene]);
@@ -294,7 +293,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   };
 
   return (
-    <div className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}>
+    <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
@@ -319,7 +318,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
         following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}
-      <main id="main" className={styles.camp} data-camp-view=""
+      <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}
         onPointerDown={event => { press.current = { x: event.clientX, y: event.clientY }; }}
         onPointerUp={event => {
           const start = press.current;

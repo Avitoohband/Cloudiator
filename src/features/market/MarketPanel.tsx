@@ -26,6 +26,7 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
+import { focusOutcome } from '../shell/focus-lost';
 import {
   MARKET_FEE_PERCENT, MAXIMUM_LISTINGS, MAXIMUM_PRICE, RETRY_CODES, activeListings, amount, itemGrade, itemIcon, itemName, itemStats,
   listableItems, marketErrorText, marketFee, money, npcValueText, offerName, sellerReceives, timeLeft, validPrice, type MarketKind,
@@ -122,6 +123,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
   full?: boolean;
 }) {
   const { rows, status } = model;
+  const ids = useId();
   return <div className={styles.offers}>
     {status === 'failed' && rows.length === 0
       ? <div className={styles.failed} role="alert"><p>Listings could not be loaded right now.</p><button type="button" onClick={onRetry}>Try again</button></div>
@@ -131,6 +133,8 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
             const name = offerName(row.item), own = row.seller.gladiatorId === ownerId, expired = row.expiresAtMs <= now;
             const poor = available !== null && row.price > available;
             const blocked = action === 'buy' && !own && !expired ? (poor ? 'Not enough available money' : full ? 'Your inventory is full' : null) : null;
+            // A disabled Buy says why: the reason describes it (Task 23.5, C18).
+            const blockedId = `${ids}-${row.listingId}`;
             return <li key={row.listingId} className={styles.offer} data-testid={`listing-${row.listingId}`}>
               <div className={styles.what}>
                 <p className={styles.name}><span className={styles.icon} aria-hidden="true">{itemIcon(row.item)}</span>{name}
@@ -139,12 +143,12 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
                 <p className={styles.detail}>{`${itemGrade(row.item)} · ${itemStats(row.item)}`}</p>
                 <p className={styles.detail}>{npcValueText(row.item)}</p>
                 {action === 'cancel' && <p className={styles.detail}>{`You receive ${money(sellerReceives(row.price))} after the ${MARKET_FEE_PERCENT}% fee`}</p>}
-                {blocked && <p className={styles.blocked}>{blocked}</p>}
+                {blocked && <p id={blockedId} className={styles.blocked}>{blocked}</p>}
               </div>
               <div className={styles.deal}>
                 <p className={styles.price}><span aria-hidden="true">💰 </span>{amount(row.price)}<span className={styles.sr}> money</span></p>
                 {action === 'buy' && !own && <button type="button" className={styles.act} disabled={busy || expired || blocked !== null}
-                  aria-label={`Buy ${name} for ${money(row.price)}`} onClick={() => onAction(row)}>Buy</button>}
+                  aria-label={`Buy ${name} for ${money(row.price)}`} aria-describedby={blocked ? blockedId : undefined} onClick={() => onAction(row)}>Buy</button>}
                 {action === 'cancel' && <button type="button" className={styles.act} disabled={busy}
                   aria-label={`Cancel listing: ${name} for ${money(row.price)}`} onClick={() => onAction(row)}>Cancel</button>}
               </div>
@@ -214,10 +218,14 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
   const items = listableItems(owner);
   const [chosen, setChosen] = useState<string | null>(null);
   const [price, setPrice] = useState('');
-  const group = useId(), priceId = useId(), hintId = useId();
+  const group = useId(), priceId = useId(), hintId = useId(), errorId = useId(), limitId = useId();
   const item = items.find(i => i.id === chosen) ?? null;
   const value = Number(price), valid = price.trim() !== '' && validPrice(value);
   const count = activeListings(owner), atLimit = count >= MAXIMUM_LISTINGS;
+  // The price's message marks the field invalid and describes it, beside its hint; List for sale is described by what
+  // keeps it disabled (Task 23.5, C18).
+  const wrong = price.trim() !== '' && !valid;
+  const listReasons = [wrong && errorId, atLimit && limitId].filter(Boolean).join(' ');
   return <div className={styles.sell}>
     <p className={styles.count}>{`Active listings: ${count} of ${MAXIMUM_LISTINGS}`}</p>
     <p className="muted">{`No listing fee. When an item sells, a ${MARKET_FEE_PERCENT}% sale fee (rounded down) is kept from the price. A listing lasts ${LISTING_DAYS} days; cancel it any time to take the item back.`}</p>
@@ -234,9 +242,9 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
         </fieldset>
         <label className={styles.priceLabel} htmlFor={priceId}>Price in money</label>
         <input id={priceId} className={styles.priceInput} type="number" inputMode="numeric" min={1} max={MAXIMUM_PRICE} step={1} value={price}
-          aria-describedby={hintId} onChange={event => setPrice(event.target.value)} />
+          aria-invalid={wrong ? true : undefined} aria-describedby={wrong ? `${hintId} ${errorId}` : hintId} onChange={event => setPrice(event.target.value)} />
         <p id={hintId} className="muted">{`A whole price from 1 to ${amount(MAXIMUM_PRICE)}.`}</p>
-        {price.trim() !== '' && !valid && <p className={styles.blocked} role="status">{`Enter a whole price from 1 to ${amount(MAXIMUM_PRICE)}.`}</p>}
+        {wrong && <p id={errorId} className={styles.blocked} role="status">{`Enter a whole price from 1 to ${amount(MAXIMUM_PRICE)}.`}</p>}
         {item && <div className={styles.terms} aria-live="polite">
           <p>{npcValueText(item)}</p>
           {valid && <>
@@ -244,8 +252,9 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
             <p className={styles.receive}>{`You receive: ${money(sellerReceives(value))}`}</p>
           </>}
         </div>}
-        {atLimit && <p className={styles.blocked} role="status">{`You have ${MAXIMUM_LISTINGS} active listings, the most allowed. Cancel one to list another.`}</p>}
-        <button type="button" className={styles.primary} disabled={busy || !item || !valid || atLimit} onClick={() => { if (item && valid) onList(item, value); }}>List for sale</button>
+        {atLimit && <p id={limitId} className={styles.blocked} role="status">{`You have ${MAXIMUM_LISTINGS} active listings, the most allowed. Cancel one to list another.`}</p>}
+        <button type="button" className={styles.primary} disabled={busy || !item || !valid || atLimit} aria-describedby={listReasons || undefined}
+          onClick={() => { if (item && valid) onList(item, value); }}>List for sale</button>
       </>}
   </div>;
 }
@@ -283,6 +292,14 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
   const attempt = useRef<Attempt | null>(null), sending = useRef(false), mounted = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const tabsId = useId(), confirmId = useId();
+  // A settled trade gives the focus to its receipt or its reason (Task 23.5, C18): a bought or cancelled listing's row,
+  // with its button, leaves the refreshed page, which would drop the focus to <body>.
+  const panel = useRef<HTMLDivElement>(null), outcome = useRef<HTMLParagraphElement>(null), settled = useRef(false);
+  useEffect(() => {
+    if (busy || !settled.current) return;
+    settled.current = false;
+    focusOutcome(panel.current, outcome.current);
+  }, [busy, message, error]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { if (confirming && !dialog.current?.open) dialog.current?.showModal(); }, [confirming]);
   // The owner is read through the latest `refreshOwner`, whose identity may change, without reading again for that.
@@ -333,7 +350,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
       }
     } catch {
       if (mounted.current) { setError(marketErrorText('unavailable', command.kind)); setRetry(true); }
-    } finally { sending.current = false; if (mounted.current) setBusy(false); }
+    } finally { sending.current = false; settled.current = true; if (mounted.current) setBusy(false); }
   }
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -354,7 +371,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     if (listing) void send({ kind: 'buy-listing', listingId: listing.listingId }, offerName(listing.item), listing.price);
   };
 
-  return <div className={styles.market}>
+  return <div className={styles.market} ref={panel}>
     {viewer === 'visitor' && <p className={`muted ${styles.browsing}`}>Browsing only. Sign in to buy or sell.</p>}
     {viewer === 'no-gladiator' && <p className={styles.create}>Create your gladiator to trade.</p>}
     {trader && <div className={styles.wallet}>
@@ -376,8 +393,8 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
       </>}
       {shown === 'sell' && owner && <SellForm owner={owner} busy={busy} onList={(item, price) => void send({ kind: 'create-listing', itemId: item.id, price }, itemName(item), price)} />}
     </div>
-    {message && <p className={styles.message} role="status">{message}</p>}
-    {error && <p className={styles.error} role="alert">{error}</p>}
+    {message && <p ref={outcome} className={styles.message} role="status" tabIndex={-1}>{message}</p>}
+    {error && <p ref={outcome} className={styles.error} role="alert" tabIndex={-1}>{error}</p>}
     {retry && <button type="button" className={styles.retry} disabled={busy}
       onClick={() => { const kept = attempt.current; if (kept) void send(kept.command, kept.name, kept.price); }}>Retry request</button>}
     {viewer === 'visitor' && <TradeSignIn fixture={fixture} />}

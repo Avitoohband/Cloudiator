@@ -111,8 +111,11 @@ test.describe('the camp shell with a pointer', () => {
     }
   });
 
-  test('reveals the rail on the first Tab and returns focus to the icon on Escape', async ({ page }) => {
+  test('reaches the skip link on the first Tab, reveals the rail on the next and returns focus to the icon on Escape', async ({ page }) => {
     await openCamp(page);
+    // Task 23.5 (C19): the first Tab reaches the skip link; the shell no longer takes it for the rail.
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
     await page.keyboard.press('Tab');
     const icons = railMenus(page).getByRole('button');
     await expect(icons.first()).toBeFocused();

@@ -8,7 +8,8 @@
 // preview's samples carry their owner's, so the scene drops it), so visitors never see rewards in a scene. An address
 // with a malformed activity id names nothing: the scene says so and reads nothing (final review Minor 6). Each view is
 // the account's own read: once the session is known, a sign-out, expiry or account switch (here or in another tab)
-// remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1).
+// remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1). It mounts only once
+// the viewer is known, so a signed-in deep link reads once (Task 23.5).
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
@@ -75,11 +76,17 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   const clock = state.world || state.syncError ? state.clock : null;
   const activityId = view.activityId;
   const viewKey = `${sceneKey}|${state.session.userId ?? 'visitor'}`;
-  const loading = !reads || state.session.status === 'loading';
+  // The view mounts once the viewer is known: the session, and for an account its owner read (Task 23.5, C19). Mounted
+  // earlier, a signed-in player's view would read as a visitor's and remount as the player's a moment later, reading its
+  // timeline twice and restarting the replay.
+  const loading = !reads || state.session.status === 'loading' || state.viewer === 'loading';
   return (
     <dialog ref={dialog} className={styles.scene} aria-label={view.kind === 'replay' ? 'Replay' : 'Expedition'}
-      // Escape closes a modal dialog natively (it may refuse to cancel it): follow it into the address. The close event
+      // Escape asks the scene to close: the address goes back to the camp, and the dialog stays open (with the focus in
+      // it) until the scene unmounts and gives the focus back to its opener (Task 23.5: a native close would drop the
+      // focus to <body> until then). Should the browser close it anyway, follow that into the address. The close event
       // comes a task later, so one from an unmount (or React's development remount) finds the dialog open again or gone.
+      onCancel={event => { event.preventDefault(); closeRef.current(); }}
       onClose={() => { if (!leaving.current && !dialog.current?.open) closeRef.current(); }}>
       <button ref={back} type="button" className={styles.sceneBack} onClick={onClose}><span aria-hidden="true">←</span> Back to camp</button>
       <div className={styles.sceneBody}>

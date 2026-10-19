@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Attributes, ClassId, EquipmentSlot, GameCommand, Stance } from '@contracts/commands';
 import type { BuildView, ItemInstance, OwnerState } from '@contracts/reads';
 import type { BuildInput } from '@domain/types';
@@ -9,10 +9,14 @@ import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
 import { deriveStats, preserveStamina } from '@domain/stats';
 import type { GameGateway } from '../../lib/api/gateway';
+import { focusLost } from '../shell/focus-lost';
 
 const attributes = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
 const slots: EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
 const input = (build: BuildView): BuildInput => ({ classId: build.classId, stance: build.stance, allocation: { ...build.allocations }, equipment: { ...build.equipment } });
+/** Which fields a build validation reason names (Task 23.5): the attribute points, or the equipment. */
+const POINT_REASONS = new Set(['points']);
+const EQUIPMENT_REASONS = new Set(['item', 'slot', 'level', 'reserved', 'two-handed']);
 type BuildCommand = Extract<GameCommand, { kind: 'queue-build' | 'cancel-build' }>;
 function BuildSummary({ build, inventory }: { build: BuildView; inventory: ItemInstance[] }) {
   return <><p>{build.classId} · {build.stance}</p><dl>{attributes.map(key => <div key={key}><dt>{key}</dt><dd>{build.allocations[key]}</dd></div>)}
@@ -24,6 +28,15 @@ export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gat
   const [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
   const attempt = useRef<BuildCommand | null>(null), sending = useRef(false), mounted = useRef(false);
   const draftVersion = useRef(owner.buildVersion);
+  const reviewId = useId();
+  // A settled command whose control went away or the focus with it (Cancel pending build removes its section) gives the
+  // focus to its outcome, never to <body> (Task 23.5).
+  const outcome = useRef<HTMLParagraphElement>(null), settled = useRef(false);
+  useEffect(() => {
+    if (busy || !settled.current) return;
+    settled.current = false;
+    if (focusLost()) outcome.current?.focus();
+  }, [busy, message, error]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (draftVersion.current !== owner.buildVersion) {
@@ -32,6 +45,9 @@ export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gat
     }
   }, [owner.buildVersion, owner.currentBuild, owner.pendingBuild]);
   const valid = validateBuild(draft, owner.inventory, owner.progression.earnedAttributePoints, owner.progression.level);
+  // The review message names its fields: they are marked invalid and described by it (Task 23.5).
+  const pointsInvalid = !valid.ok && POINT_REASONS.has(valid.reason), equipmentInvalid = !valid.ok && EQUIPMENT_REASONS.has(valid.reason);
+  const reviewed = (invalid: boolean) => (invalid ? { 'aria-invalid': true, 'aria-describedby': reviewId } : {});
   const stats = valid.ok ? deriveStats(valid.snapshot, RULES_V1) : null;
   const fee = valid.ok ? buildChangeFee(input(owner.currentBuild), draft) : null;
   const weapon = owner.inventory.find(item => item.id === draft.equipment.weapon);
@@ -59,7 +75,7 @@ export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gat
         if (result.code === 'conflict') await refresh();
       }
     } catch { if (mounted.current) setError('This change could not be confirmed. Retry to confirm the same request.'); }
-    finally { sending.current = false; if (mounted.current) setBusy(false); }
+    finally { sending.current = false; settled.current = true; if (mounted.current) setBusy(false); }
   }
   function submit(event: FormEvent) { event.preventDefault(); void send('queue-build'); }
   return <div className="planning-form">
@@ -78,11 +94,11 @@ export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gat
         <label htmlFor="build-stance">Stance</label><select id="build-stance" value={draft.stance} onChange={e => update({ ...draft, stance: e.target.value as Stance })}>{Object.keys(RULES_V1.stances).map(value => <option key={value}>{value}</option>)}</select>
       </fieldset>
       <fieldset disabled={busy}><legend>Attribute points · {owner.progression.earnedAttributePoints} earned</legend>
-        <div className="build-points">{attributes.map(key => <label key={key}>{key}<input type="number" min="0" max={owner.progression.earnedAttributePoints} step="1" value={draft.allocation[key]} onChange={e => update({ ...draft, allocation: { ...draft.allocation, [key]: e.target.value === '' ? 0 : Number(e.target.value) } as Attributes })} /></label>)}</div>
+        <div className="build-points">{attributes.map(key => <label key={key}>{key}<input type="number" min="0" max={owner.progression.earnedAttributePoints} step="1" value={draft.allocation[key]} {...reviewed(pointsInvalid)} onChange={e => update({ ...draft, allocation: { ...draft.allocation, [key]: e.target.value === '' ? 0 : Number(e.target.value) } as Attributes })} /></label>)}</div>
         <p>Adding unspent points is free. Decreasing any current allocation reserves {RULES_V1.fees.respec} money.</p>
       </fieldset>
       <fieldset disabled={busy}><legend>Equipment</legend>
-        {slots.map(slot => <label key={slot}>{slot}<select value={draft.equipment[slot] ?? ''} disabled={slot === 'offHand' && twoHands} onChange={e => {
+        {slots.map(slot => <label key={slot}>{slot}<select value={draft.equipment[slot] ?? ''} disabled={slot === 'offHand' && twoHands} {...reviewed(equipmentInvalid)} onChange={e => {
           const id = e.target.value || null;
           const entry = owner.inventory.find(item => item.id === id);
           const clearShield = slot === 'weapon' && entry && CATALOG_V1.items[entry.catalogId]?.hands === 2;
@@ -92,10 +108,11 @@ export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gat
       </fieldset>
       {stats && <div className="creation-preview"><p>Estimated reservation: {fee} money</p><p>Maximum stamina: {stats.maxStamina} · Stamina after change: {preserveStamina(owner.stamina.current, stats.maxStamina)}</p>
         <p>Load: {stats.load} / {stats.loadCapacity} · Combat efficiency: {Math.round(stats.efficiency * 100)}%</p><p>Raising Endurance increases capacity without restoring current stamina.</p></div>}
-      {!valid.ok && <p role="status">Review your build: {valid.reason}.</p>}
-      <button className="primary-button" disabled={busy || !valid.ok} type="submit">Queue build</button>
+      {!valid.ok && <p id={reviewId} role="status">Review your build: {valid.reason}.</p>}
+      <button className="primary-button" disabled={busy || !valid.ok} type="submit" aria-describedby={!valid.ok ? reviewId : undefined}>Queue build</button>
     </form>
     <p className="muted">Available money: {owner.wallets.money - owner.reservedFees.money}. Reserved fees remain in your wallet until activation.</p>
-    {message && <p role="status">{message}</p>}{error && <p role="alert" className="form-error">{error}</p>}
+    {message && <p ref={outcome} role="status" tabIndex={-1}>{message}</p>}
+    {error && <p ref={outcome} role="alert" className="form-error" tabIndex={-1}>{error}</p>}
   </div>;
 }

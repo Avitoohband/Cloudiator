@@ -100,6 +100,13 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
       ownerReads.current.doneAt = performance.now();
     }
   }, [gateway, account]);
+  /**
+   * The latest `loadOwner`, for work that resumes after an await (the session refresh below): the account may have
+   * changed meanwhile, and the read must be the current account's, never the one captured before the await (Task 23.5,
+   * C19, the stale-closure race after a refresh).
+   */
+  const latestLoadOwner = useRef(loadOwner);
+  useEffect(() => { latestLoadOwner.current = loadOwner; });
 
   // A new account (or none) invalidates reads in flight; a signed-out view keeps no private owner.
   useEffect(() => {
@@ -150,15 +157,16 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
     void (async () => {
       if (firstRejection && await refreshSession()) {
         signingOut.current = false;
-        // The renewed token reads again: the world (whose next publish says whether it is still refused) and the owner.
+        // The renewed token reads again: the world (whose next publish says whether it is still refused) and the owner,
+        // through the latest reader (the account may have changed during the refresh).
         void controllerRef.current?.refresh();
-        void loadOwner().catch(() => undefined);
+        void latestLoadOwner.current().catch(() => undefined);
         return;
       }
       try { await signOut({ scope: 'local' }); } catch { /* kept: tried again at the next publish that reports it */ }
       signingOut.current = false;
     })();
-  }, [fixture, session.status, sync, loadOwner]);
+  }, [fixture, session.status, sync]);
 
   // `refreshOwner` is `loadOwner` itself unless a fixture-enabled test renews its identity (never in production).
   const [renewals, setRenewals] = useState(0);

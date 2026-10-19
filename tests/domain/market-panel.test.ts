@@ -193,6 +193,15 @@ describe('the Marketplace panel', () => {
       expect(html).toContain(`aria-label="Buy Spear for 450 money"`);
     });
 
+    it('describes a disabled Buy by its reason (Task 23.5, C18)', () => {
+      const html = offers({ model: { ...model, rows: [spear] }, action: 'buy', ownerId: helmet.seller.gladiatorId, available: 100 });
+      const reason = /<p id="([^"]+)"[^>]*>Not enough available money<\/p>/.exec(html);
+      expect(reason).not.toBeNull();
+      expect(html).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-describedby="${reason![1]}"[^>]*>Buy</button>`));
+      // An enabled Buy is described by nothing.
+      expect(offers({ model: { ...model, rows: [spear] }, action: 'buy', ownerId: helmet.seller.gladiatorId, available: 1000 })).not.toContain('aria-describedby');
+    });
+
     it('offers Cancel on the seller’s own listings, with what the sale would pay', () => {
       const html = offers({ model: { ...model, rows: [helmet] }, action: 'cancel', ownerId: helmet.seller.gladiatorId });
       expect(html).toContain(`aria-label="Cancel listing: Iron helmet for 95 money"`);

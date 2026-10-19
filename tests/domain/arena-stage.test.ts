@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RevealedTimeline } from '@contracts/events';
 import { ARENA_REVEAL_MS, ARENA_SLOT_MS, arenaRevealMarks, renderArenaStage, type ArenaStageState } from '@/game/arena-stage';
+import { boutEndMs, replayBattles, replayViewOf } from '@/game/replay';
 import {
   ARENA_ACTIVITIES, ARENA_BATTLE_LOGS, ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId, arenaBattleId, type ArenaActivityKey,
 } from '../fixtures/arena';
@@ -190,5 +191,28 @@ describe('arena stage purity', () => {
     expect(arenaRevealMarks(at('ownerHumanWin', 70))).toEqual([S + 80 * MIN]);
     expect(arenaRevealMarks(at('ownerHumanWin', 80))).toEqual([]);
     expect(arenaRevealMarks(at('ownerDelayed', 65))).toEqual([startOf('ownerDelayed') + 80 * MIN]);
+  });
+});
+
+describe('one definition of a bout that has ended (Task 23.5, C19)', () => {
+  it('ends a bout for the Arena card exactly when its replay offers the fight', () => {
+    // The server publishes a bout's end as its start plus the logged duration. A stage published with a later end (the
+    // replay fixtures' 60–80 minute bout stage) must not make the card wait while the replay already offers the fight.
+    const source = structuredClone(timeline('ownerHumanWin'));
+    const bout = source.stages[1];
+    const loggedEnd = bout.startedAtMs + bout.battleLog!.durationMs;
+    bout.endsAtMs = bout.startedAtMs + 20 * MIN;
+    const view = replayViewOf(source);
+    for (const t of [loggedEnd - 1, loggedEnd, loggedEnd + 1, bout.endsAtMs - 1, bout.endsAtMs]) {
+      const state = renderArenaStage(source, t, { entrantId: entrantOf('ownerHumanWin'), owner: true });
+      const offered = replayBattles(view, t).length > 0;
+      expect(state.bout!.finished, `at ${t - loggedEnd} ms from the logged end`).toBe(offered);
+      expect(state.stages.find(s => s.kind === 'bout')!.inProgress, `at ${t - loggedEnd} ms`).toBe(!offered);
+      expect(state.result !== null, `at ${t - loggedEnd} ms`).toBe(offered);
+    }
+    expect(boutEndMs(bout)).toBe(loggedEnd);
+    // Without a log the published end decides.
+    const { battleLog: _log, ...unlogged } = bout;
+    expect(boutEndMs(unlogged)).toBe(bout.endsAtMs);
   });
 });

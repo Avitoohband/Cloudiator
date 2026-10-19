@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { shopOffers, type Merchant } from '@domain/inventory';
@@ -22,6 +22,10 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   const full = owner.inventory.length + quantity > owner.inventoryCapacity;
   const banner = CATALOG_V1.cosmetics.banner;
   const ownsBanner = owner.ownedCosmetics.some(item => item.catalogId === banner.id);
+  // Each message names what it explains (Task 23.5): the quantity field and the Buy buttons are described by it.
+  const ids = useId();
+  const quantityId = `${ids}-quantity`, fullId = `${ids}-full`;
+  const shared = [!validQuantity && quantityId, full && fullId].filter(Boolean).join(' ');
   return <section ref={section} aria-labelledby="shops-heading" className="shops-panel">
     <h2 id="shops-heading">Shops</h2>
     <div className="shop-merchants" aria-label="Merchants">
@@ -31,22 +35,25 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
     <div className="shop-filters">
       <label>Shop currency<select value={currency} onChange={e => setCurrency(e.target.value as typeof currency)}><option value="money">Money</option><option value="renown">Renown</option></select></label>
       <label>Shop tier<select value={tier} onChange={e => setTier(Number(e.target.value))}>{[1, 5, 10].map(level => <option key={level} value={level}>Level {level}</option>)}</select></label>
-      <label>Purchase quantity<input type="number" min="1" max="60" step="1" value={quantity || ''} onChange={e => setQuantity(Number(e.target.value))} /></label>
+      <label>Purchase quantity<input type="number" min="1" max="60" step="1" value={quantity || ''} onChange={e => setQuantity(Number(e.target.value))}
+        aria-invalid={!validQuantity || full ? true : undefined} aria-describedby={shared || undefined} /></label>
     </div>
     <p>{currency === 'renown' ? 'Account-bound gear. +10% weapon damage or armor in Arena and tournaments; no expedition bonus.' : 'Common equipment. NPC sell value is shown for comparison.'}</p>
-    {!validQuantity && <p role="status">Choose a whole quantity from 1 to 60.</p>}
-    {full && <p role="status">Inventory full for this purchase. Clear enough slots first.</p>}
+    {!validQuantity && <p id={quantityId} role="status">Choose a whole quantity from 1 to 60.</p>}
+    {full && <p id={fullId} role="status">Inventory full for this purchase. Clear enough slots first.</p>}
     <div className="inventory-grid">{shopOffers(CATALOG_V1).filter(offer => offer.merchant === merchant && offer.currency === currency && offer.requiredLevel === tier).map(offer => {
       const entry = CATALOG_V1.items[offer.catalogId], total = offer.unitPrice * quantity;
       const levelLocked = owner.progression.level < offer.requiredLevel;
       const poor = total > available;
+      const levelId = `${ids}-${offer.catalogId}-level`, moneyId = `${ids}-${offer.catalogId}-money`;
+      const described = [shared, levelLocked && levelId, poor && moneyId].filter(Boolean).join(' ');
       return <article className="inventory-item" key={offer.catalogId} data-testid={`offer-${offer.catalogId}`}>
         <h3>{entry.name}</h3><p>Level {entry.tier} · {entry.hands === 2 ? 'Two hands' : entry.slot}</p>
         <p>Damage {entry.stats.damage} · Armor {entry.stats.armor} · Weight {entry.stats.weight}</p>
         <p>{offer.unitPrice} {currency} each{quantity > 1 && ` · ${total} total`}</p>
         <p>{entry.npcSellValue === null ? 'Account-bound · Cannot sell' : `NPC sell value: ${entry.npcSellValue} money`}</p>
-        {levelLocked && <p>Requires level {entry.tier}</p>}{poor && <p>Not enough available {currency}</p>}
-        <button disabled={busy || !validQuantity || (!preview && (levelLocked || full || poor))} onClick={() => buy(offer.catalogId, quantity)}>Buy {entry.name}</button>
+        {levelLocked && <p id={levelId}>Requires level {entry.tier}</p>}{poor && <p id={moneyId}>Not enough available {currency}</p>}
+        <button disabled={busy || !validQuantity || (!preview && (levelLocked || full || poor))} aria-describedby={described || undefined} onClick={() => buy(offer.catalogId, quantity)}>Buy {entry.name}</button>
       </article>;
     })}</div>
     {merchant === 'armorer' && <article className="inventory-item cosmetic-offer">

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { SkipLink } from '../features/shell/SkipLink';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -7,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en"><body><a className="skip-link" href="#main">Skip to content</a>{children}</body></html>;
+  return <html lang="en"><body><SkipLink />{children}</body></html>;
 }

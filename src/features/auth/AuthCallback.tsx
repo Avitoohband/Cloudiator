@@ -17,7 +17,7 @@ export function AuthCallback() {
       });
     return () => { active = false; };
   }, []);
-  return <main id="main" className="callback"><p className="eyebrow">CLOUDIATOR</p><h1>Completing Google sign-in…</h1>
+  return <main id="main" className="callback" tabIndex={-1}><p className="eyebrow">CLOUDIATOR</p><h1>Completing Google sign-in…</h1>
     <p role="status">Checking your sign-in…</p>
   </main>;
 }

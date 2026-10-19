@@ -49,7 +49,7 @@ function ReplayShell() {
     </header>
     {fixture && <p className="fixture-banner" role="status">Fixture mode — sample replays from the local preview</p>}
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
-    <main id="main" className="replay-page">
+    <main id="main" className="replay-page" tabIndex={-1}>
       {!activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
         : game.session.status === 'loading' ? <p role="status">Loading the replay…</p>
           : <ActivityReplay key={`${fixture}|${activityId}|${stageId}|${reader}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock}
@@ -60,5 +60,5 @@ function ReplayShell() {
 }
 
 export default function ReplayPage() {
-  return <Suspense fallback={<main id="main" className="loading" role="status">Loading the replay…</main>}><ReplayShell /></Suspense>;
+  return <Suspense fallback={<main id="main" className="loading" role="status" tabIndex={-1}>Loading the replay…</main>}><ReplayShell /></Suspense>;
 }

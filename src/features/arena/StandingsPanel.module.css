@@ -66,7 +66,7 @@
   padding: 0 0.6rem;
   color: var(--ink);
   background: #111b2d;
-  border: 1px solid var(--line);
+  border: 1px solid var(--field-line);
   font: inherit;
   font-size: 0.9rem;
 }

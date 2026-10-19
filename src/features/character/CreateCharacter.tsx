@@ -23,6 +23,11 @@ type Creation = Extract<GameCommand, { kind: 'create-character' }>;
 type Draft = { version: 1; name: string; classId: ClassId; allocation: Attributes;
   attempt?: { account: string; command: Creation } };
 const initialDraft: Draft = { version: 1, name: '', classId: 'berserker', allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } };
+/** The refusals that are about the name: the name field is marked invalid and described by them (Task 23.5). */
+const NAME_RULE = 'Use 3–20 English letters, digits, spaces, underscores or hyphens.';
+const NAME_TAKEN = 'This name may already be taken, or this account already has a gladiator. Choose another name and try again.';
+const NAME_OR_POINTS = 'Check your name and allocate exactly 10 whole points.';
+const NAME_ERRORS: readonly string[] = [NAME_RULE, NAME_TAKEN, NAME_OR_POINTS];
 function readDraft(): Draft {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as Draft | null;
@@ -74,7 +79,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
   const mounted = useRef(true);
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  const titleId = useId();
+  const titleId = useId(), errorId = useId(), pointsId = useId();
   // Modal over the camp: the camp keeps running behind it, but takes no input until the dialog closes. The title takes
   // the focus, so a long form opens at its top.
   useEffect(() => {
@@ -93,6 +98,9 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
   }, []);
   const preview = creationPreview(draft.classId, draft.allocation);
   const remaining = RULES_V1.attributes.creationPoints - keys.reduce((sum, key) => sum + draft.allocation[key], 0);
+  // The name's refusal and the point count describe their fields, which are marked invalid while they apply (Task 23.5).
+  const nameInvalid = error !== null && NAME_ERRORS.includes(error);
+  const pointsInvalid = !preview;
   function update(next: Draft) {
     const clean = { ...next, attempt: undefined };
     setDraft(clean); setError(null); setStorageAvailable(persist(clean));
@@ -101,7 +109,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
     event.preventDefault();
     if (sending.current || !accountId || !ready) return;
     const name = draft.name.trim();
-    if (!/^[A-Za-z0-9 _-]{3,20}$/.test(name)) { setError('Use 3–20 English letters, digits, spaces, underscores or hyphens.'); return; }
+    if (!/^[A-Za-z0-9 _-]{3,20}$/.test(name)) { setError(NAME_RULE); return; }
     if (!preview) { setError('Allocate exactly 10 whole points.'); return; }
     const command: Creation = draft.attempt?.account === accountId ? draft.attempt.command : {
       kind: 'create-character', operationId: crypto.randomUUID(), name, classId: draft.classId, allocation: { ...draft.allocation },
@@ -128,8 +136,8 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
         }
       }
       if (!mounted.current) return;
-      if (!result.ok && result.code === 'conflict') setError('This name may already be taken, or this account already has a gladiator. Choose another name and try again.');
-      else if (!result.ok && result.code === 'invalid') setError('Check your name and allocate exactly 10 whole points.');
+      if (!result.ok && result.code === 'conflict') setError(NAME_TAKEN);
+      else if (!result.ok && result.code === 'invalid') setError(NAME_OR_POINTS);
       else if (!result.ok && result.code === 'unauthenticated') setError('Your session has expired. Sign in with Google again; your draft is safe.');
       else if (!result.ok && result.code === 'rate-limited') setError(`Too many attempts. Wait ${Math.ceil(Math.max(1000, Number.isFinite(result.retryAfterMs) ? result.retryAfterMs! : 60_000) / 1000)} seconds before retrying.`);
       else setError('Creation could not be confirmed. Retry with this draft to safely check the same request.');
@@ -144,7 +152,8 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
       <p className="muted">You’re signed in. Name your gladiator and pick a class; the camp keeps running behind this dialog. Your draft stays on this device.</p>
       <fieldset disabled={busy || !ready}>
         <label htmlFor="gladiator-name">Gladiator name</label>
-        <input id="gladiator-name" autoComplete="off" maxLength={100} value={draft.name} onChange={event => update({ ...draft, name: event.target.value })} aria-describedby="name-help" />
+        <input id="gladiator-name" autoComplete="off" maxLength={100} value={draft.name} onChange={event => update({ ...draft, name: event.target.value })}
+          aria-invalid={nameInvalid ? true : undefined} aria-describedby={nameInvalid ? `name-help ${errorId}` : 'name-help'} />
         <p id="name-help" className="muted">3–20 letters, digits, spaces, underscores or hyphens. Names are unique regardless of case.</p>
         <fieldset className="class-options"><legend>Choose a class</legend>
           {classes.map(classId => <label key={classId}><input type="radio" name="class" value={classId} checked={draft.classId === classId} onChange={() => update({ ...draft, classId })} />{title(classId)}</label>)}
@@ -152,15 +161,16 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
         <p className="muted">{keys.filter(key => RULES_V1.classes[draft.classId][key] !== 1).map(key => `${title(key)} +${Math.round((RULES_V1.classes[draft.classId][key] - 1) * 100)}%`).join(' · ')}</p>
         <fieldset className="point-options"><legend>Allocate 10 starting points</legend>
           <p className="muted">Five base points in each attribute.</p>
-          {keys.map(key => <label key={key} htmlFor={`points-${key}`}><span>{title(key)} points</span><input id={`points-${key}`} type="number" min="0" max="10" step="1" inputMode="numeric" value={Number.isFinite(draft.allocation[key]) ? draft.allocation[key] : ''} onChange={event => update({ ...draft, allocation: { ...draft.allocation, [key]: event.target.value === '' ? NaN : Number(event.target.value) } })} /></label>)}
-          <p role="status">{preview ? 'All 10 points allocated.' : 'Allocate exactly 10 whole points.'} {Number.isFinite(remaining) && remaining !== 0 ? `${remaining} points remaining.` : ''}</p>
+          {keys.map(key => <label key={key} htmlFor={`points-${key}`}><span>{title(key)} points</span><input id={`points-${key}`} type="number" min="0" max="10" step="1" inputMode="numeric" value={Number.isFinite(draft.allocation[key]) ? draft.allocation[key] : ''} onChange={event => update({ ...draft, allocation: { ...draft.allocation, [key]: event.target.value === '' ? NaN : Number(event.target.value) } })}
+            aria-invalid={pointsInvalid ? true : undefined} aria-describedby={pointsInvalid ? pointsId : undefined} /></label>)}
+          <p id={pointsId} role="status">{preview ? 'All 10 points allocated.' : 'Allocate exactly 10 whole points.'} {Number.isFinite(remaining) && remaining !== 0 ? `${remaining} points remaining.` : ''}</p>
         </fieldset>
       </fieldset>
       {preview && <section className="creation-preview" aria-label="Starting build preview"><h4>Starting build preview</h4>
         <dl><div><dt>Health</dt><dd data-testid="preview-hp">{preview.maxHp}</dd></div><div><dt>Stamina</dt><dd data-testid="preview-stamina">{preview.maxStamina}</dd></div><div><dt>Equipment load</dt><dd data-testid="preview-load">{preview.load} / {preview.loadCapacity}</dd></div></dl>
         <p className="muted">Common sword · Light body armor · 100 money · 0 renown</p>
       </section>}
-      {error && <p ref={reason} role="alert" className="form-error" tabIndex={-1}>{error}</p>}
+      {error && <p ref={reason} id={errorId} role="alert" className="form-error" tabIndex={-1}>{error}</p>}
       {!storageAvailable && <p role="status">This browser cannot retain your draft after leaving the page.</p>}
       {!accountId && <p className="muted">Sign in with Google before confirming.</p>}
       <div className={styles.actions}>

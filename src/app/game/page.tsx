@@ -25,5 +25,5 @@ function GameRoute() {
 
 /** The full-screen camp. The site root renders this same page, so a shared link opens straight onto the camp. */
 export default function GamePage() {
-  return <Suspense fallback={<main id="main" className="loading" role="status">Opening the camp…</main>}><GameRoute /></Suspense>;
+  return <Suspense fallback={<main id="main" className="loading" role="status" tabIndex={-1}>Opening the camp…</main>}><GameRoute /></Suspense>;
 }

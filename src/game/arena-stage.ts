@@ -6,8 +6,9 @@
 // The public stage sequence (proposed to Codex for Task 16) for a slot starting at S:
 //   0 `staging` S..S+60 min "Warming up"; 1 `bout` from S+60 min for the logged duration; 2 `return` at S+80 min.
 // Only stages whose revealedAtMs <= displayNowMs exist here, even when the timeline already holds later ones, and
-// the summary appears only once its settlement time has passed. A bout's outcome is never shown before the bout's
-// endsAtMs, although its published label names it. The winner is always the logged winnerId (a seeded tie-break at
+// the summary appears only once its settlement time has passed. A bout's outcome is never shown before the bout has
+// ended (`boutEndMs`, the one definition the replay shares: its logged end, which the server publishes as the stage's
+// endsAtMs), although its published label names it. The winner is always the logged winnerId (a seeded tie-break at
 // 0 HP included); health and labels never decide it, so a bout without its log has no result here. Nothing here
 // computes a result, rating or reward, and no Phaser, React, clock or randomness is used, so the same inputs always
 // give the same state.
@@ -15,6 +16,7 @@ import type { ActivitySummary, BattleLog, RevealedCombatant, RevealedStage, Reve
 import type { ClassId } from '@contracts/commands';
 import { RULES_V1 } from '@domain/rules-v1';
 import { replayKept } from '../lib/replay-retention';
+import { boutEndMs } from './replay';
 
 export const ARENA_SLOT_MS = RULES_V1.clock.slotMs;
 /** The bout log is revealed at minute 60 of the slot. */
@@ -48,9 +50,11 @@ export type ArenaBout = {
   readonly battleId: string | null;
   readonly log: BattleLog | null;
   readonly startedAtMs: number;
+  /** When the bout ends (`boutEndMs`: its logged end, else the stage's published end); the camp's ring shows the result from here. */
   readonly endsAtMs: number;
   /** Display time since the bout started; a scene seeks its playback to it. */
   readonly elapsedMs: number;
+  /** The display time has reached `endsAtMs`. */
   readonly finished: boolean;
 };
 
@@ -123,10 +127,12 @@ export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: numbe
   const owner = !!options.owner;
   const boutStage = [...revealed].reverse().find(stage => stage.kind === 'bout');
   const log = boutStage?.battleLog ?? null;
-  const finished = !!boutStage && t >= boutStage.endsAtMs;
+  // The one definition of an ended bout, shared with the replay and the camp's rings (`boutEndMs`, Task 23.5).
+  const boutEnd = boutStage ? boutEndMs(boutStage) : null;
+  const finished = boutEnd !== null && t >= boutEnd;
 
   const stages: ArenaVisibleStage[] = revealed.map(stage => {
-    const inProgress = stage.kind === 'bout' && t < stage.endsAtMs;
+    const inProgress = stage.kind === 'bout' && t < boutEndMs(stage);
     return { id: stage.id, kind: stage.kind, label: inProgress ? 'Bout in progress' : stage.label, startedAtMs: stage.startedAtMs, endsAtMs: stage.endsAtMs, inProgress };
   });
 
@@ -170,7 +176,7 @@ export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: numbe
     opponent,
     npcOpponent: !!opponent?.npc,
     bout: boutStage ? {
-      stageId: boutStage.id, battleId: log?.battleId ?? null, log, startedAtMs: boutStage.startedAtMs, endsAtMs: boutStage.endsAtMs,
+      stageId: boutStage.id, battleId: log?.battleId ?? null, log, startedAtMs: boutStage.startedAtMs, endsAtMs: boutEnd!,
       elapsedMs: t - boutStage.startedAtMs, finished,
     } : null,
     replay: boutStage && activityId && !replayExpired ? { activityId, stageId: boutStage.id } : null,

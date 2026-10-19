@@ -167,6 +167,10 @@ describe('Arena standings', () => {
     expect(view({ nextCursor: null })).not.toContain('>More</button>');
   });
 
+  it('reads the season progress as human bouts, not a bare number (Task 23.5, C17)', () => {
+    expect(view()).toMatch(/role="progressbar" aria-label="Human bouts toward season rewards" aria-valuemin="0" aria-valuemax="5" aria-valuenow="3" aria-valuetext="3 of 5 human bouts"/);
+  });
+
   it('shows the owner’s rating, renown and current combat strength separately, or not available', () => {
     expect(text(view())).toMatch(/Your standing League Bronze Rating 1015 Renown 25 Current combat strength 412/);
     expect(text(view({ own: { ...base.own!, combatStrength: null } }))).toContain('Current combat strength not available');

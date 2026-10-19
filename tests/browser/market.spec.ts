@@ -9,6 +9,8 @@ import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 import { SUPABASE_URL, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
+import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
+import { forbidRemote } from './remote';
 
 // Task 18.3: the 💰 Marketplace menu. Anyone browses the open offers (the public `market_offers` projection); a player
 // buys (after a confirmation), lists an eligible item and cancels a listing through the authenticated command endpoint.
@@ -155,12 +157,12 @@ async function marketFlow(context: BrowserContext): Promise<Flow> {
 }
 
 /** The signed-in camp with the Marketplace open at Browse, its listings loaded. */
-async function openMarket(page: Page) {
+async function openMarket(page: Page, offers = MARKET_ROWS.length) {
   await page.goto('/game/');
   await expectOwnerShown(page, 'Aster');
   const market = await openMenu(page, 'Marketplace');
   await expect(market.getByRole('tab', { name: 'Browse', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await expect(market.getByRole('list', { name: 'Open listings' }).getByRole('listitem')).toHaveCount(MARKET_ROWS.length);
+  await expect(market.getByRole('list', { name: 'Open listings' }).getByRole('listitem')).toHaveCount(offers);
   return market;
 }
 
@@ -439,4 +441,141 @@ test('fits the Marketplace sheet at 360 px with no horizontal scroll', async ({ 
   await sell.getByLabel('Price in money').fill('1000000000');
   await expect(sell).toContainText('You receive: 950,000,000 money');
   await fits('Sell');
+});
+
+// Task 23.5 (C18, carried from the Task 18 review): the focus after a trade, and the coverage gaps.
+
+test('moves the focus to the outcome of each trade, never to the page', async ({ page, context }, info) => {
+  await watchFocus(page);
+  const flow = await marketFlow(context);
+  const market = await openMarket(page);
+  // Buy by keyboard: the confirmation opens on Keep browsing; Confirm purchase sends it; the receipt takes the focus and
+  // keeps it when the bought row leaves the refreshed page.
+  await row(market, SHIELD).getByRole('button', { name: /^Buy/ }).focus();
+  await page.keyboard.press('Enter');
+  const confirm = page.getByRole('dialog', { name: 'Confirm purchase' });
+  await expect(confirm.getByRole('button', { name: 'Keep browsing' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(confirm.getByRole('button', { name: 'Confirm purchase' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const receipt = market.getByRole('status').filter({ hasText: 'Purchase confirmed' });
+  await expect(receipt).toBeFocused();
+  await expect(row(market, SHIELD)).toHaveCount(0);
+  await expect(receipt).toBeFocused();
+  await campReady(page);
+  await a11yShot(page, info, 'market-receipt-focused');
+  // A refused purchase (sold elsewhere): its reason takes the focus.
+  flow.close(SPEAR, 'sold');
+  await row(market, SPEAR).getByRole('button', { name: /^Buy/ }).focus();
+  await page.keyboard.press('Enter');
+  await expect(confirm.getByRole('button', { name: 'Keep browsing' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await expect(market.getByRole('alert')).toBeFocused();
+  await expect(row(market, SPEAR)).toHaveCount(0);
+  // List, then cancel: each outcome takes the focus; the cancelled row is gone from My listings.
+  await market.getByRole('tab', { name: 'Sell', exact: true }).click();
+  const sell = market.getByRole('tabpanel', { name: 'Sell' });
+  await sell.getByRole('radio', { name: /^Axe/ }).check();
+  await sell.getByLabel('Price in money').fill('120');
+  await sell.getByRole('button', { name: 'List for sale', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const listed = market.getByRole('status').filter({ hasText: 'Listed for sale: Axe at 120 money' });
+  await expect(listed).toBeFocused();
+  await market.getByRole('tab', { name: 'My listings', exact: true }).click();
+  const cancel = market.getByRole('button', { name: 'Cancel listing: Axe for 120 money', exact: true });
+  await cancel.focus();
+  await page.keyboard.press('Enter');
+  const cancelled = market.getByRole('status').filter({ hasText: 'Listing cancelled. Axe is back in your inventory.' });
+  await expect(cancelled).toBeFocused();
+  await expect(cancel).toHaveCount(0);
+  await expect(cancelled).toBeFocused();
+  expect(flow.commands.map(c => c.kind)).toEqual(['buy-listing', 'buy-listing', 'create-listing', 'cancel-listing']);
+  expect(await focusDrops(page)).toEqual([]);
+});
+
+test('disables Buy with its reason when the money is short or the inventory full', async ({ page, context }) => {
+  const flow = await marketFlow(context);
+  flow.state.wallets.money = 100;
+  const market = await openMarket(page);
+  // Too dear: the Spear (450); affordable: the Round shield (18).
+  const spear = row(market, SPEAR).getByRole('button', { name: /^Buy/ });
+  await expect(spear).toBeDisabled();
+  await expect(row(market, SPEAR)).toContainText('Not enough available money');
+  await expect(spear).toHaveAccessibleDescription('Not enough available money');
+  const shield = row(market, SHIELD).getByRole('button', { name: /^Buy/ });
+  await expect(shield).toBeEnabled();
+  // The inventory fills elsewhere (no new revision): Refresh reads the owner, and each Buy says why it cannot be used.
+  flow.state.inventoryCapacity = flow.state.inventory.length;
+  flow.live.setOwner(flow.state);
+  await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(shield).toBeDisabled();
+  await expect(shield).toHaveAccessibleDescription('Your inventory is full');
+  await expect(spear).toHaveAccessibleDescription('Not enough available money');
+  expect(flow.commands).toEqual([]);
+});
+
+test('refuses fractional and over-cap prices, and List for sale at the listing limit', async ({ page, context }) => {
+  const flow = await marketFlow(context);
+  // Four more open listings than the helmet: five, the most allowed.
+  for (const [catalogId, price] of [['leather-hood:5:common', 200], ['sword:5:common', 300], ['bow:1:common', 400], ['light-boots:1:uncommon', 500]] as const) flow.listed(catalogId, price);
+  const market = await openMarket(page, MARKET_ROWS.length + 4);
+  await market.getByRole('tab', { name: 'Sell', exact: true }).click();
+  const sell = market.getByRole('tabpanel', { name: 'Sell' });
+  await expect(sell).toContainText('Active listings: 5 of 5');
+  await sell.getByRole('radio', { name: /^Axe/ }).check();
+  const price = sell.getByLabel('Price in money');
+  const list = sell.getByRole('button', { name: 'List for sale', exact: true });
+  for (const value of ['1.5', '1000000001', '-3']) {
+    await price.fill(value);
+    await expect(sell, value).toContainText('Enter a whole price from 1 to 1,000,000,000.');
+    await expect(price, value).toHaveAttribute('aria-invalid', 'true');
+    await expect(list, value).toBeDisabled();
+    await expect(list, value).toHaveAccessibleDescription(/Enter a whole price/);
+  }
+  await price.fill('1000000000');
+  await expect(price).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(sell).toContainText('You receive: 950,000,000 money');
+  // A valid price at the limit: List for sale stays disabled, and says why.
+  await expect(list).toBeDisabled();
+  await expect(list).toHaveAccessibleDescription(/You have 5 active listings, the most allowed/);
+  expect(flow.commands).toEqual([]);
+});
+
+test('refreshes My listings and the owner with its Refresh', async ({ page, context }) => {
+  const flow = await marketFlow(context);
+  const { listing } = flow.listed('sword:5:common', 300);
+  const market = await openMarket(page, MARKET_ROWS.length + 1);
+  await market.getByRole('tab', { name: 'My listings', exact: true }).click();
+  const mine = market.getByRole('tabpanel', { name: 'My listings' });
+  await expect(mine.getByRole('listitem')).toHaveCount(2);
+  const owners = flow.live.count('owner_state');
+  const sellerReads = () => flow.live.requests.filter(r => r.table === 'market_offers' && r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`).length;
+  const reads = sellerReads();
+  flow.soldElsewhere(listing);
+  await mine.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(mine.getByRole('listitem')).toHaveCount(1);
+  await expect(market.getByText('Available money: 2,285')).toBeVisible();
+  expect(sellerReads()).toBe(reads + 1);
+  expect(flow.live.count('owner_state')).toBe(owners + 1);
+});
+
+test('browses the fixture preview Marketplace, whose actions say they are unavailable', async ({ page, baseURL }) => {
+  const commands = watchCommands(page);
+  const remote = forbidRemote(page, baseURL);
+  await page.goto('/game/?mode=fixture');
+  await expectOwnerShown(page, 'Aster');
+  const market = await openMenu(page, 'Marketplace');
+  await expect(market.getByRole('list', { name: 'Open listings' }).getByRole('listitem')).toHaveCount(MARKET_ROWS.length);
+  await expect(market.getByText('Available money: 100')).toBeVisible();
+  await row(market, SHIELD).getByRole('button', { name: /^Buy/ }).click();
+  const preview = market.getByRole('status').filter({ hasText: 'Actions are unavailable in this preview.' });
+  await expect(preview).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Confirm purchase' })).toHaveCount(0);
+  await market.getByRole('tab', { name: 'My listings', exact: true }).click();
+  await market.getByRole('button', { name: /^Cancel listing: Iron helmet/ }).click();
+  await expect(preview).toBeVisible();
+  await expect(market.getByRole('tabpanel', { name: 'My listings' }).getByRole('listitem')).toHaveCount(1);
+  expect(commands).toEqual([]);
+  expect(remote).toEqual([]);
 });

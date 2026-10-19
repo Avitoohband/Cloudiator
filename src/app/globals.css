@@ -1,4 +1,6 @@
-:root { color-scheme: dark; --bg: #101625; --panel: #1b2336; --ink: #f3f0e5; --muted: #acb7cc; --gold: #f2c66b; --line: #39455c; }
+:root { color-scheme: dark; --bg: #101625; --panel: #1b2336; --ink: #f3f0e5; --muted: #acb7cc; --gold: #f2c66b; --line: #39455c;
+  /* A form field's edge: at least 3:1 against the panels and the schedule's coloured slots (WCAG 1.4.11, Task 23.5). */
+  --field-line: #7a86a0; }
 * { box-sizing: border-box; }
 html { min-width: 320px; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; }
@@ -11,6 +13,8 @@ h1, h2, h3, p { margin-top: 0; }
 h1, h2, h3 { line-height: 1.2; }
 .skip-link { position: fixed; left: 1rem; top: 1rem; z-index: 10; background: var(--gold); color: var(--bg); padding: .6rem 1rem; clip-path: inset(50%); }
 .skip-link:focus { clip-path: none; }
+/* The skip link's target takes the focus to start the page's tab order there; it is a landmark, not a control. */
+main[tabindex="-1"]:focus { outline: none; }
 .brand { color: var(--gold); font-family: Georgia, serif; font-size: 1.65rem; font-weight: 900; letter-spacing: .08em; line-height: 1.2; }
 .brand span { display: block; font: 500 .6rem/2 system-ui, sans-serif; color: var(--muted); letter-spacing: .24em; }
 .topbar { padding: 1.4rem max(1.5rem, calc((100vw - 1280px)/2)); display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line); background: #151c2c; }
@@ -56,7 +60,7 @@ h1, h2, h3 { line-height: 1.2; }
 .creation-form fieldset { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
 .creation-form legend { font-weight: 700; margin-bottom: .5rem; }
 .creation-form label { display: block; font-size: .85rem; }
-.creation-form input:not([type="radio"]) { width: 100%; min-width: 0; color: var(--ink); background: #111b2d; border: 1px solid var(--line); padding: .6rem; font: inherit; min-height: 44px; }
+.creation-form input:not([type="radio"]) { width: 100%; min-width: 0; color: var(--ink); background: #111b2d; border: 1px solid var(--field-line); padding: .6rem; font: inherit; min-height: 44px; }
 .creation-form input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .creation-form .class-options label { display: flex; align-items: center; min-height: 44px; gap: .5rem; }
 .creation-form .point-options label { display: grid; grid-template-columns: minmax(0, 1fr) 65px; align-items: center; gap: .5rem; margin-bottom: .5rem; }
@@ -68,7 +72,7 @@ h1, h2, h3 { line-height: 1.2; }
 .creation-preview p { margin: .7rem 0 0; }
 .form-error { color: #ffd0bb; }
 .planning-form label { display: block; margin: .6rem 0; text-transform: capitalize; }
-.planning-form select, .planning-form input { display: block; width: 100%; min-width: 0; min-height: 44px; padding: .5rem; margin-top: .3rem; color: var(--ink); background: #111b2d; border: 1px solid var(--line); font: inherit; }
+.planning-form select, .planning-form input { display: block; width: 100%; min-width: 0; min-height: 44px; padding: .5rem; margin-top: .3rem; color: var(--ink); background: #111b2d; border: 1px solid var(--field-line); font: inherit; }
 .planning-form button { min-height: 44px; padding: .6rem 1rem; }
 .planning-form fieldset { min-width: 0; border: 1px solid var(--line); margin: 1rem 0; padding: 1rem; }
 .planning-form :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
@@ -90,10 +94,11 @@ h1, h2, h3 { line-height: 1.2; }
 .inventory-item h3 { margin-top: 0; }
 .inventory-item p { font-size: .9rem; overflow-wrap: anywhere; }
 .inventory-panel button { min-height: 44px; padding: 9px 14px; }
-.inventory-panel input, .inventory-panel select { min-height: 44px; padding: 8px; width: 100%; background: #111c2d; color: #f4ead5; border: 1px solid #65718a; border-radius: 6px; }
+.inventory-panel input, .inventory-panel select { min-height: 44px; padding: 8px; width: 100%; background: #111c2d; color: #f4ead5; border: 1px solid var(--field-line); border-radius: 6px; }
 .inventory-panel label { display: grid; gap: 6px; }
 .item-actions, .shop-merchants { display: flex; flex-wrap: wrap; gap: 8px; }
-.shop-merchants button[aria-pressed="true"] { border-color: #ecc677; color: #ecc677; }
+/* The chosen merchant: gold on a dark fill (8.8:1; gold on the default button grey was 3.3:1, Task 23.5). */
+.shop-merchants button[aria-pressed="true"] { border-color: #ecc677; color: #ecc677; background: #2f2a1e; }
 .shop-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
 .shops-panel { margin-top: 32px; padding-top: 20px; border-top: 1px solid #475670; }
 .cosmetic-offer { margin-top: 16px; }

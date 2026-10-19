@@ -120,3 +120,79 @@ report in place of `task-23-report.md`. The evidence is `docs/operations/release
 Avi, shall I update AGENTS.md — "Build and browser output separation" — to say that, before `npm run test:db`, the serving
 worktree's `supabase/functions` access times are refreshed (as `npm run verify` does), because a read alone leaves entries read
 within the hour to change mid-run? (Proposal only; the guide `verification-gates.md` already records it.)
+
+## Fix round 1
+
+Review: `.superpowers/sdd/2026-10-19-task-23-release-readiness/task-23.6-review.md` (Needs fixes: 4 Important). Commit
+`6bb7380` fix: make the release gate's verdicts trustworthy; this section, docs: report Task 23.6 fix round 1.
+
+### Rulings applied
+
+- **Access-time refresh:** kept, made safe (Important 2 below).
+- **`docs/operations/verification-gates.md`:** restored to the approved a2ed84a text everywhere except "Database tests and the
+  local Edge runtime". Avi approved (2026-10-19, in chat) extending that section with the last-access refresh. It now
+  carries the line "Extended with Avi's approval on 2026-10-19 (Task 23.6): …" and the Observed cause / Tested once /
+  Observed / Mitigation / Tested paragraphs, which describe the final behaviour. My other earlier edits to the guide (an
+  `npm run verify` paragraph, `test:db` in the safe order, the host-fault and stack paragraphs) were reverted. So no
+  "Proposed update" section is needed.
+- **Workflow actions:** pinned to full commit SHAs, each found with read-only `gh api` lookups; the release tag and the v4
+  major tag gave the same commit. checkout v4.4.0 `11d5960…`, setup-node v4.4.0 `49933ea…`, upload-artifact v4.6.2 `ea165f8…`
+  (`.github/workflows/checks.yml:30, 32, 62`).
+
+### Findings
+
+1. **Important 1 (the blocker could hide DB failures): fixed.**
+   - `scripts/vitest-gate-reporter.mjs:21` writes module errors, failed suites with their own errors, failed tests and
+     unhandled errors.
+   - `classifyDb` (`scripts/verify.mjs:148`) returns `blocked` only when every failed test matches a blocker. It also needs
+     every failed suite to enclose a blocked test and have no errors of its own, no module or unhandled error, and a run that
+     ended normally.
+   - RED: the new tests failed against the old classifier (`tests/scripts/verify.test.ts:170`, `:178`). On a real scratch
+     vitest run (capacity blocker + failing `beforeAll` + unhandled error), the old classifier said `blocked`; the new one
+     says `failed` with both reasons.
+2. **Important 2 (the refresh followed links and swallowed its guard): fixed.**
+   - `refreshAccessTimes` (`scripts/verify.mjs:336`) opens with `0x02200000` (`:347`, `FILE_FLAG_OPEN_REPARSE_POINT`).
+   - It skips reparse points without descending into them (`:365`) and throws for an entry outside the root (`:364`).
+   - It returns `{ ok: false, reason }` on any failure, including the modified-time guard. `prepareEdge` (`:388`) then fails
+     the Edge step as an infrastructure fault with that reason.
+   - RED: the junction test (`tests/scripts/verify.test.ts:323`) failed with links followed (7 entries touched, 0 skipped),
+     then passed (5 entries, 1 skipped, the target's access time unchanged). The missing-folder case reports its reason.
+3. **Important 3 (host-fault rerun by co-occurrence): fixed.**
+   - `runBrowser` (`scripts/verify.mjs:240`) runs each browser step once.
+   - A failure in a context that saw a host fault is labelled `probable host fault (…)` beside the test's own first error
+     (`:286`) and fails the gate with exit 1.
+   - Each step keeps its own output directory, so traces survive.
+   - The marker is now "Probable host fault:", not "Infrastructure fault, not product evidence:".
+   - The database rerun is fixed at exactly one (`DB_RERUNS`, `:250`), and the `--db-retries` option was removed
+     (`parseOptions`, `:435`; a test checks that it is refused).
+4. **Important 4 (doc test): fixed.** `tests/scripts/verify.test.ts:73` parses the approved "Safe order in one worktree" list.
+   It checks each step's `guide` phrase in order, the database rule and StartedAt command, and the 2026-10-19 extension of
+   that section. ``` `npm run verify` ``` is matched only with its backticks, so `verify:static` cannot satisfy it.
+5. **Minors fixed:**
+   - The blocker needs a finite share ≥ 1 (`scripts/verify.mjs:61`); NaN, Infinity and 0.5 are tested.
+   - The comment at `tests/db/capacity.test.ts:21` is corrected.
+   - The committed `test.fail()` case is at `tests/browser/csp.spec.ts:38`. RED with the teardown check removed: "Expected
+     to fail, but passed" on both projects.
+   - The JWT scan catches tokens after `%XX`, `\n`, `\t`, `"` and `\x22` (`scripts/verify-static.mjs:39`). It was RED on
+     four cases, and both real exports still pass with 91 assets each.
+
+### Verification
+
+- `npm test` 1,216 passed; `tsc --noEmit` clean; `git diff --check` clean.
+- **Run 5** of `npm run verify -- --config node_modules/.cache/pw-claude.config.mjs` (16:58–17:15 UTC) exited **2
+  (blocked)**. Every step passed except the database budget.
+  - Edge: 714 entries refreshed and 21 junctions skipped. It settled through one recreation, and the start time was unchanged
+    across `test:db`, where 276 passed plus the blocker.
+  - Development suite 527 / 0 / 33; production 32 / 0 / 528. The watcher logged 33 detections, all from the refresh while
+    settling.
+- **AGENTS.md:185-189** (Build and browser output separation) restates the database rule: "Avi approved its database-test rule
+  on 2026-10-14: run `npm run test:db` only while nothing else builds, browses or edits in the worktree that serves Edge,
+  compare the Edge container's start time before and after, and discard and rerun a run during which it was recreated." I
+  did not edit it.
+
+### Deferred (controller ruling)
+
+Three Minors are deferred:
+- `build-headers.mjs` takes the origin from the process environment only.
+- The R6 static checker has gaps (`drop function … cascade`, `drop constraint`, trigger enable modes, guard-trigger presence).
+- `allowCspViolations` can still be turned off by a configuration-level `use`.

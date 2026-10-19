@@ -12,7 +12,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { TOURNAMENT_KEYS, TOURNAMENTS, type TournamentKey } from '../fixtures/tournament-ids';
 import { largeTournament } from '../fixtures/tournament-build';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { reviewShot } from './review-shots';
+import { reviewShot, reviewShot360 } from './review-shots';
 import { creationDialog, expectOwnerShown, openMenu } from './shell-helpers';
 
 // Task 23.4: read volume and render cost. The camp stops drawing under an opaque scene; "being prepared" re-reads back off;
@@ -365,6 +365,7 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     const again = main.getByRole('button', { name: 'Try again', exact: true });
     await expect(again).toBeEnabled();
     await reviewShot(page, testInfo, 'reload-replay-try-again');
+    await reviewShot360(page, testInfo, 'reload-replay-try-again', again);
     live.fail('visible_events', false);
     await again.click();
     await expect(main.getByRole('heading', { level: 1, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
@@ -383,6 +384,7 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     await expect(replay).toContainText('This replay cannot be loaded right now. Try again shortly.');
     await replay.getByRole('button', { name: 'Try again', exact: true }).scrollIntoViewIfNeeded();
     await reviewShot(page, testInfo, 'reload-tournament-replay-try-again');
+    await reviewShot360(page, testInfo, 'reload-tournament-replay-try-again', replay.getByRole('button', { name: 'Try again', exact: true }));
     failing = false;
     await replay.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
@@ -412,6 +414,7 @@ test.describe('the frame-rate overlay (Decision 2)', () => {
     const first = await frames();
     await expect.poll(frames).toBeGreaterThan(first);
     await reviewShot(page, testInfo, 'perf-overlay-camp');
+    await reviewShot360(page, testInfo, 'perf-overlay-camp');
     if (!production) {
       // It stays over a scene, so a device run measures the scenes too.
       await page.evaluate(id => window.__cloudiatorCamp!.emit('view-replay', { activityId: id }), REPLAY_FIXTURES.pvp.activityId);

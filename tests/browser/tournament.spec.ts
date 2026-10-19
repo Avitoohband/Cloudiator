@@ -153,6 +153,28 @@ test.describe('tournament registration and brackets', () => {
     await card(page).screenshot({ path: testInfo.outputPath('tournament-byes-midway.png') });
   });
 
+  test('rings a focused round tab and Watch replay with the panel’s gold outline', async ({ page }) => {
+    // Task 23.4 review I1: a broken selector list had dropped the panel's own focus ring (3 px gold at a 2 px offset) from
+    // the round tabs, Watch replay and the sample buttons, leaving the global ring at a 5 px offset.
+    await tournamentFlow.openAtMinute(page, 'completed', 79);
+    const ring = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => {
+      const style = getComputedStyle(el);
+      return { focusVisible: el.matches(':focus-visible'), style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset, color: style.outlineColor };
+    });
+    const panelRing = { focusVisible: true, style: 'solid', width: '3px', offset: '2px', color: 'rgb(242, 198, 107)' };
+    const tabs = card(page).getByRole('tablist', { name: 'Rounds' });
+    await tabs.getByRole('tab', { name: 'Semifinals', exact: true }).click();
+    // The keyboard moves the focus, so it shows its ring.
+    await page.keyboard.press('ArrowRight');
+    const final = tabs.getByRole('tab', { name: 'Final', exact: true });
+    await expect(final).toBeFocused();
+    expect(await ring(final), 'the focused round tab').toEqual(panelRing);
+    const watch = card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' });
+    await watch.focus();
+    await expect(watch).toBeFocused();
+    expect(await ring(watch), 'the focused Watch replay').toEqual(panelRing);
+  });
+
   test('says a toggle after the cutoff applies to the next tournament, and the preview keeps the box unchanged', async ({ page, baseURL }) => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openAtMinute(page, 'opening', 5);

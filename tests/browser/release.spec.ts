@@ -13,7 +13,7 @@ import { MARKET_ROWS } from '../fixtures/market';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession, testUser } from './live-routes';
-import { reviewShot } from './review-shots';
+import { reviewShot, reviewShot360 } from './review-shots';
 import { cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
@@ -904,6 +904,7 @@ test('offers Reload when the camp cannot load and recovers after it', async ({ p
   await expect(reload).toBeEnabled();
   await expectNamedControls(fallback, 'the camp fallback');
   await reviewShot(page, testInfo, 'reload-camp-failed');
+  await reviewShot360(page, testInfo, 'reload-camp-failed');
   // The menus still work while the camp is down (Schedule for the fixture player; the production build's live camp has
   // no backend here, so its viewer gets the public menus).
   await revealRail(page);

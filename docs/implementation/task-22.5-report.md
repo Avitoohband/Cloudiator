@@ -215,3 +215,45 @@ each for desktop and mobile:
 - **Proposed process note, not applied:** element screenshots taken inside the scrolling menu surface captured the wrong
   region. A page screenshot after `scrollIntoViewIfNeeded` and the animations settling works. This could go into the
   browser-testing guidance if the controller wants it.
+
+## Final fix wave (F0: tournament log reads inside the retention window)
+
+Commit `4eab68b` (`test: read tournament logs inside the retention window`). Test-only; no `src/` change.
+
+**Observed failure.** The branch integration gate's `npm run test:db` gave 254/256. Two tests in
+`tests/db/tournaments.test.ts` failed with `not-found`: "publishes the seeded first round …" and "keeps battle logs out of
+every polled read of a late 50-entrant view …". This task made `readTournamentLog` answer `not-found` once the sampled
+server time reaches the tournament's end plus `RULES_V1.retention.replayMs`. These tests run the 1970 tournament at slot 301
+and read its logs at the real server time, decades after the window. The controller ruled that the product rule stands and
+the tests must read inside the window.
+
+**Where the time comes from, and the stand-in chosen.** `readRevision`'s `serverNowMs` is `public.world_revision.server_now_ms`.
+That view computes it from `statement_timestamp()` inside the view (`20261014045856_projections.sql`), not through
+`private.planning_now_ms()`, so there is no function to stand in for. Replacing the view would change a shared
+security-invoker object that every read uses, and falls outside the `pg_get_functiondef` restore rule. The least invasive
+approach is on the client side instead:
+- `tests/fixtures/db.ts` gains `serverClockFetch(serverNowMs)`. It rewrites only `server_now_ms` and `slot_index` in a
+  `world_revision` response; every other response passes through untouched.
+- Two helpers use it. `clockedClient(token | null, serverNowMs)` is a new client, and `recordingClient(token, { serverNowMs })`
+  is an optional extension of the existing one.
+- The database, its due-time RLS (`clock_timestamp()`) and every other response stay real. Nothing in the database changes,
+  so nothing needs restoring.
+
+**Test changes** (`LOG_KEPT` is the tournament's end, `CUTOFF + 80 min`, plus `replayMs - 1`, the last kept millisecond):
+- **"publishes the seeded first round …".** Each revealed log is read with `clockedClient(spectator.token, LOG_KEPT)`. New
+  assertion: the same revealed log is `not-found` at `LOG_KEPT + 1` and with the real clock. A SQL check shows its row still
+  holds `battleLog`, so the `not-found` comes from the window, not from missing data.
+- **"keeps battle logs out of every polled read …".** The on-demand log reads (the per-bout loop and the final) use a second
+  recording client at `LOG_KEPT`, and the log byte measurements come from that client. The polled `readTournament` reads keep
+  the real clock. The bye and unrevealed-final `not-found` assertions therefore still mean "no log yet", not an expiry.
+- **"hides a future-dated public bout result …".** The `readTournamentLog` check uses `clockedClient(token, LOG_KEPT)` for
+  the owner, another account and anonymous, so its `not-found` again means "not revealed". It was passing before, but
+  through the retention check.
+
+**Commands and output** (all run after the gate's `DONE`):
+- `npm run test:db -- tests/db/tournaments.test.ts`: 34/34. Edge `StartedAt` was `2026-10-19T06:52:03.084601932Z` before and
+  after.
+- Full `npm run test:db`: 15 files, **256/256** (213 s). Edge `StartedAt` was `2026-10-19T06:52:03.084601932Z` before and
+  after, so the run is valid. The gate's own run had recorded `2026-10-19T06:31:49.0324451Z`; the container was recreated
+  after that gate, before this wave.
+- `npm test`: 1102/1102 in 50 files. `npm run typecheck`: passes. `npx vitest run tests/scripts`: 29/29.

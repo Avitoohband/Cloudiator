@@ -414,3 +414,69 @@ original report and runbook described this step as proving "no second grant". Th
 The probes show that the restored copy keeps its grant guards and that the primary key refuses a second settlement. They
 do not drive a real settlement through `settle_activity`'s `inserted=0` path. On a fully settled world no leased settlement
 job exists to drive it with.
+
+## Final fix wave (final review: `.superpowers/sdd/2026-10-18-task-22-retention-operations/final-review.md`)
+
+Commits: `1a1cf70` (`docs: create worker secrets after a restore and keep credentials off command lines`, F1, F2 and F4) and
+`85fe838` (`fix: record the repository commit in restore manifests`, F3).
+
+### F1 (Important 1): secrets after a restore, and the private file
+
+Changes in `docs/operations/runbook.md`, "Secret rotation":
+- **Step 4 is rotation on a live database only.** It now warns that `update_secret` with no `game_worker_secret` row updates
+  nothing without an error. It adds a check that prints names and times only:
+  `select name, updated_at from vault.secrets where name = 'game_worker_secret'`.
+- **New paragraph "After a restore, create both Vault secrets".** `vault.secrets` is excluded from the export, so both
+  secrets are created after a restore with `vault.create_secret('<worker url>', 'game_worker_url')` and
+  `vault.create_secret('<worker secret>', 'game_worker_secret')`. The secret must equal the Edge function's
+  `GAME_WORKER_SECRET`, and the scheduler is paused first. The same SQL-editor rules apply: a new unsaved query, never a
+  snippet, the query and its history entry deleted, the clipboard cleared, the private file deleted. A names-only check must
+  list both secrets. The old sentence "step 4 is also the step that re-creates the secrets after a restore" is gone. The
+  `vault.secrets` exclusion bullet now points to the new paragraph.
+- **Step 2.** Node now writes the private file, with the path as an argument and `{ flag: 'wx' }`. The PowerShell 5.1 `>`
+  redirect is gone; the step says why (UTF-16LE that `--env-file` cannot parse).
+
+Check: I ran step 2's exact command in Windows PowerShell 5.1 to a scratch file and printed no value. It exited 0 and wrote
+63 bytes beginning `GAME_WORKER_SECRET=`: UTF-8 with no BOM (first bytes 71, 65) and a final LF. A second run on the same
+path exited 1, because `wx` refuses to overwrite. I then deleted the file. `vault.create_secret` and `update_secret` were not
+run (no hosted database; Task 24).
+
+### F2 (Minor 1): no inline connection strings
+
+`docs/operations/migrations.md` (M16 release notes) and the header comment of `scripts/health.mjs` no longer show
+`CLOUDIATOR_DB_URL=… command`. Both point to the runbook's "Entering a connection string".
+
+### F3 (Minor 2): the manifest's commit
+
+- `scripts/restore-compare.mjs`: `git()` now runs with `cwd` set to the repository root,
+  `fileURLToPath(new URL('..', import.meta.url))`.
+- The manifest's `commit`/`dirty` come from a new exported `repositoryCommit()`.
+- The extra blank line at the end of the file is removed; it was the gate's only `git diff --check b4b3521..HEAD` finding.
+
+Covering test: `tests/scripts/restore-invariants.test.ts`, "records this repository's commit wherever the operator runs the
+script from". It imports the module in a child node process whose working directory is a fresh temp directory, and expects
+`{ commit: <git rev-parse HEAD>, dirty: <boolean> }`.
+- RED: with the `cwd` removed, it failed with `expected { commit: null, dirty: null } to deeply equal { …(2) }`.
+- GREEN: restored from a byte copy, 29/29.
+
+### F4 (Minor 3): restore-check codes, resume statuses, error text and backup contents
+
+In `docs/operations/runbook.md`:
+- **Failure codes.** The list adds the comparison module's `usage`, `verify-failed` and `compare-failed`, each with an action.
+- **Resume statuses.** Each status other than `replayed` now has an action:
+  - `not-replayed`: read `resume.result`; `invalid` means a clock problem.
+  - `no-published-slot`: seed a world locally; hosted, publish a boundary first.
+  - `lease-held`: rerun after the 120 s lease.
+- **Error text.** A failed restore's psql error text can echo row values (`Failing row contains (…)` for `auth.users`) and
+  must not be shared.
+- **Backup contents.** The export section names the `auth.users` password hashes and the `auth.mfa_factors` secrets.
+
+### Commands and output
+
+All were run after the gate's `DONE`:
+- `npx vitest run tests/scripts`: 29/29.
+- `npm test`: 1102/1102 in 50 files.
+- `npm run typecheck`: passes.
+- `npm run test:db`: 256/256 in 15 files (213 s). Edge `StartedAt` was `2026-10-19T06:52:03.084601932Z` both before and
+  after, so the run is valid.
+- `git diff --check` and `git diff --check b4b3521..HEAD`: clean.

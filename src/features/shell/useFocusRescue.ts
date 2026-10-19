@@ -5,6 +5,7 @@
 // unusable (disabled or hidden; Chrome keeps the focus on a disabled button, other browsers may not), the browser drops
 // the focus to <body>, and a keyboard or screen-reader player loses their place. This watches for that and puts the focus
 // back near where it was:
+// 0. the outcome of a command the player sent by keyboard from that control (`useOutcomeFocus` marks it), else
 // 1. the nearest container around it that takes the focus (a menu panel, a profile card), else
 // 2. the first control of the nearest part of the page that still has one (the corner chip's sign-in button), else
 // 3. the open modal dialog's first focusable element, or the camp view (`fallback`).
@@ -50,6 +51,9 @@ export function useFocusRescue(root: RefObject<HTMLElement | null>, fallback: ()
       // Inside an open modal dialog the page behind is inert: stay inside it.
       const scope = modal ?? shell ?? document.body;
       const near = ancestors.filter(el => el.isConnected && scope.contains(el) && el !== scope && rendered(el));
+      // A command the player sent by keyboard marks its outcome as the place to go (`useOutcomeFocus`); it scrolls into view.
+      const outcome = near.map(el => el.querySelector('[data-focus-target]')).find((el): el is HTMLElement => !!el && usable(el));
+      if (outcome) { outcome.focus(); return; }
       const target = near.find(container)
         ?? near.map(el => [...el.querySelectorAll(CONTROLS)].find(tabbable)).find((el): el is HTMLElement => !!el)
         ?? (modal ? [...modal.querySelectorAll(CONTROLS)].find(el => usable(el)) as HTMLElement | undefined : undefined);

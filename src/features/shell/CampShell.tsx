@@ -80,6 +80,15 @@ const shown = (element: HTMLElement | null): element is HTMLElement => !!element
 const modalOpen = () => document.querySelector('dialog:modal') !== null;
 /** Gives the keyboard back to the camp view (the menus hand the view to the camp). */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
+/**
+ * Where the focus goes when the creation dialog that opened on its own is dismissed: the chip's "Create your gladiator",
+ * which offers it again, else the camp view (Task 23.5 fix round 1: never <body>, the first screen of a new account).
+ */
+const focusOffer = () => {
+  const offer = document.querySelector<HTMLElement>('[data-create-offer]');
+  if (shown(offer)) offer.focus({ preventScroll: true });
+  else focusCamp();
+};
 
 /** The fixture preview's schedule: the sample plan, read-only. */
 function SchedulePreview({ owner }: { owner: OwnerState | null }) {
@@ -332,7 +341,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
       </main>
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
-        <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} />
+        <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
       )}
     </div>
   );

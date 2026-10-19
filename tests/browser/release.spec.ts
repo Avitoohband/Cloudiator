@@ -287,6 +287,15 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(strength).toHaveAttribute('aria-invalid', 'true');
     await expect(strength).toHaveAccessibleDescription(/Review your build/);
     await expect(mine.getByRole('button', { name: 'Queue build' })).toHaveAccessibleDescription(/Review your build/);
+    // Not a whole number (fix round 1, I1): "invalid-input" marks and describes that field alone.
+    const agility = mine.getByRole('spinbutton', { name: 'agility', exact: true });
+    for (const value of ['1.5', '-1']) {
+      await strength.fill(value);
+      await expect(mine.getByText('Review your build: invalid-input.'), value).toBeVisible();
+      await expect(strength, value).toHaveAttribute('aria-invalid', 'true');
+      await expect(strength, value).toHaveAccessibleDescription('Review your build: invalid-input.');
+      await expect(agility, value).not.toHaveAttribute('aria-invalid', 'true');
+    }
     await strength.fill('2');
     await expect(mine.getByText(/^Review your build:/)).toHaveCount(0);
     await expect(strength).not.toHaveAttribute('aria-invalid', 'true');
@@ -339,6 +348,27 @@ test.describe('release accessibility in the fixture preview', () => {
     const dialog = creationDialog(page);
     await expect(dialog).toBeVisible({ timeout: 45_000 });
     await expectNamedControls(dialog, 'the creation dialog');
+    // Decision 8 (fix round 1, I3): the dialog's structure, by role and name.
+    await expect(dialog).toMatchAriaSnapshot(`
+      - dialog "Create your gladiator":
+        - heading "Create your gladiator" [level=2]
+        - group:
+          - textbox "Gladiator name"
+          - group "Choose a class":
+            - radio "Berserker" [checked]
+            - radio "Guardian"
+            - radio "Duelist"
+          - group "Allocate 10 starting points":
+            - spinbutton "Strength points"
+            - spinbutton "Agility points"
+            - spinbutton "Vitality points"
+            - spinbutton "Endurance points"
+            - spinbutton "Precision points"
+            - status: All 10 points allocated.
+        - region "Starting build preview"
+        - button "Not now"
+        - button "Create gladiator"
+    `);
     const name = dialog.getByRole('textbox', { name: 'Gladiator name' });
     await name.fill('x');
     await dialog.getByRole('button', { name: 'Create gladiator' }).click();
@@ -360,6 +390,127 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(name).not.toHaveAttribute('aria-invalid', 'true');
     expect(await contrastIssues(await settled(dialog)), 'the creation dialog').toEqual([]);
     await shot(page, testInfo, 'creation-dialog');
+  });
+
+  for (const how of ['Escape', 'Enter on Not now'] as const) {
+    test(`keeps the focus on the page when the first-visit creation dialog is dismissed by keyboard (${how})`, async ({ page }) => {
+      // Fix round 1, I2: the dialog opens on its own after sign-in, when nothing has the focus, so the browser has nothing
+      // to give the focus back to. It goes to the chip's "Create your gladiator", which offers the dialog again.
+      await watchFocus(page);
+      await seedSession(page.context());
+      await routeLiveReads(page.context(), { world: emptyWorld(), owner: null });
+      await page.goto('/game/');
+      const dialog = creationDialog(page);
+      await expect(dialog).toBeVisible({ timeout: 45_000 });
+      await expect(dialog.getByRole('heading', { name: 'Create your gladiator' })).toBeFocused();
+      if (how === 'Escape') await page.keyboard.press('Escape');
+      else {
+        await dialog.getByRole('button', { name: 'Not now' }).focus();
+        await page.keyboard.press('Enter');
+      }
+      await expect(dialog).toBeHidden();
+      const offer = cornerChip(page).getByRole('button', { name: 'Create your gladiator', exact: true });
+      await expect(offer).toBeFocused();
+      expect(await focusDrops(page), 'the focus never fell to <body>').toEqual([]);
+      // The offer reopens the dialog by keyboard.
+      await page.keyboard.press('Enter');
+      await expect(dialog).toBeVisible();
+    });
+  }
+
+  test("records a focus left on <body> (the focus watcher's own check)", async ({ page }) => {
+    // Fix round 1: a negative control for `watchFocus`. A page with no focus rescue (the replay page): the focused
+    // button is removed, so the focus falls to <body>, and the watcher records exactly that one drop.
+    await watchFocus(page);
+    await page.goto('/replay/?activity=not-an-activity');
+    await expect(page.locator('main#main')).toContainText('No fight was found for this link.');
+    expect(await focusDrops(page)).toEqual([]);
+    await page.evaluate(() => {
+      const button = document.createElement('button');
+      button.textContent = 'Short-lived';
+      document.body.append(button);
+      button.focus();
+      button.remove();
+    });
+    await expect.poll(() => focusDrops(page)).toEqual([{ from: '<button> Short-lived', after: 'a DOM change' }]);
+  });
+
+  test('pins the rail, a menu frame, a scene and the profile card in accessibility snapshots', async ({ page }, testInfo) => {
+    // Plan Decision 8 (fix round 1, I3). The rail: the eight menus, and the camera controls on a pointer only.
+    await openFixtureCamp(page);
+    await revealRail(page);
+    const rail = page.getByTestId('menu-rail');
+    await expect(rail.getByRole('navigation', { name: 'Game menus' })).toMatchAriaSnapshot(`
+      - navigation "Game menus":
+        - /children: equal
+        - button "My gladiator"
+        - button "Schedule"
+        - button "Inventory and shops"
+        - button "Marketplace"
+        - button "Arena"
+        - button "Tournaments"
+        - button "Results"
+        - button "Gladiators"
+    `);
+    if (await touchLayout(page)) {
+      await expect(page.getByRole('button', { name: 'Menus', exact: true })).toMatchAriaSnapshot('- button "Menus" [expanded]');
+      await expect(rail.getByRole('group', { name: 'Camera controls' })).toHaveCount(0);
+    } else {
+      await expect(rail.getByRole('group', { name: 'Camera controls' })).toMatchAriaSnapshot(`
+        - group "Camera controls":
+          - /children: equal
+          - button "Zoom in"
+          - button "Zoom out"
+          - button "Reset zoom"
+      `);
+    }
+    // A menu's frame: the labelled dialog, its title, its Close button, then the panel's own heading.
+    const schedule = await openMenu(page, 'Schedule');
+    await expect(schedule).toMatchAriaSnapshot(`
+      - dialog "Schedule":
+        - paragraph: Schedule
+        - button "Close"
+        - heading "Repeating schedule" [level=2]
+    `);
+    // A profile card.
+    const roster = await openMenu(page, 'Gladiators');
+    await roster.getByRole('button', { name: 'Profile: Varro', exact: true }).first().click();
+    const card = page.getByRole('dialog', { name: 'Profile: Varro' });
+    await expect(card.getByRole('heading', { name: 'Varro' })).toBeVisible();
+    await expect(card).toMatchAriaSnapshot(`
+      - 'dialog "Profile: Varro"':
+        - button "Close profile"
+        - heading "Varro" [level=2]
+        - term: Now
+        - term: Rating
+        - term: Equipped
+        - button "Follow"
+    `);
+    // A replay scene over the camp.
+    await page.goto(`/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}`);
+    await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+    await expect(scene(page, 'Replay')).toMatchAriaSnapshot(`
+      - dialog "Replay":
+        - button "Back to camp"
+        - region "Aster vs Varro":
+          - heading "Aster vs Varro" [level=2]
+          - img
+          - meter "Aster health"
+          - meter "Varro health"
+          - group "Replay controls":
+            - button /^(Pause|Play)$/
+            - button "Fast ×4"
+            - button "Restart"
+            - button "Skip to result"
+          - slider "Replay position"
+          - region "Result":
+            - heading "Result" [level=3]
+          - region "Fighters":
+            - heading "Fighters" [level=3]
+          - region "Combat log":
+            - heading "Combat log" [level=3]
+    `);
+    void testInfo;
   });
 
   test('meets 4.5:1 contrast on panel text and 3:1 on controls', async ({ page }, testInfo) => {

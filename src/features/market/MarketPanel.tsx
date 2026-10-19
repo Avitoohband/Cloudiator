@@ -26,7 +26,7 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
-import { focusOutcome } from '../shell/focus-lost';
+import { useOutcomeFocus } from '../shell/focus-lost';
 import {
   MARKET_FEE_PERCENT, MAXIMUM_LISTINGS, MAXIMUM_PRICE, RETRY_CODES, activeListings, amount, itemGrade, itemIcon, itemName, itemStats,
   listableItems, marketErrorText, marketFee, money, npcValueText, offerName, sellerReceives, timeLeft, validPrice, type MarketKind,
@@ -292,14 +292,9 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
   const attempt = useRef<Attempt | null>(null), sending = useRef(false), mounted = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const tabsId = useId(), confirmId = useId();
-  // A settled trade gives the focus to its receipt or its reason (Task 23.5, C18): a bought or cancelled listing's row,
-  // with its button, leaves the refreshed page, which would drop the focus to <body>.
-  const panel = useRef<HTMLDivElement>(null), outcome = useRef<HTMLParagraphElement>(null), settled = useRef(false);
-  useEffect(() => {
-    if (busy || !settled.current) return;
-    settled.current = false;
-    focusOutcome(panel.current, outcome.current);
-  }, [busy, message, error]);
+  // A trade sent by keyboard gives the focus to its receipt or its reason when its control leaves (Task 23.5, C18): a bought
+  // or cancelled listing's row, with its button, leaves the refreshed page. A pointer trade moves nothing (`useOutcomeFocus`).
+  const { outcome, begin, end, target } = useOutcomeFocus(busy);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { if (confirming && !dialog.current?.open) dialog.current?.showModal(); }, [confirming]);
   // The owner is read through the latest `refreshOwner`, whose identity may change, without reading again for that.
@@ -326,6 +321,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     const command = previous && comparable(previous.command) === comparable(intent) ? previous.command
       : { ...intent, operationId: crypto.randomUUID() } as MarketCommand;
     attempt.current = { command, name, price };
+    begin();
     sending.current = true; setBusy(true); setError(''); setMessage(''); setRetry(false);
     try {
       const result = await gateway.command<{ price?: number }>(command);
@@ -350,7 +346,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
       }
     } catch {
       if (mounted.current) { setError(marketErrorText('unavailable', command.kind)); setRetry(true); }
-    } finally { sending.current = false; settled.current = true; if (mounted.current) setBusy(false); }
+    } finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -371,7 +367,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     if (listing) void send({ kind: 'buy-listing', listingId: listing.listingId }, offerName(listing.item), listing.price);
   };
 
-  return <div className={styles.market} ref={panel}>
+  return <div className={styles.market}>
     {viewer === 'visitor' && <p className={`muted ${styles.browsing}`}>Browsing only. Sign in to buy or sell.</p>}
     {viewer === 'no-gladiator' && <p className={styles.create}>Create your gladiator to trade.</p>}
     {trader && <div className={styles.wallet}>
@@ -393,8 +389,8 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
       </>}
       {shown === 'sell' && owner && <SellForm owner={owner} busy={busy} onList={(item, price) => void send({ kind: 'create-listing', itemId: item.id, price }, itemName(item), price)} />}
     </div>
-    {message && <p ref={outcome} className={styles.message} role="status" tabIndex={-1}>{message}</p>}
-    {error && <p ref={outcome} className={styles.error} role="alert" tabIndex={-1}>{error}</p>}
+    {message && <p ref={outcome} className={styles.message} role="status" tabIndex={-1} {...target}>{message}</p>}
+    {error && <p ref={outcome} className={styles.error} role="alert" tabIndex={-1} {...target}>{error}</p>}
     {retry && <button type="button" className={styles.retry} disabled={busy}
       onClick={() => { const kept = attempt.current; if (kept) void send(kept.command, kept.name, kept.price); }}>Retry request</button>}
     {viewer === 'visitor' && <TradeSignIn fixture={fixture} />}

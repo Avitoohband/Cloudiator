@@ -95,7 +95,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   return (
     <div ref={chip} className={styles.chip} data-testid="corner-chip">
       <div className={styles.chipRow}>
-        {viewer === 'no-gladiator' && <button type="button" className={styles.create} onClick={() => { setOpen(false); onCreate(); }}>Create your gladiator</button>}
+        {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { setOpen(false); onCreate(); }}>Create your gladiator</button>}
         <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>

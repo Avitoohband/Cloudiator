@@ -445,6 +445,79 @@ test('fits the Marketplace sheet at 360 px with no horizontal scroll', async ({ 
 
 // Task 23.5 (C18, carried from the Task 18 review): the focus after a trade, and the coverage gaps.
 
+test('pins the purchase confirmation in an accessibility snapshot', async ({ page, context }) => {
+  // Plan Decision 8 (Task 23.5 fix round 1, I3).
+  await marketFlow(context);
+  const market = await openMarket(page);
+  await row(market, SPEAR).getByRole('button', { name: /^Buy/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Confirm purchase' })).toMatchAriaSnapshot(`
+    - dialog "Confirm purchase":
+      - heading "Confirm purchase" [level=2]
+      - paragraph: Buy Spear (Level 10 · Rare) from Varro for 450 money?
+      - paragraph: "Available money after the purchase: 1,550 money."
+      - button "Keep browsing"
+      - button "Confirm purchase"
+  `);
+});
+
+test('leaves the focus and the scroll where they are after a pointer trade', async ({ page, context }) => {
+  // Fix round 1 (the controller's ruling on review Minor 1): a trade sent with the pointer moves nothing. The bought row
+  // leaves, so the focus goes to the menu panel without scrolling it, never to the receipt or <body>.
+  await watchFocus(page);
+  const flow = await marketFlow(context);
+  const market = await openMarket(page);
+  const body = market.getByTestId('menu-body');
+  await body.evaluate(el => { el.scrollTop = 120; });
+  const before = await body.evaluate(el => el.scrollTop);
+  expect(before).toBeGreaterThan(0);
+  // A real pointer click at the button where it is: a locator click may scroll its target into view first.
+  const buy = (await row(market, AXE).getByRole('button', { name: /^Buy/ }).boundingBox())!;
+  const view = (await body.boundingBox())!;
+  expect(buy.y >= view.y && buy.y + buy.height <= view.y + view.height, 'Buy is in view').toBe(true);
+  await page.mouse.click(buy.x + buy.width / 2, buy.y + buy.height / 2);
+  const confirm = page.getByRole('dialog', { name: 'Confirm purchase' });
+  await expect(confirm).toBeVisible();
+  expect(await body.evaluate(el => el.scrollTop)).toBe(before);
+  await confirm.getByRole('button', { name: 'Confirm purchase', exact: true }).click();
+  const receipt = market.getByRole('status').filter({ hasText: 'Purchase confirmed' });
+  await expect(receipt).toBeVisible();
+  await expect(row(market, AXE)).toHaveCount(0);
+  await expect(receipt).not.toBeFocused();
+  expect(await body.evaluate(el => el.scrollTop)).toBe(before);
+  expect(await page.evaluate(() => document.activeElement?.hasAttribute('data-menu-surface'))).toBe(true);
+  expect(flow.commands.map(c => c.kind)).toEqual(['buy-listing']);
+  expect(await focusDrops(page)).toEqual([]);
+});
+
+test('never takes a focus the player moved while a keyboard trade was pending', async ({ page, context }) => {
+  // Fix round 1 (Minor 1 ruling): the command is held; meanwhile the player moves to the Sell tab. The receipt arrives and
+  // the bought row leaves, and the focus stays on Sell.
+  await watchFocus(page);
+  const flow = await marketFlow(context);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let sent = false;
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    if (route.request().method() === 'POST') { sent = true; await held; }
+    await route.fallback();
+  });
+  const market = await openMarket(page);
+  await row(market, SHIELD).getByRole('button', { name: /^Buy/ }).focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => sent).toBe(true);
+  const sellTab = market.getByRole('tab', { name: 'Sell', exact: true });
+  await sellTab.focus();
+  release();
+  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toBeVisible();
+  await expect(sellTab).toBeFocused();
+  await page.waitForTimeout(500);
+  await expect(sellTab).toBeFocused();
+  expect(flow.commands.map(c => c.kind)).toEqual(['buy-listing']);
+  expect(await focusDrops(page)).toEqual([]);
+});
+
 test('moves the focus to the outcome of each trade, never to the page', async ({ page, context }, info) => {
   await watchFocus(page);
   const flow = await marketFlow(context);

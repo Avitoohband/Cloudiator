@@ -7,7 +7,7 @@ import { CATALOG_V1 } from '@domain/catalog-v1';
 import { npcSaleValue, type Merchant } from '@domain/inventory';
 import type { GameGateway } from '../../lib/api/gateway';
 import { ShopPanel } from '../shops/ShopPanel';
-import { focusOutcome } from '../shell/focus-lost';
+import { useOutcomeFocus } from '../shell/focus-lost';
 
 type InventoryCommand = Extract<GameCommand, { kind: 'buy-shop' | 'sell-item' | 'discard-item' }>;
 type Intent = Omit<Extract<InventoryCommand, { kind: 'buy-shop' }>, 'operationId'> | Omit<Extract<InventoryCommand, { kind: 'sell-item' | 'discard-item' }>, 'operationId'>;
@@ -26,13 +26,9 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false, initi
   const [retry, setRetry] = useState(false);
   const attempt = useRef<InventoryCommand | null>(null), sending = useRef(false), mounted = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  // A settled trade gives the focus to its outcome (Task 23.5): the sold or discarded item often leaves with its button.
-  const panel = useRef<HTMLDivElement>(null), outcome = useRef<HTMLParagraphElement>(null), settled = useRef(false);
-  useEffect(() => {
-    if (busy || !settled.current) return;
-    settled.current = false;
-    focusOutcome(panel.current, outcome.current);
-  }, [busy, message, error]);
+  // A trade sent by keyboard gives the focus to its outcome when its control leaves (the sold or discarded item); a pointer
+  // trade moves nothing (Task 23.5, `useOutcomeFocus`).
+  const { outcome, begin, end, target } = useOutcomeFocus(busy);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { if (confirmation) dialog.current?.showModal(); }, [confirmation]);
   async function send(intent: Intent | InventoryCommand) {
@@ -41,6 +37,7 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false, initi
     const comparable = (value: InventoryCommand | Intent) => { const { operationId: _id, ...rest } = value as InventoryCommand; return JSON.stringify(rest); };
     const command = attempt.current && comparable(attempt.current) === comparable(intent) ? attempt.current
       : { ...intent, operationId: crypto.randomUUID() } as InventoryCommand;
+    begin();
     attempt.current = command; sending.current = true; setBusy(true); setError(''); setMessage(''); setRetry(false);
     try {
       const result = await gateway.command(command);
@@ -64,9 +61,9 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false, initi
       }
     } catch {
       if (mounted.current) { setError('This request could not be confirmed. Retry the same request.'); setRetry(true); }
-    } finally { sending.current = false; settled.current = true; if (mounted.current) setBusy(false); }
+    } finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
-  return <div className="inventory-panel" ref={panel}>
+  return <div className="inventory-panel">
     <div className="section-title"><h2>Inventory</h2><span>{owner.inventory.length} / {owner.inventoryCapacity} slots</span></div>
     <p>Available money: {owner.wallets.money - owner.reservedFees.money}</p><p>Available renown: {owner.wallets.renown - owner.reservedFees.renown}</p>
     <p className="muted">Equipped and reserved items count toward capacity. Discarding gives no currency and never lowers historical gear strength.</p>
@@ -85,13 +82,13 @@ export function InventoryPanel({ owner, gateway, refresh, preview = false, initi
           <button disabled={busy || reserved || !valid} onClick={() => preview ? setMessage('Actions are unavailable in this preview.') : setConfirmation({ item, quantity })}>Discard</button></div>
       </article>;
     })}</div>
-    {message && <p ref={outcome} role="status" tabIndex={-1}>{message}</p>}{error && <p ref={outcome} role="alert" tabIndex={-1}>{error}</p>}
+    {message && <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>}{error && <p ref={outcome} role="alert" tabIndex={-1} {...target}>{error}</p>}
     {retry && <button disabled={busy} onClick={() => { if (attempt.current) void send(attempt.current); }}>Retry request</button>}
     <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => setConfirmation(null)}>
       <h2 id="discard-heading">Confirm discard</h2><p>Discard {confirmation?.quantity} × {confirmation ? itemName(confirmation.item) : ''}? This gives no money or renown.</p>
       <button autoFocus onClick={() => { dialog.current?.close(); setConfirmation(null); }}>Keep item</button>
-      <button disabled={busy} onClick={() => { if (confirmation) void send({ kind: 'discard-item', itemId: confirmation.item.id, quantity: confirmation.quantity }); dialog.current?.close(); setConfirmation(null); }}>Confirm discard</button>
+      <button disabled={busy} onClick={() => { dialog.current?.close(); setConfirmation(null); if (confirmation) void send({ kind: 'discard-item', itemId: confirmation.item.id, quantity: confirmation.quantity }); }}>Confirm discard</button>
     </dialog>
   </div>;
 }

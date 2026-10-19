@@ -63,11 +63,16 @@ function creationPreview(classId: ClassId, allocation: Attributes) {
   return build.ok ? deriveStats(build.snapshot, RULES_V1) : null;
 }
 
-export function CreateCharacter({ gateway, onCreated, onDismiss }: {
+export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: {
   gateway: GameGateway;
   onCreated?: (owner: OwnerState) => void;
   /** "Not now", or Escape: the dialog is closed. */
   onDismiss(): void;
+  /**
+   * The dialog closed with nothing to give the focus back to (it opened on its own after sign-in, when nothing had the
+   * focus): the caller puts it somewhere on the page, never on <body> (Task 23.5 fix round 1).
+   */
+  onFocusLost?(): void;
 }) {
   const accountId = useSession().userId;
   const [draft, setDraft] = useState<Draft>(initialDraft);
@@ -144,9 +149,18 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
     } catch { if (mounted.current) setError('Creation could not be confirmed. Retry with this draft to safely check the same request.'); }
     finally { sending.current = false; if (mounted.current) setBusy(false); }
   }
+  // "Not now" and Escape close the dialog here, in the same event, so the focus can be put back at once: the browser gives
+  // it back to what had it before the dialog opened, and when nothing had (the dialog opened on its own), `onFocusLost`.
+  const close = () => {
+    const element = dialog.current;
+    element?.close();
+    // Right after close() the browser may still report the focus inside the closed dialog (it is fixed up to <body> later).
+    const active = document.activeElement;
+    if (!active || active === document.body || element?.contains(active)) onFocusLost?.();
+  };
   // While a creation is being confirmed the dialog stays open, so its outcome is shown.
   return <dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId} onClose={onDismiss}
-    onCancel={event => { if (sending.current) event.preventDefault(); }}>
+    onCancel={event => { event.preventDefault(); if (!sending.current) close(); }}>
     <form className={`creation-form ${styles.form}`} onSubmit={submit} noValidate aria-busy={busy}>
       <h2 id={titleId} ref={heading} className={styles.title} tabIndex={-1}>Create your gladiator</h2>
       <p className="muted">You’re signed in. Name your gladiator and pick a class; the camp keeps running behind this dialog. Your draft stays on this device.</p>
@@ -174,7 +188,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss }: {
       {!storageAvailable && <p role="status">This browser cannot retain your draft after leaving the page.</p>}
       {!accountId && <p className="muted">Sign in with Google before confirming.</p>}
       <div className={styles.actions}>
-        <button className={styles.later} type="button" disabled={busy} onClick={() => dialog.current?.close()}>Not now</button>
+        <button className={styles.later} type="button" disabled={busy} onClick={close}>Not now</button>
         <button className={styles.confirm} type="submit" disabled={!accountId || busy || !ready}>{busy ? 'Confirming creation…' : 'Create gladiator'}</button>
       </div>
     </form>

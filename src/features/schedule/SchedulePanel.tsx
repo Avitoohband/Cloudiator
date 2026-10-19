@@ -8,7 +8,7 @@ import { nextPhaseStart } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
-import { focusLost } from '../shell/focus-lost';
+import { useOutcomeFocus } from '../shell/focus-lost';
 
 const phases = ['morning', 'afternoon', 'evening'] as const;
 const choiceKey = (choice: ActivityChoice) => choice.kind === 'expedition' ? `expedition:${choice.expeditionId}` : choice.kind;
@@ -32,13 +32,9 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   const [answered, setAnswered] = useState<{ phase: Phase; invalid: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const outcomeId = useId();
-  // A settled save whose button lost the focus gives it to the outcome, never to <body> (Task 23.5).
-  const outcome = useRef<HTMLParagraphElement>(null), settled = useRef(false);
-  useEffect(() => {
-    if (busy || !settled.current) return;
-    settled.current = false;
-    if (focusLost()) outcome.current?.focus();
-  }, [busy, message, error]);
+  // A save sent by keyboard whose button lost the focus gives it to the outcome, never to <body>; a pointer save moves
+  // nothing (Task 23.5, `useOutcomeFocus`).
+  const { outcome, begin, end, target } = useOutcomeFocus(busy);
   /** The slot the shared clock is in; the estimates depend on nothing else. Null until mounted. */
   const [slot, setSlot] = useState<number | null>(null);
   const sending = useRef(false), mounted = useRef(false);
@@ -60,6 +56,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   }, [owner.scheduleVersion, owner.schedule]);
   async function save(phase: Phase) {
     if (sending.current) return;
+    begin();
     sending.current = true; setBusy(true); setError(''); setMessage(''); setAnswered(null);
     const command = attempt.current?.phase === phase ? attempt.current : {
       kind: 'edit-schedule' as const, operationId: crypto.randomUUID(), expectedVersion: owner.scheduleVersion, phase, choice: draft[phase],
@@ -83,7 +80,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
         if (result.code === 'conflict') await refresh();
       }
     } catch { if (mounted.current) { setAnswered({ phase, invalid: false }); setError('This change could not be confirmed. Retry to confirm the same request.'); } }
-    finally { sending.current = false; settled.current = true; if (mounted.current) setBusy(false); }
+    finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
   return <div className="planning-form">
     <h2>Repeating schedule</h2>
@@ -105,7 +102,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
       <button onClick={() => void save(phase)} disabled={busy} aria-describedby={answered?.phase === phase && (message || error) ? outcomeId : undefined}>Save {phase}</button>
     </article>)}</div>
     <p className="muted">The server confirms the effective time when you save.</p>
-    {message && <p ref={outcome} id={outcomeId} role="status" tabIndex={-1}>{message}</p>}
-    {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1}>{error}</p>}
+    {message && <p ref={outcome} id={outcomeId} role="status" tabIndex={-1} {...target}>{message}</p>}
+    {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
   </div>;
 }

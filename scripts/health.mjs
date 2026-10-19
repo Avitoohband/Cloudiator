@@ -5,8 +5,9 @@ import { describeFailure, Failure, operatorTarget, parseDatabaseUrl, isLoopback,
 
 // Owner-operated health report (Task 22.3, Decision 8): prints private.health_report(private.planning_now_ms()) as JSON.
 //   node scripts/health.mjs            the local Cloudiator stack, discovered in memory (as scripts/test-db.mjs)
-//   CLOUDIATOR_DB_URL=… node scripts/health.mjs [--remote]
-//                                      an operator connection (the database owner); a non-loopback host needs --remote
+//   node scripts/health.mjs [--remote] with CLOUDIATOR_DB_URL set in the shell as docs/operations/runbook.md ("Entering a
+//                                      connection string") says, never on a command line: an operator connection (the
+//                                      database owner); a non-loopback host needs --remote
 // Exit codes: 0 healthy, 1 alerts, 2 failure ({"ok":false,"code":…} on stdout). The connection string, its credential and
 // raw error text are never printed: every failure is mapped to a short code (and a SQLSTATE when the database gave one).
 // The string is parsed once (scripts/operator-db.mjs) and the driver receives only the parsed fields (Task 22.4, review M1).

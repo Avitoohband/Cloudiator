@@ -168,28 +168,49 @@ Names only; never print the values.
   `GAME_ALLOWED_ORIGINS` (configuration, not a secret). Locally they live in the git-ignored `.env.edge.local`.
   `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform.
 
-Rotating the worker secret (both sides must hold the same value):
+Rotating the worker secret on a live database (both sides must hold the same value):
 1. Pause the scheduler.
-2. Generate a new value without displaying it, for example into a private, git-ignored file outside the repository:
-   `node -e "process.stdout.write('GAME_WORKER_SECRET='+require('crypto').randomBytes(32).toString('base64url')+'\n')" > <private file>`
+2. Generate a new value without displaying it into a private, git-ignored file outside the repository. Let node write the file,
+   with its path as an argument: never redirect with `>`, which in Windows PowerShell 5.1 writes UTF-16LE that
+   `supabase secrets set --env-file` cannot parse. (`wx` refuses to overwrite an existing file.)
+   `node -e "require('fs').writeFileSync(process.argv[1], 'GAME_WORKER_SECRET=' + require('crypto').randomBytes(32).toString('base64url') + '\n', { flag: 'wx' })" <private file>`
 3. Set the Edge secret from that file: `npx supabase secrets set --env-file <private file> --project-ref <ref>` (check the
    current `--help` first). The function picks it up on its next start.
 4. Update Vault with the same value in the SQL editor:
    `select vault.update_secret((select id from vault.secrets where name = 'game_worker_secret'), '<value>');`
-   The editor keeps query text in its history and in saved snippets. Run it in a new, unsaved query; never save it as a
-   snippet; afterwards delete that query and its history entry, and clear the clipboard. Then delete the private file.
+   `update_secret` changes an existing secret only: with no `game_worker_secret` row it updates nothing and reports no error,
+   so check `select name, updated_at from vault.secrets where name = 'game_worker_secret';` shows the new time. The editor
+   keeps query text in its history and in saved snippets. Run it in a new, unsaved query; never save it as a snippet;
+   afterwards delete that query and its history entry, and clear the clipboard. Then delete the private file.
 5. Resume the scheduler and run the health check: `overdue-jobs` must stay clear and `attempts24h` must grow. A mismatch shows
    as jobs that stop draining, not as a SQL failure.
 
 The publishable key, the service-role key and the JWT secret are rotated in the hosting dashboard; afterwards update the
-frontend build variable (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) and redeploy. A restored database never carries Vault
-values (see the export exclusions), so step 4 is also the step that re-creates the secrets after a restore.
+frontend build variable (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) and redeploy.
+
+**After a restore, create both Vault secrets.** A restored database never carries Vault values (`vault.secrets` is in the
+export exclusions), so it has no `game_worker_url` or `game_worker_secret` row and step 4's `update_secret` would silently
+update nothing. `update_secret` is for rotation on a live database only. Pause the scheduler (the restored row keeps the
+source's setting), then create both secrets by name in the SQL editor: the URL is the worker endpoint, and the secret is the
+same value as the Edge function's `GAME_WORKER_SECRET` (if that value is not at hand, generate and set a new one with steps 2
+and 3 first).
+
+```sql
+select vault.create_secret('<worker url>', 'game_worker_url');
+select vault.create_secret('<worker secret>', 'game_worker_secret');
+```
+
+Follow step 4's editor rules for this query (new and unsaved, never a snippet, deleted with its history entry, clipboard
+cleared, private file deleted). `select name from vault.secrets where name in ('game_worker_url', 'game_worker_secret');`
+must list both names; then resume the scheduler and run the health check as in step 5. Without both secrets dispatch reports
+`unconfigured` and sends nothing, which shows only as `overdue-jobs`.
 
 ## Weekly export and the restore check
 
 Once a week (and before launch), export the hosted database to storage outside the free service, then prove the copy
 restores. `.backups/` is git-ignored; keep the copies on encrypted storage the operator controls, because a backup contains
-the players' accounts (`auth.users`, identities) and game state.
+the players' accounts and their credential material, not only game state: `auth.users` with its password hashes, the
+identities, and `auth.mfa_factors` with each factor's secret. Treat a backup like the database password.
 
 ### Export
 
@@ -217,8 +238,8 @@ host gives `schema-dump-failed` without printing it); Task 24 runs it against th
 are two `pg_dump` runs: export outside a deployment window so no migration lands between them.
 
 **Excluded table data** (`EXPORT_DATA_EXCLUSIONS` in `scripts/restore-compare.mjs`, recorded in every manifest):
-- `vault.secrets`: Vault ciphertext is bound to the source server's root key and would not decrypt elsewhere; re-create the
-  two secrets by name after a restore ("Secret rotation", step 4).
+- `vault.secrets`: Vault ciphertext is bound to the source server's root key and would not decrypt elsewhere; create the
+  two secrets by name after a restore ("Secret rotation", "After a restore, create both Vault secrets").
 - `auth.sessions`, `auth.refresh_tokens`, `auth.mfa_amr_claims`, `auth.one_time_tokens`, `auth.flow_state`,
   `auth.saml_relay_states`: sign-in sessions, refresh tokens and short-lived sign-in flow tokens. They are bearer material
   with no game state, and the set is closed under its foreign keys. After a restore, players sign in again.
@@ -282,8 +303,24 @@ and 4 data entries. The schedules stay in the backup; a restore into a real `pos
 Restore-check failure codes (exit `2`): `database-not-allowed`, `backup-missing`, `manifest-missing`, `manifest-invalid`,
 `file-missing`, `json-invalid`, `container-missing`, `container-not-verified`, `container-not-running`,
 `container-work-failed`, `copy-failed`, `drop-failed`, `create-failed`, `list-failed`, `exclude-failed`, `sql-failed`,
-`schema-restore-failed`, `data-restore-failed`, `invariants-failed`, `resume-failed`, `restore-check-failed`. On a failure the
-script still drops the database (unless `-Keep`) and removes its temporary files.
+`schema-restore-failed`, `data-restore-failed`, `invariants-failed`, `resume-failed`, `restore-check-failed`, and the
+comparison module's own codes: `usage` (`scripts/restore-compare.mjs` was called with the wrong arguments, so the scripts in
+the checkout do not match: use a clean checkout), `verify-failed` (the checksum step failed otherwise, for example on a backup
+file it could not read: check the files' permissions, then rerun) and `compare-failed` (the report step failed otherwise, for
+example on a work file it could not read: rerun the check). On a failure the script still drops the database (unless
+`-Keep`) and removes its temporary files. A failed schema or data restore leaves psql's own error text on the console, and
+that text can echo row values, for example `Failing row contains (…)` with an `auth.users` row: read it on the operator's
+console only and never paste it into an issue, a chat or a log.
+
+The resume status (`resume.status` in the report) must be `replayed`; any other status fails the check with exit `1`:
+- `not-replayed`: the lease was taken but `advance_boundary` refused, and `resume.result` carries its code. `invalid` means
+  the published slot is ahead of this machine's clock: correct the clock and rerun the check on the same backup. For any
+  other code, do not trust the backup: run the health check on the source and export again.
+- `no-published-slot`: the source never published a boundary, so there is nothing to replay. Locally, seed a world first
+  ("Seeding a local world for the check" below). For the hosted database, enable the scheduler (after the season epoch),
+  wait until the health check shows `slotsBehind` `0`, and export again.
+- `lease-held`: the copy carries an unexpired coordinator lease, because the export caught a coordinator run (a lease lasts
+  120 s). Rerun the check on the same backup two minutes later; if it persists, this machine's clock is behind the source's.
 
 If a check fails, do not trust that backup: run `scripts/restore-invariants.sql` against the source inside a read-only
 transaction to see whether the source itself violates the invariant, fix that first, and export again.

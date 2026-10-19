@@ -172,8 +172,9 @@ invocations (300,000) are read from the hosting dashboard; the Edge runtime expo
   `cloudiator-cleanup` (`23 * * * *`), both active.
 - Check the hosted `current_setting('pg_net.ttl', true)`. If it is absent, add the guarded `net._http_response` delete from the
   retention design.
-- Run `CLOUDIATOR_DB_URL=… npm run health -- --remote`. `cleanup-stale` stays on until the first hourly cleanup, unless the
-  operator runs `select private.cleanup_tick()` once after enabling the scheduler.
+- Set `CLOUDIATOR_DB_URL` as in the runbook's "Entering a connection string" (`docs/operations/runbook.md`; never on a command
+  line), then run `npm run health -- --remote` and remove the variable. `cleanup-stale` stays on until the first hourly
+  cleanup, unless the operator runs `select private.cleanup_tick()` once after enabling the scheduler.
 
 ## Tasks 21.1 and 21.2: seasons (M15)
 

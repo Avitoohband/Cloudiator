@@ -204,3 +204,101 @@ No layout or wording changed; the only new copy is screen-reader text (`aria-val
    All are contrast, focus or label changes within the brief's allowance; the screenshots are listed above.
 4. **The contrast check composites translucent panels onto the camp's own colour (`#1c3f24`).** The real pixels behind a panel are the Phaser scene, which no computed style reads. A bright sprite behind a panel would be lighter than that backdrop.
 5. **A proposed process note, for the controller to put to Avi** (not a skill change): `docs/operations/verification-gates.md` could add "do not edit source files while the development browser suite runs (Fast Refresh reloads the pages under test); after any edit, rerun the gate". I hit this once and reran the whole gate.
+
+## Fix round 1
+
+The findings come from [the Task 23.5 review](../../.superpowers/sdd/2026-10-19-task-23-release-readiness/task-23.5-review.md) (I1–I3) and the controller's ruling on review Minor 1. The other Minor items are deferred, as briefed.
+
+**Commit:** `c63a060` fix: link every build error and keep keyboard focus after dialogs (on `28cd329`). Not pushed.
+
+### I1: Build's `invalid-input` is linked to its fields
+
+- **Before:** typing `1.5`, `-1` or a value over the cap showed "Review your build: invalid-input." but marked and described no field.
+- **Fix** (`BuildPanel.tsx`):
+  - An attribute that is not a whole number from 0 to the cap is marked invalid on its own and described by the message.
+  - When every attribute is whole but their sum is over the cap, all of them are marked.
+  - More points than earned (`points`) still marks every attribute.
+- **Test:** the release names-and-links test now also fills strength with `1.5` and `-1`. Strength is invalid and described by "Review your build: invalid-input."; agility is not.
+
+### I2: dismissing the first-visit creation dialog by keyboard
+
+- **Before:** the dialog opens on its own after sign-in, when nothing has the focus, so the browser had nothing to give the focus back to. Escape or Enter on Not now left the focus on `<body>`, and the rescue deliberately skips closed dialogs.
+- **Fix:**
+  - `CreateCharacter.tsx` closes the dialog itself, for Not now and for Escape (its `cancel`). If the focus is then on `<body>`, or still reported inside the closed dialog, it calls `onFocusLost`.
+  - `CampShell.tsx` passes `focusOffer`: the chip's "Create your gladiator" (marked `data-create-offer` in `CornerChip.tsx`), which offers the dialog again, else the camp view.
+  - A first draft checked only `<body>` and failed GREEN: right after `close()`, Chrome still reported the focus on the closed dialog's heading.
+- **Tests:** release, *keeps the focus on the page when the first-visit creation dialog is dismissed by keyboard*, run once for Escape and once for Enter on Not now. Each:
+  - opens a seeded session with no owner and waits for the dialog, whose heading has the focus;
+  - dismisses it by keyboard;
+  - expects the chip's offer focused and `focusDrops` empty;
+  - then reopens the dialog with Enter on the offer.
+- **The watcher's negative control:** release, *records a focus left on `<body>`*. It runs on the replay page, which has no rescue: a focused button is removed, and the watcher records exactly `[{ from: '<button> Short-lived', after: 'a DOM change' }]`. It passed at RED and at GREEN, which shows the watcher does record drops.
+
+### I3: Decision 8's accessibility snapshots
+
+`toMatchAriaSnapshot` now pins each of these:
+
+| What | Where |
+| --- | --- |
+| The rail's eight menus (`/children: equal`) | release, *pins the rail, a menu frame, a scene and the profile card…* |
+| The camera group on a pointer; on touch, `button "Menus" [expanded]` and no camera group | same test |
+| A menu frame: `dialog "Schedule"`, its title, Close, then the panel's `heading "Repeating schedule"` | same test |
+| The profile card (`dialog "Profile: Varro"`: Close profile, heading, the Now, Rating and Equipped terms, Follow) | same test |
+| The replay scene (Back to camp; the region with its heading, close-up image, both health meters, the controls group, the position slider, and the Result, Fighters and Combat log regions) | same test |
+| The creation dialog | release, *links the creation form messages to their fields* |
+| The purchase confirmation | market, *pins the purchase confirmation in an accessibility snapshot* |
+
+The menu frame's title is a paragraph, not a heading. The dialog takes its name from `aria-label`, and the panel's first heading follows. I pinned it as it is: making it a heading would add a second "Tournaments" heading in that panel, and the round's scope excluded other changes.
+
+### Minor 1 ruling: the outcome takes the focus only after a keyboard command
+
+`useOutcomeFocus` (`src/features/shell/focus-lost.ts`) replaces `focusOutcome`. Build, Schedule, Inventory and the Marketplace all use it.
+- **Keyboard command** (the sending control showed its keyboard focus ring):
+  - if the focus is lost when the command settles, the outcome takes it;
+  - if the focus is still on the sending control, the outcome is marked `data-focus-target`. `useFocusRescue` sends the focus there if that control leaves later, as when a bought listing's row leaves on the re-read.
+- **Pointer command:** nothing moves. A control that leaves gives the focus to the panel without scrolling, so the menu keeps its scroll position.
+- **A focus moved elsewhere while the command was pending is never taken.** The mark is also dropped once the player moves on.
+- **Inventory's discard** now closes its confirmation before sending, so the focus is back on Discard when the command starts, as the Marketplace's purchase already did.
+- **Tests:**
+  - **Keyboard:** the existing market test *moves the focus to the outcome of each trade* (keyboard buy, refusal, list and cancel) still passes.
+  - **Pointer:** market, *leaves the focus and the scroll where they are after a pointer trade*. The menu is scrolled to 120 px and Buy is clicked with a real mouse click; the receipt is not focused, the scroll is unchanged, the focus is on the menu panel, and there are no focus drops.
+  - **Moved focus:** market, *never takes a focus the player moved while a keyboard trade was pending*. The command is held while the focus moves to the Sell tab; the receipt arrives and the row leaves, and the focus stays on Sell.
+  - The pointer test first measured the scroll before a locator click. Playwright scrolls a click target into view under load, so that run failed 1 time in 3. It now clicks at the button's box and measures after the click. It then passed 8/8 alone, every time in two repeated runs of `market.spec.ts` with `scenes.spec.ts`, and in the full suite.
+
+### RED, then GREEN
+
+- **RED** (new tests against the stashed previous source; the stash was restored afterwards): **10 failed, 8 passed**.
+  - Failed, on both projects:
+    - the Build `1.5` case: no `aria-invalid`;
+    - both creation-dialog dismissals: the offer was not focused;
+    - the pointer trade: the receipt took the focus;
+    - the moved focus: the Sell tab lost it to the receipt.
+  - Passed: the snapshot tests and the watcher's negative control, which pin existing structure and behaviour.
+- **GREEN:** the covering specs (`release`, `market`, `inventory`, `planning`, `visitor`, `identity`, `management`, `scenes`, `full-screen`), both projects: **199 passed, 19 skipped, 0 failed**.
+  - An earlier covering run had one failure in `scenes.spec.ts` *keeps /replay/ and /expedition/ deep links working*: the first `/replay/` visit timed out on the dev server. It passed alone and in the two later runs.
+  - In a heavy repeated run of `market.spec.ts` and `scenes.spec.ts`, the unchanged *explains sold and expired results…* timed out once waiting for the owner chip. It passed 8/8 alone and in the full suite.
+
+### Gates, in order
+
+1. `npm test`: 50 files, 1105 passed.
+2. `npm run typecheck`: clean.
+3. `node assets/source/build-assets.mjs --check`: assets up to date (28 files). `npm run build` and `npm run verify:static`: 5 routes, 91 assets, clean.
+4. **Development browser suite** (`pw-replay.config.mjs`, port 3300): **503 passed, 27 skipped, 0 failed** (8.8 min).
+   - The first full run had one failure: the pointer test's scroll measurement, fixed as above, test-only. The source did not change between that run and this one.
+5. **Production gate** (port 4173 free before and after):
+   - `CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true npm run build`: exit 0.
+   - `npm run verify:static -- .next/browser-test`: clean.
+   - `PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test`: **20 passed, 510 skipped, 0 failed**.
+6. `git diff --cached --check`: clean. `AGENTS.md` unchanged. Port 3400 (Avi's preview) was not touched.
+
+### Screenshots
+
+Every `a11y-` screenshot was retaken by the final development run, in the same folder as before. There is no new visible change:
+- `market-receipt-focused` still shows the receipt focused after the keyboard purchase;
+- `creation-dialog` is unchanged;
+- after a pointer trade, the focus moves to the menu panel, which shows no focus ring, so it looks the same.
+
+### Concerns
+
+- **Pointer trades now leave the focus on the menu panel**, not on the bought row's neighbour or the receipt. The panel is the named dialog, so a screen reader announces "Marketplace" and the live region reads the receipt.
+- **The Minor 1 ruling also applies to Build and Schedule.** Their outcome took the focus for pointer users too when the focus was lost, for example on Cancel pending build. Now it moves only after a keyboard command.

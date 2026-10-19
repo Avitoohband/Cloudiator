@@ -429,9 +429,13 @@ describe('release access matrix', () => {
   it('denies direct writes and private RPCs through the Data API as owner, other account and visitor', { timeout: 120_000 }, async () => {
     const f = await fighter(), other = await account();
     const clients: [string, SupabaseClient][] = [['owner', f.owner.client], ['other account', other.client], ['visitor', anonymous]];
-    // pg_relation_is_updatable: the bit mask of the commands a relation can take at all (UPDATE 4, INSERT 8, DELETE 16).
+    // pg_relation_is_updatable: the bit mask of the commands a relation can take at all (UPDATE 4, INSERT 8, DELETE 16). The
+    // probe column is the first updatable one when the relation has any, so an update of a column that cannot be updated
+    // (0A000, before the privilege check) never stands in for the privilege check: since Task 23.2 world_revision has one,
+    // published_slot_index, beside its three computed columns.
     const relations = await sql`select n.nspname as schema, c.relname as name, (select a.attname from pg_attribute a
-      where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped order by a.attnum limit 1) as col,
+      where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped order by pg_column_is_updatable(c.oid, a.attnum, true) desc, a.attnum
+      limit 1) as col,
       pg_relation_is_updatable(c.oid, true) as updatable
       from pg_class c join pg_namespace n on n.oid=c.relnamespace
       where n.nspname in ('public','private') and c.relkind in ('r','v','m','p','f') order by 1,2`;

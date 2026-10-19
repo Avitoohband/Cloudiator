@@ -66,6 +66,53 @@ describe('safe projection authorization', () => {
       expect((await readTimeline(f.other.client,completedId, { ownerSummary: true })).completion?.result).toBe('completed');
     } finally {sync.stop();}
   });
+  it('exposes the published slot in the public revision state', async () => {
+    // Task 23.2 Decision 6 (C5): the coordinator's published slot is private, so the public revision row carries a copy. A
+    // visitor or a player then tells a slot still being prepared (publishedSlotIndex < slotIndex) from a published one
+    // without a time-based grace. The copy follows the coordinator when its transaction commits, never earlier, never on a
+    // rollback, and also when the backend role (the worker's coordination) publishes.
+    const f=await fighter(), slot=Math.floor(Date.now()/4_800_000), previous=slot-1, token=randomUUID();
+    await sql`truncate private.boundaries,private.boundary_work`;
+    await sql`update private.coordinator set published_slot=${previous-1},lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
+    await sql`update public.gladiators set created_at_ms=${(previous-1)*4_800_000+1},orientation_end_ms=${previous*4_800_000},processed_slot_index=${previous-1} where id=${f.gid}`;
+    await sql`update public.schedule_revisions set choice='{"kind":"rest"}',received_at_ms=${(previous-1)*4_800_000+1},effective_slot_index=${previous} where gladiator_id=${f.gid}`;
+    const rpc=async(name:string,args:Record<string,unknown>)=>{const {data,error}=await admin.rpc(name,args);if(error)throw Error(error.message);return data;};
+    const advance=(target:number)=>rpc('advance_boundary',{target_slot:target,coordinator_token:token});
+    const visitor=()=>readRevision(anonymous), player=()=>readRevision(f.other.client);
+    for (const read of [visitor, player]) {
+      const state=await read();
+      expect(state.publishedSlotIndex).toBe(previous-1);
+      expect(state.publishedSlotIndex!).toBeLessThan(state.slotIndex);
+    }
+    // While its preparation runs, the boundary of `previous` is not published: that slot is still being prepared.
+    expect(await advance(previous)).toMatchObject({status:'waiting',wait:'preparation'});
+    expect((await visitor()).publishedSlotIndex).toBe(previous-1);
+    const jobs=await rpc('claim_jobs',{worker_id:randomUUID(),kind:'prepare',batch_limit:20}) as JobLease[];
+    expect(jobs).toHaveLength(1);
+    expect(await rpc('complete_job',{job_id:jobs[0].id,lease_token:jobs[0].token,result:prepareActivityV1(jobs[0].snapshot as PreparationInput)})).toMatchObject({ok:true});
+    expect(await advance(previous)).toMatchObject({status:'complete'});
+    expect((await visitor()).publishedSlotIndex).toBe(previous);
+    expect((await player()).publishedSlotIndex).toBe(previous);
+    // Inside a transaction the copy waits for the commit (it takes the revision row last, as every projection write does);
+    // a rollback leaves it unchanged.
+    const rollback=new Error('rollback-only');
+    await expect(sql.begin(async tx=>{
+      await tx`update private.coordinator set published_slot=${slot} where singleton`;
+      expect(await tx`select published_slot_index::int as published from public.world_revision_state`).toEqual([{published:previous}]);
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect((await visitor()).publishedSlotIndex).toBe(previous);
+    // Before the first coordination nothing is published.
+    await sql`update private.coordinator set published_slot=null where singleton`;
+    expect((await visitor()).publishedSlotIndex).toBeNull();
+    // The revision view gains this one column, still read-only for a visitor.
+    const {data,error}=await anonymous.from('world_revision').select('*').single();
+    expect(error).toBeNull();
+    expect(Object.keys(data!).sort()).toEqual(['published_slot_index','revision','server_now_ms','slot_index']);
+    expect((await anonymous.from('world_revision_state').update({published_slot_index:slot}).eq('singleton',true).select()).error).not.toBeNull();
+    await sql`update private.coordinator set published_slot=${previous},lease_token=null,lease_until_ms=0 where singleton`;
+    expect((await visitor()).publishedSlotIndex).toBe(previous);
+  });
   it('publishes explicit equipped silhouettes to authenticated spectators, retaining private owner management', async () => {
     const f = await fighter();
     const world = await readWorld(f.other.client);

@@ -122,7 +122,7 @@ describe('public projection reads without a session', () => {
   /** What the Data API answers for each public object; `activities` is owner-only, so a visitor's read of it is denied. */
   function answer(table: string, url: URL, signedIn: boolean): Response {
     switch (table) {
-      case 'world_revision': return json({ revision: '1', server_now_ms: NOW, slot_index: 302 });
+      case 'world_revision': return json({ revision: '1', server_now_ms: NOW, slot_index: 302, published_slot_index: 301 });
       case 'world_actor_reads': return json([]);
       case 'public_profile_reads': return json({ profile });
       case 'visible_events': return json([{ ordinal: 0, stage: { id: 's1', kind: 'staging', revealedAtMs: 0, startedAtMs: 0, endsAtMs: 1, label: 'Warm-up' } }]);
@@ -158,8 +158,8 @@ describe('public projection reads without a session', () => {
   it('reads every public projection without a session', async () => {
     const { tables } = api(() => null);
     const gateway = createLiveGateway();
-    expect(await gateway.world()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, actors: [] });
-    expect(await gateway.revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302 });
+    expect(await gateway.world()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, actors: [] });
+    expect(await gateway.revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301 });
     expect(await gateway.timeline('act')).toMatchObject({ activityId: 'act', completion, stages: [{ id: 's1' }] });
     expect(await gateway.profile('g1')).toEqual(profile);
     expect(await gateway.standings('bronze')).toMatchObject({ league: 'bronze', seasonId: '2', rows: [{ rank: 1, gladiatorId: 'g1', name: 'Aster' }] });
@@ -203,8 +203,25 @@ describe('public projection reads without a session', () => {
   it('retries a public read once when the account changes during it', async () => {
     let account: Session | null = null, changes = 0;
     const { tables } = api(() => account, table => { if (table === 'world_revision' && changes++ === 0) account = session('first'); });
-    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302 });
+    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301 });
     expect(tables).toEqual(['world_revision', 'world_revision']);
+  });
+
+  it('reads the published slot with the revision, as a number, and null before the first publication (Task 23.2)', async () => {
+    const selects: (string | null)[] = [];
+    let published: unknown = '301';
+    const client = createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async input => {
+      const url = new URL(String(input));
+      selects.push(url.searchParams.get('select'));
+      return json({ revision: '1', server_now_ms: NOW, slot_index: 302, published_slot_index: published });
+    } } });
+    vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session: null }, error: null });
+    holder.client = client;
+    // A slot whose boundary is not yet published is still being prepared: publishedSlotIndex < slotIndex.
+    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301 });
+    published = null;
+    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: null });
+    expect(selects).toEqual(['revision,server_now_ms,slot_index,published_slot_index', 'revision,server_now_ms,slot_index,published_slot_index']);
   });
 
   it('throws unavailable when the account changes again during the retry', async () => {

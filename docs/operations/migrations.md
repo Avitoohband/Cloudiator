@@ -1,5 +1,91 @@
 # Local identity backend and migrations
 
+## Task 23.2: timing correctness (M18)
+
+M18 is `supabase/migrations/20261019102324_timing.sql`. It was generated with CLI 2.120.0 by
+`db pull timing --local --schema public,private --yes` (engine `migra`) from the tested second part of
+`supabase/sql/15-release.sql`, applied once to a clean M01–M17 reset, and completed from that source. M01–M17 are unchanged.
+The plan is `docs/superpowers/plans/2026-10-19-task-23-release-readiness.md`, Task 23.2, Decisions 3–6.
+
+**Source iteration.** As for M17: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/15-release.sql`). The
+whole file is reapplicable: its Task 23.1 statements are idempotent revokes.
+
+**What M18 changes.**
+- **Dispatch budget per scheduled minute (Decision 5, C3).** `private.dispatch_workers()` counts the invocations dispatched in
+  the scheduled minute the tick runs in, `[minute start, minute start + 60 s)` of database time sampled after the dispatch lock,
+  instead of those of the last rolling 60 s. pg_cron starts each tick a few hundred ms late and dispatch is sampled after
+  coordination, so the tick after a slower cutoff tick (for example +300 ms, then +60 250 ms) found the rolling window still
+  holding the cutoff tick's invocations; at 50 characters publication then waited for a third tick (121 s). The ceiling stays
+  five per scheduled minute (about 216 000 in a 30-day month, 5 × 1 440 × 30). Two consecutive minutes can now send up to ten
+  invocations within 60 s across their edge. The function stays owner-only (`{postgres=X}`).
+- **Published slot in the public revision state (Decision 6, C5).** `public.world_revision_state.published_slot_index` (bigint,
+  null before the first coordination) is a copy of `private.coordinator.published_slot`. It is written by
+  `private.mirror_published_slot()` through the deferred constraint trigger `mirror_published_slot` (after update of
+  `published_slot`, when it changed), so it changes exactly when the coordinator's transaction commits, never on a rollback,
+  and it takes the global revision row last, as every projection write does. A publication already holds that row from phase 8;
+  the other changes of `published_slot` (first coordination, skipped empty boundaries, an operator) take it only at commit.
+  `public.world_revision` appends the column (`create or replace`, so its grants and `security_invoker` stay), and visitors and
+  players read it as `RevisionState.publishedSlotIndex` (optional and additive; `src/lib/api/reads.ts`). A slot with
+  `publishedSlotIndex < slotIndex` is still being prepared; Task 23.4 replaces the client's five-minute grace with it. The
+  trigger function is owner-only: a trigger fires without an EXECUTE grant, including when the worker coordinates as
+  `service_role` (tested). The access matrix's `service_role` snapshot is unchanged; no new public object, so `OPEN` is
+  unchanged too.
+- **Not in M18:** the worker's bounded retry of a busy coordination (Decision 4, `supabase/functions/_shared/backend/jobs.ts`)
+  and the test timeouts (Decision 3). See "Worker and tests" below.
+
+**The draft needed four completions** (checked one by one against the source):
+1. Its `create or replace view "public"."world_revision"` named no options. CREATE OR REPLACE VIEW replaces a view's options with
+   the ones it names, so it would have dropped `security_invoker`. It is replaced by the source's statement, verbatim.
+2. It omitted both function ACLs; the source's two `revoke all … from public, anon, authenticated, service_role` are added.
+3. It omitted the backfill of `published_slot_index` from the coordinator; the source's statement follows the trigger.
+4. A provenance header and `notify pgrst`.
+
+The column, both functions and the constraint trigger are as generated, and the trigger follows its function. It re-emits no
+unchanged function: the two function bodies are byte-identical to the source's (compared programmatically).
+
+**Worker and tests (not migration content).**
+- **Bounded retry of a busy coordination (Decision 4, C2).** In `runWorker`, a coordination after the invocation's own work
+  that answers `busy` is retried at most three times, at least 250 ms apart; a coordination still busy then is left to the next
+  tick and counted in the report's `deferred`. Two refinements, each from an observed failure of the literal rule: the opening
+  coordination (before any work) is asked once, and each wait adds up to 250 ms of random jitter (`COORDINATION_RETRY`). The
+  invocations of one tick start and often finish together, and retries in step admit one of them per round, so the fifth of
+  five exhausted its retries (twice) although each coordination held the coordinator for milliseconds.
+- **Stable-slot waits (Decision 3, C16).** `tests/stable-slot-waits.test.ts` scans `tests/db/*.test.ts` statically for every
+  `stableRealSlot(margin)` call and every inline `if (remaining < margin) … setTimeout(resolve, remaining + 1_000)` wait,
+  through helpers, and fails with file and line unless the test's (or hook's) timeout covers the longest sleep plus the default
+  test (or hook) timeout for its own work. It found the two named causes (`arena.test.ts` 121 s in 60 s, `tournaments.test.ts`
+  61 s in the 20 s default) and two hooks (`market.test.ts` 181 s in 200 s, `shops.test.ts` 121 s in 150 s); their timeouts are
+  now written as the sum.
+- The production-cadence tests (`arena.test.ts`, `tournaments.test.ts`) tick at realistic offsets, +300 ms every minute
+  ("cleared") and alternately +300/+250 ms ("held", 59 950 ms after the cutoff tick), and require publication within 120 s in
+  both. The access matrix's write probe now updates an updatable column where the relation has one, because
+  `world_revision`'s new plain column made the view auto-updatable and the probe's first (computed) column answered 0A000
+  before any privilege check.
+
+**Replay evidence.**
+- The clean `db reset --local --no-seed --yes` to M01–M17 matched Task 23.1's recorded M17 replay fingerprint byte for byte
+  (1127 lines).
+- The source-applied fingerprint differs from it only in the `dispatch_workers` body, the new function (owner-only), the
+  `world_revision` definition (same ACL and `security_invoker=true`), the two new columns, the trigger, its constraint row and
+  its enabled state, plus the extension line below.
+- A clean `db reset --local --no-seed --yes` replayed M01–M18, with no source applied afterwards. Its fingerprint (the M17
+  coverage plus one line, the coordinator's published slot equals its public copy; 1134 lines) matched the source-applied
+  fingerprint byte for byte, and again after the full test runs.
+- Inspection of the replay: both functions `{postgres=X/postgres}`, invoker, `search_path=""`; `world_revision`
+  `{security_invoker=true}` with anon, authenticated and service_role SELECT only; the trigger enabled, deferrable and initially
+  deferred; all 44 `public`/`private` triggers enabled; both cron jobs active; no function executable by anon or authenticated.
+- The backfill cannot act on an empty replay (no published slot), so it was checked on the replay inside a `DO` block that
+  always raises: with the trigger disabled and the coordinator at slot 12345, the verbatim statement set the copy from null to
+  12345, and a second run changed no row. Afterwards both were null and the trigger enabled.
+- `npm run test:db` passed **269/269** in 16 files on the replay, with the Edge container's start time unchanged across the run.
+- Lint is empty. Advisors report one INFO unused-index notice (`jobs_gladiator_idx`) after the tests and no warnings or errors.
+  `migration list --local` shows M01–M18.
+
+**Release (Task 24).** Deploy M18 and the `game-worker` together, and before a client that reads `published_slot_index`:
+`readRevision` selects the column, which an M17 database refuses, so the revision read would fail. Task 24 still measures the
+hosted `dispatch_log` spacing and worker CPU (C4).
+
 ## Task 23.1: release access matrix and hardening (M17)
 
 M17 is `supabase/migrations/20261019075634_release.sql`. It was created with CLI 2.120.0 by `migration new release`, because
@@ -865,7 +951,7 @@ Later tasks replace these exact hook signatures, along with `private.settle_rewa
 
 **Jobs.** `private.jobs` has the kinds `prepare`, `simulation`, `reveal` and `settlement`, a unique `dedupe_key`, and an immutable input/seed/rules version, enforced by the `guard_job` trigger (since M04 also a status machine with terminal `completed` rows). Unfinished jobs cannot be deleted. `claim_jobs` uses `FOR UPDATE SKIP LOCKED` and caps a claim at 20 simple jobs or 5 simulation jobs. Each claim issues a fresh token and a 120-second lease. `renew_job` extends a lease without rotating its token. `complete_job`, `fail_job` and `settle_activity` require the current token. A completed job replays only to its own token. Attempts are counted per claim. A third failure, or a third expired lease, retains the job in `operator` state with the sanitized `last_failure`; since M04 the expired case is swept by every claim, boundary step and coordination pass, not only by a later claim. `private.resume_operator_job(id)` (direct SQL only) resumes the same seed and input. `private.job_attempts` logs worker, timing, outcome and failure code, never tokens. `private.settled_slots(gladiator, slot)` is the permanent grant guard. It deliberately has no activity FK, so summary retention can never remove it.
 
-**Coordinator and dispatch.** `coordinate_work()` takes the coordinator row with `SKIP LOCKED` and respects an unexpired external lease. It advances at most six boundaries per call, skips provably empty boundaries, and starts at the earliest existing checkpoint on its first run. `private.cron_tick()` is registered every minute and stays inert until `private.scheduler.enabled` is true. When enabled, it coordinates and then calls `private.dispatch_workers()`. Dispatch sends at most five `net.http_post` calls per rolling minute, and only for claimable work. It authenticates with the Vault secrets `game_worker_url` and `game_worker_secret`; without both, nothing is sent. Locally, the cron registration and execution, the dispatch budget and a real pg_net delivery to the local `game-worker` were tested. **Task 24 must** store the hosted Vault secrets, set `GAME_WORKER_SECRET` as a function secret, deploy `game-worker` with JWT verification disabled (the handler checks the secret), enable `private.scheduler`, and verify hosted scheduling and dispatch. None of that is claimed here.
+**Coordinator and dispatch.** `coordinate_work()` takes the coordinator row with `SKIP LOCKED` and respects an unexpired external lease. It advances at most six boundaries per call, skips provably empty boundaries, and starts at the earliest existing checkpoint on its first run. `private.cron_tick()` is registered every minute and stays inert until `private.scheduler.enabled` is true. When enabled, it coordinates and then calls `private.dispatch_workers()`. Dispatch sends at most five `net.http_post` calls per rolling minute (per scheduled minute since M18, Task 23.2), and only for claimable work. It authenticates with the Vault secrets `game_worker_url` and `game_worker_secret`; without both, nothing is sent. Locally, the cron registration and execution, the dispatch budget and a real pg_net delivery to the local `game-worker` were tested. **Task 24 must** store the hosted Vault secrets, set `GAME_WORKER_SECRET` as a function secret, deploy `game-worker` with JWT verification disabled (the handler checks the secret), enable `private.scheduler`, and verify hosted scheduling and dispatch. None of that is claimed here.
 
 **Edge worker.** `supabase/functions/game-worker/index.ts` requires `GAME_WORKER_SECRET`, at least 32 characters, and compares bearer digests in constant time. Locally the secret is an ignored line in `.env.edge.local`, generated randomly and never printed. `scripts/test-db.mjs` passes it to the tests in memory only. After adding it, restart `npx supabase functions serve --env-file .env.edge.local` from this checkout.
 

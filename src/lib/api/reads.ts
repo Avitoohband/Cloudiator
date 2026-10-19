@@ -22,8 +22,10 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   return row.state;
 }
 export async function readRevision(client: SupabaseClient): Promise<RevisionState> {
-  const row = checked<{revision:string;server_now_ms:number;slot_index:number}>(await client.from('world_revision').select('revision,server_now_ms,slot_index').single());
-  return { revision: row.revision, serverNowMs: Number(row.server_now_ms), slotIndex: Number(row.slot_index) };
+  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null}>(
+    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index').single());
+  return { revision: row.revision, serverNowMs: Number(row.server_now_ms), slotIndex: Number(row.slot_index),
+    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index) };
 }
 export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> {
   // A concurrent commit between pages must not be labeled with an earlier revision.

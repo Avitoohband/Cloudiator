@@ -39,7 +39,14 @@ export type PublicActor = {
   activityId: ActivityId | null; activityStatus: CurrentActivity['status'] | 'idle';
   startsAtMs: number | null; endsAtMs: number | null; visibleStage: RevealedStage | null;
 };
-export type RevisionState = { revision: string; serverNowMs: number; slotIndex: number };
+export type RevisionState = {
+  revision: string; serverNowMs: number; slotIndex: number;
+  /**
+   * Task 23.2 (C5): the latest slot whose boundary is published, from the public revision read (M18); null before the first
+   * coordination. A slot with `publishedSlotIndex < slotIndex` is still being prepared. Additive: absent from fixture worlds.
+   */
+  publishedSlotIndex?: number | null;
+};
 export type WorldSnapshot = RevisionState & { actors: PublicActor[] };
 /**
  * One season award on a public profile (Task 21), oldest season first. `seasonId` is the season index as text (players see

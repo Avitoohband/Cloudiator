@@ -229,7 +229,9 @@ export type ExecutorIo = { database: Pick<WorkerDatabase, 'tournamentBoutInput'>
 /** Versioned executors keyed by the job's persisted rules version. Settlement is SQL-side and never an executor. */
 export type JobExecutor = (job: JobLease, io?: ExecutorIo) => unknown | Promise<unknown>;
 export type ExecutorRegistry = Readonly<Record<string, Partial<Record<Exclude<JobKind, 'settlement'>, JobExecutor>>>>;
-export type WorkerDependencies = { database: WorkerDatabase; workerId: string; executors?: ExecutorRegistry; now?: () => number; cpuNow?: () => number };
+/** `sleep` waits between coordination retries (default: a real timer) and `random` draws their jitter in [0, 1) (default: Math.random); tests inject both. */
+export type WorkerDependencies = { database: WorkerDatabase; workerId: string; executors?: ExecutorRegistry; now?: () => number; cpuNow?: () => number;
+  sleep?: (ms: number) => Promise<void>; random?: () => number };
 export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
   async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
     const { data, error } = await client.rpc(name, args);

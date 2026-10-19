@@ -146,7 +146,8 @@ describe('inventory and NPC shops', () => {
     // Commands correctly return processing across a shared boundary; do not start a run in its final two minutes.
     const remaining = SLOT - (Date.now() % SLOT);
     if (remaining < 120_000) await new Promise(resolve => setTimeout(resolve, remaining + 1_000));
-  }, 150_000);
+    // The longest sleep (121 s) plus the default hook time for this setup (Task 23.2 Decision 3; tests/stable-slot-waits.test.ts).
+  }, 121_000 + 30_000);
   afterAll(() => sql.end());
 
   it('exposes backend-only buy_shop, sell_item and discard_item RPCs with invoker security', async () => {

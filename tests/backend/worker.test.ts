@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_EXECUTORS, handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput, PairingResult, TournamentBoutResult } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ExecutorRegistry, JobOutcome, TournamentBoutRead, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
@@ -479,6 +479,80 @@ describe('fenced worker orchestration', () => {
     expect([queues.prepare.length, queues.pair.length, queues.simulation.length]).toEqual([5, 1, 1]);
     expect(report).toMatchObject({ claimed: 20, byKind: { prepare: 20, pair: 0, simulation: 0 },
       coordination: { boundaries: [{ status: 'waiting', wait: 'preparation' }] } });
+  });
+  it('retries coordination three times when busy, then reports deferred', async () => {
+    // Task 23.2 Decision 4 (C2): after this invocation's settlement another invocation holds the coordinator. After the first
+    // answer and three retries at least 250 ms apart the coordination is left to the next scheduled tick and counted as
+    // deferred, in the existing report shape. The opening coordination, before any work, is asked once: the invocations a
+    // tick dispatches start together, and retrying them in step would only queue them behind each other.
+    const job = lease('settlement');
+    const { database, calls } = port({ settlement: [job] });
+    database.coordinate = async () => { calls.push({ name: 'coordinate', args: [] }); return { ok: true, busy: true, publishedSlot: 299 }; };
+    const sleeps: number[] = [];
+    const report = await runWorker({ database, workerId: 'worker-busy', sleep: async ms => { sleeps.push(ms); }, random: () => 0 });
+    expect(calls.map(c => c.name)).toEqual(['coordinate', 'claim', 'settle', 'coordinate', 'coordinate', 'coordinate', 'coordinate',
+      'claim', 'claim', 'claim']);
+    expect(sleeps).toEqual([250, 250, 250]);
+    expect(report).toMatchObject({ claimed: 1, completed: 1, deferred: 1, coordination: { ok: true, busy: true } });
+  });
+  it('adds up to 250 ms of random jitter to each retry, so invocations that finished together do not retry in step', async () => {
+    // Observed in Task 23.2: five invocations of one tick finished their simulations together; with fixed 250 ms waits each
+    // round admitted one of them, and the fifth exhausted its retries although every coordination took milliseconds.
+    const { database } = port({ settlement: [lease('settlement')] });
+    database.coordinate = async () => ({ ok: true, busy: true, publishedSlot: 299 });
+    const draws = [0, 0.5, 0.999_999], sleeps: number[] = [];
+    await runWorker({ database, workerId: 'worker-jitter', sleep: async ms => { sleeps.push(ms); }, random: () => draws.shift()! });
+    expect(sleeps).toEqual([250, 375, 499]);
+  });
+  it('asks the opening coordination once and defers nothing when only it finds the coordinator busy', async () => {
+    const { database, calls } = port({});
+    database.coordinate = async () => { calls.push({ name: 'coordinate', args: [] }); return { ok: true, busy: true, publishedSlot: 299 }; };
+    const sleeps: number[] = [];
+    const report = await runWorker({ database, workerId: 'worker-opening', sleep: async ms => { sleeps.push(ms); }, random: () => 0 });
+    expect(calls.filter(c => c.name === 'coordinate')).toHaveLength(1);
+    expect(sleeps).toEqual([]);
+    expect(report.deferred).toBeUndefined();
+    expect(report).toMatchObject({ claimed: 0, coordination: { ok: true, busy: true } });
+  });
+  it('retries a busy coordination after the last preparation and claims the pairing that coordination released', async () => {
+    // C2, observed in the production-cadence timing test: the invocation that completed the boundary's last preparation found
+    // the coordinator busy with another invocation's coordination, which had begun before that completion and so still waited
+    // on preparation. Neither invocation saw the released pairing jobs, and publication waited a whole scheduled minute.
+    const pairs = [lease('pair', { gladiatorId: null }), lease('pair', { gladiatorId: null })];
+    const { database, calls, executors } = pairingBoundary({ prepare: Array.from({ length: 20 }, () => lease('prepare')), pair: pairs });
+    const coordinate = database.coordinate;
+    let busy = 2;
+    database.coordinate = async () => {
+      if (calls.filter(c => c.name === 'complete').length === 20 && busy > 0) {
+        busy -= 1;
+        calls.push({ name: 'coordinate', args: [] });
+        return { ok: true, busy: true, publishedSlot: 299 };
+      }
+      return coordinate();
+    };
+    const sleeps: number[] = [];
+    const report = await runWorker({ database, workerId: 'worker-race', executors, sleep: async ms => { sleeps.push(ms); }, random: () => 0 });
+    expect(sleeps).toEqual([250, 250]);
+    expect(calls.filter(c => c.name === 'claim').map(c => c.args.slice(1))).toEqual([['settlement', 20], ['prepare', 20], ['pair', 1], ['pair', 1], ['pair', 1]]);
+    expect(report.deferred).toBeUndefined();
+    expect(report).toMatchObject({ claimed: 22, completed: 22, byKind: { prepare: 20, pair: 2 }, coordination: { publishedSlot: 300 } });
+  });
+  it('waits on the real timer between coordination attempts and stops retrying once the coordinator is free', async () => {
+    vi.useFakeTimers();
+    try {
+      const { database } = port({ settlement: [lease('settlement')] });
+      const attempts: number[] = [];
+      // Busy for the opening coordination and the first two after the settlement, then free.
+      database.coordinate = async () => { attempts.push(Date.now()); return { ok: true, busy: attempts.length <= 3, publishedSlot: 299 }; };
+      const run = runWorker({ database, workerId: 'worker-timer', random: () => 0 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const report = await run;
+      expect(attempts.map(t => t - attempts[0])).toEqual([0, 0, 250, 500]);
+      expect(report.deferred).toBeUndefined();
+      expect(report.coordination).toEqual({ ok: true, busy: false, publishedSlot: 299 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('processes at most five combat jobs only when no simple work exists', async () => {
     const simulations = Array.from({ length: 9 }, () => lease('simulation'));

@@ -17,6 +17,15 @@ import type { ExecutorIo, ExecutorRegistry, JobOutcome, TournamentBoutRead, Work
 
 /** Spec 10.4 batch limits and lease length; CPU measurements may lower the batch sizes without changing semantics. */
 export const WORKER_LIMITS = Object.freeze({ simple: 20, combat: 5, cpuMs: 2_000, leaseMs: 120_000, renewBelowMs: 60_000 });
+/**
+ * Task 23.2 Decision 4 (C2): a coordination after this invocation's work that answers `busy` met another invocation's
+ * coordination, which may have begun before that work committed and so not see it. Retry at most `attempts` times, at least
+ * `delayMs` apart; a coordination still busy after that is left to the next scheduled tick and counted in `deferred`.
+ * Each wait adds up to `jitterMs` at random: the invocations one tick dispatches often finish together, and retries in step
+ * would admit one of them per round, so the fifth of five exhausted its retries (observed twice in Task 23.2, while each
+ * coordination held the coordinator for milliseconds).
+ */
+export const COORDINATION_RETRY = Object.freeze({ attempts: 3, delayMs: 250, jitterMs: 250 });
 
 /** Stable, secret-free failure codes. Raw exception text is never stored, logged or returned. */
 export type FailureCode = 'unsupported-rules' | 'unsupported-executor' | 'invalid-input' | 'invalid-build' | 'invalid-result' | 'execution-failed';
@@ -249,6 +258,8 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
   const executors = deps.executors ?? DEFAULT_EXECUTORS;
   const now = deps.now ?? Date.now;
   const cpuNow = deps.cpuNow ?? (() => performance.now());
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const random = deps.random ?? Math.random;
   let computeMs = 0;
   const report: WorkerReport = { claimed: 0, completed: 0, replayed: 0, failed: 0, conflicts: 0, unrecorded: 0,
     byKind: { prepare: 0, pair: 0, simulation: 0, reveal: 0, settlement: 0 }, coordination: null };
@@ -258,12 +269,25 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
     else report.completed += 1;
   };
   /** Coordination failing must never stop claimable work: due jobs still drain, and the report says coordination was unreachable. */
-  async function coordinate(): Promise<CoordinatorReport> {
+  async function coordinateOnce(): Promise<CoordinatorReport> {
     try {
       return await deps.database.coordinate();
     } catch {
       return { ok: false, code: 'coordinator-unavailable', publishedSlot: null };
     }
+  }
+  /**
+   * One coordination after this invocation's own work, retried while another invocation holds the coordinator
+   * (COORDINATION_RETRY): that coordination may have begun before the work committed.
+   */
+  async function coordinate(): Promise<CoordinatorReport> {
+    let answer = await coordinateOnce();
+    for (let retry = 0; answer.busy && retry < COORDINATION_RETRY.attempts; retry++) {
+      await sleep(COORDINATION_RETRY.delayMs + Math.floor(Math.min(Math.max(random(), 0), 0.999_999) * COORDINATION_RETRY.jitterMs));
+      answer = await coordinateOnce();
+    }
+    if (answer.busy) report.deferred = (report.deferred ?? 0) + 1;
+    return answer;
   }
   async function execute(job: JobLease): Promise<unknown> {
     const versioned = Object.hasOwn(executors, job.rulesVersion) ? executors[job.rulesVersion] : undefined;
@@ -313,7 +337,10 @@ export async function runWorker(deps: WorkerDependencies): Promise<WorkerReport>
       }
     }
   }
-  report.coordination = await coordinate();
+  // The opening coordination is not retried: before any work there is nothing of this invocation's for a running
+  // coordination to miss, and the invocations one tick dispatches start together, so retrying them in step would only queue
+  // them behind each other (observed in Task 23.2: the fifth of five then exhausted its retries).
+  report.coordination = await coordinateOnce();
   let simple = WORKER_LIMITS.simple;
   // Pairing follows preparation: completed preparations release a boundary's phases 5–7, whose pairing jobs this same
   // invocation can then claim before any reveal.

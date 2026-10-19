@@ -171,7 +171,8 @@ describe('marketplace listings in the database', () => {
     // Commands correctly return processing across a shared boundary; do not start a run in its final three minutes.
     const remaining = SLOT - (Date.now() % SLOT);
     if (remaining < 180_000) await new Promise(resolve => setTimeout(resolve, remaining + 1_000));
-  }, 200_000);
+    // The longest sleep (181 s) plus the default hook time for this setup (Task 23.2 Decision 3; tests/stable-slot-waits.test.ts).
+  }, 181_000 + 30_000);
   afterAll(() => sql.end());
 
   it('lets exactly one of two buyers and a cancel reach a terminal state', async () => {

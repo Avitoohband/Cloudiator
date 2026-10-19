@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import type { TransactionSql } from 'postgres';
 import { sql, account, resetIdentity, admin, anonymous, creation, request } from '../fixtures/db.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, createWorkerDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
@@ -32,6 +33,8 @@ async function rpc<T = Outcome>(name: string, args: Record<string, unknown> = {}
   return data as T;
 }
 const nowSlot = () => Math.floor(Date.now() / SLOT);
+const clockDefinition = async (): Promise<string> =>
+  (await sql`select pg_get_functiondef('private.planning_now_ms()'::regprocedure) as definition`)[0].definition;
 /** Avoid asserting exact real-clock slots in the final seconds before a shared boundary. */
 async function stableRealSlot(marginMs = 30_000) {
   const remaining = SLOT - (Date.now() % SLOT);
@@ -715,26 +718,63 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     expect(runs).toBeGreaterThan(0);
   }, 90_000);
 
-  it('dispatches at most five workers per minute and only when claimable work exists', async () => {
-    const owner = await fighter();
-    await sql.begin(async tx => {
+  /**
+   * Dispatch inside one transaction that always rolls back, at pinned database times: the test-only clock stand-in reads
+   * `cloudiator.test_now_ms`, and the rollback discards it, the Vault secrets, the jobs and every queued request (none is sent).
+   */
+  async function dispatchRolledBack(run: (tx: TransactionSql, dispatchAt: (atMs: number) => Promise<Outcome & { dispatched: number }>) => Promise<void>) {
+    const definition = await clockDefinition();
+    const rollback = new Error('rollback-only');
+    await expect(sql.begin(async tx => {
+      await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker
+        set search_path='' as $clock$ select current_setting('cloudiator.test_now_ms')::bigint $clock$`);
       await tx`select vault.create_secret('http://127.0.0.1:9/never-sent','game_worker_url')`;
       await tx`select vault.create_secret('dispatch-test-secret-0123456789abcdef','game_worker_secret')`;
+      await run(tx, async atMs => {
+        await tx.unsafe(`set local cloudiator.test_now_ms = '${atMs}'`);
+        return (await tx`select private.dispatch_workers() as d`)[0].d;
+      });
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect(await clockDefinition()).toBe(definition);
+  }
+  it('dispatches at most five workers per minute and only when claimable work exists', async () => {
+    const owner = await fighter();
+    // One scheduled minute, 300 ms after it starts (a cutoff, as pg_cron runs a little after each minute).
+    const at = (nowSlot() + 1) * SLOT + 300;
+    await dispatchRolledBack(async (tx, dispatchAt) => {
       const queued = async () => (await tx`select count(*)::int as n from net.http_request_queue`)[0].n as number;
       const base = await queued();
-      expect((await tx`select private.dispatch_workers() as d`)[0].d).toMatchObject({ ok: true, dispatched: 0 });
+      expect(await dispatchAt(at)).toMatchObject({ ok: true, dispatched: 0 });
       await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
         select 'reveal','dispatch:'||n,300,${owner.gid},'{}','v1',0 from generate_series(1,30) n`;
-      expect((await tx`select private.dispatch_workers() as d`)[0].d).toMatchObject({ ok: true, dispatched: 2 });
+      expect(await dispatchAt(at + 1)).toMatchObject({ ok: true, dispatched: 2 });
       await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
         select 'reveal','dispatch-more:'||n,300,${owner.gid},'{}','v1',0 from generate_series(1,200) n`;
-      expect((await tx`select private.dispatch_workers() as d`)[0].d).toMatchObject({ ok: true, dispatched: 3 });
-      expect((await tx`select private.dispatch_workers() as d`)[0].d).toMatchObject({ ok: true, dispatched: 0 });
+      expect(await dispatchAt(at + 2)).toMatchObject({ ok: true, dispatched: 3 });
+      expect(await dispatchAt(at + 3)).toMatchObject({ ok: true, dispatched: 0 });
       expect(await queued() - base).toBe(5);
       const [{ headers }] = await tx`select headers from net.http_request_queue order by id desc limit 1`;
       expect(headers.Authorization === 'Bearer dispatch-test-secret-0123456789abcdef').toBe(true);
       expect(JSON.stringify(await tx`select * from private.dispatch_log`)).not.toContain('dispatch-test-secret');
-      await tx`rollback`;
+    });
+  });
+  it('spends the dispatch budget per scheduled minute at offsets +300 ms and +60,250 ms', async () => {
+    // Task 23.2 Decision 5 (C3): pg_cron starts each minute's tick a few hundred ms late, and a tick whose coordination takes
+    // longer samples its dispatch later. Under a rolling 60 s window the next tick, 59 950 ms later, still counted the
+    // previous tick's invocations and could dispatch only the rest of the five. The budget now belongs to the scheduled
+    // minute the tick runs in: each minute dispatches at most five, about 216 000 in a 30-day month (5 × 1 440 × 30).
+    const owner = await fighter();
+    const minute = (nowSlot() + 1) * SLOT;
+    await dispatchRolledBack(async (tx, dispatchAt) => {
+      await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
+        select 'reveal','minute:'||n,300,${owner.gid},'{}','v1',0 from generate_series(1,200) n`;
+      const offsets = [300, 59_999, 60_250, 119_999, 120_000, 179_999];
+      const dispatched: number[] = [];
+      for (const offset of offsets) dispatched.push((await dispatchAt(minute + offset)).dispatched);
+      expect(dispatched).toEqual([5, 0, 5, 0, 5, 0]);
+      expect(await tx`select (dispatched_at_ms/60000 - ${minute / 60_000})::int as minute, count(*)::int as n from private.dispatch_log
+        group by 1 order by 1`).toEqual([{ minute: 0, n: 5 }, { minute: 1, n: 5 }, { minute: 2, n: 5 }]);
     });
   });
 

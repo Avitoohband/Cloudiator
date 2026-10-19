@@ -508,11 +508,14 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(rows.map(r => [r.battle_id, r.kind])).toEqual([[`arena:300:${solo.gid}:npc`, 'npc']]);
     });
 
-    it('times consecutive 50-entrant Arena boundaries at the one-minute cron cadence: steady-state publication within 120 s once the rolling dispatch window clears, within 180 s while it holds the previous tick, every bout before minute 60', async () => {
+    it('publishes a cleared and a held window within 120 s at production cadence', async () => {
       // Three consecutive 50-entrant Arena slots P, P + 1 and P + 2 run end to end through the real scheduled tick and the
-      // real private Edge worker reached through pg_net. P is a cold first boundary. P + 1 and P + 2 are steady state: the
-      // previous slot's 50 settlements fall due at their cutoff and must finish before phase 1 continues, under the same
-      // dispatch budget (at most five invocations per rolling minute) and batch limits as the boundary itself.
+      // real private Edge worker reached through pg_net, at the one-minute cron cadence, every bout simulated before minute
+      // 60. P is a cold first boundary. P + 1 and P + 2 are steady state: the previous slot's 50 settlements fall due at their
+      // cutoff and must finish before phase 1 continues, under the same dispatch budget (at most five invocations per
+      // scheduled minute, Task 23.2 Decision 5) and batch limits as the boundary itself. Ticks run at realistic offsets into
+      // their minute: pg_cron starts a few hundred ms late, and a tick whose coordination takes longer samples its dispatch
+      // later than the next tick does.
       const first = (await stableRealSlot(30_000)) + 1;
       await resetWorld(first - 1);
       const CLASSES = ['berserker', 'guardian', 'duelist'] as const;
@@ -566,11 +569,11 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
           claimableCombat: result.dispatch.claimableCombat,
           invocations: invocations.map(r => Object.entries(r.byKind).filter(([, n]) => n).map(([kind, n]) => `${kind} ${n}`).join(', ') || 'idle') };
       }
-      /** Ticks one boundary from its cutoff every `spacing` ms until it is published and every bout is simulated. */
-      async function boundary(slot: number, spacing: number) {
+      /** Ticks one boundary at `offset(k)` after its cutoff, k = 0, 1, …, until it is published and every bout is simulated. */
+      async function boundary(slot: number, offset: (k: number) => number) {
         const cutoff = slot * SLOT, ticks: Tick[] = [];
         for (let k = 0; k < 8; k++) {
-          ticks.push(await tick(cutoff + k * spacing));
+          ticks.push(await tick(cutoff + offset(k)));
           const [state] = await sql`select (select phase::int from private.boundaries where slot_index=${slot}) as phase,
             (select count(*)::int from private.arena_assignments where slot_index=${slot}) as battles,
             (select count(*)::int from private.jobs where kind='simulation' and slot_index=${slot} and status='completed') as simulated`;
@@ -585,7 +588,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
           (select count(*)::int from private.arena_assignments where slot_index=${slot}) as battles,
           (select count(*)::int from private.jobs where kind='simulation' and slot_index=${slot} and status='completed') as simulations`;
         const since = (ms: number | null) => ms === null ? null : ms - cutoff;
-        return { slot, spacingMs: spacing, battles: t.battles as number, simulations: t.simulations as number, settledMs: since(t.settled),
+        return { slot, battles: t.battles as number, simulations: t.simulations as number, settledMs: since(t.settled),
           preparedMs: since(t.prepared)!, pairedMs: since(t.paired)!, publishedMs: since(t.published)!, simulatedMs: since(t.simulated)!,
           ticks: ticks.map(x => ({ ...x, atMs: x.atMs - cutoff })) };
       }
@@ -598,6 +601,10 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         }
         throw new Error(`the minute-60 reveals of slot ${slot} did not complete`);
       }
+      // Cleared: every tick 300 ms into its minute, exactly a minute after the previous one, so a rolling 60 s window would
+      // have let the previous tick's invocations go. Held: the cutoff tick at +300 ms, the next at +60 250 ms (59 950 ms
+      // later), and so on alternately, so a rolling window would still count the previous tick's invocations.
+      const CLEARED = (k: number) => k * MINUTE + 300, HELD = (k: number) => k * MINUTE + (k % 2 ? 250 : 300);
       await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
       const started = Date.now();
       let measured: Awaited<ReturnType<typeof boundary>>[] = [];
@@ -605,14 +612,13 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         await sql`select vault.create_secret('http://supabase_edge_runtime_Cloudiator:8081/game-worker','game_worker_url')`;
         await sql`select vault.create_secret(${secret},'game_worker_secret')`;
         // P: the cold first boundary (nothing to settle), then its minute-60 reveals.
-        const cold = await boundary(first, MINUTE);
+        const cold = await boundary(first, CLEARED);
         await reveals(first);
-        // P + 1: steady state, each tick exactly one minute after the previous one, so the rolling window has cleared.
-        const cleared = await boundary(first + 1, MINUTE);
+        // P + 1: steady state in the cleared case.
+        const cleared = await boundary(first + 1, CLEARED);
         await reveals(first + 1);
-        // P + 2: steady state, each tick 1 ms less than a minute after the previous one, so the window still holds the
-        // previous tick's invocations. Cron start and coordination jitter decide which of the two cases a real minute sees.
-        const held = await boundary(first + 2, MINUTE - 1);
+        // P + 2: steady state in the held case. Cron start and coordination jitter decide which case a real minute sees.
+        const held = await boundary(first + 2, HELD);
         measured = [cold, cleared, held];
       } finally {
         await sql`update private.scheduler set enabled=false where singleton`;
@@ -620,7 +626,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
       }
       expect((await sql.unsafe(clockQuery))[0].definition).toBe(definition);
-      console.info(`Task 16 Arena boundaries at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, targetMs: 120_000,
+      console.info(`Task 23.2 Arena boundaries at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, targetMs: 120_000,
         revealMs: RULES_V1.arena.revealAfterMs, wallMs: Date.now() - started, boundaries: measured })}`);
       const [cold, cleared, held] = measured;
       for (const b of measured) {
@@ -634,19 +640,26 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       for (const b of [cleared, held]) {
         // Steady state: the cutoff tick dispatches the previous slot's 50 settlements to three invocations, and they finish
         // before preparation (phase 4) can start.
-        expect(b.ticks[0]).toMatchObject({ atMs: 0, dispatched: 3, claimableSimple: 50 });
+        expect(b.ticks[0]).toMatchObject({ atMs: 300, dispatched: 3, claimableSimple: 50 });
         expect(b.settledMs).not.toBeNull();
         expect(b.settledMs!).toBeLessThanOrEqual(b.preparedMs);
+        // The next tick, in the next scheduled minute, has its own budget: it dispatches all the invocations its claimable
+        // preparations need (three for 50), which also run the pairing their coordination releases, so the slot publishes in
+        // that tick. Under a rolling window the held tick could dispatch only two (40 preparations), and publication waited
+        // for a third tick, at about 121 s (C3).
+        const next = b.ticks[1];
+        expect(next.claimableSimple).toBeGreaterThan(0);
+        expect(next.dispatched).toBe(Math.min(5, Math.ceil(next.claimableSimple / 20) + Math.ceil(next.claimableCombat / 5)));
       }
-      // Spec §10.4: normal boundary processing (settling the previous slot through publication) within two minutes.
+      expect(held.ticks[1].atMs).toBe(60_250);
+      // Spec §10.4: normal boundary processing (settling the previous slot through publication) within two minutes, at every
+      // offset of the tick in its minute.
       expect(cleared.publishedMs).toBeLessThan(120_000);
-      // While the window still holds the cutoff tick's three invocations, the next tick can dispatch only two, which run 40
-      // of the 50 preparations, so publication waits for a third tick. (The cutoff tick's spare 10 slots cannot prepare:
-      // preparation jobs exist only after the last settlement commits.)
-      expect(held.ticks[1]).toMatchObject({ dispatched: 2 });
-      expect(held.publishedMs).toBeLessThan(180_000);
-      // Every job was run by the real worker, with no failure, conflict, unrecorded failure or deferral.
-      expect(reports.reduce((sum, r) => sum + r.failed + r.conflicts + r.unrecorded + (r.deferred ?? 0), 0)).toBe(0);
+      expect(held.publishedMs).toBeLessThan(120_000);
+      // Every job was run by the real worker, with no failure, conflict, unrecorded failure or deferral (a deferral also
+      // counts a coordination still busy after its retries, Task 23.2 Decision 4).
+      const flagged = reports.filter(r => r.failed + r.conflicts + r.unrecorded + (r.deferred ?? 0) > 0);
+      expect(flagged, JSON.stringify(flagged)).toEqual([]);
       const total = (kind: string) => reports.reduce((sum, r) => sum + (r.byKind[kind] ?? 0), 0);
       expect([total('settlement'), total('prepare'), total('pair'), total('reveal'), total('simulation')])
         .toEqual([100, 150, 6, 100, cold.battles + cleared.battles + held.battles]);
@@ -1246,7 +1259,9 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
           [control.gid]: ['bronze', 'bronze', 10, 2], [respec.gid]: ['silver', 'silver', 105, 0] });
         throw rollback;
       })).rejects.toBe(rollback);
-    }, 60_000);
+      // The longest stableRealSlot sleep (121 s, a run that starts in the slot's last two minutes) plus this test's own minute
+      // (Task 23.2 Decision 3, C16: the 60 s timeout alone failed every late start; tests/stable-slot-waits.test.ts checks it).
+    }, 121_000 + 60_000);
 
     it('serves public, paginated standings of the latest season from the rating rows, with no wallet or loot', async () => {
       const bronze: Fighter[] = [];

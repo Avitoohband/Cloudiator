@@ -207,7 +207,9 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       const stranger = await account();
       expect(await optIn(stranger.id, { kind: 'set-tournament-opt-in', operationId: randomUUID(), enabled: true })).toEqual({ ok: false, code: 'not-found' });
       expect(await rpc('set_tournament_opt_in', { actor_id: null, operation_id: randomUUID(), input: { command: {} } })).toEqual({ ok: false, code: 'unauthenticated' });
-    });
+      // The longest stableRealSlot sleep (61 s, a run that starts in the slot's last minute) plus the default 20 s for this work
+      // (Task 23.2 Decision 3; tests/stable-slot-waits.test.ts checks it).
+    }, 61_000 + 20_000);
 
     it('freezes the flag at the cutoff: a toggle 1 ms before counts, at or after the cutoff it answers processing until the slot is published', async () => {
       const [a, b] = await many(2, { optIn: true });
@@ -1505,13 +1507,15 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
     }, 60_000);
   });
 
-  it('times a 50-entrant tournament slot through every round at the one-minute cron cadence: steady-state publication, every round simulated before its reveal, reveals and credits on time, in both dispatch window cases', async () => {
+  it('times a 50-entrant tournament slot through every round at the one-minute cron cadence: publication within 120 s, every round simulated before its reveal, reveals and credits on time, at every tick offset', async () => {
     // Two runs of the same pair of boundaries through the real scheduled tick and the real private Edge worker reached
     // through pg_net: P, a cold regular Arena slot, then the tournament slot T = P + 1 in steady state (P's 50
     // settlements fall due at T's cutoff and must finish before phase 1 continues), ticked on through every round's reveal
-    // and the minute-80 settlement. Run 1 ticks T exactly a minute apart (the rolling dispatch window has cleared), run 2
-    // 1 ms less than a minute apart (it still holds the previous tick). T is the next real Wednesday or Saturday 17:20 UTC
-    // slot, so database time stays near real time.
+    // and the minute-80 settlement. Ticks run at realistic offsets into their minute (Task 23.2): run 1 every tick 300 ms in,
+    // exactly a minute after the previous one (a rolling 60 s window would have cleared); run 2 alternately 300 ms and
+    // 250 ms in, so the tick after the cutoff tick comes 59 950 ms after it (a rolling window would still count it). The
+    // dispatch budget is per scheduled minute (Decision 5), so both publish within 120 s. T is the next real Wednesday or
+    // Saturday 17:20 UTC slot, so database time stays near real time.
     let tournamentSlot = nowSlot() + 2;
     while (!isTournamentSlot(slotAt(tournamentSlot * SLOT))) tournamentSlot += 1;
     const P = tournamentSlot - 1;
@@ -1557,8 +1561,11 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
     const phaseOf = async (slot: number) => (await sql`select phase::int from private.boundaries where slot_index=${slot}`)[0]?.phase ?? 0;
     const unsettled = async () => (await sql`select count(*)::int as n from private.jobs where kind='settlement' and slot_index=${tournamentSlot}
       and status<>'completed'`)[0].n as number;
-    /** One run: the cold regular slot P to its minute-60 reveals, then the tournament slot T from its cutoff to every credit. */
-    async function run(spacing: number) {
+    /**
+     * One run: the cold regular slot P to its minute-60 reveals, then the tournament slot T from its cutoff to every credit,
+     * its tick k at `offset(k)` after the cutoff.
+     */
+    async function run(name: string, offset: (k: number) => number) {
       await resetWorld(P - 1);
       await many(50, { firstSlot: P, optIn: true });
       for (let k = 0; k < 6 && !(await phaseOf(P) === 9 && (await sql`select count(*)::int as n from private.jobs
@@ -1569,7 +1576,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       }
       const cutoff = tournamentSlot * SLOT, ticks: Tick[] = [];
       let k = 0;
-      for (; k < 5 && await phaseOf(tournamentSlot) !== 9; k++) ticks.push(await tick(cutoff + k * spacing));
+      for (; k < 5 && await phaseOf(tournamentSlot) !== 9; k++) ticks.push(await tick(cutoff + offset(k)));
       // At publication only the ready bouts are claimable: the 18 fought first-round bouts and the round-two bouts between
       // two bye winners.
       const [t] = await tournaments();
@@ -1579,7 +1586,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         and private.dependencies_ready(id) order by dedupe_key`).map(r => r.dedupe_key);
       expect(claimable).toEqual(ready);
       // Then on at the same cadence, through every round's reveal and the minute-80 settlement.
-      for (; k < 90 && await unsettled() > 0; k++) ticks.push(await tick(cutoff + k * spacing));
+      for (; k < 90 && await unsettled() > 0; k++) ticks.push(await tick(cutoff + offset(k)));
       const [m] = await sql`select
         (select max(completed_at_ms) from private.jobs where kind='settlement' and slot_index=${P})::float8 as settled,
         (select max(completed_at_ms) from private.jobs where kind='prepare' and slot_index=${tournamentSlot})::float8 as prepared,
@@ -1595,7 +1602,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         where o.tournament_id=${t.id} group by o.round order by o.round`).map(r => ({ round: r.round as number, bouts: r.bouts as number,
         revealAtMs: r.due - cutoff, simulatedMs: r.simulated - cutoff, marginMs: r.due - r.simulated, revealLagMs: r.revealed - r.due }));
       const since = (ms: number | null) => ms === null ? null : ms - cutoff;
-      return { spacingMs: spacing, tournamentId: t.id as string, settledMs: since(m.settled), preparedMs: since(m.prepared)!, pairedMs: since(m.paired)!,
+      return { run: name, tournamentId: t.id as string, settledMs: since(m.settled), preparedMs: since(m.prepared)!, pairedMs: since(m.paired)!,
         publishedMs: since(m.published), creditedMs: since(m.credited), bouts: m.bouts as number, reveals: m.reveals as number,
         dependencies: m.dependencies as number, rounds, ticks: ticks.filter(x => x.dispatched > 0).map(x => ({ ...x, atMs: x.atMs - cutoff })) };
     }
@@ -1605,7 +1612,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
     try {
       await sql`select vault.create_secret('http://supabase_edge_runtime_Cloudiator:8081/game-worker','game_worker_url')`;
       await sql`select vault.create_secret(${secret},'game_worker_secret')`;
-      measured.push(await run(MINUTE));
+      measured.push(await run('cleared', k => k * MINUTE + 300));
       // Checked here, before the second run resets the world: one 50-entrant Bronze bracket, settled, and its public view.
       expect(await tournaments()).toHaveLength(1);
       expect(await sql`select count(*)::int as n from private.tournament_entries`).toEqual([{ n: 50 }]);
@@ -1618,16 +1625,17 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       expect(await sql`select (select count(*) from public.tournament_bout_results where tournament_id=${measured[0].tournamentId})::int as results,
         (select count(*) from public.tournament_placements where tournament_id=${measured[0].tournamentId})::int as placements`)
         .toEqual([{ results: 63, placements: 50 }]);
-      measured.push(await run(MINUTE - 1));
+      measured.push(await run('held', k => k * MINUTE + (k % 2 ? 250 : 300)));
     } finally {
       await sql`update private.scheduler set enabled=false where singleton`;
       await sql.unsafe(definition);
       await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
     }
     expect((await sql.unsafe(clockQuery))[0].definition).toBe(definition);
-    console.info(`Task 19 tournament slot at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, tournamentSlot, targetMs: 120_000,
+    console.info(`Task 23.2 tournament slot at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, tournamentSlot, targetMs: 120_000,
       wallMs: Date.now() - started, runs: measured })}`);
-    const [cleared, held] = measured;
+    // The longest gap between two consecutive ticks of either run: 300 ms in, then 250 ms into the next minute and back.
+    const GAP = MINUTE + 50;
     for (const m of measured) {
       // 49 bouts and their 49 reveals; dependencies: 48 parent bouts, 49 reveals on their bouts, 48 reveals on their fought
       // parents' reveals, and each of the 50 settlements on the final's bout and reveal.
@@ -1635,27 +1643,24 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       expect(m.publishedMs).not.toBeNull();
       expect(m.settledMs!).toBeLessThanOrEqual(m.preparedMs);
       expect(m.preparedMs <= m.pairedMs && m.pairedMs <= m.publishedMs!).toBe(true);
-      expect(m.ticks[0]).toMatchObject({ atMs: 0, dispatched: 3, claimableSimple: 50 });
+      expect(m.ticks[0]).toMatchObject({ atMs: 300, dispatched: 3, claimableSimple: 50 });
       expect(m.rounds.map(r => r.bouts)).toEqual([18, 16, 8, 4, 2, 1]);
       for (const r of m.rounds) {
         // Every round is simulated before it is due, and revealed by the first tick that reaches its reveal time.
         expect(r.marginMs, `round ${r.round}`).toBeGreaterThan(0);
         expect(r.revealLagMs, `round ${r.round}`).toBeGreaterThanOrEqual(0);
-        expect(r.revealLagMs, `round ${r.round}`).toBeLessThan(m.spacingMs + 10_000);
+        expect(r.revealLagMs, `round ${r.round}`).toBeLessThan(GAP + 10_000);
       }
       expect(m.creditedMs!).toBeGreaterThanOrEqual(80 * MINUTE);
-      expect(m.creditedMs!).toBeLessThan(80 * MINUTE + m.spacingMs + 10_000);
+      expect(m.creditedMs!).toBeLessThan(80 * MINUTE + GAP + 10_000);
+      // Spec §10.4, at every offset: the tick after the cutoff tick has its own scheduled minute's budget (Decision 5), and
+      // the invocation that completes the last preparation retries a busy coordination (Decision 4, C2), so it sees and
+      // claims the released pairing job and the slot publishes in that tick. Before Task 23.2 the cleared run published at
+      // the third tick when two preparation invocations finished together, and the held run always did.
+      expect(m.publishedMs!, m.run).toBeLessThan(120_000);
     }
-    // Cleared window: the invocation that completes the last preparation claims the released pairing job and publishes at
-    // the second tick. Observed (pre-existing, Task 16's "coordinator busy race"): when the two 20-job preparation
-    // invocations finish together, the one that completed the last preparation can find the coordinator busy with the
-    // other's coordination, which itself still saw a preparation unfinished; no invocation then sees the released pairing
-    // job and the slot publishes at the third tick. The test tells the two cases apart from the reported coordinations.
-    const raced = cleared.ticks.find(x => x.atMs === MINUTE)!.coordinations;
-    if (raced.includes('busy') && !raced.includes('complete')) expect(cleared.publishedMs!).toBeLessThan(180_000);
-    else expect(cleared.publishedMs!).toBeLessThan(120_000);
-    expect(held.publishedMs!).toBeLessThan(180_000);
-    // Every job was run by the real worker with no failure, conflict, unrecorded failure or deferral.
+    // Every job was run by the real worker with no failure, conflict, unrecorded failure or deferral (a deferral also counts a
+    // coordination still busy after its retries).
     expect(reports.reduce((sum, r) => sum + r.failed + r.conflicts + r.unrecorded + (r.deferred ?? 0), 0)).toBe(0);
   }, 600_000);
 });

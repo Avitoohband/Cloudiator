@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import type { BattleAction, BattleLog } from '../../supabase/functions/_shared/contracts/events';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';

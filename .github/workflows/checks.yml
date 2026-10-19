@@ -1,0 +1,67 @@
+# The release gate on a GitHub-hosted runner (Task 23.6, R4, Avi decision 3): a fresh local Supabase stack with every
+# migration replayed, the local Edge functions, then `npm run verify` (scripts/verify.mjs), the same gate as on a
+# development machine. No hosted project, key or secret is used: the stack is local to the runner and the worker secret is
+# generated for the run. Nothing here prints the local keys (`supabase start` writes them only to a file in RUNNER_TEMP).
+# Exit 2 from the gate means its only failures are known blockers (today the database budget, Task 23.7): still a red run.
+name: checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Install the pinned dependencies (package-lock.json)
+        run: npm ci
+
+      - name: Start a fresh local Supabase stack (every migration replayed)
+        run: |
+          npx supabase start --exclude studio,realtime,storage-api,imgproxy,mailpit,logflare,vector,supavisor > "$RUNNER_TEMP/supabase-start.log" 2>&1 || {
+            # The log holds the local keys: print only its error lines, without any line naming a credential.
+            grep -iE 'error|fail' "$RUNNER_TEMP/supabase-start.log" | grep -viE 'key|secret|jwt|token|password|postgres(ql)?://' || true
+            exit 1
+          }
+
+      - name: Configure the local Edge functions (a random worker secret, never printed)
+        run: |
+          node -e "const c = require('node:crypto'); require('node:fs').writeFileSync('.env.edge.local', 'GAME_ALLOWED_ORIGINS=http://127.0.0.1:3000\nGAME_WORKER_SECRET=' + c.randomBytes(32).toString('base64url') + '\n')"
+
+      - name: Serve the local Edge functions in the background
+        run: |
+          nohup npx supabase functions serve --env-file .env.edge.local > "$RUNNER_TEMP/edge.log" 2>&1 &
+
+      - name: Release gate
+        run: |
+          npm run verify -- --json "$RUNNER_TEMP/verify.json"
+
+      - name: Keep the gate's results and the browser traces
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate
+          path: |
+            ${{ runner.temp }}/verify.json
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

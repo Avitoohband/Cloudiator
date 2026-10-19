@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { sql, account, resetIdentity, admin, anonymous, creation } from '../fixtures/db.ts';
+import { recordMeasurement } from '../fixtures/measurements.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1, runWorker } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput, PairingResult } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -626,8 +627,8 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
       }
       expect((await sql.unsafe(clockQuery))[0].definition).toBe(definition);
-      console.info(`Task 23.2 Arena boundaries at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, targetMs: 120_000,
-        revealMs: RULES_V1.arena.revealAfterMs, wallMs: Date.now() - started, boundaries: measured })}`);
+      recordMeasurement('Task 23.2 Arena boundaries at the one-minute cron cadence', { entrants: 50, targetMs: 120_000,
+        revealMs: RULES_V1.arena.revealAfterMs, wallMs: Date.now() - started, boundaries: measured });
       const [cold, cleared, held] = measured;
       for (const b of measured) {
         expect(b.simulations).toBe(b.battles);

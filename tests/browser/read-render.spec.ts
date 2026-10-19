@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from './fixtures';
 import type { BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { OwnerState, PublicActor, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { recordMeasurement } from '../fixtures/measurements';
 import { ARENA_BOUTS, type ArenaBoutKey } from '../fixtures/arena-ids';
 import { buildArenaFixtures } from '../fixtures/arena-build';
 import { EXPEDITION_FIXTURES } from '../fixtures/expedition-ids';
@@ -345,7 +346,7 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     // One read for each pair, NPC bout and boutless entrant, with at most one more for a pair whose sides were read at the
     // same time (two reads run at once); Task 17 read every entrant's timeline.
     expect(reads.length, `timeline reads for ${entrants.length} entrants`).toBeLessThanOrEqual(pairs + npcBouts + noBout + 1);
-    console.log(`arena timeline reads: ${reads.length} for ${entrants.length} entrants (${pairs} human pairs)`);
+    recordMeasurement('arena timeline reads', `${reads.length} for ${entrants.length} entrants (${pairs} human pairs)`);
     expect(new Set(reads).size).toBe(reads.length);
   });
 

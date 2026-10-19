@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from './fixtures';
 import type { SeasonView, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ARENA_STANDINGS } from '../fixtures/arena-build';

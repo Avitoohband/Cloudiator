@@ -14,6 +14,7 @@ import { buildBracket, readyBouts, recordBout, runBout, type TournamentGraph } f
 import { freezeDomain } from '../../supabase/functions/_shared/domain/types.ts';
 import type { ActivitySnapshot, BuildSnapshot, FighterSnapshot, ItemInstance, JobLease } from '../../supabase/functions/_shared/domain/types.ts';
 import { BUDGETS } from './capacity-model.ts';
+import { recordMeasurement } from '../fixtures/measurements.ts';
 
 // Task 23.3 worker benchmarks in pure code: builders for the heaviest v1 jobs and a timer. Each `run` does what one Edge
 // invocation does for a job: parse the claimed lease (and any fenced read) from its JSON, freeze it as runWorker does, run
@@ -161,13 +162,12 @@ export function machine() {
 }
 
 /**
- * Prints one measurement section on the console, for a report or gate run only: scripts/resource-report.mjs sets
- * CAPACITY_REPORT_DIR, and Task 23.6's release gate sets CAPACITY_GATE=1. A plain `npm test` or `npm run test:db` prints
- * nothing; writeSection's on-disk sections are unchanged.
+ * Prints one measurement section on the console, for a report run (scripts/resource-report.mjs sets CAPACITY_REPORT_DIR) or
+ * behind CLOUDIATOR_MEASUREMENTS=1 only. Any other run prints nothing, the release gate's CAPACITY_GATE=1 run included
+ * (Task 23.6, C23: its failed budget checks name their numbers); writeSection's on-disk sections are unchanged.
  */
 export function logSection(label: string, value: unknown) {
-  if (!process.env.CAPACITY_REPORT_DIR && process.env.CAPACITY_GATE !== '1') return;
-  console.info(`Task 23.3 ${label}: ${JSON.stringify(value)}`);
+  recordMeasurement(`Task 23.3 ${label}`, value, Boolean(process.env.CAPACITY_REPORT_DIR));
 }
 
 /** Writes one report section for scripts/resource-report.mjs when it set CAPACITY_REPORT_DIR; otherwise nothing. */

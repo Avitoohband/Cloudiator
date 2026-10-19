@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext } from '@playwright/test';
+import { test, expect, type BrowserContext } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import { ownerFixture } from '../fixtures/domain';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';

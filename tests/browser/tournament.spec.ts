@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
+import { recordMeasurement } from '../fixtures/measurements';
 import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
 import { largeTournament, tournamentCampActors } from '../fixtures/tournament-build';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
@@ -649,7 +650,7 @@ test.describe('the live Tournaments panel', () => {
     for (let ring = 0; ring < 6; ring += 1) expect(due.filter(f => f.ring === ring).length, `ring ${ring}`).toBeLessThanOrEqual(2);
     const measured = `${logReads().length} of ${revealed.length} revealed bouts (${due.filter(f => f.enterAtMs <= at).length} current, ${due.filter(f => f.enterAtMs > at).length} next)`;
     testInfo.annotations.push({ type: 'late-joiner log reads', description: measured });
-    console.log(`late-joiner log reads: ${measured}`);
+    recordMeasurement('late-joiner log reads', measured);
     // The Tournaments panel reads its replays through the same reader and its one log cache: the replay of a bout whose
     // log the camp loaded opens without another log read once the bout is decided.
     const shared = due.find(f => f.enterAtMs <= at)!;

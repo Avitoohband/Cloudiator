@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { emptyWorld, routeLiveReads } from './live-routes';
 import { joinButton, openMenu, railMenus, revealRail } from './shell-helpers';
 

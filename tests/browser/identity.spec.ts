@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from './fixtures';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';

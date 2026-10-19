@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import type { BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture } from '../fixtures/domain';

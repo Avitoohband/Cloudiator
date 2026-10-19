@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import type { Sql, TransactionSql } from 'postgres';
 import { sql, account, resetIdentity, admin, creation } from '../fixtures/db.ts';
+import { recordMeasurement } from '../fixtures/measurements.ts';
 import { createDatabase, createWorkerDatabase, prepareBuild, prepareShopPurchase } from '../../supabase/functions/_shared/backend/database.ts';
 import type { WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { prepareActivityV1, runWorker } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -394,8 +395,8 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
     const [history] = await sql`select (select jsonb_object_agg(k,n) from (select resolved_kind as k,count(*) as n from public.activities group by 1) x) as kinds,
       (select count(*)::int from private.arena_assignments where kind='human') as "humanBattles",
       (select count(*)::int from public.season_standings) as archived, (select count(*)::int from private.season_awards) as awards`;
-    console.info(`Task 22.2 catch-up after a ${PAUSE}-slot pause: ${JSON.stringify({ rounds: first.rounds, coordinations: first.reports.length,
-      boundaries: first.completed.length, financial, ...history })}`);
+    recordMeasurement(`Task 22.2 catch-up after a ${PAUSE}-slot pause`, { rounds: first.rounds, coordinations: first.reports.length,
+      boundaries: first.completed.length, financial, ...history });
   });
 
   it('sweeps listings that expired during the pause once and returns their items once', async () => {
@@ -491,8 +492,8 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
       for (const [k, n] of Object.entries(pick(r))) total[k] = (total[k] ?? 0) + n;
       return total;
     }, {} as Counts);
-    console.info(`Task 22.2 cleanup in the middle of catch-up: ${JSON.stringify({ checkpoint: cut!.checkpoint, horizon, calls: cut!.results.length,
-      rounds: second.rounds, detail: sum(r => r.detail.deleted), summary: sum(r => r.summary.deleted) })}`);
+    recordMeasurement('Task 22.2 cleanup in the middle of catch-up', { checkpoint: cut!.checkpoint, horizon, calls: cut!.results.length,
+      rounds: second.rounds, detail: sum(r => r.detail.deleted), summary: sum(r => r.summary.deleted) });
   }), 900_000);
 
   it('returns the stored receipt for a command retried after ninety days of cleanup and conflict for a changed payload', () => withClock(async () => {

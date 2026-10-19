@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './fixtures';
 import type { OwnerState, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { createDemoWorld } from '../../src/game/demo-world';

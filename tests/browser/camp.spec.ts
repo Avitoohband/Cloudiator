@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { drawSlices, hidesActor } from '../../src/game/depth';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { worldToScreen } from '../../src/game/iso';

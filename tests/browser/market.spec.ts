@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Locator, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import type { ApiErrorCode, GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { ItemInstance, MarketListing, OwnerState, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';

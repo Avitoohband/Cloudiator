@@ -28,9 +28,10 @@ dispatch ceiling is a named risk.**
     load). With `--players` above 50 the windows are still recorded, and the report's boundary line gives their verdict.
   - The cadence case (`publishes within 120 s after a slot of expeditions …`) always runs 50 characters, whatever `--players`
     is (fix round 1).
-  - The measured sections are printed on the console only in a report or `CAPACITY_GATE=1` run; a plain `npm test` or
-    `npm run test:db` prints none of them (fix round 1). A measurement the suites did not produce is reported as `missing`
-    and fails the report, never `ok`.
+  - The measured sections are printed on the console only in a report run (or with `CLOUDIATOR_MEASUREMENTS=1`); a plain
+    `npm test` or `npm run test:db` prints none of them (fix round 1), and since Task 23.6 neither does the gate's
+    `CAPACITY_GATE=1` run, whose failed checks name their numbers (C23). A measurement the suites did not produce is reported
+    as `missing` and fails the report, never `ok`.
   - Task 23.6's release gate runs the file with the flag, and fails until every blocker below is resolved.
   - The report's verdicts and exit code do not depend on the flag.
 - **Environment:**
@@ -460,3 +461,204 @@ The `tests/browser/read-render.spec.ts` checks:
 | Tournament logs cached by the gateway | unbounded for the session | at most 64, least recently used dropped first |
 | A failed ring log | asked again after 30 s of display time (never with a held clock) | after 2 s, then 4, 8 and 16 s, then every 30 s, by real time |
 | Late joiner, 50-entrant bracket (Task 13.9 measure, unchanged) | 8 of 34 revealed bout logs | 8 of 34 |
+
+## Release gate (Task 23.6)
+
+**Status: blocked by the database budget, as expected; every other step passed in the final run.** `npm run verify` exits 2
+(known blockers only): its single failure is the capacity case's database budget, owned by Task 23.7 (Avi's decision
+A + C + D). The gate names the blocker and never counts it as a pass. Nothing was pushed: the controller pushes after the Task
+23 final review and records the first GitHub Actions run then.
+
+### Environment
+
+- 13th Gen Intel Core i9-13900K (32 logical cores, 32 GiB), Windows 11 Pro 25H2 (10.0.26200).
+- Node 22.19.0, npm 11.8.0, git 2.41.0.windows.3.
+- Next.js 16.4.0, Phaser 4.2.1, vitest 5.0.3, Playwright 1.64.0 with Google Chrome 155.0.8059.80 (`channel: 'chrome'`), Deno 2.9.6.
+- Supabase CLI 2.120.0, PostgreSQL 17.11 (M01–M20 applied), Docker Desktop 4.94.0 with Engine 29.8.2.
+- Branch `claude/task-23` at `a2ed84a` (lanes A and B integrated) with the Task 23.6 changes, uncommitted during the runs.
+- Command: `npm run verify -- --config node_modules/.cache/pw-claude.config.mjs --json <scratchpad>/verify-<n>.json`, the
+  private Playwright configuration (port 3200 for the dev server and for the static host), beside another worktree's dev
+  server on 3400 and this worktree's `supabase functions serve`.
+
+### Commands and results
+
+Four end-to-end runs on 2026-10-19 (UTC). Runs 1 and 2 ran the first version of the gate. Run 3 added the access-time refresh
+of the Edge files, the host-fault rerun and separate browser results; run 4 is the final gate (the refresh covers folders
+too). Browser counts are passed / failed / skipped.
+
+| Step | Run 1 (15:08–15:25) | Run 2 (15:26–15:44) | Run 3 (15:52–16:11) | Run 4 (16:17–16:33) |
+|---|---|---|---|---|
+| `npm test` | 1,197 passed | 1,197 passed | 1,203 passed | 1,204 passed |
+| `npm run typecheck` (tsc, deno check, deno test 2/2) | passed | passed | passed | passed |
+| `node assets/source/build-assets.mjs --check` | passed | passed | passed | passed |
+| `npm run build` (`_headers` written, gallery removed) | passed | passed | passed | passed |
+| `npm run verify:static` (91 assets) | passed | passed | passed | passed |
+| Edge settled before the database tests | read 612 files; 32 s; not recreated | read 612 files; 34 s; recreated while settling | refreshed 612 files, read 612; 34 s; recreated while settling | refreshed 735 files and folders, read 612; 34 s; recreated while settling |
+| `CAPACITY_GATE=1 npm run test:db` | **blocked**: 276 passed, 1 blocked | **blocked**: 276, 1 | **blocked**: 276, 1 | **blocked**: 276, 1 |
+| Edge start time across the database run | unchanged (15:08:28) | unchanged (15:26:53) | unchanged (15:52:49) | unchanged (16:17:14) |
+| `npx playwright test` (development) | 527 / 0 / 31 | 526 / **1** / 31 | 527 / 0 / 31 | 527 / 0 / 31 |
+| `CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true npm run build` | passed | passed | passed | passed |
+| `npm run verify:static -- .next/browser-test` (91 assets) | passed | passed | passed | passed |
+| Production browser gate | 29 / **1** / 528 | 30 / 0 / 528 | 30 / 0 / 528 | 30 / 0 / 528 |
+| `git diff --check` | clean | clean | clean | clean |
+| Exit | 1 | 1 | 2 (blocked) | 2 (blocked) |
+
+- **The blocker, every run:** the capacity case's four database checks and nothing else in it. Database at 90 days: 177.7–178.6 %
+  (mixed schedules) and 150.6–151.3 % (new-character schedule) of the 250 MB budget; after one year 273.7–274.5 % and
+  227.7–228.2 %. Its invocation and raw-egress checks passed. No budget constant was changed.
+- **Run 1, production:** `[desktop] expedition.spec.ts:761` timed out at 5 s with the page still on "Loading the expedition…".
+  Its trace shows the framework chunk `turbopack-….js` failed with `net::ERR_NO_BUFFER_SPACE` (Windows WSAENOBUFS, before any
+  request was sent), so the page never hydrated: an infrastructure fault ("Flake triage").
+- **Run 2, development:** `[desktop] release.spec.ts:517` (the contrast check) waited 45 s for the fixture camp at about 15:37,
+  while Docker Desktop failed. The production run then reused the output folder and deleted the trace; since run 3 each
+  browser step keeps its own results.
+- **Docker, run 2 (observed, cause unknown):** at about 15:36 the local stack's containers restarted with Docker Desktop (its
+  processes and the containers started again at 15:43), and `supabase functions serve` exited with it. The gate never starts,
+  stops or resets Docker or the stack. Once the stack was healthy, `npx supabase functions serve --env-file .env.edge.local`
+  was started again in this worktree, its output to a file in the task's scratchpad; the worker answered at 15:45:35.
+
+### What the gate adds
+
+- **`scripts/verify.mjs` (`npm run verify`):** the order of `docs/operations/verification-gates.md`; every step whose input is
+  valid runs after a failure; one summary; exit 0 (passed), 2 (known blockers only), 1 (anything else).
+  `tests/scripts/verify.test.ts` pins the order against the guide, the environments, the classifications and the reruns.
+- **Security headers (Decision 7):** `scripts/build-headers.mjs` writes `_headers` after `next build` and removes
+  `assets/gallery.html` (Decision 2). The policy is exactly Decision 7; `connect-src` adds only the build's Supabase origin,
+  which must be `https://<project>.supabase.co` (or loopback `http` for a local build). These runs' exports have no Supabase
+  URL, so `connect-src 'self'`.
+- **Scanner (C27):** `scripts/verify-static.mjs` also requires `_headers` to be exactly the generated file for an allowed origin,
+  refuses the gallery, any JWT (three base64url segments after `eyJ`) and `service_role` base64- or base64url-encoded at each of
+  its three byte alignments. The real exports passed (91 assets each): no false positive.
+- **Static host:** `scripts/serve-static.mjs` applies the export's `_headers` as Cloudflare Pages does, never serves `_headers`,
+  refuses an export without it, and takes its port from `CLOUDIATOR_STATIC_PORT`.
+
+### Content Security Policy
+
+- **No violation** in any production run: 30 tests in each of the four gate runs, 5 more full production runs, 40 repeats of the
+  C21 case and a 300-test stress run (8 workers, 10 repeats). The policy needed no change and no `'unsafe-eval'`: Phaser's
+  `new Function('return this')` fallback sits behind `typeof globalThis === 'object'`, which Chrome satisfies.
+- **The listener** (`tests/browser/fixtures.ts`, every spec's `test`; `tests/harness.test.ts` checks that no spec bypasses it)
+  records each page's `securitypolicyviolation` events and Chrome's console reports and fails the test on any.
+  - RED: against the previous static host (no headers), `tests/browser/csp.spec.ts` failed 4 of 6 (no policy header; the blocked
+    `fetch` recorded nothing).
+  - A temporary test that made a violation without opting out failed with both records ("Connecting to
+    'https://csp-probe.invalid/' violates … connect-src 'self'"). It was deleted after the run.
+- **Recorded exception:** `'unsafe-inline'` for scripts and styles: a static export has no per-request nonce (Next.js
+  content-security-policy guide, "How nonces work"), and its framework scripts are inline.
+
+### Edge recreations (C22)
+
+**Observed cause and tested once (controller, before this task):** NTFS last-access updates are on; a read of Edge source not
+read within an hour makes the CLI watcher report "File change detected … (WRITE)" and recreate the container. A pre-read, a
+settle, then `test:db` passed 275/275 with the start time unchanged.
+
+**Observed in this task** (container start times, UTC):
+
+| Time | What happened |
+|---|---|
+| 14:37:54 | Recreated as I first read Edge source files (no run active). |
+| 15:06:30 | Recreated during a development-server stress run of `market.spec.ts` (Next compiles modules of `supabase/functions/_shared`). |
+| 15:08:28 | Recreated in run 1 before its pre-read (the unit tests and type checks read Edge source). |
+| 15:24:47 | Five Edge files' access times updated during run 1's production build, 16 minutes after its full pre-read (no recreation visible). |
+| 15:26:53 | Recreated while run 2 settled: its pre-read updated 573 files' access times, 18 minutes after run 1's. |
+| 16:10:57 | Recreated after run 3's database run, during its production build: the watcher reported the folder `_shared` (a listing updated its access time; run 3 refreshed files only). |
+
+**Finding (observed):** a read (or a folder listing) does not refresh an access time younger than an hour, so a full pre-read
+leaves such entries unrefreshed, and they change on the next read once they pass the hour. One read during `test:db` then
+recreates the container mid-run, whatever the pre-read did. Zero-length files never change (a read reads no data).
+
+**Newly tested (Task 23.6),** with the serve log in this task's scratchpad:
+- Setting every file's access time to now raised 37 detections and one recreation (15:46:19); a full read one minute later raised
+  none, and later unit and type-check runs raised none.
+- With folders included (735 entries, through a handle that asks only for attribute writes, since the watcher holds the folders
+  open), the refresh raised 34 detections and one recreation (16:15:15); a full listing and read 40 s later raised none.
+  Modification times were checked unchanged entry by entry, and `git status` was identical before and after.
+- The gate runs: runs 3 and 4 refreshed, then settled through one recreation, then kept the start time through the database run.
+  Run 4's whole gate raised 33 detections, all from its refresh while settling, and none afterwards: not in the database run, the development suite or either build.
+
+### Flake triage
+
+- **C21, `[mobile] shell.spec.ts:42` (production, first run after a build).** Not reproduced: 5 full production runs, 40 repeats on
+  mobile (4 workers), and 10 repeats in the 8-worker stress run all passed; the four gate runs passed it too. No artifact of the
+  original failure exists. **Likely cause, not proven:** run 1's production step, which ran straight after a development suite
+  as C21's first run did, failed its first expedition page because a framework chunk failed with `net::ERR_NO_BUFFER_SPACE`
+  and the page never hydrated; C21's assertions are the same kind of first-page wait. Socket sampling every 5 s during runs
+  2–4 found at most 1,488 `TIME_WAIT` sockets against 16,384 dynamic ports, so port exhaustion is not supported, and the host
+  error's cause is unknown. **Changes (no product code):** `tests/browser/host-faults.ts` and the browser fixture name a request
+  that failed in the host's network stack on the failed test; `npm run verify` discards a browser run whose every failure is
+  such a fault and runs it once more (none occurred in runs 3 and 4); each browser step keeps its traces
+  (`test-results/development`, `test-results/production`).
+- **`[mobile] market.spec.ts:463`** (the purchased row still listed 5 s after "Purchase confirmed", once, in the integration dry
+  run). Not reproduced: 40 repeats on mobile at 8 workers, the whole spec 8 times at 16 workers (256 cases, 16 of this one), and
+  the four gate runs. The failure record shows the row on 14 polls over 5 s. The row leaves only when the re-read after the
+  purchase answers, and reading `MarketPanel.tsx` found no stale-read path (each read has a generation, and an older one is
+  dropped). Its trace was not kept. No change.
+- **`[desktop] release.spec.ts:517`** (run 2, above): coincided with Docker Desktop's failure; it passed in runs 1, 3 and 4.
+
+### Harness noise (C23)
+
+- The ten console calls of the gate suites (`arena.test.ts:629`, `recovery.test.ts:397, 494`, `restore-world.test.ts:170`,
+  `tournaments.test.ts:1077, 1106, 1635`, `tests/performance/harness.ts:170`, `read-render.spec.ts:348`,
+  `tournament.spec.ts:652`) now go through `tests/fixtures/measurements.ts`: printed only with `CLOUDIATOR_MEASUREMENTS=1`, or in
+  a `scripts/resource-report.mjs` run. The capacity sections no longer print under `CAPACITY_GATE=1`; the failed checks name
+  their numbers. `tests/harness.test.ts` keeps new console calls out.
+- `NO_COLOR` is removed from the gate's child processes (Playwright sets `FORCE_COLOR=1`, and Node warns when both are set).
+  vitest's caching hint is off (`fsModuleCache: false`, its default, stated). `git diff --check` runs with
+  `core.safecrlf=false`, which silences only the line-ending notices of a Windows checkout.
+- What remains in the gate's output is each tool's own report: vitest, Deno's test lines, the Next build, Playwright's list.
+
+### Rule retention across migrations (R6)
+
+- `tests/rule-retention.test.ts` checks every migration's top-level statements. None deletes, truncates, drops, retypes or renames
+  in-progress state (jobs and their dependencies, snapshots, boundaries and their cohorts and work, plans, assignments,
+  tournaments, entries and bouts, pending preparations, settled slots, activities and stages). The only top-level backfills are
+  the two reviewed ones (M05 peak strength, M18 published slot). `private.rules_versions` only ever gets
+  `insert … on conflict do nothing`. A dropped guard trigger is replaced in the same migration. Every seeded rules version
+  (`v1`) has the worker's executors for every job kind. It passes on all 20 migrations; its synthetic cases show each rule fires.
+- `tests/db/rule-retention.test.ts` checks the migrated catalog. The four `rules_version` columns (snapshots, boundaries, jobs,
+  tournaments) each have a validated foreign key with NO ACTION to `private.rules_versions`; nothing deletes a version row on its
+  own; and the worker has executors for every stored version and job kind. RED with a planted version row `v99` and a planted
+  table with an unpinned `rules_version` column; both were removed, leaving only `v1`.
+- Limit: this checks the migrations and the catalog, not an in-progress world replayed through a migration (pg_cron exists only
+  in the `postgres` database, so a scratch database cannot replay M03). The runtime guards (`guard_job`, the per-version
+  executors) are covered by the existing activity tests.
+
+### Dependency audit
+
+- `npm audit`: 0 vulnerabilities in 152 dependencies (30 production, 85 development, 79 optional, 33 peer).
+- `npm ls --all`: exit 0. Two extraneous packages in this worktree's `node_modules` only (`@emnapi/runtime@1.11.3`,
+  `@img/sharp-wasm32@0.35.5`, not in the lockfile; `npm ci` removes them, not run here because it also deletes the private
+  configurations in `node_modules/.cache`). 94 unmet optional dependencies, all other platforms' binaries.
+- `package-lock.json` (version 3): 152 entries, each with an integrity hash and resolved from `registry.npmjs.org`. Every direct
+  dependency is pinned to an exact version equal to the lockfile's.
+- The workflow's actions are pinned to major tags (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`),
+  not commit SHAs: SHA pins need a lookup this task did not make (no downloads, no GitHub queries).
+
+### CI workflow
+
+`.github/workflows/checks.yml` runs on pushes, pull requests and by hand, with read-only permissions, on `ubuntu-24.04`: Node
+22.19.0, `npm ci`, a fresh local stack (`npx supabase start` with the documented exclusions, so every migration replays; its
+output, which holds the local keys, goes to a file in `RUNNER_TEMP`), a random worker secret written to `.env.edge.local`
+without printing it, `npx supabase functions serve` in the background, then `npm run verify -- --json "$RUNNER_TEMP/verify.json"`,
+and the results and traces as an artifact. Validated locally: the YAML parses (PyYAML 6.0.3), and `tests/workflow.test.ts`
+checks the order, that every `npm run` script and `node` file it calls exists, and that it prints no credential. **Not run:**
+the controller pushes and records the first run. It stays red until Task 23.7 (exit 2, the database budget).
+
+### Device metrics and the budget arithmetic
+
+- Device metrics are Lane B's ("Lane B: render cost"): desktop at the 170 Hz vsync ceiling in every phase; the Pixel 7 emulation
+  with 4× CPU throttling is indicative only. The mobile 30 fps target is unmeasured.
+- The budget arithmetic is Lane A's ("Lane A: capacity"); the four gate runs reproduce its database shares (above).
+
+### Before the public release
+
+- **Task 23.7:** the database budget, the gate's known blocker.
+- **Task 24 blockers:**
+  1. mobile 30 fps on the device (`?perf=1` on the deployed production build);
+  2. hosted CPU and dispatch spacing (C4);
+  3. hosted egress and compression (Lane A, risk 2);
+  4. CORS parity: the hosted `GAME_ALLOWED_ORIGINS` and Auth redirects for the exact Pages origin;
+  5. the remote export rehearsal (`scripts/export-db.ps1 -Remote`, then the restore check).
+- **Also open:** the first GitHub Actions run (the controller's push); SHA-pinned actions; the hosted `connect-src` origin (the
+  production build sets `NEXT_PUBLIC_SUPABASE_URL`, and the scanner then names that origin); Lane A's risk 5 (boundary headroom
+  at 50 characters).

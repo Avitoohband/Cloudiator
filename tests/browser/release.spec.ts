@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './fixtures';
 import type { BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/contracts/reads';

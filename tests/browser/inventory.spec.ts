@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext } from '@playwright/test';
+import { test, expect, type BrowserContext } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import { ownerFixture, itemFixture } from '../fixtures/domain';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';

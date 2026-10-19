@@ -32,8 +32,8 @@ need the local URLs read it in memory (`scripts/test-db.mjs`, `scripts/health.mj
 | 54322 | PostgreSQL |
 | 54320 | Shadow database used by `db pull`/`db diff` |
 | 3000 | `npm run dev` (the Auth `site_url` and redirect `http://127.0.0.1:3000/auth/callback`) |
-| 3100 | The repository Playwright configuration's dev server |
-| 4173 | `scripts/serve-static.mjs`, the repository's static export host |
+| 3100 | The repository Playwright configuration's dev server (`PLAYWRIGHT_DEV_PORT` moves it) |
+| 4173 | `scripts/serve-static.mjs`, the repository's static export host (`CLOUDIATOR_STATIC_PORT`; `PLAYWRIGHT_STATIC_PORT` for the Playwright configuration) |
 | 3200, 3300 | Private Playwright configurations of the `Cloudiator-claude` and `Cloudiator-replay` worktrees (`node_modules/.cache/`, not committed) |
 
 ### Worktrees
@@ -82,6 +82,13 @@ Nothing is hosted yet. Task 24 fills these in; until then every value is unknown
 | `NODE_EXTRA_CA_CERTS` | path | `scripts/health.mjs` with `sslmode=verify-full` | the operator's shell (runbook, "Connections and TLS") |
 | `LOCAL_DB_TEST`, `LOCAL_API_URL`, `LOCAL_DB_URL`, `LOCAL_ANON_KEY`, `LOCAL_SERVICE_KEY`, `LOCAL_JWT_SECRET`, `LOCAL_WORKER_SECRET` | local test credentials | the database tests | set in memory by `scripts/test-db.mjs` from the local CLI and `.env.edge.local`; never set by hand |
 | `CLOUDIATOR_BROWSER_TEST`, `PLAYWRIGHT_STATIC`, `PLAYWRIGHT_STATIC_ROOT`, `CLOUDIATOR_STATIC_ROOT` | test configuration | builds and browser tests | the command line (`docs/operations/verification-gates.md`) |
+| `PLAYWRIGHT_DEV_PORT`, `PLAYWRIGHT_STATIC_PORT`, `CLOUDIATOR_STATIC_PORT` | test configuration | the repository Playwright configuration and `scripts/serve-static.mjs` | the command line, or `npm run verify -- --dev-port <n> --static-port <n>` (Task 23.6) |
+| `CAPACITY_GATE` | test configuration | `tests/db/capacity.test.ts` enforces its budgets with `1` | set by `npm run verify` (Task 23.6) |
+| `CLOUDIATOR_MEASUREMENTS` | test output switch | `1` prints the measurements the database and browser suites record (`tests/fixtures/measurements.ts`) | the command line; unset in the gate, whose output stays clean (Task 23.6, C23) |
+| `PLAYWRIGHT_JSON_OUTPUT_NAME` | test configuration | where a browser step's JSON report goes | set by `npm run verify` to a temporary file |
+
+In CI (`.github/workflows/checks.yml`, Task 23.6) the runner's local stack is started fresh and `.env.edge.local` gets a
+`GAME_WORKER_SECRET` generated for that run, never printed; no hosted key or secret is used.
 
 `.gitignore` ignores `.env*` (except `.env.example`), `*.pem`, `*.key`, `*.log`, `.supabase/`, `supabase/.temp/` and
 `.backups/`. A new secret gets a row here (name, kind, user, where it lives) in the same change that introduces it.

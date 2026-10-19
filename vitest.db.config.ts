@@ -8,5 +8,6 @@ export default defineConfig({
     '@contracts': fileURLToPath(new URL('./supabase/functions/_shared/contracts', import.meta.url)),
     '@': fileURLToPath(new URL('./src', import.meta.url)),
   } },
-  test: { include: ['tests/db/**/*.test.ts'], fileParallelism: false, testTimeout: 20000, hookTimeout: 30000 },
+  // fsModuleCache stays off (the default), stated so vitest does not print its caching hint in the gate (Task 23.6, C23).
+  test: { include: ['tests/db/**/*.test.ts'], fileParallelism: false, testTimeout: 20000, hookTimeout: 30000, fsModuleCache: false },
 });

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import type { BattleLog } from '../../supabase/functions/_shared/contracts/events';
 import type { TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page, type Request } from '@playwright/test';
+import { expect, test, type Page, type Request } from './fixtures';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { EXPEDITION_FIXTURES, type ExpeditionFixtureKey } from '../fixtures/expedition-ids';

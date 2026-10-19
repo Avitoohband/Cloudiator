@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { OwnerState, PublicActor, ResultRow } from '../../supabase/functions/_shared/contracts/reads';

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import type { BattleAction, BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_ACTIVITIES, ARENA_BOUTS, ARENA_GLADIATORS, arenaActivityId, arenaBattleId, type ArenaActivityKey, type ArenaBoutKey } from '../fixtures/arena-ids';

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './fixtures';
 import type { BattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { ResultRow, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { worldFixture } from '../fixtures/domain';

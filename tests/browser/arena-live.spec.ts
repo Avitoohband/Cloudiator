@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext } from '@playwright/test';
+import { test, expect, type BrowserContext } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import type { RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicProfile, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';

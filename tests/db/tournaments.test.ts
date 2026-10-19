@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { sql, account, resetIdentity, admin, anonymous, creation, directEdge, recordingClient, clockedClient } from '../fixtures/db.ts';
+import { recordMeasurement } from '../fixtures/measurements.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import type { TournamentBoutRead } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1, runWorker, simulateTournamentBoutV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -1074,7 +1075,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         return { view, bytes: responses.reduce((sum, r) => sum + r.bytes, 0), requests: responses.map(r => r.path), text: responses.map(r => r.text).join('\n') };
       };
       const late = await poll();
-      console.log(`Task 19 phase 2b fix: polled read of the late 50-entrant view: ${late.bytes} bytes in ${late.requests.length} responses (${late.requests.join(', ')})`);
+      recordMeasurement('Task 19 phase 2b fix: polled read of the late 50-entrant view', `${late.bytes} bytes in ${late.requests.length} responses (${late.requests.join(', ')})`);
       expect([late.view.status, late.view.entrants.length, late.view.bouts.filter(b => b.revealedResult).length]).toEqual(['processing', 50, 62]);
       expect(late.text).not.toMatch(/battleLog|"events"|finalHp/);
       expect(JSON.stringify(late.view)).not.toMatch(/battleLog|"events"|finalHp/);
@@ -1103,9 +1104,9 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       expect([done.view.status, done.view.placements.length]).toEqual(['completed', 50]);
       expect(done.text).not.toMatch(/battleLog|"events"|finalHp/);
       expect(done.bytes).toBeLessThan(POLLED_READ_BOUND);
-      console.log(`Task 19 phase 2b fix: measured ${JSON.stringify({ lateBytes: late.bytes, completedBytes: done.bytes, completedResponses: done.requests.length,
+      recordMeasurement('Task 19 phase 2b fix: measured', { lateBytes: late.bytes, completedBytes: done.bytes, completedResponses: done.requests.length,
         boundBytes: POLLED_READ_BOUND, logReads: logBytes.length + 1, logBytesMin: Math.min(...logBytes), logBytesMax: Math.max(...logBytes),
-        logBytesTotal: logBytes.reduce((a, b) => a + b, 0) })}`);
+        logBytesTotal: logBytes.reduce((a, b) => a + b, 0) });
     }, 180_000);
 
     it('hides a future-dated public bout result from the owner, another account and anonymous callers, by id and by tournament, through the due-time policy alone (2b review M2)', async () => {
@@ -1632,8 +1633,8 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       await sql`delete from vault.secrets where name in ('game_worker_url','game_worker_secret')`;
     }
     expect((await sql.unsafe(clockQuery))[0].definition).toBe(definition);
-    console.info(`Task 23.2 tournament slot at the one-minute cron cadence: ${JSON.stringify({ entrants: 50, tournamentSlot, targetMs: 120_000,
-      wallMs: Date.now() - started, runs: measured })}`);
+    recordMeasurement('Task 23.2 tournament slot at the one-minute cron cadence', { entrants: 50, tournamentSlot, targetMs: 120_000,
+      wallMs: Date.now() - started, runs: measured });
     // The longest gap between two consecutive ticks of either run: 300 ms in, then 250 ms into the next minute and back.
     const GAP = MINUTE + 50;
     for (const m of measured) {

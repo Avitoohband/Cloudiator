@@ -10,8 +10,9 @@
     "health": "node scripts/health.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit && deno check --frozen --config supabase/functions/deno.json supabase/functions/game-command/index.ts supabase/functions/game-worker/index.ts && deno test --frozen --config supabase/functions/deno.json tests/backend/edge.deno.ts",
-    "build": "next build",
-    "verify:static": "node scripts/verify-static.mjs"
+    "build": "next build && node scripts/build-headers.mjs",
+    "verify:static": "node scripts/verify-static.mjs",
+    "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.3",

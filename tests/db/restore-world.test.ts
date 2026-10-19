@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { Sql, TransactionSql } from 'postgres';
 import { sql, account, resetIdentity, admin, creation } from '../fixtures/db.ts';
+import { recordMeasurement } from '../fixtures/measurements.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import type { WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { runWorker } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -167,7 +168,7 @@ describe('Task 22.4: the restore-check world and its invariants', () => {
     expect(state.receipts).toBeGreaterThan(world.gids.length);
     expect(state.ledger).toBeGreaterThan(world.gids.length);
     expect(state.awards).toBeGreaterThan(0);
-    console.info(`Task 22.4 restore-check world: ${JSON.stringify(state)}`);
+    recordMeasurement('Task 22.4 restore-check world', state);
   });
 
   it('holds every invariant on the real world and counts every public and private table plus auth.users', async () => {

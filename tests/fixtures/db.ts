@@ -2,6 +2,7 @@ import postgres from 'postgres';
 import { createClient } from '@supabase/supabase-js';
 import { createHmac, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 
 if (process.env.LOCAL_DB_TEST !== 'Cloudiator') throw new Error('Run through npm run test:db');
 const url = process.env.LOCAL_API_URL!;
@@ -30,13 +31,40 @@ export async function account(provider = 'google') {
   return { id, token, client };
 }
 /**
- * A Data API client signed in with `token` that records every response body it receives (decoded JSON text and its
- * UTF-8 size), so a test can measure what a read transfers. Bodies stay in memory; nothing is logged here.
+ * A test-only stand-in for the server time a read samples (Task 22 final fix wave). `public.world_revision` computes
+ * `server_now_ms` and `slot_index` from `statement_timestamp()` in the view itself, so no database function can stand in for
+ * them; this fetch rewrites only those two fields of that view's response to `serverNowMs`. The database, its due-time RLS
+ * (`clock_timestamp()`) and every other response stay real, and nothing in the database changes, so nothing needs restoring.
+ * Without `serverNowMs` it is plain `fetch`.
  */
-export function recordingClient(token: string) {
-  const responses: { path: string; bytes: number; text: string }[] = [];
-  const client = createClient(url, process.env.LOCAL_ANON_KEY!, { global: { headers: { Authorization: `Bearer ${token}` }, fetch: async (input, init) => {
+function serverClockFetch(serverNowMs?: number): typeof fetch {
+  if (serverNowMs === undefined) return fetch;
+  return async (input, init) => {
     const response = await fetch(input, init);
+    const path = new URL(String(input instanceof Request ? input.url : input)).pathname;
+    if (!response.ok || !path.endsWith('/rest/v1/world_revision')) return response;
+    const body = await response.json();
+    const at = (row: Record<string, unknown>) => ({ ...row, server_now_ms: serverNowMs, slot_index: Math.floor(serverNowMs / RULES_V1.clock.slotMs) });
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    return new Response(JSON.stringify(Array.isArray(body) ? body.map(at) : at(body)), { status: response.status, statusText: response.statusText, headers });
+  };
+}
+/** A Data API client signed in with `token` (anonymous when null) whose reads sample `serverNowMs` as the server time. */
+export function clockedClient(token: string | null, serverNowMs: number) {
+  return createClient(url, process.env.LOCAL_ANON_KEY!, { global: { ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    fetch: serverClockFetch(serverNowMs) }, auth: { persistSession: false, autoRefreshToken: false } });
+}
+/**
+ * A Data API client signed in with `token` that records every response body it receives (decoded JSON text and its
+ * UTF-8 size), so a test can measure what a read transfers. Bodies stay in memory; nothing is logged here. With
+ * `serverNowMs`, its reads sample that server time (`serverClockFetch`).
+ */
+export function recordingClient(token: string, options: { serverNowMs?: number } = {}) {
+  const responses: { path: string; bytes: number; text: string }[] = [];
+  const base = serverClockFetch(options.serverNowMs);
+  const client = createClient(url, process.env.LOCAL_ANON_KEY!, { global: { headers: { Authorization: `Bearer ${token}` }, fetch: async (input, init) => {
+    const response = await base(input, init);
     const text = await response.clone().text();
     responses.push({ path: new URL(String(input instanceof Request ? input.url : input)).pathname, bytes: Buffer.byteLength(text, 'utf8'), text });
     return response;

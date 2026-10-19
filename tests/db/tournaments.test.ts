@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
-import { sql, account, resetIdentity, admin, anonymous, creation, directEdge, recordingClient } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, directEdge, recordingClient, clockedClient } from '../fixtures/db.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import type { TournamentBoutRead } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1, runWorker, simulateTournamentBoutV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -19,6 +19,13 @@ const MINUTE = 60_000;
 /** Slot 301 starts on Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot. Its cutoff is 301 × 4 800 000 ms. */
 const T = 301;
 const CUTOFF = T * SLOT;
+/**
+ * Task 22.5: a tournament's bout logs are kept until seven days after it ends (with its slot); from then on
+ * `readTournamentLog` answers `not-found` by the server time it samples. Slot 301 is long past, so its logs are read with
+ * the revision's server time stood in (`clockedClient`) at `LOG_KEPT`, the last millisecond they are kept.
+ */
+const ENDS = CUTOFF + 80 * MINUTE;
+const LOG_KEPT = ENDS + RULES_V1.retention.replayMs - 1;
 /** tournament_views is readable column by column only (Task 13.1): never its pairing job or publication time. */
 const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms';
 const commands = createDatabase(admin);
@@ -986,14 +993,22 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       await revealAll();
       const revealed = await readTournament(spectator.client, tid);
       const graph = await graphOf(t.id);
-      for (const bout of revealed.bouts.filter(b => !round1.find(r => r.id === b.id)?.bye)) {
+      const fought = revealed.bouts.filter(b => !round1.find(r => r.id === b.id)?.bye);
+      const inWindow = clockedClient(spectator.token, LOG_KEPT);
+      for (const bout of fought) {
         const stored = graph.bouts.find(b => b.id === bout.id)!.result!;
-        // The polled read carries the fight summary; the log itself loads on demand (2b review I1).
+        // The polled read carries the fight summary; the log itself loads on demand (2b review I1), while it is kept.
         expect(bout.revealedResult).toEqual({ participants: stored.log!.participants.map(p => revealed.entrants.find(e => e.gladiatorId === p.gladiatorId)),
           winnerId: stored.winnerId, bye: false,
           fight: { durationMs: stored.log!.durationMs, victoryReason: stored.log!.victoryReason, tieBreakReason: stored.log!.tieBreakReason } });
-        expect(await readTournamentLog(spectator.client, bout.id)).toEqual(stored.log);
+        expect(await readTournamentLog(inWindow, bout.id)).toEqual(stored.log);
       }
+      // Task 22.5: from seven days after the tournament's end the same revealed log is no longer kept, by the sampled server
+      // time (the window's first millisecond, and the real clock decades later), although its row still holds the log.
+      for (const [when, client] of [['window passed', clockedClient(spectator.token, LOG_KEPT + 1)], ['real clock', spectator.client]] as const) {
+        await expect(readTournamentLog(client, fought[0].id), when).rejects.toMatchObject({ code: 'not-found' });
+      }
+      expect(await sql`select result ? 'battleLog' as kept from public.tournament_bout_results where bout_id=${fought[0].id}`).toEqual([{ kept: true }]);
       // Every round is revealed, but no placement shows until every entrant has settled.
       expect([revealed.status, revealed.placements]).toEqual(['processing', []]);
       const jobs = await claim('settlement');
@@ -1062,22 +1077,24 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       expect(late.text).not.toMatch(/battleLog|"events"|finalHp/);
       expect(JSON.stringify(late.view)).not.toMatch(/battleLog|"events"|finalHp/);
       expect(late.bytes).toBeLessThan(POLLED_READ_BOUND);
-      // On demand: each revealed bout's stored log, read once per bout; a bye has none; the final none until revealed.
+      // On demand: each revealed bout's stored log, read once per bout; a bye has none; the final none until revealed. The
+      // logs are read while they are kept (Task 22.5, `LOG_KEPT`), so each `not-found` here means no log, not an expiry.
       const graph = await graphOf(t.id);
       const final = graph.bouts.find(b => b.round === t.rounds)!;
+      const kept = recordingClient(viewer.token, { serverNowMs: LOG_KEPT });
       const logBytes: number[] = [];
       for (const bout of graph.bouts) {
-        responses.length = 0;
+        kept.responses.length = 0;
         if (bout.bye || bout.id === final.id) {
-          await expect(readTournamentLog(client, bout.id), bout.id).rejects.toMatchObject({ code: 'not-found' });
+          await expect(readTournamentLog(kept.client, bout.id), bout.id).rejects.toMatchObject({ code: 'not-found' });
           continue;
         }
-        expect(await readTournamentLog(client, bout.id), bout.id).toEqual(bout.result!.log);
-        logBytes.push(responses.reduce((sum, r) => sum + r.bytes, 0));
+        expect(await readTournamentLog(kept.client, bout.id), bout.id).toEqual(bout.result!.log);
+        logBytes.push(kept.responses.reduce((sum, r) => sum + r.bytes, 0));
       }
       expect(logBytes).toHaveLength(48);
       expect(await revealRound()).toEqual([t.rounds]);
-      expect(await readTournamentLog(client, final.id)).toEqual(final.result!.log);
+      expect(await readTournamentLog(kept.client, final.id)).toEqual(final.result!.log);
       // Settled: placements and their public completions join the polled read, still without a log and under the bound.
       expect([...(await settleAll()).values()].every(s => s.ok)).toBe(true);
       const done = await poll();
@@ -1112,10 +1129,12 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         client.from('tournament_bout_results').select('bout_id,reveal_at_ms,result').eq('bout_id', bout.id),
         client.from('tournament_bout_results').select('bout_id,reveal_at_ms,result').eq('tournament_id', t.id),
       ];
-      // Visitors (Task 13.1) may read public results, so the due-time policy alone must hide this one from them too.
-      for (const [who, client] of [['owner', owner.client], ['another account', other.client], ['anonymous', anonymous]] as const) {
+      // Visitors (Task 13.1) may read public results, so the due-time policy alone must hide this one from them too. The log
+      // is asked for while it would be kept (Task 22.5, `LOG_KEPT`), so its `not-found` means not revealed, not an expiry.
+      for (const [who, client, token] of [['owner', owner.client, owner.token], ['another account', other.client, other.token],
+        ['anonymous', anonymous, null]] as const) {
         for (const [i, query] of reads(client).entries()) expect(await query, `${who} ${i ? 'by tournament' : 'by id'}`).toMatchObject({ error: null, data: [] });
-        await expect(readTournamentLog(client, bout.id), who).rejects.toMatchObject({ code: 'not-found' });
+        await expect(readTournamentLog(clockedClient(token, LOG_KEPT), bout.id), who).rejects.toMatchObject({ code: 'not-found' });
         const view = await readTournament(client, t.id);
         expect(view.bouts.find(b => b.id === bout.id)!.revealedResult, who).toBeNull();
       }

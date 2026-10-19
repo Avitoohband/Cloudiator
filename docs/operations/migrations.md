@@ -1,5 +1,84 @@
 # Local identity backend and migrations
 
+## Task 23.3 fix round 1: a shared reveal leased once (M20)
+
+M20 is `supabase/migrations/20261019132814_shared_reveal.sql`, the correction of M19's settlement claim found by the Task 23.3
+review (Important 2).
+- **Generation.** CLI 2.120.0, `db pull shared_reveal --local --schema public,private --yes` (engine `migra`). The input was
+  the tested `supabase/sql/15-release.sql` (its third part's `claim_jobs`), applied once to a clean M01–M19 reset.
+- **Completion.** The draft was completed from that source; M01–M19 are unchanged.
+- **Decision.** The controller's ruling on the review (2026-10-19): fix it in a new migration, because committed migrations are
+  immutable; leave the dispatch accounting unchanged.
+
+**The problem.** Every tournament entrant's settlement waits on the final's bout and on its reveal (10-tournament-results.sql,
+exception 5). When several settlements were released by the same due reveal R, M19's claim appended R once per settlement, so
+`picked` became `[R, S1, R, S2, …]`:
+- R counted against the cap once per settlement: a cap of 3 took R and S1 only.
+- The lease statement's `update … from chosen` matched R once per copy and used one of those join rows, chosen by the plan.
+  Under a hash join R came back after S1, `[S1, R, S2]`. The worker would then settle S1 first; `settle_activity` refuses it
+  (`processing`), and S1 sits leased for 120 s with one of its three attempts spent.
+- Safety held throughout: `settle_activity` re-checks the dependencies.
+
+**What M20 changes.** Only the settlement branch of `public.claim_jobs`. A group adds only the prerequisites not already in
+`picked` (`… and p.id<>all(picked)`). A reveal taken for an earlier settlement is already locked by this transaction, was
+checked then, and precedes the later settlement in the list. So:
+- each job is in the list once, and is leased once per claim with one attempt row;
+- every reveal comes before the first settlement that waits on it, whatever the join plan;
+- the cap counts only the ids a group adds, so a shared reveal counts once.
+
+Unchanged: every other kind's claim; the SKIP LOCKED locking and the re-check after the lock; never splitting a group across
+the cap; `dispatch_workers()`; `released_by_due_reveals`; the ACLs.
+
+**The draft needed two completions** (checked against the source):
+1. The function ACL: `revoke all … from public, anon, authenticated` and `grant execute … to service_role`. CREATE OR REPLACE
+   keeps the existing grants; the migration restates them as the source does.
+2. A provenance header and `notify pgrst`.
+
+The function statement is as generated. Its body is byte-identical to the source's (4,278 bytes, compared programmatically),
+and differs from M19's only in that condition and two comment lines. M20 re-emits no unchanged function.
+
+**Catch-up (dispatch accounting unchanged, ruling).**
+- Normally a tournament's final reveal falls due within the slot (round R of R reveals at R/(R+1) of it) and completes long
+  before the settlements fall due at the cutoff.
+- If it is still unfinished when its N settlements fall due, `dispatch_workers()` counts 1 + N simple jobs and dispatches for
+  them.
+- Only the claim that leases the reveal can take the settlements that wait on it, up to its cap (the reveal and 19
+  settlements). While the reveal is leased to it, no other claim sees the rest as released, so the other invocations of that
+  tick find none and claim other kinds or exit.
+- The remaining settlements wait for the next tick, when the completed reveal makes them dependency-ready.
+
+**Tests.** `tests/db/activities.test.ts`, "leases a reveal that several settlements share once, before them, and counts it once
+against the cap (M20)". It runs on pinned database time in a rolled-back transaction, in the tournament-final shape: a completed
+bout, its reveal due at the cutoff, and two settlements waiting on both.
+- Dispatch counts 3 jobs (`releasedSettlements: 2`) and dispatches one invocation.
+- Cap 3: `[R, S1, S2]`, one lease and one attempt row per job.
+- Cap 20 with a hash join forced (`enable_nestloop=off`, `enable_mergejoin=off`, `plan_cache_mode=force_custom_plan`):
+  `[R, S1, S2]`.
+- Cap 2: `[R, S1]`. S2 stays pending with no attempt, and a second claimer then takes neither S2 nor R while R is leased to the
+  first.
+- **RED on M19's source:** cap 3 took `[R, S1]` (S2 pending, no attempt); the forced hash join returned `[S1, R, S2]`. The cap-2
+  and second-claimer checks passed on M19 too.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M19 matched Task 23.3's recorded M19 replay fingerprint byte for byte (1,135
+  lines).
+- The source-applied fingerprint differs from it only in the `claim_jobs` body hash. Its ACL, security, volatility and
+  `search_path` are unchanged.
+- A clean reset replayed M01–M20, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte (1,135 lines), and again after the full test run.
+- Inspection of the replay:
+  - `claim_jobs` `{postgres=X/postgres,service_role=X/postgres}`, invoker, volatile, `search_path=""`, its body carrying the
+    fix;
+  - `dispatch_workers` and `released_by_due_reveals` unchanged;
+  - 44/44 `public`/`private` triggers enabled; both cron jobs active; no function executable by anon or authenticated;
+  - 20 migrations recorded.
+- Lint is empty on the source and on the replay. Advisors on the fresh replay: 36 INFO `unused_index` notices (no statistics
+  yet), no warnings or errors.
+- `npm run test:db`: 275/275 on the source and 275/275 on the M01–M20 replay, the Edge container's start time unchanged
+  across both runs.
+
+**Release (Task 24).** Deploy M20 with M19 (it replaces the same function). It changes no client contract and no Edge code.
+
 ## Task 23.3: settlements released by due reveals (M19)
 
 M19 is `supabase/migrations/20261019124532_dispatch_released.sql`, the latency fix found by Task 23.3's capacity run.
@@ -36,13 +115,21 @@ Arena-only cadence tests (about 61 s) could not see it.
   - A settlement claim walks the due settlements in due order and takes a released one only together with every reveal it
     waits on. Each row is locked with SKIP LOCKED and re-checked after the lock, so a reveal another claim holds leaves its
     settlement for later. A group is taken only while it fits the batch cap.
-  - Leases come back reveals first.
+  - Leases come back reveals first. (When several settlements share one reveal, M19 listed it once per settlement; M20
+    corrects that, see above.)
   - The worker (`supabase/functions/_shared/backend/jobs.ts`, unchanged) runs each lease by its own kind, so the reveal
     completes before the settlement settles in the same invocation. `settle_activity` still refuses a settlement whose
     dependencies are unfinished.
   - The lease statement is shared by every kind. It is the 07-arena.sql statement, fed from the ordered list.
 - **Result.** The cutoff tick settles the whole slot, and the boundary publishes in the next tick (61.5 s measured), as an
   Arena-only boundary does.
+
+**Known trade-off.** A released settlement is leased in the same claim as its reveal.
+- If the reveal fails, the worker's settle of the settlement is refused (`processing`, `settle_activity` checks the dependency).
+- The settlement has then spent one of its three attempts, and its lease holds it for 120 s before it can be claimed again.
+- Three such failures leave it to `operator` through the exhausted-lease sweep.
+- Before M19 a settlement was claimed only once its reveals had completed, so a failed reveal cost it nothing. The coupling is
+  accepted for the latency it removes (Task 23.3 review, Minor 8).
 
 **The draft needed three completions** (checked one by one against the source):
 1. The order: the draft created `claim_jobs` first. The helper now comes before the two functions that call it, as in the source.

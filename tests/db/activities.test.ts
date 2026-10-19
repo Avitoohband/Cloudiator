@@ -821,6 +821,59 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
         where j.dedupe_key like 'm19:%' and j.status='leased' and a.outcome is null`).toEqual([{ n: 23 }]);
     });
   });
+  it('leases a reveal that several settlements share once, before them, and counts it once against the cap (M20)', async () => {
+    // Task 23.3 fix round 1: every tournament entrant's settlement waits on the final's bout and its reveal
+    // (10-tournament-results.sql, exception 5). When those settlements fall due while that reveal is still claimable (a
+    // catch-up), M19's claim appended the shared reveal once per settlement: the reveal counted against the cap once per
+    // settlement, and the lease update matched it once per copy, so where it came back (reveals first) depended on the join
+    // plan. Each job is now taken at most once, every reveal before the settlements that wait on it.
+    const owner = await fighter();
+    const cutoff = (nowSlot() + 1) * SLOT;
+    await dispatchRolledBack(async (tx, dispatchAt) => {
+      const job = async (key: string, kind: string, due: number) => (await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,
+        rules_version,due_at_ms) values(${kind},${key},300,${owner.gid},'{}','v1',${due}) returning id`)[0].id as string;
+      const depends = (dependent: string, prerequisite: string) =>
+        tx`insert into private.job_dependencies(job_id,prerequisite_id) values(${dependent},${prerequisite})`;
+      // The final's bout has completed (inserted so: guard_job allows completion only from a lease); its reveal falls due at
+      // the cutoff, and two settlements wait on both.
+      const [{ id: bout }] = await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms,status,result,
+        completed_at_ms) values('simulation','m20:bout',300,${owner.gid},'{}','v1',${cutoff - 120_000},'completed','{}'::jsonb,${cutoff - 60_000}) returning id`;
+      const reveal = await job('m20:reveal', 'reveal', cutoff);
+      await depends(reveal, bout);
+      const [first, second] = [await job('m20:settlement:a', 'settlement', cutoff), await job('m20:settlement:b', 'settlement', cutoff)].sort();
+      for (const settlement of [first, second]) { await depends(settlement, bout); await depends(settlement, reveal); }
+      // Dispatch counts each job once: the reveal and the two settlements it releases.
+      expect(await dispatchAt(cutoff + 300)).toMatchObject({ ok: true, dispatched: 1, claimableSimple: 3, releasedSettlements: 2 });
+      await tx.unsafe(`set local cloudiator.test_now_ms = '${cutoff + 400}'`);
+      const claimed = async (kind: string, limit: number) =>
+        ((await tx`select public.claim_jobs(${randomUUID()},${kind},${limit}) as jobs`)[0].jobs as JobLease[]).map(lease => [lease.kind, lease.id]);
+      /** Each job's status, attempts and logged attempts: one lease per job means one attempt row each. */
+      const state = async () => Object.fromEntries((await tx`select j.id, j.status, j.attempts::int as attempts,
+        (select count(*)::int from private.job_attempts a where a.job_id=j.id) as logged from private.jobs j where j.id in ${tx([reveal, first, second])}`)
+        .map(row => [row.id, [row.status, row.attempts, row.logged]]));
+      const leased = ['leased', 1, 1], untouched = ['pending', 0, 0];
+      const undo = new Error('undo');
+      const isolated = (run: () => Promise<void>) => expect(tx.savepoint(async () => { await run(); throw undo; })).rejects.toBe(undo);
+      // Cap 3: the shared reveal counts once, so it comes once and first, followed by both settlements.
+      await isolated(async () => {
+        expect.soft(await claimed('settlement', 3), 'cap 3').toEqual([['reveal', reveal], ['settlement', first], ['settlement', second]]);
+        expect.soft(await state(), 'cap 3 leases').toEqual({ [reveal]: leased, [first]: leased, [second]: leased });
+      });
+      // The same with a hash join for the lease statement (custom plans, no nested loop or merge join): for a duplicated
+      // reveal the join row it uses need not be the first copy's.
+      await isolated(async () => {
+        for (const setting of ['enable_nestloop = off', 'enable_mergejoin = off', 'plan_cache_mode = force_custom_plan']) await tx.unsafe(`set local ${setting}`);
+        expect.soft(await claimed('settlement', 20), 'hash join').toEqual([['reveal', reveal], ['settlement', first], ['settlement', second]]);
+        expect.soft(await state(), 'hash join leases').toEqual({ [reveal]: leased, [first]: leased, [second]: leased });
+      });
+      // Cap 2: the reveal and the first settlement. The second settlement is never split from the reveal: it stays pending,
+      // and while the reveal is leased to that claim a second claimer takes neither it nor the reveal.
+      expect.soft(await claimed('settlement', 2), 'cap 2').toEqual([['reveal', reveal], ['settlement', first]]);
+      expect.soft(await claimed('settlement', 20), 'second claimer, settlements').toEqual([]);
+      expect.soft(await claimed('reveal', 20), 'second claimer, reveals').toEqual([]);
+      expect.soft(await state(), 'cap 2 leases').toEqual({ [reveal]: leased, [first]: leased, [second]: untouched });
+    });
+  });
 
   describe('real game-worker Edge runtime', () => {
     const secret = process.env.LOCAL_WORKER_SECRET ?? '';

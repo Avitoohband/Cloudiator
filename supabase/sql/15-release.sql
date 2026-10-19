@@ -1,6 +1,7 @@
 -- Task 23 reapplicable source. Committed migrations are immutable; deploy only the generated migrations: M17
 -- (supabase/migrations/*_release.sql, Task 23.1, access hardening), M18 (*_timing.sql, Task 23.2, the second part below) and
--- M19 (*_dispatch_released.sql, Task 23.3, the third part: settlements released by due reveals).
+-- M19 (*_dispatch_released.sql, Task 23.3, the third part: settlements released by due reveals), corrected by M20
+-- (*_shared_reveal.sql, Task 23.3 fix round 1: the third part's claim_jobs leases a reveal several settlements share once).
 -- Release access hardening (plan 2026-10-19-task-23-release-readiness, Task 23.1, and the controller's rulings on the access
 -- matrix's findings). tests/db/access-matrix.test.ts derives every expectation from the catalog through the exported audit
 -- scripts/access-audit.sql. On the M01-M16 replay it found these client privileges, all revoked here:
@@ -181,6 +182,11 @@ revoke all on function private.dispatch_workers() from public, anon, authenticat
 -- reveal it waits on (each locked with SKIP LOCKED and re-checked after the lock, so a reveal another claim holds leaves the
 -- settlement for later), only while the whole group fits the cap, reveals first. Leases are returned in that order, so the
 -- worker completes the reveals before it settles. Database time is sampled once, before any lock, as before.
+-- M20 (Task 23.3 fix round 1): a group adds only the reveals the claim has not taken yet. Every tournament entrant's
+-- settlement waits on the same final reveal (10-tournament-results.sql, exception 5); M19 appended that reveal once per
+-- settlement, so it counted against the cap once per settlement, and the lease update matched it once per copy, so its
+-- position depended on the join plan (a hash join leased a settlement before it). Now each job is in the list once, every
+-- reveal before the first settlement that waits on it, and the cap counts it once.
 create or replace function public.claim_jobs(worker_id uuid,kind text,batch_limit integer) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare now_ms bigint:=private.planning_now_ms(); cap integer; leases jsonb; picked uuid[]:='{}'::uuid[]; candidate record; waits uuid[];
@@ -208,8 +214,10 @@ begin
       exit when cardinality(picked)>=cap;
       waits:='{}'::uuid[];
       if not candidate.ready then
+        -- Only the reveals not already picked: one this claim took for an earlier settlement is locked by this transaction,
+        -- was checked then, and precedes this settlement in the list.
         select coalesce(array_agg(p.id order by p.due_at_ms,p.id),'{}'::uuid[]) into waits from private.job_dependencies d
-          join private.jobs p on p.id=d.prerequisite_id where d.job_id=candidate.id and p.status<>'completed';
+          join private.jobs p on p.id=d.prerequisite_id where d.job_id=candidate.id and p.status<>'completed' and p.id<>all(picked);
       end if;
       continue when cardinality(picked)+cardinality(waits)+1>cap;
       select j.id into settlement from private.jobs j where j.id=candidate.id and j.kind='settlement' and j.due_at_ms<=now_ms

@@ -8,9 +8,19 @@
 - fix the boundary latency in this task (see "Latency fix" below);
 - leave retention and database sizing alone, pending Avi.
 
-Commits: `test: measure capacity against the free-tier budgets` and this report (`docs: report Task 23.3`).
+Commits:
+- `a167ab9` test: measure capacity against the free-tier budgets
+- `caf8ec0` docs: report Task 23.3
+- `119f36b` fix: dispatch settlements released by due reveals in the same tick (M19)
+- this report's "Latency fix" section
 
-- **The blockers, as first measured:**
+**Now:**
+- Boundary latency is fixed (61.5–61.6 s in every window; see "Latency fix" at the end).
+- The database blocker stays open for Avi.
+- Egress is a blocker only under a hosted condition (raw with backend traffic, 113–116 %).
+- Client raw egress is 77–79 %; the dispatch ceiling is a named risk (82–85 %).
+
+- **The blockers, as first measured (before M19):**
   1. **Database.** 50 always-scheduled characters reach 376–445 MiB at 90 days and 570–685 MiB after a year, against
      250 MiB (151–274 %). Even with no commands the 90-day figure is 296–365 MiB.
   2. **Boundary latency.** About 121.6 s after any slot that had expeditions, against the 120 s target (101.3 %). Spec §10.4
@@ -262,3 +272,141 @@ Recommended options are not built; the full list is in the evidence.
 7. **Upkeep proposal (pending Avi):** `docs/operations/verification-gates.md`, "Database tests and the local Edge runtime".
    Add "run `npm run typecheck` (and any `tsc`) before taking the Edge baseline, never during a DB run", with today's four
    observed recreations as the evidence. It is an observed correlation, not a tested fix.
+
+## Latency fix
+
+**Ruling** (controller, 2026-10-19). The boundary latency is a technical fix owned by this task:
+- dispatch, in the same tick, the settlements that due reveals release;
+- keep the five dispatches per scheduled minute and Task 23.2's per-scheduled-minute accounting;
+- put the SQL in `15-release.sql` and generate and complete M19.
+Retention and database sizing stay unchanged.
+
+**Cause** (from the run's own dispatch log and the RED tests below).
+- An expedition's settlement job depends on every reveal of its plan. Its last stage, "Arrive at camp", falls due exactly at
+  the next cutoff.
+- `dispatch_workers()` counted only dependency-ready jobs. At an all-expedition cutoff that is the 50 reveals: three
+  invocations.
+- `runWorker` claims settlements before reveals, so the released settlements waited for minute 1, and preparation for minute 2:
+  publication at about 121.6 s.
+
+**Why dispatch counting alone would not do.**
+- Counting the released settlements makes the cutoff tick dispatch five invocations. But the extra two would find no ready
+  settlement and exit, while the three that reveal spend their 20-job budget on reveals.
+- So `claim_jobs(…,'settlement',…)` now takes a released settlement together with the reveals it waits on: reveals first,
+  never splitting the group across the cap.
+  - Each row is locked with SKIP LOCKED and re-checked after the lock, so a claim never waits and cannot deadlock. A reveal
+    another claim holds leaves its settlement for later.
+- The worker (`jobs.ts`) is unchanged. It runs each lease by its own kind, so the reveal completes before the settlement
+  settles in the same invocation, and `settle_activity` still checks the dependency.
+- At an all-expedition cutoff, five invocations each claim ten pairs: 100 jobs, the whole slot.
+
+**Changes** (commit `119f36b`).
+- **`supabase/sql/15-release.sql`, third part:**
+  - `private.released_by_due_reveals(job, now_ms)`, new: STABLE, invoker, `search_path=""`, owner and `service_role` EXECUTE;
+  - `private.dispatch_workers()`: counts released settlements and reports `releasedSettlements`; the ceiling, minute
+    accounting and owner-only ACL are unchanged;
+  - `public.claim_jobs`: the settlement branch; every other kind unchanged; one shared lease statement.
+- **Migration:** `supabase/migrations/20261019124532_dispatch_released.sql` (M19).
+- **Tests:**
+  - `tests/db/activities.test.ts`, new case: claim and dispatch semantics on pinned database time, rolled back;
+  - `tests/db/capacity.test.ts`, new cadence case: real tick and worker. The measurement case's boundary check is now always
+    on; its budgets stay gated;
+  - `tests/fixtures/capacity.ts`: per-window first ticks and cutoff-tick settlements, `measureCadence`;
+  - `tests/db/access-matrix.test.ts`: one line added to the pinned `service_role` snapshot, for the helper's EXECUTE.
+- **Docs:**
+  - `docs/operations/migrations.md`: a new M19 section;
+  - `docs/operations/release-evidence.md`: regenerated from the post-fix report run.
+
+**RED** (on M18, before the SQL change; Edge 12:11:13.70 unchanged).
+- Claim and dispatch case: `dispatched: 3, claimableSimple: 51` where 5 and 101 were expected.
+- Cadence case:
+  - slot 302 (after the Woodland slot) published at **121,554 ms**;
+  - its cutoff tick dispatched 3 for 50 jobs and settled **0** of slot 301's 50 expeditions;
+  - the Arena-only boundaries took 61.6 s.
+
+**GREEN.**
+- **On the source:**
+  - claim, dispatch and pg_net dispatch cases 4/4;
+  - cadence case: slot 302 at **61,535 ms**; cutoff tick 5 dispatched for 100 jobs, 50/50 settled in it; Arena-only 61.6 s
+    (unchanged); no flagged report.
+- **Full `npm run test:db`:**
+  - on the source: 274/274;
+  - on the clean M01–M19 replay: **274/274**.
+- `npm test` 1,117/1,117. `npm run typecheck` clean.
+
+**M19 generation and completion.**
+1. `db reset --local --no-seed --yes` to M01–M18. The fingerprint (Task 23.2's script, 1,134 lines) matched Task 23.2's
+   recorded M18 replay **byte for byte**.
+2. Applied the source once with the psql fallback after the container label check (`Cloudiator`).
+   - **Fingerprint diff,** exactly the expected set: the `claim_jobs` and `dispatch_workers` bodies, and the new helper's line.
+   - **Lint:** one plpgsql_check warning (an untyped `'{}'` literal assigned to `uuid[]`), fixed in the source with `::uuid[]`
+     and reapplied; then empty.
+3. `npx supabase db pull dispatch_released --local --schema public,private --yes` (migra) wrote the draft. A copy is kept as
+   `scratchpad t233/dispatch-released-draft-as-generated.sql`. It needed three completions:
+   - the helper ahead of its two callers (the draft created `claim_jobs` first);
+   - the function ACLs;
+   - a provenance header and `notify pgrst`.
+   The three function statements are as generated, line for line, and no unchanged function was re-emitted.
+4. **Replay.** A clean reset replayed M01–M19, with no source applied afterwards.
+   - **Fingerprint:** byte-identical to the source-applied one (1,135 lines), and again after the full test run.
+   - **Inspection:**
+     - `claim_jobs` and the helper `{postgres=X/postgres,service_role=X/postgres}`; `dispatch_workers` `{postgres=X/postgres}`;
+     - all three invoker with `search_path=""`;
+     - 44/44 triggers enabled; both cron jobs active; no function executable by anon or authenticated;
+     - after the runs: scheduler off, no Vault worker secret.
+   - **Lint:** empty.
+   - **Advisors:** 36 INFO on the fresh replay (unused indexes, no statistics) and 1 INFO after the tests, no WARN or ERROR.
+   - `migration list --local` shows M01–M19.
+
+**Capacity report after the fix** (12:53–12:55 UTC, Edge 12:31:44.11 unchanged, exit 1 for the database budget):
+
+| Budget | Before M19 | After M19 |
+|---|---|---|
+| Boundary publication, worst of 7 windows | 121.6 s, 101.3 % (blocker) | **61.6 s, 51.3 %** (every window 61.5–61.6 s) |
+| Database at 90 days / after a year (mixed) | 178.1 / 274.0 % | 178.1 / 274.1 % (unchanged, pending Avi) |
+| Database at 90 days / after a year (new-character schedule) | 150.6 / 227.8 % | 150.5 / 227.4 % |
+| Egress raw, players and viewers (30 / 31 days) | 81.6 / 83.7 % (risk) | **77.1 / 79.0 %** |
+| Egress raw with backend traffic | 117.4 / 120.6 % | 113.0 / 115.9 % (conditional, Task 24) |
+| Egress gzip, players and viewers | 19.1 / 19.6 % | 18.6 / 19.0 % |
+| Invocations / at the dispatch ceiling | 13.9–14.3 % / 82.0–84.7 % | the same |
+| Worker, season close, standings | ≤ 9.5 % / ≤ 0.1 % / ≤ 0.9 % | ≤ 9.3 % / ≤ 0.1 % / 0.6 % |
+
+Egress fell because the shorter boundary removes about one revision change per slot (10.5 to 9.5 in a regular slot).
+
+**Edge StartedAt for every DB run of this phase** (all compared before and after):
+
+| Run (UTC) | Scope | Edge before / after | Result |
+|---|---|---|---|
+| 12:17–12:19 | capacity file, gate unset (ruling 1) | 12:11:13.70 / same | 3/3 |
+| 12:26 | RED claim and dispatch case | 12:11:13.70 / same | fails as expected |
+| 12:26–12:27 | RED cadence case | 12:11:13.70 / same | fails as expected (121,554 ms) |
+| 12:29 | claim, dispatch and pg_net cases (source) | 12:11:13.70 / same | 4/4 |
+| 12:29–12:31 | cadence case, twice (source) | 12:11:13.70 / same | pass (61,535 ms) |
+| 12:31–12:37 | full suite (source) | 12:11:13.70 / **12:31:44.11** | **discarded** |
+| 12:38–12:44 | full suite (source), rerun | 12:31:44.11 / same | **274/274** |
+| 12:47–12:52 | full suite on the M01–M19 replay | 12:31:44.11 / same | **274/274** |
+| 12:53–12:55 | `node scripts/resource-report.mjs` | 12:31:44.11 / same | exit 1 (database), boundary 61.6 s |
+
+**The discarded run.**
+- The container was recreated 5 s into the 12:31 run, a minute after I edited two test files; no Edge file had changed.
+- One creation RPC answered `creation-unavailable` in the first file, then. Both reruns passed whole.
+
+**Self-review of the fix.**
+- **Locks.** Every lock the claim takes is SKIP LOCKED, so it never waits. A settlement it locks but does not lease, because
+  its reveal is held elsewhere or the group does not fit the cap, stays pending; its lock lasts only until the claim commits.
+- **Non-settlement claims** select the same rows in the same order with the same lease statement as before. The arena,
+  tournament and expedition suites pass unchanged.
+- **The released predicate** follows one level only: a reveal must itself be dependency-ready. A catch-up chain of several
+  unfinished reveals still drains over ticks, as before.
+- **A failed reveal** in a pair leaves its settlement leased until the lease expires (120 s), as any failed job does. Nothing
+  is settled out of order: `settle_activity` checks the dependency.
+- **Not touched:** Task 23.2's deferred Minor 1 (the `security_invoker` comment in `15-release.sql`).
+
+**Concerns** (in addition to those above).
+1. **`npm run test:db` grows by about 45 s more** for the cadence case: about 6 minutes in all now.
+2. **C22.** Concern 6 above needs a correction:
+   - one `tsc` run (12:26) caused no recreation;
+   - the 12:31:44 recreation followed edits to two test files, not a `tsc` run.
+   - The trigger is still unproven. The upkeep proposal (concern 7) becomes: take the Edge baseline only after the last edit
+     and typecheck, once the container has run for a minute.
+3. **Hosted check (Task 24):** the cutoff-tick dispatch spacing at five invocations (C4).

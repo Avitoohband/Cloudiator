@@ -37,7 +37,7 @@ export async function account(provider = 'google') {
  * (`clock_timestamp()`) and every other response stay real, and nothing in the database changes, so nothing needs restoring.
  * Without `serverNowMs` it is plain `fetch`.
  */
-function serverClockFetch(serverNowMs?: number): typeof fetch {
+export function serverClockFetch(serverNowMs?: number): typeof fetch {
   if (serverNowMs === undefined) return fetch;
   return async (input, init) => {
     const response = await fetch(input, init);

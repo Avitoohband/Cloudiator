@@ -88,15 +88,18 @@ const months = list => Object.fromEntries(list.map(m => [`${m.days}d`, { raw: Ma
 
 /**
  * The report: the sections the suites wrote, and every budget's use with its verdict (ok, risk above 80 %, blocker at 100 %,
- * missing when the measurement is not there). Any missing or blocker line fails it.
+ * missing when the measurement is not there). Any missing or blocker line fails it. The one-year database figures are a
+ * named risk at any share, never a blocker (Task 23.7, Avi's decision 2026-10-19: the 90-day figures must stay under the
+ * 500 MB budget; the year's growth waits for the after-launch compactions of the database budget design).
  * @param {{ players: number, viewers: number, slots: number }} options
  * @param {{ worker?: any, capacity?: any, seasonClose?: any, standings?: any }} sections the parsed sections; absent ones are null
  * @param {boolean} passed whether both suites passed
  */
 export function report(options, { worker = null, capacity = null, seasonClose = null, standings = null }, passed) {
   const budgets = [];
-  const add = (name, used, budget) => {
-    const share = measured(used) / measured(budget), status = verdict(share);
+  const add = (name, used, budget, { riskOnly = false } = {}) => {
+    const share = measured(used) / measured(budget), measuredVerdict = verdict(share);
+    const status = riskOnly && measuredVerdict === 'blocker' ? 'risk' : measuredVerdict;
     budgets.push(status === 'missing' ? { name, used: null, budget: Number.isNaN(measured(budget)) ? null : budget, percent: null, status }
       : { name, used: Math.round(used * 10) / 10, budget, percent: percent(share), status });
   };
@@ -110,7 +113,7 @@ export function report(options, { worker = null, capacity = null, seasonClose = 
     database = { ...db(capacity.database), defaultSchedule: db(capacity.databaseDefault), commandSensitivity: capacity.sensitivity };
     for (const [label, d] of [['mixed schedules', capacity.database], ['new-character schedule', capacity.databaseDefault]]) {
       add(`database at 90 days, ${label}`, d.steadyStateBytes, d.budgetBytes);
-      add(`database after one year, ${label}`, d.atOneYear.bytes, d.budgetBytes);
+      add(`database after one year, ${label}`, d.atOneYear.bytes, d.budgetBytes, { riskOnly: true });
     }
     const inv = i => ({ perSlot: i.perSlot, perMonth: Object.fromEntries(i.months.map(m => [`${m.days}d`, { worker: m.worker, commands: m.commands, total: m.total,
       ceiling: m.ceiling }])), budget: i.budget });

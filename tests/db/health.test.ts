@@ -18,9 +18,10 @@ const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const S = 5_000;
 const NOW = S * SLOT + 15 * MINUTE;
-const BUDGET = 262_144_000;
-/** 80 % of the budget: the database-size warning threshold. */
-const WARN = 209_715_200;
+/** Task 23.7 (Avi's decision, 2026-10-19): 500 MB, MB meaning 2^20 bytes. */
+const BUDGET = 524_288_000;
+/** 80 % of the budget, 400 MB: the database-size warning threshold. */
+const WARN = 419_430_400;
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../../scripts/health.mjs', import.meta.url));
 
@@ -45,6 +46,8 @@ type Health = {
   events: Record<'market-sweep' | 'dispatch' | 'cleanup', {
     latestFailure: { atMs: number; sqlstates: string[]; failedSellers: number | null } | null; lastHour: Failures }>;
   resources: { databaseBytes: number; budgetBytes: number; largestTables: { name: string; bytes: number }[] };
+  /** Task 23.7: the characters with an activity in the current slot (Task 23.8 adds the resting ones). */
+  cohort: { activeCharacters: number };
   cpu: string;
   alerts: { code: string; severity: 'warn' | 'alert'; detail: Record<string, unknown> }[];
 };
@@ -265,7 +268,7 @@ describe('Task 22.3: operator health', () => {
         { code: 'cleanup-backlog', severity: 'warn', detail: { moreSinceMs: NOW - 30 * HOUR } },
         { code: 'tick-failures', severity: 'warn', detail: { 'market-sweep': { failures: 2, sqlstates: ['23505', '55P03', 'P0001'] },
           dispatch: { failures: 1, sqlstates: ['55P03'] } } }]);
-      // The database against its 250 MB budget, with its ten largest tables, largest first.
+      // The database against its 500 MB budget, with its ten largest tables, largest first.
       expect(health.resources.budgetBytes).toBe(BUDGET);
       expect(Math.abs(health.resources.databaseBytes - before)).toBeLessThan(before / 100);
       expect(health.resources.largestTables).toHaveLength(10);
@@ -289,15 +292,53 @@ describe('Task 22.3: operator health', () => {
       await tx`update private.scheduler set enabled=false where singleton`;
       expect((await report(tx)).alerts.map(a => a.code)).toEqual(['tick-failures']);
     });
-    // The size alert: a warning from 80 % of the budget, an alert from 100 %.
+  });
+
+  it('warns at 400 MB and alerts at 500 MB of physical database size', async () => {
+    // Task 23.7 (Avi's decision, 2026-10-19): the report measures the physical database (pg_database_size) against 500 MB.
+    const health = await rollback(tx => report(tx));
+    const physical = Number((await sql`select pg_database_size(current_database())::text as bytes`)[0].bytes);
+    expect(health.resources.budgetBytes).toBe(BUDGET);
+    expect(Math.abs(health.resources.databaseBytes - physical)).toBeLessThan(physical / 100);
+    // The alerts take the budget from the report itself: a warning from 80 % (400 MB), an alert from 100 %.
     const quiet = { checkedAtMs: NOW, currentSlot: S, publishedSlot: S, scheduler: { enabled: false }, boundaries: [],
       jobs: { overdueTotal: 0, overdue: [], operatorTotal: 0 }, cleanup: { failures: { consecutive: 0, sqlstates: [] }, moreSinceMs: null },
-      events: {}, resources: { budgetBytes: BUDGET } };
-    const sized = (bytes: number) => alertsOf(sql, { ...quiet, resources: { databaseBytes: bytes, budgetBytes: BUDGET } });
-    expect(await sized(WARN - 1)).toEqual([]);
-    expect(await sized(WARN)).toEqual([{ code: 'database-size', severity: 'warn', detail: { databaseBytes: WARN, budgetBytes: BUDGET } }]);
-    expect(await sized(BUDGET - 1)).toEqual([{ code: 'database-size', severity: 'warn', detail: { databaseBytes: BUDGET - 1, budgetBytes: BUDGET } }]);
-    expect(await sized(BUDGET)).toEqual([{ code: 'database-size', severity: 'alert', detail: { databaseBytes: BUDGET, budgetBytes: BUDGET } }]);
+      events: {}, resources: health.resources };
+    const sized = (bytes: number) => alertsOf(sql, { ...quiet, resources: { ...health.resources, databaseBytes: bytes } });
+    const alert = (bytes: number, severity: 'warn' | 'alert') => [{ code: 'database-size', severity, detail: { databaseBytes: bytes, budgetBytes: BUDGET } }];
+    expect(await sized(419_430_399)).toEqual([]);
+    expect(await sized(WARN)).toEqual(alert(419_430_400, 'warn'));
+    expect(await sized(BUDGET - 1)).toEqual(alert(524_287_999, 'warn'));
+    expect(await sized(524_288_000)).toEqual(alert(524_288_000, 'alert'));
+  });
+
+  it('counts the characters with an activity in the current slot', async () => {
+    // Task 23.7: the watch for the boundary-latency risk (release-evidence.md, risk 5; zero headroom at 50 characters).
+    const others: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const owner = await account();
+      const created = await commands.createGladiator({ userId: owner.id }, creation('Cohort ' + randomUUID().slice(0, 8)));
+      if (!created.ok) throw new Error('creation failed');
+      others.push(created.value.gladiatorId);
+    }
+    await rollback(async tx => {
+      expect((await report(tx)).cohort).toEqual({ activeCharacters: 0 });
+      // Two characters in the current slot S, one only in the slots before and after it.
+      const activity = (character: string, slot: number) => tx`insert into public.activities(gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,
+        resolved_kind,status) values(${character},${slot},${slot * SLOT},${(slot + 1) * SLOT},'{"kind":"training"}','training','active')`;
+      await activity(gid, S);
+      await activity(others[0], S);
+      await activity(others[1], S - 1);
+      await activity(others[1], S + 1);
+      await activity(gid, S - 1);
+      expect((await report(tx)).cohort).toEqual({ activeCharacters: 2 });
+      expect((await report(tx, (S + 1) * SLOT)).cohort).toEqual({ activeCharacters: 1 });
+      expect((await report(tx, S * SLOT - 1)).cohort).toEqual({ activeCharacters: 2 });
+      // An index read, never a scan of the activity history: the operator runs the report on every check.
+      await tx`set local enable_seqscan=off`;
+      const [plan] = await tx`explain (format json) select count(*) from public.activities a where a.slot_index=${S}`;
+      expect(JSON.stringify(plan)).toMatch(/Index (Only )?Scan/);
+    });
   });
 
   it('contains no secrets: no URLs, keys, tokens or raw error text', () => rollback(async tx => {

@@ -7,8 +7,9 @@ import { report, verdict } from '../../scripts/resource-report.mjs';
 
 const OPTIONS = { players: 50, viewers: 50, slots: 4 };
 const MONTHS = [30, 31];
-const database = () => ({ bytesPerSlot: 1_000, steadyStateBytes: 100 * 2 ** 20, atOneYear: { bytes: 150 * 2 ** 20, byClass: {} }, at90Days: { byClass: {} },
-  permanentBytesPerMonth: 1, seasonBytesPerMonth: 1, monthsToBudget: 12, budgetBytes: 250 * 2 ** 20 });
+const database = (at90Days = 100 * 2 ** 20, atOneYear = 150 * 2 ** 20) => ({ bytesPerSlot: 1_000, steadyStateBytes: at90Days,
+  atOneYear: { bytes: atOneYear, byClass: {} }, at90Days: { byClass: {} }, permanentBytesPerMonth: 1, seasonBytesPerMonth: 1, monthsToBudget: 12,
+  budgetBytes: 500 * 2 ** 20 });
 const invocations = () => ({ perSlot: 20, months: MONTHS.map(days => ({ days, worker: 10_000, commands: 1_000, total: 11_000, ceiling: 200_000 })),
   budget: 300_000 });
 const egressMonths = () => MONTHS.map(days => ({ days, raw: 1e9, gzip: 2e8, brotli: 1.5e8 }));
@@ -38,6 +39,21 @@ describe('resource-report.mjs verdicts', () => {
     expect(result.budgets.map((b: { status: string }) => b.status)).not.toContain('missing');
     expect(line(result, 'boundary publication')).toEqual([expect.objectContaining({ used: 61_600, percent: 51.3, status: 'ok' })]);
     expect(result.ok).toBe(true);
+  });
+
+  it('reports the one-year database figure as a risk, never a blocker, and holds the 90-day figure to the budget', () => {
+    // Task 23.7 (Avi's decision, 2026-10-19): both scenarios must stay under 100 % of the 500 MB budget at 90 days; the year is
+    // a named risk with the after-launch compaction plan (docs/superpowers/specs/2026-10-19-database-budget-design.md).
+    const input = sections();
+    input.capacity.database = database(400 * 2 ** 20, 600 * 2 ** 20);
+    const risk = report(OPTIONS, input, true);
+    expect(line(risk, 'database at 90 days, mixed')).toEqual([expect.objectContaining({ percent: 80, status: 'ok' })]);
+    expect(line(risk, 'database after one year, mixed')).toEqual([expect.objectContaining({ percent: 120, status: 'risk' })]);
+    expect(risk.ok).toBe(true);
+    input.capacity.database = database(500 * 2 ** 20, 600 * 2 ** 20);
+    const blocked = report(OPTIONS, input, true);
+    expect(line(blocked, 'database at 90 days, mixed')).toEqual([expect.objectContaining({ percent: 100, status: 'blocker' })]);
+    expect(blocked.ok).toBe(false);
   });
 
   it('reports a boundary window that never published as missing, never as the other windows\' worst, and fails', () => {

@@ -51,24 +51,30 @@ export const BOUNDARY_TARGET_MS = 120_000;
 /** Supabase's default statement timeout for the anon role (visitors read as anon): the hard limit of a public read. */
 const ANON_STATEMENT_TIMEOUT_MS = 3_000;
 /**
- * The budgets. Database: 250 MB as private.health_report counts it (262,144,000 bytes). Egress: 3 GB taken as 3 × 10⁹
+ * The budgets. Database: 500 MB as private.health_report counts it (524,288,000 bytes; Avi's decision, 2026-10-19, Task 23.7;
+ * the report warns from 80 %, 400 MB, on the physical size). Egress: 3 GB taken as 3 × 10⁹
  * bytes, the stricter reading. Invocations: 300,000 a month. Worker: cpuMs less 25 %. The season close must fit in what the
  * boundary target leaves after a steady publication, less 25 %. A standings read must stay far inside the anon statement
  * timeout: its plan at a tenth of it, its local Data API round trip at a quarter.
  */
 export const BUDGETS = Object.freeze({
-  databaseBytes: 262_144_000, egressBytes: 3_000_000_000, invocations: 300_000, workerMs: WORKER_LIMITS.cpuMs * 0.75,
+  databaseBytes: 524_288_000, egressBytes: 3_000_000_000, invocations: 300_000, workerMs: WORKER_LIMITS.cpuMs * 0.75,
   seasonCloseMs: Math.floor((BOUNDARY_TARGET_MS - STEADY_PUBLICATION_MS) * 0.75),
   standingsPlanMs: ANON_STATEMENT_TIMEOUT_MS / 10, standingsReadMs: ANON_STATEMENT_TIMEOUT_MS / 4,
   /** A budget used above this share is a named risk with a mitigation; above 1 it is a blocker for Avi. */
   riskShare: 0.8,
 });
 export const share = (used: number, budget: number) => used / budget;
+/**
+ * Task 23.7: the slots a job keeps its input and result. Cleanup's trim compacts the completed jobs of slots at or below the
+ * checkpoint minus 19 (15-release.sql, M21), once an hourly tick reaches them; a tick's lag is under one 80-minute slot.
+ */
+export const JOB_PAYLOAD_SLOTS = 19 + 1;
 
 export type Retention = 'detail' | 'summary' | 'permanent' | 'player' | 'season' | 'operational' | 'singleton';
 /**
  * Every table of the public and private schemas with its retention class (14-operations.sql's retention matrix):
- * - detail: whole slots pruned seven days (126 slots) after they end;
+ * - detail: whole slots pruned seven days (126 slots) after they end (a job's payloads compacted after JOB_PAYLOAD_SLOTS);
  * - summary: pruned after ninety days (1,620 slots; the ledger, reservations and listings by time, which is the same span);
  * - permanent: one row per slot and character, never pruned (settled slots; receipts, a settlement receipt's result
  *   compacted at 90 days);
@@ -82,7 +88,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'private.activity_snapshots': { retention: 'detail' }, 'private.arena_assignment_sides': { retention: 'detail' },
   'private.arena_assignments': { retention: 'detail' }, 'private.arena_results': { retention: 'detail' },
   'private.boundary_members': { retention: 'detail' }, 'private.expedition_plans': { retention: 'detail' },
-  'private.job_attempts': { retention: 'detail' }, 'private.job_dependencies': { retention: 'detail' }, 'private.jobs': { retention: 'detail' },
+  'private.job_attempts': { retention: 'detail' }, 'private.job_dependencies': { retention: 'detail' },
+  'private.jobs': { retention: 'detail', compactAfterSlots: JOB_PAYLOAD_SLOTS },
   'private.tournament_bouts': { retention: 'detail' }, 'private.tournament_entries': { retention: 'detail' },
   'private.tournament_results': { retention: 'detail' }, 'private.tournaments': { retention: 'detail' }, 'public.activity_stages': { retention: 'detail' },
   'private.boundaries': { retention: 'summary' }, 'private.boundary_work': { retention: 'summary' }, 'public.activities': { retention: 'summary' },

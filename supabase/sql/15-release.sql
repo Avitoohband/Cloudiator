@@ -1,7 +1,8 @@
 -- Task 23 reapplicable source. Committed migrations are immutable; deploy only the generated migrations: M17
 -- (supabase/migrations/*_release.sql, Task 23.1, access hardening), M18 (*_timing.sql, Task 23.2, the second part below) and
 -- M19 (*_dispatch_released.sql, Task 23.3, the third part: settlements released by due reveals), corrected by M20
--- (*_shared_reveal.sql, Task 23.3 fix round 1: the third part's claim_jobs leases a reveal several settlements share once).
+-- (*_shared_reveal.sql, Task 23.3 fix round 1: the third part's claim_jobs leases a reveal several settlements share once),
+-- and M21 (*_job_payloads.sql, Task 23.7, the fourth part: settled jobs' payloads compacted, the 500 MB budget).
 -- Release access hardening (plan 2026-10-19-task-23-release-readiness, Task 23.1, and the controller's rulings on the access
 -- matrix's findings). tests/db/access-matrix.test.ts derives every expectation from the catalog through the exported audit
 -- scripts/access-audit.sql. On the M01-M16 replay it found these client privileges, all revoked here:
@@ -258,6 +259,489 @@ end $$;
 -- As 07-arena.sql: the backend claims, nobody else; the helper is the backend's too (claim_jobs runs as service_role).
 revoke all on function public.claim_jobs(uuid,text,integer), private.released_by_due_reveals(uuid,bigint) from public, anon, authenticated;
 grant execute on function public.claim_jobs(uuid,text,integer), private.released_by_due_reveals(uuid,bigint) to service_role;
+
+-- ===== Task 23.7: settled jobs' payloads and the 500 MB budget (M21) =====
+-- Database budget design (docs/superpowers/specs/2026-10-19-database-budget-design.md, A.1 and D): Avi's decision A + C + D,
+-- 2026-10-19 (C, idle characters, is Task 23.8). Task 23.3 measured background job rows at about 62 MiB of the database at
+-- 90 days, nearly all of it their input and result, kept for the seven-day detail window although nothing reads them once
+-- their slot has settled:
+--   - a job's input is read when it is claimed (claim_jobs' snapshot) and by its own completion's checks;
+--   - a result is read by later phases of the same boundary (preparation's stamina, league and fighter; a pairing's bracket
+--     and routes, publish_tournaments' insufficient-entrants branch included), all before that slot starts, and by a
+--     same-token settlement retry (settle_activity_core returns j.result||{newGrants: 0, replayed: true}, and the worker reads
+--     only its ok and replayed);
+--   - replays, Arena results, tournament views and recent results keep their own copies (activity_stages, arena_results,
+--     tournament_results, tournament_views, tournament_bout_results, recent_results); the pairing history reads only a pairing
+--     job's kind and slot (07-arena.sql exception 7).
+-- So cleanup_history now compacts the completed jobs of settled slots: the row and every other column stay, input becomes
+-- {"compacted": true} and result {"ok": true, "compacted": true}, and the seven-day pass deletes the row as before. A
+-- same-token settlement retry on a compacted job still answers ok, with no new grant, replayed. No job kind is read after its
+-- slot has settled, so none is excluded (tests/db/retention.test.ts and tests/db/activities.test.ts pin each reader).
+-- "Settled" is the seven-day pass's own rule without its seven-day age: at or below the checkpoint P - 19 (everything a
+-- catch-up still needs stays above it; 14-operations.sql's header) and below the first slot that still has an unfinished
+-- activity or job (blockedSlot's rule). The trim has its own watermark, retention_state.jobs_compacted_through_slot, and takes
+-- at most three slots that have jobs a call, so the seven-day pass's watermark and result keep their meaning; its count is
+-- the seven-day pass's compacted.jobs. Its locks are the seven-day pass's: completed rows of slots at or below P - 19, under
+-- the same 500 ms lock timeout (a contended row fails the call whole; the next hourly tick retries).
+-- D: the internal database budget is 500 MB, MB meaning 2^20 bytes (524,288,000 bytes); private.health_alerts already warns
+-- from 80 % (419,430,400 bytes, 400 MB) and alerts from 100 %, both on physical pg_database_size. The report also counts the
+-- characters with an activity in the current slot (cohort.activeCharacters), the watch for the boundary-latency risk at 50
+-- characters (docs/operations/release-evidence.md, risk 5).
+
+-- The last slot whose completed jobs' payloads cleanup has compacted (-1: none yet). Only cleanup_history advances it, under
+-- its retention state lock; the job guard allows the compaction only at or below it.
+alter table private.retention_state add column if not exists jobs_compacted_through_slot bigint not null default -1
+  check (jobs_compacted_through_slot >= -1);
+
+-- 07-arena.sql's status machine, and exactly one update of a completed job (as guard_receipt allows exactly one compaction of
+-- a settlement receipt): input to {"compacted": true} and result to {"ok": true, "compacted": true}, once, every other column
+-- unchanged, and only at or below retention_state.jobs_compacted_through_slot. cleanup_history moves that watermark across
+-- settled slots just before it compacts them, so the same update anywhere else (an unsettled slot, an unfinished job, a
+-- second compaction) is refused like every other update of a completed job. The trigger (03-activities-jobs.sql) is unchanged.
+create or replace function private.guard_job() returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+  if tg_op='DELETE' then
+    if old.status<>'completed' then raise exception 'unfinished job'; end if;
+    return old;
+  end if;
+  if old.status='completed' then
+    if new.input='{"compacted": true}'::jsonb and new.result='{"ok": true, "compacted": true}'::jsonb
+      and old.input<>'{"compacted": true}'::jsonb
+      and (new.id,new.kind,new.dedupe_key,new.slot_index,new.gladiator_id,new.activity_id,new.seed,new.rules_version,new.status,
+        new.due_at_ms,new.attempts,new.max_attempts,new.lease_token,new.lease_owner,new.leased_at_ms,new.lease_until_ms,new.last_failure,
+        new.created_at_ms,new.completed_at_ms)
+        is not distinct from (old.id,old.kind,old.dedupe_key,old.slot_index,old.gladiator_id,old.activity_id,old.seed,old.rules_version,
+        old.status,old.due_at_ms,old.attempts,old.max_attempts,old.lease_token,old.lease_owner,old.leased_at_ms,old.lease_until_ms,
+        old.last_failure,old.created_at_ms,old.completed_at_ms)
+      and old.slot_index<=(select r.jobs_compacted_through_slot from private.retention_state r where r.singleton) then
+      return new;
+    end if;
+    raise exception 'immutable job';
+  end if;
+  if new.id<>old.id or new.kind<>old.kind or new.dedupe_key<>old.dedupe_key or new.slot_index<>old.slot_index
+    or new.gladiator_id is distinct from old.gladiator_id or new.activity_id is distinct from old.activity_id or new.input<>old.input
+    or new.seed<>old.seed or new.rules_version<>old.rules_version or new.attempts<old.attempts then
+    raise exception 'immutable job';
+  end if;
+  if new.status<>old.status and not (
+    (old.status='pending' and new.status='leased')
+    or (old.status='leased' and new.status in ('completed','pending','operator'))
+    or (old.status='operator' and new.status='pending')) then
+    raise exception 'immutable job';
+  end if;
+  if new.result is distinct from old.result and not (old.status='leased' and new.status='completed') then
+    raise exception 'immutable job';
+  end if;
+  return new;
+end $$;
+-- As 07-arena.sql: the backend keeps EXECUTE, as every guard does (a trigger fires without it).
+revoke all on function private.guard_job() from public, anon, authenticated;
+grant execute on function private.guard_job() to service_role;
+
+-- 14-operations.sql's cleanup, unchanged except the trim of settled jobs after the seven-day pass and its count in the
+-- result (detail.compacted.jobs).
+create or replace function private.cleanup_history(now_ms bigint) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare
+  started_ms bigint:=floor(extract(epoch from clock_timestamp())*1000)::bigint; step_ms bigint;
+  st private.retention_state%rowtype; published bigint; cp_slot bigint; horizon bigint; lo bigint; hi bigint;
+  data_slots integer; third bigint; blocked bigint; n bigint; flipped bigint:=0; compacted bigint:=0;
+  battles text[]; tids text[]; job_ids uuid[]; listing_ids uuid[];
+  v_deleted jsonb; v_replay jsonb; v_detail jsonb; v_summary jsonb; v_ledger jsonb; v_market jsonb; v_operational jsonb; v_cron jsonb; v_result jsonb;
+  folded_rows bigint; folded_gladiators bigint; expired integer; reservations bigint; revisions bigint;
+  more boolean; trim_lo bigint; trim_hi bigint; trim_horizon bigint; trim_slots integer; trim_third bigint; trim_blocked bigint;
+  jobs_compacted bigint:=0;
+begin
+  if now_ms is null then raise exception 'invalid cleanup time' using errcode='22023'; end if;
+  -- Give up any contended lock after 500 ms, for the rest of this transaction (Decision 4).
+  perform set_config('lock_timeout','500ms',true);
+  select * into st from private.retention_state where singleton for update;
+  if not found then raise exception 'missing retention state'; end if;
+  -- Database time after the guard lock; never a time ahead of it (Decision 4).
+  if now_ms>private.planning_now_ms() then raise exception 'cleanup time is in the future' using errcode='22023'; end if;
+  select c.published_slot into published from private.coordinator c where c.singleton;
+  cp_slot:=case when published is null then null else least(published,(select min(g.processed_slot_index) from public.gladiators g)) end;
+
+  -- 0. Expired replays, independent of the checkpoint: whole slots that ended 7 days ago, lowest first, at most 300.
+  step_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  with picked as (
+    select a.id from public.activities a
+    where (a.summary->'replayExpiry'->>'state')='available' and a.status='completed' and a.slot_index<=(now_ms-604800000)/4800000-1
+      and (a.summary->'replayExpiry'->>'expiresAtMs')::numeric<=now_ms
+    order by a.slot_index,a.id limit 300)
+  update public.activities a set summary=jsonb_set(a.summary,'{replayExpiry}','{"state":"expired"}'::jsonb) from picked p where a.id=p.id;
+  get diagnostics n=row_count; flipped:=n;
+  v_replay:=jsonb_build_object('flipped',flipped,'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-step_ms);
+
+  -- Seven-day pass.
+  step_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  v_deleted:=jsonb_build_object('activityStages',0,'expeditionPlans',0,'arenaResults',0,'arenaAssignmentSides',0,'arenaAssignments',0,
+    'tournamentResults',0,'tournamentBouts',0,'tournamentEntries',0,'tournaments',0,'jobDependencies',0,'jobAttempts',0,'jobs',0,
+    'activitySnapshots',0,'boundaryMembers',0);
+  lo:=null; hi:=null; blocked:=null; more:=false; compacted:=0;
+  if cp_slot is not null then
+    horizon:=least(cp_slot-19,(now_ms-604800000)/4800000-1);
+    lo:=st.detail_through_slot+1;
+    if horizon>=lo then
+      -- At most three data slots; empty slots between them are skipped.
+      select count(*),max(x.slot_index) into data_slots,third from (
+        select distinct a.slot_index from public.activities a where a.slot_index>=lo order by 1 limit 3) x;
+      hi:=case when data_slots<3 then horizon else least(third,horizon) end;
+      -- Stop below a slot that still has unfinished work.
+      select min(x.slot) into blocked from (
+        select min(a.slot_index) as slot from public.activities a where a.slot_index between lo and hi and a.status<>'completed'
+        union all
+        select min(j.slot_index) from private.jobs j where j.slot_index between lo and hi and j.status<>'completed') x;
+      if blocked is not null then hi:=blocked-1; end if;
+      if hi>=lo then
+        -- (1) No 'available' summary outlives its detail.
+        update public.activities a set summary=jsonb_set(a.summary,'{replayExpiry}','{"state":"expired"}'::jsonb)
+          where a.slot_index between lo and hi and a.status='completed' and (a.summary->'replayExpiry'->>'state')='available';
+        get diagnostics n=row_count; flipped:=flipped+n;
+        -- (2) Public bout logs become their fight summary (exception 3).
+        update public.tournament_bout_results b set result=(b.result-'battleLog')||jsonb_build_object('fight',jsonb_build_object(
+            'durationMs',b.result->'battleLog'->'durationMs','victoryReason',b.result->'battleLog'->'victoryReason',
+            'tieBreakReason',b.result->'battleLog'->'tieBreakReason'))
+          from public.tournament_views v where v.id=b.tournament_id and v.slot_index between lo and hi and b.result ? 'battleLog';
+        get diagnostics compacted=row_count;
+        -- (3)-(4) Stages and expedition plans of A.
+        delete from public.activity_stages s using public.activities a where a.id=s.activity_id and a.slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activityStages',n);
+        delete from private.expedition_plans p using public.activities a where a.id=p.activity_id and a.slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('expeditionPlans',n);
+        -- (5)-(7) Arena battles, through their pairing jobs' slot (the indexed path).
+        select coalesce(array_agg(x.battle_id),'{}') into battles from private.arena_assignments x join private.jobs p on p.id=x.pairing_job_id
+          where p.kind='pair' and p.slot_index between lo and hi;
+        delete from private.arena_results where battle_id=any(battles);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('arenaResults',n);
+        delete from private.arena_assignment_sides where battle_id=any(battles);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('arenaAssignmentSides',n);
+        delete from private.arena_assignments where battle_id=any(battles);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('arenaAssignments',n);
+        -- (8)-(11) Tournament frames.
+        select coalesce(array_agg(t.id),'{}') into tids from private.tournaments t where t.slot_index between lo and hi;
+        delete from private.tournament_results where tournament_id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentResults',n);
+        delete from private.tournament_bouts where tournament_id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentBouts',n);
+        delete from private.tournament_entries where tournament_id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentEntries',n);
+        delete from private.tournaments where id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournaments',n);
+        -- (12) Completed jobs of R, except a pairing job a tournament view still references (the 90-day pass removes it).
+        select coalesce(array_agg(j.id),'{}') into job_ids from private.jobs j where j.slot_index between lo and hi and j.status='completed'
+          and not exists(select 1 from public.tournament_views v where v.pairing_job_id=j.id);
+        delete from private.job_dependencies where job_id=any(job_ids) or prerequisite_id=any(job_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobDependencies',n);
+        delete from private.job_attempts where job_id=any(job_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobAttempts',n);
+        delete from private.jobs where id=any(job_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobs',n);
+        -- (13)-(14) Frozen snapshots of A and the cohorts of R.
+        delete from private.activity_snapshots s using public.activities a where a.id=s.activity_id and a.slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activitySnapshots',n);
+        delete from private.boundary_members where slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaryMembers',n);
+        -- (15)
+        update private.retention_state set detail_through_slot=hi where singleton;
+        st.detail_through_slot:=hi;
+      end if;
+      more:=blocked is null and st.detail_through_slot<horizon;
+    end if;
+  end if;
+  -- Task 23.7: the completed jobs of settled slots keep their rows and lose their payloads. Settled: above the trim
+  -- watermark, at or below P - 19 (the seven-day pass's rule without its seven-day age) and below the first slot with an
+  -- unfinished activity or job; at most three slots that have jobs a call, empty slots skipped. The watermark moves first,
+  -- because the job guard allows the compaction only at or below it.
+  if cp_slot is not null then
+    trim_lo:=st.jobs_compacted_through_slot+1;
+    trim_horizon:=cp_slot-19;
+    if trim_horizon>=trim_lo then
+      select count(*),max(x.slot_index) into trim_slots,trim_third from (
+        select distinct j.slot_index from private.jobs j where j.slot_index between trim_lo and trim_horizon order by 1 limit 3) x;
+      trim_hi:=case when trim_slots<3 then trim_horizon else trim_third end;
+      select min(x.slot) into trim_blocked from (
+        select min(a.slot_index) as slot from public.activities a where a.slot_index between trim_lo and trim_hi and a.status<>'completed'
+        union all
+        select min(j.slot_index) from private.jobs j where j.slot_index between trim_lo and trim_hi and j.status<>'completed') x;
+      if trim_blocked is not null then trim_hi:=trim_blocked-1; end if;
+      if trim_hi>=trim_lo then
+        update private.retention_state set jobs_compacted_through_slot=trim_hi where singleton;
+        st.jobs_compacted_through_slot:=trim_hi;
+        update private.jobs j set input='{"compacted": true}'::jsonb,result='{"ok": true, "compacted": true}'::jsonb
+          where j.slot_index between trim_lo and trim_hi and j.status='completed' and j.input<>'{"compacted": true}'::jsonb;
+        get diagnostics jobs_compacted=row_count;
+      end if;
+    end if;
+  end if;
+  v_detail:=jsonb_build_object('fromSlot',case when hi>=lo then lo end,'throughSlot',case when hi>=lo then hi end,'more',more,
+    'blockedSlot',blocked,'deleted',v_deleted,'compacted',jsonb_build_object('tournamentBoutResults',compacted,'jobs',jobs_compacted),
+    'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-step_ms);
+  v_replay:=v_replay||jsonb_build_object('flipped',flipped);
+
+  -- Ninety-day pass.
+  step_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  v_deleted:=jsonb_build_object('tournamentBoutResults',0,'tournamentPlacements',0,'tournamentViews',0,'jobAttempts',0,'jobs',0,
+    'activities',0,'boundaryWork',0,'boundaries',0);
+  lo:=null; hi:=null; more:=false; compacted:=0;
+  if cp_slot is not null then
+    horizon:=least(cp_slot-19,(now_ms-7776000000)/4800000-1,st.detail_through_slot);
+    lo:=st.summary_through_slot+1;
+    if horizon>=lo then
+      select count(*),max(x.slot_index) into data_slots,third from (
+        select distinct a.slot_index from public.activities a where a.slot_index>=lo order by 1 limit 3) x;
+      hi:=case when data_slots<3 then horizon else least(third,horizon) end;
+      -- (1) Settlement receipts keep their key, request and digest (the replay guard); only their result is compacted.
+      update public.operation_receipts o set result=jsonb_build_object('compactedAtMs',now_ms)
+        from public.activities a where a.slot_index between lo and hi and o.receipt_id=a.receipt_id
+          and o.request->>'kind'='activity-settlement' and not (o.result ? 'compactedAtMs' and o.result-'compactedAtMs'='{}'::jsonb);
+      get diagnostics compacted=row_count;
+      -- (2)-(5) The public tournament rows of R', then the pairing jobs only they still referenced.
+      delete from public.tournament_bout_results b using public.tournament_views v where v.id=b.tournament_id and v.slot_index between lo and hi;
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentBoutResults',n);
+      delete from public.tournament_placements p using public.tournament_views v where v.id=p.tournament_id and v.slot_index between lo and hi;
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentPlacements',n);
+      with gone as (delete from public.tournament_views v where v.slot_index between lo and hi returning v.pairing_job_id)
+        select coalesce(array_agg(g.pairing_job_id),'{}'),count(*) into job_ids,n from gone g;
+      v_deleted:=v_deleted||jsonb_build_object('tournamentViews',n);
+      delete from private.job_attempts where job_id=any(job_ids);
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobAttempts',n);
+      delete from private.jobs where id=any(job_ids);
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobs',n);
+      -- (6) Completed activities (recent_results cascade). A forgotten referencing row fails the whole call closed.
+      delete from public.activities where slot_index between lo and hi and status='completed';
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activities',n);
+      -- (7) Finished boundary bookkeeping.
+      delete from private.boundary_work where slot_index between lo and hi and status='done';
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaryWork',n);
+      delete from private.boundaries where slot_index between lo and hi and status='complete';
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaries',n);
+      -- (8)
+      update private.retention_state set summary_through_slot=hi where singleton;
+      st.summary_through_slot:=hi;
+      more:=hi<horizon;
+    end if;
+  end if;
+  v_summary:=jsonb_build_object('fromSlot',case when hi>=lo then lo end,'throughSlot',case when hi>=lo then hi end,'more',more,
+    'deleted',v_deleted,'compacted',jsonb_build_object('receipts',compacted),
+    'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-step_ms);
+
+  -- Ledger fold (one statement): the oldest rows older than 90 days, at most 5000, summed into their checkpoints.
+  with picked as (
+    select l.id from public.wallet_ledger l where l.created_at<to_timestamp((now_ms-7776000000)/1000.0)
+    order by l.created_at,l.id limit 5000
+  ), folded as (
+    delete from public.wallet_ledger l using picked p where l.id=p.id
+    returning l.gladiator_id,l.money_delta,l.renown_delta,l.created_at
+  ), sums as (
+    select f.gladiator_id,sum(f.money_delta)::bigint as money,sum(f.renown_delta)::bigint as renown,count(*) as n_rows,max(f.created_at) as through
+    from folded f group by f.gladiator_id
+  ), saved as (
+    insert into private.wallet_checkpoints as c(gladiator_id,money,renown,ledger_rows,folded_through,updated_at_ms)
+      select s.gladiator_id,s.money,s.renown,s.n_rows,s.through,now_ms from sums s
+    on conflict (gladiator_id) do update set money=c.money+excluded.money,renown=c.renown+excluded.renown,
+      ledger_rows=c.ledger_rows+excluded.ledger_rows,folded_through=greatest(c.folded_through,excluded.folded_through),
+      updated_at_ms=excluded.updated_at_ms
+    returning c.gladiator_id
+  )
+  select coalesce((select sum(s.n_rows) from sums s),0)::bigint,(select count(*) from saved) into folded_rows,folded_gladiators;
+  v_ledger:=jsonb_build_object('rows',folded_rows,'gladiators',folded_gladiators,'more',folded_rows=5000);
+
+  -- Fee reservations already consumed or refunded whose queue-build receipt is 90 days old; held ones are never touched.
+  with doomed as (
+    select r.id from public.reservations r join public.gladiators g on g.id=r.gladiator_id
+      join public.operation_receipts o on o.owner_id=g.owner_id and o.operation_id=r.operation_id
+    where r.status in ('consumed','refunded') and o.request->>'kind'='queue-build'
+      and o.created_at<to_timestamp((now_ms-7776000000)/1000.0)
+    order by o.created_at,r.id limit 1000)
+  delete from public.reservations r using doomed d where r.id=d.id;
+  get diagnostics reservations=row_count;
+
+  -- Schedule revisions 90 days old that no future boundary can read: a newer revision of the same phase is effective by the
+  -- character's next boundary (processed slot + 1) and is not effective earlier than this one (phase 5 picks the latest
+  -- effective slot, then the latest version).
+  with doomed as (
+    select r.gladiator_id,r.phase,r.version from public.schedule_revisions r join public.gladiators g on g.id=r.gladiator_id
+    where r.received_at_ms<now_ms-7776000000 and exists(select 1 from public.schedule_revisions x where x.gladiator_id=r.gladiator_id
+      and x.phase=r.phase and x.version>r.version and x.effective_slot_index>=r.effective_slot_index
+      and x.effective_slot_index<=g.processed_slot_index+1)
+    order by r.received_at_ms,r.gladiator_id,r.phase,r.version limit 1000)
+  delete from public.schedule_revisions r using doomed d where r.gladiator_id=d.gladiator_id and r.phase=d.phase and r.version=d.version;
+  get diagnostics revisions=row_count;
+
+  -- Every deferred projection trigger of this call fires now, inside the lock budget, so a failure is this call's failure.
+  set constraints all immediate;
+
+  -- Market (exception 1): the expiry backstop, then terminal listings 90 days past expiry with any offer; never an open one.
+  expired:=private.expire_listings(now_ms);
+  select coalesce(array_agg(x.id),'{}') into listing_ids from (
+    select l.id from private.market_listings l where l.status<>'open' and l.expires_at_ms<=now_ms-7776000000
+    order by l.expires_at_ms,l.id limit 1000) x;
+  delete from public.market_offers where id=any(listing_ids);
+  get diagnostics n=row_count; v_market:=jsonb_build_object('expired',expired,'offers',n);
+  delete from private.market_listings where id=any(listing_ids);
+  get diagnostics n=row_count; v_market:=v_market||jsonb_build_object('listings',n);
+
+  -- Operational windows, 1000 rows each.
+  delete from private.command_attempts a where a.id in (select x.id from private.command_attempts x
+    where x.attempted_at<to_timestamp((now_ms-3600000)/1000.0) order by x.attempted_at limit 1000 for update skip locked);
+  get diagnostics n=row_count; v_operational:=jsonb_build_object('commandAttempts',n);
+  delete from private.dispatch_log d where d.id in (select x.id from private.dispatch_log x
+    where x.dispatched_at_ms<now_ms-172800000 order by x.dispatched_at_ms limit 1000);
+  get diagnostics n=row_count; v_operational:=v_operational||jsonb_build_object('dispatchLog',n);
+  delete from private.operations_events e where e.id in (select x.id from private.operations_events x
+    where x.at_ms<now_ms-2592000000 order by x.at_ms limit 1000);
+  get diagnostics n=row_count; v_operational:=v_operational||jsonb_build_object('operationsEvents',n);
+  -- pg_cron's run log in its own block: a failure here reports only its SQLSTATE and the rest of the call still commits.
+  begin
+    delete from cron.job_run_details d where d.runid in (select x.runid from cron.job_run_details x
+      where x.end_time<to_timestamp((now_ms-604800000)/1000.0) order by x.end_time limit 1000);
+    get diagnostics n=row_count; v_cron:=to_jsonb(n);
+  exception when others then
+    v_cron:=jsonb_build_object('ok',false,'sqlstate',sqlstate);
+  end;
+  v_operational:=v_operational||jsonb_build_object('cronRunDetails',v_cron);
+
+  v_result:=jsonb_build_object('ok',true,'nowMs',now_ms,'publishedSlot',published,'checkpointSlot',cp_slot,
+    'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-started_ms,'replay',v_replay,'detail',v_detail,'summary',v_summary,
+    'ledger',v_ledger,'market',v_market,'reservations',reservations,'scheduleRevisions',revisions,'operational',v_operational);
+  update private.retention_state set last_run_at_ms=now_ms,last_result=v_result where singleton;
+  return v_result;
+end $$;
+-- Owner only (pg_cron through cleanup_tick, an operator), as before.
+revoke all on function private.cleanup_history(bigint) from public, anon, authenticated, service_role;
+
+-- 14-operations.sql's report, unchanged except the 500 MB budget and cohort.activeCharacters.
+create or replace function private.health_report(now_ms bigint) returns jsonb
+language plpgsql volatile security invoker set search_path='' as $$
+declare
+  coord private.coordinator%rowtype; st private.retention_state%rowtype; enabled boolean; current_slot bigint; more boolean; more_since bigint;
+  failures bigint; failure_states jsonb; overdue_total bigint; operator_total bigint; v_boundaries jsonb; v_jobs jsonb; v_attempts jsonb;
+  v_dispatch jsonb; v_cleanup jsonb; v_events jsonb; v_resources jsonb; v_cohort jsonb; report jsonb;
+begin
+  if now_ms is null or now_ms<0 then raise exception 'invalid health time' using errcode='22023'; end if;
+  current_slot:=now_ms/4800000;
+  select * into coord from private.coordinator where singleton;
+  select * into st from private.retention_state where singleton;
+  enabled:=coalesce((select s.enabled from private.scheduler s where s.singleton),false);
+
+  -- Boundaries not yet complete (normally only the next one), lowest slot first, at most 20; waitingMs since it opened.
+  select coalesce(jsonb_agg(jsonb_build_object('slot',b.slot_index,'phase',b.phase,'status',b.status,'waitReason',b.wait_reason,
+      'lastError',case when b.last_error is null then null when b.last_error ~ '^[0-9A-Z]{5}$' then b.last_error else 'unrecognized' end,
+      'waitingMs',now_ms-b.opened_at_ms) order by b.slot_index),'[]'::jsonb)
+    into v_boundaries from (select * from private.boundaries x where x.status<>'complete' order by x.slot_index limit 20) b;
+
+  -- Jobs: counts by kind and status; overdue (pending more than 10 minutes past due, or leased with a lease expired more
+  -- than 10 minutes ago) and operator jobs, at most 20 each, oldest first, with their totals.
+  select count(*) into overdue_total from private.jobs j
+    where (j.status='pending' and j.due_at_ms<now_ms-600000) or (j.status='leased' and j.lease_until_ms<now_ms-600000);
+  select count(*) into operator_total from private.jobs j where j.status='operator';
+  v_jobs:=jsonb_build_object(
+    'counts',coalesce((select jsonb_object_agg(k.kind,k.statuses) from (select x.kind,jsonb_object_agg(x.status,x.n) as statuses
+      from (select j.kind,j.status,count(*) as n from private.jobs j group by j.kind,j.status) x group by x.kind) k),'{}'::jsonb),
+    'overdueTotal',overdue_total,
+    'overdue',coalesce((select jsonb_agg(jsonb_build_object('jobId',o.id,'kind',o.kind,'slot',o.slot_index,'status',o.status,
+        'dueAtMs',o.due_at_ms,'overdueMs',now_ms-o.due_at_ms,'attempts',o.attempts) order by o.due_at_ms,o.id) from (
+      select j.id,j.kind,j.slot_index,j.status,j.due_at_ms,j.attempts from private.jobs j
+      where (j.status='pending' and j.due_at_ms<now_ms-600000) or (j.status='leased' and j.lease_until_ms<now_ms-600000)
+      order by j.due_at_ms,j.id limit 20) o),'[]'::jsonb),
+    'operatorTotal',operator_total,
+    'operator',coalesce((select jsonb_agg(jsonb_build_object('jobId',o.id,'kind',o.kind,'slot',o.slot_index,'attempts',o.attempts,
+        'lastFailure',case when o.last_failure is null then null when o.last_failure ~ '^[a-z0-9][a-z0-9-]{0,63}$' then o.last_failure
+          else 'unrecognized' end) order by o.slot_index,o.id) from (
+      select j.id,j.kind,j.slot_index,j.attempts,j.last_failure from private.jobs j where j.status='operator'
+      order by j.slot_index,j.id limit 20) o),'[]'::jsonb));
+
+  -- Attempts claimed in the last 24 hours: their count, failures by code, and per-kind durations (finished_at_ms -
+  -- claimed_at_ms) of the completed ones. CPU time is not exposed per request by the Edge runtime (Decision 8).
+  with w as (
+    select a.outcome,a.failure_code,a.claimed_at_ms,a.finished_at_ms,j.kind from private.job_attempts a join private.jobs j on j.id=a.job_id
+    where a.claimed_at_ms>now_ms-86400000 and a.claimed_at_ms<=now_ms)
+  select jsonb_build_object('count',(select count(*) from w),'failed',(select count(*) from w where w.outcome in ('failed','expired')),
+    'failuresByCode',coalesce((select jsonb_object_agg(f.code,f.n) from (
+      select case when coalesce(w.failure_code,'unknown') ~ '^[a-z0-9][a-z0-9-]{0,63}$' then coalesce(w.failure_code,'unknown')
+        else 'unrecognized' end as code,count(*) as n from w where w.outcome in ('failed','expired') group by 1) f),'{}'::jsonb),
+    'durations',coalesce((select jsonb_object_agg(d.kind,jsonb_build_object('count',d.n,'p50Ms',d.p50,'p95Ms',d.p95,'maxMs',d.longest)) from (
+      select w.kind,count(*) as n,percentile_disc(0.5) within group (order by w.finished_at_ms-w.claimed_at_ms) as p50,
+        percentile_disc(0.95) within group (order by w.finished_at_ms-w.claimed_at_ms) as p95,max(w.finished_at_ms-w.claimed_at_ms) as longest
+      from w where w.outcome='completed' and w.finished_at_ms is not null group by w.kind) d),'{}'::jsonb))
+  into v_attempts;
+
+  v_dispatch:=jsonb_build_object('lastAtMs',(select max(d.dispatched_at_ms) from private.dispatch_log d where d.dispatched_at_ms<=now_ms),
+    'lastHour',(select count(*) from private.dispatch_log d where d.dispatched_at_ms>now_ms-3600000 and d.dispatched_at_ms<=now_ms));
+
+  -- Cleanup: the watermarks and the last successful run's result (its durations surface the growth of each pass); since
+  -- when every cleanup tick has still had more to do; the failed cleanup ticks since the last successful one.
+  more:=coalesce(st.last_result->'detail'->'more'='true'::jsonb,false) or coalesce(st.last_result->'summary'->'more'='true'::jsonb,false)
+    or coalesce(st.last_result->'ledger'->'more'='true'::jsonb,false);
+  if more then
+    with ev as (
+      select e.id,e.at_ms,coalesce(e.detail->'detail'->'more'='true'::jsonb,false) or coalesce(e.detail->'summary'->'more'='true'::jsonb,false)
+        or coalesce(e.detail->'ledger'->'more'='true'::jsonb,false) as more
+      from private.operations_events e where e.source='cleanup' and e.ok and e.at_ms<=now_ms)
+    select min(ev.at_ms) into more_since from ev where ev.more and ev.id>coalesce((select max(x.id) from ev x where not x.more),0);
+  end if;
+  with streak as (
+    select e.sqlstate from private.operations_events e where e.source='cleanup' and not e.ok and e.at_ms<=now_ms
+      and e.id>coalesce((select max(x.id) from private.operations_events x where x.source='cleanup' and x.ok and x.at_ms<=now_ms),0))
+  select (select count(*) from streak),(select coalesce(jsonb_agg(x.sqlstate order by x.sqlstate collate "C"),'[]'::jsonb)
+    from (select distinct s.sqlstate from streak s where s.sqlstate is not null) x)
+  into failures,failure_states;
+  v_cleanup:=jsonb_build_object('lastRunAtMs',st.last_run_at_ms,'detailThroughSlot',st.detail_through_slot,
+    'summaryThroughSlot',st.summary_through_slot,'more',more,
+    'durationMs',case when jsonb_typeof(st.last_result->'durationMs')='number' then st.last_result->'durationMs' end,
+    'detail',jsonb_build_object('more',coalesce(st.last_result->'detail'->'more'='true'::jsonb,false),
+      'blockedSlot',case when jsonb_typeof(st.last_result->'detail'->'blockedSlot')='number' then st.last_result->'detail'->'blockedSlot' end,
+      'durationMs',case when jsonb_typeof(st.last_result->'detail'->'durationMs')='number' then st.last_result->'detail'->'durationMs' end),
+    'summary',jsonb_build_object('more',coalesce(st.last_result->'summary'->'more'='true'::jsonb,false),
+      'durationMs',case when jsonb_typeof(st.last_result->'summary'->'durationMs')='number' then st.last_result->'summary'->'durationMs' end),
+    'ledger',jsonb_build_object('more',coalesce(st.last_result->'ledger'->'more'='true'::jsonb,false)),
+    'moreSinceMs',more_since,'failures',jsonb_build_object('consecutive',failures,'sqlstates',failure_states));
+
+  -- Events per source: the latest failure in 24 hours, and the failures of the last hour aggregated (count and distinct
+  -- SQLSTATEs, including those a sweep keeps in its detail), never one entry per row.
+  with w as (
+    select e.id,e.source,e.at_ms,e.sqlstate,e.detail from private.operations_events e
+    where not e.ok and e.at_ms>now_ms-86400000 and e.at_ms<=now_ms
+  ), codes as (
+    select w.id,w.sqlstate as code from w where w.sqlstate is not null
+    union
+    select w.id,t.code from w cross join lateral jsonb_array_elements_text(case when jsonb_typeof(w.detail->'sqlstates')='array'
+      then w.detail->'sqlstates' else '[]'::jsonb end) t(code)
+  ), valid as (
+    select c.id,c.code from codes c where c.code ~ '^[0-9A-Z]{5}$'
+  )
+  select jsonb_object_agg(s.source,jsonb_build_object(
+    'latestFailure',(select jsonb_build_object('atMs',l.at_ms,
+        'sqlstates',(select coalesce(jsonb_agg(v.code order by v.code collate "C"),'[]'::jsonb) from valid v where v.id=l.id),
+        'failedSellers',case when jsonb_typeof(l.detail->'failedSellers')='number' then l.detail->'failedSellers' end)
+      from w l where l.source=s.source order by l.at_ms desc,l.id desc limit 1),
+    'lastHour',jsonb_build_object('failures',(select count(*) from w h where h.source=s.source and h.at_ms>now_ms-3600000),
+      'sqlstates',(select coalesce(jsonb_agg(x.code order by x.code collate "C"),'[]'::jsonb) from (
+        select distinct v.code from valid v join w h on h.id=v.id where h.source=s.source and h.at_ms>now_ms-3600000) x))))
+  into v_events from (values ('market-sweep'),('dispatch'),('cleanup')) s(source);
+
+  -- Resources against the 500 MB budget (Task 23.7); egress and function invocations are read from the hosting dashboard.
+  v_resources:=jsonb_build_object('databaseBytes',pg_database_size(current_database()),'budgetBytes',524288000,
+    'largestTables',coalesce((select jsonb_agg(jsonb_build_object('name',t.name,'bytes',t.bytes) order by t.bytes desc,t.name collate "C") from (
+      select n.nspname||'.'||r.relname as name,pg_total_relation_size(r.oid) as bytes from pg_class r join pg_namespace n on n.oid=r.relnamespace
+      where r.relkind in ('r','m') and n.nspname not in ('pg_catalog','information_schema') and n.nspname not like 'pg\_toast%'
+        and n.nspname not like 'pg\_temp%'
+      order by 2 desc,1 limit 10) t),'[]'::jsonb));
+
+  -- Task 23.7: the characters with an activity in the current slot (unique per character and slot; activities_slot_status_idx).
+  v_cohort:=jsonb_build_object('activeCharacters',(select count(*) from public.activities a where a.slot_index=current_slot));
+
+  report:=jsonb_build_object('checkedAtMs',now_ms,'currentSlot',current_slot,'publishedSlot',coord.published_slot,
+    'slotsBehind',current_slot-coord.published_slot,
+    'coordinator',jsonb_build_object('lastError',case when coord.last_error is null then null when coord.last_error ~ '^[0-9A-Z]{5}$' then coord.last_error
+        else 'unrecognized' end,'lastFailedSlot',coord.last_failed_slot,'leaseHeld',coalesce(coord.lease_token is not null and coord.lease_until_ms>now_ms,false)),
+    'scheduler',jsonb_build_object('enabled',enabled),'boundaries',v_boundaries,'jobs',v_jobs,'attempts24h',v_attempts,'dispatch',v_dispatch,
+    'cleanup',v_cleanup,'events',v_events,'resources',v_resources,'cohort',v_cohort,'cpu','not available');
+  return report||jsonb_build_object('alerts',private.health_alerts(report));
+end $$;
+-- The operator's, as before: nobody else may EXECUTE it.
+revoke all on function private.health_report(bigint) from public, anon, authenticated, service_role;
 
 notify pgrst, 'reload schema';
 commit;

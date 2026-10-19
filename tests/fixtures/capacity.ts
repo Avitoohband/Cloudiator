@@ -475,8 +475,13 @@ async function tableMeasures(run: World) {
     coalesce(avg(pg_column_size((b.result-'battleLog')||jsonb_build_object('fight',jsonb_build_object('durationMs',b.result->'battleLog'->'durationMs',
       'victoryReason',b.result->'battleLog'->'victoryReason','tieBreakReason',coalesce(b.result->'battleLog'->'tieBreakReason','null'::jsonb))))),0)::float8 as compacted
     from public.tournament_bout_results b where jsonb_typeof(b.result->'battleLog')='object'`;
+  // Task 23.7: a settled job's input and result become their stubs (15-release.sql, M21), over the same rows bytesPerRow averages.
+  const [job] = await sql`select coalesce(avg(pg_column_size(j.input)+coalesce(pg_column_size(j.result),0)),0)::float8 as full,
+    (pg_column_size('{"compacted": true}'::jsonb)+pg_column_size('{"ok": true, "compacted": true}'::jsonb))::float8 as compacted
+    from private.jobs j`;
   const shrink: Record<string, number> = { 'public.operation_receipts': (Number(receipt.full) - Number(receipt.compacted)) * BLOAT_ALLOWANCE,
-    'public.tournament_bout_results': (Number(bout.full) - Number(bout.compacted)) * BLOAT_ALLOWANCE };
+    'public.tournament_bout_results': (Number(bout.full) - Number(bout.compacted)) * BLOAT_ALLOWANCE,
+    'private.jobs': (Number(job.full) - Number(job.compacted)) * BLOAT_ALLOWANCE };
   const tables: Record<string, Measured> = {};
   for (const name of run.tables) {
     const rows = run.atEnd[name] ?? 0, modeled = await modeledRow(name);
@@ -510,6 +515,39 @@ async function compactCheck(run: World, measured: Record<string, Measured>) {
   const compact = await sizes(), rowsNow = await counts(big);
   return Object.fromEntries(big.map(n => [n, { compactBytesPerRow: Math.round(Math.max(0, compact[n] - run.empty[n]) / Math.max(1, rowsNow[n])),
     modeledLiveBytesPerRow: Math.round(measured[n].bytesPerRow / BLOAT_ALLOWANCE), asRunBytesPerRow: Math.round(measured[n].asRunBytesPerRow) }]));
+}
+/**
+ * Task 23.7: the job trim's model against the physical table, after the measurement (it rewrites the run's jobs). The run's
+ * settled slots are compacted as cleanup does it, through private.cleanup_history with the checkpoint 19 slots past the last
+ * slot and a 1970 database time no history is seven days older than (operator world control; the next world resets it).
+ * The last slot is unsettled, so it keeps its payloads. Then private.jobs is rewritten by VACUUM FULL, and its file growth
+ * per row is compared with the modeled live size of the same mix of full and compacted rows.
+ */
+async function compactedJobsCheck(run: World, measured: Record<string, Measured>, lastSlot: number) {
+  const job = measured['private.jobs'];
+  const checkpoint = lastSlot + 19;
+  await sql`update private.coordinator set published_slot=${checkpoint} where singleton`;
+  await sql`update public.gladiators set processed_slot_index=${checkpoint} where processed_slot_index<${checkpoint}`;
+  // Each call: the jobs it compacted and its seven-day pass's duration (the trim runs inside it).
+  const calls: { jobs: number; durationMs: number }[] = [];
+  for (let call = 0; call < 10; call++) {
+    const [{ result }] = await sql`select private.cleanup_history(${(lastSlot + 1) * SLOT + 86_400_000}) as result`;
+    calls.push({ jobs: Number(result.detail.compacted.jobs), durationMs: Number(result.detail.durationMs) });
+    if (calls.at(-1)!.jobs === 0) break;
+  }
+  const [rows] = await sql`select count(*)::float8 as n,
+    count(*) filter (where input='{"compacted": true}'::jsonb and result='{"ok": true, "compacted": true}'::jsonb)::float8 as compacted,
+    count(*) filter (where slot_index=${lastSlot})::float8 as unsettled from private.jobs`;
+  const n = Number(rows.n), compacted = Number(rows.compacted), full = n - compacted;
+  const live = await modeledRow('private.jobs');
+  await sql.unsafe('vacuum full private.jobs');
+  const [{ bytes }] = await sql`select pg_total_relation_size('private.jobs')::float8 as bytes`;
+  return { rows: n, compactedRows: compacted, unsettledRows: Number(rows.unsettled), calls,
+    // The capacity model's rows (bytesPerRow, then compactedBytesPerRow), without the autovacuum allowance.
+    modeledLiveBytesPerRow: Math.round((full * job.bytesPerRow + compacted * (job.compactedBytesPerRow ?? job.bytesPerRow)) / Math.max(1, n) / BLOAT_ALLOWANCE),
+    // The same rows measured as stored now, and the physical file growth per row after VACUUM FULL.
+    liveBytesPerRow: Math.round(live.bytes / BLOAT_ALLOWANCE), compactBytesPerRow: Math.round(Math.max(0, Number(bytes) - run.empty['private.jobs']) / Math.max(1, n)),
+    fullBytesPerRow: Math.round(job.bytesPerRow / BLOAT_ALLOWANCE), compactedBytesPerRow: Math.round((job.compactedBytesPerRow ?? job.bytesPerRow) / BLOAT_ALLOWANCE) };
 }
 const windowSummary = (list: Window[]) => list.map(({ statuses, workMs, rows: _rows, ...w }) => ({ ...w, statusesOk: statuses.every(s => s === 200),
   meanWorkMs: workMs.length ? Math.round(mean(workMs)) : 0, maxWorkMs: workMs.length ? Math.round(Math.max(...workMs)) : 0 }));
@@ -592,6 +630,8 @@ export async function measureWorld(options: typeof CAPACITY) {
     worker,
   };
   const compact = await compactCheck(run, measured.tables);
+  // Last, because it compacts the run's settled jobs: the job trim's model against the physical table (Task 23.7).
+  const jobTrim = await compactedJobsCheck(run, measured.tables, lastSlot);
 
   // Scenario 2: the new-character schedule (a fresh world; the first one's measurement is complete above).
   const plain = await runWorld(options.players, 3, [DEFAULT_SCHEDULE], false);
@@ -605,7 +645,7 @@ export async function measureWorld(options: typeof CAPACITY) {
     runMs: run.runMs, windows: windowSummary(windows), dispatchesPerSlot, splitFactor, tournament: tournamentReads,
     command: { status: command.status, ok: command.ok, authLookup: command.authLookup },
     seasonAwards: awarded, seasonRows, seasonBytes, receiptKinds, commandReceiptBytes, commandSummaryBytes, inventoryAllowanceBytes,
-    system: { start: run.systemStart, end: systemEnd }, rowsPerSlot: perSlotRows(measured.tables), compactCheck: compact,
+    system: { start: run.systemStart, end: systemEnd }, rowsPerSlot: perSlotRows(measured.tables), compactCheck: compact, jobTrim,
     defaultSchedule: { runMs: plain.runMs, windows: windowSummary(plain.windows), dispatchesPerSlot: plainDispatches, flagged: plain.flagged.length,
       rowsPerSlot: perSlotRows(plainMeasured.tables) },
   };

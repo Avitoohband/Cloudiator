@@ -78,11 +78,11 @@ export async function resetIdentity() {
   // Season rows and the standings archive have no foreign key to characters (Task 21), so the cascade does not reach them.
   await sql`truncate public.seasons, public.season_standings, private.season_awards`;
   // Retention state (Task 22): the operations log and wallet checkpoints start empty, and the singleton is reseeded (recreated
-  // if it was ever deleted) with both watermarks at their seed (-1).
+  // if it was ever deleted) with every watermark at its seed (-1), Task 23.7's job-payload watermark included.
   await sql`truncate private.operations_events, private.wallet_checkpoints`;
-  await sql`insert into private.retention_state(singleton,detail_through_slot,summary_through_slot,last_run_at_ms,last_result)
-    values(true,-1,-1,null,null) on conflict (singleton) do update set detail_through_slot=-1, summary_through_slot=-1,
-    last_run_at_ms=null, last_result=null`;
+  await sql`insert into private.retention_state(singleton,detail_through_slot,summary_through_slot,jobs_compacted_through_slot,last_run_at_ms,last_result)
+    values(true,-1,-1,-1,null,null) on conflict (singleton) do update set detail_through_slot=-1, summary_through_slot=-1,
+    jobs_compacted_through_slot=-1, last_run_at_ms=null, last_result=null`;
   // Local and test databases set the launch season epoch explicitly (Task 16). It is immutable once set, so a local
   // database with any other epoch would place historical test slots outside a season.
   await sql`insert into private.season_epoch(singleton,epoch_slot) values(true,0) on conflict(singleton) do nothing`;

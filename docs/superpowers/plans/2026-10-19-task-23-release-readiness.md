@@ -24,7 +24,7 @@
 - "Public projections are readable by anyone, including visitors who have not signed in. Private reads and all commands require Google sign-in, and the acting character is bound to the verified account."
 - "Backend credentials, worker authentication material, seeds, and unrevealed plans remain server-side."
 - "Target 60 fps desktop and at least 30 fps on the mobile test device, verified before release rather than assumed."
-- "Below 250 MB database usage, below 3 GB monthly Supabase egress, and below 300,000 monthly function invocations at the initial expected usage."
+- "Below 500 MB database usage (warning at 400 MB; Avi's decision, 2026-10-19), below 3 GB monthly Supabase egress, and below 300,000 monthly function invocations at the initial expected usage."
 - The usage model is 50 active players × 30 visible minutes per day, plus a separate 50-concurrent-viewer model (visitors).
 - Worker budget: `cpuMs 2_000` per invocation, at most 25 simulations per tick; boundary latency at most 120 s at 50 characters.
 - No package or tool downloads (no new npm packages, Docker images or CLIs). `npm audit` (a registry query, no download) is allowed by default (Avi decision 4).
@@ -38,7 +38,7 @@
 
 - **An unexpected privilege.** A visitor, another account, or the owner must not be able to write to any table or run any function they should not, or read any private seed, plan, snapshot or another owner's private state. The check covers every role and every privilege kind, MAINTAIN, REFERENCES and TRIGGER included. Test: 23.1.
 - **A slot that starts in the last minutes of its 80 minutes.** Timing tests, the coordinator and the dispatch window behave the same at every offset in the slot. Test: 23.2.
-- **The target load.** 50 players and 50 visitors stay under 250 MB, 3 GB a month and 300,000 invocations a month, with the arithmetic shown. Test: 23.3.
+- **The target load.** 50 players and 50 visitors stay under 500 MB (warning at 400 MB; Avi's decision, 2026-10-19), 3 GB a month and 300,000 invocations a month, with the arithmetic shown. Test: 23.3.
 - **A keyboard-only or screen-reader player.** Every control has a name, focus never drops to `body`, and validation messages are linked to their fields. Test: 23.5.
 - **A failure while playing.** Missing art, a failed log or an unavailable camp shows a clear state with a working Reload, never a blank or frozen camp. Test: 23.4 and 23.5.
 

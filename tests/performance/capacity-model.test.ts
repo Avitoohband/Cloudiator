@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
-import { BUDGETS, MONTHS, RETENTION, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocations, share, tournamentsIn } from './capacity-model.ts';
+import { BUDGETS, JOB_PAYLOAD_SLOTS, MONTHS, RETENTION, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocations, share,
+  tournamentsIn } from './capacity-model.ts';
 
 // Task 23.3: the arithmetic that turns the measured run into monthly figures, pinned on small synthetic inputs.
 
@@ -13,8 +14,29 @@ describe('Task 23.3: capacity projections', () => {
     expect(MONTHS.map(m => [m.days, m.slots, m.dispatchCeiling, m.tournaments])).toEqual([[30, 540, 216_000, 9], [31, 558, 223_200, 9]]);
     // At most one extra Wednesday or Saturday beyond four whole weeks: they are three days apart.
     expect([28, 29, 30, 31].map(days => tournamentsIn(days))).toEqual([8, 9, 9, 9]);
-    expect(BUDGETS).toMatchObject({ databaseBytes: 262_144_000, egressBytes: 3_000_000_000, invocations: 300_000, workerMs: WORKER_LIMITS.cpuMs * 0.75 });
+    expect(BUDGETS).toMatchObject({ databaseBytes: 524_288_000, egressBytes: 3_000_000_000, invocations: 300_000, workerMs: WORKER_LIMITS.cpuMs * 0.75 });
     expect(share(80, 100)).toBe(0.8);
+  });
+
+  it('models compacted job rows and the 500 MB budget', () => {
+    // Task 23.7 (Avi's decision, 2026-10-19): 500 MB of 2^20 bytes, its 400 MB warning the health report's 80 %.
+    expect(BUDGETS.databaseBytes).toBe(500 * 2 ** 20);
+    expect(BUDGETS.databaseBytes * 0.8).toBe(419_430_400);
+    // A job keeps its payloads until cleanup's trim reaches its slot: 19 slots behind the checkpoint, plus the hourly tick's
+    // lag (under one 80-minute slot). Then it is a compacted row until the seven-day pass deletes it.
+    expect(JOB_PAYLOAD_SLOTS).toBe(20);
+    expect(TABLE_CLASSES['private.jobs']).toEqual({ retention: 'detail', compactAfterSlots: JOB_PAYLOAD_SLOTS });
+    const projected = projectDatabase({
+      players: 0, baselineBytes: 0, slotsPerSeason: 504,
+      tables: { 'private.jobs': { regularRows: 10, tournamentRows: 10, bytesPerRow: 2_000, compactedBytesPerRow: 500, rows: 0, totalBytes: 0 } },
+      system: { cronBytesPerRow: 0, netBytes: 0, authBytesPerPlayer: 0 },
+      commandReceipts: { perPlayerPerDay: 0, bytesPerRow: 0 },
+    });
+    // 20 slots at full size, then 106 compacted, within the 126-slot detail window; before 20 slots every row is full.
+    expect(projected.at90Days.byTable['private.jobs']).toBe(10 * (20 * 2_000 + 106 * 500));
+    expect(projected.atOneYear.byTable['private.jobs']).toBe(10 * (20 * 2_000 + 106 * 500));
+    expect(projected.atDays(1).byTable['private.jobs']).toBe(10 * 18 * 2_000);
+    expect(projected.budgetBytes).toBe(524_288_000);
   });
 
   it('classifies every retention class it projects', () => {

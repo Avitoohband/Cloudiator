@@ -1,5 +1,126 @@
 # Local identity backend and migrations
 
+## Task 23.7: settled jobs' payloads and the 500 MB budget (M21)
+
+M21 is `supabase/migrations/20261019180659_job_payloads.sql`, sections A.1 and D of the
+[database budget design](../superpowers/specs/2026-10-19-database-budget-design.md) (Avi's decision A + C + D, 2026-10-19;
+C is Task 23.8).
+- **Generation.** CLI 2.120.0, `db pull job_payloads --local --schema public,private --yes` (engine `migra`). The input was
+  the tested fourth part of `supabase/sql/15-release.sql`, applied once to a clean M01–M20 reset.
+- **Completion.** The draft was completed from that source; M01–M20 are unchanged.
+
+**Source iteration.** As for M17–M20: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/15-release.sql`). The
+whole file is reapplicable: the new column is added with `add column if not exists`.
+
+**Why.** Task 23.3 measured background job rows at about 62 MiB of the database at 90 days, almost all of it their `input` and
+`result`, kept for the seven-day detail window although nothing reads them once their slot has settled.
+
+**What M21 changes.**
+- **`private.retention_state.jobs_compacted_through_slot`** (bigint, not null, default -1, at least -1): the last slot whose
+  completed jobs cleanup has compacted. It is backend-only like the rest of the table (`service_role` SELECT through the table
+  grant). The default seeds the singleton, so there is no backfill.
+- **`private.cleanup_history(now_ms)`.** M16's body plus one step after the seven-day pass, reported as
+  `detail.compacted.jobs`:
+  - its range starts above that watermark and ends at the checkpoint P − 19: the seven-day pass's own settled-slot rule without
+    its seven-day age;
+  - it takes at most three slots that have jobs per call, and stops below the first slot that still has an unfinished activity
+    or job (the `blockedSlot` rule);
+  - it moves the watermark first, then sets every completed job's `input` to `{"compacted": true}` and `result` to
+    `{"ok": true, "compacted": true}`;
+  - each row and every other column stays, and the seven-day pass deletes the rows as before. A pairing job that a
+    tournament view keeps for 90 days stays compacted until the 90-day pass removes it.
+  The seven-day pass's watermark, `more` and `blockedSlot` keep their meaning. The trim locks only completed job rows of slots
+  at or below P − 19, under the call's 500 ms lock timeout.
+- **`private.guard_job()`.** M09's status machine (07-arena.sql), plus exactly one update of a completed job, as
+  `guard_receipt` allows exactly one compaction of a settlement receipt:
+  - the two stubs, once, with every other column unchanged;
+  - only at or below the watermark, which cleanup moves across settled slots just before it compacts them.
+  Any other update of a completed job raises `immutable job`, including the same shape on a job above the watermark, on an
+  unfinished job, or a second time. The trigger is unchanged, so `scripts/restore-invariants.sql` still finds `guard_job`.
+- **`private.health_report(now_ms)`.**
+  - `resources.budgetBytes` is 524,288,000 (500 MB of 2^20 bytes). `private.health_alerts` is unchanged, so it warns from
+    419,430,400 bytes (400 MB, 80 %) and alerts from 100 %, both on the physical `pg_database_size`.
+  - The new `cohort: {activeCharacters}` counts the activities of the current slot (one per character and slot), through
+    `activities_slot_status_idx`. It is the watch for the boundary-latency risk (`docs/operations/release-evidence.md`,
+    risk 5). Task 23.8 adds the resting characters.
+
+**Who reads a job's payloads.** This is the trim's safety argument; no job kind is excluded, and the tests below pin each case.
+- `input`: the claim (`claim_jobs`' snapshot) and the job's own completion checks, before the job completes.
+- `result`, other than a settlement's: later phases of the same boundary, before that slot starts, and never again:
+  - preparation results: the stamina maximum, the league recompute and the pairing input;
+  - a pairing's result: `accept_pairing`, `valid_bracket`, and `publish_tournaments`' insufficient-entrants branch.
+- A settlement's `result`: a same-token retry, through `settle_activity_core`'s `j.result||{newGrants: 0, replayed: true}`.
+  After compaction it answers `{"ok": true, "compacted": true, "newGrants": 0, "replayed": true}`. The worker reads only `ok`
+  and `replayed` (`supabase/functions/_shared/backend/jobs.ts`).
+- The pairing history reads only a pairing job's kind and slot (07-arena.sql exception 7).
+- Everything players read has its own copy: `activity_stages`, `arena_results`, `tournament_results`, `tournament_views`,
+  `tournament_bout_results` and `recent_results`.
+
+**The draft needed two completions** (checked against the source):
+1. The three function ACLs: `guard_job` keeps the backend's EXECUTE, as every guard does; `cleanup_history` and
+   `health_report` stay the owner's. CREATE OR REPLACE keeps the existing grants; the migration restates them as the source
+   does.
+2. A provenance header and `notify pgrst`.
+
+The rest is as generated:
+- The column, and its check constraint as `add constraint … not valid`, then `validate`.
+- The three function statements. They are byte-identical to the source-applied `pg_get_functiondef` (20,304, 2,136 and
+  11,115 bytes, compared programmatically).
+M21 re-emits no unchanged function.
+
+**Tests** (RED first, on the M20 source):
+- `tests/db/retention.test.ts`:
+  - "empties the input and result of completed jobs in settled slots and keeps the rows": all 95 jobs of the history, every
+    kind, with every other column, every referencing row and every kept row unchanged. A second call compacts nothing, and the
+    seven-day pass later deletes exactly what it did before.
+  - "leaves the jobs of an unsettled or blocked slot untouched": the checkpoint 18 slots past the last slot; an unfinished
+    job; the slot compacted once that job completes.
+  - "reads Arena results, tournament views and recent results identically after compaction": every open projection as
+    `anon`, every owner state as its owner, and the private results and stages.
+  - The tournament case's `compacted` now includes `jobs: 1` (the view's pairing job), and the second-call case counts it.
+  - RED: `jobs` missing from `detail.compacted`.
+- `tests/db/activities.test.ts`:
+  - "answers a same-token settlement retry on a compacted job with ok and no new grants": twice, with no settled slot,
+    ledger, receipt or point added, and another token still refused.
+  - "still refuses every other update of a completed job, a compaction-shaped update outside cleanup included": the exact
+    shape above the watermark; 16 near-shapes within it; a second compaction; an unfinished job.
+  - RED: no compaction, and no watermark column.
+- `tests/db/health.test.ts`:
+  - "warns at 400 MB and alerts at 500 MB of physical database size": the report's own budget, checked at 419,430,399,
+    419,430,400, 524,287,999 and 524,288,000 bytes.
+  - "counts the characters with an activity in the current slot".
+  - RED: budget 262,144,000, and no `cohort`.
+- `tests/performance/capacity-model.test.ts` and `tests/scripts/resource-report.test.ts`: the jobs class (20 full slots, then
+  compacted), the 500 MB budget, and the one-year line reported as a risk.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M20 matched Task 23.3 fix round 1's recorded M20 replay fingerprint byte
+  for byte (1,135 lines).
+- The source-applied fingerprint differs from it only in:
+  - the three function body hashes, with ACLs, security, volatility and `search_path` unchanged;
+  - the new column and its check constraint;
+  - the extension line for the new watermark's seed (`seed-retention-jobs|1|-1`).
+- A clean reset replayed M01–M21, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte (1,138 lines).
+- Inspection of the replay:
+  - `guard_job` `{postgres=X/postgres,service_role=X/postgres}`; `cleanup_history` and `health_report` `{postgres=X/postgres}`;
+    all three invoker, volatile, `search_path=""`;
+  - the `guard_job` trigger unchanged and enabled; 44/44 `public`/`private` triggers enabled; both cron jobs active;
+  - no function executable by anon or authenticated;
+  - `retention_state` `{postgres=arwdDxtm/postgres,service_role=r/postgres}` with row security, its seed row at -1, -1 and -1;
+  - 21 migrations recorded.
+- Lint is empty on the source and on the replay. Advisors on the fresh replay: 36 INFO `unused_index` notices (no statistics
+  yet), no warnings or errors.
+- `npm run test:db` with `CAPACITY_GATE=1`:
+  - 284/284 on the source, the Edge container's start time unchanged;
+  - 284/284 on the M01–M21 replay, in `npm run verify` (18:13–18:29 UTC, exit 0), the start time unchanged across the database
+    run.
+  The replay's fingerprint was identical again after those runs.
+
+**Release (Task 24).** Deploy M21 with the release. It changes no client contract and no Edge code. On a database that already
+holds history, the first hourly cleanups walk the trim watermark from slot 0, three slots that have jobs per call.
+
 ## Task 23.3 fix round 1: a shared reveal leased once (M20)
 
 M20 is `supabase/migrations/20261019132814_shared_reveal.sql`, the correction of M19's settlement claim found by the Task 23.3
@@ -502,7 +623,8 @@ The report holds:
 - `dispatch`: `lastAtMs`, `lastHour`;
 - `cleanup`: the watermarks, the last run's durations and `more` flags, `moreSinceMs`, and the current failure streak;
 - `events`: per source, the latest failure in 24 hours and the last hour's failures with their distinct SQLSTATEs;
-- `resources`: database size against the 250 MB budget and the ten largest tables;
+- `resources`: database size against the budget (250 MB in M16; 500 MB since M21, Task 23.7) and the ten largest tables;
+- `cohort` (M21): `activeCharacters`, the characters with an activity in the current slot;
 - `cpu: "not available"`;
 - `alerts`.
 

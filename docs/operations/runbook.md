@@ -48,6 +48,11 @@ Remove-Item Env:CLOUDIATOR_DB_URL
 `docs/operations/migrations.md` ("Operator health report"). Run it daily, after every deployment, after a pause and after any
 recovery below.
 
+`cohort.activeCharacters` (M21) counts the characters with an activity in the current slot. Boundary latency has no headroom
+at 50 such characters (`docs/operations/release-evidence.md`, risk 5): as it approaches 50, plan one of that risk's
+mitigations before a boundary publishes later than 120 s. In the first minutes of a slot, before its boundary has run, the
+count can still be 0.
+
 ### Alerts and what to do
 
 | Alert | Meaning | Action |
@@ -60,7 +65,7 @@ recovery below.
 | `cleanup-failures` | The last three or more cleanup ticks failed. | The events carry only a SQLSTATE. `55P03` (lock timeout) means cleanup kept yielding to boundaries (it gives up a lock after 500 ms); it should clear when the backlog of boundaries ends. Anything else: run `select private.cleanup_history(private.planning_now_ms());` as the owner in a transaction you roll back, read the error there, fix the cause. |
 | `cleanup-backlog` | Cleanup has reported `more` for 24 hours. | Usually a long pause: each hourly call handles at most 3 slots per pass. If `blockedSlot` is set, an unfinished activity or job in that slot stops it: resolve the job first (see `operator-jobs`). |
 | `tick-failures` | Market-sweep or dispatch failures in the last hour, aggregated with their SQLSTATEs. | A sweep failure for one seller does not stop the others; repeated failures for the same SQLSTATE point to a data problem in that seller's listings. Dispatch failures usually mean pg_net or Vault problems. |
-| `database-size` | Warning from 80 % of the 250 MB budget, alert from 100 %. | Check `resources.largestTables`. Confirm cleanup is running (the 7-day detail and 90-day summary passes free most space). If the budget is still exceeded, plan the paid tier or a retention change before writes fail. |
+| `database-size` | Warning from 80 % of the 500 MB budget (400 MB; Avi's decision, 2026-10-19), alert from 100 %, both on the physical database size. | Check `resources.largestTables`. Confirm cleanup is running (the 7-day detail and 90-day summary passes free most space, and the trim of settled jobs' payloads keeps `private.jobs` small). The warning is the trigger for the after-launch compactions of the database budget design (`docs/superpowers/specs/2026-10-19-database-budget-design.md`: settled slots as per-character ranges, command receipts older than 90 days as a fingerprint); plan that task when it appears. At 100 % the free plan's 500 MB is reached: plan the paid tier or a retention change before writes fail. |
 
 ### Failure codes of the health CLI
 
@@ -352,7 +357,8 @@ check fails with `connection-failed` and players cannot load the game.
 
 ## Budgets in the hosting dashboard
 
-The free-tier budgets are 250 MB database, **3 GB monthly egress** and **300,000 monthly Edge Function invocations**. The
+The free-tier budgets are 500 MB database (warning at 400 MB; Avi's decision, 2026-10-19), **3 GB monthly egress** and
+**300,000 monthly Edge Function invocations**. The
 health report covers only the database size (`resources`, the `database-size` alert); the Edge runtime exposes no
 per-request CPU (`cpu: "not available"`), and egress and invocations are read in the dashboard:
 - Open the organization's usage page in the Supabase dashboard for the current billing cycle.

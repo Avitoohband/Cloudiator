@@ -14,10 +14,12 @@ import { BUDGETS, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocati
 // 4. Boundary latency after a slot of expeditions (the Task 23.3 latency fix, M19), beside the Arena-only case of Task 23.2.
 // Every case resets the world first; the file resets it again at the end, so no measurement row outlives the file.
 //
-// CAPACITY_GATE=1 enforces the budgets of case 1 (database, invocations and raw egress), each checked
+// CAPACITY_GATE=1 enforces the budgets of case 1 (the database at 90 days, invocations and raw egress), each checked
 // softly so one run names every one that fails. Without it (the default, as in a plain `npm run test:db`) case 1 still
-// measures and records every number and checks the run itself, but not the budgets: they are open blockers for Avi
-// (docs/operations/release-evidence.md, "Lane A: capacity"), and Task 23.6's release gate runs this file with the flag.
+// measures and records every number and checks the run itself, but not the budgets (docs/operations/release-evidence.md,
+// "Lane A: capacity"); Task 23.6's release gate runs this file with the flag. The database figure after one year is recorded
+// and reported as a named risk, not enforced (Task 23.7, Avi's decision 2026-10-19: the structural compactions of the
+// database budget design wait until after launch, when the health report's 400 MB warning appears).
 // The measured sections are printed on the console only in a scripts/resource-report.mjs run or with CLOUDIATOR_MEASUREMENTS=1
 // (logSection; the release gate's CAPACITY_GATE=1 run prints none, Task 23.6); they are always written for
 // scripts/resource-report.mjs when it asks (writeSection).
@@ -70,11 +72,17 @@ describe('Task 23.3: capacity against the free-tier budgets', () => {
     // both scenarios publishes within 120 s of its cutoff.
     const late = [...world.windows, ...world.plainWindows].filter(w => w.publishedMs === null || w.publishedMs >= 120_000).map(w => [w.slot, w.publishedMs]);
     if (CAPACITY.players <= TARGET_CHARACTERS) expect(late, 'boundaries published at or after 120 s').toEqual([]);
-    // The budgets (CAPACITY_GATE=1 only, see the header). Any over 100 % is a blocker for Avi; over 80 % is a named risk.
+    // Task 23.7: cleanup's trim compacted every settled slot of the run and left the unsettled last slot's payloads. After a
+    // VACUUM FULL (in this test only) the table's file growth per row is close to the model's live size of the same rows.
+    const trim = world.summary.jobTrim;
+    expect(trim.unsettledRows).toBeGreaterThan(0);
+    expect(trim.compactedRows).toBe(trim.rows - trim.unsettledRows);
+    expect(Math.abs(trim.compactBytesPerRow - trim.modeledLiveBytesPerRow) / trim.modeledLiveBytesPerRow, JSON.stringify(trim)).toBeLessThan(0.25);
+    // The budgets (CAPACITY_GATE=1 only, see the header). Any over 100 % is a blocker for Avi; over 80 % is a named risk. The
+    // one-year database figures are recorded above (database.atOneYear) as a named risk.
     if (!GATE) return;
     for (const [name, d] of [['mixed schedules', database], ['new-character schedule', databaseDefault]] as const) {
       expect.soft(share(d.at90Days.bytes, BUDGETS.databaseBytes), `database at 90 days, ${name}`).toBeLessThan(1);
-      expect.soft(share(d.atOneYear.bytes, BUDGETS.databaseBytes), `database after one year, ${name}`).toBeLessThan(1);
     }
     for (const month of invocations.months) expect.soft(share(month.total, BUDGETS.invocations), `invocations, ${month.days} days`).toBeLessThan(1);
     for (const month of egress.combined.months) expect.soft(share(month.raw, BUDGETS.egressBytes), `raw egress, ${month.days} days`).toBeLessThan(1);

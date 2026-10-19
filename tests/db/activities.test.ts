@@ -33,6 +33,19 @@ async function rpc<T = Outcome>(name: string, args: Record<string, unknown> = {}
   return data as T;
 }
 const nowSlot = () => Math.floor(Date.now() / SLOT);
+/** Task 23.7: the stubs cleanup compacts a settled job's payloads to. */
+const COMPACTED = { input: { compacted: true }, result: { ok: true, compacted: true } };
+const ROLLBACK = new Error('rollback-only');
+/** Runs `run` in one transaction that is always rolled back; returns what `run` returned. */
+async function rollback<T>(run: (tx: TransactionSql) => Promise<T>): Promise<T> {
+  let value: T | undefined;
+  try {
+    await sql.begin(async tx => { value = await run(tx); throw ROLLBACK; });
+  } catch (error) {
+    if (error !== ROLLBACK) throw error;
+  }
+  return value as T;
+}
 const clockDefinition = async (): Promise<string> =>
   (await sql`select pg_get_functiondef('private.planning_now_ms()'::regprocedure) as definition`)[0].definition;
 /** Avoid asserting exact real-clock slots in the final seconds before a shared boundary. */
@@ -203,6 +216,34 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     await db.commitThenLoseResponse();
     expect(await db.retrySameSettlement()).toMatchObject({ ok: true, newGrants: 0, earned: 11 });
     expect(await sql`select count(*)::int as n from private.settled_slots`).toEqual([{ n: 1 }]);
+  });
+
+  it('answers a same-token settlement retry on a compacted job with ok and no new grants', async () => {
+    // Task 23.7 (Review Focus: a replay or retry after compaction). The settlement commits and its response is lost; then the
+    // slot settles (the checkpoint passes it by 19 slots) and cleanup, one day on (nothing is seven days old), compacts its jobs.
+    await db.commitThenLoseResponse();
+    const { job, owner } = db.lost!;
+    const outcome = await rollback(async tx => {
+      await tx`update private.coordinator set published_slot=319 where singleton`;
+      await tx`update public.gladiators set processed_slot_index=319`;
+      const grants = async () => ({ ...(await tx`select (select count(*)::int from private.settled_slots) as settled,
+        (select count(*)::int from public.wallet_ledger) as ledger, (select count(*)::int from public.operation_receipts) as receipts,
+        (select earned_points::int from public.gladiators where id=${owner.gid}) as earned`)[0] });
+      const before = await grants();
+      const [{ result }] = await tx`select private.cleanup_history(${301 * SLOT + 86_400_000}) as result`;
+      expect(result.detail.compacted.jobs).toBeGreaterThan(0);
+      expect(await tx`select input, result from private.jobs where id=${job.id}`).toEqual([COMPACTED]);
+      // The worker's retry is this call (database.ts settle: a training settlement has no expedition input).
+      const [{ retried }] = await tx`select public.settle_activity(${job.activityId},${job.token}) as retried`;
+      const [{ again }] = await tx`select public.settle_activity(${job.activityId},${job.token}) as again`;
+      const [{ stolen }] = await tx`select public.settle_activity(${job.activityId},${randomUUID()}) as stolen`;
+      return { retried, again, stolen, before, after: await grants() };
+    });
+    expect(outcome.retried).toEqual({ ok: true, compacted: true, newGrants: 0, replayed: true });
+    expect(outcome.again).toEqual(outcome.retried);
+    expect(outcome.stolen).toHaveCode('conflict');
+    expect(outcome.before).toMatchObject({ settled: 1, earned: 11 });
+    expect(outcome.after).toEqual(outcome.before);
   });
 
   it('rejects completion with a stolen lease', async () => {
@@ -400,6 +441,36 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     await sql`update private.jobs set status='operator',lease_token=null where id=${settlement.id}`;
     await expect(sql`update private.jobs set status='completed' where id=${settlement.id}`).rejects.toThrow('immutable job');
     await expect(sql`update private.jobs set status='leased' where id=${settlement.id}`).rejects.toThrow('immutable job');
+  });
+
+  it('still refuses every other update of a completed job, a compaction-shaped update outside cleanup included', async () => {
+    // Task 23.7: the guard allows exactly one more update of a completed job, cleanup's compaction of a settled slot.
+    await fighter();
+    await runBoundary(300);
+    const [prepared] = await sql`select id, slot_index::int as slot from private.jobs where kind='prepare' and status='completed'`;
+    // Outside cleanup no settled range covers the job (the compaction watermark is still below it): even the exact shape is refused.
+    await expect(sql`update private.jobs set input='{"compacted":true}',result='{"ok":true,"compacted":true}' where id=${prepared.id}`)
+      .rejects.toThrow('immutable job');
+    await rollback(async tx => {
+      // Inside a compacted range: exactly the two stubs, nothing else, and only once.
+      await tx`update private.retention_state set jobs_compacted_through_slot=${prepared.slot} where singleton`;
+      const compaction = tx`input='{"compacted":true}',result='{"ok":true,"compacted":true}'`;
+      for (const change of [tx`input='{"compacted":true}'`, tx`result='{"ok":true,"compacted":true}'`,
+        tx`input='{"compacted":true}',result='{"ok":true}'`, tx`input='{}',result='{"ok":true,"compacted":true}'`,
+        tx`input='{"compacted":true,"x":1}',result='{"ok":true,"compacted":true}'`, tx`${compaction},status='pending'`,
+        tx`${compaction},lease_token=${randomUUID()}`, tx`${compaction},attempts=attempts+1`, tx`${compaction},max_attempts=9`,
+        tx`${compaction},completed_at_ms=0`, tx`${compaction},created_at_ms=0`, tx`${compaction},due_at_ms=0`, tx`${compaction},seed='00'`,
+        tx`${compaction},last_failure='forged'`, tx`${compaction},dedupe_key='forged'`, tx`${compaction},slot_index=slot_index-1`]) {
+        await expect(tx.savepoint(sp => sp`update private.jobs set ${change} where id=${prepared.id}`)).rejects.toThrow('immutable job');
+      }
+      await tx`update private.jobs set ${compaction} where id=${prepared.id}`;
+      expect(await tx`select input, result from private.jobs where id=${prepared.id}`).toEqual([COMPACTED]);
+      await expect(tx.savepoint(sp => sp`update private.jobs set ${compaction} where id=${prepared.id}`)).rejects.toThrow('immutable job');
+      // An unfinished job is never compacted, whatever the range.
+      const [unfinished] = await tx`select id from private.jobs where status<>'completed' limit 1`;
+      expect(unfinished).toBeDefined();
+      await expect(tx.savepoint(sp => sp`update private.jobs set ${compaction} where id=${unfinished.id}`)).rejects.toThrow('immutable job');
+    });
   });
 
   it('copies the authoritative snapshot seed onto the activity jobs', async () => {

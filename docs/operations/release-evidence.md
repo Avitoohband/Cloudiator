@@ -5,13 +5,65 @@ section; the controller merges them.
 
 ## Lane A: capacity
 
-**Status: the database budget fails (a blocker, pending Avi), egress fails only under a hosted condition (Task 24), and the
-dispatch ceiling is a named risk.**
+**Status (Task 23.7, 2026-10-19): the database is within its 500 MB budget at 90 days in both scenarios; after a year it is a
+named risk, with the after-launch compaction plan. Egress fails only under a hosted condition (Task 24), and the dispatch
+ceiling is a named risk.** Task 23.3 measured the database as a blocker against 250 MB. Avi then chose A + C + D (the
+[database budget design](../superpowers/specs/2026-10-19-database-budget-design.md)), and Task 23.7 built A.1 and D ("Task
+23.7: the database re-measured" below).
 - The boundary-latency blocker this measurement found is fixed (M19, corrected by M20; "Boundary latency" below), but with
   **zero headroom**: at 50 all-expedition characters the cutoff tick is exactly full, and a 51st character would bring the
   121.6 s publication back (derived, not measured). It is a named risk (risk 5).
 - Task 23.3, measured on 2026-10-19 on the local stack. Nothing here is a hosted measurement: hosted CPU, compression and billing
   are Task 24 checks.
+
+### Task 23.7: the database re-measured (M21)
+
+Avi's decision (2026-10-19):
+- The internal database budget is 500 MB (524,288,000 bytes), and the health report warns at 400 MB.
+- Completed jobs' payloads are emptied once their slot has settled (M21; `docs/operations/migrations.md`).
+- Idle characters pausing (C) is Task 23.8 and is not in these figures.
+
+**Command and run.**
+- `node scripts/resource-report.mjs` (50 players, 50 viewers, 4 slots), 18:30:56–18:33:24 UTC on the M01–M21 replay.
+- The Edge container's start time was unchanged (18:30:24). Both suites passed (2/2 and 4/4).
+- Exit 1 only because of the egress lines with backend traffic (risk 2, a Task 24 condition, as before).
+- An earlier run on the source-applied database (17:56–17:58) agrees with it within 0.1 % on every database figure.
+- Raw client egress came out at 80.7–82.7 % in this run, against 76.4–78.3 % at 17:56: run-to-run variance of the egress
+  measurement, which the trim does not touch (it runs after the reads are measured). It sits at the risk line, as before.
+
+| Database (50 characters, all active every slot, 10 commands a day) | Task 23.3 | After M21 | Share of 500 MB | Verdict |
+|---|---|---|---|---|
+| 90 days, mixed schedules | 445.4 MiB | 409.8 MiB | 82.0 % | under the budget; risk (over 80 %) |
+| One year, mixed schedules | 685.2 MiB | 649.7 MiB | 129.9 % | **risk** (after-launch compactions) |
+| 90 days, new-character schedule | 376.2 MiB | 346.1 MiB | 69.2 % | ok |
+| One year, new-character schedule | 568.5 MiB | 539.3 MiB | 107.9 % | **risk** (after-launch compactions) |
+
+- **The trim** saves about 35 MiB (mixed) and 29 MiB (new-character schedule) at 90 days.
+  - A job row is modeled at 2,109 B with its payloads and 867 B compacted (mixed; 2,061 and 866 B on the new-character
+    schedule). The fixed columns, the seed and the seven indexes stay.
+  - A job keeps its payloads for 20 slots: 19 behind the checkpoint, plus the hourly tick's lag
+    (`JOB_PAYLOAD_SLOTS` in `tests/performance/capacity-model.ts`).
+  - The detail class at 90 days falls from 139.5 to 104.2 MiB (mixed), and from 111.3 to 81.8 MiB.
+- **Cross-check (in the test only).** The capacity case compacts the run's settled slots through `private.cleanup_history`:
+  three calls, of 757, 278 and 0 jobs, in 31, 5 and 1 ms. The unsettled last slot's 280 jobs keep their payloads. The case
+  then rewrites `private.jobs` with `VACUUM FULL`. Per row, for that mix of 1,035 compacted and 280 full rows:
+  - modeled live size 943 B;
+  - measured live size 910 B;
+  - file growth 829 B, 12 % under the model (the rebuilt indexes are fuller than the model's 75 %).
+  The case asserts the file growth within 25 % of the model.
+- **The gate.**
+  - `CAPACITY_GATE=1` now enforces both 90-day figures. The one-year figures are recorded and reported as a risk, never a
+    blocker.
+  - The release gate passed end to end (`npm run verify`, exit 0; "Release gate (Task 23.6)", the Task 23.7 run).
+- **The 400 MB warning** (419,430,400 bytes):
+  - At the mixed worst case it comes before day 90: 409.8 MiB is 429.7 million bytes.
+  - On the new-character schedule it comes after about 5½ months: about 2.6 months past day 90, at 21 MiB a month of
+    permanent rows.
+  - Real figures are lower by every idle or unscheduled character.
+  - The warning is the trigger for the structural compactions: settled slots as per-character ranges, and command receipts
+    older than 90 days as a fingerprint (Avi's decision, 2026-10-19: after launch).
+- **Physical size** can run above the modeled figures until autovacuum reuses the space a compaction frees. The health
+  report's warning and alert read the physical `pg_database_size`.
 
 ### How it was measured
 
@@ -69,7 +121,8 @@ dispatch ceiling is a named risk.**
 
 ### The report
 
-The output of `node scripts/resource-report.mjs` (exit 1: the database budget), condensed. The `measured` block (every table's
+Task 23.3's output of `node scripts/resource-report.mjs` (exit 1: the database budget), before M21 and against the 250 MB
+budget (Task 23.7's re-measured database figures are above), condensed. The `measured` block (every table's
 rows and row sizes, the per-tick record) is left out. Database figures are bytes; read sizes are raw / gzip / brotli body
 bytes, before their headers.
 
@@ -143,10 +196,10 @@ bytes, before their headers.
 
 | Budget | Used | Limit | Share | Verdict |
 |---|---|---|---|---|
-| Database at 90 days, mixed schedules | 445.4 MiB | 250 MiB | 178.1 % | **blocker (pending Avi)** |
-| Database after one year, mixed schedules | 685.2 MiB | 250 MiB | 274.1 % | **blocker (pending Avi)** |
-| Database at 90 days, new-character schedule | 376.2 MiB | 250 MiB | 150.5 % | **blocker (pending Avi)** |
-| Database after one year, new-character schedule | 568.5 MiB | 250 MiB | 227.4 % | **blocker (pending Avi)** |
+| Database at 90 days, mixed schedules (Task 23.7, M21) | 409.8 MiB (Task 23.3: 445.4) | 500 MiB | 82.0 % (Task 23.3: 178.1 % of 250) | risk, under the budget |
+| Database after one year, mixed schedules (Task 23.7, M21) | 649.7 MiB (Task 23.3: 685.2) | 500 MiB | 129.9 % (Task 23.3: 274.1 % of 250) | **risk** (after-launch compactions; Avi's decision) |
+| Database at 90 days, new-character schedule (Task 23.7, M21) | 346.1 MiB (Task 23.3: 376.2) | 500 MiB | 69.2 % (Task 23.3: 150.5 % of 250) | ok |
+| Database after one year, new-character schedule (Task 23.7, M21) | 539.3 MiB (Task 23.3: 568.5) | 500 MiB | 107.9 % (Task 23.3: 227.4 % of 250) | **risk** (after-launch compactions; Avi's decision) |
 | Boundary publication at 50 characters (worst of 7 windows) | 61.6 s (before M19: 121.6 s) | 120 s | 51.3 % (before: 101.3 %) | **risk: zero headroom** (fixed by M19 at exactly 50; a 51st all-expedition character steps back to about 121.6 s, derived; risk 5) |
 | Egress raw, players and viewers, 31-day month | 2.371 GB | 3 GB | 79.0 % | ok, at the risk line |
 | Egress gzip, players and viewers, 31-day month | 0.571 GB | 3 GB | 19.0 % | ok |
@@ -346,7 +399,14 @@ beside the players for 3 always-on visitors.
 
 ### Risks and mitigations
 
-1. **Database (blocker, pending Avi).** The 7-day detail and 90-day summaries of 50 characters with an activity every slot
+1. **Database (Task 23.7: within the budget at 90 days; the year is a risk).**
+   - Avi chose A + C + D on 2026-10-19: the trim of settled jobs' payloads (M21), idle characters pausing (Task 23.8) and a
+     500 MB budget with a 400 MB warning.
+   - At 90 days the database is at 82.0 % and 69.2 % of 500 MB; after one year at 129.9 % and 107.9 %. The structural
+     compactions wait until after launch, when the warning appears ("Task 23.7: the database re-measured").
+   - Task 23.3's finding, kept for the record, follows.
+
+   The 7-day detail and 90-day summaries of 50 characters with an activity every slot
    already exceed 250 MB, and permanent rows add about 21 MB a month. Options for Avi, none built (the ruling keeps retention
    and sizing unchanged here):
    - delete or empty completed jobs' inputs and results once their slot settles (about −60 MiB);
@@ -376,17 +436,17 @@ beside the players for 3 always-on visitors.
      reveals and the 50 settlements they release.
    - A 51st character steps publication back to about 121.6 s (101 %): one pair waits for minute 1 and preparation for minute 2.
      This is derived, not measured.
-   - **Watch:** the number of active characters (those with an activity in a slot). The health report does not count them yet;
-     until it does, its `boundaries` section (a boundary still waiting after the second tick) and `jobs.overdue` show the
-     symptom, and the count is a direct query.
+   - **Watch:** the number of active characters (those with an activity in a slot). Since M21 (Task 23.7) the health report
+     counts them for the current slot as `cohort.activeCharacters`. Its `boundaries` section (a boundary still waiting after
+     the second tick) and `jobs.overdue` show the symptom.
    - **Mitigation options when active characters approach 50 (none built):**
      - make the final reveal fall due before the cutoff, so an earlier tick completes it and the cutoff tick carries only the
        settlements (100 characters fit);
      - fold the final reveal into the settlement job (one job per character at the cutoff);
      - or raise the cutoff tick's capacity: a larger simple batch, or more invocations in the cutoff minute, within the
        invocation budget (risk 3).
-   - Task 23.7's planned idle pause (a character whose owner has sent no activity signal for 14 days leaves the boundary
-     cohort) reduces the active cohort. Its design awaits Avi's approval; nothing of it is built.
+   - The idle pause (a character whose owner has sent no activity signal for 14 days leaves the boundary cohort) reduces the
+     active cohort. Avi approved it on 2026-10-19 (the database budget design, C); it is Task 23.8 and not built yet.
    - Hosted dispatch spacing is still C4 (Task 24).
 
 ## Lane B: render cost
@@ -464,7 +524,9 @@ The `tests/browser/read-render.spec.ts` checks:
 
 ## Release gate (Task 23.6)
 
-**Status: blocked by the database budget, as expected; every other step passed in the final run.** `npm run verify` exits 2
+**Status (Task 23.7): passed.** `npm run verify` exited 0 on the M01–M21 replay ("Task 23.7 run" below): the database budget
+blocker is resolved at 90 days. Task 23.6's status, kept for the record:
+**blocked by the database budget, as expected; every other step passed in the final run.** `npm run verify` exits 2
 (known blockers only): its single failure is the capacity case's database budget, owned by Task 23.7 (Avi's decision
 A + C + D). The gate names the blocker and never counts it as a pass. Nothing was pushed: the controller pushes after the Task
 23 final review and records the first GitHub Actions run then.
@@ -657,7 +719,8 @@ the controller pushes and records the first run. It stays red until Task 23.7 (e
 
 ### Before the public release
 
-- **Task 23.7:** the database budget, the gate's known blocker.
+- **Task 23.7:** done (M21). The database budget is met at 90 days, and the gate passes ("Task 23.7 run" below).
+- **Tasks 23.8 and 23.9:** idle characters pausing, and their copy in the camp.
 - **Task 24 blockers:**
   1. mobile 30 fps on the device (`?perf=1` on the deployed production build);
   2. hosted CPU and dispatch spacing (C4);
@@ -710,3 +773,22 @@ RED-then-GREEN test, and the gate was run end to end once more (run 5).
 
 The watcher logged 33 detections in the whole run, all from the refresh while settling; the container's start time was the
 same at the end of the run.
+
+### Task 23.7 run
+
+`npm run verify -- --config node_modules/.cache/pw-claude.config.mjs --json <scratchpad>/verify-1.json`, 18:13–18:29 UTC on
+2026-10-19, on branch `claude/task-23` at `51875a7` with the Task 23.7 changes uncommitted, the database the clean M01–M21
+replay. **Exit 0 (passed): every step passed, and no known blocker was hit.**
+
+| Step | Task 23.7 run |
+|---|---|
+| `npm test` | 1,218 passed |
+| typecheck, assets, build, `verify:static` | passed |
+| Edge settled | 714 files and folders refreshed, 21 links skipped, 612 files read; 35 s; recreated while settling (17:59:30 → 18:13:32) |
+| `CAPACITY_GATE=1 npm run test:db` | **passed**: 284 passed (the database at 90 days under 100 % in both scenarios); Edge start time unchanged (18:13:32) |
+| Development browser suite | 527 / 0 / 33 |
+| Production build, its scan, production gate | passed; 32 / 0 / 528 |
+| `git diff --check` | clean |
+
+`scripts/verify.mjs` still lists the database budget as a known blocker (`KNOWN_BLOCKERS`, owner Task 23.7). It no longer
+fires: the case's only database checks are now the two 90-day shares, both under 1.

@@ -63,7 +63,7 @@ Nothing is hosted yet. Task 24 fills these in; until then every value is unknown
 | Database owner connection | Dashboard only; used through `CLOUDIATOR_DB_URL` / `CLOUDIATOR_EXPORT_DB_URL` in the operator's shell |
 | `pg_net.ttl` | Check after deploying M16 (`docs/operations/migrations.md`, M16 release notes); 6 hours locally |
 | Season epoch, scheduler | Set the epoch, then enable `private.scheduler` (M09 and M16 release notes) |
-| Plan and budgets | Free tier: 250 MB database, 3 GB monthly egress, 300,000 monthly Edge Function invocations (runbook, "Budgets") |
+| Plan and budgets | Free tier: 500 MB database (warning at 400 MB; Avi's decision, 2026-10-19), 3 GB monthly egress, 300,000 monthly Edge Function invocations (runbook, "Budgets") |
 
 ## Environment variables and secrets
 

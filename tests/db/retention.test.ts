@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
 import { sql, account, resetIdentity, admin, anonymous, creation } from '../fixtures/db.ts';
+import { OPEN, PUBLIC_TOURNAMENT_COLUMNS } from '../fixtures/access.ts';
 import { createDatabase, createWorkerDatabase, prepareGrant } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
 import { applyXp } from '../../supabase/functions/_shared/domain/inventory.ts';
@@ -29,6 +30,10 @@ const LAST = 302;
 /** Database times seven and ninety days after the last history slot ended. */
 const SEVEN_DAYS_LATER = (LAST + 1) * SLOT + REPLAY_MS;
 const NINETY_DAYS_LATER = (LAST + 1) * SLOT + SUMMARY_MS;
+/** One day after the history: its slots are settled once the checkpoint is 19 slots past them, and nothing is seven days old. */
+const SETTLED = (LAST + 1) * SLOT + DAY;
+/** Task 23.7: the stubs a settled job's payloads are compacted to (the seven-day pass still deletes the row later). */
+const COMPACTED = { input: { compacted: true }, result: { ok: true, compacted: true } };
 
 const commands = createDatabase(admin);
 const worker = createWorkerDatabase(admin);
@@ -95,7 +100,7 @@ type Cleanup = {
   ok: true; nowMs: number; publishedSlot: number | null; checkpointSlot: number | null; durationMs: number;
   replay: { flipped: number; durationMs: number };
   detail: { fromSlot: number | null; throughSlot: number | null; more: boolean; blockedSlot: number | null; deleted: Counts;
-    compacted: { tournamentBoutResults: number }; durationMs: number };
+    compacted: { tournamentBoutResults: number; jobs: number }; durationMs: number };
   summary: { fromSlot: number | null; throughSlot: number | null; more: boolean; deleted: Counts; compacted: { receipts: number }; durationMs: number };
   ledger: { rows: number; gladiators: number; more: boolean };
   market: { expired: number; listings: number; offers: number };
@@ -110,7 +115,7 @@ async function cleanup(tx: Sql, nowMs: number): Promise<Cleanup> {
 /** Every count a call reports, flattened (durations, times and slots excluded). */
 function countsOf(result: Cleanup): number[] {
   const cron = result.operational.cronRunDetails;
-  return [result.replay.flipped, ...Object.values(result.detail.deleted), result.detail.compacted.tournamentBoutResults,
+  return [result.replay.flipped, ...Object.values(result.detail.deleted), result.detail.compacted.tournamentBoutResults, result.detail.compacted.jobs,
     ...Object.values(result.summary.deleted), result.summary.compacted.receipts, result.ledger.rows, result.ledger.gladiators,
     result.market.expired, result.market.listings, result.market.offers, result.reservations, result.scheduleRevisions,
     result.operational.commandAttempts, result.operational.dispatchLog, result.operational.operationsEvents, typeof cron === 'number' ? cron : -1];
@@ -176,6 +181,49 @@ const unreconciled = (q: Sql) => q`select g.id::text from public.gladiators g jo
   left join (select l.gladiator_id,sum(l.money_delta) as money,sum(l.renown_delta) as renown from public.wallet_ledger l group by l.gladiator_id) l
     on l.gladiator_id=g.id
   where w.money<>coalesce(c.money,0)+coalesce(l.money,0) or w.renown<>coalesce(c.renown,0)+coalesce(l.renown,0)`;
+/** Task 23.7: the jobs of slots lo..hi, each with every column but its two payloads (`fixed`) and then the payloads. */
+const jobRows = async (q: Sql, lo: number, hi: number) => (await q`select j.id::text, j.kind, j.slot_index::int as slot,
+  to_jsonb(j)-'input'-'result' as fixed, j.input, j.result from private.jobs j where j.slot_index between ${lo} and ${hi} order by j.id`)
+  .map(row => ({ ...row }));
+/** The rows that reference jobs: a compaction updates its jobs and never removes or orphans one of these. */
+async function jobReferences(q: Sql): Promise<Counts> {
+  const [row] = await q`select (select count(*)::int from private.job_dependencies d join private.jobs a on a.id=d.job_id
+      join private.jobs b on b.id=d.prerequisite_id) as dependencies,
+    (select count(*)::int from private.job_attempts x join private.jobs j on j.id=x.job_id) as attempts,
+    (select count(*)::int from private.arena_assignments x join private.jobs j on j.id=x.pairing_job_id) as "arenaAssignments",
+    (select count(*)::int from private.arena_results x join private.jobs j on j.id=x.simulation_job_id) as "arenaResults",
+    (select count(*)::int from private.tournaments x join private.jobs j on j.id=x.pairing_job_id) as tournaments,
+    (select count(*)::int from private.tournament_results x join private.jobs j on j.id=x.final_job_id) as "tournamentResults",
+    (select count(*)::int from public.tournament_views x join private.jobs j on j.id=x.pairing_job_id) as "tournamentViews"`;
+  return { ...row } as Counts;
+}
+/**
+ * Task 23.7: everything a visitor, an owner or a replay reads. Every open projection as a visitor (anon, through its grants and
+ * policies), each character's owner state as its owner (authenticated), and, as the owner of the database, the private
+ * results and stages the projections and replays come from.
+ */
+async function reads(tx: Sql) {
+  // world_revision's server_now_ms is the database clock at the read, not data.
+  const rows = async (from: string) => (await tx.unsafe(`select coalesce(jsonb_agg(r order by r::text),'[]'::jsonb) as rows
+    from (select to_jsonb(t)-'server_now_ms' as r from (select * from ${from}) t) x`))[0].rows as unknown[];
+  const seen: Record<string, unknown> = {};
+  await tx`set local role anon`;
+  for (const relation of OPEN) {
+    seen[relation] = await rows(relation === 'tournament_views' ? `(select ${PUBLIC_TOURNAMENT_COLUMNS} from public.tournament_views) v` : `public.${relation}`);
+  }
+  await tx`reset role`;
+  for (const owner of world.all) {
+    await tx`select set_config('request.jwt.claim.sub',${owner.id},true)`;
+    await tx`set local role authenticated`;
+    seen[`owner ${owner.gid}`] = (await tx`select state from public.owner_state`).map(row => row.state);
+    await tx`reset role`;
+  }
+  for (const relation of ['public.activities', 'public.activity_stages', 'private.arena_results', 'private.arena_assignments',
+    'private.tournament_bouts', 'private.tournament_results', 'private.tournament_entries', 'private.settled_slots', 'public.operation_receipts']) {
+    seen[relation] = await rows(relation);
+  }
+  return seen;
+}
 
 // Operator-only world controls for the isolated local test database; no player API exposes them.
 async function resetWorld(published: number | null) {
@@ -355,7 +403,8 @@ describe('Task 22.1: retention in the database', () => {
     const [before, bracket, places] = [await results(), await view(), await placements()];
     expect(places).toHaveLength(3);
     const result = await cleanup(tx, SEVEN_DAYS_LATER);
-    expect(result.detail.compacted).toEqual({ tournamentBoutResults: 2 });
+    // Task 23.7: the pairing job the tournament view keeps for ninety days is compacted too (the only job the pass leaves).
+    expect(result.detail.compacted).toEqual({ tournamentBoutResults: 2, jobs: 1 });
     expect(await results()).toEqual(before.map(row => {
       if (!('battleLog' in row.result)) return row;
       const { battleLog, ...rest } = row.result;
@@ -460,6 +509,72 @@ describe('Task 22.1: retention in the database', () => {
     const resumed = await cleanup(tx, SEVEN_DAYS_LATER);
     expect(resumed.detail).toMatchObject({ fromSlot: TOURNAMENT, throughSlot: LAST, more: false, blockedSlot: null });
     expect(Object.values(await detailRows(tx, FIRST, LAST)).every(n => n === 0)).toBe(true);
+  }));
+
+  // Task 23.7 (database budget design, A.1): completed jobs of settled slots keep their rows and lose their payloads.
+  it('empties the input and result of completed jobs in settled slots and keeps the rows', () => rollback(async tx => {
+    // The checkpoint is 19 slots past the history, so its slots are settled; nothing is seven days old yet.
+    await checkpoint(tx, LAST + 19);
+    const before = await jobRows(tx, FIRST, LAST);
+    expect([...new Set(before.map(j => j.kind as string))].sort()).toEqual(['pair', 'prepare', 'reveal', 'settlement', 'simulation']);
+    expect(before.every(j => j.fixed.status === 'completed')).toBe(true);
+    const [detail, references, kept, summaries] = [await detailRows(tx, FIRST, LAST), await jobReferences(tx), await keptRows(tx),
+      await summaryRows(tx, FIRST, LAST)];
+    const result = await cleanup(tx, SETTLED);
+    expect(result.detail.compacted).toEqual({ tournamentBoutResults: 0, jobs: before.length });
+    expect(Object.values(result.detail.deleted).every(n => n === 0)).toBe(true);
+    // Every row stays, every column but the two payloads unchanged; every row that references a job keeps it.
+    expect(await jobRows(tx, FIRST, LAST)).toEqual(before.map(j => ({ ...j, ...COMPACTED })));
+    expect(await detailRows(tx, FIRST, LAST)).toEqual(detail);
+    expect(await jobReferences(tx)).toEqual(references);
+    expect(await keptRows(tx)).toEqual(kept);
+    expect(await summaryRows(tx, FIRST, LAST)).toEqual(summaries);
+    expect(await tx`select jobs_compacted_through_slot::int as slot from private.retention_state`).toEqual([{ slot: LAST }]);
+    // Once only: a second call compacts nothing. Seven days on, the pass deletes the compacted rows exactly as before, and the
+    // pairing job its tournament view keeps for ninety days stays compacted.
+    expect((await cleanup(tx, SETTLED)).detail.compacted.jobs).toBe(0);
+    const later = await cleanup(tx, SEVEN_DAYS_LATER);
+    expect(later.detail).toMatchObject({ throughSlot: LAST, deleted: detail, compacted: { jobs: 0 } });
+    expect((await tx`select j.input, j.result from public.tournament_views v join private.jobs j on j.id=v.pairing_job_id`).map(row => ({ ...row })))
+      .toEqual([COMPACTED]);
+  }));
+
+  it('leaves the jobs of an unsettled or blocked slot untouched', () => rollback(async tx => {
+    // Unsettled: with the checkpoint 18 slots past the last history slot, that slot keeps its payloads.
+    await checkpoint(tx, LAST + 18);
+    const [early, last] = [await jobRows(tx, FIRST, TOURNAMENT), await jobRows(tx, LAST, LAST)];
+    expect((await cleanup(tx, SETTLED)).detail.compacted.jobs).toBe(early.length);
+    expect(await jobRows(tx, FIRST, TOURNAMENT)).toEqual(early.map(j => ({ ...j, ...COMPACTED })));
+    expect(await jobRows(tx, LAST, LAST)).toEqual(last);
+    expect(await tx`select jobs_compacted_through_slot::int as slot from private.retention_state`).toEqual([{ slot: LAST - 1 }]);
+    // Blocked: settled by the checkpoint, but an unfinished job keeps every job of its slot as it is.
+    await checkpoint(tx, LAST + 30);
+    await tx`insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
+      values('reveal','retention-unsettled',${LAST},${world.trainee.gid},'{"ordinal":1}','v1',0)`;
+    const blocked = await jobRows(tx, LAST, LAST);
+    expect((await cleanup(tx, SETTLED)).detail.compacted.jobs).toBe(0);
+    expect(await jobRows(tx, LAST, LAST)).toEqual(blocked);
+    expect(await tx`select jobs_compacted_through_slot::int as slot from private.retention_state`).toEqual([{ slot: LAST - 1 }]);
+    // Once it finishes (its status machine), the next call compacts the slot, that job included.
+    await tx`update private.jobs set status='leased' where dedupe_key='retention-unsettled'`;
+    await tx`update private.jobs set status='completed',result='{}' where dedupe_key='retention-unsettled'`;
+    expect((await cleanup(tx, SETTLED)).detail.compacted.jobs).toBe(blocked.length);
+    expect((await jobRows(tx, LAST, LAST)).map(j => ({ input: j.input, result: j.result }))).toEqual(blocked.map(() => COMPACTED));
+  }));
+
+  it('reads Arena results, tournament views and recent results identically after compaction', () => rollback(async tx => {
+    await checkpoint(tx, LAST + 19);
+    // The checkpoint's own projection triggers fire first, so the reads compare compaction alone.
+    await tx`set constraints all immediate`;
+    const before = await reads(tx);
+    for (const relation of ['recent_results', 'tournament_views', 'tournament_bout_results', 'tournament_placements', 'activity_stages',
+      'private.arena_results', 'private.tournament_results']) {
+      expect((before[relation] as unknown[]).length, relation).toBeGreaterThan(0);
+    }
+    expect((await cleanup(tx, SETTLED)).detail.compacted.jobs).toBeGreaterThan(0);
+    const after = await reads(tx);
+    expect(Object.keys(after)).toEqual(Object.keys(before));
+    for (const [relation, rows] of Object.entries(before)) expect(after[relation], relation).toEqual(rows);
   }));
 
   it('refuses to delete a receipt and allows only the settlement-receipt compaction', async () => {

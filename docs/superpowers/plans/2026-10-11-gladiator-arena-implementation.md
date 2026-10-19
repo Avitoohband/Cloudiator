@@ -24,7 +24,7 @@
 - Backend credentials, worker authentication material, seeds, and unrevealed plans remain server-side.
 - Runtime package versions are pinned and lockfiles committed when implementation begins.
 - Target 60 fps desktop and at least 30 fps on the mobile test device, verified before release rather than assumed.
-- Below 250 MB database usage, below 3 GB monthly Supabase egress, and below 300,000 monthly function invocations at the initial expected usage.
+- Below 500 MB database usage (warning at 400 MB; Avi's decision, 2026-10-19), below 3 GB monthly Supabase egress, and below 300,000 monthly function invocations at the initial expected usage.
 - Retain detailed battle/expedition replay events seven days. Retain activity and financial summaries 90 days, with checkpointed balances and progression.
 - Preserve account state, item ownership, season archives, prestige, and unique settled-slot checkpoints indefinitely.
 
@@ -538,7 +538,7 @@ Live reads use the protected Supabase Data API tables/views and RLS, avoiding an
   ```
 - [ ] **Step 2:** Run owning access and releasebrowser suites; any newly exposed access/failure gap must fail before fixing it.
 - [ ] **Step 3:** Close proven access/failure gaps, wire CI to fresh migrations/local backend, and implement resource measurement. Test retained rules against migrations/static releases. Build benchmarks for worst-case 120-second combat and the largest 50-entry tournament graph; tune batches locally without changing semantics. Profile real assets with 50 actors/six NPCs, culling, hidden pause and lazy scenes. Hosted measurements run in Task 24 after infrastructure exists.
-- [ ] **Step 4:** Run `npm run verify`. Record desktop/browser and a physical mobile device or connected device lab: target 60 desktop/≥30 mobile fps under a repeatable scene path; touch drag/pinch, panel scroll, keyboard equivalent controls, reduced motion, and repeated scene navigation. Record local timing and projected DB<250 MB, monthly egress<3 GB, functions<300,000, including reveals/polling/full projection size/retention. Simulated mobile viewport and local worker timing are not hosted/device evidence; leave the actual hosted CPU/boundary checks pending for Task 24. Unavailable real-device measurements remain a launch blocker.
+- [ ] **Step 4:** Run `npm run verify`. Record desktop/browser and a physical mobile device or connected device lab: target 60 desktop/≥30 mobile fps under a repeatable scene path; touch drag/pinch, panel scroll, keyboard equivalent controls, reduced motion, and repeated scene navigation. Record local timing and projected DB<500 MB (warning at 400 MB; Avi's decision, 2026-10-19), monthly egress<3 GB, functions<300,000, including reveals/polling/full projection size/retention. Simulated mobile viewport and local worker timing are not hosted/device evidence; leave the actual hosted CPU/boundary checks pending for Task 24. Unavailable real-device measurements remain a launch blocker.
 - [ ] **Step 5:** Stage named/changed files; commit `test: verify public game security and capacity`.
 
 ## Task 24: Provision free infrastructure and verify the public origin

@@ -1,5 +1,94 @@
 # Local identity backend and migrations
 
+## Task 23.1: release access matrix and hardening (M17)
+
+M17 is `supabase/migrations/20261019075634_release.sql`. It was created with CLI 2.120.0 by `migration new release`, because
+`db pull release --local --schema public,private --yes` (engine `migra`) on the source-applied database reported "No schema
+changes found" and wrote no draft. It was then completed from the tested `supabase/sql/15-release.sql`. M01–M16 are unchanged.
+
+**Source iteration.** The source was applied with the psql fallback documented under M16 below, after the container label
+check (Git Bash: `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q <
+supabase/sql/15-release.sql`). Source application is iteration evidence only; the replay below is the migration-artifact proof.
+
+**The access matrix** (`tests/db/access-matrix.test.ts`). Every expectation comes from the catalog through the exported operator
+audit `scripts/access-audit.sql`, one read-only SELECT (see the runbook's "Release access audit"). The only hand-written lists
+are the OPEN visitor projections (`tests/fixtures/access.ts`, shared with `tests/db/visitor-access.test.ts`) and a pinned
+`service_role` snapshot. It checks, for PUBLIC, anon and authenticated:
+- every relation, column and sequence privilege of every kind in `public` and `private`, MAINTAIN, REFERENCES and TRIGGER
+  included: anon holds exactly SELECT on the OPEN objects (column by column on `tournament_views`); authenticated holds only
+  SELECT, only in `public`, and every table it can read has a SELECT policy for it; PUBLIC holds nothing;
+- USAGE on schema `public` only (the private schema is not exposed), no role membership, no CREATE on the database;
+- row security on every table and `security_invoker` on every view in both schemas, and no materialized view;
+- for every function in both schemas (extension members excluded): not SECURITY DEFINER, `search_path=""`, and no EXECUTE;
+- the default privileges of the role that owns our objects (postgres) in `public`, `private` and globally, as PostgreSQL
+  combines them; and, in practice, that a new table, sequence and function postgres creates in either schema (inside a
+  transaction that rolls back) gives no client role anything;
+- `service_role`'s whole effective set against the pinned snapshot; drift fails and lists the lines added and removed;
+- through the Data API as the owner, another account and a visitor: every write to every public relation is refused (42501,
+  or 55000 where a view cannot take the command at all), every public RPC is refused (42501), every private table and function
+  is unreachable (PGRST106, exposure), and no base table changes;
+- that private seeds, plans and snapshots (activity snapshots and seeds, expedition plans, job inputs and seeds, Arena
+  assignment seeds, build preparations) never appear in anything their owner can read.
+
+Each catalog case also proves, in a transaction that always rolls back, that the audit reports the violation it guards against.
+`anonWritable` in `tests/db/visitor-access.test.ts` now also counts REFERENCES, TRIGGER and MAINTAIN.
+
+**What the matrix found on the M01–M16 replay, and M17 revokes** (the two named items and controller rulings A–C):
+1. anon's MAINTAIN on the eight M01 owner tables (`builds`, `gladiators`, `item_instances`, `operation_receipts`,
+   `reservations`, `schedules`, `wallet_ledger`, `wallets`). M01's generated revokes covered REFERENCES, TRIGGER and TRUNCATE.
+2. M01's default `GRANT UPDATE ON SEQUENCES` to anon and authenticated in `public`.
+- A. authenticated's MAINTAIN on the same eight tables.
+- B. authenticated's MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on the `owner_state` view (recorded under M13 below).
+- C. postgres's default table privileges in `public`: anon and authenticated TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on
+  every new table.
+
+M17 runs `revoke all` on the eight tables and `owner_state` from anon; revokes INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES,
+TRIGGER and MAINTAIN on the same nine relations from authenticated, which keeps SELECT; and runs `alter default privileges for
+role postgres in schema public revoke all on tables` (and on sequences and on functions) from anon and authenticated. The
+statements name every non-SELECT kind and are idempotent, so they also clear fuller platform defaults on a hosted project. On
+the replay the function defaults held no client grant, so that revoke changes nothing there. After M17 a client role holds only
+SELECT (anon on the OPEN objects; authenticated on those and on its owner-filtered tables) and USAGE on schema `public`.
+
+**Accepted exceptions** (controller rulings):
+- **D, backend.** `service_role` keeps MAINTAIN on the eight tables; MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on
+  `owner_state`; and the defaults UPDATE on new `public` sequences and TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on new
+  `public` tables. All are pinned in the matrix's snapshot.
+- **E, platform.** Outside the matrix; the audit lists them in its `platform-default` and `database` sections for Task 24:
+  - supabase_admin's default privileges in `public`, `graphql`, `graphql_public` and `supabase_functions`: anon,
+    authenticated and service_role receive every privilege on its new tables, sequences and functions. postgres is not a
+    member of supabase_admin and cannot change them; none of our objects is created by supabase_admin.
+  - postgres's platform-provided defaults in schema `storage` (the same grants). We create nothing in `storage`.
+  - PUBLIC's USAGE on schema `public`, and CONNECT and TEMPORARY on the database (so anon, authenticated and service_role
+    hold them too). No client role may CREATE on the database.
+
+**Completion.** The generator wrote nothing: its diff did not see MAINTAIN, the owner view's privileges or default privileges.
+Every M17 statement is the source's, verbatim apart from the transaction, which the CLI supplies (statement equality checked).
+A provenance header and `notify pgrst` were added. There is no function, trigger, policy, table, backfill or initialization
+change. The CLI's other diff engine, `pg-delta`, was not tried: the established engine is migra, and this task allows no
+downloads.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M16 matched Task 22.3's recorded M16 replay fingerprint byte for byte
+  (1127 lines, the M16 coverage).
+- The source-applied fingerprint differs from it only in the nine relation ACLs and the two `public` default rows (tables,
+  sequences) above.
+- A clean `db reset --local --no-seed --yes` replayed M01–M17, with no source applied afterwards. Its fingerprint matched the
+  source-applied fingerprint byte for byte (1127 lines), and again after the full test run. The audit's output was identical on
+  the source-applied database and on the replay.
+- Inspection of the replay: the eight tables are `authenticated=r`, `service_role=arwdm`; `owner_state` is `authenticated=r`,
+  `service_role=rDxtm`; postgres's `public` defaults are `{postgres=arwdDxtm, service_role=Dxtm}` (tables),
+  `{postgres=rwU, service_role=w}` (sequences) and `{postgres=X}` (functions); all 43 `public`/`private` triggers are enabled;
+  both cron jobs are active.
+- `npm run test:db` passed **265/265** in 16 files on the replay, with the Edge container's start time unchanged across the run.
+- Lint is empty. Advisors report four INFO unused-index notices (`boundary_members_gladiator_idx`, `jobs_gladiator_idx`,
+  `market_listings_buyer_idx`, `market_listings_receipt_idx`) and no warnings or errors. `migration list --local` shows
+  M01–M17.
+
+**Release (Task 24).** M17 needs PostgreSQL 17 (`maintain` is a PostgreSQL 17 privilege; the audit uses it too) and no client
+or worker change. After deploying it, run the release access audit against the hosted project and compare it with a local
+replay, as the runbook's "Release access audit" describes. Any difference outside the platform sections blocks the release
+until explained; a difference inside them is recorded as the hosted platform's state.
+
 ## Tasks 22.1–22.3: retention, durable ticks, whole seasons and operator health (M16)
 
 M16 is `supabase/migrations/20261018191110_operations.sql`, generated with CLI 2.120.0 (engine `migra`) by
@@ -399,7 +488,8 @@ onward. The current read adapters already name `tournament_views` columns, so si
 `service_role` keep TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on `owner_state`. The replayed default privileges for new
 `public` tables still give anon, `authenticated` and `service_role` TRUNCATE, REFERENCES, TRIGGER and MAINTAIN, so every new
 public table needs its explicit `revoke all`, as every source already has. None of these is reachable through the Data
-API, and none is a read or a row write.
+API, and none is a read or a row write. M17 (Task 23.1, top of this guide) revokes the anon and `authenticated` leftovers and
+the client default privileges; `service_role`'s are kept and pinned as an accepted backend exception.
 
 ## Task 19 phase 2b: tournament results, reveals, settlement and the public view
 

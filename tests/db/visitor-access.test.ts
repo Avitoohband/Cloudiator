@@ -3,21 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { readWorld, readProfile, readStandings, readTournament, readTimeline, readRecent } from '../../src/lib/api/reads.ts';
+import { OPEN, PUBLIC_TOURNAMENT_COLUMNS } from '../fixtures/access.ts';
 
 // Task 13.1 (M13): visitors (the `anon` role) read the sanitized public projections, and nothing else.
 const commands = createDatabase(admin);
 beforeEach(async () => { await resetIdentity(); await sql`update private.scheduler set enabled=false where singleton`; });
 afterAll(() => sql.end());
 
-/**
- * The public projections a visitor may SELECT: eight base tables, the five invoker views over them, tournament_views, the
- * marketplace offers (Task 18.1, M14), and the season rows and their frozen standings archive (Task 21.1).
- */
-const OPEN = ['world_revision_state', 'world_actors', 'public_profiles', 'recent_results', 'activity_stages', 'arena_standings',
-  'tournament_bout_results', 'tournament_placements', 'visible_events', 'world_revision', 'world_actor_reads', 'public_profile_reads',
-  'arena_standing_reads', 'tournament_views', 'market_offers', 'seasons', 'season_standings'];
-/** tournament_views is granted column by column: never its pairing job or publication time (Task 19 review M1). */
-const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms';
 /** Relations: tables, views, materialized views, partitioned and foreign tables. */
 const RELATION_KINDS = ['r', 'v', 'm', 'p', 'f'];
 
@@ -27,12 +19,17 @@ async function anonSelectable() {
     where n.nspname='public' and c.relkind::text in ${sql(RELATION_KINDS)} and has_any_column_privilege('anon',c.oid,'SELECT')
     order by c.relname`).map(r => r.relname as string);
 }
-/** Every public-schema relation anon may INSERT into, UPDATE (any column), DELETE from or TRUNCATE. */
+/**
+ * Every public-schema relation on which anon holds any privilege besides SELECT: INSERT, UPDATE or REFERENCES (on any
+ * column), DELETE, TRUNCATE, TRIGGER or MAINTAIN (Task 23.1: MAINTAIN, REFERENCES and TRIGGER were missed before).
+ */
 async function anonWritable() {
   return (await sql`select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
     where n.nspname='public' and c.relkind::text in ${sql(RELATION_KINDS)}
       and (has_any_column_privilege('anon',c.oid,'INSERT') or has_any_column_privilege('anon',c.oid,'UPDATE')
-        or has_table_privilege('anon',c.oid,'DELETE') or has_table_privilege('anon',c.oid,'TRUNCATE'))
+        or has_any_column_privilege('anon',c.oid,'REFERENCES') or has_table_privilege('anon',c.oid,'DELETE')
+        or has_table_privilege('anon',c.oid,'TRUNCATE') or has_table_privilege('anon',c.oid,'TRIGGER')
+        or has_table_privilege('anon',c.oid,'MAINTAIN'))
     order by c.relname`).map(r => r.relname as string);
 }
 /** Every public or private function anon may EXECUTE. */

@@ -362,3 +362,46 @@ per-request CPU (`cpu: "not available"`), and egress and invocations are read in
   minute (`private.scheduler.max_dispatch_per_minute`, at most 7,200 a day) and only for claimable work; the rest is player
   commands. If the trend crosses the daily share, lower `max_dispatch_per_minute` (1–5) and check for clients retrying commands.
 - Record the three numbers with each weekly export.
+
+## Release access audit
+
+Task 23.1 (M17; `docs/operations/migrations.md`, "Task 23.1"). `scripts/access-audit.sql` is one SELECT over the catalog and
+changes nothing. Each row is `section | object | grantee | privilege`: every privilege PUBLIC, anon, authenticated and
+service_role hold on the relations, columns, sequences, functions and schemas of `public` and `private`; the default
+privileges of the role that owns those objects; role memberships; every policy; any table without row security, view without
+`security_invoker`, materialized view, SECURITY DEFINER function or function without `search_path=""`; and, in the
+`platform-default` and `database` sections, the platform's own settings. The file's header describes each section. It needs
+PostgreSQL 17 (MAINTAIN). `tests/db/access-matrix.test.ts` holds the expectations.
+
+Run it after deploying M17, after any later migration and before launch:
+1. **Local reference.** On the local stack, at the commit being deployed, with `migration list --local` showing the same
+   migrations as the hosted project and no SQL source applied since the last `db reset --local --no-seed --yes` (a reset
+   guarantees both and deletes local data), after the label check:
+   ```powershell
+   (docker inspect -f '{{json .Config.Labels}}' supabase_db_Cloudiator | ConvertFrom-Json).'com.supabase.cli.project'   # must print Cloudiator
+   Get-Content scripts/access-audit.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 --csv > local-access-audit.csv
+   ```
+2. **Hosted.** In the hosted SQL editor, as the database owner, run the whole file and download the result as CSV
+   (`hosted-access-audit.csv`). No connection string is needed.
+3. **Compare** the two as sets of rows, for example
+   `Compare-Object (Get-Content local-access-audit.csv) (Get-Content hosted-access-audit.csv)`, after making the two CSV
+   exports quote fields the same way if they differ.
+   - Any difference in `relation`, `column`, `sequence`, `function`, `schema`, `default`, `membership` or `policy`, or any row
+     in a finding section (`rls-disabled`, `not-security-invoker`, `materialized-view`, `security-definer`, `search-path`)
+     on either side, blocks the release until it is explained and fixed by a new migration.
+   - A difference in `platform-default` or `database` is the hosted platform's state: record it in the release evidence and
+     check that it touches nothing of ours.
+
+Expected platform rows (accepted exception E; the local replay shows exactly these):
+- `platform-default supabase_admin:<schema>:tables|sequences|functions` for `public`, `graphql`, `graphql_public` and
+  `supabase_functions`: anon, authenticated and service_role receive every table privilege, SELECT, UPDATE and USAGE on
+  sequences, and EXECUTE on functions. postgres cannot alter them, and nothing of ours is created by supabase_admin.
+- `platform-default postgres:storage:tables|sequences|functions`: the same grants, in the platform's `storage` schema, where we
+  create nothing.
+- `database postgres`: CONNECT and TEMPORARY for PUBLIC (and therefore for anon, authenticated and service_role). No client role
+  may CREATE.
+- Also expected outside the platform sections: `schema public PUBLIC USAGE` (PostgreSQL's default), and service_role's pinned
+  privileges (exception D: MAINTAIN on the eight M01 owner tables, MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on
+  `owner_state`, and its `public` table and sequence defaults).
+
+Not yet run against a hosted project (none exists before Task 24); Task 24 verifies the export format and the comparison.

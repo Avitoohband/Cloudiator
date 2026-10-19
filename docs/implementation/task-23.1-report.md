@@ -302,3 +302,47 @@ authenticated-readable relation outside OPEN (`activities`, `builds`, `gladiator
 - Edge was recreated during one more full run, which was discarded and rerun (C22, cause still unknown).
 - No `MultiXactId` error recurred in these runs.
 - The hosted policy-hash comparison depends on the same `search_path` on both sides. This is untested until Task 24.
+
+## Fix round 2 (re-review N1: the cross-account loop was vacuous for three relations)
+
+Commit `68f7511` test: anchor the cross-account read on every relation. Only
+`tests/db/access-matrix.test.ts` changed (the case *never shows one account another owner's private state*).
+
+**The gap.** The case seeded only an activity per gladiator. Three relations therefore read `[]` for both accounts and could
+never contain an owner id, whatever their policy said:
+- `owned_cosmetics` (written only by a banner purchase);
+- `reservations` and `pending_build_items` (written only by a queued build).
+
+The anchor joined all relations together, so it could not notice an empty one.
+
+**The fix.**
+- **Seeding.** Each gladiator now gets, through the admin `sql` and within each table's constraints, the rows the real
+  commands write:
+  - a published rest activity;
+  - a queued build: a `held` fee reservation (money 10) and the gladiator's first starter item in `pending_build_items`, under
+    one operation id;
+  - a bought `banner` cosmetic (`v1`, `bound`).
+  - None of these tables has an insert guard. `resetIdentity`'s `truncate public.gladiators cascade` removes them before the
+    next case.
+- **Per-relation anchor.** The owner's read must hold one of its ids (account, gladiator or activity) in *every* non-OPEN
+  relation, and so must the other account's read of its own state. Each failure message names the relations.
+- **The leak check** names every relation in which the other account saw any of the owner's ids.
+
+**Proof.** Each plant was committed for one run inside a subshell with `trap '… drop policy if exists …' EXIT`, so a failed
+run cannot leave it behind. After each run, `pg_policy` held no `matrix_red%` policy and the parity fingerprint was
+byte-identical to the M01–M17 replay's.
+
+| Run | Plant | Raw summary | Edge before | Edge after |
+|---|---|---|---|---|
+| GREEN 1 | none | `Test Files  2 passed (2)` / `Tests  16 passed (16)` | 2026-10-19T08:42:35.061571612Z | same |
+| RED 1 | `create policy matrix_red_leak on public.reservations for select to authenticated using ((select auth.uid()) is not null)` | `Test Files  1 failed \| 1 passed (2)` / `Tests  1 failed \| 15 passed (16)`; `AssertionError: relations that showed the other account the owner's ids: expected [ 'reservations' ] to deeply equal []` | 2026-10-19T08:42:35.061571612Z | same |
+| RED 2 (anchor) | `create policy matrix_red_empty on public.owned_cosmetics as restrictive for select to authenticated using (false)` | `Test Files  1 failed \| 1 passed (2)` / `Tests  1 failed \| 15 passed (16)`; `AssertionError: relations whose read by their owner holds no owner id: …` with `-   "owned_cosmetics"` missing | 2026-10-19T08:42:35.061571612Z | same |
+| GREEN 2 | none (after removal) | `Test Files  2 passed (2)` / `Tests  16 passed (16)` | 2026-10-19T08:42:35.061571612Z | same |
+| full | none | `Test Files  16 passed (16)` / `Tests  267 passed (267)` (204.6 s) | 2026-10-19T08:42:35.061571612Z | 2026-10-19T08:42:35.061571612Z |
+
+- RED 1 is the reviewer's example: a body that names `auth.uid()` but does not filter. It passes (c) and now fails the loop,
+  naming `reservations`.
+- RED 2 shows that an emptied relation now fails the per-relation anchor by name instead of passing silently.
+- Edge was recreated at 08:42:35Z, between fix round 1 and this round, while I was editing. No counted run spans a change.
+- `git diff --check` was clean. Nothing else changed. `npm test` and `npm run typecheck` were not rerun, because this change
+  is test-only; the test file typechecks (`npx tsc --noEmit -p .` passed).

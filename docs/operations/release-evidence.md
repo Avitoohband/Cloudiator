@@ -482,9 +482,9 @@ A + C + D). The gate names the blocker and never counts it as a pass. Nothing wa
 
 ### Commands and results
 
-Four end-to-end runs on 2026-10-19 (UTC). Runs 1 and 2 ran the first version of the gate. Run 3 added the access-time refresh
-of the Edge files, the host-fault rerun and separate browser results; run 4 is the final gate (the refresh covers folders
-too). Browser counts are passed / failed / skipped.
+Four end-to-end runs on 2026-10-19 (UTC) before the review. Runs 1 and 2 ran the first version of the gate. Run 3 added the
+access-time refresh of the Edge files, a host-fault rerun (removed in fix round 1) and separate browser results; run 4 the
+refresh of folders too. Run 5, after fix round 1, is under "Fix round 1" below. Browser counts are passed / failed / skipped.
 
 | Step | Run 1 (15:08–15:25) | Run 2 (15:26–15:44) | Run 3 (15:52–16:11) | Run 4 (16:17–16:33) |
 |---|---|---|---|---|
@@ -542,7 +542,9 @@ too). Browser counts are passed / failed / skipped.
   - RED: against the previous static host (no headers), `tests/browser/csp.spec.ts` failed 4 of 6 (no policy header; the blocked
     `fetch` recorded nothing).
   - A temporary test that made a violation without opting out failed with both records ("Connecting to
-    'https://csp-probe.invalid/' violates … connect-src 'self'"). It was deleted after the run.
+    'https://csp-probe.invalid/' violates … connect-src 'self'"). Since fix round 1 this is a committed case:
+    `csp.spec.ts` "fails a test whose page breaks the policy" runs under `test.fail()`. With the teardown check removed it
+    failed ("Expected to fail, but passed") on both projects; with the check it passes.
 - **Recorded exception:** `'unsafe-inline'` for scripts and styles: a static export has no per-request nonce (Next.js
   content-security-policy guide, "How nonces work"), and its framework scripts are inline.
 
@@ -570,7 +572,7 @@ recreates the container mid-run, whatever the pre-read did. Zero-length files ne
 **Newly tested (Task 23.6),** with the serve log in this task's scratchpad:
 - Setting every file's access time to now raised 37 detections and one recreation (15:46:19); a full read one minute later raised
   none, and later unit and type-check runs raised none.
-- With folders included (735 entries, through a handle that asks only for attribute writes, since the watcher holds the folders
+- With folders included (735 entries, then counting the contents of 21 junctions; since fix round 1 the links are skipped: 714 entries; through a handle that asks only for attribute writes, since the watcher holds the folders
   open), the refresh raised 34 detections and one recreation (16:15:15); a full listing and read 40 s later raised none.
   Modification times were checked unchanged entry by entry, and `git status` was identical before and after.
 - The gate runs: runs 3 and 4 refreshed, then settled through one recreation, then kept the start time through the database run.
@@ -585,9 +587,10 @@ recreates the container mid-run, whatever the pre-read did. Zero-length files ne
   and the page never hydrated; C21's assertions are the same kind of first-page wait. Socket sampling every 5 s during runs
   2–4 found at most 1,488 `TIME_WAIT` sockets against 16,384 dynamic ports, so port exhaustion is not supported, and the host
   error's cause is unknown. **Changes (no product code):** `tests/browser/host-faults.ts` and the browser fixture name a request
-  that failed in the host's network stack on the failed test; `npm run verify` discards a browser run whose every failure is
-  such a fault and runs it once more (none occurred in runs 3 and 4); each browser step keeps its traces
-  (`test-results/development`, `test-results/production`).
+  that failed in the host's network stack on a failed test. Since fix round 1, `npm run verify` labels such a failure a
+  probable host fault in its summary, beside the test's own first error, and the gate still fails; nothing is rerun (runs
+  3 and 4 had a rerun, which never fired). Each browser step keeps its traces (`test-results/development`,
+  `test-results/production`).
 - **`[mobile] market.spec.ts:463`** (the purchased row still listed 5 s after "Purchase confirmed", once, in the integration dry
   run). Not reproduced: 40 repeats on mobile at 8 workers, the whole spec 8 times at 16 workers (256 cases, 16 of this one), and
   the four gate runs. The failure record shows the row on 14 polls over 5 s. The row leaves only when the re-read after the
@@ -631,8 +634,10 @@ recreates the container mid-run, whatever the pre-read did. Zero-length files ne
   configurations in `node_modules/.cache`). 94 unmet optional dependencies, all other platforms' binaries.
 - `package-lock.json` (version 3): 152 entries, each with an integrity hash and resolved from `registry.npmjs.org`. Every direct
   dependency is pinned to an exact version equal to the lockfile's.
-- The workflow's actions are pinned to major tags (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`),
-  not commit SHAs: SHA pins need a lookup this task did not make (no downloads, no GitHub queries).
+- The workflow's actions are pinned to full commit SHAs (fix round 1), each resolved with read-only `gh api` lookups
+  (`repos/<action>/commits/<tag>`). The latest v4 release and the v4 major tag resolved to the same commit for each action:
+  `actions/checkout` v4.4.0 `11d5960a…77262`, `actions/setup-node` v4.4.0 `49933ea5…20020`, `actions/upload-artifact` v4.6.2
+  `ea165f8d…fa02`. `tests/workflow.test.ts` requires a 40-character SHA and a `# vX.Y.Z` comment on every `uses:`.
 
 ### CI workflow
 
@@ -659,6 +664,49 @@ the controller pushes and records the first run. It stays red until Task 23.7 (e
   3. hosted egress and compression (Lane A, risk 2);
   4. CORS parity: the hosted `GAME_ALLOWED_ORIGINS` and Auth redirects for the exact Pages origin;
   5. the remote export rehearsal (`scripts/export-db.ps1 -Remote`, then the restore check).
-- **Also open:** the first GitHub Actions run (the controller's push); SHA-pinned actions; the hosted `connect-src` origin (the
+- **Also open:** the first GitHub Actions run (the controller's push); the hosted `connect-src` origin (the
   production build sets `NEXT_PUBLIC_SUPABASE_URL`, and the scanner then names that origin); Lane A's risk 5 (boundary headroom
   at 50 characters).
+
+### Fix round 1 (Task 23.6 review)
+
+The review found three Important issues in the gate's verdicts and one in its doc test. All four are fixed, each with a
+RED-then-GREEN test, and the gate was run end to end once more (run 5).
+
+- **The known blocker could hide real database failures (Important 1).** vitest's JSON reporter does not show a failed
+  describe-level hook (its tests are only skipped) or an unhandled error, so exit 2 could cover them. The database step now
+  reads `scripts/vitest-gate-reporter.mjs`, which writes every module error, every failed suite with its own errors, every
+  failed test, and the unhandled errors. `blocked` now needs every failed test to be a database-budget check with a finite
+  share of at least 1, every failed suite to enclose one and have no error of its own, and no module or unhandled error.
+  - On a real vitest run, a scratch capacity test failing beside a failing `beforeAll` and an unhandled error: the old
+    classifier said `blocked`; the new one says `failed` with both reasons.
+- **The refresh followed links and swallowed its own guard (Important 2).** The handle now opens with
+  `FILE_FLAG_OPEN_REPARSE_POINT`. Links are skipped and never descended into, every entry is checked to be under the resolved
+  `supabase/functions`, and any failure (including a changed modification time) fails the Edge step as an infrastructure
+  fault with its reason.
+  - In a scratch folder, the junction test failed on the old behaviour (7 entries touched, through the link) and passes now
+    (5 entries, 1 link skipped, the target's access time unchanged).
+- **The host-fault rerun was decided by co-occurrence (Important 3).** Removed. A failed test whose context saw a host
+  network fault is labelled "probable host fault" in the summary beside its own first error, and fails the gate (exit 1).
+  The database rerun on a changed Edge start time stays, fixed at exactly one (the `--db-retries` option is gone).
+- **The doc test depended on unapproved edits (Important 4).** `docs/operations/verification-gates.md` is back to the
+  approved a2ed84a text, except the "Database tests and the local Edge runtime" section. Avi approved extending that section
+  on 2026-10-19 with the last-access refresh, and the test now checks the approved "Safe order" list and that section.
+- **Minors taken:** the blocker needs a finite share of at least 1; the comment at `tests/db/capacity.test.ts:21` is
+  corrected; a committed `test.fail()` CSP case; the JWT scan catches tokens after `%20`, `\n`, `\t`, `\u0022` and `\x22`
+  (the real exports still pass, 91 assets each); the actions are SHA-pinned.
+
+**Run 5 (16:58–17:15 UTC, after fix round 1): exit 2 (blocked); every step passed except the known blocker.**
+
+| Step | Run 5 |
+|---|---|
+| `npm test` | 1,216 passed |
+| typecheck, assets, build, `verify:static` (91 assets) | passed |
+| Edge settled | 714 files and folders refreshed, 21 links skipped (the junctions in `supabase/functions/node_modules`), 612 files read; 34 s; recreated while settling (16:17:14 → 16:58:48) |
+| `CAPACITY_GATE=1 npm run test:db` | **blocked**: 276 passed, 1 blocked (90 days 178.4 % / 151.0 %, one year 274.3 % / 227.8 %); Edge start time unchanged (16:58:48) |
+| Development browser suite | 527 / 0 / 33 (the new `test.fail()` CSP case is production-only: skipped on both projects) |
+| Production build, its scan (91 assets), production gate | passed; 32 / 0 / 528 (the `test.fail()` case passed on both projects) |
+| `git diff --check` | clean |
+
+The watcher logged 33 detections in the whole run, all from the refresh while settling; the container's start time was the
+same at the end of the run.

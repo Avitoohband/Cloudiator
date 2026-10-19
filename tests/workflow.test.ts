@@ -58,7 +58,12 @@ describe('the checks workflow', () => {
     expect(run).not.toMatch(/cat \.env|type \.env|echo .*SECRET/i);
     // The start output contains the local keys: it goes to a file in the runner's temp folder, never to the log.
     expect(run).toMatch(/npx supabase start [^\n]*> "\$RUNNER_TEMP\/supabase-start\.log" 2>&1/);
-    // Third-party actions are pinned to a release, never to a moving branch.
-    for (const [, ref] of text.matchAll(/uses: [\w./-]+@(\S+)/g)) expect(ref).toMatch(/^v\d+(\.\d+){0,2}$|^[0-9a-f]{40}$/);
+    // Every action is pinned to a full commit SHA with its release as a comment (fix round 1), never to a moving tag.
+    const uses = [...text.matchAll(/uses: ([\w./-]+)@(\S+)(.*)$/gm)];
+    expect(uses.length).toBe(3);
+    for (const [, action, ref, comment] of uses) {
+      expect(ref, action).toMatch(/^[0-9a-f]{40}$/);
+      expect(comment.trim(), action).toMatch(/^# v\d+\.\d+\.\d+$/);
+    }
   });
 });

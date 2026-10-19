@@ -3,6 +3,8 @@
 # development machine. No hosted project, key or secret is used: the stack is local to the runner and the worker secret is
 # generated for the run. Nothing here prints the local keys (`supabase start` writes them only to a file in RUNNER_TEMP).
 # Exit 2 from the gate means its only failures are known blockers (today the database budget, Task 23.7): still a red run.
+# Actions are pinned to full commit SHAs, each resolved read-only on 2026-10-19 (`gh api repos/<action>/commits/<tag>`); each
+# release tag and its major tag (v4) pointed to the same commit.
 name: checks
 
 on:
@@ -25,9 +27,9 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.19.0
           cache: npm
@@ -57,7 +59,7 @@ jobs:
 
       - name: Keep the gate's results and the browser traces
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-gate
           path: |

@@ -18,7 +18,8 @@ import { BUDGETS, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocati
 // softly so one run names every one that fails. Without it (the default, as in a plain `npm run test:db`) case 1 still
 // measures and records every number and checks the run itself, but not the budgets: they are open blockers for Avi
 // (docs/operations/release-evidence.md, "Lane A: capacity"), and Task 23.6's release gate runs this file with the flag.
-// The measured sections are printed on the console only in a report or gate run (logSection); they are always written for
+// The measured sections are printed on the console only in a scripts/resource-report.mjs run or with CLOUDIATOR_MEASUREMENTS=1
+// (logSection; the release gate's CAPACITY_GATE=1 run prints none, Task 23.6); they are always written for
 // scripts/resource-report.mjs when it asks (writeSection).
 const GATE = process.env.CAPACITY_GATE === '1';
 /**

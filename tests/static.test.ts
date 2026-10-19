@@ -155,6 +155,19 @@ describe('JWT and base64 service-role material', () => {
     expect(result.stderr).toContain('token.js');
   });
 
+  // Fix round 1 (Minor): a token right after a percent-encoded or an escaped character (`Bearer%20eyJ…`, an escaped newline
+  // before `eyJ…`) is preceded by a letter or digit, and is still a token. String.raw keeps each backslash as written.
+  test.each([
+    String.raw`fetch(u,{headers:{a:"Bearer%20${FAKE_JWT}"}})`,
+    String.raw`const lines="first line\n${FAKE_JWT}";`,
+    String.raw`const tabbed="key:\t${FAKE_JWT}";`,
+    String.raw`const unicode="\u0022${FAKE_JWT}";`,
+  ])('refuses a JWT after an encoded or escaped character: %s', (content) => {
+    const result = scan(exportedSite(`<script>${content}</script>`));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Forbidden backend material');
+  });
+
   // A base64 string has three alignments: the text can start at any byte offset modulo 3 of the encoded value.
   test.each(['', 'x', 'xy'].flatMap(prefix => (['base64', 'base64url'] as const).map(encoding => [prefix.length, encoding,
     Buffer.from(`${prefix}{"aud":"fake","role":"service_role"}`).toString(encoding)] as const)))(

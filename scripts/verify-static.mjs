@@ -34,7 +34,9 @@ const forbidden = [
   /\b(?:private_?seed|private_?plan)(?:\\*["'])?\s*:/i,
   /(?:encounter_?plan|private_?fixture_?plan|future_?opponent_?snapshot)/i,
   // Task 23.6 (C27): any JWT (three base64url segments, the first a JSON header). The browser uses only the publishable key.
-  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  // It starts at a word boundary, or right after a percent-encoded byte (`Bearer%20eyJ…`) or an escape (`\n`, `\t`, `\u0022`,
+  // `\x22`), whose last character is a letter or digit (fix round 1).
+  /(?:(?<![A-Za-z0-9_-])|(?<=%[0-9A-Fa-f]{2})|(?<=\\[nrtbfv0])|(?<=\\u[0-9A-Fa-f]{4})|(?<=\\x[0-9A-Fa-f]{2}))eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
   // ...and `service_role` base64- or base64url-encoded at any of its three byte alignments (a JWT payload, an encoded key).
   ...base64Needles('service_role').map(needle => new RegExp(needle.replace(/[+/]/g, '\\$&'))),
 ];

@@ -3,8 +3,9 @@
 //   scripts/serve-static.mjs) each test listens for Content-Security-Policy violations in every page of its context and
 //   fails on any. The development server sends no policy, so there the listener does nothing.
 // - C21 triage: in both gates, a failed test whose context saw a request fail in the host's network stack
-//   (tests/browser/host-faults.ts) gets one more error naming it, so the run reads as an infrastructure fault, not product
-//   evidence, and scripts/verify.mjs runs the step once more.
+//   (tests/browser/host-faults.ts) gets one more error naming that fault after its own errors. scripts/verify.mjs labels the
+//   failure a probable host fault in its summary, beside the test's own first error; the test still fails, and nothing is
+//   rerun (Task 23.6 fix round 1).
 import { test as base, expect } from '@playwright/test';
 import { HOST_FAULT_MARKER, isHostFault } from './host-faults';
 

@@ -32,6 +32,17 @@ test.describe('the production Content Security Policy', () => {
     expect(cspViolations).toEqual([]);
   });
 
+  // Fix round 1 (Minor): the automatic check itself. A violation with the check on must fail the test: `test.fail()` expects
+  // that failure, so this case passes only while the fixture's teardown check fails it.
+  test('fails a test whose page breaks the policy (the automatic check)', async ({ page, cspViolations }) => {
+    test.fail();
+    await page.goto('/game/');
+    await expect(page.locator('main#main')).toBeVisible({ timeout: 45_000 });
+    expect(await page.evaluate(() => fetch('https://csp-probe.invalid/').then(() => 'sent', () => 'refused'))).toBe('refused');
+    // The body itself passes once the violation is recorded; only the teardown check can fail the test.
+    await expect.poll(() => cspViolations.length).toBeGreaterThan(0);
+  });
+
   test.describe('listener', () => {
     // This case makes a violation on purpose, so the automatic check is off for it and it checks the record instead.
     test.use({ allowCspViolations: true });

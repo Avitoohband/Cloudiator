@@ -1,32 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, childEnv, classifyBrowser, classifyDb, gateSteps, refreshAccessTimes, runGate, summarize } from '../../scripts/verify.mjs';
+import { HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, childEnv, classifyBrowser, classifyDb, gateSteps, parseOptions, prepareEdge,
+  refreshAccessTimes, runGate, summarize } from '../../scripts/verify.mjs';
 import { HOST_FAULT_MARKER } from '../browser/host-faults.ts';
 
-// Task 23.6 (R3): `npm run verify` runs every gate of docs/operations/verification-gates.md, in its order, one after another,
-// runs every step whose input is valid even after another one failed, and ends with one summary. The capacity case runs with
-// CAPACITY_GATE=1; its database budget is a known blocker (Task 23.7) that is reported by name, never as a pass. A database run
-// during which the Edge container was recreated is discarded as an infrastructure fault (C22). Pure tests with a fake runner.
+// Task 23.6 (R3): `npm run verify` runs every gate of the approved docs/operations/verification-gates.md, in its order, one
+// after another, runs every step whose input is valid even after another one failed, and ends with one summary. The capacity
+// case runs with CAPACITY_GATE=1; its database budget is a known blocker (Task 23.7) that is reported by name, never as a pass,
+// and only when nothing else failed (fix round 1, Important 1). A database run during which the Edge container was recreated is
+// discarded and run exactly once more (C22). A browser failure beside a host network fault is labelled, never rerun (fix round
+// 1, Important 3). Pure tests with a fake runner, plus the Edge refresh on a scratch folder (Windows).
 
 const ORDER = ['unit', 'typecheck', 'assets', 'build', 'static', 'edge', 'db', 'browser', 'browser-build', 'browser-static', 'production', 'diff'];
 type Step = ReturnType<typeof gateSteps>[number];
 const byId = (steps: Step[], id: string) => steps.find(step => step.id === id)!;
 
-/** A database report in vitest's JSON shape. */
-function dbReport(tests: { file?: string; name: string; failures?: string[] }[], fileFailure?: string) {
-  const files = new Map<string, typeof tests>();
+type Test = { file?: string; name: string; suites?: string[]; errors?: string[] };
+/** A database report as scripts/vitest-gate-reporter.mjs writes it. */
+function dbReport(tests: Test[], extra: { suiteErrors?: Record<string, string[]>; moduleErrors?: string[]; unhandled?: string[]; passed?: number } = {}) {
+  const files = new Map<string, Test[]>();
   for (const test of tests) files.set(test.file ?? 'tests/db/arena.test.ts', [...(files.get(test.file ?? 'tests/db/arena.test.ts') ?? []), test]);
+  if (extra.suiteErrors && !files.has('tests/db/recovery.test.ts')) files.set('tests/db/recovery.test.ts', []);
   return {
-    success: tests.every(t => !t.failures?.length) && !fileFailure,
-    numPassedTests: tests.filter(t => !t.failures?.length).length, numFailedTests: tests.filter(t => t.failures?.length).length,
-    testResults: [...files].map(([file, list]) => ({ name: `C:/repo/${file}`, status: list.some(t => t.failures?.length) || fileFailure ? 'failed' : 'passed',
-      message: fileFailure ?? '', assertionResults: list.map(t => ({ fullName: t.name, status: t.failures?.length ? 'failed' : 'passed',
-        failureMessages: (t.failures ?? []).map(m => `AssertionError: ${m}\n    at tests/db/x.ts:1:1`) })) })),
+    reason: 'failed', unhandledErrors: extra.unhandled ?? [], passed: extra.passed ?? tests.filter(t => !t.errors?.length).length,
+    modules: [...files].map(([file, list], index) => {
+      const failed = list.filter(t => t.errors?.length);
+      const suites = new Map<string, string[]>();
+      for (const t of failed) for (const s of t.suites ?? []) suites.set(s, []);
+      if (file === 'tests/db/recovery.test.ts') for (const [name, errors] of Object.entries(extra.suiteErrors ?? {})) suites.set(name, errors);
+      return { file, state: failed.length || suites.size || (index === 0 && extra.moduleErrors) ? 'failed' : 'passed', errors: index === 0 ? extra.moduleErrors ?? [] : [],
+        suites: [...suites].map(([fullName, errors]) => ({ fullName, errors })),
+        tests: failed.map(t => ({ fullName: [...(t.suites ?? []), t.name].join(' > '), suites: t.suites ?? [], errors: t.errors! })) };
+    }),
   };
 }
-const CAPACITY = { file: 'tests/db/capacity.test.ts', name: 'Task 23.3: capacity against the free-tier budgets measures database growth, invocations and egress over accelerated boundaries with the real worker' };
+const SUITE = 'Task 23.3: capacity against the free-tier budgets';
+const CAPACITY = { file: 'tests/db/capacity.test.ts', name: 'measures database growth, invocations and egress over accelerated boundaries with the real worker', suites: [SUITE] };
 const BUDGET_FAILURES = ['database at 90 days, mixed schedules: expected 1.781 to be less than 1', 'database after one year, new-character schedule: expected 2.274 to be less than 1'];
 
 /** A Playwright JSON report: the failed tests and their error messages (one test per entry). */
@@ -34,7 +45,7 @@ function browserReport(failed: string[][]) {
   return { stats: { expected: 10, unexpected: failed.length }, suites: [{ title: 'x.spec.ts', specs: failed.map((errors, i) => ({ title: `case ${i}`,
     tests: [{ projectName: 'desktop', status: 'unexpected', results: [{ status: 'failed', errors: errors.map(message => ({ message })) }] }] })) }] };
 }
-const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack (net::ERR_NO_BUFFER_SPACE for http://127.0.0.1:3200/_next/static/chunks/a.js)`;
+const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack (net::ERR_NO_BUFFER_SPACE for http://127.0.0.1:3200/_next/static/chunks/a.js).`;
 
 /** A fake runner: exit codes by step id (0 when absent; a list is used up call by call), a stable Edge unless told otherwise. */
 function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: unknown[]; browserReports?: Record<string, unknown[]>;
@@ -59,20 +70,38 @@ function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: 
 }
 
 describe('the gate steps', () => {
-  it('follow docs/operations/verification-gates.md in one worktree, one after another', () => {
+  it('follow the approved safe order of docs/operations/verification-gates.md, one after another', () => {
     expect(gateSteps().map(step => step.id)).toEqual(ORDER);
-    const doc = readFileSync('docs/operations/verification-gates.md', 'utf8');
-    // The guide lists the same commands in the same order.
-    const positions = gateSteps().filter(step => step.kind !== 'edge').map(step => [step.display, doc.indexOf(step.display)] as const);
-    for (const [display, at] of positions) expect(at, display).toBeGreaterThanOrEqual(0);
+    const doc = readFileSync('docs/operations/verification-gates.md', 'utf8').replace(/\r\n/g, '\n');
+    // The approved guide (Avi, 2026-10-14) numbers the steps under "Safe order in one worktree"; each gate step is written
+    // there as `guide`, in the same order.
+    const order = /## Safe order in one worktree\n([\s\S]*?)\n## /.exec(doc)?.[1] ?? '';
+    expect(order).toMatch(/^1\. /m);
+    const positions = gateSteps().filter(step => step.guide).map(step => [step.guide!, order.indexOf(step.guide!)] as const);
+    expect(positions.map(([guide]) => guide)).toEqual(['npm test', 'npm run typecheck', 'node assets/source/build-assets.mjs --check', 'npm run build',
+      'npm run verify:static', 'npx playwright test', 'CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true',
+      'npm run verify:static -- .next/browser-test', 'PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test', 'git diff --check']);
+    for (const [guide, at] of positions) expect(at, guide).toBeGreaterThanOrEqual(0);
     expect(positions.map(([, at]) => at)).toEqual([...positions.map(([, at]) => at)].sort((a, b) => a - b));
-    expect(doc).toContain('npm run verify');
+    // The database tests follow the guide's own rule: alone (after the builds and scans, before any browser step), with the
+    // Edge container's start time compared before and after.
+    const rules = /## Database tests and the local Edge runtime\n([\s\S]*?)\n## /.exec(doc)?.[1] ?? '';
+    expect(rules).toContain('Run `npm run test:db` only while nothing else builds, runs a browser suite or edits files');
+    expect(rules).toContain("docker inspect -f '{{.State.StartedAt}}' supabase_edge_runtime_Cloudiator");
+    expect(ORDER.indexOf('db')).toBe(ORDER.indexOf('static') + 2);
+    // Avi's 2026-10-19 extension of that section describes this gate's Edge step and its single database rerun.
+    expect(rules).toContain("Extended with Avi's approval on 2026-10-19 (Task 23.6): the last-access refresh before the database tests.");
+    expect(rules).toMatch(/`npm run verify` \(`scripts\/verify\.mjs`\)/);
+    for (const phrase of ['FILE_FLAG_OPEN_REPARSE_POINT', 'skipped and never descended into', 'must lie under the resolved `supabase/functions`',
+      'fails the Edge step as an infrastructure fault', 'repeated at most once', 'no browser step is']) expect(rules, phrase).toContain(phrase);
   });
 
   it('run the capacity case with its budgets enforced, beside the whole database suite', () => {
     const db = byId(gateSteps(), 'db');
     expect(db.display).toBe('CAPACITY_GATE=1 npm run test:db');
     expect(db.env).toMatchObject({ CAPACITY_GATE: '1' });
+    expect(db.env?.CLOUDIATOR_GATE_REPORT).toMatch(/db\.json$/);
+    expect(db.args).toEqual(expect.arrayContaining(['--reporter=default', expect.stringMatching(/--reporter=.*vitest-gate-reporter\.mjs$/)]));
     expect(db.needs).toEqual(['edge']);
   });
 
@@ -110,6 +139,11 @@ describe('the gate steps', () => {
     expect(env).toEqual({ PATH: 'x', FORCE_COLOR: '1', CLOUDIATOR_BROWSER_TEST: 'true', NEXT_PUBLIC_FIXTURE_ENABLED: 'true' });
     expect(childEnv(byId(gateSteps(), 'unit'), { NO_COLOR: '1' })).toEqual({});
   });
+
+  it('take no rerun option: the database rerun is the approved single one, and browser runs are never rerun', () => {
+    expect(() => parseOptions(['--db-retries', '3'])).toThrow(/Unknown option --db-retries/);
+    expect(parseOptions(['--config', 'x.mjs', '--dev-port', '3200'])).toMatchObject({ config: 'x.mjs', devPort: 3200 });
+  });
 });
 
 describe('the database result', () => {
@@ -118,19 +152,40 @@ describe('the database result', () => {
   });
 
   it('names the database budget as the known blocker when it is the only failure', () => {
-    const result = classifyDb(dbReport([{ name: 'a' }, { ...CAPACITY, failures: BUDGET_FAILURES }]));
+    const result = classifyDb(dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }]));
     expect(result).toMatchObject({ status: 'blocked', passed: 1, failed: 0 });
     expect(result.blocked).toEqual([expect.objectContaining({ blocker: 'database-budget' })]);
     expect(KNOWN_BLOCKERS.find(b => b.id === 'database-budget')).toMatchObject({ name: 'database budget', owner: expect.stringContaining('Task 23.7') });
   });
 
   it('fails a run with any other failure, also when the blocker fails beside it', () => {
-    expect(classifyDb(dbReport([{ name: 'a', failures: ['expected 1 to be 2'] }, { ...CAPACITY, failures: BUDGET_FAILURES }]))).toMatchObject({ status: 'failed', failed: 1 });
+    expect(classifyDb(dbReport([{ name: 'a', errors: ['expected 1 to be 2'] }, { ...CAPACITY, errors: BUDGET_FAILURES }]))).toMatchObject({ status: 'failed', failed: 1 });
     // Another budget in the same capacity case is not the known blocker.
-    expect(classifyDb(dbReport([{ ...CAPACITY, failures: [...BUDGET_FAILURES, 'raw egress, 31 days: expected 1.2 to be less than 1'] }]))).toMatchObject({ status: 'failed' });
-    // A file that failed outside its tests (a hook, an import) is a failure.
-    expect(classifyDb(dbReport([{ name: 'a' }], 'Error: afterAll hook timed out'))).toMatchObject({ status: 'failed' });
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: [...BUDGET_FAILURES, 'raw egress, 31 days: expected 1.2 to be less than 1'] }]))).toMatchObject({ status: 'failed' });
+    // A module that failed outside its tests (an import, a top-level hook) is a failure.
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { moduleErrors: ['afterAll hook timed out'] }))).toMatchObject({ status: 'failed' });
     expect(classifyDb(null)).toMatchObject({ status: 'failed' });
+  });
+
+  it('fails a describe-level hook failure beside the blocker (its tests are skipped, not failed)', () => {
+    const result = classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { suiteErrors: { 'Task 22.2: recovery': ['beforeAll: connection refused'] } }));
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(result.failures).toEqual([expect.objectContaining({ test: 'Task 22.2: recovery', message: 'beforeAll: connection refused' })]);
+    // A failed suite that encloses no blocked test is a failure even without its own errors.
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { suiteErrors: { 'an unrelated suite': [] } }))).toMatchObject({ status: 'failed' });
+  });
+
+  it('fails an unhandled error beside the blocker', () => {
+    const result = classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { unhandled: ['late unhandled failure'] }));
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(result.failures).toEqual([expect.objectContaining({ test: '(unhandled error)', message: 'late unhandled failure' })]);
+  });
+
+  it('counts a budget check as the blocker only for a finite share of at least 1', () => {
+    for (const value of ['NaN', 'Infinity', '0.5', 'undefined']) {
+      expect(classifyDb(dbReport([{ ...CAPACITY, errors: [`database at 90 days, mixed schedules: expected ${value} to be less than 1`] }])), value).toMatchObject({ status: 'failed' });
+    }
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: ['database at 90 days, mixed schedules: expected 1 to be less than 1'] }]))).toMatchObject({ status: 'blocked' });
   });
 });
 
@@ -157,7 +212,7 @@ describe('the gate run', () => {
   });
 
   it('reports the database budget blocker by name and exits 2 when nothing else failed', async () => {
-    const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ name: 'a' }, { ...CAPACITY, failures: BUDGET_FAILURES }])] });
+    const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }])] });
     const results = await runGate(gateSteps(), io);
     expect(results.find(r => r.id === 'db')).toMatchObject({ status: 'blocked' });
     const summary = summarize(results);
@@ -166,10 +221,19 @@ describe('the gate run', () => {
     expect(summary.text).toContain('Task 23.7');
   });
 
+  it('exits 1 for a describe-hook failure or an unhandled error beside the blocker', async () => {
+    for (const extra of [{ suiteErrors: { 'Task 22.2: recovery': ['beforeAll: connection refused'] } }, { unhandled: ['late unhandled failure'] }]) {
+      const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], extra)] });
+      const results = await runGate(gateSteps(), io);
+      expect(results.find(r => r.id === 'db'), JSON.stringify(extra)).toMatchObject({ status: 'failed' });
+      expect(summarize(results)).toMatchObject({ status: 'failed', exitCode: 1 });
+    }
+  });
+
   it('discards a database run during which the Edge container was recreated, then reruns once on a settled Edge', async () => {
     // The first run starts and ends on different container start times; the rerun is stable.
     const { io, ran } = fakeIo({ starts: ['2026-10-19T14:23:38.1Z', '2026-10-19T14:30:02.5Z', '2026-10-19T14:31:00.0Z', '2026-10-19T14:31:00.0Z'],
-      reports: [dbReport([{ name: 'a', failures: ['connection refused'] }]), dbReport([{ name: 'a' }])] });
+      reports: [dbReport([{ name: 'a', errors: ['connection refused'] }]), dbReport([{ name: 'a' }])] });
     const results = await runGate(gateSteps(), io);
     expect(ran.filter(id => id === 'db' || id === 'settle')).toEqual(['settle', 'db', 'settle', 'db']);
     const db = results.find(r => r.id === 'db')!;
@@ -178,9 +242,10 @@ describe('the gate run', () => {
     expect(db.note).toContain('14:30:02.5Z');
   });
 
-  it('calls a twice-recreated Edge an infrastructure fault, never a result', async () => {
-    const { io } = fakeIo({ starts: ['a', 'b', 'c', 'd'], reports: [dbReport([{ name: 'a' }]), dbReport([{ name: 'a' }])] });
+  it('reruns the database tests exactly once, and calls a twice-recreated Edge an infrastructure fault', async () => {
+    const { io, ran } = fakeIo({ starts: ['a', 'b', 'c', 'd', 'e', 'f'], reports: [dbReport([{ name: 'a' }]), dbReport([{ name: 'a' }]), dbReport([{ name: 'a' }])] });
     const results = await runGate(gateSteps(), io);
+    expect(ran.filter(id => id === 'db')).toEqual(['db', 'db']);
     expect(results.find(r => r.id === 'db')).toMatchObject({ status: 'infrastructure' });
     expect(summarize(results)).toMatchObject({ status: 'failed', exitCode: 1 });
   });
@@ -195,22 +260,25 @@ describe('the gate run', () => {
 });
 
 describe('a browser run', () => {
-  it('is an infrastructure fault only when every failed test names a host network fault', () => {
+  it('fails on any failed test, and labels one beside a host network fault with its own first error', () => {
     expect(GATE_MARKER).toBe(HOST_FAULT_MARKER);
     expect(classifyBrowser(browserReport([]))).toMatchObject({ status: 'passed' });
-    expect(classifyBrowser(browserReport([['Error: expect(locator).toBeVisible() failed', HOST]]))).toMatchObject({ status: 'infrastructure', failed: 1 });
+    const labelled = classifyBrowser(browserReport([['Error: expect(locator).toBeVisible() failed', HOST]]));
+    expect(labelled).toMatchObject({ status: 'failed', failed: 1 });
+    expect(labelled.failures).toEqual([expect.objectContaining({ message: 'Error: expect(locator).toBeVisible() failed',
+      hostFault: expect.stringContaining('net::ERR_NO_BUFFER_SPACE') })]);
     expect(classifyBrowser(browserReport([[HOST], ['Error: expect(received).toBe(expected)']]))).toMatchObject({ status: 'failed', failed: 2 });
     expect(classifyBrowser(null)).toMatchObject({ status: 'failed' });
   });
 
-  it('is run once more after a host network fault, and the discarded run is reported', async () => {
-    const { io, ran } = fakeIo({ codes: { production: [1, 0] }, browserReports: { production: [browserReport([[HOST]]), browserReport([])] } });
+  it('is never rerun: a probable host fault still fails the gate, named in the summary with the original error', async () => {
+    const { io, ran } = fakeIo({ codes: { production: [1, 0] }, browserReports: { production: [browserReport([['Error: expect(locator).toBeVisible() failed', HOST]]), browserReport([])] } });
     const results = await runGate(gateSteps(), io);
-    expect(ran.filter(id => id === 'production')).toEqual(['production', 'production']);
-    const production = results.find(r => r.id === 'production')!;
-    expect(production.status).toBe('passed');
-    expect(production.note).toContain('1 run discarded');
-    expect(production.note).toContain('ERR_NO_BUFFER_SPACE');
+    expect(ran.filter(id => id === 'production')).toEqual(['production']);
+    expect(results.find(r => r.id === 'production')).toMatchObject({ status: 'failed' });
+    const summary = summarize(results);
+    expect(summary).toMatchObject({ status: 'failed', exitCode: 1 });
+    expect(summary.text).toMatch(/probable host fault \(net::ERR_NO_BUFFER_SPACE[^)]*\).*expect\(locator\)\.toBeVisible\(\) failed/);
   });
 
   it('is a failure, never rerun, when a test failed for any other reason', async () => {
@@ -222,23 +290,59 @@ describe('a browser run', () => {
 });
 
 describe('the Edge access-time refresh (C22)', () => {
-  it.skipIf(process.platform !== 'win32')('sets every folder and file access time to now and leaves the modification times', () => {
-    const root = mkdtempSync(join(tmpdir(), 'cloudiator-atime-'));
+  const windows = process.platform === 'win32';
+  /** A scratch tree under the test temp folder: root/{deno.json, _shared/domain/types.ts} and `outside/` beside it. */
+  function scratch() {
+    const base = mkdtempSync(join(tmpdir(), 'cloudiator-atime-'));
+    const root = join(base, 'functions'), outside = join(base, 'outside');
+    mkdirSync(join(root, '_shared', 'domain'), { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(join(root, '_shared', 'domain', 'types.ts'), 'export {};');
+    writeFileSync(join(root, 'deno.json'), '{}');
+    writeFileSync(join(outside, 'target.ts'), 'export {};');
+    const old = new Date('2026-01-01T00:00:00Z');
+    const inside = [root, join(root, '_shared'), join(root, '_shared', 'domain'), join(root, '_shared', 'domain', 'types.ts'), join(root, 'deno.json')];
+    for (const entry of [...inside, outside, join(outside, 'target.ts')]) utimesSync(entry, old, old);
+    return { base, root, outside, inside };
+  }
+
+  it.skipIf(!windows)('sets every folder and file access time to now and leaves the modification times', () => {
+    const { base, inside } = scratch();
     try {
-      mkdirSync(join(root, '_shared', 'domain'), { recursive: true });
-      writeFileSync(join(root, '_shared', 'domain', 'types.ts'), 'export {};');
-      writeFileSync(join(root, 'deno.json'), '{}');
-      const old = new Date('2026-01-01T00:00:00Z');
-      const entries = [root, join(root, '_shared'), join(root, '_shared', 'domain'), join(root, '_shared', 'domain', 'types.ts'), join(root, 'deno.json')];
-      for (const entry of entries) utimesSync(entry, old, old);
-      const before = entries.map(entry => statSync(entry, { bigint: true }).mtimeNs);
+      const before = inside.map(entry => statSync(entry, { bigint: true }).mtimeNs);
       const started = Date.now();
-      expect(refreshAccessTimes(root)).toBe(entries.length);
-      for (const [i, entry] of entries.entries()) {
+      expect(refreshAccessTimes(inside[0])).toEqual({ ok: true, count: inside.length, skipped: 0 });
+      for (const [i, entry] of inside.entries()) {
         const stat = statSync(entry, { bigint: true });
         expect(Number(stat.atimeNs / 1_000_000n), entry).toBeGreaterThanOrEqual(started - 2_000);
         expect(stat.mtimeNs, entry).toBe(before[i]);
       }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(!windows)('skips a junction and never touches what it points to', () => {
+    const { base, root, outside, inside } = scratch();
+    try {
+      symlinkSync(outside, join(root, 'linked'), 'junction');
+      const target = statSync(join(outside, 'target.ts'), { bigint: true });
+      const folder = statSync(outside, { bigint: true });
+      expect(refreshAccessTimes(root)).toEqual({ ok: true, count: inside.length, skipped: 1 });
+      expect(statSync(join(outside, 'target.ts'), { bigint: true }).atimeNs).toBe(target.atimeNs);
+      expect(statSync(outside, { bigint: true }).atimeNs).toBe(folder.atimeNs);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(!windows)('reports a failed refresh with its reason, and the Edge preparation fails with it', () => {
+    const missing = join(tmpdir(), 'cloudiator-atime-missing-folder');
+    const refresh = refreshAccessTimes(missing);
+    expect(refresh).toMatchObject({ ok: false, reason: expect.stringMatching(/\S/) });
+    expect(prepareEdge(missing)).toMatchObject({ ok: false, reason: expect.stringContaining('access-time refresh failed') });
+  });
+
+  it('prepares an Edge folder: refreshed (on Windows) and read', () => {
+    const { base, root, inside } = scratch();
+    try {
+      expect(prepareEdge(root)).toMatchObject({ ok: true, files: 2, ...(windows ? { refreshed: inside.length, skipped: 0 } : {}) });
+    } finally { rmSync(base, { recursive: true, force: true }); }
   });
 });

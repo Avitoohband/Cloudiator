@@ -320,3 +320,49 @@ They are in `C:\Users\AVI_OP~1\AppData\Local\Temp\claude\C--Avi-Studies-Projects
    - **After creation.** My gladiator opens at once from the dialog's confirming read, instead of after a second read.
    - **Arena timelines.** Two at a time means a 50-entrant minute-60 wave lands in about 13 round trips before the camp stages it. Before, all were read at once with twice the reads.
 5. **A hanging tournament view read** delays the others in its batch by at most 5 s, a bounded trade for an order-independent ring layout.
+
+## Fix round 1
+
+Source: [the Task 23.4 review](../../.superpowers/sdd/2026-10-19-task-23-release-readiness/task-23.4-review.md) I1, plus the controller's request for a ring assertion and 360 px screenshots. The review's Minor items are deferred, as briefed.
+
+**Commit:** `598e749` fix: restore the tournament panel focus ring (on `1271b39`). Not pushed.
+
+### I1: the tournament panel's focus ring
+
+- **The defect:** `fc99367` put `.retry:hover { … }` into the middle of the panel's `:focus-visible` selector list, and `59036a8` then put `.retry { justify-self: start; }` there.
+  - The round tabs, Watch replay and the sample buttons therefore got only `justify-self: start` when focused.
+  - They lost the panel's `outline: 3px solid gold; outline-offset: 2px`. Their ring came from the global `button:focus-visible` rule instead, at a 5 px offset, which the round-tab strip (`overflow-x: auto`, no padding) clips more.
+- **The fix** (`TournamentPanel.module.css`):
+  - the original four-selector `:focus-visible` rule is restored as it was at `f238eda`, with `.retry:focus-visible` added beside `.replayHeader button:focus-visible`;
+  - `.retry { justify-self: start; }` and `.retry:hover` are now rules of their own;
+  - nothing else in the file changed (`git diff f238eda` shows only the Try again additions).
+- **Test:** tournament.spec, *rings a focused round tab and Watch replay with the panel's gold outline*.
+  - The keyboard moves the focus to the Final tab, then to Watch replay.
+  - Each must match `:focus-visible` with a solid 3 px outline in `rgb(242, 198, 107)` (`--gold`) at a 2 px offset.
+  - **RED**, with the CSS fix stashed: both projects failed on the round tab with `"offset": "5px"`, expected `"2px"`.
+  - **GREEN** with the fix.
+
+### 360 px review screenshots
+
+`reviewShot360` (`tests/browser/review-shots.ts`) takes the same shot in a 360×740 viewport, then restores the test's own viewport. The shots are in the same perf-shots folder, for both projects:
+- `reload-*-camp-failed-360`, also in `-production`;
+- `reload-*-replay-try-again-360`;
+- `reload-*-tournament-replay-try-again-360`;
+- `perf-*-overlay-camp-360`, also in `-production`.
+
+At 360 px the Try again buttons sit at the start of their sections, and the overlay sits below the pill, clear of the chip.
+
+### Gates
+
+Ports 3300 and 4173 were free before and after each browser run.
+
+1. **Covering specs** (`tournament.spec.ts`, `release.spec.ts` and `read-render.spec.ts`, both projects, private config on 3300): 129 passed, 3 skipped, 0 failed.
+2. **`npm test`:** 53 files, 1124 tests passed.
+3. **`npm run typecheck`:** clean (`tsc`, `deno check`, and the 2 Edge tests).
+4. **Asset check:** up to date. `npm run build` and `verify:static` passed: 5 routes, 91 assets.
+5. **Full development suite** (3300): **527 passed, 25 skipped, 0 failed, 0 flaky**. That is the previous 525 and the new ring test on both projects.
+6. **Production gate:**
+   - the isolated build: exit 0;
+   - `verify:static -- .next/browser-test`: clean;
+   - repo config on 4173: **24 passed, 528 skipped, 0 failed**.
+7. **`git diff --check`:** clean.

@@ -9,7 +9,8 @@
 // so the byes are public then too; a fought bout's result appears only once its round's reveal time has passed, with
 // the logged winner, and participants of a future round stay hidden inside the null result. Placements (public place
 // and Task 10's six safe completion fields) appear only once the tournament is settled at minute 80; an owner reads its
-// own rewards from its own activity timeline.
+// own rewards from its own activity timeline. From seven days after its end, the view is the one served after the cleanup
+// that compacts its logs (Task 22.5).
 import type { TournamentGraph, TournamentOutcome } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { ActivitySummary, BattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events.ts';
 import type { PublicActor, TournamentBout, TournamentEntrant, TournamentView } from '../../supabase/functions/_shared/contracts/reads.ts';
@@ -47,10 +48,17 @@ export function insufficientView(key: TournamentKey): TournamentView {
   return { ...frame(key), status: 'insufficient-entrants', bracket: null, entrants: publicEntrants(entrants), bouts: [], placements: [] };
 }
 
+/**
+ * Whether the server's hourly cleanup has run over this tournament by `asOfMs` (Task 22.5): seven days after its end it
+ * compacts each fought result's battle log to its fight summary and flips its entrants' replay expiry in the same call.
+ * The fixtures model the view as served after that cleanup.
+ */
+const cleanedUp = (graph: TournamentGraph, asOfMs: number) => asOfMs >= graph.settlesAtMs + REPLAY_KEPT_MS;
+
 /** Task 10's six safe fields of an entrant's settled tournament activity, as its public completion shows them. */
-function completionOf(graph: TournamentGraph, o: TournamentOutcome): PublicActivitySummary {
+function completionOf(graph: TournamentGraph, o: TournamentOutcome, asOfMs: number): PublicActivitySummary {
   return { activityId: o.activityId, resolvedKind: 'tournament', result: o.result, success: o.success, settledAtMs: graph.settlesAtMs,
-    replayExpiry: { state: 'available', expiresAtMs: graph.settlesAtMs + REPLAY_KEPT_MS } };
+    replayExpiry: cleanedUp(graph, asOfMs) ? { state: 'expired' } : { state: 'available', expiresAtMs: graph.settlesAtMs + REPLAY_KEPT_MS } };
 }
 
 /**
@@ -72,14 +80,18 @@ export function projectTournament(graph: TournamentGraph, outcomes: readonly Tou
     if (result && bout.bye) revealedResult = { participants: [entrant(result.winnerId)], winnerId: result.winnerId, bye: true };
     else if (result) {
       const log = structuredClone(result.log) as BattleLog;
-      revealedResult = { participants: log.participants.map(p => entrant(p.gladiatorId)), winnerId: result.winnerId, bye: false, battleLog: log };
+      const participants = log.participants.map(p => entrant(p.gladiatorId));
+      // After cleanup only the fight summary of the log is left (14-operations.sql exception 3).
+      revealedResult = cleanedUp(graph, asOfMs)
+        ? { participants, winnerId: result.winnerId, bye: false, fight: { durationMs: log.durationMs, victoryReason: log.victoryReason, tieBreakReason: log.tieBreakReason } }
+        : { participants, winnerId: result.winnerId, bye: false, battleLog: log };
     }
     return { id: bout.id, round: bout.round, position: bout.position, parentBoutIds: [...bout.parentBoutIds], revealedResult };
   });
   const settled = outcomes !== null && asOfMs >= graph.settlesAtMs;
   const placements: TournamentView['placements'] = !settled ? [] : [...outcomes]
     .sort((a, b) => a.place - b.place || (a.gladiatorId < b.gladiatorId ? -1 : 1))
-    .map(o => ({ gladiatorId: o.gladiatorId, place: o.place, completion: completionOf(graph, o) }));
+    .map(o => ({ gladiatorId: o.gladiatorId, place: o.place, completion: completionOf(graph, o, asOfMs) }));
   return {
     id: graph.id, league: graph.league, slotIndex: graph.slotIndex, startsAtMs: graph.startsAtMs, endsAtMs: graph.settlesAtMs,
     status: !started ? 'scheduled' : settled ? 'completed' : asOfMs < graph.settlesAtMs ? 'active' : 'processing',
@@ -109,7 +121,7 @@ export function ownerTimeline(graph: TournamentGraph, o: TournamentOutcome, asOf
     { id: `${activityId}:${graph.rounds + 1}`, kind: 'return', revealedAtMs: graph.settlesAtMs, startedAtMs: graph.settlesAtMs,
       endsAtMs: graph.settlesAtMs, label: 'Results credited' },
   ];
-  const completion = completionOf(graph, o);
+  const completion = completionOf(graph, o, asOfMs);
   const summary: ActivitySummary = { activityId, resolvedKind: 'tournament', result: o.result, success: o.success,
     rewards: { money: o.rewards.money, renown: o.rewards.renown, xp: o.rewards.xp, attributePoints: o.rewards.attributePoints, items: [],
       overflowMoney: o.rewards.overflowMoney },

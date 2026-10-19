@@ -11,6 +11,7 @@ import late from './tournaments/late.json';
 import completed from './tournaments/completed.json';
 import pair from './tournaments/pair.json';
 import insufficient from './tournaments/insufficient.json';
+import aged from './tournaments/aged.json';
 import ownerTimelines from './tournaments/owner-timelines.json';
 import { TOURNAMENT_SAMPLE_KEYS, TOURNAMENTS, tournamentAsOf, tournamentId, type TournamentKey } from './tournament-ids.ts';
 
@@ -19,7 +20,7 @@ export * from './tournament-ids.ts';
 const view = (json: unknown) => json as TournamentView;
 export const TOURNAMENT_VIEWS: Record<TournamentKey, TournamentView> = {
   upcoming: view(upcoming), opening: view(opening), midway: view(midway), late: view(late),
-  completed: view(completed), pair: view(pair), insufficient: view(insufficient),
+  completed: view(completed), pair: view(pair), insufficient: view(insufficient), aged: view(aged),
 };
 /** Views by tournament id, as gateway.tournament(id) returns them. */
 export const TOURNAMENT_VIEWS_BY_ID: Record<string, TournamentView> = Object.fromEntries(Object.values(TOURNAMENT_VIEWS).map(v => [v.id, v]));

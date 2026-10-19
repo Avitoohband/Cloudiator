@@ -39,6 +39,7 @@ import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { GameViewport } from '../../game/GameViewport';
+import type { DisplayClock } from '../../game/display-clock';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
@@ -107,13 +108,13 @@ function SampleLink({ view, label, onOpen }: { view: SceneView; label: string; o
 }
 
 /** Results: the recent results, and in fixture mode the sample replays and expeditions below them, opened as scenes. */
-function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, onWatch, onOpen }: {
-  fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null;
+function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen }: {
+  fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; clock: DisplayClock;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
   onOpen(view: SceneView): void;
 }) {
   return <>
-    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} onWatch={onWatch} />
+    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
@@ -284,8 +285,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
         onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} />;
-      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} onWatch={watchResult}
-        onOpen={openScene} />;
+      case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
+        onWatch={watchResult} onOpen={openScene} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;

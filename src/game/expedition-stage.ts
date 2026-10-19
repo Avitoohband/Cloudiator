@@ -9,6 +9,7 @@
 import type { ActivitySummary, BattleLog, RevealedStage, RevealedTimeline } from '@contracts/events';
 import { RULES_V1 } from '@domain/rules-v1';
 import { REPLAY_OUTRO_MS, reduceReplay } from './replay';
+import { replayKept } from '../lib/replay-retention';
 
 /** One expedition fills one shared slot: depart at minute 0, encounters at 20, 40 and 60, arrival at 80. */
 export const EXPEDITION_MS = RULES_V1.clock.slotMs;
@@ -98,6 +99,12 @@ export type ExpeditionSceneState = {
   readonly outcome: 'success' | 'failure' | null;
   /** The settled summary (owner timelines only), once its settlement time has passed. */
   readonly summary: ActivitySummary | null;
+  /**
+   * At the display time the encounter replays are no longer kept, by the settled owner summary or, for anyone, the settled
+   * public completion (Task 22.5: decided by time, so a summary still saying available past its expiry counts). After
+   * cleanup an expedition has no stage left, only this and its summary.
+   */
+  readonly replayExpired: boolean;
   /** Minute 80 has passed and no summary is visible: an owner sees "Processing results". */
   readonly awaitingSummary: boolean;
 };
@@ -170,8 +177,11 @@ export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: 
   const t = displayNowMs;
   const revealed = timeline.stages.filter(stage => stage.revealedAtMs <= t);
   const summary = timeline.summary && timeline.summary.settledAtMs <= t ? structuredClone(timeline.summary) : null;
-  // Replay expiry, like everything else in the summary, counts only once the summary is settled.
-  const kept = summary?.replayExpiry.state !== 'expired';
+  // Replay expiry, like everything else in the summary, counts only once the summary is settled; a spectator's public
+  // completion decides the same way (Task 22.5).
+  const completion = timeline.completion && timeline.completion.settledAtMs <= t ? timeline.completion : null;
+  const expiry = summary?.replayExpiry ?? completion?.replayExpiry;
+  const replayExpired = !!expiry && !replayKept(expiry, t);
 
   let encounters = 0;
   const encounterOf = new Map<RevealedStage, number>();
@@ -185,7 +195,7 @@ export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: 
       label: inProgress ? `Encounter ${encounter}` : stage.label,
       startedAtMs: stage.startedAtMs, endsAtMs: stage.endsAtMs,
       encounter, inProgress, outcome,
-      replay: encounter !== null && !inProgress && !!stage.battleLog && kept,
+      replay: encounter !== null && !inProgress && !!stage.battleLog && !replayExpired,
       final: isFinal(stage),
     };
   });
@@ -254,6 +264,7 @@ export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: 
     outcome,
     summary,
     awaitingSummary: !summary && startMs !== null && t >= startMs + EXPEDITION_MS,
+    replayExpired,
   }, new Set(revealed.flatMap(stage => (stage.battleLog ? [stage.battleLog] : []))));
 }
 

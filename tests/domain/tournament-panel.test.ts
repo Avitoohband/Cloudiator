@@ -392,3 +392,72 @@ describe('the live Tournaments panel before the shared clock has the server’s 
     expect(synced).toContain('Loading the tournament…');
   });
 });
+
+describe('bout replays older than seven days (Task 22.5)', () => {
+  const DAY = 86_400_000;
+  /** Minutes from the start of `key` to the end of its replays: the end of its slot plus seven days. */
+  const expiryMinute = (key: TournamentKey) => (TOURNAMENT_VIEWS[key].endsAtMs + 7 * DAY - TOURNAMENTS[key].startsAtMs) / MIN;
+  const polled = (key: TournamentKey) => withoutTournamentLogs(TOURNAMENT_VIEWS[key]);
+  const final = TOURNAMENT_VIEWS.completed.bouts.find(b => b.round === 3)!;
+  const NOTE = 'These bout replays are no longer kept. Detailed replays are kept for seven days; the results stay.';
+
+  it('offers each decided bout’s replay until seven days after the tournament ends, by display time', () => {
+    const kept = bracket('completed', expiryMinute('completed') - 1 / MIN, { round: 1 }, polled('completed'));
+    expect(count(kept, '>Watch replay<')).toBe(4);
+    expect(text(kept)).not.toContain('no longer kept');
+    const gone = bracket('completed', expiryMinute('completed'), { round: 1 }, polled('completed'));
+    expect(gone).not.toContain('Watch replay');
+    expect(count(text(gone), 'Replay no longer kept')).toBe(4);
+    expect(text(gone)).toContain(NOTE);
+    // The winners and how they won stay: they come from the result and its fight summary, not from the log.
+    expect(count(text(gone), 'Winner:')).toBe(4);
+  });
+
+  it('shows a tournament older than seven days from its compacted bouts: fight summaries, results and placements, no replay', () => {
+    const view = TOURNAMENT_VIEWS.aged;
+    const fought = view.bouts.filter(b => b.revealedResult && !b.revealedResult.bye);
+    expect(fought.length).toBeGreaterThan(0);
+    for (const bout of fought) {
+      expect(bout.revealedResult!.battleLog, bout.id).toBeUndefined();
+      expect(bout.revealedResult!.fight, bout.id).toMatchObject({ durationMs: expect.any(Number), victoryReason: expect.any(String) });
+    }
+    const sample = TOURNAMENT_SAMPLES.find(s => s.id === tournamentId('aged'))!;
+    expect(sample.asOfMs).toBeGreaterThanOrEqual(view.endsAtMs + 7 * DAY);
+    const html = bracket('aged', (sample.asOfMs - TOURNAMENTS.aged.startsAtMs) / MIN, { round: 1 }, polled('aged'));
+    expect(html).not.toContain('Watch replay');
+    expect(text(html)).toContain('Replay no longer kept');
+    expect(text(html)).toContain(NOTE);
+    expect(text(html)).toMatch(/was defeated\.|tie-break decided it\.|larger share of health\./);
+    expect(text(html)).toContain('Placements');
+    // Its public completions were flipped by the same cleanup that compacted the logs.
+    expect(view.placements.every(p => p.completion.replayExpiry.state === 'expired')).toBe(true);
+  });
+
+  it('says a watched replay is no longer kept once its log cannot be read after seven days, and cannot be loaded before', () => {
+    const at = expiryMinute('completed');
+    for (const replayStatus of ['loading', 'failed'] as const) {
+      const after = text(bracket('completed', at, { replayBoutId: final.id, replayStatus }, polled('completed')));
+      expect(after).toContain('This replay is no longer kept. Detailed replays are kept for seven days. The result stays in the recent results.');
+      expect(after).not.toContain('cannot be loaded right now');
+      expect(after).not.toContain('Loading the replay…');
+    }
+    const before = text(bracket('completed', at - 1 / MIN, { replayBoutId: final.id, replayStatus: 'failed' }, polled('completed')));
+    expect(before).toContain('This replay cannot be loaded right now. Try again shortly.');
+    // A log already loaded keeps playing: watching it never depends on the clock.
+    expect(text(bracket('completed', at, { replayBoutId: final.id, replayStatus: null }))).toContain('Combat log');
+  });
+
+  it('says an old tournament link is no longer kept instead of a missing tournament, by the slot its id carries', () => {
+    const tid = tournamentId('completed');
+    const end = TOURNAMENT_VIEWS.completed.endsAtMs;
+    const card = (failure: 'not-found' | 'unavailable', now: number) =>
+      text(renderToStaticMarkup(createElement(TournamentCardNotice, { id: tid, failure, now, processedSlotIndex: null })));
+    expect(card('not-found', end + 7 * DAY)).toContain('This tournament is no longer kept');
+    expect(card('not-found', end + 7 * DAY)).toContain('Detailed replays are kept for seven days, and results stay in the recent results for 90 days.');
+    expect(card('not-found', end + 100 * DAY)).toContain('This tournament is no longer kept');
+    // Within seven days a missing view still means no tournament in that league; a failed read stays a failed read.
+    expect(card('not-found', end + 7 * DAY - 1)).toContain('No tournament matches this selection.');
+    expect(card('unavailable', end + 7 * DAY)).toContain('Tournament brackets cannot be loaded right now.');
+    expect(card('unavailable', end + 7 * DAY)).not.toContain('no longer kept');
+  });
+});

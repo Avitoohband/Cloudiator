@@ -270,6 +270,30 @@ describe('replays and the summary', () => {
     expect(replays(renderExpeditionStage(t, t.summary!.settledAtMs))).toEqual([]);
   });
 
+  it('offers no replay from the expiry on by display time, from the owner summary or the public completion (Task 22.5)', () => {
+    const t = T.woodland;
+    const replays = (s: ExpeditionSceneState) => s.stages.filter(x => x.replay).map(x => x.encounter);
+    const expiry = (t.summary!.replayExpiry as { expiresAtMs: number }).expiresAtMs;
+    // The summary still says available: kept until its expiry, and not from then on.
+    expect(renderExpeditionStage(t, expiry - 1)).toMatchObject({ replayExpired: false });
+    expect(replays(renderExpeditionStage(t, expiry - 1))).toEqual([1, 2, 3]);
+    expect(renderExpeditionStage(t, expiry)).toMatchObject({ replayExpired: true, phase: 'settled' });
+    expect(replays(renderExpeditionStage(t, expiry))).toEqual([]);
+    // A spectator decides by the settled public completion.
+    const { summary, ...spectator } = t;
+    const completion = { activityId: t.activityId, resolvedKind: 'expedition' as const, result: summary!.result, success: summary!.success,
+      settledAtMs: summary!.settledAtMs, replayExpiry: summary!.replayExpiry };
+    expect(replays(renderExpeditionStage({ ...spectator, completion }, expiry - 1))).toEqual([1, 2, 3]);
+    expect(renderExpeditionStage({ ...spectator, completion }, expiry)).toMatchObject({ replayExpired: true, summary: null });
+    expect(replays(renderExpeditionStage({ ...spectator, completion }, expiry))).toEqual([]);
+    // After cleanup no stage is left: the owner keeps the settled summary, and the state says the replays are gone.
+    const cleared = renderExpeditionStage({ ...t, stages: [] }, expiry);
+    expect(cleared).toMatchObject({ stages: [], replayExpired: true, summary: { success: true } });
+    expect(renderExpeditionStage({ ...spectator, stages: [], completion }, expiry)).toMatchObject({ stages: [], replayExpired: true, summary: null });
+    // Nothing settled yet says nothing about expiry.
+    expect(at(t, 39).replayExpired).toBe(false);
+  });
+
   it('takes the result and rewards only from the timeline summary, once it is settled', () => {
     const t = T.woodland;
     expect(at(t, 80)).toMatchObject({ phase: 'arrived', summary: null, awaitingSummary: true, outcome: 'success' });

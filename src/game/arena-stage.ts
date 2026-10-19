@@ -14,6 +14,7 @@
 import type { ActivitySummary, BattleLog, RevealedCombatant, RevealedStage, RevealedTimeline } from '@contracts/events';
 import type { ClassId } from '@contracts/commands';
 import { RULES_V1 } from '@domain/rules-v1';
+import { replayKept } from '../lib/replay-retention';
 
 export const ARENA_SLOT_MS = RULES_V1.clock.slotMs;
 /** The bout log is revealed at minute 60 of the slot. */
@@ -85,7 +86,10 @@ export type ArenaStageState = {
   readonly summary: ActivitySummary | null;
   /** The owner's minute 80 has passed and no summary is visible: "Processing results". */
   readonly awaitingSummary: boolean;
-  /** The owner's summary says the detailed log is no longer kept. */
+  /**
+   * At the display time the detailed log is no longer kept: the owner's summary says so, or, for anyone, the settled public
+   * completion does (Task 22.5: decided by time, so a summary still saying available past its expiry counts).
+   */
   readonly replayExpired: boolean;
 };
 
@@ -145,7 +149,11 @@ export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: numbe
   }
 
   const summary = owner && summarySource && summarySource.settledAtMs <= t ? structuredClone(summarySource) : null;
-  const replayExpired = owner && summarySource?.replayExpiry.state === 'expired';
+  // By the display time (Task 22.5): the owner's summary, else the public completion once settled, may say the replay is
+  // no longer kept, even while its summary still says available.
+  const completion = timeline.completion && timeline.completion.settledAtMs <= t ? timeline.completion : null;
+  const expiry = (owner ? summarySource?.replayExpiry : undefined) ?? completion?.replayExpiry;
+  const replayExpired = !!expiry && !replayKept(expiry, t);
   const phase: ArenaPhase = summary ? 'credited'
     : boutStage ? (finished ? 'completed' : 'bout')
       : startMs !== null && t >= startMs + ARENA_REVEAL_MS ? 'preparing'

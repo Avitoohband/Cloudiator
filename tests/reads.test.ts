@@ -333,7 +333,7 @@ describe('protected Data API adapters', () => {
     expect(results).toContain('limit=50');
     // Only the fields the view needs cross: participants, winner, bye and the fight summary, never the battle log itself.
     expect(new URL(`http://local${results}`).searchParams.get('select')!.split(',')).toEqual(['bout_id', 'ordinal',
-      'participants:result->participants', 'winnerId:result->>winnerId', 'bye:result->bye', 'durationMs:result->battleLog->durationMs',
+      'participants:result->participants', 'winnerId:result->>winnerId', 'bye:result->bye', 'fight:result->fight', 'durationMs:result->battleLog->durationMs',
       'victoryReason:result->battleLog->>victoryReason', 'tieBreakReason:result->battleLog->>tieBreakReason']);
     // A due round without its result is processing, never invented.
     const late = await readTournament(tournament({ tournament_views: view, tournament_bout_results: [], tournament_placements: [] }, [], S + 2_400_000), view.id);
@@ -345,6 +345,14 @@ describe('protected Data API adapters', () => {
     const summarized = await readTournament(tournament({ tournament_views: view, tournament_bout_results: fought, tournament_placements: [] }, [], S + 2_400_000), view.id);
     expect(summarized.bouts[0].revealedResult).toEqual({ ...result, fight: { durationMs: 9_000, victoryReason: 'tie-break', tieBreakReason: 'simultaneous-defeat' } });
     expect(JSON.stringify(summarized)).not.toContain('battleLog');
+    // Task 22.5: seven days after the tournament, cleanup compacts the log to `result.fight`; the read keeps showing it
+    // (only its three fields cross), and prefers it to anything read through a log.
+    const compacted = [{ ...due[0], fight: { durationMs: 12_000, victoryReason: 'defeat', tieBreakReason: null, extra: 'never shown' } }];
+    const aged = await readTournament(tournament({ tournament_views: view, tournament_bout_results: compacted, tournament_placements: [] }, [], S + 4_800_000 + 8 * 86_400_000), view.id);
+    expect(aged.bouts[0].revealedResult).toEqual({ ...result, fight: { durationMs: 12_000, victoryReason: 'defeat', tieBreakReason: null } });
+    const both = [{ ...fought[0], fight: { durationMs: 12_000, victoryReason: 'defeat', tieBreakReason: null } }];
+    expect((await readTournament(tournament({ tournament_views: view, tournament_bout_results: both, tournament_placements: [] }, [], S + 2_400_000), view.id))
+      .bouts[0].revealedResult!.fight).toEqual({ durationMs: 12_000, victoryReason: 'defeat', tieBreakReason: null });
     // One entrant settled: no placement yet, and processing after minute 80.
     const one = await readTournament(tournament({ tournament_views: view, tournament_bout_results: due,
       tournament_placements: [{ gladiator_id: 'g1', activity_id: 'a1', place: 1 }], recent_results: [{ activity_id: 'a1', summary: completion('a1', 'victory') }] },
@@ -384,6 +392,13 @@ describe('protected Data API adapters', () => {
     for (const row of [null, { battleLog: null }]) {
       await expect(readTournamentLog(tournament({ tournament_bout_results: row }, [], S), id)).rejects.toMatchObject({ code: 'not-found' });
     }
+    // Task 22.5: from seven days after the tournament's end (its slot's end) the log is no longer kept, by the sampled server
+    // time: not-found without asking for it, whether or not cleanup has compacted it yet.
+    const end = S + 4_800_000, week = 604_800_000;
+    expect(await readTournamentLog(tournament({ tournament_bout_results: { battleLog: log } }, [], end + week - 1), id)).toEqual(log);
+    const expired: string[] = [];
+    await expect(readTournamentLog(tournament({ tournament_bout_results: { battleLog: log } }, expired, end + week), id)).rejects.toMatchObject({ code: 'not-found' });
+    expect(expired.map(c => c.split('?')[0].split('/').at(-1))).toEqual(['world_revision']);
     // Malformed bout ids never reach a query.
     const none: string[] = [], client = tournament({}, none, 0);
     for (const bad of ['tournament:301:bronze', 'tournament:301:bronze:1:0,bout_id.neq.x', 'tournament:301:platinum:1:0', 'x', '']) {

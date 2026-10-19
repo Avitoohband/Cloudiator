@@ -6,6 +6,7 @@ import type {
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
+import { tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
 
 export class GatewayReadError extends Error {
   constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
@@ -269,17 +270,23 @@ const PAGE = 50;
 /**
  * The result fields a polled tournament read needs, by PostgREST JSON-path selection on `result`: participants, winner,
  * bye and the fight summary (duration, victory and tie-break reasons). Never the battle log (2b review I1): a late
- * 50-entrant view carried about half a megabyte of logs on every poll. A log loads on demand (`readTournamentLog`).
+ * 50-entrant view carried about half a megabyte of logs on every poll. A log loads on demand (`readTournamentLog`). Seven
+ * days after the tournament, cleanup replaces the log with `result.fight` (Task 22), which carries the same summary.
  */
-const POLLED_RESULT = 'bout_id,ordinal,participants:result->participants,winnerId:result->>winnerId,bye:result->bye,'
+const POLLED_RESULT = 'bout_id,ordinal,participants:result->participants,winnerId:result->>winnerId,bye:result->bye,fight:result->fight,'
   + 'durationMs:result->battleLog->durationMs,victoryReason:result->battleLog->>victoryReason,tieBreakReason:result->battleLog->>tieBreakReason';
 type PolledResultRow = { bout_id: string; ordinal: number; participants: TournamentEntrant[]; winnerId: GladiatorId; bye: boolean;
-  durationMs: unknown; victoryReason: unknown; tieBreakReason: unknown };
-/** A polled row as the view's revealed result; the stage core checks it is well formed before showing it. */
+  fight?: unknown; durationMs: unknown; victoryReason: unknown; tieBreakReason: unknown };
+/**
+ * A polled row as the view's revealed result: its fight summary is the compacted `result.fight` when there is one, else
+ * read through the log (only its three fields cross either way). The stage core checks it is well formed before showing it.
+ */
 function polledResult(row: PolledResultRow): NonNullable<TournamentBout['revealedResult']> {
   const result: NonNullable<TournamentBout['revealedResult']> = { participants: row.participants, winnerId: row.winnerId, bye: row.bye };
-  if (row.durationMs != null || row.victoryReason != null || row.tieBreakReason != null) {
-    result.fight = { durationMs: row.durationMs, victoryReason: row.victoryReason, tieBreakReason: row.tieBreakReason ?? null } as NonNullable<typeof result.fight>;
+  const compacted = row.fight !== null && typeof row.fight === 'object' ? row.fight as Record<string, unknown> : null;
+  const { durationMs, victoryReason, tieBreakReason } = compacted ?? row;
+  if (durationMs != null || victoryReason != null || tieBreakReason != null) {
+    result.fight = { durationMs, victoryReason, tieBreakReason: tieBreakReason ?? null } as NonNullable<typeof result.fight>;
   }
   return result;
 }
@@ -347,11 +354,13 @@ export async function readTournament(client: SupabaseClient, id: string): Promis
  * One revealed tournament bout's battle log, on demand (2b review I1): only once its public result is due, under the same
  * RLS due-time filter as the polled read and also filtered by the sampled server time. A malformed bout id never reaches
  * a query. A bout that is not due, not published or a bye (no log) is `not-found`. Results are immutable, so callers
- * cache what this returns.
+ * cache what this returns. From seven days after the tournament's end (by the sampled server time) the log is no longer
+ * kept: `not-found` without asking for it, whether or not cleanup has compacted it yet (Task 22.5).
  */
 export async function readTournamentLog(client: SupabaseClient, boutId: string): Promise<BattleLog> {
   if (typeof boutId !== 'string' || !TOURNAMENT_BOUT_ID.test(boutId)) throw new GatewayReadError('not-found');
   const clock = await readRevision(client);
+  if (!tournamentReplayKept(tournamentEndsAtMs(boutId)!, clock.serverNowMs)) throw new GatewayReadError('not-found');
   const row = checked<{ battleLog: BattleLog | null }>(await client.from('tournament_bout_results').select('battleLog:result->battleLog')
     .eq('bout_id', boutId).lte('reveal_at_ms', clock.serverNowMs).maybeSingle());
   if (!row.battleLog || typeof row.battleLog !== 'object') throw new GatewayReadError('not-found');

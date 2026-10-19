@@ -57,7 +57,10 @@ export type LiveData = {
   standings?: readonly StandingsPage[];
   /** The public seasons, in any order; by default one per standings page's season (closed for an archived page). */
   seasons?: readonly SeasonView[];
-  /** Public tournament views; their round results, logs and placements become the polled and on-demand rows. */
+  /**
+   * Public tournament views; their round results, logs and placements become the polled and on-demand rows. A result with
+   * a fight summary and no log is stored as cleanup leaves it (Task 22.5).
+   */
   tournaments?: readonly TournamentView[];
   /** Activity timelines by activity id: their stages, public completion and (for a signed-in reader) owner summary. */
   timelines?: Readonly<Record<string, RevealedTimeline>>;
@@ -293,9 +296,10 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
     view.bouts.forEach((bout, ordinal) => {
       const result = bout.revealedResult;
       if (!result) return;
-      const battleLog = result.battleLog ?? (result.fight ? { ...result.fight } : undefined);
+      // The stored result holds the battle log, or, once cleanup has compacted it (Task 22.5), only its fight summary.
+      const detail = result.battleLog ? { battleLog: result.battleLog } : result.fight ? { fight: { ...result.fight } } : {};
       boutResults.push({ tournament_id: view.id, bout_id: bout.id, ordinal, reveal_at_ms: reveals[bout.round - 1],
-        result: { participants: result.participants, winnerId: result.winnerId, bye: result.bye, ...(battleLog ? { battleLog } : {}) } });
+        result: { participants: result.participants, winnerId: result.winnerId, bye: result.bye, ...detail } });
     });
     for (const p of view.placements) {
       placements.push({ tournament_id: view.id, gladiator_id: p.gladiatorId, activity_id: p.completion.activityId, place: p.place });

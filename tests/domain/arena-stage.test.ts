@@ -133,6 +133,24 @@ describe('arena stage audiences', () => {
     expect(at('ownerHumanWin', 79).stages).toHaveLength(2);
   });
 
+  it('offers no replay once the display time passes its expiry, for the owner and for a spectator (Task 22.5)', () => {
+    const key = 'ownerHumanWin';
+    const owned = timeline(key);
+    const expiry = (owned.summary!.replayExpiry as { expiresAtMs: number }).expiresAtMs;
+    const state = (t: number, owner: boolean, view: RevealedTimeline = owned) => renderArenaStage(view, t, { entrantId: entrantOf(key), owner });
+    // The owner's summary still says available: the replay is offered until its expiry, and not from then on.
+    expect(state(expiry - 1, true)).toMatchObject({ replayExpired: false, replay: { activityId: arenaActivityId(key) } });
+    expect(state(expiry, true)).toMatchObject({ replayExpired: true, replay: null, phase: 'credited' });
+    // A spectator has only the public completion, which decides the same way once it is settled.
+    const { summary, ...spectator } = structuredClone(owned);
+    const completion = { activityId: owned.activityId, resolvedKind: 'arena' as const, result: summary!.result, success: summary!.success,
+      settledAtMs: summary!.settledAtMs, replayExpiry: summary!.replayExpiry };
+    expect(state(expiry - 1, false, { ...spectator, completion })).toMatchObject({ replayExpired: false, replay: { activityId: arenaActivityId(key) } });
+    expect(state(expiry, false, { ...spectator, completion })).toMatchObject({ replayExpired: true, replay: null, summary: null });
+    // A spectator without a completion (not settled yet) keeps the replay, as before.
+    expect(state(expiry, false, spectator)).toMatchObject({ replayExpired: false });
+  });
+
   it('names no outcome for a bout stage without a log, even after it ends: the outcome comes only from winnerId', () => {
     const noLog: RevealedTimeline = structuredClone(timeline('bellator'));
     delete noLog.stages[1].battleLog;

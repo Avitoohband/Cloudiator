@@ -6,14 +6,21 @@
 // never a reward or receipt. A kept replay offers "Replay", which calls `onWatch` with the result's kind (the camp opens
 // it over itself as that kind's scene, Task 13.8). It reads once each time the menu opens and never sends a command.
 // Names render as React text.
+//
+// Task 22.5: one plain line explains retention, and whether a replay is kept is decided by the shared display clock (the
+// server's time): until it has the server's time the rows offer no replay and call none gone (never an endless "Loading"
+// when the revision cannot be read), and a row stops offering its replay when the clock passes its expiry.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { ResultRow } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
-import { resultKind, resultLine, resultTime } from './result-text';
+import type { DisplayClock } from '../../game/display-clock';
+import { RETENTION_TEXT, resultKind, resultLine, resultTime } from './result-text';
 import styles from './ResultsPanel.module.css';
 
 const PAGE_ROWS = 50;
+/** The rows before the first page has loaded (one array, so the server-time timer is not reset on every render). */
+const NO_ROWS: ResultRow[] = [];
 
 export type ResultsReader = Pick<GameGateway, 'recent'>;
 export type ResultsList = { rows: ResultRow[]; nextCursor: string | null };
@@ -37,11 +44,39 @@ export async function readResults(reader: ResultsReader, loaded: ResultsList | n
   return { rows: [...(loaded?.rows ?? []), ...fresh], nextCursor: page.nextCursor };
 }
 
+/**
+ * The shared display clock's time once it has the server's time (or a test holds it), else null: the device's own clock
+ * never decides whether a replay is kept. It is read again when the clock is held or let go, when the next listed replay
+ * expires (checked at least every minute, as a later revision read can move the clock forward), and every second until
+ * the clock has the server's time.
+ */
+function useServerTime(clock: DisplayClock, rows: readonly ResultRow[]): number | null {
+  const sample = useCallback(() => (clock.synced() || clock.frozen() !== null ? clock.now() : null), [clock]);
+  const [now, setNow] = useState<number | null>(sample);
+  useEffect(() => {
+    let timer: number | undefined;
+    const update = () => {
+      window.clearTimeout(timer);
+      const t = sample();
+      setNow(t);
+      if (t === null) { timer = window.setTimeout(update, 1000); return; }
+      const next = Math.min(...rows.map(r => r.summary.replayExpiry).flatMap(e => (e.state === 'available' && e.expiresAtMs > t ? [e.expiresAtMs] : [])));
+      if (Number.isFinite(next) && clock.frozen() === null) timer = window.setTimeout(update, Math.min(60_000, next - t + 50));
+    };
+    update();
+    const off = clock.subscribe(update);
+    return () => { off(); window.clearTimeout(timer); };
+  }, [clock, rows, sample]);
+  return now;
+}
+
 /** Pure view of the loaded results. */
-export function ResultsView({ model, viewerId, onMore, onRetry, onWatch, loadingMore = false, moreFailed = false, timeZone }: {
+export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, loadingMore = false, moreFailed = false, timeZone }: {
   model: ResultsModel;
   /** The viewer's own gladiator, whose rows say "You"; null for a visitor. */
   viewerId: string | null;
+  /** The server's time (the shared display clock), which decides whether each replay is kept; null until it is known (no replay offered). */
+  serverNowMs: number | null;
   onMore(): void;
   onRetry(): void;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
@@ -55,12 +90,13 @@ export function ResultsView({ model, viewerId, onMore, onRetry, onWatch, loading
   return (
     <section className={styles.results} aria-labelledby={titleId}>
       <p id={titleId} className="eyebrow">RECENT RESULTS</p>
+      <p className="muted">{RETENTION_TEXT}</p>
       {status === 'failed' && rows.length === 0
         ? <div className={styles.failed} role="alert"><p>Recent results could not be loaded right now.</p><button type="button" onClick={onRetry}>Try again</button></div>
         : status === 'loading' && rows.length === 0 ? <p className="muted" role="status">Loading recent results…</p>
           : rows.length === 0 ? <p className="muted" role="status">No results yet.</p>
             : <ul className={styles.list} aria-label="Recent results">{rows.map(row => {
-              const line = resultLine(row);
+              const line = resultLine(row, serverNowMs);
               return (
                 <li key={row.summary.activityId} className={styles.row}>
                   <div className={styles.what}>
@@ -79,9 +115,11 @@ export function ResultsView({ model, viewerId, onMore, onRetry, onWatch, loading
   );
 }
 
-export function ResultsPanel({ reads, viewerId, onWatch }: {
+export function ResultsPanel({ reads, viewerId, clock, onWatch }: {
   reads: ResultsReader;
   viewerId: string | null;
+  /** The shared display clock: whether each replay is kept is decided by the server's time. */
+  clock: DisplayClock;
   /** Watches a result's kept replay. */
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
 }) {
@@ -120,7 +158,9 @@ export function ResultsPanel({ reads, viewerId, onWatch }: {
     }
   }, [list, loadingMore, reads]);
 
-  const model: ResultsModel = { rows: list?.rows ?? [], nextCursor: list?.nextCursor ?? null, status };
-  return <ResultsView model={model} viewerId={viewerId} onMore={() => void more()} onRetry={() => setAttempt(n => n + 1)} onWatch={onWatch}
-    loadingMore={loadingMore} moreFailed={moreFailed} />;
+  const rows = list?.rows ?? NO_ROWS;
+  const serverNowMs = useServerTime(clock, rows);
+  const model: ResultsModel = { rows, nextCursor: list?.nextCursor ?? null, status };
+  return <ResultsView model={model} viewerId={viewerId} serverNowMs={serverNowMs} onMore={() => void more()} onRetry={() => setAttempt(n => n + 1)}
+    onWatch={onWatch} loadingMore={loadingMore} moreFailed={moreFailed} />;
 }

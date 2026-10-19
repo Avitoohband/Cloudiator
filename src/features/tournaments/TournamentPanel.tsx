@@ -19,6 +19,11 @@
 // the owner refresh before it reads the tournament again (R2). A visitor, with no league of its own, picks one (Bronze
 // first). The panel names a slot's tournament only once the shared clock has the server's time; while the sync cannot
 // read the revision it says brackets cannot be loaded (review M1).
+//
+// Task 22.5: bout replays are kept seven days after the tournament ends (`tournamentReplayKept`, by the display clock), when
+// the server compacts each log to its fight summary. From then on a decided bout says "Replay no longer kept" (its result
+// and fight summary stay), a watched replay whose log is not loaded says so instead of "cannot be loaded", no log is read,
+// and an old tournament link whose view is gone (its id carries its slot) is "no longer kept" instead of missing.
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { GameCommand, LeagueId } from '@contracts/commands';
 import type { ActivitySummary, BattleLog } from '@contracts/events';
@@ -31,6 +36,7 @@ import {
   tournamentWindowAt, withTournamentLogs, type TournamentBoutState, type TournamentStageState,
 } from '../../game/tournament-stage';
 import { tournamentLookupIdOrNull } from '../../lib/tournament-id';
+import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
 import {
   ENTRY_RULES, ENTRY_STAMINA, afternoonText, countdownText, creditedText, leagueName, ordinal, registrationNote, roleText, roundNote,
@@ -137,7 +143,11 @@ export type BracketModel = {
   timeZone?: string;
 };
 
-function BoutCard({ bout, onWatch }: { bout: TournamentBoutState; onWatch(boutId: string): void }) {
+/** Seven days after a tournament ends its bout replays are no longer kept; its results stay (Task 22.5). */
+const REPLAYS_GONE = 'These bout replays are no longer kept. Detailed replays are kept for seven days; the results stay.';
+const REPLAY_GONE = 'This replay is no longer kept. Detailed replays are kept for seven days. The result stays in the recent results.';
+
+function BoutCard({ bout, kept, onWatch }: { bout: TournamentBoutState; kept: boolean; onWatch(boutId: string): void }) {
   const names = bout.sides.map(s => s?.name ?? 'To be decided');
   const winner = bout.sides.find(s => s?.gladiatorId === bout.winnerId) ?? null;
   const how = victoryText(bout);
@@ -150,10 +160,10 @@ function BoutCard({ bout, onWatch }: { bout: TournamentBoutState; onWatch(boutId
       {bout.status === 'bye' && winner && <p className={styles.winner} data-winner-id={winner.gladiatorId}>{winner.name} advances on a bye</p>}
       {bout.status === 'decided' && winner && <p className={styles.winner} data-winner-id={winner.gladiatorId}>Winner: {winner.name}</p>}
       {how && <p className="muted">{how}</p>}
-      {/* A completed fought bout can always be watched: its log loads on demand when the polled view has none. */}
-      {bout.status === 'decided' && (
-        <button type="button" className={styles.watch} aria-label={`Watch replay of ${names.join(' vs ')}`} onClick={() => onWatch(bout.id)}>Watch replay</button>
-      )}
+      {/* A completed fought bout can be watched while its replay is kept: its log loads on demand when the polled view has none. */}
+      {bout.status === 'decided' && (kept
+        ? <button type="button" className={styles.watch} aria-label={`Watch replay of ${names.join(' vs ')}`} onClick={() => onWatch(bout.id)}>Watch replay</button>
+        : <p className="muted">Replay no longer kept</p>)}
     </li>
   );
 }
@@ -171,6 +181,7 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
   const own = viewerText(state, !!model.viewerId, timeZone);
   const replay = model.replayBoutId ? state.rounds.flatMap(r => r.bouts).find(b => b.id === model.replayBoutId && b.status === 'decided') ?? null : null;
   const replayRound = replay ? state.rounds.find(r => r.round === replay.round)! : null;
+  const kept = tournamentReplayKept(state.endsAtMs, state.displayNowMs);
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!round) return;
@@ -221,7 +232,8 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
           <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${round.round}`} className={styles.panel}>
             <p className={styles.roundStatus}>{roundStatus(round)}</p>
             {roundNote(round, timeZone) && <p className="muted">{roundNote(round, timeZone)}</p>}
-            <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} onWatch={onWatch} />)}</ul>
+            {!kept && <p className="muted">{REPLAYS_GONE}</p>}
+            <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} />)}</ul>
           </div>
         </section>
       )}
@@ -241,8 +253,10 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
               stage: { id: replay.id, kind: 'bout', label: `Tournament · ${replayRound.label}`, revealedAtMs: replay.revealAtMs, startedAtMs: replay.revealAtMs, endsAtMs: replay.fightEndsAtMs! },
             }] }} />
           </> : (
-            // The log loads on demand (the polled view carries none); the card's own status line stays the only status.
-            <p className="muted" aria-live="polite">{model.replayStatus === 'failed' ? 'This replay cannot be loaded right now. Try again shortly.' : 'Loading the replay…'}</p>
+            // The log loads on demand (the polled view carries none) while the replay is kept; the card's own status line
+            // stays the only status. Once it is not kept the log cannot be read any more (Task 22.5).
+            <p className="muted" aria-live="polite">{!kept ? REPLAY_GONE
+              : model.replayStatus === 'failed' ? 'This replay cannot be loaded right now. Try again shortly.' : 'Loading the replay…'}</p>
           )}
         </section>
       )}
@@ -262,8 +276,19 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
   );
 }
 
-/** A missing or unreadable tournament, or the running slot's tournament before its publication (2b review M4). */
-export function TournamentNotice({ failure, preparing }: { failure: 'unavailable' | 'not-found'; preparing: boolean }) {
+/**
+ * A missing or unreadable tournament, or the running slot's tournament before its publication (2b review M4). `expired`
+ * (Task 22.5): a missing tournament whose replays would no longer be kept anyway, as an old link's slot tells.
+ */
+export function TournamentNotice({ failure, preparing, expired = false }: { failure: 'unavailable' | 'not-found'; preparing: boolean; expired?: boolean }) {
+  if (failure === 'not-found' && expired) {
+    return (
+      <div className={styles.detail} role="status">
+        <p><strong>This tournament is no longer kept</strong></p>
+        <p className="muted">Detailed replays are kept for seven days, and results stay in the recent results for 90 days.</p>
+      </div>
+    );
+  }
   if (failure === 'not-found' && preparing) {
     return (
       <div className={styles.detail} role="status">
@@ -292,13 +317,16 @@ const cardPreparing = (id: string, failure: 'unavailable' | 'not-found', now: nu
 
 /**
  * A card without a view (Task 19 R5): its tournament is being prepared during the five minutes after its cutoff, or while
- * the owner's processed slot (null without an owner) is still behind it (`tournamentPreparing`); otherwise it is missing
- * or cannot be read now.
+ * the owner's processed slot (null without an owner) is still behind it (`tournamentPreparing`); a missing one whose slot
+ * ended seven days or more before the display time is no longer kept (Task 22.5); otherwise it is missing or cannot be
+ * read now.
  */
 export function TournamentCardNotice({ id, failure, now, processedSlotIndex }: {
   id: string; failure: 'unavailable' | 'not-found'; now: number; processedSlotIndex: number | null;
 }) {
-  return <TournamentNotice failure={failure} preparing={cardPreparing(id, failure, now, processedSlotIndex)} />;
+  const endsAtMs = tournamentEndsAtMs(id);
+  return <TournamentNotice failure={failure} preparing={cardPreparing(id, failure, now, processedSlotIndex)}
+    expired={endsAtMs !== null && !tournamentReplayKept(endsAtMs, now)} />;
 }
 
 /**
@@ -379,9 +407,9 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
   const merged = useMemo(() => (view ? withTournamentLogs(view, logs) : null), [view, logs]);
   const state = merged ? renderTournament(merged, now, { viewerId }) : null;
 
-  // The watched bout's log, on demand: once per bout (a failure can be retried by watching again).
+  // The watched bout's log, on demand while its replay is kept: once per bout (a failure can be retried by watching again).
   const watched = replay && state ? state.rounds.flatMap(r => r.bouts).find(b => b.id === replay && b.status === 'decided') ?? null : null;
-  const needsLog = !!watched && !watched.log;
+  const needsLog = !!watched && !watched.log && tournamentReplayKept(state!.endsAtMs, state!.displayNowMs);
   useEffect(() => {
     if (!replay || !needsLog || logs.has(replay)) return;
     let current = true;

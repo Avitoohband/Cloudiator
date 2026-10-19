@@ -4,6 +4,7 @@
 // is imported. Playback is a position in log milliseconds, so it is independent of frame rate.
 import type { ActivitySummary, BattleAction, BattleLog, BattleVictory, RevealedStage, RevealedTimeline } from '@contracts/events';
 import type { GameGateway } from '../lib/api/gateway';
+import { replayKept } from '../lib/replay-retention';
 
 export const REPLAY_SPEEDS = { normal: 1, fast: 4 } as const;
 export type ReplaySpeed = keyof typeof REPLAY_SPEEDS;
@@ -224,12 +225,14 @@ export type ReplayView =
 
 /**
  * What a replay page can show for a revealed timeline. An expired replay always shows its owner's summary; a spectator,
- * who has only the public completion, is told it is no longer kept (Task 13.8 fix round 1).
+ * who has only the public completion, is told it is no longer kept (Task 13.8 fix round 1). Expiry is decided at the
+ * read's server time (Task 22.5): a summary that still says `available` past its expiry (cleanup has not flipped it yet,
+ * or has already pruned the log) is expired too, never `missing` or "not available yet".
  */
 export function replayViewOf(timeline: RevealedTimeline, stageId?: string | null): ReplayView {
   const summary = timeline.summary ?? null;
-  if (summary?.replayExpiry.state === 'expired') return { kind: 'summary', reason: 'expired', summary };
-  if (!summary && timeline.completion?.replayExpiry.state === 'expired') return { kind: 'unavailable', reason: 'expired' };
+  if (summary && !replayKept(summary.replayExpiry, timeline.serverNowMs)) return { kind: 'summary', reason: 'expired', summary };
+  if (!summary && timeline.completion && !replayKept(timeline.completion.replayExpiry, timeline.serverNowMs)) return { kind: 'unavailable', reason: 'expired' };
   const battles = timeline.stages.filter((s): s is RevealedStage & { battleLog: BattleLog } => !!s.battleLog).map(stage => ({ stage, log: stage.battleLog }));
   if (battles.length) return { kind: 'replay', battles, selected: Math.max(0, battles.findIndex(b => b.stage.id === stageId)), summary };
   if (summary) return { kind: 'summary', reason: 'missing', summary };

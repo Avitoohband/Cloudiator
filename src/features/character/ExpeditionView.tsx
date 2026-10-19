@@ -14,6 +14,10 @@
 // the view has no timer of its own. Over the camp it is a scene (`overCamp`): its headings start at h2, Watch
 // replay opens the replay scene, and Back to camp replaces its Camp link. A guessed or unknown activity, with no
 // revealed stage and no world actor on it, is "not available yet": never an endless "Preparing", never an error.
+//
+// Task 22.5: replays are kept seven days by the display clock (the server's time). Once cleanup has removed every stage,
+// an expedition whose settled summary or public completion says so is "no longer kept": the owner sees its saved outcome
+// and credited rewards, a spectator only that its replays are gone, never "not available yet".
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { ActivitySummary, RevealedTimeline } from '@contracts/events';
@@ -171,16 +175,28 @@ const sectionTag = (level: HeadingLevel) => (level === 1 ? 'h2' : 'h3');
  * Shown for a missing, malformed or unreadable expedition (nothing is drawn or read further), and for a guessed or
  * unknown one (`not-yet`), which shows no summary at all. A failed read cannot be loaded right now (timelines have had a
  * reader since Task 13.2, so it is no longer "in this build"; final review Minor 6). Over the camp there is no Camp link
- * (the scene has Back to camp) and the title is an h2.
+ * (the scene has Back to camp) and the title is an h2. `expired` (Task 22.5): cleanup has removed its stages; the owner's
+ * settled `summary` still shows its outcome and credited rewards, and a spectator (no summary) is told the result stays in
+ * the recent results.
  */
-export function ExpeditionUnavailable({ fixture, reason, overCamp = false }: { fixture: boolean; reason: 'not-found' | 'unavailable' | 'not-yet'; overCamp?: boolean }) {
+export function ExpeditionUnavailable({ fixture, reason, overCamp = false, summary = null }: {
+  fixture: boolean; reason: 'not-found' | 'unavailable' | 'not-yet' | 'expired'; overCamp?: boolean; summary?: ActivitySummary | null;
+}) {
   const titleId = useId();
   const Title = titleTag(overCamp ? 2 : 1);
   return <section className={`${styles.card} ${styles.missing}`} aria-labelledby={titleId}>
-    <Title id={titleId}>{reason === 'not-yet' ? 'This expedition is not available yet' : 'This expedition is not available'}</Title>
-    <p>{reason === 'not-yet' ? 'Nothing has been revealed for it. Only the revealed stages of an expedition are ever shown, as they happen.'
-      : reason === 'not-found' ? 'No expedition matches this link.'
-        : 'This expedition cannot be loaded right now. Only revealed stages of an expedition are ever shown.'}</p>
+    <Title id={titleId}>{reason === 'not-yet' ? 'This expedition is not available yet' : reason === 'expired' ? 'This expedition’s replays are no longer kept'
+      : 'This expedition is not available'}</Title>
+    {reason === 'expired' && summary ? <>
+      <strong className={styles.verdict}>{summary.success ? 'Success' : 'Defeated'}</strong>
+      {summary.success ? <><p className={styles.note}>Credited rewards</p>
+        <ul className={styles.rewards}>{rewardLines(summary).map((line, i) => <li key={`${i}-${line}`}>{line}</li>)}</ul></>
+        : <p className={styles.note}>No rewards are credited after a defeat.</p>}
+      <p>Detailed replays are kept for seven days; the result and the credited rewards stay in your history for 90 days.</p>
+    </> : <p>{reason === 'not-yet' ? 'Nothing has been revealed for it. Only the revealed stages of an expedition are ever shown, as they happen.'
+      : reason === 'expired' ? 'Detailed replays are kept for seven days. The result stays in the recent results.'
+        : reason === 'not-found' ? 'No expedition matches this link.'
+          : 'This expedition cannot be loaded right now. Only revealed stages of an expedition are ever shown.'}</p>}
     {!overCamp && <Link className={styles.camp} href={fixture ? '/game/?mode=fixture' : '/game/'}>Camp</Link>}
   </section>;
 }
@@ -309,6 +325,8 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
 
   if (failure) return <ExpeditionUnavailable fixture={fixture} reason={failure} overCamp={!!overCamp} />;
   if (!timeline || !state) return <p role="status">Loading the expedition…</p>;
+  // Cleanup has removed every stage of an expedition whose replays are no longer kept (Task 22.5): its saved outcome only.
+  if (!state.stages.length && state.replayExpired) return <ExpeditionUnavailable fixture={fixture} reason="expired" summary={state.summary} overCamp={!!overCamp} />;
   // A guessed or unknown activity: nothing revealed, and nobody in the world on it (Review Focus 3).
   if (!state.stages.length && !byActivity) {
     return world || worldFailed ? <ExpeditionUnavailable fixture={fixture} reason="not-yet" overCamp={!!overCamp} />
@@ -376,12 +394,14 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
             : !state.complete ? <p className={styles.note}>The result is known when the expedition returns at minute 80.</p>
               : <>
                 <p className={styles.verdict}>{state.outcome === 'failure' ? 'Defeated' : 'Success'}</p>
-                {!isOwner ? <p className={styles.note}>Another gladiator&apos;s expedition: only its revealed journey is shown.</p>
-                  : summary ? <>
+                {!isOwner ? <>
+                  <p className={styles.note}>Another gladiator&apos;s expedition: only its revealed journey is shown.</p>
+                  {state.replayExpired && <p className={styles.note}>Encounter replays are no longer kept; the result stays in the recent results.</p>}
+                </> : summary ? <>
                     {summary.success ? <><p className={styles.note}>Credited rewards</p>
                       <ul className={styles.rewards}>{rewardLines(summary).map((line, i) => <li key={`${i}-${line}`}>{line}</li>)}</ul></>
                       : <p className={styles.note}>No rewards are credited after a defeat.</p>}
-                    <p className={styles.note}>{summary.replayExpiry.state === 'available'
+                    <p className={styles.note}>{summary.replayExpiry.state === 'available' && !state.replayExpired
                       ? `Encounter replays are kept until ${day(summary.replayExpiry.expiresAtMs)}; the result stays in your history for 90 days.`
                       : 'Encounter replays are no longer kept; the result stays in your history for 90 days.'}</p>
                   </> : state.awaitingSummary ? <p role="status">Processing results…</p> : null}

@@ -11,6 +11,7 @@ import {
 } from '../../game/replay';
 import type { DisplayClock } from '../../game/display-clock';
 import type { GameGateway } from '../../lib/api/gateway';
+import { replayKept } from '../../lib/replay-retention';
 import { creatureFor, type Creature } from '../../game/battle-stage';
 import { createSceneBridge, type SceneBridge } from '../../game/bridge';
 import { BattleViewport } from '../../game/BattleViewport';
@@ -62,8 +63,9 @@ function Heading({ level, ...props }: { level: HeadingLevel } & HTMLAttributes<H
 const below = (level: HeadingLevel) => Math.min(6, level + 1) as HeadingLevel;
 
 /**
- * The display time for a replay view, re-rendered when its next battle ends (and when the clock is held or let go), so a
- * fight in progress is offered once it has ended. Without a clock (a view whose battles are already over) it is 0.
+ * The display time for a replay view, re-rendered when its next battle ends or its replay expires (and when the clock is
+ * held or let go), so a fight in progress is offered once it has ended and the "kept until" note goes at the expiry. Without
+ * a clock (a view whose battles are already over) it is 0.
  */
 function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView): number {
   const [now, setNow] = useState(() => clock?.now() ?? 0);
@@ -74,7 +76,8 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView)
       const t = clock.now();
       setNow(t);
       window.clearTimeout(timer);
-      const next = view.kind === 'replay' ? Math.min(...view.battles.map(battleEndMs).filter(end => end > t)) : Infinity;
+      const expiry = view.kind === 'replay' && view.summary?.replayExpiry.state === 'available' ? [view.summary.replayExpiry.expiresAtMs] : [];
+      const next = view.kind === 'replay' ? Math.min(...[...view.battles.map(battleEndMs), ...expiry].filter(end => end > t)) : Infinity;
       // A server time moved forward by a later revision read is caught within a minute.
       if (Number.isFinite(next) && clock.frozen() === null) timer = window.setTimeout(update, Math.min(60_000, next - t + 50));
     };
@@ -102,7 +105,12 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId }
   const battles = clock ? replayBattles(view, now) : view.battles;
   if (!battles.length) return <ReplayUnavailable reason="in-progress" level={headingLevel} />;
   const summary = view.summary && (!clock || view.summary.settledAtMs <= now) ? view.summary : null;
-  return <ReplayBattles battles={battles} initial={Math.min(view.selected, battles.length - 1)} summary={summary} bridge={bridge} level={headingLevel} viewerId={viewerId} />;
+  // A loaded replay keeps playing; only the "kept until" note follows the display time (Task 22.5). Without a clock the view
+  // was decided at its read's server time.
+  const expiry = summary?.replayExpiry;
+  const keptUntil = expiry?.state === 'available' && (!clock || replayKept(expiry, now)) ? expiry.expiresAtMs : null;
+  return <ReplayBattles battles={battles} initial={Math.min(view.selected, battles.length - 1)} summary={summary} keptUntil={keptUntil} bridge={bridge}
+    level={headingLevel} viewerId={viewerId} />;
 }
 
 /**
@@ -130,8 +138,8 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} /> : <p role="status">Loading the replay…</p>;
 }
 
-function ReplayBattles({ battles, initial, summary, bridge, level, viewerId }: {
-  battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
+function ReplayBattles({ battles, initial, summary, keptUntil, bridge, level, viewerId }: {
+  battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; keptUntil: number | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
 }) {
   const [chosen, setSelected] = useState(initial);
   // A display clock held back by a test can offer fewer battles than were chosen from.
@@ -141,7 +149,7 @@ function ReplayBattles({ battles, initial, summary, bridge, level, viewerId }: {
     {battles.length > 1 && <div className={styles.encounters} role="group" aria-label="Encounters">
       {battles.map((b, i) => <button key={b.stage.id} type="button" aria-pressed={i === selected} onClick={() => setSelected(i)}>{b.stage.label}</button>)}
     </div>}
-    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} bridge={bridge} level={level} viewerId={viewerId} />
+    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} keptUntil={keptUntil} bridge={bridge} level={level} viewerId={viewerId} />
   </>;
 }
 
@@ -151,8 +159,11 @@ function useController(controller: ReplayController) {
   useEffect(() => controller.subscribe(force), [controller]);
 }
 
-function BattlePlayer({ battle, summary, bridge: external, level, viewerId }: {
-  battle: ReplayBattle; summary: ActivitySummary | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
+function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId }: {
+  battle: ReplayBattle; summary: ActivitySummary | null;
+  /** When the replay stops being kept, while it still is at the display time (else null: no note). */
+  keptUntil: number | null;
+  bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
 }) {
   const { log, stage } = battle;
   // Rewards to come are promised only to a fighter in the bout (or when the viewer is not known).
@@ -307,7 +318,7 @@ function BattlePlayer({ battle, summary, bridge: external, level, viewerId }: {
             {summary ? <Rewards summary={summary} scope={stage.kind === 'encounter' ? 'Credited for the whole expedition' : 'Credited rewards'} />
               : fighter ? <p className={styles.note}>Rewards are credited when the activity settles.</p> : null}
           </div> : <p className={styles.note}>The result appears when the fight ends. Use Skip to result to see it now.</p>}
-          {summary?.replayExpiry.state === 'available' && <p className={styles.note}>This replay is kept until {day(summary.replayExpiry.expiresAtMs)}; the result and rewards stay in your history for 90 days.</p>}
+          {keptUntil !== null && <p className={styles.note}>This replay is kept until {day(keptUntil)}; the result and rewards stay in your history for 90 days.</p>}
         </section>
 
         <section className={styles.card} aria-labelledby={tableId}>

@@ -156,6 +156,11 @@ const SEEDS: Record<BracketKey, Record<string, string>> = {
   pair: {
     'tournament:372955:bronze:1:0': 'fixture-pair-tournament:372955:bronze:1:0-16',
   },
+  aged: {
+    'tournament:372829:silver:1:0': 'fixture-aged-tournament:372829:silver:1:0-0',
+    'tournament:372829:silver:1:1': 'fixture-aged-tournament:372829:silver:1:1-0',
+    'tournament:372829:silver:2:0': 'fixture-aged-tournament:372829:silver:2:0-0',
+  },
 };
 
 // A bout missing from SEEDS falls back to n = 0 here, and the explicit-seed test below fails until it is recorded.
@@ -226,7 +231,9 @@ describe('tournament fixture views', () => {
   it('publishes only whitelisted public fields: no seeds, snapshots, ratings, ranks, rewards, receipts or private outcomes', () => {
     const allowed = new Set(['id', 'league', 'slotIndex', 'startsAtMs', 'endsAtMs', 'status', 'bracket', 'size', 'rounds', 'slots', 'entrants', 'bouts',
       'placements', 'gladiatorId', 'name', 'classId', 'round', 'position', 'parentBoutIds', 'revealedResult', 'participants', 'winnerId', 'bye',
-      'battleLog', 'place', 'completion', 'activityId', 'resolvedKind', 'result', 'success', 'settledAtMs', 'replayExpiry', 'state', 'expiresAtMs']);
+      'battleLog', 'place', 'completion', 'activityId', 'resolvedKind', 'result', 'success', 'settledAtMs', 'replayExpiry', 'state', 'expiresAtMs',
+      // A compacted result's fight summary (Task 22.5).
+      'fight', 'durationMs', 'victoryReason', 'tieBreakReason']);
     for (const key of TOURNAMENT_KEYS) {
       const view = generated[key];
       expect([...keysOutsideLogs(view)].filter(k => !allowed.has(k)), key).toEqual([]);
@@ -251,6 +258,8 @@ describe('tournament fixture views', () => {
       const graph = graphs[key];
       const view = generated[key];
       const asOf = tournamentAsOf(key);
+      // Seven days after the end the server's cleanup has compacted every log to its fight summary (Task 22.5).
+      const compacted = asOf >= graph.settlesAtMs + 604_800_000;
       expect(view.bouts.map(b => b.id), key).toEqual(graph.bouts.map(b => b.id));
       view.bouts.forEach((bout, i) => {
         const due = graph.bouts[i].bye ? asOf >= graph.startsAtMs : graph.bouts[i].revealAtMs <= asOf;
@@ -258,7 +267,11 @@ describe('tournament fixture views', () => {
         if (bout.revealedResult) {
           expect(bout.revealedResult.winnerId).toBe(graph.bouts[i].result!.winnerId);
           expect(bout.revealedResult.bye).toBe(graph.bouts[i].bye);
-          if (!bout.revealedResult.bye) expect(bout.revealedResult.battleLog).toEqual(graph.bouts[i].result!.log);
+          if (bout.revealedResult.bye) return;
+          const log = graph.bouts[i].result!.log!;
+          if (!compacted) expect(bout.revealedResult.battleLog).toEqual(log);
+          else expect(bout.revealedResult).toEqual({ participants: bout.revealedResult.participants, winnerId: log.winnerId, bye: false,
+            fight: { durationMs: log.durationMs, victoryReason: log.victoryReason, tieBreakReason: log.tieBreakReason } });
         }
       });
       const settled = asOf >= graph.settlesAtMs;
@@ -272,7 +285,7 @@ describe('tournament fixture views', () => {
           // Task 10's six safe completion fields only: never rewards, a receipt or a rating change.
           const o = outcomes.find(x => x.gladiatorId === p.gladiatorId)!;
           expect(p.completion).toEqual({ activityId: o.activityId, resolvedKind: 'tournament', result: o.result, success: o.success,
-            settledAtMs: graph.settlesAtMs, replayExpiry: { state: 'available', expiresAtMs: graph.settlesAtMs + 604_800_000 } });
+            settledAtMs: graph.settlesAtMs, replayExpiry: compacted ? { state: 'expired' } : { state: 'available', expiresAtMs: graph.settlesAtMs + 604_800_000 } });
         }
         // By place, then gladiator id, as the live read orders them.
         expect(view.placements.map(p => p.gladiatorId)).toEqual([...view.placements].sort((a, b) => a.place - b.place
@@ -286,6 +299,11 @@ describe('tournament fixture views', () => {
     expect([revealedRounds('late'), generated.late.placements]).toEqual([[1, 2, 3], []]);
     expect(generated.completed.placements.map(p => p.place)).toEqual([1, 2, 3, 3, 5, 5, 5, 5]);
     expect(generated.pair.placements.map(p => [p.gladiatorId, p.place])).toEqual([[ASTER_ID, 1], [ARENA_GLADIATORS.severus.id, 2]]);
+    // Over a week old (Task 22.5): every result revealed and placed, each fought one compacted to its fight summary.
+    expect([revealedRounds('aged'), generated.aged.status, generated.aged.placements.map(p => p.place)]).toEqual([[1, 2], 'completed', [1, 2, 3, 3]]);
+    expect(generated.aged.bouts.every(b => b.revealedResult?.fight && !b.revealedResult.battleLog)).toBe(true);
+    expect(tournamentAsOf('aged')).toBeGreaterThanOrEqual(graphs.aged.settlesAtMs + 604_800_000);
+    for (const key of BRACKET_KEYS.filter(k => k !== 'aged')) expect(JSON.stringify(generated[key]), key).not.toContain('"fight"');
     // Byes, public from the start through the bracket slots, name only the advancing entrant.
     const byes = generated.midway.bouts.filter(b => b.revealedResult?.bye);
     expect(byes).toHaveLength(3);

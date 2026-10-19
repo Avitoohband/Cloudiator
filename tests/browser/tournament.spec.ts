@@ -344,8 +344,8 @@ test.describe('tournament registration and brackets', () => {
     await expect(card(page).getByRole('table')).toHaveCount(0);
     await expect(card(page)).toContainText('Both fell at 0 HP; a seeded tie-break decided it.');
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([ASTER]);
-    // Past the two remaining sample buttons, Tab reaches the selected round's tab, then the replay button.
-    for (let i = 0; i < 3; i += 1) await page.keyboard.press('Tab');
+    // Past the three remaining sample buttons (Task 22.5 added `aged`), Tab reaches the selected round's tab, then the replay button.
+    for (let i = 0; i < 4; i += 1) await page.keyboard.press('Tab');
     await expect(card(page).getByRole('tab', { name: 'Final', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     const watch = card(page).getByRole('button', { name: 'Watch replay of Severus vs Aster' });

@@ -9,4 +9,13 @@ export const REPLAY_FIXTURES = {
   },
   tie: { activityId: 'd4a3f5b7-8c93-4eab-8f60-4b5c6d7e8f94', battleId: 'fixture-bout-tie', label: 'Tie-break bout: Aster vs Cassia' },
   expired: { activityId: 'e5b4a6c8-9da4-4fbc-9071-5c6d7e8f9aa5', label: 'Older bout (replay expired)' },
+  /**
+   * Task 22.5, retention by server time. A bout of the slot seven days (126 slots) before the current one: its summary says
+   * available, and the replay is kept until the end of the current slot.
+   */
+  lastDay: { activityId: 'f7c6b8da-1e2f-4a3b-9c4d-5e6f7a8b9c01', battleId: 'fixture-bout-pvp', label: 'Bout a week ago: replay kept until this slot ends' },
+  /** One slot older: its expiry has passed, but cleanup has not run yet (log still held, summary still available). */
+  lapsed: { activityId: 'a8d7c9eb-2f30-4b4c-8d5e-6f7a8b9cad12', label: 'Bout a week and a slot ago: replay no longer kept' },
+  /** An expedition nine days old, after cleanup: no stage is left, only the owner's settled summary. */
+  cleared: { activityId: 'b9e8dafc-3041-4c5d-9e6f-7a8b9cadbe23', label: 'Woodland Path nine days ago: cleaned up, replays no longer kept' },
 } as const;

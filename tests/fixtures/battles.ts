@@ -76,6 +76,36 @@ const expiredTimeline: RevealedTimeline = {
   },
 };
 
+/**
+ * Task 22.5: an Arena bout of the slot `slotsAgo` slots before the current one, settled at that slot's end with its replay
+ * kept seven days from then (the server's rule), as read at the fixture's server time before cleanup: its stages and log
+ * are still held and its summary still says available, even once that expiry has passed.
+ */
+function olderBout(key: 'lastDay' | 'lapsed', slotsAgo: number, log: BattleLog, opponent: string, renown: number): RevealedTimeline {
+  const { activityId } = REPLAY_FIXTURES[key];
+  const start = SLOT_START - slotsAgo * SLOT_MS, settledAtMs = start + 80 * MIN;
+  return {
+    activityId, serverNowMs: NOW, visibleThroughMs: NOW,
+    stages: [stage(`${key}-staging`, 'staging', start, 0, 60, 'Warm-up in the arena staging area'),
+      stage(`${key}-bout`, 'bout', start, 60, 80, `Arena bout against ${opponent}`, log), stage(`${key}-settlement`, 'settlement', start, 80, 80, 'Result credited')],
+    summary: { activityId, resolvedKind: 'arena', result: 'victory', success: true, rewards: { ...noRewards, renown }, receiptId: `fixture-receipt-${key}`,
+      settledAtMs, replayExpiry: { state: 'available', expiresAtMs: settledAtMs + RETAIN_MS }, ratingDelta: 0 },
+  };
+}
+
+// Task 22.5: an expedition after cleanup. Its stages (and so its logs) are deleted seven days after its slot, and the same
+// cleanup flips its summary's replay expiry; the summary itself stays 90 days.
+const clearedStart = SLOT_START - 9 * DAY;
+const clearedTimeline: RevealedTimeline = {
+  activityId: REPLAY_FIXTURES.cleared.activityId, serverNowMs: NOW, visibleThroughMs: NOW, stages: [],
+  summary: {
+    activityId: REPLAY_FIXTURES.cleared.activityId, resolvedKind: 'expedition', result: 'victory', success: true,
+    rewards: { money: 20, renown: 0, xp: 100, attributePoints: 0, overflowMoney: 0,
+      items: [{ catalogId: 'salvage', catalogVersion: 'v1', tier: 1, rarity: 'common', quantity: 1 }] },
+    receiptId: 'fixture-receipt-cleared', settledAtMs: clearedStart + 80 * MIN + 45_000, replayExpiry: { state: 'expired' },
+  },
+};
+
 /** Timelines by activity id, as gateway.timeline(id) returns them. */
 export const REPLAY_TIMELINES: Record<string, RevealedTimeline> = {
   [REPLAY_FIXTURES.pvp.activityId]: arena('pvp', SLOT_START - SLOT_MS, 'Varro',
@@ -86,6 +116,10 @@ export const REPLAY_TIMELINES: Record<string, RevealedTimeline> = {
   [REPLAY_FIXTURES.tie.activityId]: arena('tie', NOW - 65 * MIN, 'Cassia', null),
   [REPLAY_FIXTURES.expedition.activityId]: expeditionTimeline,
   [REPLAY_FIXTURES.expired.activityId]: expiredTimeline,
+  // Seven days (126 slots) ago: kept until the current slot ends. One slot older: expired by server time, not cleaned up yet.
+  [REPLAY_FIXTURES.lastDay.activityId]: olderBout('lastDay', 126, FIXTURE_BATTLE_LOGS.pvp, 'Varro', 10),
+  [REPLAY_FIXTURES.lapsed.activityId]: olderBout('lapsed', 127, FIXTURE_BATTLE_LOGS.npc, 'Iron Warden (NPC)', 3),
+  [REPLAY_FIXTURES.cleared.activityId]: clearedTimeline,
 };
 
 /** Sample replays listed on the fixture game page. */

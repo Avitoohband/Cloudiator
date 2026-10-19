@@ -331,6 +331,36 @@ describe('replay views', () => {
     expect(replayViewOf({ ...pvp, stages: [], completion: { ...completion, replayExpiry: { state: 'expired' } } })).toMatchObject({ kind: 'summary', reason: 'missing' });
   });
 
+  it('decides by server time: a summary that still says available shows the saved outcome from its expiry on (Task 22.5)', () => {
+    const pvp = timeline(REPLAY_FIXTURES.pvp.activityId);
+    const expiry = (pvp.summary!.replayExpiry as { expiresAtMs: number }).expiresAtMs;
+    expect(replayViewOf({ ...pvp, serverNowMs: expiry - 1 })).toMatchObject({ kind: 'replay' });
+    // Before cleanup the log is still held and the summary not yet flipped: the client already agrees with the server.
+    expect(replayViewOf({ ...pvp, serverNowMs: expiry })).toEqual({ kind: 'summary', reason: 'expired', summary: pvp.summary });
+    // After cleanup the stages are gone: an owner whose log was pruned while the summary still said available sees
+    // `expired`, never `missing`.
+    expect(replayViewOf({ ...pvp, stages: [], serverNowMs: expiry })).toEqual({ kind: 'summary', reason: 'expired', summary: pvp.summary });
+    // The lapsed fixture: a week and one slot old, its log still held, its summary still available.
+    const lapsed = timeline(REPLAY_FIXTURES.lapsed.activityId);
+    expect(lapsed.stages.some(s => s.battleLog)).toBe(true);
+    expect(lapsed.summary!.replayExpiry.state).toBe('available');
+    expect(replayViewOf(lapsed)).toMatchObject({ kind: 'summary', reason: 'expired' });
+    // The last-day fixture is still kept at the fixture's server time.
+    expect(replayViewOf(timeline(REPLAY_FIXTURES.lastDay.activityId))).toMatchObject({ kind: 'replay' });
+  });
+
+  it('tells a spectator that a replay is no longer kept once its completion expired by server time, not that it is coming', () => {
+    const pvp = timeline(REPLAY_FIXTURES.pvp.activityId);
+    const { summary: owner, ...spectator } = pvp;
+    const completion = { activityId: pvp.activityId, resolvedKind: 'arena' as const, result: 'victory' as const, success: true,
+      settledAtMs: owner!.settledAtMs, replayExpiry: owner!.replayExpiry };
+    const expiry = (owner!.replayExpiry as { expiresAtMs: number }).expiresAtMs;
+    expect(replayViewOf({ ...spectator, completion, serverNowMs: expiry - 1 })).toMatchObject({ kind: 'replay', summary: null });
+    for (const stages of [spectator.stages, []]) {
+      expect(replayViewOf({ ...spectator, stages, completion, serverNowMs: expiry })).toEqual({ kind: 'unavailable', reason: 'expired' });
+    }
+  });
+
   it('shows the saved summary when no battle stage was kept, and nothing when there is no summary either', () => {
     const missing: RevealedTimeline = { ...timeline(REPLAY_FIXTURES.pvp.activityId), stages: [] };
     expect(replayViewOf(missing)).toMatchObject({ kind: 'summary', reason: 'missing', summary: { rewards: { renown: 10 } } });

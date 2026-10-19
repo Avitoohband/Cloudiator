@@ -1,0 +1,184 @@
+{
+  "id": "tournament:372829:silver",
+  "league": "silver",
+  "slotIndex": 372829,
+  "startsAtMs": 1789579200000,
+  "endsAtMs": 1789584000000,
+  "status": "completed",
+  "bracket": {
+    "size": 4,
+    "rounds": 2,
+    "slots": [
+      "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
+      "4fe11c86-50e1-4e19-9de1-19604ee11af3",
+      "88cd4ee7-87cd-4d54-9acd-520d89cd507a",
+      "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1"
+    ]
+  },
+  "entrants": [
+    {
+      "gladiatorId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
+      "name": "Lucilla",
+      "classId": "guardian"
+    },
+    {
+      "gladiatorId": "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
+      "name": "Marcellus",
+      "classId": "berserker"
+    },
+    {
+      "gladiatorId": "4fe11c86-50e1-4e19-9de1-19604ee11af3",
+      "name": "Nerva",
+      "classId": "duelist"
+    },
+    {
+      "gladiatorId": "88cd4ee7-87cd-4d54-9acd-520d89cd507a",
+      "name": "Titus",
+      "classId": "guardian"
+    }
+  ],
+  "bouts": [
+    {
+      "id": "tournament:372829:silver:1:0",
+      "round": 1,
+      "position": 0,
+      "parentBoutIds": [],
+      "revealedResult": {
+        "participants": [
+          {
+            "gladiatorId": "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
+            "name": "Marcellus",
+            "classId": "berserker"
+          },
+          {
+            "gladiatorId": "4fe11c86-50e1-4e19-9de1-19604ee11af3",
+            "name": "Nerva",
+            "classId": "duelist"
+          }
+        ],
+        "winnerId": "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
+        "bye": false,
+        "fight": {
+          "durationMs": 17004,
+          "victoryReason": "defeat",
+          "tieBreakReason": null
+        }
+      }
+    },
+    {
+      "id": "tournament:372829:silver:1:1",
+      "round": 1,
+      "position": 1,
+      "parentBoutIds": [],
+      "revealedResult": {
+        "participants": [
+          {
+            "gladiatorId": "88cd4ee7-87cd-4d54-9acd-520d89cd507a",
+            "name": "Titus",
+            "classId": "guardian"
+          },
+          {
+            "gladiatorId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
+            "name": "Lucilla",
+            "classId": "guardian"
+          }
+        ],
+        "winnerId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
+        "bye": false,
+        "fight": {
+          "durationMs": 27168,
+          "victoryReason": "defeat",
+          "tieBreakReason": null
+        }
+      }
+    },
+    {
+      "id": "tournament:372829:silver:2:0",
+      "round": 2,
+      "position": 0,
+      "parentBoutIds": [
+        "tournament:372829:silver:1:0",
+        "tournament:372829:silver:1:1"
+      ],
+      "revealedResult": {
+        "participants": [
+          {
+            "gladiatorId": "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
+            "name": "Marcellus",
+            "classId": "berserker"
+          },
+          {
+            "gladiatorId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
+            "name": "Lucilla",
+            "classId": "guardian"
+          }
+        ],
+        "winnerId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
+        "bye": false,
+        "fight": {
+          "durationMs": 19244,
+          "victoryReason": "defeat",
+          "tieBreakReason": null
+        }
+      }
+    }
+  ],
+  "placements": [
+    {
+      "gladiatorId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
+      "place": 1,
+      "completion": {
+        "activityId": "c1142476-c214-4609-9f14-2150c01422e3",
+        "resolvedKind": "tournament",
+        "result": "victory",
+        "success": true,
+        "settledAtMs": 1789584000000,
+        "replayExpiry": {
+          "state": "expired"
+        }
+      }
+    },
+    {
+      "gladiatorId": "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
+      "place": 2,
+      "completion": {
+        "activityId": "3c743b5c-3d74-4cef-9e74-3e823f744015",
+        "resolvedKind": "tournament",
+        "result": "defeat",
+        "success": false,
+        "settledAtMs": 1789584000000,
+        "replayExpiry": {
+          "state": "expired"
+        }
+      }
+    },
+    {
+      "gladiatorId": "4fe11c86-50e1-4e19-9de1-19604ee11af3",
+      "place": 3,
+      "completion": {
+        "activityId": "c4f7bc0c-c5f7-4d9f-96f7-bf32c7f7c0c5",
+        "resolvedKind": "tournament",
+        "result": "defeat",
+        "success": false,
+        "settledAtMs": 1789584000000,
+        "replayExpiry": {
+          "state": "expired"
+        }
+      }
+    },
+    {
+      "gladiatorId": "88cd4ee7-87cd-4d54-9acd-520d89cd507a",
+      "place": 3,
+      "completion": {
+        "activityId": "9559150d-9459-437a-9359-11e792591054",
+        "resolvedKind": "tournament",
+        "result": "defeat",
+        "success": false,
+        "settledAtMs": 1789584000000,
+        "replayExpiry": {
+          "state": "expired"
+        }
+      }
+    }
+  ]
+}

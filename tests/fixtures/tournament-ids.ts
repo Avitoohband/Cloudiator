@@ -14,9 +14,10 @@ const at1720 = (year: number, month: number, day: number) => Date.UTC(year, mont
 
 export type TournamentKey = keyof typeof TOURNAMENTS;
 /**
- * The cases (dispatch decision 3). `entrants` are fixture gladiators (Aster is the fixture owner); the projection is
- * the view a server would return `asOfMinute` minutes after the start. The fixture world's time is Saturday
- * 2026-10-10 00:40 UTC, so `upcoming` (that day's 17:20 UTC tournament) is still scheduled and the others are past.
+ * The cases (dispatch decision 3; `aged` is Task 22.5's). `entrants` are fixture gladiators (Aster is the fixture
+ * owner); the projection is the view a server would return `asOfMinute` minutes after the start. The fixture world's
+ * time is Saturday 2026-10-10 00:40 UTC, so `upcoming` (that day's 17:20 UTC tournament) is still scheduled and the
+ * others are past. `aged` is projected ten days after its start, after the cleanup that compacts its bout logs.
  */
 export const TOURNAMENTS = {
   upcoming: { startsAtMs: at1720(2026, 10, 10), league: 'bronze', entrants: [], asOfMinute: -1000, label: 'Next tournament: scheduled, entries not yet fixed' },
@@ -26,6 +27,8 @@ export const TOURNAMENTS = {
   completed: { startsAtMs: at1720(2026, 9, 26), league: 'bronze', entrants: ['aster', 'varro', 'cassia', 'severus', 'bellator', 'corvina', 'aurelia', 'decimus'], asOfMinute: 85, label: 'Bronze, 26 Sep: completed; you lost in the first round' },
   pair: { startsAtMs: at1720(2026, 9, 23), league: 'bronze', entrants: ['aster', 'severus'], asOfMinute: 85, label: 'Bronze, 23 Sep: two entrants, a 0 HP tie-break final' },
   insufficient: { startsAtMs: at1720(2026, 9, 19), league: 'gold', entrants: ['valeria'], asOfMinute: 85, label: 'Gold, 19 Sep: one qualifier, regular Arena instead' },
+  // Task 22.5: projected ten days after its start, after the cleanup that compacts its bout logs to fight summaries.
+  aged: { startsAtMs: at1720(2026, 9, 16), league: 'silver', entrants: ['lucilla', 'marcellus', 'nerva', 'titus'], asOfMinute: 14_400, label: 'Silver, 16 Sep: over a week old, bout replays no longer kept' },
 } as const satisfies Record<string, { startsAtMs: number; league: LeagueId; entrants: readonly ArenaGladiatorKey[]; asOfMinute: number; label: string }>;
 
 export const TOURNAMENT_KEYS = Object.keys(TOURNAMENTS) as TournamentKey[];
@@ -61,4 +64,4 @@ export const TOURNAMENT_LOOKS: Record<ArenaGladiatorKey, { classId: ClassId; sil
 /** Gladiator key of a fixture gladiator id. */
 export const gladiatorKeyOf = (id: string) => (Object.keys(ARENA_GLADIATORS) as ArenaGladiatorKey[]).find(key => ARENA_GLADIATORS[key].id === id) ?? null;
 /** The tournament samples listed on the fixture game page, in this order. */
-export const TOURNAMENT_SAMPLE_KEYS: readonly TournamentKey[] = ['opening', 'midway', 'late', 'completed', 'pair', 'insufficient', 'upcoming'];
+export const TOURNAMENT_SAMPLE_KEYS: readonly TournamentKey[] = ['opening', 'midway', 'late', 'completed', 'pair', 'insufficient', 'aged', 'upcoming'];

@@ -20,6 +20,12 @@
 // first). The panel names a slot's tournament only once the shared clock has the server's time; while the sync cannot
 // read the revision it says brackets cannot be loaded (review M1).
 //
+// Task 23.4 (C5): with the revision's published slot (Task 23.2) a missing view of the running slot is "being prepared"
+// exactly until that slot is published, with no five-minute bound; a card's re-reads meanwhile no longer refresh the owner
+// first (the publication is the revision's, not the owner's processed slot), and a card read before the publication reads
+// again as soon as the sync sees it. Without a published slot (before the first coordination) the Task 19 rules stand.
+// Task 23.4 (C11): those re-reads back off from three minutes after the cutoff.
+//
 // Task 22.5: bout replays are kept seven days after the tournament ends (`tournamentReplayKept`, by the display clock), when
 // the server compacts each log to its fight summary. From then on a decided bout says "Replay no longer kept" (its result
 // and fight summary stay), a watched replay whose log is not loaded says so instead of "cannot be loaded", no log is read,
@@ -320,20 +326,20 @@ export async function readTournamentCard(reads: Pick<TournamentReads, 'tournamen
   }
 }
 
-const cardPreparing = (id: string, failure: 'unavailable' | 'not-found', now: number, processedSlotIndex: number | null) =>
-  failure === 'not-found' && tournamentPreparing(id, now, processedSlotIndex);
+const cardPreparing = (id: string, failure: 'unavailable' | 'not-found', now: number, processedSlotIndex: number | null, publishedSlotIndex: number | null) =>
+  failure === 'not-found' && tournamentPreparing(id, now, processedSlotIndex, publishedSlotIndex);
 
 /**
- * A card without a view (Task 19 R5): its tournament is being prepared during the five minutes after its cutoff, or while
- * the owner's processed slot (null without an owner) is still behind it (`tournamentPreparing`); a missing one whose slot
- * ended seven days or more before the display time is no longer kept (Task 22.5); otherwise it is missing or cannot be
- * read now.
+ * A card without a view (Task 19 R5): its tournament is being prepared while its slot is unpublished by the revision's
+ * published slot as of the read (C5), or without one during the five minutes after its cutoff or while the owner's
+ * processed slot (null without an owner) is still behind it (`tournamentPreparing`); a missing one whose slot ended seven
+ * days or more before the display time is no longer kept (Task 22.5); otherwise it is missing or cannot be read now.
  */
-export function TournamentCardNotice({ id, failure, now, processedSlotIndex }: {
-  id: string; failure: 'unavailable' | 'not-found'; now: number; processedSlotIndex: number | null;
+export function TournamentCardNotice({ id, failure, now, processedSlotIndex, publishedSlotIndex = null }: {
+  id: string; failure: 'unavailable' | 'not-found'; now: number; processedSlotIndex: number | null; publishedSlotIndex?: number | null;
 }) {
   const endsAtMs = tournamentEndsAtMs(id);
-  return <TournamentNotice failure={failure} preparing={cardPreparing(id, failure, now, processedSlotIndex)}
+  return <TournamentNotice failure={failure} preparing={cardPreparing(id, failure, now, processedSlotIndex, publishedSlotIndex)}
     expired={endsAtMs !== null && !tournamentReplayKept(endsAtMs, now)} />;
 }
 
@@ -341,18 +347,27 @@ export function TournamentCardNotice({ id, failure, now, processedSlotIndex }: {
  * One tournament: read on open, at each reveal mark, on focus, every 30 s while a read failed, and while it is
  * processing after 30 s, 60 s, 120 s, 240 s and then every 5 minutes (back to the normal schedule once its status
  * changes); never from a hidden tab. A bout's battle log loads only when its replay is watched. While its slot is being
- * prepared, a re-read first awaits the owner refresh (R2).
+ * prepared without a published slot on the revision, a re-read first awaits the owner refresh (R2); with one, a card read
+ * before the publication reads again once the revision shows it (C5).
  */
-function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
+function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
   id: string; reads: TournamentReads; clock: DisplayClock; now: number; viewerId: string | null;
   /** The viewer's own processed slot (owner state; null without an owner), published with the slot's tournaments. */
   processedSlotIndex: number | null;
+  /** The revision's published slot (Task 23.2; null before the first coordination), from the shared sync. */
+  publishedSlotIndex: number | null;
   /** Re-reads the owner, so its processed slot is current while the slot is being prepared. */
   refreshOwner?: () => Promise<void>;
   onRead(): void; onLogRead(): void; hook: { current: TournamentTestHook['state'] | null };
 }) {
   const [view, setView] = useState<TournamentView | null>(null);
   const [failure, setFailure] = useState<'unavailable' | 'not-found' | null>(null);
+  /** The published slot as it was when the failed read started: a missing view read before the publication is no answer. */
+  const [failedPublished, setFailedPublished] = useState<number | null>(null);
+  /** Failed reads so far, so a read that lands just after the publication was seen is followed by one more. */
+  const [failedReads, setFailedReads] = useState(0);
+  const publishedNow = useRef(publishedSlotIndex);
+  useEffect(() => { publishedNow.current = publishedSlotIndex; });
   const [round, setRound] = useState<number | null>(null);
   const [replay, setReplay] = useState<string | null>(null);
   const [credited, setCredited] = useState<{ activityId: string; summary: ActivitySummary } | null>(null);
@@ -375,18 +390,20 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
     const mine = ++request.current;
     inFlight.current = true;
     try {
-      // While the slot is being prepared the owner is read first: a publication its processed slot shows is then
-      // already visible to the tournament read, so the two never disagree on the publication tick (R2).
-      const refresh = preparingNow.current ? refreshOwnerNow.current : undefined;
+      // While the slot is being prepared without a published slot on the revision, the owner is read first: a
+      // publication its processed slot shows is then already visible to the tournament read, so the two never disagree on
+      // the publication tick (R2). With one (C5) the revision tells the publication, so the owner is not read for it.
+      const refresh = preparingNow.current && publishedNow.current === null ? refreshOwnerNow.current : undefined;
       if (refresh) {
         await refresh().catch(() => undefined);
         if (mine !== request.current) return;
       }
+      const published = publishedNow.current;
       lastRead.current = clock.now();
       onRead();
       const next = await readTournamentCard(reads, id);
       if (mine !== request.current) return;
-      if (next.view) { setView(next.view); setFailure(null); } else setFailure(next.failure);
+      if (next.view) { setView(next.view); setFailure(null); } else { setFailure(next.failure); setFailedPublished(published); setFailedReads(n => n + 1); }
     } finally {
       if (mine === request.current) inFlight.current = false;
     }
@@ -402,12 +419,20 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
   }, [read]);
 
   // Between the cutoff and the slot's publication the live read answers not-found: the tournament is being prepared.
-  const preparing = !!failure && !view && cardPreparing(id, failure, now, processedSlotIndex);
+  const preparing = !!failure && !view && cardPreparing(id, failure, now, processedSlotIndex, failedPublished);
   useEffect(() => { preparingNow.current = preparing; });
+  // A view found missing before its slot was published is read again as soon as the revision shows the publication (C5):
+  // that read's answer is final, without waiting for the next (backed-off) retry.
+  const slotOfCard = tournamentSlotOf(id);
+  const publishedSince = failure === 'not-found' && !view && slotOfCard !== null && failedPublished !== null && failedPublished < slotOfCard
+    && publishedSlotIndex !== null && publishedSlotIndex >= slotOfCard;
+  useEffect(() => {
+    if (publishedSince && document.visibilityState === 'visible' && !inFlight.current) void read();
+  }, [publishedSince, failedReads, read]);
 
   // A failed first read is asked again every 30 s while the tab is visible (as well as on focus); while the slot is being
-  // prepared each re-read first refreshes the owner, so a published slot without this tournament stops reading as being
-  // prepared. One timer per failure: a new owner refresh function from the parent does not restart it (R2). From three
+  // prepared without a published slot on the revision, each re-read first refreshes the owner, so a published slot
+  // without this tournament stops reading as being prepared (with one, the revision tells it: C5). One timer per failure: a new owner refresh function from the parent does not restart it (R2). From three
   // minutes after the cutoff a slot still being prepared is re-read, with its owner, after 60 s, 120 s, 240 s and then
   // every 5 minutes (Task 23.4, C11): each visible 30 s tick counts toward the wait.
   useEffect(() => {
@@ -485,7 +510,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
     };
   });
 
-  if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} processedSlotIndex={processedSlotIndex} />;
+  if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} processedSlotIndex={processedSlotIndex} publishedSlotIndex={failedPublished} />;
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
   return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, replayStatus, viewerId,
     credited: credited && credited.activityId === placed ? credited.summary : null }}
@@ -506,7 +531,7 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
  * else sees the countdown and the brackets (spec "Menus", the Visitor column).
  */
-export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer }: {
+export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null }: {
   reads: TournamentReads | null;
   owner: OwnerState | null;
   clock: DisplayClock;
@@ -518,6 +543,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   syncError: 'unavailable' | 'unauthenticated' | null;
   /** The game state's viewer kind: only a visitor or a viewer without a gladiator picks a league, only a player registers. */
   viewer: Viewer;
+  /** The revision's published slot (`GameUiState.publishedSlotIndex`, Task 23.2; null before the first coordination). */
+  publishedSlotIndex?: number | null;
 }) {
   /** The shared clock's time, and whether it has the server's time yet (or is held), read together at each tick. */
   const [time, setTime] = useState(() => readClock(clock));
@@ -636,7 +663,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
               : syncError ? <TournamentNotice failure="unavailable" preparing={false} />
                 : <p role="status" className={styles.detail}>Loading the tournament…</p>)
               : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null}
-                processedSlotIndex={owner?.processedSlotIndex ?? null} refreshOwner={refresh} onRead={onRead} onLogRead={onLogRead} hook={cardState} />}
+                processedSlotIndex={owner?.processedSlotIndex ?? null} publishedSlotIndex={fixture ? null : publishedSlotIndex}
+                refreshOwner={refresh} onRead={onRead} onLogRead={onLogRead} hook={cardState} />}
       </section>
     </section>
   );

@@ -99,12 +99,14 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
 
   test('backs off both preparing reads after three minutes', async ({ page, context }) => {
     // A player whose processed slot lags, 40 s after the cutoff: the slot is never published here, so its tournament stays
-    // "being prepared". Each re-read refreshes the owner first (Task 19 R2), so the two reads go together.
+    // "being prepared". Without a published slot on the revision (before the first coordination) each re-read refreshes
+    // the owner first (Task 19 R2), so the two reads go together; with one, only the tournament is re-read (C5, below).
     const start = TOURNAMENTS.opening.startsAtMs;
     const slot = start / SLOT_MS;
     const at = start + 40_000;
     await seedSession(context);
-    const live = await routeLiveReads(context, { world: emptyWorld(at), owner: { ...structuredClone(ownerFixture), processedSlotIndex: slot - 1 }, serverNowMs: () => at });
+    const live = await routeLiveReads(context, { world: emptyWorld(at), owner: { ...structuredClone(ownerFixture), processedSlotIndex: slot - 1 }, serverNowMs: () => at,
+      publishedSlotIndex: () => null });
     await page.clock.install();
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
@@ -127,6 +129,55 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
       o += reads;
     }
     await expect(panel.getByRole('status').filter({ hasText: 'Tournament being prepared' })).toBeVisible();
+  });
+
+  test('uses the published slot instead of the five-minute grace', async ({ page, context }) => {
+    // A gladiator created after the cutoff (its processed slot is already the tournament's): the five-minute grace ended
+    // its "being prepared" at +300 s although the slot was not published. The revision's published slot (Task 23.2) keeps it
+    // until the publication, re-reads only the tournament meanwhile, and reads it again as soon as the slot is published.
+    const start = TOURNAMENTS.opening.startsAtMs;
+    const slot = start / SLOT_MS;
+    let skipped = 0, published = slot - 1;
+    const began = Date.now();
+    await seedSession(context);
+    const live = await routeLiveReads(context, { world: emptyWorld(start + 40_000), owner: { ...structuredClone(ownerFixture), processedSlotIndex: slot },
+      serverNowMs: () => start + 40_000 + skipped + (Date.now() - began), publishedSlotIndex: () => published });
+    await page.clock.install();
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    await openMenu(page, 'Tournaments');
+    const panel = page.getByRole('region', { name: 'Tournaments', exact: true });
+    const preparing = panel.getByRole('status').filter({ hasText: 'Tournament being prepared' });
+    const missing = panel.getByRole('status').filter({ hasText: 'No tournament matches this selection.' });
+    await expect(preparing).toBeVisible({ timeout: 45_000 });
+    await page.waitForTimeout(500);
+    const owners = live.count('owner_state');
+    /** Moves the page clock, and the server's time with it, in 30 s steps to `ms` after the cutoff. */
+    const advanceTo = async (ms: number) => {
+      for (;;) {
+        const shown = await page.evaluate(() => window.__cloudiatorShell!.clock.now());
+        const by = Math.min(30_000, start + ms - shown);
+        if (by <= 0) return;
+        skipped += by;
+        await page.clock.fastForward(by);
+        await page.waitForTimeout(150);
+      }
+    };
+    await advanceTo(290_000);
+    await expect(preparing).toBeVisible();
+    await advanceTo(420_000);
+    await expect(preparing).toBeVisible();
+    await expect(missing).toHaveCount(0);
+    // While being prepared only the tournament is re-read: the owner is not refreshed with each re-read.
+    expect(live.count('owner_state'), 'owner reads while the slot is being prepared').toBe(owners);
+    // The slot is published: the next revision poll says so, and the card reads its tournament at once.
+    published = slot;
+    live.setTournaments([VIEWS.opening]);
+    const views = live.count('tournament_views');
+    await page.clock.fastForward(30_000);
+    await expect.poll(() => live.count('tournament_views'), { timeout: 5_000 }).toBeGreaterThan(views);
+    await expect(panel.locator('article[data-status]').getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    await expect(preparing).toHaveCount(0);
   });
 
   test('retries a failed ring log and keeps multi-league arrival order', async ({ page, context }) => {

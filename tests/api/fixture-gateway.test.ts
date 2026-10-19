@@ -36,7 +36,9 @@ test('fixture public actors omit private owner management state', async () => {
   }
   expect(world.actors.slice(1).every(a => a.location === 'arena' && a.visibleStage?.kind === 'staging')).toBe(true);
   const revision = await gateway.revision();
-  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex });
+  // The fixture world's slot is published (Task 23.2's published slot; Task 23.4, C5).
+  expect(world.publishedSlotIndex).toBe(world.slotIndex);
+  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex, publishedSlotIndex: world.slotIndex });
 });
 
 test('unimplemented fixture reads reject explicitly as unavailable', async () => {

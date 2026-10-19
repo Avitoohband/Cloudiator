@@ -72,6 +72,11 @@ export type LiveData = {
   owner?: OwnerState | null;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
   serverNowMs?: () => number;
+  /**
+   * The revision's published slot (Task 23.2, C5): the latest slot whose boundary is published, null before the first
+   * coordination. By default the server time's own slot (the slot is published).
+   */
+  publishedSlotIndex?: (serverNowMs: number) => number | null;
   /** The account a Google sign-in through the test-only consent page signs in (a new `testUser` by default). */
   googleUser?: TestUser;
 };
@@ -95,6 +100,8 @@ export type LiveTransport = {
   setTimelines(timelines: Readonly<Record<string, RevealedTimeline>>): void;
   /** Replaces the open marketplace offers (a listing was created, bought, cancelled or swept). */
   setMarket(offers: readonly MarketListing[]): void;
+  /** Replaces the revision's published slot (a slot's publication), or restores the default with undefined. */
+  setPublishedSlotIndex(published: ((serverNowMs: number) => number | null) | undefined): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
   delay(table: string, ms: number): void;
   /** Holds a table's requests until the returned release is called (then answers them, and later ones, at once). */
@@ -203,6 +210,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setTournaments: views => { data.tournaments = views; },
     setTimelines: timelines => { data.timelines = timelines; },
     setMarket: offers => { data.market = offers; },
+    setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {
       let release!: () => void;
@@ -314,7 +322,8 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
   const seasons: SeasonView[] = data.seasons ? [...data.seasons] : [...new Map(pages.filter(page => page.seasonId !== '').map(page => [page.seasonId, page.archived] as const))]
     .map(([seasonId, archived]) => ({ seasonId, startsAtMs: 0, endsAtMs: RULES_V1.seasons.durationMs, closedAtMs: archived ? RULES_V1.seasons.durationMs : null }));
   return {
-    world_revision: { rows: [{ revision: world.revision, server_now_ms: now, slot_index: Math.floor(now / SLOT_MS) }] },
+    world_revision: { rows: [{ revision: world.revision, server_now_ms: now, slot_index: Math.floor(now / SLOT_MS),
+      published_slot_index: data.publishedSlotIndex ? data.publishedSlotIndex(now) : Math.floor(now / SLOT_MS) }] },
     world_actor_reads: { rows: world.actors.map(actor => ({ gladiator_id: actor.gladiatorId, actor })) },
     // The projection keeps each award with its season index (a number); the read maps it to a PrestigeAward with a string season id.
     public_profile_reads: { rows: Object.entries(data.profiles ?? {}).map(([gladiator_id, profile]) => ({ gladiator_id,

@@ -387,3 +387,76 @@ beside the players for 3 always-on visitors.
    - Task 23.7's planned idle pause (a character whose owner has sent no activity signal for 14 days leaves the boundary
      cohort) reduces the active cohort. Its design awaits Avi's approval; nothing of it is built.
    - Hosted dispatch spacing is still C4 (Task 24).
+
+## Lane B: render cost
+
+Task 23.4, measured 2026-10-19 on branch `claude/task-23-ui`.
+
+### How it was measured
+
+- **Harness:** `tests/performance/fps.spec.ts`, run with its own config:
+  `PLAYWRIGHT_PERF_PORT=3300 npx playwright test --config tests/performance/playwright.perf.config.ts`.
+  It never runs in the development or production gates: their `testDir` is `tests/browser`.
+- **Build:** the development fixture build (`next dev` with `NEXT_PUBLIC_FIXTURE_ENABLED=true`), so the camp's test hook can set up the scene.
+- **Browser:** headed Google Chrome 155.0.8059.80 (Playwright 1.64, `channel: 'chrome'`).
+- **WebGL renderer:** `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 (0x00002684) Direct3D11 vs_5_0 ps_5_0, D3D11)`.
+- **Machine:** Intel Core i9-13900K; the display runs at 2560×1440, 170 Hz. The frame rate is capped by vsync, so 170 fps is the ceiling here, not 60.
+- **Desktop project:** Playwright's Desktop Chrome device, a 1280×720 viewport.
+- **Sampler:** a `requestAnimationFrame` loop injected with `addInitScript` records every frame's timestamp. Each phase uses the definitions in `src/lib/frame-stats.ts`, which the `?perf=1` overlay shares:
+  - **mean fps:** frames divided by elapsed time;
+  - **p5 fps:** the rate of the 95th-percentile frame interval, by nearest rank;
+  - **frames over 16.7 ms and over 33.3 ms:** shares of intervals above each budget by more than 1 ms. The 1 ms allows for timer jitter, since rAF timestamps are coarsened and vsync drifts.
+- **The path** (plan Decision 9):
+  1. The fixture camp holds `createDemoWorld(now, 50, 6)`'s crowd. That is 50 gladiators in camp and 6 away, joined by the camp's 6 ambient NPCs.
+  2. The current slot's 13 Arena entrants fight at minute 60.
+  3. The `completed` tournament's 8 entrants are moved into the same slot, so its final is in a ring and the eliminated spectate.
+  4. The camp shows 14 ring fights: 6 in the rings, the rest queued.
+  5. Phases follow:
+     - 6 s of overview;
+     - 6 s of panning on every frame;
+     - 6 s at the maximum zoom (3.00×) over the arena;
+     - 20 open/close cycles of the replay scene and the expedition scene;
+     - 6 s of camp afterwards.
+- **Pixel 7 project:** Pixel 7 emulation (412×839 CSS px, touch) with 4× CPU throttling through CDP `Emulation.setCPUThrottlingRate`. It runs on the same desktop GPU, so it is **indicative only**.
+
+### Results
+
+| Phase | Desktop mean | Desktop p5 | Desktop >16.7 ms | Desktop >33.3 ms | Pixel 7, 4× CPU mean | Pixel 7 p5 | Pixel 7 >16.7 ms | Pixel 7 >33.3 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Camp overview (default zoom) | 170.1 | 166.7 | 0.0% | 0.0% | 155.8 | 84.7 | 0.0% | 0.0% |
+| Pan | 170.1 | 166.7 | 0.0% | 0.0% | 160.9 | 85.5 | 0.0% | 0.0% |
+| Arena at maximum zoom, fights and spectators | 169.9 | 166.7 | 0.0% | 0.0% | 169.6 | 166.7 | 0.0% | 0.0% |
+| 20 replay and expedition scene cycles | 160.0 | 166.7 | 1.2% | 0.6% | 123.2 | 56.8 | 4.0% | 2.6% |
+| Camp after the cycles | 170.1 | 166.7 | 0.0% | 0.0% | 170.1 | 166.7 | 0.0% | 0.0% |
+
+- **Frame counts:**
+  - desktop: 1,020–1,023 per 6 s phase, and 4,656 over the 29.1 s of cycles;
+  - Pixel 7: 937–1,022 per 6 s phase, and 4,892 over 39.7 s of cycles.
+- **Long frames in the cycles phase** come from each scene's start: a new Phaser game and its art. The camp is paused under the scene and is the same afterwards: ready, one canvas, and no lost WebGL context after 40 scene starts.
+- **Desktop target (60 fps):** met in every phase. The harness checks it softly, at a mean of at least 59 on the camp phases.
+- **Mobile target (at least 30 fps on the test device):** not measured. The Pixel 7 emulation runs on this desktop's GPU, so it says nothing about a phone's GPU.
+  - It stays a named launch blocker until Avi's phone is measured with `?perf=1` on the deployed production build (Task 24, plan Decision 2).
+  - The overlay shows the same four numbers with the WebGL renderer, so that measurement can be added to this table.
+
+### Render-cost changes this measurement covers
+
+- **Opaque scene (C8).** The camp's Phaser loop stops updating and drawing under an opaque scene, and resumes after.
+  - Before the change, the camp issued 7,852 WebGL draw calls a second (desktop) and 664 (Pixel 7 project) under the replay scene. Now it issues none.
+- **Culling and hidden tabs (R8, unchanged).** Actors outside the camera view stay hidden. A hidden tab draws nothing.
+
+### Read volume measured by the browser specs
+
+The `tests/browser/read-render.spec.ts` checks:
+
+| Read | Before | Now |
+| --- | --- | --- |
+| Arena timelines for a slot's 13 entrants (5 human pairs) | 13 | 8: one per pair, NPC bout or boutless entrant |
+| Owner reads for a tab return to a changed revision | 2 | 1 |
+| Owner reads for a creation and its revision change | 3: confirm, refresh, next poll | 2: confirm, revision change. The new world loads at once, not at the next poll. |
+| `/replay/` deep link: world loads | 1 per revision change | 0. It polls only the revision. |
+| `/replay/` deep link: owner reads | 1 per revision change or tab return | 1 |
+| "Being prepared" re-reads, each with an owner refresh when the revision has no published slot | every 30 s for the whole slot | every 30 s for 3 minutes after the cutoff, then after 60 s, 120 s, 240 s and every 5 minutes |
+| "Being prepared" with a published slot (C5) | owner refresh plus tournament read per retry, and "No tournament matches" from +300 s even while unpublished | tournament read only; "being prepared" until the slot is published, then one read at once |
+| Tournament logs cached by the gateway | unbounded for the session | at most 64, least recently used dropped first |
+| A failed ring log | asked again after 30 s of display time (never with a held clock) | after 2 s, then 4, 8 and 16 s, then every 30 s, by real time |
+| Late joiner, 50-entrant bracket (Task 13.9 measure, unchanged) | 8 of 34 revealed bout logs | 8 of 34 |

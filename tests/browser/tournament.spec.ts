@@ -440,10 +440,12 @@ test.describe('the live Tournaments panel', () => {
 
   test('keeps one 30 s retry while preparing even when the owner refresh prop changes', async ({ page, context }) => {
     // 40 s after the cutoff: the slot is not published yet, so the view is missing and the owner's processed slot lags.
+    // The revision carries no published slot (before the first coordination, Task 23.4 C5): the owner's processed slot
+    // tells the publication, so each re-read refreshes the owner first (R2).
     const at = startOf('opening') + 40_000;
     const owner = { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT - 1 };
     await seedSession(context);
-    const live = await routeLiveReads(context, { world: emptyWorld(at), owner, serverNowMs: () => at });
+    const live = await routeLiveReads(context, { world: emptyWorld(at), owner, serverNowMs: () => at, publishedSlotIndex: () => null });
     await page.clock.install();
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
@@ -482,17 +484,18 @@ test.describe('the live Tournaments panel', () => {
   });
 
   for (const viewer of ['gladiator', 'visitor'] as const) {
-    test(viewer === 'gladiator' ? 'shows "Tournament being prepared" for a gladiator created after the cutoff, for five minutes'
-      : 'shows a visitor "Tournament being prepared" for five minutes after the cutoff', async ({ page, context }) => {
+    test(viewer === 'gladiator' ? 'shows "Tournament being prepared" for a gladiator created after the cutoff, for five minutes without a published slot'
+      : 'shows a visitor "Tournament being prepared" for five minutes after the cutoff without a published slot', async ({ page, context }) => {
       // R3: the server's time runs on (and jumps with the page clock), so every revision read reports the tournament's
       // slot by time. The slot is never published here, so its view stays missing. A gladiator created after the cutoff
-      // already has the tournament's processed slot; a visitor has none.
+      // already has the tournament's processed slot; a visitor has none. The revision carries no published slot (before
+      // the first coordination), so the five-minute bound still applies (Task 23.4 C5: with one it no longer does).
       const start = startOf('opening');
       let skipped = 0;
       const began = Date.now();
       if (viewer === 'gladiator') await seedSession(context);
       const live = await routeLiveReads(context, { world: emptyWorld(start + 40_000), serverNowMs: () => start + 40_000 + skipped + (Date.now() - began),
-        owner: viewer === 'gladiator' ? { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT } : null });
+        owner: viewer === 'gladiator' ? { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT } : null, publishedSlotIndex: () => null });
       await page.clock.install();
       await page.goto('/game/');
       if (viewer === 'gladiator') await expectOwnerShown(page, 'Aster');

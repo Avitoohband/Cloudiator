@@ -117,23 +117,27 @@ export function preparingRetryDelay(sinceCutoffMs: number, lateRetries: number):
 }
 
 /**
- * How long after a tournament's cutoff a missing view reads as "being prepared" for every viewer (Task 19 R3). Phase 8
- * publishes a slot about 61–121 s after its cutoff; no public field says when it has, so a time bound covers visitors
- * and gladiators created after the cutoff, with room for a late cron tick.
+ * How long after a tournament's cutoff a missing view reads as "being prepared" for every viewer when the revision carries
+ * no published slot (before the first coordination; Task 19 R3). Phase 8 publishes a slot about 61–121 s after its
+ * cutoff, so a time bound covers visitors and gladiators created after the cutoff, with room for a late cron tick. With a
+ * published slot (Task 23.2, `RevisionState.publishedSlotIndex`) the bound no longer applies (Task 23.4, C5).
  */
 export const TOURNAMENT_PREPARE_GRACE_MS = 300_000;
 /**
  * Whether a missing view (`not-found`) of tournament `id` means it is still being prepared (2b review M4; Task 19 R3):
- * the display time is inside that tournament's slot, and either less than `TOURNAMENT_PREPARE_GRACE_MS` has passed since
- * its cutoff, or the owner's processed slot (published with the slot's tournaments; null without an owner) is still an
- * earlier one. Otherwise a missing view means no tournament in that league. Never before the cutoff, after the slot or
- * for a malformed id.
+ * the display time is inside that tournament's slot, and the slot is not published yet. `publishedSlotIndex` is the
+ * revision's published slot (Task 23.2) as it was when the view was read: an earlier slot means being prepared, however
+ * long it takes, and that slot or a later one means no tournament in that league (Task 23.4, C5). Without one (null or
+ * left out, before the first coordination) the old bound decides: less than `TOURNAMENT_PREPARE_GRACE_MS` since the cutoff,
+ * or the owner's processed slot (published with the slot's tournaments; null without an owner) still an earlier one.
+ * Never before the cutoff, after the slot or for a malformed id.
  */
-export function tournamentPreparing(id: string, displayNowMs: number, processedSlotIndex: number | null): boolean {
+export function tournamentPreparing(id: string, displayNowMs: number, processedSlotIndex: number | null, publishedSlotIndex?: number | null): boolean {
   const slot = tournamentSlotOf(id);
   if (slot === null || !Number.isFinite(displayNowMs) || displayNowMs < 0) return false;
   const running = tournamentWindowAt(displayNowMs);
   if (running?.slotIndex !== slot) return false;
+  if (typeof publishedSlotIndex === 'number' && Number.isFinite(publishedSlotIndex)) return publishedSlotIndex < slot;
   return displayNowMs - running.startsAtMs < TOURNAMENT_PREPARE_GRACE_MS || (processedSlotIndex !== null && processedSlotIndex < slot);
 }
 

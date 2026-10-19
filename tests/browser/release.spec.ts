@@ -904,9 +904,10 @@ test('offers Reload when the camp cannot load and recovers after it', async ({ p
   await expect(reload).toBeEnabled();
   await expectNamedControls(fallback, 'the camp fallback');
   await reviewShot(page, testInfo, 'reload-camp-failed');
-  // The menus still work while the camp is down.
+  // The menus still work while the camp is down (Schedule for the fixture player; the production build's live camp has
+  // no backend here, so its viewer gets the public menus).
   await revealRail(page);
-  await expect(railMenus(page).getByRole('button', { name: 'Schedule', exact: true })).toBeEnabled();
+  await expect(railMenus(page).getByRole('button', { name: production ? 'Tournaments' : 'Schedule', exact: true })).toBeEnabled();
   // The art is back: Reload starts the camp again, and the keyboard stays on the camp view (never on <body>).
   failing = false;
   await reload.focus();

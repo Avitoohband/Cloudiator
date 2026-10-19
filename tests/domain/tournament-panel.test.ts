@@ -328,6 +328,39 @@ describe('the tournament being prepared (2b review M4; Task 19 R3 and R5)', () =
   });
 });
 
+describe('uses the published slot instead of the five-minute grace (Task 23.2, Task 23.4 C5)', () => {
+  const slot = TOURNAMENTS.completed.startsAtMs / 4_800_000;
+  const tid = tournamentId('completed');
+  const start = TOURNAMENTS.completed.startsAtMs;
+
+  it('treats a missing view as being prepared exactly while its slot is unpublished, for every viewer', () => {
+    for (const processed of [null, slot, slot - 1]) {
+      // Not published yet: being prepared however long it takes, within the slot.
+      for (const minute of [0, 1, 4, 6, 30, 79]) expect(tournamentPreparing(tid, start + minute * MIN, processed, slot - 1), `${processed}, +${minute} min, unpublished`).toBe(true);
+      // Published: a missing view means no tournament in this league, from the first minute.
+      for (const minute of [0, 1, 6]) expect(tournamentPreparing(tid, start + minute * MIN, processed, slot), `${processed}, +${minute} min, published`).toBe(false);
+      // Never outside the slot, published or not.
+      expect(tournamentPreparing(tid, start - 1, processed, slot - 1)).toBe(false);
+      expect(tournamentPreparing(tid, start + 80 * MIN, processed, slot - 1)).toBe(false);
+    }
+    // No published slot on the revision (before the first coordination): the five-minute bound and the owner's
+    // processed slot decide, as before.
+    expect(tournamentPreparing(tid, start + MIN, null, null)).toBe(true);
+    expect(tournamentPreparing(tid, start + 300_000, null, null)).toBe(false);
+    expect(tournamentPreparing(tid, start + 300_000, slot - 1, null)).toBe(true);
+    expect(tournamentPreparing(tid, start + 300_000, slot, undefined)).toBe(false);
+  });
+
+  it('renders the card notice from the published slot', () => {
+    const card = (published: number | null, now: number) =>
+      text(renderToStaticMarkup(createElement(TournamentCardNotice, { id: tid, failure: 'not-found', now, processedSlotIndex: slot, publishedSlotIndex: published })));
+    expect(card(slot - 1, start + 6 * MIN)).toContain('Tournament being prepared');
+    expect(card(slot, start + MIN)).toContain('No tournament matches this selection.');
+    expect(card(null, start + MIN)).toContain('Tournament being prepared');
+    expect(card(null, start + 6 * MIN)).toContain('No tournament matches this selection.');
+  });
+});
+
 describe('“being prepared” re-reads back off after three minutes (Task 19 review, Task 23.4 C11)', () => {
   it('re-reads every 30 s for the first three minutes after the cutoff, then after 60 s, 120 s, 240 s and every 5 minutes', async () => {
     const { TOURNAMENT_PREPARE_FAST_MS, preparingRetryDelay } = await import('@/game/tournament-stage');

@@ -16,6 +16,8 @@ export type GameUiState = {
   viewer: Viewer; session: SessionState; world: WorldSnapshot | null; owner: OwnerState | null;
   ownerError: 'unavailable' | null; syncError: 'unavailable' | 'unauthenticated' | null;
   revision: string | null; slotIndex: number | null; clock: DisplayClock;
+  /** The revision's published slot (Task 23.2, C5): the latest slot whose boundary is published; null before the first coordination. */
+  publishedSlotIndex: number | null;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
   /**
@@ -141,6 +143,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const syncWorld = sync?.world ?? null;
   const revision = syncWorld?.revision ?? null;
   const slotIndex = syncWorld?.slotIndex ?? null;
+  const publishedSlotIndex = syncWorld?.publishedSlotIndex ?? null;
 
   useEffect(() => {
     if (!gateway || account === null || clockOnly) return;
@@ -226,7 +229,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   else viewer = owner ? 'player' : read?.missing ? 'no-gladiator' : read?.failed ? 'unavailable' : 'loading';
 
   return {
-    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, clock,
+    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, clock,
     sceneStatus, refreshOwner, setSceneStatus, ownerCreated,
   };
 }

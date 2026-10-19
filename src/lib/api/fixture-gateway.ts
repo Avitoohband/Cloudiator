@@ -35,8 +35,9 @@ export function createFixtureGateway(): GameGateway {
     command: async () => ({ ok: false, code: 'unavailable' }),
     // The owner fixture with the rating and renown of its credited Arena samples.
     owner: async () => structuredClone(ARENA_OWNER),
-    world: async () => structuredClone(FIXTURE_WORLD),
-    revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex }),
+    // The fixture world's slot is published (Task 23.2's published slot, C5).
+    world: async () => ({ ...structuredClone(FIXTURE_WORLD), publishedSlotIndex: worldFixture.slotIndex }),
+    revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex, publishedSlotIndex: worldFixture.slotIndex }),
     // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Expedition and Arena
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),

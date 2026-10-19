@@ -296,6 +296,11 @@
 .tabs button:focus-visible,
 .watch:focus-visible,
 .samples button:focus-visible,
+/* Try again sits at the start of the replay section's grid, as the Standings' Try again does. */
+.retry {
+  justify-self: start;
+}
+
 .retry:hover {
   border-color: var(--gold);
 }

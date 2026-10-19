@@ -80,6 +80,10 @@ launch, Engine 29.8.2 answered within 5 s and the error report was gone. The con
 background Edge serve were restarted. This is the third observed occurrence; each followed a Desktop
 or host restart.
 
+On 2026-10-19 after the next host reboot (08:33 IDT), a hidden launch started Engine 29.8.2 within 5 s
+with no error report: the freshly recreated `docker-secrets-engine` directory did not repeat the failure.
+The recovery is therefore needed only when the stale socket survives a restart, not on every boot.
+
 This is a tested workaround on this host, not a permanent Docker fix. The
 preserved backup is not a database export and remains outside the repository.
 No full-Docker reset, upgrade, data-directory cleanup or removal of that backup

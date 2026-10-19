@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,8 +20,10 @@ import { describeFailure, Failure, isLoopback, parseDatabaseUrl } from './operat
 // --viewers sets the visitor count of the egress model only. The suites' own output goes to stderr. The capacity suite checks
 // its budgets only with CAPACITY_GATE=1 in the environment (Task 23.6's release gate sets it); the verdicts and the exit code
 // of this report do not depend on it.
-// Exit codes: 0 every budget below 100 %, 1 a budget at or over 100 % or a failed suite (the report still prints what was
-// measured), 2 a usage or discovery failure ({"ok":false,"code":…} on stdout).
+// Exit codes: 0 every budget below 100 %, 1 a budget at or over 100 %, a missing measurement or a failed suite (the report
+// still prints what was measured), 2 a usage or discovery failure ({"ok":false,"code":…} on stdout). A measurement the suites
+// did not produce (a section a failed suite never wrote, an absent number, a boundary window that never published) is
+// reported as "missing", never as ok.
 // Follow docs/operations/verification-gates.md: nothing else may build, browse or edit in the worktree that serves Edge while
 // this runs, and the Edge container's start time must be the same before and after.
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -76,14 +78,30 @@ const section = (dir, name) => {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
 };
 const percent = share => Math.round(share * 1_000) / 10;
-const verdict = share => (share >= 1 ? 'blocker' : share > 0.8 ? 'risk' : 'ok');
+/** A measured number, or NaN for a missing one (null, undefined, NaN, an infinity or not a number at all). */
+const measured = value => (typeof value === 'number' && Number.isFinite(value) ? value : NaN);
+/** A share's verdict: ok, risk above 80 %, blocker at 100 %, and missing when the share is not a measured number. */
+export const verdict = share => (Number.isNaN(measured(share)) ? 'missing' : share >= 1 ? 'blocker' : share > 0.8 ? 'risk' : 'ok');
+/** The worst of several measurements: missing (NaN) when there is none or any one of them is missing. */
+const worst = values => (values.length > 0 && values.every(value => !Number.isNaN(measured(value))) ? Math.max(...values) : NaN);
 const months = list => Object.fromEntries(list.map(m => [`${m.days}d`, { raw: Math.round(m.raw), gzip: Math.round(m.gzip), brotli: Math.round(m.brotli) }]));
 
-/** The report: the sections the suites wrote, and every budget's use with its verdict (ok, risk above 80 %, blocker at 100 %). */
-function report(options, dir, passed) {
-  const worker = section(dir, 'worker'), capacity = section(dir, 'capacity'), seasonClose = section(dir, 'seasonClose'), standings = section(dir, 'standings');
+/**
+ * The report: the sections the suites wrote, and every budget's use with its verdict (ok, risk above 80 %, blocker at 100 %,
+ * missing when the measurement is not there). Any missing or blocker line fails it.
+ * @param {{ players: number, viewers: number, slots: number }} options
+ * @param {{ worker?: any, capacity?: any, seasonClose?: any, standings?: any }} sections the parsed sections; absent ones are null
+ * @param {boolean} passed whether both suites passed
+ */
+export function report(options, { worker = null, capacity = null, seasonClose = null, standings = null }, passed) {
   const budgets = [];
-  const add = (name, used, budget) => budgets.push({ name, used: Math.round(used * 10) / 10, budget, percent: percent(used / budget), status: verdict(used / budget) });
+  const add = (name, used, budget) => {
+    const share = measured(used) / measured(budget), status = verdict(share);
+    budgets.push(status === 'missing' ? { name, used: null, budget: Number.isNaN(measured(budget)) ? null : budget, percent: null, status }
+      : { name, used: Math.round(used * 10) / 10, budget, percent: percent(share), status });
+  };
+  /** A section the suites never wrote: its budgets are missing. */
+  const absent = name => budgets.push({ name, used: null, budget: null, percent: null, status: 'missing' });
   let database = null, invocations = null, egress = null, boundary = null;
   if (capacity) {
     const db = d => ({ bytesPerSlot: Math.round(d.bytesPerSlot), steadyStateBytes: Math.round(d.steadyStateBytes), atOneYearBytes: Math.round(d.atOneYear.bytes),
@@ -106,27 +124,28 @@ function report(options, dir, passed) {
     for (const m of e.combined.months) add(`egress raw, players and viewers, ${m.days}-day month`, m.raw, e.budget);
     for (const m of e.combined.months) add(`egress gzip, players and viewers, ${m.days}-day month`, m.gzip, e.budget);
     if (e.combinedWithWorker) for (const m of e.combinedWithWorker.months) add(`egress raw with backend traffic, ${m.days}-day month`, m.raw, e.budget);
+    // A window that never published is missing, not the other windows' worst (Math.max treats null as 0).
     const published = [...capacity.measured.windows, ...capacity.measured.defaultSchedule.windows].map(w => w.publishedMs);
     boundary = { targetMs: 120_000, publishedMs: { mixed: capacity.measured.windows.map(w => [w.slot, w.publishedMs]),
       defaultSchedule: capacity.measured.defaultSchedule.windows.map(w => [w.slot, w.publishedMs]) } };
-    add('boundary publication at 50 characters (worst window)', Math.max(...published), 120_000);
-  }
+    add(`boundary publication at ${options.players} characters (worst window)`, worst(published), 120_000);
+  } else absent('capacity measurement (database, invocations, egress, boundary)');
   if (worker) {
     for (const [name, ms] of [['worker worst 120 s fight', worker.worstCombatMs], ['worker batch of 5', worker.batch5Ms],
       ['worker 50-entrant bracket', worker.bracket50Ms], ['worker tournament bout batch', worker.tournamentBatch5Ms]]) add(name, ms, worker.cpuMs);
-  }
+  } else absent('worker CPU measurement');
   if (seasonClose && capacity) {
-    add('season close, 4 leagues x 50', seasonClose.ms50.ms, capacity.budgets.seasonCloseMs);
-    add('season close, 4 leagues x 500', seasonClose.ms500.ms, capacity.budgets.seasonCloseMs);
-  }
+    add('season close, 4 leagues x 50', seasonClose.ms50?.ms, capacity.budgets?.seasonCloseMs);
+    add('season close, 4 leagues x 500', seasonClose.ms500?.ms, capacity.budgets?.seasonCloseMs);
+  } else absent('season close measurement');
   if (standings && capacity) {
-    add('standings page at 1,000 rows (Data API)', standings.pageMs, capacity.budgets.standingsReadMs);
-    add('one standing row at 1,000 rows (Data API)', standings.oneRowMs, capacity.budgets.standingsReadMs);
-  }
-  return { ok: passed && budgets.every(b => b.status !== 'blocker'), target: 'local', options, database, invocations, egress, boundary,
+    add('standings page at 1,000 rows (Data API)', standings.pageMs, capacity.budgets?.standingsReadMs);
+    add('one standing row at 1,000 rows (Data API)', standings.oneRowMs, capacity.budgets?.standingsReadMs);
+  } else absent('standings measurement');
+  return { ok: passed && budgets.every(b => b.status !== 'blocker' && b.status !== 'missing'), target: 'local', options, database, invocations, egress, boundary,
     worker: worker && { worstCombatMs: worker.worstCombatMs, batch5Ms: worker.batch5Ms, bracket50Ms: worker.bracket50Ms, tournamentBatch5Ms: worker.tournamentBatch5Ms,
       expeditionBatch5Ms: worker.expeditionBatch5Ms, budgetMs: worker.budgetMs, machine: worker.machine },
-    seasonClose: seasonClose && { ms50: seasonClose.ms50.ms, ms500: seasonClose.ms500.ms },
+    seasonClose: seasonClose && { ms50: seasonClose.ms50?.ms ?? null, ms500: seasonClose.ms500?.ms ?? null },
     standings: standings && { pageMs: standings.pageMs, oneRowMs: standings.oneRowMs, plans: standings.plans },
     budgets, measured: capacity?.measured ?? null };
 }
@@ -142,7 +161,8 @@ function main() {
     delete base.CLOUDIATOR_DB_URL;
     const unit = suite('vitest.config.ts', 'tests/performance/simulation.test.ts', base);
     const db = suite('vitest.db.config.ts', 'tests/db/capacity.test.ts', { ...base, ...local });
-    const result = report(options, dir, unit && db);
+    const sections = Object.fromEntries(['worker', 'capacity', 'seasonClose', 'standings'].map(name => [name, section(dir, name)]));
+    const result = report(options, sections, unit && db);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return result.ok ? 0 : 1;
   } finally {
@@ -150,9 +170,19 @@ function main() {
   }
 }
 
-try {
-  process.exitCode = main();
-} catch (error) {
-  process.stdout.write(JSON.stringify(describeFailure(error)) + '\n');
-  process.exitCode = 2;
+// Importing the module (tests/scripts/resource-report.test.ts) runs nothing; only `node scripts/resource-report.mjs` does.
+const invokedDirectly = () => {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+};
+if (invokedDirectly()) {
+  try {
+    process.exitCode = main();
+  } catch (error) {
+    process.stdout.write(JSON.stringify(describeFailure(error)) + '\n');
+    process.exitCode = 2;
+  }
 }

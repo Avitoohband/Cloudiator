@@ -241,3 +241,64 @@ No file under `supabase/functions` changed. This matches the unconfirmed pattern
    - **Observed:** migra's empty diff for MAINTAIN, view privileges and default privileges.
    - **Tested here:** the `migration new` completion, whose replay matched the source fingerprint.
    - **Untested as a general rule:** whether other privilege-only changes behave the same.
+
+## Fix round 1 (review I1: one account reading another owner's private state)
+
+Commit `f7e6534` test: prove no account reads another owner's private state. No schema change; no leak was found. Every
+authenticated-readable relation outside OPEN (`activities`, `builds`, `gladiators`, `item_instances`, `operation_receipts`,
+`owned_cosmetics`, `owner_state`, `pending_build_items`, `reservations`, `schedule_revisions`, `schedules`,
+`wallet_ledger`, `wallets`) is filtered by an `owner_read` policy on `auth.uid()`, or by the invoker view over those.
+
+**(a) Cross-account read loop.** New case: *never shows one account another owner's private state*.
+- Setup: the owner and a second account each get a gladiator and a published activity.
+- The relations come from the catalog: every relation authenticated can read, minus OPEN.
+- The owner reads them all through the Data API. Its account, gladiator and activity ids must appear (the positive anchor).
+- The second account reads the same relations. Its own ids must appear, and the list of relations holding any of the owner's
+  ids must be `[]`. A leak therefore names the leaking relation.
+- `readAll` pages every relation in primary-key order, or by every readable column where there is no key; case 9 uses it too.
+
+**(b) Policy bodies in the audit.**
+- `scripts/access-audit.sql` policy rows gain a fifth column, `detail`: `permissive` or `restrictive`, then `md5:` of
+  `coalesce(pg_get_expr(polqual, polrelid), '') || '|' || coalesce(pg_get_expr(polwithcheck, polrelid), '')`.
+- The `coalesce` on `polqual` keeps INSERT-only policies, which have no USING, from hashing to null. Otherwise it is the
+  ruling's expression.
+- Every other row's `detail` is empty. Its non-policy rows are unchanged (diffed).
+- The runbook describes the column and lists the expected policy rows. It warns that deparsed names follow the session's
+  `search_path`, so both runs must use the same path. Locally the path is `"$user", public, extensions`.
+
+**(c) Catalog assertion.** New case: *filters every signed-in read outside the open projections by auth.uid()*.
+- The check: every permissive SELECT or ALL policy for authenticated or PUBLIC, on a table outside OPEN, must contain
+  `auth.uid()` in its USING expression (`strpos`).
+- Two regressions, in a transaction that rolled back, prove it: `alter policy owner_read on public.wallets using (true)`, and
+  an extra permissive `using (true)` policy on `public.builds`. The case reports exactly those two policies.
+- The same probe shows that the wallets policy row's `md5` changes while its grantees stay the same. The new builds row reads
+  `permissive md5:<32 hex>`.
+
+**Docs.**
+- `migrations.md` M17 records postgres's own `storage` defaults as an accepted, harmless exception (controller ruling). It also
+  describes the two new cases and the policy detail.
+- Nothing else was changed. The review's Minor items stay deferred.
+
+### Tests (Edge start time rule)
+
+| Run | Planted violation | Result | Edge before | Edge after |
+|---|---|---|---|---|
+| GREEN 1 | none | 15/16: the new case's anchor failed, because creation writes no activity row; the test now plants one per gladiator | 2026-10-19T08:10:56.808741083Z | same |
+| GREEN 2 | none | **16/16** (11 matrix + 5 visitor) | 2026-10-19T08:10:56.808741083Z | same |
+| RED 1 | `create policy matrix_red_leak on public.wallets for select to authenticated using (true)` | 2 failed: (c) `['public.wallets.matrix_red_leak']`; (a) the second account read the owner's gladiator id (before the per-relation message) | 2026-10-19T08:10:56.808741083Z | same |
+| RED 2 | the same policy | 2 failed: (c) as above; (a) `expected [ 'wallets' ] to deeply equal []` | 2026-10-19T08:10:56.808741083Z | same |
+| RED 3 | `… using ((select auth.uid()) is not null)` | 1 failed: only (a), `[ 'wallets' ]`; (c) passes because the body names `auth.uid()`. This shows why the runtime loop is needed beside the catalog check. | 2026-10-19T08:10:56.808741083Z | same |
+| GREEN 3 | none (after restore) | **16/16** | 2026-10-19T08:10:56.808741083Z | same |
+| full 1 | none | discarded: Edge recreated during the run (2 Edge-dependent failures: arena timing 120,943 ms against 120,000; `fetch failed` in account setup) | 2026-10-19T08:10:56.808741083Z | 2026-10-19T08:38:41.403637198Z |
+| full 2 | none | **267/267**, 16 files (209.2 s) | 2026-10-19T08:38:41.403637198Z | 2026-10-19T08:38:41.403637198Z |
+
+- **Planted policies.** Each was committed only for its RED run and dropped right after. The parity fingerprint was then
+  byte-identical to the M01–M17 replay's, after every RED run and after both full runs.
+- `npm test`: 1102/1102. `npm run typecheck`: passed (tsc, `deno check --frozen`, Deno smoke 2/2). `git diff --check` was
+  clean.
+
+### Remaining
+
+- Edge was recreated during one more full run, which was discarded and rerun (C22, cause still unknown).
+- No `MultiXactId` error recurred in these runs.
+- The hosted policy-hash comparison depends on the same `search_path` on both sides. This is untested until Task 24.

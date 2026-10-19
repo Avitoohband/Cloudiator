@@ -69,6 +69,17 @@ was preserved as
 After a hidden launch, Engine 29.8.2 answered and the error report was gone.
 The Cloudiator label was verified before the stack was started.
 
+On 2026-10-19, after the host restarted overnight, Docker Desktop was not running. A hidden launch
+failed the same way: component `services`, "initializing Secrets Engine", an `*os.LinkError` renaming
+`engine.sock` to `engine.sock.stale` ("The file cannot be accessed by the system"). The documented
+force-stop reported Desktop not running, and no Desktop or backend process remained. The directory again
+held exactly one zero-byte `engine.sock` with Archive/ReparsePoint attributes. It was preserved as
+`C:/Users/Avi_OP_PC/AppData/Local/docker-secrets-engine.cloudiator-stale-20261019-1`. After a hidden
+launch, Engine 29.8.2 answered within 5 s and the error report was gone. The containers labelled
+`com.supabase.cli.project=Cloudiator` were verified before `supabase start` (output suppressed) and the
+background Edge serve were restarted. This is the third observed occurrence; each followed a Desktop
+or host restart.
+
 This is a tested workaround on this host, not a permanent Docker fix. The
 preserved backup is not a database export and remains outside the repository.
 No full-Docker reset, upgrade, data-directory cleanup or removal of that backup

@@ -3,7 +3,8 @@
 // Fixed replay page for the static export: /replay/?activity=<id>[&stage=<stage id>], a deep link (the camp opens the
 // same replay as a scene over itself, Task 13.8). It reads one revealed timeline and plays its battle log locally; it
 // never sends commands. The page mounts the shared game state for its display clock (Task 15 review Minor 2): only the
-// battles that ended by the server's time are offered, so a fight in progress never shows its outcome.
+// battles that ended by the server's time are offered, so a fight in progress never shows its outcome. It polls only the
+// revision and reads the owner once (Task 23.4, C6): no world, which it never shows.
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -35,8 +36,9 @@ function ReplayShell() {
   }, [fixture]);
 
   const reads = loaded?.fixture === fixture ? loaded.reads : null;
-  // Without a well-formed activity there is nothing to show, so nothing is read or polled.
-  const game = useGameState(activityId ? reads : null, { fixture });
+  // Without a well-formed activity there is nothing to show, so nothing is read or polled. The page needs only the
+  // server's time and the viewer's gladiator: the revision is polled, never the world, and the owner is read once (C6).
+  const game = useGameState(activityId ? reads : null, { fixture, clockOnly: true });
   // The display clock has a server time once the shared sync has read the world (or it never will: the device's clock).
   const clock = game.world || game.syncError ? game.clock : null;
   // The replay is the account's own read: once the session is known, a sign-out, expiry or account switch (here or in

@@ -511,6 +511,35 @@
   }
 }
 
+/* The opt-in frame-rate overlay (`?perf=1`, Task 23.4): a small top-layer box in a free corner, the notices' look. */
+.perf {
+  position: fixed;
+  inset: auto 12px 12px auto;
+  margin: 0;
+  max-width: min(300px, calc(100% - 24px));
+  padding: 6px 10px;
+  overflow: hidden;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--glass);
+  color: var(--ink);
+  font: 600 11.5px/1.45 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.perf p {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.perfRenderer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
 /* A narrow window with a pointer: the pill moves beside the rail, clear of the chip. */
 @media (hover: hover) and (min-width: 481px) and (max-width: 924px) {
   .pill {
@@ -658,6 +687,11 @@
 
   .pill {
     top: 56px;
+  }
+
+  /* Touch: the dock and the sheets take the bottom and the chip the top right, so the overlay sits below the pill. */
+  .perf {
+    inset: 100px auto auto 12px;
   }
 
   .notices {

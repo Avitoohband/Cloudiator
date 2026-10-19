@@ -338,3 +338,33 @@ describe('arena timeline reads for the camp', () => {
 // Typing check: the fixture fights satisfy the public shape the scene consumes.
 const _shape: CampFight[] = fightsAt(S + 61 * MIN);
 void _shape;
+
+describe('one timeline read per human Arena pair (Task 17 M7, Task 23.4)', () => {
+  const at = S + 61 * MIN;
+  const byGladiator = new Map(ARENA_WORLD_ACTORS.map(a => [a.gladiatorId, a]));
+
+  it('names the in-camp partner whose bout an entrant’s timeline already shows, and nobody for an NPC bout', async () => {
+    const { arenaPartnersShown } = await import('@/game/arena-layout');
+    let pairs = 0;
+    for (const actor of ARENA_WORLD_ACTORS) {
+      const timeline = ARENA_TIMELINES[actor.activityId!];
+      const bout = renderArenaStage(timeline, at, { entrantId: actor.gladiatorId }).bout;
+      const opponent = bout?.log?.participants.map(p => p.gladiatorId).find(id => id !== actor.gladiatorId) ?? null;
+      const partner = opponent ? byGladiator.get(opponent) ?? null : null;
+      expect(arenaPartnersShown(timeline, ARENA_WORLD_ACTORS, at), actor.name).toEqual(partner ? [partner.activityId] : []);
+      if (partner) pairs += 1;
+    }
+    // Five human pairs in the current slot, seen from both sides.
+    expect(pairs).toBe(10);
+  });
+
+  it('names nobody before the bout is revealed, or when the partner is not in the arena', async () => {
+    const { arenaPartnersShown } = await import('@/game/arena-layout');
+    const bellator = ARENA_WORLD_ACTORS.find(a => a.name === 'Bellator')!;
+    const timeline = ARENA_TIMELINES[bellator.activityId!];
+    expect(arenaPartnersShown(timeline, ARENA_WORLD_ACTORS, S + 40 * MIN)).toEqual([]);
+    const away = ARENA_WORLD_ACTORS.map(a => (a.name === 'Corvina' ? { ...a, location: 'training' as const } : a));
+    expect(arenaPartnersShown(timeline, away, at)).toEqual([]);
+    expect(arenaPartnersShown(timeline, ARENA_WORLD_ACTORS.filter(a => a.name !== 'Corvina'), at)).toEqual([]);
+  });
+});

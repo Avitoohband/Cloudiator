@@ -13,6 +13,7 @@ import { MARKET_ROWS } from '../fixtures/market';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession, testUser } from './live-routes';
+import { reviewShot } from './review-shots';
 import { cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
@@ -884,8 +885,44 @@ test('shows an unavailable replay in the production build', async ({ page, conte
   }
 });
 
-// R13 belongs to Task 23.4 (GameViewport.tsx adds the camp's Reload): this spec asserts only the failure state that exists.
-test.fixme('offers a working Reload when the camp cannot start (Task 23.4, src/game/GameViewport.tsx)', async ({ page }) => {
-  await page.goto('/game/?mode=fixture');
-  await expect(page.getByRole('button', { name: 'Reload' })).toBeEnabled();
+// R13 (Task 23.4, src/game/GameViewport.tsx): a camp that cannot start says so and offers Reload, which starts it again in
+// place (the menus, the session and an open menu stay), in the development server and the production build alike.
+test('offers Reload when the camp cannot load and recovers after it', async ({ page }, testInfo) => {
+  await watchFocus(page);
+  let failing = true;
+  const aborted: string[] = [];
+  await page.route('**/assets/actors/**', route => {
+    if (!failing) return route.fallback();
+    aborted.push(route.request().url());
+    return route.abort();
+  });
+  await page.goto(production ? '/game/' : '/game/?mode=fixture');
+  const fallback = page.locator('[data-camp-fallback]');
+  await expect(fallback).toContainText('The camp art could not load', { timeout: 45_000 });
+  expect(aborted.length).toBeGreaterThan(0);
+  const reload = fallback.getByRole('button', { name: 'Reload', exact: true });
+  await expect(reload).toBeEnabled();
+  await expectNamedControls(fallback, 'the camp fallback');
+  await reviewShot(page, testInfo, 'reload-camp-failed');
+  // The menus still work while the camp is down.
+  await revealRail(page);
+  await expect(railMenus(page).getByRole('button', { name: 'Schedule', exact: true })).toBeEnabled();
+  // The art is back: Reload starts the camp again, and the keyboard stays on the camp view (never on <body>).
+  failing = false;
+  await reload.focus();
+  await page.keyboard.press('Enter');
+  await expect(fallback).toHaveCount(0, { timeout: 45_000 });
+  const view = page.getByRole('application');
+  await expect(view).toBeVisible();
+  await expect(view).toBeFocused();
+  await expect(page.getByText('Opening the camp…')).toHaveCount(0, { timeout: 45_000 });
+  await expect(page.locator('[data-camp-view] canvas')).toHaveCount(1);
+  if (!production) await campReady(page);
+  expect(await focusDrops(page)).toEqual([]);
+  // The rail's camera buttons are back (the pointer layout has them; touch zooms by pinch).
+  if (!(await touchLayout(page))) {
+    await revealRail(page);
+    await expect(page.getByRole('button', { name: 'Zoom in' })).toBeVisible();
+  }
+  await reviewShot(page, testInfo, 'reload-camp-recovered');
 });

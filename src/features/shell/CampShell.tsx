@@ -20,7 +20,8 @@
 // Task 13.8: replays and expeditions open as full-screen scenes over the running camp (`SceneOverlay`), each a history
 // entry on the camp's route (`?view=…`, plan Decision 4, `useSceneHistory`). The bridge carries them: `view-replay` and
 // `view-expedition` open one (the Arena card's Watch replay, the Gladiators list's away rows), `return-camp` closes it
-// (the scene's "Back to camp"); Results opens each result by its kind. The camp keeps running beneath a scene.
+// (the scene's "Back to camp"); Results opens each result by its kind. The camp pauses beneath a scene, which covers it
+// (Task 23.4, C8), and goes on from the shared clock's time when the scene closes.
 //
 // Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -47,6 +48,7 @@ import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
+import { PerfOverlay } from './PerfOverlay';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
@@ -139,7 +141,7 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   </>;
 }
 
-export function CampShell({ fixture, previewAs, fixtureRefused = false, signInResult = null, scene = null }: {
+export function CampShell({ fixture, previewAs, fixtureRefused = false, signInResult = null, scene = null, perf = false }: {
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** `?mode=fixture` was asked for in a build without the preview: say so over the live camp. */
@@ -148,6 +150,8 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   signInResult?: SignInResult | null;
   /** `?view=replay|expedition&activity=…`: the scene over the camp (plan Decision 4). */
   scene?: SceneAddress | null;
+  /** `?perf=1`: the opt-in frame-rate overlay (plan Decision 2, Task 23.4); never shown without it. */
+  perf?: boolean;
 }) {
   const [bridge] = useState(createSceneBridge);
   const [gateway] = useState(createLiveGateway);
@@ -189,7 +193,7 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
   const show = useCallback((id: MenuId) => { if (openRef.current !== id) send({ toggle: id }); }, [send]);
 
   const account = game.session.userId;
-  const joining = useJoining({ viewer, account, refreshOwner: game.refreshOwner, show });
+  const joining = useJoining({ viewer, account, ownerCreated: game.ownerCreated, show });
 
   // A sign-in that did not complete: keep its message, and take the parameter out of the address.
   const [signInNotice, setSignInNotice] = useState<SignInResult | null>(signInResult);
@@ -337,12 +341,13 @@ export function CampShell({ fixture, previewAs, fixtureRefused = false, signInRe
           if (start && isClick(event.clientX - start.x, event.clientY - start.y)) { send('camp-click'); closeCard(false); }
         }}>
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
-          onStatus={game.setSceneStatus} />
+          onStatus={game.setSceneStatus} paused={scene !== null} />
       </main>
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
       )}
+      {perf && <PerfOverlay />}
     </div>
   );
 }

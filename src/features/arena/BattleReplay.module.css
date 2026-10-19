@@ -24,7 +24,8 @@
 }
 
 .encounters button,
-.controls button {
+.controls button,
+.retry {
   min-height: 44px;
   padding: 0 0.95rem;
   color: var(--ink);
@@ -32,6 +33,10 @@
   border: 1px solid #6b5a3a;
   font-size: 0.85rem;
   font-weight: 650;
+}
+
+.retry:hover {
+  border-color: var(--gold);
 }
 
 .encounters button[aria-pressed='true'],

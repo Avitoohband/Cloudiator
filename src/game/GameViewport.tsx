@@ -12,6 +12,12 @@
 // entrants have left the camp. Tournament views carry no battle logs: the scene stages a revealed
 // bout from its fight summary, and the host loads its log, through the reader's log cache that the
 // Tournaments panel shares, only while its ring window is current or about to start.
+//
+// Task 23.4: the camp stops drawing while an opaque scene covers it (`paused`, C8); a camp that cannot start says why and
+// offers Reload, which starts it again in place (R13); the views of tournaments read together are published together, so
+// leagues that share reveal times lay out their rings the same whichever view arrives first, and a failed ring log is
+// asked for again after 2 s, backing off to 30 s (C9); and at most two Arena timelines are read at once, skipping a
+// partner whose bout a landed timeline already shows (Task 17 review M7).
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
@@ -19,11 +25,14 @@ import type { GameGateway } from '../lib/api/gateway';
 import type { Point } from './iso';
 import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
-import { arenaFightButton, arenaReadsDue, type ArenaRead } from './arena-layout';
-import { TOURNAMENT_LOG_WINDOW_MS, campTournamentIds, recordTournamentRead, tournamentLogsDue, tournamentReadsDue, type TournamentRead } from './tournament-camp';
-import { TOURNAMENT_RETRY_MS, withTournamentLogs } from './tournament-stage';
+import { arenaFightButton, arenaPartnersShown, arenaReadsDue, type ArenaRead } from './arena-layout';
+import {
+  TOURNAMENT_LOG_WINDOW_MS, campTournamentIds, recordTournamentRead, ringLogRetryDelay, tournamentLogsDue, tournamentReadsDue, type TournamentRead,
+} from './tournament-camp';
+import { withTournamentLogs } from './tournament-stage';
 import { createDisplayClock, type DisplayClock } from './display-clock';
 import { prefersReducedMotion, supportsWebGL } from './webgl';
+import { hashString } from './actors';
 import { startGame } from './phaser-game';
 import styles from './GameViewport.module.css';
 
@@ -31,6 +40,13 @@ import styles from './GameViewport.module.css';
 const ARENA_CHECK_MS = 1000;
 /** At most this many tournament battle logs load at once (each ring asks for at most its current and next bout). */
 const LOG_LOADS = 6;
+/**
+ * At most this many Arena timelines load at once, so a landed one can spare its partner's read (Task 17 review M7): two
+ * keep a pair's sides rarely in flight together, and a 50-entrant wave still lands in about 13 round trips.
+ */
+const ARENA_TIMELINE_READS = 2;
+/** Tournament views read together are published together, waiting at most this long for a slow one (Task 23.4, C9). */
+const TOURNAMENT_BATCH_WAIT_MS = 5_000;
 
 /** Keeps every battle log a view already carries (a scene test's view, an older reader) so it is never asked for. */
 function keepLogs(view: TournamentView, logs: Map<string, BattleLog>) {
@@ -100,7 +116,7 @@ declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
 
-export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus, chrome = 'framed' }: {
+export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus, chrome = 'framed', paused = false }: {
   world: WorldSnapshot | null;
   bridge: SceneBridge;
   focusGladiatorId?: string | null;
@@ -124,6 +140,11 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
    * its Gladiators menu, the fights in its Arena menu).
    */
   chrome?: 'framed' | 'none';
+  /**
+   * An opaque scene covers the camp (a replay or an expedition over it, Task 13.8): the camp's loop stops updating and
+   * drawing until it is uncovered, from where its display clock has moved on (Task 23.4, C8). Reads go on meanwhile.
+   */
+  paused?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
@@ -142,6 +163,10 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   const tournamentLogs = useRef(new Map<string, BattleLog>());
   const tournamentLogReadCount = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
+  /** Each Reload starts the camp again (R13): a new game over the same world, timelines, views and logs. */
+  const [attempt, setAttempt] = useState(0);
+  /** The running game, so a covering scene can pause it. */
+  const running = useRef<ReturnType<typeof startGame> | null>(null);
   const [following, setFollowing] = useState(false);
   const [fights, setFights] = useState<ArenaFightSummary[]>([]);
   const statusId = useId();
@@ -160,7 +185,9 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
     if (forgetLeftTournaments(tournamentViews.current, tournamentLogs.current, world)) handle.current?.setTournaments(withLogs(tournamentViews.current, tournamentLogs.current));
   }, [world]);
 
-  // Arena timelines: read once an entrant's bout is due, retried while it is missing; paused in hidden tabs.
+  // Arena timelines: read once an entrant's bout is due, retried while it is missing; paused in hidden tabs. At most
+  // ARENA_TIMELINE_READS at a time: a landed timeline whose bout names a partner in camp spares that partner's read, since
+  // both sides' timelines carry the same battle (Task 17 review M7).
   useEffect(() => {
     if (!timelines) return;
     let alive = true;
@@ -171,22 +198,35 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       if (!current || document.visibilityState !== 'visible') return;
       forgetLeft(known, current);
       const now = clock.current.now();
-      const batch: Promise<unknown>[] = [];
-      for (const activityId of arenaReadsDue(current.actors, known, now)) {
-        if (inFlight.has(activityId)) continue;
-        inFlight.add(activityId);
-        known.set(activityId, { readAtMs: now, hasBout: false });
-        arenaReadCount.current += 1;
-        batch.push(timelines.timeline(activityId).then(timeline => {
-          if (!alive) return;
-          clock.current.sync(timeline.serverNowMs);
-          const at = clock.current.now();
-          known.set(activityId, { readAtMs: at, hasBout: timeline.stages.some(s => s.kind === 'bout' && s.revealedAtMs <= at) });
-          arenaTimelines.current.set(activityId, timeline);
-        }, () => {}).finally(() => inFlight.delete(activityId)));
-      }
+      // In a stable order unrelated to the world's (which may list a pair's sides together), so the two reads at a time
+      // are rarely both sides of one pair.
+      const queue = arenaReadsDue(current.actors, known, now).filter(id => !inFlight.has(id)).sort((p, q) => hashString(p) - hashString(q) || (p < q ? -1 : 1));
+      if (!queue.length) return;
+      for (const id of queue) { inFlight.add(id); known.set(id, { readAtMs: now, hasBout: false }); }
+      const next = async () => {
+        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+          // The other side of a pair whose timeline landed meanwhile needs no read of its own.
+          if (known.get(id)?.hasBout) { inFlight.delete(id); continue; }
+          arenaReadCount.current += 1;
+          try {
+            const timeline = await timelines.timeline(id);
+            if (!alive) return;
+            clock.current.sync(timeline.serverNowMs);
+            const at = clock.current.now();
+            known.set(id, { readAtMs: at, hasBout: timeline.stages.some(s => s.kind === 'bout' && s.revealedAtMs <= at) });
+            arenaTimelines.current.set(id, timeline);
+            for (const partner of arenaPartnersShown(timeline, latestWorld.current?.actors ?? [], at)) {
+              if (!known.get(partner)?.hasBout) known.set(partner, { readAtMs: at, hasBout: true });
+            }
+          } catch {
+            // Asked again after ARENA_RETRY_MS, while the bout is missing.
+          } finally {
+            inFlight.delete(id);
+          }
+        }
+      };
       // Reads due together land together, so bouts revealed at the same minute are scheduled as one wave.
-      if (batch.length) void Promise.all(batch).then(() => {
+      void Promise.all(Array.from({ length: Math.min(ARENA_TIMELINE_READS, queue.length) }, next)).then(() => {
         if (!alive) return;
         forgetLeft(arenaTimelines.current, latestWorld.current);
         handle.current?.setTimelines(new Map(arenaTimelines.current));
@@ -203,15 +243,18 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   // A tournament whose entrants have all left the camp is forgotten. The views carry no battle logs: a bout's log loads
   // only while its ring window is current or starts within TOURNAMENT_LOG_WINDOW_MS (the scene's ring schedule), at most
   // LOG_LOADS at a time, through the reader's session cache that the Tournaments panel shares, so a viewer who joins
-  // late asks only for what the rings show now and next (Task 19 live-camp gate).
+  // late asks only for what the rings show now and next (Task 19 live-camp gate). Views read together are published
+  // together (C9): the ring schedule keeps the bouts that have entered their rings, so publishing one league's view before
+  // another's that shares its reveal times would let arrival order decide the rings. A failed log is asked for again after
+  // 2 s, 4 s, 8 s, 16 s, then every 30 s (`ringLogRetryDelay`, by real time: the display clock may be held).
   useEffect(() => {
     if (!tournaments) return;
     let alive = true;
     const known = new Map<string, TournamentRead>();
     const inFlight = new Set<string>();
     const logsInFlight = new Set<string>();
-    /** Display time of each bout's last failed log load: asked again only after the retry interval. */
-    const logFailedAt = new Map<string, number>();
+    /** Each bout's failed log loads in a row and when the last one failed (`performance.now()`). */
+    const logFailures = new Map<string, { count: number; at: number }>();
     const publish = () => handle.current?.setTournaments(withLogs(tournamentViews.current, tournamentLogs.current));
     /** Whether a tournament still has an entrant in the world, so a read or log that lands late is kept. */
     const inCamp = (id: string) => campTournamentIds(latestWorld.current?.actors ?? []).has(id);
@@ -221,19 +264,41 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       const now = clock.current.now();
       const live = campTournamentIds(current.actors);
       for (const id of [...known.keys()]) if (!live.has(id)) known.delete(id);
+      const batch: Promise<void>[] = [];
+      const landed = new Map<string, TournamentView>();
       for (const id of tournamentReadsDue(current.actors, known, now, { focused })) {
         if (inFlight.has(id)) continue;
         inFlight.add(id);
         const previous = known.get(id);
         known.set(id, { ...previous, view: previous?.view ?? null, readAtMs: now });
         tournamentReadCount.current += 1;
-        tournaments.tournament(id).then(view => {
+        batch.push(tournaments.tournament(id).then(view => {
           if (!alive || !inCamp(id)) return;
           known.set(id, recordTournamentRead(previous, view, clock.current.now()));
-          keepLogs(view, tournamentLogs.current);
-          tournamentViews.current.set(id, view);
+          landed.set(id, view);
+        }, () => { if (alive && inCamp(id)) known.set(id, recordTournamentRead(previous, null, clock.current.now())); }).finally(() => { inFlight.delete(id); }));
+      }
+      if (batch.length) {
+        // This check's views are kept and published together; a read that hangs holds the others back at most
+        // TOURNAMENT_BATCH_WAIT_MS, and is published when it lands.
+        const flush = () => {
+          if (!alive || !landed.size) return;
+          for (const [id, view] of landed) {
+            if (!inCamp(id)) continue;
+            keepLogs(view, tournamentLogs.current);
+            tournamentViews.current.set(id, view);
+          }
+          landed.clear();
           publish();
-        }, () => { if (alive && inCamp(id)) known.set(id, recordTournamentRead(previous, null, clock.current.now())); }).finally(() => inFlight.delete(id));
+        };
+        const all = Promise.all(batch);
+        let wait: number | undefined;
+        const timedOut = new Promise<boolean>(resolve => { wait = window.setTimeout(() => resolve(false), TOURNAMENT_BATCH_WAIT_MS); });
+        void Promise.race([all.then(() => true), timedOut]).then(complete => {
+          window.clearTimeout(wait);
+          flush();
+          if (!complete) void all.then(flush);
+        });
       }
       const loadLog = tournaments.tournamentLog;
       const rings = handle.current?.ringSchedule();
@@ -243,16 +308,17 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
         .sort((p, q) => rings.get(p)!.enterAtMs - rings.get(q)!.enterAtMs);
       for (const boutId of due) {
         if (logsInFlight.size >= LOG_LOADS) break;
-        if (logsInFlight.has(boutId) || tournamentLogs.current.has(boutId) || now - (logFailedAt.get(boutId) ?? -Infinity) < TOURNAMENT_RETRY_MS) continue;
+        const failed = logFailures.get(boutId);
+        if (logsInFlight.has(boutId) || tournamentLogs.current.has(boutId) || (failed && performance.now() - failed.at < ringLogRetryDelay(failed.count))) continue;
         logsInFlight.add(boutId);
         tournamentLogReadCount.current += 1;
         loadLog(boutId).then(log => {
-          logFailedAt.delete(boutId);
+          logFailures.delete(boutId);
           // A log of a tournament the camp has forgotten meanwhile is not kept (the reader's cache still holds it).
           if (!alive || ![...tournamentViews.current.values()].some(view => view.bouts.some(bout => bout.id === boutId))) return;
           tournamentLogs.current.set(boutId, log);
           publish();
-        }, () => { logFailedAt.set(boutId, clock.current.now()); }).finally(() => logsInFlight.delete(boutId));
+        }, () => { logFailures.set(boutId, { count: (logFailures.get(boutId)?.count ?? 0) + 1, at: performance.now() }); }).finally(() => logsInFlight.delete(boutId));
       }
     };
     check();
@@ -293,6 +359,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       handle.current?.dispose();
       game?.destroy();
       game = null;
+      running.current = null;
       // Deferred so panels that subscribe in their own effects (which run after ours) still hear it.
       setTimeout(() => { if (!cancelled) bridge.emit('scene-unavailable', { reason, message }); }, 0);
     };
@@ -331,6 +398,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
         scale: { mode: P.Scale.RESIZE, width: '100%', height: '100%' },
         scene: [created.scene],
       });
+      running.current = game;
       if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true') {
         window.__cloudiatorCamp = {
           state: () => handle.current?.debug() ?? null,
@@ -372,9 +440,26 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       handle.current = null;
       game?.destroy();
       game = null;
+      running.current = null;
       if (window.__cloudiatorCamp) delete window.__cloudiatorCamp;
     };
-  }, [bridge]);
+  }, [bridge, attempt]);
+
+  // Covered by an opaque scene, the ready camp's loop stops updating and drawing; uncovered, it goes on from its display
+  // clock's time (C8). A camp opened under a scene (a shared link) gets ready first, then pauses.
+  useEffect(() => {
+    const game = running.current?.game;
+    if (!game || status.kind !== 'ready') return;
+    if (paused) game.pause();
+    else game.resume();
+  }, [paused, status.kind]);
+
+  /** Starts the camp again after it could not start (R13); the keyboard stays on the camp view, never on <body>. */
+  const reload = () => {
+    host.current?.focus({ preventScroll: true });
+    setStatus({ kind: 'loading' });
+    setAttempt(n => n + 1);
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return; // leave browser zoom and shortcuts alone
@@ -421,9 +506,12 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
             )}
           </div>
         )}
-        <p id={statusId} className={unavailable ? styles.fallback : styles.status} role="status" data-camp-fallback={unavailable ? '' : undefined}>
-          {status.kind === 'loading' ? 'Opening the camp…' : unavailable ? status.message : ''}
-        </p>
+        {unavailable
+          ? <div className={styles.fallback} data-camp-fallback="">
+            <p id={statusId} role="status">{status.message}</p>
+            <button type="button" className={styles.reload} onClick={reload}>Reload</button>
+          </div>
+          : <p id={statusId} className={styles.status} role="status">{status.kind === 'loading' ? 'Opening the camp…' : ''}</p>}
       </div>
       {/* Keyboard and touch equivalents of clicking a fighting pair, below the view so they never cover it. */}
       {framed && !unavailable && fights.length > 0 && (

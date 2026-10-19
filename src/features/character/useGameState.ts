@@ -18,6 +18,11 @@ export type GameUiState = {
   revision: string | null; slotIndex: number | null; clock: DisplayClock;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
+  /**
+   * The gladiator the creation dialog has just created, with the owner state it read to confirm it: shown at once, with
+   * no read of its own, and the world (which the creation changed) read now; that new revision reads the owner once more.
+   */
+  ownerCreated(owner: OwnerState): void;
 };
 
 /**
@@ -34,6 +39,7 @@ declare global {
 const FIXTURE_ACCOUNT = 'fixture-preview';
 /** A tab return reads the owner only when no read is in flight and none completed this recently (final review Minor 5). */
 const RETURN_READ_GAP_MS = 2_000;
+type Seen = { revision: string | null; slotIndex: number | null };
 /**
  * The last owner read of one account: its owner, or that it has none (`missing`), and whether the latest read failed. A
  * failed refresh keeps an owner already shown (with `failed`), but never a "no gladiator" answer, so a failed read never
@@ -44,13 +50,19 @@ const codeOf = (error: unknown) => (error && typeof error === 'object' && 'code'
 
 /**
  * `gateway` is the live gateway, or in fixture mode the fixture gateway once loaded (null until then). `previewAs:
- * 'visitor'` (fixture mode only) previews the visitor view, without an owner.
+ * 'visitor'` (fixture mode only) previews the visitor view, without an owner. `clockOnly` (a /replay/ deep link, which
+ * needs only the server's time and the viewer's gladiator; Task 23.4, C6): the sync polls the revision and never loads
+ * the world (its `world` has no actors), and the owner is read once per account, never again on a revision, a slot or a
+ * tab return.
  *
  * - One `createSync` runs per gateway, which wires `subscribeSession`; each publish with an offset syncs the display clock
  *   to `Date.now() + offsetMs` (forward only, and never while a test holds it).
  * - The owner is read when the account changes, the revision changes, the server slot advances or the tab comes back,
- *   and on `refreshOwner()`, which rejects when its read fails. Only the latest read lands. A tab return fires both
- *   `visibilitychange` and `focus`: it reads only when no owner read is in flight and none completed within 2 s.
+ *   and on `refreshOwner()`, which rejects when its read fails. Only the latest read lands. A revision or slot change is
+ *   seen as the sync publishes it, so the read starts at once (Task 23.4, C6). A tab return fires both `visibilitychange`
+ *   and `focus`: it reads only when no owner read is in flight and none completed within 2 s, and only after that
+ *   return's revision read, which reads the owner itself when it finds a new revision, so a return to a changed world
+ *   reads the owner once, not twice. A creation's own confirming read stands for the owner read (`ownerCreated`).
  * - A stored session the server rejects: while the session says signed in and the sync reports `unauthenticated` (the
  *   public reads carried the stale token), the session is first refreshed once; a renewed session reads the world and
  *   the owner again. Only a refused refresh, or a renewed session the next read still reports, is signed out locally,
@@ -58,34 +70,24 @@ const codeOf = (error: unknown) => (error && typeof error === 'object' && 'code'
  *   no longer discards the refresh token). A sign-out that fails and keeps the session is tried again at each later
  *   publish that still reports it. A successful read lets a later rejection be refreshed once again.
  */
-export function useGameState(gateway: GameGateway | null, options: { fixture: boolean; previewAs?: 'visitor' | 'player' }): GameUiState {
-  const { fixture, previewAs } = options;
+export function useGameState(gateway: GameGateway | null, options: { fixture: boolean; previewAs?: 'visitor' | 'player'; clockOnly?: boolean }): GameUiState {
+  const { fixture, previewAs, clockOnly = false } = options;
   const session = useSession();
   const [clock] = useState(createDisplayClock);
   const [sync, setSync] = useState<SyncState | null>(null);
   const [ownerRead, setOwnerRead] = useState<OwnerRead | null>(null);
   const [sceneStatus, setSceneStatus] = useState<GameUiState['sceneStatus']>('loading');
   const ticket = useRef(0);
-  /** Owner reads in flight, and when the last one completed (`performance.now()`), for tab returns. */
-  const ownerReads = useRef({ inFlight: 0, doneAt: Number.NEGATIVE_INFINITY });
+  /** Owner reads started and in flight, and when the last one completed (`performance.now()`), for tab returns. */
+  const ownerReads = useRef({ started: 0, inFlight: 0, doneAt: Number.NEGATIVE_INFINITY });
   const controllerRef = useRef<SyncController | null>(null);
   const account = fixture ? (previewAs === 'visitor' ? null : FIXTURE_ACCOUNT)
     : session.status === 'signed-in' ? session.userId : null;
 
-  useEffect(() => {
-    if (!gateway) return;
-    const controller = createSync(gateway, next => {
-      if (next.offsetMs !== null) clock.sync(Date.now() + next.offsetMs);
-      setSync(next);
-    });
-    controllerRef.current = controller;
-    void controller.start();
-    return () => { controller.stop(); if (controllerRef.current === controller) controllerRef.current = null; };
-  }, [gateway, clock]);
-
   const loadOwner = useCallback(async (): Promise<void> => {
     if (!gateway || account === null) return;
     const mine = ++ticket.current;
+    ownerReads.current.started += 1;
     ownerReads.current.inFlight += 1;
     try {
       const owner = await gateway.owner();
@@ -108,6 +110,27 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const latestLoadOwner = useRef(loadOwner);
   useEffect(() => { latestLoadOwner.current = loadOwner; });
 
+  // The world's revision and slot as the sync last published them: a new revision, or a later server slot, reads the
+  // owner at once (not after a render), so a tab return that awaits the sync refresh knows whether it already has.
+  const seen = useRef<Seen>({ revision: null, slotIndex: null });
+  useEffect(() => {
+    if (!gateway) return;
+    seen.current = { revision: null, slotIndex: null };
+    const controller = createSync(gateway, next => {
+      if (next.offsetMs !== null) clock.sync(Date.now() + next.offsetMs);
+      const previous = seen.current;
+      const now: Seen = { revision: next.world?.revision ?? null, slotIndex: next.world?.slotIndex ?? null };
+      seen.current = now;
+      const changed = (previous.revision !== null && now.revision !== null && now.revision !== previous.revision)
+        || (previous.slotIndex !== null && now.slotIndex !== null && now.slotIndex > previous.slotIndex);
+      if (changed && !clockOnly) void latestLoadOwner.current().catch(() => undefined);
+      setSync(next);
+    }, { actors: !clockOnly });
+    controllerRef.current = controller;
+    void controller.start();
+    return () => { controller.stop(); if (controllerRef.current === controller) controllerRef.current = null; };
+  }, [gateway, clock, clockOnly]);
+
   // A new account (or none) invalidates reads in flight; a signed-out view keeps no private owner.
   useEffect(() => {
     ticket.current++;
@@ -118,26 +141,36 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const syncWorld = sync?.world ?? null;
   const revision = syncWorld?.revision ?? null;
   const slotIndex = syncWorld?.slotIndex ?? null;
-  const seen = useRef<{ revision: string | null; slotIndex: number | null }>({ revision: null, slotIndex: null });
-  useEffect(() => {
-    const previous = seen.current;
-    seen.current = { revision, slotIndex };
-    const changed = (previous.revision !== null && revision !== null && revision !== previous.revision)
-      || (previous.slotIndex !== null && slotIndex !== null && slotIndex > previous.slotIndex);
-    if (changed) void loadOwner().catch(() => undefined);
-  }, [revision, slotIndex, loadOwner]);
 
   useEffect(() => {
-    if (!gateway || account === null) return;
+    if (!gateway || account === null || clockOnly) return;
+    let returning = false;
     const refresh = () => {
       const reads = ownerReads.current;
-      if (document.visibilityState !== 'visible' || reads.inFlight > 0 || performance.now() - reads.doneAt < RETURN_READ_GAP_MS) return;
-      void loadOwner().catch(() => undefined);
+      if (returning || document.visibilityState !== 'visible' || reads.inFlight > 0 || performance.now() - reads.doneAt < RETURN_READ_GAP_MS) return;
+      returning = true;
+      const before = reads.started;
+      // The sync reads the revision on the same return (its own focus handler starts the refresh this one joins); a new
+      // revision or slot has read the owner already by the time it resolves, so the return reads it only otherwise.
+      void (controllerRef.current?.refresh() ?? Promise.resolve())
+        .then(() => (ownerReads.current.started === before ? latestLoadOwner.current() : undefined))
+        .catch(() => undefined)
+        .finally(() => { returning = false; });
     };
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
-  }, [gateway, account, loadOwner]);
+  }, [gateway, account, clockOnly]);
+
+  const ownerCreated = useCallback((owner: OwnerState) => {
+    if (account === null) return;
+    // Reads in flight (started before the creation) would say there is no gladiator: they no longer land.
+    ticket.current++;
+    setOwnerRead({ account, owner, missing: false, failed: false });
+    // The creation changed the world: read its revision now, after any refresh in flight; the new revision reads the
+    // owner once more, and the camp shows the new gladiator without waiting for the next poll.
+    void controllerRef.current?.refresh({ fresh: true });
+  }, [account]);
 
   const syncError = sync?.error ?? null;
   // A rejected stored session: one refresh first; then one local sign-out attempt per completed sync publish that still
@@ -194,6 +227,6 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   return {
     viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, clock,
-    sceneStatus, refreshOwner, setSceneStatus,
+    sceneStatus, refreshOwner, setSceneStatus, ownerCreated,
   };
 }

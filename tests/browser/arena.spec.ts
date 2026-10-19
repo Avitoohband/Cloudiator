@@ -601,16 +601,21 @@ test.describe('the Arena card and league standings', () => {
     await page.waitForTimeout(1500);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.arenaReads())).toBe(0);
     await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN);
-    await page.waitForFunction(n => window.__cloudiatorCamp!.arenaTimelines().length >= n, ENTRANTS.length);
-    expect(await page.evaluate(() => window.__cloudiatorCamp!.arenaReads())).toBe(ENTRANTS.length);
     await page.waitForFunction(() => window.__cloudiatorCamp!.state()!.arena.fights.length === 7);
+    await page.waitForTimeout(500);
+    // Task 23.4 (Task 17 review M7): one timeline per human pair (five of them here), since both sides' timelines carry the
+    // same battle; at most one more when a pair's two sides were read at the same time.
+    const reads = await page.evaluate(() => window.__cloudiatorCamp!.arenaReads());
+    expect(reads).toBeGreaterThanOrEqual(ENTRANTS.length - 5);
+    expect(reads).toBeLessThanOrEqual(ENTRANTS.length - 4);
+    expect(await page.evaluate(() => window.__cloudiatorCamp!.arenaTimelines().length)).toBe(reads);
     // Only the delayed bout is asked for again, 30 s later, and never while the tab is hidden.
     await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); });
     await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), S + 60 * MIN + 31_000);
     await page.waitForTimeout(1500);
-    expect(await page.evaluate(() => window.__cloudiatorCamp!.arenaReads())).toBe(ENTRANTS.length);
+    expect(await page.evaluate(() => window.__cloudiatorCamp!.arenaReads())).toBe(reads);
     await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); });
-    await page.waitForFunction(n => window.__cloudiatorCamp!.arenaReads() === n + 1, ENTRANTS.length);
+    await page.waitForFunction(n => window.__cloudiatorCamp!.arenaReads() === n + 1, reads);
   });
 
   for (const motion of ['reduce', 'no-preference'] as const) {

@@ -96,12 +96,14 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView)
  * `viewerId` is the viewer's own gladiator (null for a visitor): only a fighter in the bout is told its rewards are
  * credited when the activity settles; when it is left out, everyone is (Task 13.8 fix round 1).
  */
-export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId }: {
+export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, onRetry }: {
   view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
+  /** Reads the replay again: a replay that could not be loaded offers Try again (Task 23.4). */
+  onRetry?: () => void;
 }) {
   const now = useReplayTime(clock, view);
   if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
-  if (view.kind === 'unavailable') return <ReplayUnavailable reason={view.reason} level={headingLevel} />;
+  if (view.kind === 'unavailable') return <ReplayUnavailable reason={view.reason} level={headingLevel} onRetry={onRetry} />;
   const battles = clock ? replayBattles(view, now) : view.battles;
   if (!battles.length) return <ReplayUnavailable reason="in-progress" level={headingLevel} />;
   const summary = view.summary && (!clock || view.summary.settledAtMs <= now) ? view.summary : null;
@@ -127,15 +129,18 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   /** The viewer's own gladiator, or null for a visitor (`BattleReplay`). */
   viewerId?: string | null;
 }) {
-  const [loaded, setLoaded] = useState<{ reads: object; view: ReplayView } | null>(null);
+  const [loaded, setLoaded] = useState<{ reads: object; attempt: number; view: ReplayView } | null>(null);
+  /** Each Try again reads the replay once more (Task 23.4). */
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!reads) return;
     let active = true;
-    loadReplayView(reads, activityId, stageId).then(view => { if (active) setLoaded({ reads, view }); });
+    loadReplayView(reads, activityId, stageId).then(view => { if (active) setLoaded({ reads, attempt, view }); });
     return () => { active = false; };
-  }, [activityId, reads, stageId]);
-  const view = loaded && loaded.reads === reads ? loaded.view : null;
-  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} /> : <p role="status">Loading the replay…</p>;
+  }, [activityId, reads, stageId, attempt]);
+  const view = loaded && loaded.reads === reads && loaded.attempt === attempt ? loaded.view : null;
+  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} onRetry={() => setAttempt(n => n + 1)} />
+    : <p role="status">Loading the replay…</p>;
 }
 
 function ReplayBattles({ battles, initial, summary, keptUntil, bridge, level, viewerId }: {
@@ -398,7 +403,9 @@ function SavedOutcome({ summary, level }: { summary: ActivitySummary; level: Hea
  * cannot be loaded right now (timelines have had a reader since Task 13.2, so it is no longer "in this build"; final
  * review Minor 6).
  */
-function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-progress' | 'not-found' | 'unavailable' | 'expired'; level: HeadingLevel }) {
+function ReplayUnavailable({ reason, level, onRetry }: {
+  reason: 'not-revealed' | 'in-progress' | 'not-found' | 'unavailable' | 'expired'; level: HeadingLevel; onRetry?: () => void;
+}) {
   const later = reason === 'not-revealed' || reason === 'in-progress';
   return <section className={`${styles.card} ${styles.saved}`}>
     <Heading level={level}>{later ? 'This replay is not available yet' : reason === 'expired' ? 'This replay is no longer kept' : 'This replay is not available'}</Heading>
@@ -407,5 +414,15 @@ function ReplayUnavailable({ reason, level }: { reason: 'not-revealed' | 'in-pro
         : reason === 'expired' ? 'Detailed replays are kept for seven days. The result stays in the recent results.'
           : reason === 'not-found' ? 'No fight was found for this link.'
             : 'This replay cannot be loaded right now. Try again shortly.'}</p>
+    {reason === 'unavailable' && onRetry && <button type="button" className={styles.retry} onClick={event => { focusStaying(event.currentTarget); onRetry(); }}>Try again</button>}
   </section>;
+}
+
+/**
+ * Try again replaces itself with "Loading the replay…": first the focus moves to what stays (the scene's Back to camp, or
+ * the page's main landmark), so it never falls to <body> (Task 23.5).
+ */
+function focusStaying(from: HTMLElement) {
+  const target = from.closest('dialog')?.querySelector<HTMLElement>('button') ?? from.closest<HTMLElement>('main');
+  target?.focus({ preventScroll: true });
 }

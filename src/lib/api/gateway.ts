@@ -46,7 +46,8 @@ export interface GameGateway {
   tournament(id: string): Promise<TournamentView>;
   /**
    * One revealed tournament bout's battle log, loaded on demand when the bout is watched or animated. Results are
-   * immutable, so a log is fetched at most once per session; callers share it and must not change it.
+   * immutable, so a log is fetched once while it is among the `TOURNAMENT_LOG_CACHE_LIMIT` most recently used ones
+   * (Task 23.4, C7); callers share it and must not change it.
    */
   tournamentLog(boutId: string): Promise<BattleLog>;
   recent(cursor?: string): Promise<ResultsPage>;
@@ -55,12 +56,23 @@ export interface GameGateway {
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
 
 /**
+ * How many tournament battle logs (9–14 KB each) the live gateway keeps, most recently used first (Task 23.4, C7). It holds
+ * the camp's six rings' current and next windows and the panel's watched replay with room to spare, but never a whole
+ * slot's logs (a 50-entrant tournament has 49 bouts, in each of four leagues) for the rest of the session.
+ */
+export const TOURNAMENT_LOG_CACHE_LIMIT = 64;
+
+/**
  * Data API reads. The server enforces ownership and reveal authorization: the public projections are readable without a
  * session (visitors read as `anon`), while the owner's state and every command need a signed-in account.
  */
 export function createLiveGateway(): GameGateway {
   let epoch = 0;
-  /** Loaded (or loading) tournament logs, shared by every viewer; a failed load is forgotten so it can be asked again. */
+  /**
+   * Loaded (or loading) tournament logs, shared by every viewer, in least to most recently used order (a Map keeps its
+   * insertion order, and a use moves a log to the end): at most `TOURNAMENT_LOG_CACHE_LIMIT`, the least recently used
+   * dropped first. A failed load is forgotten so it can be asked again.
+   */
   const logs = new Map<string, Promise<BattleLog>>();
   /** An owner read: needs a session, and fails `unauthenticated` if the account changes while it runs. */
   async function read<T>(load: (client: BrowserClient) => Promise<T>): Promise<T> {
@@ -149,9 +161,18 @@ export function createLiveGateway(): GameGateway {
     tournamentLog: boutId => {
       // A due log is public and immutable, so a cached one is served without a session check; an account change clears the cache.
       const cached = logs.get(boutId);
-      if (cached) return cached;
+      if (cached) {
+        logs.delete(boutId);
+        logs.set(boutId, cached);
+        return cached;
+      }
       const pending = publicRead(client => readTournamentLog(client, boutId));
       logs.set(boutId, pending);
+      // Dropping a log still loading only means its next caller reads it again; this one still gets it.
+      for (const oldest of logs.keys()) {
+        if (logs.size <= TOURNAMENT_LOG_CACHE_LIMIT) break;
+        logs.delete(oldest);
+      }
       pending.catch(() => { if (logs.get(boutId) === pending) logs.delete(boutId); });
       return pending;
     },

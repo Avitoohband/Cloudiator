@@ -125,7 +125,8 @@
 
 .samples button,
 .watch,
-.replayHeader button {
+.replayHeader button,
+.retry {
   min-height: 44px;
   padding: 0.35rem 0.8rem;
   color: var(--ink);
@@ -295,7 +296,12 @@
 .tabs button:focus-visible,
 .watch:focus-visible,
 .samples button:focus-visible,
-.replayHeader button:focus-visible {
+.retry:hover {
+  border-color: var(--gold);
+}
+
+.replayHeader button:focus-visible,
+.retry:focus-visible {
   outline: 3px solid var(--gold);
   outline-offset: 2px;
 }

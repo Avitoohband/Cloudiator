@@ -9,7 +9,8 @@ import { sceneOf } from '../../features/shell/scene-url';
  * Reads the preview options from the URL: `?mode=fixture` (fixture-enabled builds only) and, with it, `?as=visitor`;
  * `?signin=cancelled|failed`, a Google sign-in that returned without completing (plan Decision 6); and
  * `?view=replay|expedition&activity=…`, a scene over the camp (plan Decision 4), which the shell opens and closes with
- * `history.pushState` and Back (the App Router keeps `useSearchParams` in step with them).
+ * `history.pushState` and Back (the App Router keeps `useSearchParams` in step with them); and `?perf=1`, the opt-in
+ * frame-rate overlay (plan Decision 2, Task 23.4).
  */
 function GameRoute() {
   const search = useSearchParams();
@@ -20,7 +21,9 @@ function GameRoute() {
   const signin = search.get('signin');
   const signInResult: SignInResult | null = signin === 'cancelled' || signin === 'failed' ? signin : null;
   const scene = useMemo(() => sceneOf(search), [search]);
-  return <CampShell fixture={fixture} previewAs={previewAs} fixtureRefused={requested && !fixture} signInResult={signInResult} scene={scene} />;
+  // `?perf=1` shows the frame-rate overlay (plan Decision 2), in every build; nothing samples frames without it.
+  const perf = search.get('perf') === '1';
+  return <CampShell fixture={fixture} previewAs={previewAs} fixtureRefused={requested && !fixture} signInResult={signInResult} scene={scene} perf={perf} />;
 }
 
 /** The full-screen camp. The site root renders this same page, so a shared link opens straight onto the camp. */

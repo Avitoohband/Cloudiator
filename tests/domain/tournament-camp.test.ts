@@ -335,3 +335,15 @@ describe('a large tournament in the camp (Task 19 R4 and the live-camp gate)', (
     expect(campTournamentIds([])).toEqual(new Set());
   });
 });
+
+describe('a failed ring log is asked for again soon (Task 23.4, C9)', () => {
+  it('waits 2 s, then 4, 8 and 16 s, and never more than 30 s, between asks', async () => {
+    const { ringLogRetryDelay } = await import('@/game/tournament-camp');
+    expect([1, 2, 3, 4, 5, 6, 20].map(ringLogRetryDelay)).toEqual([2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
+    // The first retry lands well inside the shortest ring window (the jog-in and the result hold), so a pair whose log
+    // failed once plays its bout instead of standing idle for it.
+    expect(ringLogRetryDelay(1)).toBeLessThan(TOURNAMENT_LOG_WINDOW_MS / 2);
+    expect(ringLogRetryDelay(Number.NaN)).toBe(2_000);
+    expect(ringLogRetryDelay(0)).toBe(2_000);
+  });
+});

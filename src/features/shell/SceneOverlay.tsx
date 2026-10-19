@@ -1,7 +1,7 @@
 'use client';
 
-// A replay or an expedition as a full-screen scene over the running camp (spec "Scenes", the approved mockup's bout
-// scene; Task 13.8). It is a labelled modal dialog: the camp keeps running beneath it but takes no input, "Back to camp"
+// A replay or an expedition as a full-screen scene over the camp (spec "Scenes", the approved mockup's bout scene; Task
+// 13.8). It is a labelled modal dialog: the camp is paused beneath it (Task 23.4, C8) and takes no input, "Back to camp"
 // (or Escape) closes it, and the focus goes back to whatever opened it. The scenes are the existing views: the battle
 // replay, filtered by the shared display clock, and the followable expedition, re-read on the shared revision. A
 // viewer who is not a player never gets an owner summary here (the live server sends a visitor none; the fixture

@@ -31,11 +31,12 @@ import type { OwnerState, TournamentView } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
+import { RULES_V1 } from '@domain/rules-v1';
 import {
-  latestTournament, nextTournament, processingRetryDelay, renderTournament, tournamentPreparing, tournamentRevealMarks,
-  tournamentWindowAt, withTournamentLogs, type TournamentBoutState, type TournamentStageState,
+  TOURNAMENT_PREPARE_FAST_MS, latestTournament, nextTournament, preparingRetryDelay, processingRetryDelay, renderTournament, tournamentPreparing,
+  tournamentRevealMarks, tournamentWindowAt, withTournamentLogs, type TournamentBoutState, type TournamentStageState,
 } from '../../game/tournament-stage';
-import { tournamentLookupIdOrNull } from '../../lib/tournament-id';
+import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
 import {
@@ -169,8 +170,10 @@ function BoutCard({ bout, kept, onWatch }: { bout: TournamentBoutState; kept: bo
 }
 
 /** Pure view of one tournament at the display time. */
-export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }: {
+export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, onRetryReplay }: {
   model: BracketModel; onRound(round: number): void; onWatch(boutId: string): void; onCloseReplay(): void;
+  /** Asks for the watched bout's log again after its load failed (Task 23.4); without it no Try again is offered. */
+  onRetryReplay?: () => void;
 }) {
   const { state, timeZone } = model;
   const titleId = useId();
@@ -255,8 +258,13 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay }
           </> : (
             // The log loads on demand (the polled view carries none) while the replay is kept; the card's own status line
             // stays the only status. Once it is not kept the log cannot be read any more (Task 22.5).
-            <p className="muted" aria-live="polite">{!kept ? REPLAY_GONE
-              : model.replayStatus === 'failed' ? 'This replay cannot be loaded right now. Try again shortly.' : 'Loading the replay…'}</p>
+            <>
+              <p className="muted" aria-live="polite">{!kept ? REPLAY_GONE
+                : model.replayStatus === 'failed' ? 'This replay cannot be loaded right now. Try again shortly.' : 'Loading the replay…'}</p>
+              {/* Try again replaces itself: the focus moves to Close replay first, never to <body>. */}
+              {kept && model.replayStatus === 'failed' && onRetryReplay && <button type="button" className={styles.retry}
+                onClick={event => { event.currentTarget.closest('section')?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true }); onRetryReplay(); }}>Try again</button>}
+            </>
           )}
         </section>
       )}
@@ -351,6 +359,8 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
   /** Logs of watched bouts, loaded on demand (results are immutable; the live gateway also keeps them for the session). */
   const [logs, setLogs] = useState<ReadonlyMap<string, BattleLog>>(() => new Map());
   const [logFailed, setLogFailed] = useState<string | null>(null);
+  /** Each Try again on a failed log asks for it once more (Task 23.4). */
+  const [logAttempt, setLogAttempt] = useState(0);
   const request = useRef(0);
   const inFlight = useRef(false);
   const lastRead = useRef(-Infinity);
@@ -397,12 +407,25 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
 
   // A failed first read is asked again every 30 s while the tab is visible (as well as on focus); while the slot is being
   // prepared each re-read first refreshes the owner, so a published slot without this tournament stops reading as being
-  // prepared. One timer per failure: a new owner refresh function from the parent does not restart it (R2).
+  // prepared. One timer per failure: a new owner refresh function from the parent does not restart it (R2). From three
+  // minutes after the cutoff a slot still being prepared is re-read, with its owner, after 60 s, 120 s, 240 s and then
+  // every 5 minutes (Task 23.4, C11): each visible 30 s tick counts toward the wait.
   useEffect(() => {
     if (!failure || view) return;
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void read(); }, RETRY_MS);
+    const slot = tournamentSlotOf(id);
+    let ticks = 0, late = 0;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      ticks += 1;
+      const since = slot === null ? Number.NaN : clock.now() - slot * RULES_V1.clock.slotMs;
+      const preparingLate = preparingNow.current && since >= TOURNAMENT_PREPARE_FAST_MS;
+      if (ticks * RETRY_MS < (preparingNow.current ? preparingRetryDelay(since, late) : RETRY_MS)) return;
+      ticks = 0;
+      if (preparingLate) late += 1;
+      void read();
+    }, RETRY_MS);
     return () => window.clearInterval(timer);
-  }, [failure, view, read]);
+  }, [failure, view, read, clock, id]);
 
   const merged = useMemo(() => (view ? withTournamentLogs(view, logs) : null), [view, logs]);
   const state = merged ? renderTournament(merged, now, { viewerId }) : null;
@@ -420,7 +443,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
       if (current) setLogs(prev => new Map(prev).set(replay, log));
     }, () => { if (current) setLogFailed(replay); });
     return () => { current = false; };
-  }, [replay, needsLog, logs, reads, onLogRead]);
+  }, [replay, needsLog, logs, reads, onLogRead, logAttempt]);
   // A loaded log that does not agree with the published result is never shown.
   const replayStatus = !needsLog ? null : logFailed === replay || (replay !== null && logs.has(replay)) ? 'failed' as const : 'loading' as const;
 
@@ -466,7 +489,8 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, r
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
   return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, replayStatus, viewerId,
     credited: credited && credited.activityId === placed ? credited.summary : null }}
-    onRound={setRound} onWatch={setReplay} onCloseReplay={() => setReplay(null)} />;
+    onRound={setRound} onWatch={setReplay} onCloseReplay={() => setReplay(null)}
+    onRetryReplay={replayStatus === 'failed' && logFailed === replay ? () => { setLogFailed(null); setLogAttempt(n => n + 1); } : undefined} />;
 }
 
 const LEAGUES: readonly LeagueId[] = ['bronze', 'silver', 'gold', 'champion'];

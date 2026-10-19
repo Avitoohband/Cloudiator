@@ -163,6 +163,18 @@ export function tournamentReadsDue(actors: readonly PublicActor[], known: Readon
   return due;
 }
 
+/** The first wait before a failed ring log is asked for again (Task 23.4, C9). */
+export const TOURNAMENT_LOG_RETRY_MS = 2_000;
+/**
+ * The wait before asking again for a ring log that failed `failures` times in a row: 2 s, then 4, 8 and 16 s, and never
+ * more than 30 s (Task 23.4, C9; it was 30 s from the first failure, so a pair stood idle in its ring for most of a bout).
+ * The scene stages the bout from its fight summary meanwhile, so a retry only brings the pair's moves.
+ */
+export function ringLogRetryDelay(failures: number): number {
+  const n = Number.isFinite(failures) && failures > 1 ? Math.floor(failures) - 1 : 0;
+  return Math.min(TOURNAMENT_RETRY_MS, TOURNAMENT_LOG_RETRY_MS * 2 ** Math.min(n, 10));
+}
+
 /**
  * How far ahead the camp asks for the log of a bout queued for a ring: the shortest ring window (the jog-in and the
  * result hold), so each ring asks for at most its current bout and the next one.

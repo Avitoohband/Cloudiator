@@ -94,7 +94,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.pvp.activityId });
     await expect(replayScene.getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
-    // Full window, over the camp, which keeps running beneath it; Back to camp takes the focus.
+    // Full window, over the camp, which stays ready (paused beneath it since Task 23.4); Back to camp takes the focus.
     const viewport = page.viewportSize()!;
     expect(await replayScene.boundingBox()).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     await expect(backToCamp(page)).toBeFocused();

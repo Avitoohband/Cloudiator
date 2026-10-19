@@ -180,6 +180,26 @@ export function arenaFightButton(fight: ArenaFightSummary): { label: string; ent
 export type ArenaRead = { readAtMs: number; hasBout: boolean };
 
 /**
+ * The Arena entrants in camp, by activity, whose revealed bout `timeline` already shows at the display time: the other
+ * human side of its pair. Both sides' timelines carry the same battle and either is enough to stage it
+ * (`campArenaFights`), so the camp need not read the partner's (Task 17 review M7, Task 23.4). None for an NPC fallback,
+ * a bout not revealed yet, or a partner not in the arena.
+ */
+export function arenaPartnersShown(timeline: RevealedTimeline, actors: readonly PublicActor[], displayNowMs: number): string[] {
+  const entrant = actors.find(a => isArena(a) && a.activityId === timeline.activityId);
+  if (!entrant) return [];
+  const log = renderArenaStage(timeline, displayNowMs, { entrantId: entrant.gladiatorId }).bout?.log;
+  if (!log || !log.participants.some(p => p.gladiatorId === entrant.gladiatorId)) return [];
+  const partners: string[] = [];
+  for (const p of log.participants) {
+    if (!p.gladiatorId || p.gladiatorId === entrant.gladiatorId) continue;
+    const partner = actors.find(a => isArena(a) && a.gladiatorId === p.gladiatorId && a.startsAtMs === entrant.startsAtMs);
+    if (partner?.activityId) partners.push(partner.activityId);
+  }
+  return partners;
+}
+
+/**
  * Arena activities whose timeline the camp should read now: an entrant in the arena whose bout is not known, once
  * minute 60 has passed (or at once when its public stage already shows the bout), again every 30 s while the bout
  * is missing, and never after its slot ends. In-camp actors only; at most one read per activity at a time.

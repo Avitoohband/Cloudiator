@@ -328,6 +328,19 @@ describe('the tournament being prepared (2b review M4; Task 19 R3 and R5)', () =
   });
 });
 
+describe('“being prepared” re-reads back off after three minutes (Task 19 review, Task 23.4 C11)', () => {
+  it('re-reads every 30 s for the first three minutes after the cutoff, then after 60 s, 120 s, 240 s and every 5 minutes', async () => {
+    const { TOURNAMENT_PREPARE_FAST_MS, preparingRetryDelay } = await import('@/game/tournament-stage');
+    expect(TOURNAMENT_PREPARE_FAST_MS).toBe(180_000);
+    // Publication usually comes 61–121 s after the cutoff, so the first three minutes keep the 30 s pace.
+    for (const since of [0, 30_000, 120_000, 179_999]) expect(preparingRetryDelay(since, 0), `${since} ms`).toBe(30_000);
+    // From then on each re-read waits longer, like a stuck settlement's processing re-reads.
+    expect([0, 1, 2, 3, 4, 10].map(late => preparingRetryDelay(180_000 + late * 60_000, late))).toEqual([60_000, 120_000, 240_000, 300_000, 300_000, 300_000]);
+    // A malformed elapsed time keeps the fast pace rather than stalling.
+    expect(preparingRetryDelay(Number.NaN, 0)).toBe(30_000);
+  });
+});
+
 describe('the live Tournaments panel before the shared clock has the server’s time (Task 13.4 review M1)', () => {
   const start = TOURNAMENTS.completed.startsAtMs;
   const reads = { tournament: async () => TOURNAMENT_VIEWS.completed };

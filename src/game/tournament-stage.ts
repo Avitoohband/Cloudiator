@@ -101,6 +101,22 @@ export function processingRetryDelay(retries: number): number {
 }
 
 /**
+ * For this long after a tournament's cutoff a "being prepared" card re-reads every 30 s: phase 8 usually publishes a slot
+ * 61–121 s after its cutoff (Task 19 review, C11).
+ */
+export const TOURNAMENT_PREPARE_FAST_MS = 180_000;
+/**
+ * The wait before the next re-read of a tournament still being prepared, `sinceCutoffMs` after its cutoff, after
+ * `lateRetries` such re-reads from `TOURNAMENT_PREPARE_FAST_MS` on: 30 s for the first three minutes, then 60 s, 120 s,
+ * 240 s and every 5 minutes, as a stuck settlement's processing re-reads (Task 23.4, C11). Each of those re-reads also
+ * refreshes the owner first (R2), so both reads back off together when a publication is late.
+ */
+export function preparingRetryDelay(sinceCutoffMs: number, lateRetries: number): number {
+  if (!(sinceCutoffMs >= TOURNAMENT_PREPARE_FAST_MS)) return TOURNAMENT_RETRY_MS;
+  return processingRetryDelay((Number.isFinite(lateRetries) && lateRetries > 0 ? Math.floor(lateRetries) : 0) + 1);
+}
+
+/**
  * How long after a tournament's cutoff a missing view reads as "being prepared" for every viewer (Task 19 R3). Phase 8
  * publishes a slot about 61–121 s after its cutoff; no public field says when it has, so a time bound covers visitors
  * and gladiators created after the cutoff, with room for a late cron tick.

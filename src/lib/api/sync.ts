@@ -5,15 +5,25 @@ export type SyncState = {
   world: WorldSnapshot | null; offsetMs: number | null; lastSyncMs: number | null;
   processing: boolean; refreshing: boolean; error: 'unavailable' | 'unauthenticated' | null;
 };
-export type SyncController = { start(): Promise<void>; stop(): void; refresh(): Promise<void> };
+export type SyncController = {
+  start(): Promise<void>; stop(): void;
+  /**
+   * Reads the revision (and a changed world) now, or joins the refresh in flight. `fresh` (a command just changed the
+   * world, Task 23.4) waits for a refresh in flight and then reads again, so the revision read starts after the change.
+   */
+  refresh(options?: { fresh?: boolean }): Promise<void>;
+};
 
 /**
  * Poll only revision/time after entry. Details and owner management are requested by their consumers. Every refresh,
  * the first included, starts with one timed `revision()` read, the only source of `offsetMs`: a world load spans
  * several requests (pages and its revision checks), so timing it would bias the offset by about half the load. The
- * world is then loaded only when there is none yet or its revision changed.
+ * world is then loaded only when there is none yet or its revision changed. With `{ actors: false }` (a page that only
+ * needs the server's time, such as a /replay/ deep link; Task 23.4, C6) the world is never loaded: each refresh publishes
+ * the revision as a world without actors.
  */
-export function createSync(gateway: GameGateway, listener: (state: SyncState) => void): SyncController {
+export function createSync(gateway: GameGateway, listener: (state: SyncState) => void, options: { actors?: boolean } = {}): SyncController {
+  const actors = options.actors ?? true;
   let state: SyncState = { world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null };
   let running = false, generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -36,7 +46,8 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
         if (ticket !== generation || !running) return;
         const offsetMs = clock.serverNowMs - (began + ended) / 2;
         let world: WorldSnapshot;
-        if (state.world && clock.revision === state.world.revision) world = { ...state.world, ...clock };
+        if (!actors) world = { ...clock, actors: [] };
+        else if (state.world && clock.revision === state.world.revision) world = { ...state.world, ...clock };
         else {
           world = await gateway.world();
           if (ticket !== generation || !running) return;
@@ -75,6 +86,6 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
       if (typeof window !== 'undefined') window.removeEventListener('focus', focus);
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility);
     },
-    refresh,
+    refresh: options => (options?.fresh && pending ? pending.then(() => refresh()) : refresh()),
   };
 }

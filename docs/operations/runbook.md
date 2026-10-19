@@ -366,12 +366,14 @@ per-request CPU (`cpu: "not available"`), and egress and invocations are read in
 ## Release access audit
 
 Task 23.1 (M17; `docs/operations/migrations.md`, "Task 23.1"). `scripts/access-audit.sql` is one SELECT over the catalog and
-changes nothing. Each row is `section | object | grantee | privilege`: every privilege PUBLIC, anon, authenticated and
+changes nothing. Each row is `section | object | grantee | privilege | detail`: every privilege PUBLIC, anon, authenticated and
 service_role hold on the relations, columns, sequences, functions and schemas of `public` and `private`; the default
-privileges of the role that owns those objects; role memberships; every policy; any table without row security, view without
-`security_invoker`, materialized view, SECURITY DEFINER function or function without `search_path=""`; and, in the
-`platform-default` and `database` sections, the platform's own settings. The file's header describes each section. It needs
-PostgreSQL 17 (MAINTAIN). `tests/db/access-matrix.test.ts` holds the expectations.
+privileges of the role that owns those objects; role memberships; every policy (its detail is `permissive` or `restrictive`
+and `md5:` of its USING and WITH CHECK expressions, so a changed policy body changes the row); any table without row
+security, view without `security_invoker`, materialized view, SECURITY DEFINER function or function without
+`search_path=""`; and, in the `platform-default` and `database` sections, the platform's own settings. Only policy rows
+have a detail. The file's header describes each section. It needs PostgreSQL 17 (MAINTAIN).
+`tests/db/access-matrix.test.ts` holds the expectations.
 
 Run it after deploying M17, after any later migration and before launch:
 1. **Local reference.** On the local stack, at the commit being deployed, with `migration list --local` showing the same
@@ -382,7 +384,9 @@ Run it after deploying M17, after any later migration and before launch:
    Get-Content scripts/access-audit.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 --csv > local-access-audit.csv
    ```
 2. **Hosted.** In the hosted SQL editor, as the database owner, run the whole file and download the result as CSV
-   (`hosted-access-audit.csv`). No connection string is needed.
+   (`hosted-access-audit.csv`). No connection string is needed. The policy hashes come from deparsed expressions, which
+   qualify names by the session's search path, so check that `show search_path` gives the same value in both places (locally
+   `"$user", public, extensions`); a different path changes every policy hash, not one.
 3. **Compare** the two as sets of rows, for example
    `Compare-Object (Get-Content local-access-audit.csv) (Get-Content hosted-access-audit.csv)`, after making the two CSV
    exports quote fields the same way if they differ.
@@ -403,5 +407,8 @@ Expected platform rows (accepted exception E; the local replay shows exactly the
 - Also expected outside the platform sections: `schema public PUBLIC USAGE` (PostgreSQL's default), and service_role's pinned
   privileges (exception D: MAINTAIN on the eight M01 owner tables, MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on
   `owner_state`, and its `public` table and sequence defaults).
+- Policy rows: every policy of ours is `permissive`, with command SELECT for anon and authenticated (`player_read` and
+  `due_read` on the open projections, `owner_read` on owner data, which filters by `auth.uid()`) or ALL or SELECT for
+  service_role (`backend_only`). Each `md5:` must equal the local reference's.
 
 Not yet run against a hosted project (none exists before Task 24); Task 24 verifies the export format and the comparison.

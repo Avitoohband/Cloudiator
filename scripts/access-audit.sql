@@ -5,7 +5,8 @@
 --         with the same file's output on a clean local replay of the same commit. Any difference is investigated.
 --
 -- Scope: the `public` and `private` schemas, minus objects owned by an extension (pg_depend deptype 'e'). Every row is
--- (section, object, grantee, privilege). The grantees are PUBLIC and the three Data API roles: anon (visitors),
+-- (section, object, grantee, privilege, detail); detail is empty except on policy rows. The grantees are PUBLIC and the three
+-- Data API roles: anon (visitors),
 -- authenticated (signed-in players) and service_role (the backend).
 --   PUBLIC rows come from the ACLs themselves (aclexplode, with the built-in default when an ACL is null).
 --   anon, authenticated and service_role rows are their *effective* privileges (has_*_privilege), so a PUBLIC grant or a
@@ -24,7 +25,9 @@
 --               gives PUBLIC USAGE on every new type, and that grants no access to data.
 --   membership  a role the grantee is a member of (privilege MEMBER)
 --   policy      every row-security policy: one row per role it applies to, privilege = its command (SELECT INSERT UPDATE
---               DELETE ALL), object `<schema>.<table>.<policy>`
+--               DELETE ALL), object `<schema>.<table>.<policy>`, detail = `permissive` or `restrictive` and `md5:` of its
+--               USING and WITH CHECK expressions (pg_get_expr, so a changed policy body changes the row; the deparsed text
+--               qualifies names by the session's search_path, so compare runs made with the same search_path)
 -- Platform sections (outside the matrix: the platform's settings, accepted exceptions recorded for comparison):
 --   platform-default  every other default-privilege entry that grants PUBLIC or a Data API role something: other roles'
 --                     entries (supabase_admin), and the owner's entries for other schemas (object `<role>:<schema>:<kind>`,
@@ -136,11 +139,6 @@ with
     select 'membership', g.rolname, m.rolname, 'MEMBER' from pg_auth_members am
       join pg_roles g on g.oid = am.roleid join pg_roles m on m.oid = am.member
       where m.rolname in (select grantee from api)
-    -- policy
-    union all
-    select 'policy', r.object || '.' || p.polname, case when x.member = 0 then 'PUBLIC' else pg_get_userbyid(x.member) end,
-      case p.polcmd when 'r' then 'SELECT' when 'a' then 'INSERT' when 'w' then 'UPDATE' when 'd' then 'DELETE' else 'ALL' end
-      from pg_policy p join rel r on r.oid = p.polrelid cross join unnest(p.polroles) x(member)
     -- findings
     union all
     select 'rls-disabled', r.object, '', 'row security off' from rel r where r.relkind in ('r', 'p') and not r.relrowsecurity
@@ -155,5 +153,15 @@ with
     union all
     select 'search-path', f.object, '', coalesce(array_to_string(f.proconfig, ','), 'unset') from fn f
       where f.proconfig is distinct from array['search_path=""']
+  ),
+  policy(section, object, grantee, privilege, detail) as (
+    select 'policy', r.object || '.' || p.polname, case when x.member = 0 then 'PUBLIC' else pg_get_userbyid(x.member) end,
+      case p.polcmd when 'r' then 'SELECT' when 'a' then 'INSERT' when 'w' then 'UPDATE' when 'd' then 'DELETE' else 'ALL' end,
+      case when p.polpermissive then 'permissive' else 'restrictive' end || ' md5:'
+        || md5(coalesce(pg_get_expr(p.polqual, p.polrelid), '') || '|' || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), ''))
+      from pg_policy p join rel r on r.oid = p.polrelid cross join unnest(p.polroles) x(member)
   )
-select distinct section, object, grantee, privilege from audit order by section, object, grantee, privilege;
+select distinct section, object, grantee, privilege, '' as detail from audit
+union all
+select section, object, grantee, privilege, detail from policy
+order by section, object, grantee, privilege, detail;

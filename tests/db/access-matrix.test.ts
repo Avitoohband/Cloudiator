@@ -9,15 +9,15 @@ import { OPEN, PUBLIC_TOURNAMENT_COLUMNS } from '../fixtures/access.ts';
 
 // Task 23.1 (M17): the release access matrix. Every expectation is derived from the catalog through the exported operator
 // audit (scripts/access-audit.sql, one read-only SELECT), except the OPEN list of visitor projections
-// (tests/fixtures/access.ts) and the pinned service_role snapshot below. The visitor, row-security, function and
-// default-privilege cases also prove, inside a transaction that always rolls back, that the audit reports the violation they
-// guard against; the authenticated case reads the same sections for another role.
+// (tests/fixtures/access.ts) and the pinned service_role snapshot below. The visitor, row-security, function,
+// default-privilege and owner-policy cases also prove, inside a transaction that always rolls back, that the audit reports the
+// violation they guard against; the authenticated case reads the same sections for another role.
 const commands = createDatabase(admin);
 beforeEach(async () => { await resetIdentity(); await sql`update private.scheduler set enabled=false where singleton`; });
 afterAll(() => sql.end());
 
 const AUDIT = readFileSync(new URL('../../scripts/access-audit.sql', import.meta.url), 'utf8');
-type Row = { section: string; object: string; grantee: string; privilege: string };
+type Row = { section: string; object: string; grantee: string; privilege: string; detail: string };
 /** The client roles: visitors (anon), signed-in players (authenticated), and PUBLIC, which every role inherits. */
 const CLIENT_ROLES = ['anon', 'authenticated', 'PUBLIC'];
 /**
@@ -26,27 +26,72 @@ const CLIENT_ROLES = ['anon', 'authenticated', 'PUBLIC'];
  * compare the hosted project with a local replay; only a client's CREATE on the database is checked here.
  */
 const PLATFORM_SECTIONS = ['platform-default', 'database'];
-const line = (r: Row) => [r.section, r.object, r.grantee, r.privilege].filter(Boolean).join(' ');
+const line = (r: Row) => [r.section, r.object, r.grantee, r.privilege, r.detail].filter(Boolean).join(' ');
 const lines = (rows: Row[]) => rows.map(line).sort();
 const toRows = (result: unknown) => [...(result as Row[])];
 const audit = async () => toRows(await sql.unsafe(AUDIT));
 class RolledBack extends Error {}
 /**
- * The audit as seen inside a transaction that first runs `statements`. The transaction always rolls back. It runs on a
+ * What `read` sees inside a transaction that first runs `statements`. The transaction always rolls back. It runs on a
  * connection of its own that is closed afterwards, so no later statement shares a backend with the rolled-back DDL (a
  * precaution after one transient PostgreSQL error in the Task 23.1 runs; see docs/implementation/task-23.1-report.md).
  */
-async function auditAfter(...statements: string[]) {
+async function rolledBack<T>(statements: string[], read: (tx: postgres.TransactionSql) => Promise<T>) {
   const probe = postgres(process.env.LOCAL_DB_URL!, { max: 1, onnotice: () => {} });
-  let rows: Row[] = [];
+  let seen: T | undefined;
   try {
     await probe.begin(async tx => {
       for (const statement of statements) await tx.unsafe(statement);
-      rows = toRows(await tx.unsafe(AUDIT));
+      seen = await read(tx);
       throw new RolledBack();
     }).catch(error => { if (!(error instanceof RolledBack)) throw error; });
   } finally { await probe.end(); }
-  return rows;
+  return seen as T;
+}
+/** The audit as seen inside a transaction that first runs `statements` and always rolls back. */
+const auditAfter = (...statements: string[]) => rolledBack(statements, async tx => toRows(await tx.unsafe(AUDIT)));
+/**
+ * Every permissive SELECT (or ALL) policy for authenticated or PUBLIC on a table outside the OPEN projections whose USING
+ * expression does not reference auth.uid(): such a policy would show one account another owner's rows. Run with `db`.
+ */
+async function unfilteredOwnerPolicies(db: postgres.Sql | postgres.TransactionSql) {
+  return (await db`select n.nspname||'.'||c.relname||'.'||p.polname as policy
+    from pg_policy p join pg_class c on c.oid=p.polrelid join pg_namespace n on n.oid=c.relnamespace
+    where n.nspname in ('public','private') and p.polpermissive and p.polcmd in ('r','*')
+      and (0 = any(p.polroles) or 'authenticated'::regrole = any(p.polroles))
+      and not (n.nspname = 'public' and c.relname = any(${OPEN}))
+      and strpos(coalesce(pg_get_expr(p.polqual, p.polrelid), ''), 'auth.uid()') = 0
+    order by 1`).map(r => r.policy as string);
+}
+/**
+ * Every public relation a signed-in player may read: whether it may read all columns, the columns it may read, and a
+ * deterministic page order (the primary key, or every readable column where there is none).
+ */
+async function signedInReadable() {
+  return (await sql`select c.relname as name, has_table_privilege('authenticated', c.oid, 'SELECT') as whole,
+    array(select a.attname from pg_attribute a where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped
+      and has_column_privilege('authenticated', c.oid, a.attnum, 'SELECT') order by a.attnum) as columns,
+    array(select a.attname from pg_index i cross join unnest(i.indkey) with ordinality k(attnum, ord)
+      join pg_attribute a on a.attrelid=c.oid and a.attnum=k.attnum where i.indrelid=c.oid and i.indisprimary order by k.ord) as key
+    from pg_class c where c.relnamespace='public'::regnamespace and c.relkind in ('r','v','m','p','f')
+      and has_any_column_privilege('authenticated', c.oid, 'SELECT') order by 1`)
+    .map(r => ({ name: r.name as string, whole: r.whole as boolean, columns: r.columns as string[], key: r.key as string[] }));
+}
+/** Everything `client` reads from each of `relations` through the Data API, as JSON text, page by page in a fixed order. */
+async function readAll(client: SupabaseClient, relations: Awaited<ReturnType<typeof signedInReadable>>) {
+  const seen: Record<string, string> = {};
+  for (const r of relations) {
+    seen[r.name] = '';
+    for (let from = 0; ; from += 50) {
+      let query = client.from(r.name).select(r.whole ? '*' : r.columns.join(','));
+      for (const column of r.key.length ? r.key : r.columns) query = query.order(column);
+      const { data, error } = await query.range(from, from + 49);
+      if (error) throw Error(`${r.name}: ${error.message}`);
+      seen[r.name] += JSON.stringify(data);
+      if (data.length < 50) break;
+    }
+  }
+  return seen;
 }
 /** `schema.relation` of a relation, column or policy object. */
 const relationOf = (object: string) => object.split('.').slice(0, 2).join('.');
@@ -285,6 +330,25 @@ describe('release access matrix', () => {
     expect(lines(rows.filter(r => r.section === 'policy' && CLIENT_ROLES.includes(r.grantee) && r.privilege !== 'SELECT'))).toEqual([]);
   });
 
+  it('filters every signed-in read outside the open projections by auth.uid()', async () => {
+    // Every permissive read policy for signed-in players on a table outside OPEN names the caller (auth.uid()); an open-read
+    // policy there (`using (true)`) would let every account read another owner's rows.
+    expect(await unfilteredOwnerPolicies(sql)).toEqual([]);
+    // Proven by two rolled-back regressions: an owner filter opened in place, and a second permissive policy beside one.
+    const before = (await audit()).filter(r => r.section === 'policy' && r.object === 'public.wallets.owner_read');
+    const probe = await rolledBack(["alter policy owner_read on public.wallets using (true)",
+      'create policy matrix_probe_read on public.builds for select to authenticated using (true)'],
+    async tx => ({ gaps: await unfilteredOwnerPolicies(tx), audit: toRows(await tx.unsafe(AUDIT)) }));
+    expect(probe.gaps).toEqual(['public.builds.matrix_probe_read', 'public.wallets.owner_read']);
+    // The audit's policy rows carry the body's hash, so the hosted comparison sees a changed body too.
+    const after = probe.audit.filter(r => r.section === 'policy' && r.object === 'public.wallets.owner_read');
+    expect(after.map(r => r.grantee)).toEqual(before.map(r => r.grantee));
+    expect(after.map(r => r.detail)).not.toEqual(before.map(r => r.detail));
+    expect(before.map(r => r.detail.split(' ')[0])).toEqual(['permissive']);
+    expect(lines(probe.audit.filter(r => r.object === 'public.builds.matrix_probe_read')))
+      .toEqual([expect.stringMatching(/^policy public\.builds\.matrix_probe_read authenticated SELECT permissive md5:[0-9a-f]{32}$/)]);
+  });
+
   it('enables RLS on every public table and security_invoker on every view', async () => {
     const rows = await audit();
     expect(lines(rows.filter(r => ['rls-disabled', 'not-security-invoker', 'materialized-view'].includes(r.section)))).toEqual([]);
@@ -439,20 +503,7 @@ describe('release access matrix', () => {
     expect(Number(planted)).toBe(5);
 
     // The owner reads every public relation the catalog lets a signed-in player read, page by page, and never sees the marker.
-    const readable = await sql`select c.relname as name, has_table_privilege('authenticated', c.oid, 'SELECT') as whole,
-      array(select a.attname from pg_attribute a where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped
-        and has_column_privilege('authenticated', c.oid, a.attnum, 'SELECT') order by a.attnum) as columns
-      from pg_class c where c.relnamespace='public'::regnamespace and c.relkind in ('r','v','m','p','f')
-        and has_any_column_privilege('authenticated', c.oid, 'SELECT') order by 1`;
-    let seen = '';
-    for (const r of readable) {
-      for (let from = 0; ; from += 50) {
-        const { data, error } = await f.owner.client.from(r.name).select(r.whole ? '*' : (r.columns as string[]).join(',')).range(from, from + 49);
-        expect(error, r.name).toBeNull();
-        seen += JSON.stringify(data);
-        if (data!.length < 50) break;
-      }
-    }
+    const seen = Object.values(await readAll(f.owner.client, await signedInReadable())).join('');
     expect(seen).toContain(f.gid);
     expect(seen).toContain(activityId);
     expect(seen).not.toContain(marker);
@@ -462,5 +513,30 @@ describe('release access matrix', () => {
     }
     expect(await sql`select c.relname from pg_class c where c.relnamespace='private'::regnamespace and c.relkind in ('r','v','m','p','f')
       and (has_any_column_privilege('authenticated', c.oid, 'SELECT') or has_any_column_privilege('anon', c.oid, 'SELECT'))`).toEqual([]);
+  });
+
+  it("never shows one account another owner's private state", { timeout: 60_000 }, async () => {
+    const owner = await fighter(), other = await fighter();
+    // Each gladiator gets a published activity of its own (creation itself writes none).
+    const slot = Math.floor(Date.now() / 4_800_000) - 1;
+    const activity = async (gid: string) => {
+      const id = randomUUID();
+      await sql`insert into public.activities(id,gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,resolved_kind,status,published_at_ms)
+        values(${id},${gid},${slot},${slot * 4_800_000},${(slot + 1) * 4_800_000},'{"kind":"rest"}','rest','active',${slot * 4_800_000})`;
+      return [id];
+    };
+    const [ownerActivities, otherActivities] = [await activity(owner.gid), await activity(other.gid)];
+    // Every relation a signed-in player may read that is not an open projection: the owner-filtered state.
+    const owned = (await signedInReadable()).filter(r => !OPEN.includes(r.name));
+    expect(owned.length).toBeGreaterThan(0);
+    // The owner's own reads of them hold its account, gladiator and activity ids, so their absence below is not vacuous.
+    const ownerIds = [owner.owner.id, owner.gid, ...ownerActivities];
+    const mine = Object.values(await readAll(owner.owner.client, owned)).join('');
+    for (const id of ownerIds) expect(mine).toContain(id);
+    // The other account, with a gladiator of its own, reads its own state and, from no relation, the owner's.
+    const theirs = await readAll(other.owner.client, owned);
+    const own = Object.values(theirs).join('');
+    for (const id of [other.owner.id, other.gid, ...otherActivities]) expect(own).toContain(id);
+    expect(Object.entries(theirs).filter(([, text]) => ownerIds.some(id => text.includes(id))).map(([name]) => name)).toEqual([]);
   });
 });

@@ -17,6 +17,9 @@ are the OPEN visitor projections (`tests/fixtures/access.ts`, shared with `tests
 - every relation, column and sequence privilege of every kind in `public` and `private`, MAINTAIN, REFERENCES and TRIGGER
   included: anon holds exactly SELECT on the OPEN objects (column by column on `tournament_views`); authenticated holds only
   SELECT, only in `public`, and every table it can read has a SELECT policy for it; PUBLIC holds nothing;
+- that every permissive read policy for authenticated or PUBLIC on a table outside OPEN references `auth.uid()` (Task 23.1
+  review I1), and that a second account with a gladiator of its own reads, through the Data API and from every relation
+  authenticated can read outside OPEN, its own account, gladiator and activity ids and never the owner's;
 - USAGE on schema `public` only (the private schema is not exposed), no role membership, no CREATE on the database;
 - row security on every table and `security_invoker` on every view in both schemas, and no materialized view;
 - for every function in both schemas (extension members excluded): not SECURITY DEFINER, `search_path=""`, and no EXECUTE;
@@ -30,8 +33,9 @@ are the OPEN visitor projections (`tests/fixtures/access.ts`, shared with `tests
 - that private seeds, plans and snapshots (activity snapshots and seeds, expedition plans, job inputs and seeds, Arena
   assignment seeds, build preparations) never appear in anything their owner can read.
 
-The visitor, row-security, function and default-privilege cases also prove, in a transaction that always rolls back, that the
-audit reports the violation they guard against.
+The visitor, row-security, function, default-privilege and owner-policy cases also prove, in a transaction that always rolls
+back, that the audit reports the violation they guard against. The audit's policy rows carry each policy's permissive flag and
+an md5 of its USING and WITH CHECK expressions, so the hosted comparison also sees a changed policy body.
 `anonWritable` in `tests/db/visitor-access.test.ts` now also counts REFERENCES, TRIGGER and MAINTAIN.
 
 **What the matrix found on the M01–M16 replay, and M17 revokes** (the two named items and controller rulings A–C):
@@ -58,7 +62,8 @@ SELECT (anon on the OPEN objects; authenticated on those and on its owner-filter
   - supabase_admin's default privileges in `public`, `graphql`, `graphql_public` and `supabase_functions`: anon,
     authenticated and service_role receive every privilege on its new tables, sequences and functions. postgres is not a
     member of supabase_admin and cannot change them; none of our objects is created by supabase_admin.
-  - postgres's platform-provided defaults in schema `storage` (the same grants). We create nothing in `storage`.
+  - postgres's platform-provided defaults in schema `storage` (the same grants). Unlike supabase_admin's, postgres could revoke
+    these; the controller ruled them an accepted, harmless exception, because we create nothing in `storage`.
   - PUBLIC's USAGE on schema `public`, and CONNECT and TEMPORARY on the database (so anon, authenticated and service_role
     hold them too). No client role may CREATE on the database.
 

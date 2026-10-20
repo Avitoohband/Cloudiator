@@ -524,6 +524,8 @@ The `tests/browser/read-render.spec.ts` checks:
 
 ## Release gate (Task 23.6)
 
+**Status (Task 23.8): passed.** `npm run verify` exited 0 on the M01–M22 replay at `46f176e` ("Task 23.8 runs" below, run 2;
+run 1 failed on one browser flake). The database budget is no longer a known blocker.
 **Status (Task 23.7): passed.** `npm run verify` exited 0 on the M01–M21 replay ("Task 23.7 run" below): the database budget
 blocker is resolved at 90 days. Task 23.6's status, kept for the record:
 **blocked by the database budget, as expected; every other step passed in the final run.** `npm run verify` exits 2
@@ -790,5 +792,31 @@ replay. **Exit 0 (passed): every step passed, and no known blocker was hit.**
 | Production build, its scan, production gate | passed; 32 / 0 / 528 |
 | `git diff --check` | clean |
 
-`scripts/verify.mjs` still lists the database budget as a known blocker (`KNOWN_BLOCKERS`, owner Task 23.7). It no longer
-fires: the case's only database checks are now the two 90-day shares, both under 1.
+`scripts/verify.mjs` still listed the database budget as a known blocker (`KNOWN_BLOCKERS`, owner Task 23.7) at that run. It
+no longer fired: the case's only database checks are now the two 90-day shares, both under 1. **Task 23.8 retired it**
+(`8db6700`): the list is empty, so a 90-day budget failure is an ordinary failure (exit 1). The mechanism and its tests stay,
+the tests with their own fixture list (`tests/scripts/verify.test.ts`).
+
+### Task 23.8 runs
+
+`npm run verify -- --config node_modules/.cache/pw-claude.config.mjs --json <scratchpad>/verify-<n>.json` on 2026-10-20, on
+branch `claude/task-23` at `46f176e` (M22 committed, clean tree), the database the clean M01–M22 replay.
+
+| Step | Run 1 (08:11–08:31 UTC) | Run 2 (08:32–08:50 UTC) |
+|---|---|---|
+| `npm test` | 1,222 passed | 1,222 passed |
+| typecheck, assets, build, `verify:static` | passed | passed |
+| Edge settled | 714 refreshed, 21 links skipped, 612 files read; 35 s; recreated while settling | 714 refreshed, 21 links skipped, 612 files read; 36 s; recreated while settling |
+| `CAPACITY_GATE=1 npm run test:db` | **passed**: 299; Edge start time unchanged | **passed**: 299; Edge start time unchanged |
+| Development browser suite | **failed**: 526 / 1 / 33 | **passed**: 527 / 0 / 33 |
+| Production build, its scan, production gate | passed; 32 / 0 / 528 | passed; 32 / 0 / 528 |
+| `git diff --check` | clean | clean |
+| Exit | 1 | **0 (passed)** |
+
+Run 1's one failure was `[mobile] release.spec.ts:517` ("meets 4.5:1 contrast on panel text and 3:1 on controls"). In the
+expedition scene, "Returned to camp" was measured at text alpha 0.03 (ratio 1.09). The text was caught while fading in:
+`settled()` (release.spec.ts:39) waits only for the animations already running when it is called.
+- Run alone with `--repeat-each=6` on both projects, it passed 12/12.
+- Task 23.8 changes no scene or style.
+- It is recorded as a load-timing flake for the final review's flake triage, not as product evidence; the gate's no-rerun
+  rule stands, so run 2 is a whole new run.

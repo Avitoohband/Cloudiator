@@ -32,8 +32,12 @@ function format(ms: number, options: Intl.DateTimeFormatOptions): string {
  * The time part itself never breaks across lines (its pieces are joined by no-break spaces); a line may break before it.
  * The Schedule panel's estimated starts and effective times, the Build panel's effective time and the owner's resting line
  * (Task 23.9) all show their times this way (Task 23.10).
+ *
+ * A time or display time that is not a finite number (missing from a read, or a broken clock) gives `''`, never a throw
+ * during render or a made-up date; each caller then leaves its time out (Task 23 final review, Minor 4).
  */
 export function slotTimeText(ms: number, nowMs: number): string {
+  if (!Number.isFinite(ms) || !Number.isFinite(nowMs)) return '';
   const days = (localDay(ms) - localDay(nowMs)) / DAY_MS;
   if (days === 0) return format(ms, {});
   if (days === 1) return `tomorrow ${format(ms, {})}`;

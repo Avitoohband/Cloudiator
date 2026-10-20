@@ -59,6 +59,8 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const fee = valid.ok ? buildChangeFee(input(owner.currentBuild), draft) : null;
   const weapon = owner.inventory.find(item => item.id === draft.equipment.weapon);
   const twoHands = weapon ? CATALOG_V1.items[weapon.catalogId]?.hands === 2 : false;
+  /** The pending build's effective time, or '' when it cannot be shown: its line is then left out. */
+  const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs) : '';
   function update(next: BuildInput) { attempt.current = null; setDraft(next); setError(''); setMessage(''); }
   async function send(kind: BuildCommand['kind']) {
     if (sending.current || (kind === 'queue-build' && !valid.ok)) return;
@@ -90,7 +92,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     <div className="build-comparison">
       <section data-testid="current-build"><h2>Current build</h2><BuildSummary build={owner.currentBuild} inventory={owner.inventory} /></section>
       {owner.pendingBuild && <section data-testid="pending-build"><h2>Pending build</h2><BuildSummary build={owner.pendingBuild.build} inventory={owner.inventory} />
-        <p>Effective {slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs)}</p>
+        {effective && <p>Effective {effective}</p>}
         <p>Reserved: {owner.pendingBuild.reservedMoney} money · {owner.pendingBuild.reservedItemIds.length} equipment items</p>
         <button disabled={busy} onClick={() => void send('cancel-build')}>Cancel pending build</button>
       </section>}

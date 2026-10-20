@@ -1,5 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { slotTimeText } from '../../src/features/schedule/slot-time';
+import { BuildPanel } from '../../src/features/build/BuildPanel';
+import { createDisplayClock } from '../../src/game/display-clock';
+import type { GameGateway } from '../../src/lib/api/gateway';
+import { ownerFixture } from '../fixtures/domain';
 
 // Task 23.10: a slot boundary's time, short, in the viewer's locale and zone. The zone is pinned to New York (the process's
 // own, restored afterwards) and the locale to en-US (the formatter is handed it only where the code names none), so no
@@ -128,5 +134,38 @@ describe('slotTimeText', () => {
     slotTimeText(at(25, 4, 20), NOW);
     expect(locales.length).toBeGreaterThanOrEqual(4);
     expect(locales.every(locale => locale === undefined)).toBe(true);
+  });
+
+  // Final review Minor 4: a time that is not a finite number (a value missing from a read, a broken display clock) shows
+  // nothing. Unguarded, formatToParts throws a RangeError for NaN or Infinity during render, and a missing or null value
+  // reads as the current moment or 1970. The callers leave their time out (activity-status.test.ts; the Build panel below).
+  it('shows nothing for a time or a display time that is not a finite number', () => {
+    const missing = undefined as unknown as number, nothing = null as unknown as number;
+    for (const bad of [NaN, Infinity, -Infinity, missing, nothing, missing * 4_800_000, Number(missing)]) {
+      expect(slotTimeText(bad, NOW), `time ${bad}`).toBe('');
+      expect(slotTimeText(at(14, 4, 20), bad), `display time ${bad}`).toBe('');
+    }
+  });
+});
+
+describe('slot time callers', () => {
+  // The Build panel's pending build says "Effective {time}"; with a time that cannot be shown it leaves that line out rather
+  // than ending on "Effective" alone.
+  it("leaves the Build panel's effective line out when its time cannot be shown", () => {
+    const clock = createDisplayClock();
+    clock.freeze(NOW);
+    // (React's static markup separates adjacent text with `<!-- -->`; it is read as nothing.)
+    const render = (effectiveSlotIndex: number) => renderToStaticMarkup(createElement(BuildPanel, {
+      owner: { ...structuredClone(ownerFixture), pendingBuild: { build: structuredClone(ownerFixture.currentBuild), effectiveSlotIndex,
+        reservedMoney: 0, reservedItemIds: [], operationId: '5d0f6a52-8f3e-4a51-9a39-3c1f4e0f9d21' } },
+      gateway: {} as GameGateway, refresh: async () => {}, clock,
+    })).replaceAll('<!-- -->', '');
+    const next = Math.floor(NOW / 4_800_000) + 1;
+    expect(render(next)).toContain(`<p>Effective ${slotTimeText(next * 4_800_000, NOW)}</p>`);
+    for (const bad of [NaN, undefined as unknown as number]) {
+      const html = render(bad);
+      expect(html, String(bad)).toContain('Pending build');
+      expect(html, String(bad)).not.toContain('Effective');
+    }
   });
 });

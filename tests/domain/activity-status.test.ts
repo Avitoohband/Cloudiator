@@ -102,4 +102,14 @@ describe('activity status', () => {
     // Once its return is known, the line says when.
     expect(activityStatus({ ...waiting, restingUntilSlot: slot + 1 }, slot, start + 1, { resting: true }).label).toBe(ownRestingText(slot + 1, start + 1));
   });
+
+  // Final review Minor 4: a return time that cannot be shown (`slotTimeText` gives '' for a value that is not a finite
+  // number) leaves only "Resting at home.", never "… back on your schedule at " with nothing after it.
+  it('says only "Resting at home." when the return time cannot be shown', () => {
+    const missing = undefined as unknown as number;
+    const cases: [number, number][] = [[NaN, start + 1], [Infinity, start + 1], [missing, start + 1], [slot + 1, NaN], [slot + 1, Infinity]];
+    for (const [until, now] of cases) expect(ownRestingText(until, now), `${until} at ${now}`).toBe('Resting at home.');
+    // A time that can be shown is still said.
+    expect(ownRestingText(slot + 1, start + 1)).toBe(`Resting at home: back on your schedule at ${slotTimeText((slot + 1) * SLOT_MS, start + 1)}`);
+  });
 });

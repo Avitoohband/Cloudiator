@@ -9,12 +9,13 @@ export type ActivityStatus = 'scheduled' | 'in-progress' | 'processing' | 'prepa
  * it (`OwnerState.restingUntilSlot`), its start in the viewer's local time as every slot time is shown (`slotTimeText` against
  * the display time `nowMs`, Task 23.10); or, before that is known (the presence not yet answered), only that it rests, which
  * needs no time. My gladiator, the owner's own Gladiators row and its own profile card all say this, never the public "back
- * when {name}'s owner returns."
+ * when {name}'s owner returns." A time that cannot be shown (`slotTimeText` gives '') also leaves "Resting at home.".
  */
 export function ownRestingText(restingUntilSlot: null): string;
 export function ownRestingText(restingUntilSlot: number | null, nowMs: number): string;
 export function ownRestingText(restingUntilSlot: number | null, nowMs = 0): string {
-  return restingUntilSlot === null ? 'Resting at home.' : `Resting at home: back on your schedule at ${slotTimeText(restingUntilSlot * SLOT_MS, nowMs)}`;
+  const time = restingUntilSlot === null ? '' : slotTimeText(restingUntilSlot * SLOT_MS, nowMs);
+  return time ? `Resting at home: back on your schedule at ${time}` : 'Resting at home.';
 }
 
 const PROCESSING = { status: 'processing', label: 'Processing results', endsAtMs: null } as const;

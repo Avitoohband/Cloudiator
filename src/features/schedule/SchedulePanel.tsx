@@ -88,6 +88,13 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
     } catch { if (mounted.current) { setAnswered({ phase, invalid: false }); setError('This change could not be confirmed. Retry to confirm the same request.'); } }
     finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
+  /** A phase's estimated next start, left out until mounted or when its time cannot be shown (`slotTimeText` gives ''). */
+  const estimate = (phase: Phase) => {
+    const time = slot === null ? '' : slotTimeText(nextPhaseStart(phase, slot * SLOT_MS), nowMs);
+    return time ? <p>Estimated next start: {time}</p> : null;
+  };
+  /** The saved change's effective time; when it cannot be shown the status line says only that the change was saved. */
+  const effective = message ? slotTimeText(message.effectiveAtMs, nowMs) : '';
   return <div className="planning-form">
     <h2>Repeating schedule</h2>
     <p className="muted">Edits apply to the next occurrence that has not started. Your current activity continues.</p>
@@ -104,11 +111,11 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
         <option value="training">Training</option><option value="rest">Rest</option><option value="arena">Arena</option>
         {Object.values(CATALOG_V1.expeditions).map(entry => <option key={entry.id} value={`expedition:${entry.id}`} disabled={owner.progression.level < entry.requiredLevel}>{entry.name} · Level {entry.requiredLevel}</option>)}
       </select>
-      {slot !== null && <p>Estimated next start: {slotTimeText(nextPhaseStart(phase, slot * SLOT_MS), nowMs)}</p>}
+      {estimate(phase)}
       <button onClick={() => void save(phase)} disabled={busy} aria-describedby={answered?.phase === phase && (message || error) ? outcomeId : undefined}>Save {phase}</button>
     </article>)}</div>
     <p className="muted">The server confirms the effective time when you save.</p>
-    {message && <p ref={outcome} id={outcomeId} role="status" tabIndex={-1} {...target}>{`Effective ${slotTimeText(message.effectiveAtMs, nowMs)} for ${message.phase} and future occurrences.`}</p>}
+    {message && <p ref={outcome} id={outcomeId} role="status" tabIndex={-1} {...target}>{`${effective ? `Effective ${effective}` : 'Saved'} for ${message.phase} and future occurrences.`}</p>}
     {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
   </div>;
 }

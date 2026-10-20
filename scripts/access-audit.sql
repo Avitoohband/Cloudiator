@@ -35,10 +35,13 @@
 --   database          the grantee's privileges on the current database: CONNECT TEMPORARY CREATE
 -- Finding sections (listed only when present; grantee is empty):
 --   rls-disabled          a table without row security
---   not-security-invoker  a view without security_invoker=true
+--   not-security-invoker  a view without security_invoker=true (privilege = the names of its options, or `no options`)
 --   materialized-view     any materialized view (row security cannot apply to it)
 --   security-definer      a SECURITY DEFINER function
---   search-path           a function whose configuration is not exactly search_path="" (privilege = what it has)
+--   search-path           a function whose configuration is not exactly search_path="" (privilege = the names of its
+--                         settings, or `unset`)
+-- Setting names only (Task 24.1, 23.1 M4): a view's options and a function's configuration can carry configuration values, and
+-- the hosted CSV leaves the database, so no row ever prints a value. Names are sorted (collation "C") and comma-separated.
 with
   nsp as (select oid, nspname, nspacl, nspowner from pg_namespace where nspname in ('public', 'private')),
   api(grantee) as (values ('anon'), ('authenticated'), ('service_role')),
@@ -143,7 +146,8 @@ with
     union all
     select 'rls-disabled', r.object, '', 'row security off' from rel r where r.relkind in ('r', 'p') and not r.relrowsecurity
     union all
-    select 'not-security-invoker', r.object, '', coalesce(array_to_string(r.reloptions, ','), 'no options') from rel r
+    select 'not-security-invoker', r.object, '', coalesce((select string_agg(o.option_name, ',' order by o.option_name collate "C")
+        from pg_options_to_table(r.reloptions) o), 'no options') from rel r
       where r.relkind = 'v' and coalesce((select lower(o.option_value) from pg_options_to_table(r.reloptions) o
         where o.option_name = 'security_invoker'), 'false') not in ('true', 'on', 'yes', '1')
     union all
@@ -151,7 +155,8 @@ with
     union all
     select 'security-definer', f.object, '', 'SECURITY DEFINER' from fn f where f.prosecdef
     union all
-    select 'search-path', f.object, '', coalesce(array_to_string(f.proconfig, ','), 'unset') from fn f
+    select 'search-path', f.object, '', coalesce((select string_agg(split_part(c.setting, '=', 1), ',' order by split_part(c.setting, '=', 1) collate "C")
+        from unnest(f.proconfig) c(setting)), 'unset') from fn f
       where f.proconfig is distinct from array['search_path=""']
   ),
   policy(section, object, grantee, privilege, detail) as (

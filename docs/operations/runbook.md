@@ -382,29 +382,60 @@ privileges of the role that owns those objects; role memberships; every policy (
 and `md5:` of its USING and WITH CHECK expressions, so a changed policy body changes the row); any table without row
 security, view without `security_invoker`, materialized view, SECURITY DEFINER function or function without
 `search_path=""`; and, in the `platform-default` and `database` sections, the platform's own settings. Only policy rows
-have a detail. The file's header describes each section. It needs PostgreSQL 17 (MAINTAIN).
-`tests/db/access-matrix.test.ts` holds the expectations.
+have a detail. A finding row names a view's options or a function's settings, never their values (Task 24.1). The file's
+header describes each section. It needs PostgreSQL 17 (MAINTAIN). `tests/db/access-matrix.test.ts` holds the expectations.
 
-Run it after deploying M17, after any later migration and before launch:
-1. **Local reference.** On the local stack, at the commit being deployed, with `migration list --local` showing the same
+Run it after deploying M17, after any later migration and before launch. The comparison needs no connection string, key or
+password, and the two CSV files hold only catalog names, privileges and hashes. Work in Windows PowerShell, in the
+repository root, one step after another:
+1. **A work folder outside the repository**, new for this run:
+   ```powershell
+   $work = Join-Path ([IO.Path]::GetTempPath()) ('cloudiator-audit-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
+   New-Item -ItemType Directory -Path $work | Out-Null
+   ```
+2. **Local reference.** On the local stack, at the commit being deployed, with `migration list --local` showing the same
    migrations as the hosted project and no SQL source applied since the last `db reset --local --no-seed --yes` (a reset
-   guarantees both and deletes local data), after the label check:
+   guarantees both and deletes local data), after the label check. `Set-Content -Encoding utf8` is used because `>` in
+   Windows PowerShell 5.1 writes UTF-16.
    ```powershell
    (docker inspect -f '{{json .Config.Labels}}' supabase_db_Cloudiator | ConvertFrom-Json).'com.supabase.cli.project'   # must print Cloudiator
-   Get-Content scripts/access-audit.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 --csv > local-access-audit.csv
+   'select current_schemas(false);' | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -At   # {public,extensions}
+   Get-Content scripts/access-audit.sql -Raw | docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 --csv |
+     Set-Content -Encoding utf8 -LiteralPath (Join-Path $work 'local-access-audit.csv')
+   "psql exit $LASTEXITCODE"                                                                                   # must print psql exit 0
    ```
-2. **Hosted.** In the hosted SQL editor, as the database owner, run the whole file and download the result as CSV
-   (`hosted-access-audit.csv`). No connection string is needed. The policy hashes come from deparsed expressions, which
-   qualify names by the session's search path, so check that `show search_path` gives the same value in both places (locally
-   `"$user", public, extensions`); a different path changes every policy hash, not one.
-3. **Compare** the two as sets of rows, for example
-   `Compare-Object (Get-Content local-access-audit.csv) (Get-Content hosted-access-audit.csv)`, after making the two CSV
-   exports quote fields the same way if they differ.
+3. **Hosted.** In the hosted SQL editor, as the database owner, run `select current_schemas(false);` and check that it prints
+   the same schemas as step 2. The policy hashes come from deparsed expressions, which qualify names by the session's search
+   path, so a different path changes every policy hash, not one. `current_schemas` lists the existing schemas the path
+   resolves to; `show search_path` prints its text, which can differ in form while resolving to the same schemas (locally,
+   observed 2026-10-20, it reads `"\$user", public, extensions`, with a stored backslash). Then, in a new query, run the whole
+   of `scripts/access-audit.sql` (if the editor offers a row limit, choose none) and download the result as CSV into `$work`
+   as `hosted-access-audit.csv`.
+4. **Read both files.** `Import-Csv` reads a field the same way however the export quoted it:
+   ```powershell
+   $row = { '{0} | {1} | {2} | {3} | {4}' -f $_.section, $_.object, $_.grantee, $_.privilege, $_.detail }
+   $local = @(Import-Csv -LiteralPath (Join-Path $work 'local-access-audit.csv') | ForEach-Object $row)
+   $hosted = @(Import-Csv -LiteralPath (Join-Path $work 'hosted-access-audit.csv') | ForEach-Object $row)
+   foreach ($name in 'local', 'hosted') { (Get-Content -LiteralPath (Join-Path $work "$name-access-audit.csv") -TotalCount 1) }
+   "local: $($local.Count) rows; hosted: $($hosted.Count) rows"
+   ```
+   Both header lines must be `section,object,grantee,privilege,detail` (with or without quotes) and both counts above zero;
+   otherwise the export is not the audit's, so download it again.
+5. **Compare** them as sets of rows, case-sensitively, and list the differences by section:
+   ```powershell
+   $diff = @(Compare-Object -CaseSensitive $local $hosted | Sort-Object InputObject)
+   $diff | ForEach-Object { '{0} {1}' -f $(if ($_.SideIndicator -eq '<=') { 'local only: ' } else { 'hosted only:' }), $_.InputObject }
+   $diff | Group-Object { $_.InputObject.Split('|')[0].Trim() } | ForEach-Object { "$($_.Name): $($_.Count)" }
+   $findings = 'rls-disabled', 'not-security-invoker', 'materialized-view', 'security-definer', 'search-path'
+   @($local + $hosted) | Where-Object { $findings -contains $_.Split('|')[0].Trim() }                          # must print nothing
+   ```
    - Any difference in `relation`, `column`, `sequence`, `function`, `schema`, `default`, `membership` or `policy`, or any row
      in a finding section (`rls-disabled`, `not-security-invoker`, `materialized-view`, `security-definer`, `search-path`)
      on either side, blocks the release until it is explained and fixed by a new migration.
    - A difference in `platform-default` or `database` is the hosted platform's state: record it in the release evidence and
      check that it touches nothing of ours.
+6. **Record and clean up.** Record the two counts and every difference line in the release evidence, then remove the folder:
+   `Remove-Item -LiteralPath $work -Recurse`.
 
 Expected platform rows (accepted exception E; the local replay shows exactly these):
 - `platform-default supabase_admin:<schema>:tables|sequences|functions` for `public`, `graphql`, `graphql_public` and
@@ -422,3 +453,5 @@ Expected platform rows (accepted exception E; the local replay shows exactly the
   service_role (`backend_only`). Each `md5:` must equal the local reference's.
 
 Not yet run against a hosted project (none exists before Task 24); Task 24 verifies the export format and the comparison.
+Rehearsed locally in Task 24.1: steps 1, 2, 4, 5 and 6 with a "hosted" file made from the local one, re-quoted, with one row
+changed and one added; step 5 listed exactly those three lines.

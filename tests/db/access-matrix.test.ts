@@ -391,8 +391,27 @@ describe('release access matrix', () => {
     expect(lines(probe.filter(r => r.object.includes('.matrix_probe_') && r.grantee !== 'service_role'))).toEqual([
       'function private.matrix_probe_path() authenticated EXECUTE', 'function public.matrix_probe_definer() anon EXECUTE',
       'function public.matrix_probe_open() PUBLIC EXECUTE', 'function public.matrix_probe_open() anon EXECUTE',
-      'function public.matrix_probe_open() authenticated EXECUTE', 'search-path private.matrix_probe_path() search_path=public',
+      'function public.matrix_probe_open() authenticated EXECUTE', 'search-path private.matrix_probe_path() search_path',
       'search-path public.matrix_probe_open() unset', 'security-definer public.matrix_probe_definer() SECURITY DEFINER'].sort());
+  });
+
+  it('names the settings in a finding row, never their values (Task 24.1, 23.1 M4)', async () => {
+    // A view's options and a function's configuration can carry configuration values; the hosted CSV leaves the database, so
+    // a finding row says which settings an object has and never what they are set to.
+    const VALUE = 'matrix-probe-setting-value';
+    const probe = await auditAfter(
+      'create view public.matrix_probe_view with (security_barrier=true) as select 1 as id',
+      `create function private.matrix_probe_cfg() returns int language sql set search_path=public set work_mem='64kB'
+         set application_name='${VALUE}' as 'select 1'`,
+      `create function public.matrix_probe_pinned() returns int language sql set search_path='' set application_name='${VALUE}' as 'select 1'`);
+    expect(lines(probe.filter(r => ['not-security-invoker', 'search-path'].includes(r.section) && r.object.includes('.matrix_probe_')))).toEqual([
+      'not-security-invoker public.matrix_probe_view security_barrier',
+      'search-path private.matrix_probe_cfg() application_name,search_path,work_mem',
+      'search-path public.matrix_probe_pinned() application_name,search_path']);
+    // No row of any section carries a setting's value, nor any `name=value` pair.
+    const leaks = probe.filter(r => [r.section, r.object, r.grantee, r.privilege, r.detail].some(field => field.includes(VALUE)
+      || field.includes('64kB') || field.includes('=')));
+    expect(lines(leaks)).toEqual([]);
   });
 
   it('leaves no default privileges to anon or authenticated', async () => {

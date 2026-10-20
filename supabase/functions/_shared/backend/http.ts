@@ -9,6 +9,16 @@ export function jsonResponse(value: unknown, status: number, origin: string | nu
   }
   return new Response(status === 204 ? null : JSON.stringify(value), { status, headers });
 }
+/**
+ * The answer to a command preflight (OPTIONS): 204 with the exact-origin grant of jsonResponse. Task 24.1 (plan Decision 9):
+ * every preflight is a billed function invocation, so a granted preflight may be cached for 7200 s (Chrome's maximum);
+ * without an allowed origin there is no grant and nothing to cache.
+ */
+export function preflightResponse(origin: string | null): Response {
+  const response = jsonResponse(null, 204, origin);
+  if (origin) response.headers.set('Access-Control-Max-Age', '7200');
+  return response;
+}
 export function statusFor(code: ApiErrorCode): number {
   if (code === 'unauthenticated') return 401;
   if (code === 'invalid') return 400;

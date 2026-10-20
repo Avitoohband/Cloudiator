@@ -90,6 +90,30 @@ it('uses exact origin CORS and bounded streamed bodies', async () => {
   expect(preflight.status).toBe(204);
 });
 
+// Task 24.1 (plan Decision 9): every preflight is a billed function invocation, so the browser may cache the command
+// preflight for two hours (Chrome's maximum). The exact-origin rule is unchanged: another origin gets no CORS grant at all.
+it('lets the browser cache the command preflight for 7200 s, for the allowed origin only', async () => {
+  const preflight = (origin?: string) => handleCommand(new Request('http://local', { method: 'OPTIONS',
+    headers: { ...(origin ? { Origin: origin } : {}), 'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'authorization, apikey, content-type' } }), deps);
+  const allowed = await preflight('http://127.0.0.1:3000');
+  expect(allowed.status).toBe(204);
+  expect(Object.fromEntries([...allowed.headers].filter(([name]) => name.startsWith('access-control-')))).toEqual({
+    'access-control-allow-origin': 'http://127.0.0.1:3000', 'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info',
+    'access-control-allow-methods': 'POST, OPTIONS', 'access-control-max-age': '7200' });
+  expect(allowed.headers.get('Vary')).toBe('Origin');
+  expect(await allowed.text()).toBe('');
+  const refused = await preflight('https://evil.example');
+  expect(refused.status).toBe(403);
+  expect([...refused.headers].filter(([name]) => name.startsWith('access-control-'))).toEqual([]);
+  // Without an Origin there is no CORS grant to cache either.
+  const bare = await preflight();
+  expect(bare.status).toBe(204);
+  expect([...bare.headers].filter(([name]) => name.startsWith('access-control-'))).toEqual([]);
+  // Only the preflight is cacheable: a command answer carries no Max-Age.
+  expect((await handleCommand(req(create), deps)).headers.has('Access-Control-Max-Age')).toBe(false);
+});
+
 it('returns durable rate-limit retry hints and does not expose unexpected backend errors', async () => {
   const limited = await handleCommand(req(create), { ...deps, database: { ...deps.database, consumeRateLimit: async () => 1200 } });
   expect(limited.status).toBe(429);

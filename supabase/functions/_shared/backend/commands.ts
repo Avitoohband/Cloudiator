@@ -4,7 +4,7 @@ import type { CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, Pl
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
-import { jsonResponse, readCommandBody, statusFor } from './http.ts';
+import { jsonResponse, preflightResponse, readCommandBody, statusFor } from './http.ts';
 
 const uuid = (v: unknown) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -61,7 +61,7 @@ export type CommandDependencies = {
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
   const origin = request.headers.get('Origin');
   if (origin && !deps.allowedOrigins.includes(origin)) return jsonResponse({ ok: false, code: 'invalid' }, 403, null);
-  if (request.method === 'OPTIONS') return jsonResponse(null, 204, origin);
+  if (request.method === 'OPTIONS') return preflightResponse(origin);
   if (request.method !== 'POST') return jsonResponse({ ok: false, code: 'invalid' }, 405, origin);
   let actor: Actor;
   try { actor = await deps.verifyActor(request); } catch { return jsonResponse({ ok: false, code: 'unauthenticated' }, 401, origin); }

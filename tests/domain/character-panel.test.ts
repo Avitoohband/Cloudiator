@@ -28,8 +28,10 @@ describe('My gladiator', () => {
   it('shows the owner "Resting at home: back on your schedule at {time}" until that boundary', () => {
     const owner: OwnerState = { ...structuredClone(ownerFixture), currentActivity: null, processedSlotIndex: SLOT, restingUntilSlot: SLOT + 1 };
     const boundary = (SLOT + 1) * SLOT_MS;
-    const line = `Resting at home: back on your schedule at ${slotTimeText(boundary)}`;
-    const resting = panel(owner, SLOT * SLOT_MS + 40 * 60_000);
+    // {time} is shown against the display time the panel is at (Task 23.10).
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    const line = `Resting at home: back on your schedule at ${slotTimeText(boundary, nowMs)}`;
+    const resting = panel(owner, nowMs);
     expect(text(resting)).toContain(line);
     // It is the activity line itself (a status), and nothing says the gladiator has an activity.
     expect(resting).toMatch(new RegExp(`role="status"[^>]*>${line.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}<`));

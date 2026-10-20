@@ -64,12 +64,18 @@ describe('activity status', () => {
   it('shows the owner "Resting at home: back on your schedule at {time}" until that boundary', () => {
     const back = slot + 1, boundary = back * SLOT_MS;
     const resting = { processedSlotIndex: slot, currentActivity: null, restingUntilSlot: back };
-    // {time} is the start of that slot in the viewer's local time, formatted as the Schedule panel formats its starts.
-    expect(slotTimeText(boundary)).toBe(new Date(boundary).toLocaleString());
-    const line = `Resting at home: back on your schedule at ${slotTimeText(boundary)}`;
+    // {time} is the start of that slot in the viewer's local time, as every slot time is shown (`slotTimeText`, Task 23.10),
+    // against the display time the status is read at.
+    const lineAt = (now: number) => `Resting at home: back on your schedule at ${slotTimeText(boundary, now)}`;
     for (const now of [start, start + 1, boundary - 1]) {
-      expect(activityStatus(resting, slot, now), `${boundary - now} ms before the boundary`).toEqual({ status: 'resting', label: line, endsAtMs: null });
+      expect(activityStatus(resting, slot, now), `${boundary - now} ms before the boundary`).toEqual({ status: 'resting', label: lineAt(now), endsAtMs: null });
     }
+    // The wording follows the display time, not the boundary alone: a day or more ahead it is not the time of day alone.
+    const early = boundary - 36 * 3_600_000;
+    const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(boundary);
+    expect(activityStatus(resting, slot, early).label).toBe(lineAt(early));
+    expect(activityStatus(resting, slot, early).label).not.toBe(`Resting at home: back on your schedule at ${timeOnly}`);
+    expect(lineAt(boundary - 1)).toBe(`Resting at home: back on your schedule at ${timeOnly}`);
     // From the boundary (by the display clock, or by a revision read already in that slot) the schedule applies again:
     // the next activity is being prepared until the owner state is read once more.
     expect(activityStatus(resting, slot, boundary)).toEqual({ status: 'preparing', label: 'Preparing your next activity', endsAtMs: null });
@@ -77,7 +83,7 @@ describe('activity status', () => {
     // Resting with no signal since it began (null until the owner's presence and a fresh read): no time to show yet.
     expect(activityStatus({ ...resting, restingUntilSlot: null }, slot, start + 1).status).toBe('preparing');
     // The owner's own words for its card and its list row (fix round 1) are the same line.
-    expect(ownRestingText(back)).toBe(line);
+    expect(ownRestingText(back, start + 1)).toBe(lineAt(start + 1));
   });
 
   // Fix round 1 (review Minor 1): resting in the world, before its presence is answered.
@@ -93,6 +99,6 @@ describe('activity status', () => {
     expect(activityStatus(waiting, slot, end, { resting: true }).status).toBe('preparing');
     expect(activityStatus(waiting, slot + 1, end - 1, { resting: true }).status).toBe('preparing');
     // Once its return is known, the line says when.
-    expect(activityStatus({ ...waiting, restingUntilSlot: slot + 1 }, slot, start + 1, { resting: true }).label).toBe(ownRestingText(slot + 1));
+    expect(activityStatus({ ...waiting, restingUntilSlot: slot + 1 }, slot, start + 1, { resting: true }).label).toBe(ownRestingText(slot + 1, start + 1));
   });
 });

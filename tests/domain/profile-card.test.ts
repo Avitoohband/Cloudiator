@@ -123,7 +123,7 @@ describe('profile card', () => {
   // Fix round 1 (review Important 1): the returning owner's own card says when it is back, never "back when Aster's owner returns."
   it('shows the owner its own resting line as its own card\'s Now', () => {
     const me: PublicActor = { ...ACTOR, location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, resting: true };
-    const own = 'Resting at home: back on your schedule at 10/10/2026, 4:20:00 AM';
+    const own = 'Resting at home: back on your schedule at 4:20 AM';
     const html = unescaped(card({ actor: me, own: true, ownPlace: own }));
     expect(html).toContain(`<dt>Now</dt><dd>${own}</dd>`);
     expect(html).not.toContain("Aster's owner returns");

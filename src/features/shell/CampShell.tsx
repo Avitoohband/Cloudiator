@@ -36,6 +36,7 @@ import { CreateCharacter } from '../character/CreateCharacter';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
 import { ProfileLayer } from '../character/ProfileCard';
 import { SchedulePanel } from '../schedule/SchedulePanel';
+import { useMinuteNow } from '../schedule/use-minute-now';
 import { InventoryPanel } from '../inventory/InventoryPanel';
 import { MarketPanel } from '../market/MarketPanel';
 import { ArenaMenu } from '../arena/ArenaMenu';
@@ -182,6 +183,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // One sync controller, display clock and owner state for the camp and every menu (the fixture gateway once loaded).
   const game = useGameState(reads, { fixture, previewAs });
   const { owner, world, clock, viewer } = game;
+  // The display time the owner's resting line shows its return against (Task 23.10): it follows the shared clock by the minute.
+  const nowMs = useMinuteNow(clock);
   const menus = menusFor(viewer);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
@@ -283,8 +286,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const sceneUnavailable = game.sceneStatus === 'unavailable';
   const ownerId = owner?.gladiatorId ?? null;
   // The owner's own words while its gladiator rests at home (Task 23.9 fix round 1): when it is back on its schedule once
-  // that is known, else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
-  const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot) : null;
+  // that is known (a short time, Task 23.10), else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
+  const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot, nowMs) : null;
   const content = (id: MenuId) => {
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}

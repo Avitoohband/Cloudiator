@@ -9,6 +9,9 @@ import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
 import { deriveStats, preserveStamina } from '@domain/stats';
 import type { GameGateway } from '../../lib/api/gateway';
+import type { DisplayClock } from '../../game/display-clock';
+import { slotTimeText } from '../schedule/slot-time';
+import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
 
 const attributes = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
@@ -24,7 +27,9 @@ function BuildSummary({ build, inventory }: { build: BuildView; inventory: ItemI
     {slots.map(slot => { const item = inventory.find(item => item.id === build.equipment[slot]); return <div key={slot}><dt>{slot}</dt><dd>{item ? CATALOG_V1.items[item.catalogId]?.name ?? item.catalogId : 'None'}</dd></div>; })}</dl></>;
 }
 
-export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void> }) {
+export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock }) {
+  /** The shared display clock's time to the minute: the pending build's effective time is shown against it (Task 23.10). */
+  const nowMs = useMinuteNow(clock);
   const [draft, setDraft] = useState(() => input(owner.pendingBuild?.build ?? owner.currentBuild));
   const [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
   const attempt = useRef<BuildCommand | null>(null), sending = useRef(false), mounted = useRef(false);
@@ -85,7 +90,7 @@ export function BuildPanel({ owner, gateway, refresh }: { owner: OwnerState; gat
     <div className="build-comparison">
       <section data-testid="current-build"><h2>Current build</h2><BuildSummary build={owner.currentBuild} inventory={owner.inventory} /></section>
       {owner.pendingBuild && <section data-testid="pending-build"><h2>Pending build</h2><BuildSummary build={owner.pendingBuild.build} inventory={owner.inventory} />
-        <p>Effective {new Date(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs).toLocaleString()}</p>
+        <p>Effective {slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs)}</p>
         <p>Reserved: {owner.pendingBuild.reservedMoney} money · {owner.pendingBuild.reservedItemIds.length} equipment items</p>
         <button disabled={busy} onClick={() => void send('cancel-build')}>Cancel pending build</button>
       </section>}

@@ -80,7 +80,7 @@ describe('Gladiators', () => {
     const rest = { location: 'camp' as const, activityStatus: 'idle' as const, startsAtMs: null, endsAtMs: null, resting: true };
     const me: PublicActor = { ...actor('Aster', 'camp'), ...rest };
     const otho: PublicActor = { ...actor('Otho', 'camp'), ...rest };
-    const own = 'Resting at home: back on your schedule at 10/10/2026, 4:20:00 AM';
+    const own = 'Resting at home: back on your schedule at 4:20 AM';
     const world = { ...WORLD, actors: [me, otho] };
     const html = panel({ world, ownerId: me.gladiatorId, roster: { inCamp: [], away: [] }, ownPlace: own }).replace(/&#x27;/g, "'");
     const row = (name: string) => new RegExp(`<li[^>]*>(?:(?!</li>).)*aria-label="Profile: ${name}"(?:(?!</li>).)*</li>`).exec(html)![0];

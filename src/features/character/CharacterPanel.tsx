@@ -88,7 +88,7 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
     return <>
       <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry} />
       {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
-        : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} />}
+        : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
     </>;
   }
   let joining: ReactNode;

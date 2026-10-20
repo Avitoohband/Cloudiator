@@ -10,6 +10,7 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { slotTimeText } from './slot-time';
+import { useMinuteNow } from './use-minute-now';
 
 const phases = ['morning', 'afternoon', 'evening'] as const;
 const choiceKey = (choice: ActivityChoice) => choice.kind === 'expedition' ? `expedition:${choice.expeditionId}` : choice.kind;
@@ -23,16 +24,20 @@ const NOT_THE_CHOICE = ['processing', 'conflict', 'unavailable', 'rate-limited']
 /**
  * The repeating schedule. The estimated next start of each phase comes from the shared display clock (estimated server
  * time), and follows it: past a slot boundary, or when the clock is held or moved, the estimates move with it, so the
- * panel never shows a start that has already passed (the Task 6 stale-clock gate).
+ * panel never shows a start that has already passed (the Task 6 stale-clock gate). Its times are short (`slotTimeText`, Task
+ * 23.10) and shown against the same clock by the minute, so "tomorrow" and the weekday follow it too.
  */
 export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock }) {
   const [draft, setDraft] = useState(owner.schedule);
-  const [message, setMessage] = useState('');
+  /** The saved change the status line answers: the server's effective time is kept, not its text, so the wording follows the clock. */
+  const [message, setMessage] = useState<{ phase: Phase; effectiveAtMs: number } | null>(null);
   const [error, setError] = useState('');
   /** The phase whose save the message or error answers, and whether the server refused that phase's choice. */
   const [answered, setAnswered] = useState<{ phase: Phase; invalid: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const outcomeId = useId();
+  /** The shared clock's time to the minute, the "now" every time on this panel is shown against. */
+  const nowMs = useMinuteNow(clock);
   // A save sent by keyboard whose button lost the focus gives it to the outcome, never to <body>; a pointer save moves
   // nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
@@ -58,7 +63,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   async function save(phase: Phase) {
     if (sending.current) return;
     begin();
-    sending.current = true; setBusy(true); setError(''); setMessage(''); setAnswered(null);
+    sending.current = true; setBusy(true); setError(''); setMessage(null); setAnswered(null);
     const command = attempt.current?.phase === phase ? attempt.current : {
       kind: 'edit-schedule' as const, operationId: crypto.randomUUID(), expectedVersion: owner.scheduleVersion, phase, choice: draft[phase],
     };
@@ -70,7 +75,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
         await refresh();
         if (mounted.current) {
           attempt.current = null; setAnswered({ phase, invalid: false });
-          setMessage(`Effective ${new Date(result.value.effectiveAtMs).toLocaleString()} for ${phase} and future occurrences.`);
+          setMessage({ phase, effectiveAtMs: result.value.effectiveAtMs });
         }
       } else {
         setAnswered({ phase, invalid: !NOT_THE_CHOICE.includes(result.code) });
@@ -93,17 +98,17 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
         const value = event.target.value;
         const choice: ActivityChoice = value.startsWith('expedition:') ? { kind: 'expedition', expeditionId: value.split(':')[1] as 'woodland' | 'outpost' | 'mountain' }
           : { kind: value as 'rest' | 'training' | 'arena' };
-        attempt.current = null; setDraft({ ...draft, [phase]: choice }); setError(''); setMessage(''); setAnswered(null);
+        attempt.current = null; setDraft({ ...draft, [phase]: choice }); setError(''); setMessage(null); setAnswered(null);
       }} aria-invalid={answered?.phase === phase && answered.invalid ? true : undefined}
         aria-describedby={answered?.phase === phase && (message || error) ? outcomeId : undefined}>
         <option value="training">Training</option><option value="rest">Rest</option><option value="arena">Arena</option>
         {Object.values(CATALOG_V1.expeditions).map(entry => <option key={entry.id} value={`expedition:${entry.id}`} disabled={owner.progression.level < entry.requiredLevel}>{entry.name} · Level {entry.requiredLevel}</option>)}
       </select>
-      {slot !== null && <p>Estimated next start: {slotTimeText(nextPhaseStart(phase, slot * SLOT_MS))}</p>}
+      {slot !== null && <p>Estimated next start: {slotTimeText(nextPhaseStart(phase, slot * SLOT_MS), nowMs)}</p>}
       <button onClick={() => void save(phase)} disabled={busy} aria-describedby={answered?.phase === phase && (message || error) ? outcomeId : undefined}>Save {phase}</button>
     </article>)}</div>
     <p className="muted">The server confirms the effective time when you save.</p>
-    {message && <p ref={outcome} id={outcomeId} role="status" tabIndex={-1} {...target}>{message}</p>}
+    {message && <p ref={outcome} id={outcomeId} role="status" tabIndex={-1} {...target}>{`Effective ${slotTimeText(message.effectiveAtMs, nowMs)} for ${message.phase} and future occurrences.`}</p>}
     {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
   </div>;
 }

@@ -6,12 +6,15 @@ export type ActivityStatus = 'scheduled' | 'in-progress' | 'processing' | 'prepa
 
 /**
  * The owner's own words for its gladiator resting at home (Task 23.9 and its fix round 1): the slot whose boundary returns
- * it (`OwnerState.restingUntilSlot`), its start in the viewer's local time as the Schedule panel shows its starts; or, before
- * that is known (the presence not yet answered), only that it rests. My gladiator, the owner's own Gladiators row and its
- * own profile card all say this, never the public "back when {name}'s owner returns."
+ * it (`OwnerState.restingUntilSlot`), its start in the viewer's local time as every slot time is shown (`slotTimeText` against
+ * the display time `nowMs`, Task 23.10); or, before that is known (the presence not yet answered), only that it rests, which
+ * needs no time. My gladiator, the owner's own Gladiators row and its own profile card all say this, never the public "back
+ * when {name}'s owner returns."
  */
-export function ownRestingText(restingUntilSlot: number | null): string {
-  return restingUntilSlot === null ? 'Resting at home.' : `Resting at home: back on your schedule at ${slotTimeText(restingUntilSlot * SLOT_MS)}`;
+export function ownRestingText(restingUntilSlot: null): string;
+export function ownRestingText(restingUntilSlot: number | null, nowMs: number): string;
+export function ownRestingText(restingUntilSlot: number | null, nowMs = 0): string {
+  return restingUntilSlot === null ? 'Resting at home.' : `Resting at home: back on your schedule at ${slotTimeText(restingUntilSlot * SLOT_MS, nowMs)}`;
 }
 
 const PROCESSING = { status: 'processing', label: 'Processing results', endsAtMs: null } as const;
@@ -39,7 +42,7 @@ export function activityStatus(owner: Pick<OwnerState, 'currentActivity' | 'proc
   const activity = owner.currentActivity;
   const current = Math.max(slotIndex, Math.floor(nowMs / SLOT_MS));
   const back = owner.restingUntilSlot ?? null;
-  if (back !== null && current < back) return { status: 'resting', label: ownRestingText(back), endsAtMs: null };
+  if (back !== null && current < back) return { status: 'resting', label: ownRestingText(back, nowMs), endsAtMs: null };
   const behind = owner.processedSlotIndex < current;
   if (options.resting && !activity && back === null && !behind) return { status: 'resting', label: ownRestingText(null), endsAtMs: null };
   if (!activity) return { ...PREPARING };

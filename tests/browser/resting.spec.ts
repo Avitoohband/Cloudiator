@@ -9,6 +9,7 @@ import { RESTING_ACTOR, restingActor } from '../fixtures/resting';
 import { contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
 import { SLOT_MS, SUPABASE_URL, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot360 } from './review-shots';
+import { slotTime as slotTimeAt } from './slot-time';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -33,8 +34,11 @@ const fact = (card: Locator, term: string) => card.locator('dt', { hasText: new 
 const activityLine = (panel: Locator) => panel.locator('p[role="status"]').filter({ hasText: /^(Resting at home|Scheduled|In progress|Processing results|Preparing|Completed)/ });
 /** Waits for a panel's or card's opening animation to end, so its colours are the ones it keeps (as release.spec.ts). */
 const settled = async (locator: Locator) => { await locator.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished))); return locator; };
-/** The local date and time the Schedule panel would show for the start of slot `slot`, in the page's own locale and zone. */
-const slotTime = (page: Page, slot: number) => page.evaluate(ms => new Date(ms).toLocaleString(), slot * SLOT_MS);
+/**
+ * The short local time every slot time shows (Task 23.10) for the start of slot `slot`, in the page's own locale and zone, against
+ * the fixture world's time: both specs below hold the display clock at `worldFixture.serverNowMs`, running on from there.
+ */
+const slotTime = (page: Page, slot: number) => slotTimeAt(page, slot * SLOT_MS, worldFixture.serverNowMs);
 
 test.describe('a gladiator resting at home in the fixture preview', () => {
   test.skip(production, 'The fixture preview is a development build feature.');
@@ -106,7 +110,7 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     expect(await drawn(page, ownerFixture.gladiatorId)).toBe(false);
     const mine = await settled(await openMenu(page, 'My gladiator'));
     // The presence sent on load is answered, and the owner read again says when the gladiator returns: the start of the
-    // next slot, as the Schedule panel formats its starts.
+    // next slot, as every slot time is shown (short, local).
     const line = `Resting at home: back on your schedule at ${await slotTime(page, worldFixture.slotIndex + 1)}`;
     await expect(activityLine(mine)).toHaveText(line);
     await expect(mine.getByText('Training at the practice yard')).toHaveCount(0);

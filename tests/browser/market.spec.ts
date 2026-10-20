@@ -471,13 +471,27 @@ test('leaves the focus and the scroll where they are after a pointer trade', asy
   await body.evaluate(el => { el.scrollTop = 120; });
   const before = await body.evaluate(el => el.scrollTop);
   expect(before).toBeGreaterThan(0);
-  // A real pointer click at the button where it is: a locator click may scroll its target into view first.
-  const buy = (await row(market, AXE).getByRole('button', { name: /^Buy/ }).boundingBox())!;
+  // A real pointer click at the button where it is: a locator click may scroll its target into view first. On a phone the
+  // menu is a bottom sheet that rises into place as it opens (`rise`, 0.2 s, in shell.module.css), so a box read during the
+  // rise is below the button by the time the click lands (Task 24.0b: under load the point fell beside Axe's Buy and no
+  // confirmation opened). The button is measured once the sheet has stopped moving.
+  await market.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
+  const axeBuy = row(market, AXE).getByRole('button', { name: /^Buy/ });
+  const buy = (await axeBuy.boundingBox())!;
   const view = (await body.boundingBox())!;
   expect(buy.y >= view.y && buy.y + buy.height <= view.y + view.height, 'Buy is in view').toBe(true);
-  await page.mouse.click(buy.x + buy.width / 2, buy.y + buy.height / 2);
+  const point = { x: buy.x + buy.width / 2, y: buy.y + buy.height / 2 };
+  // What the pointer will land on: Axe's Buy itself, not whatever lies at that point by the time the click arrives.
+  expect(await axeBuy.evaluate((button, { x, y }) => {
+    const at = document.elementFromPoint(x, y);
+    if (at && (at === button || button.contains(at))) return 'the Axe Buy button';
+    return at ? `${at.tagName} ${at.closest('button')?.getAttribute('aria-label') ?? at.closest('[data-testid]')?.getAttribute('data-testid') ?? ''}`.trim() : 'nothing';
+  }, point), 'the element at the click point').toBe('the Axe Buy button');
+  await page.mouse.click(point.x, point.y);
   const confirm = page.getByRole('dialog', { name: 'Confirm purchase' });
   await expect(confirm).toBeVisible();
+  // The confirmation is for the Axe, before it is confirmed.
+  await expect(confirm).toContainText(`Buy ${itemName(AXE)} (Level 5 · Common) from ${AXE.seller.name} for 90 money?`);
   expect(await body.evaluate(el => el.scrollTop)).toBe(before);
   await confirm.getByRole('button', { name: 'Confirm purchase', exact: true }).click();
   const receipt = market.getByRole('status').filter({ hasText: 'Purchase confirmed' });

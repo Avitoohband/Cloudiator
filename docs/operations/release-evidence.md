@@ -868,5 +868,5 @@ expedition scene, "Returned to camp" was measured at text alpha 0.03 (ratio 1.09
 **The earlier integration run at `81a57d7`** (23.9 integrated, before 23.10): 11 of 12 steps passed. The development suite
 had one failure, `[desktop] retention.spec.ts:157` ("keeps offering a replay until its expiry by server time"), beside a
 probable host fault (`net::ERR_NO_BUFFER_SPACE`), while another worktree's browser suite (Task 23.10's) ran at the same time.
-Run alone it passed 3/3. It is recorded as a probable host fault, not product evidence; the gate's no-rerun rule stands, and the run
-above, with no other browser suite active, is the gate of record.
+Run alone it passed 3/3. It is recorded as a probable host fault, not product evidence; the gate's no-rerun rule stands,
+and the run above, with no other browser suite active, is the gate of record.

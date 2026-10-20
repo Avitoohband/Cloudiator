@@ -53,6 +53,10 @@ at 50 such characters (`docs/operations/release-evidence.md`, risk 5): as it app
 mitigations before a boundary publishes later than 120 s. In the first minutes of a slot, before its boundary has run, the
 count can still be 0.
 
+`cohort.restingCharacters` (M22) counts the characters resting at home in the current slot: their owners have sent no
+activity signal for 14 days (spec §4.3). They are outside the boundary cohort, so they add neither latency nor rows. Like
+`activeCharacters`, it can read 0 early in a slot, before its boundary has run.
+
 ### Alerts and what to do
 
 | Alert | Meaning | Action |

@@ -44,6 +44,8 @@ export function parseCommand(value: unknown): GameCommand | null {
     case 'create-listing': valid = shape('itemId', 'price') && uuid(value.itemId) && integer(value.price, 1, RULES_V1.marketplace.maximumPrice); break;
     case 'cancel-listing': case 'buy-listing': valid = shape('listingId') && uuid(value.listingId); break;
     case 'set-tournament-opt-in': valid = shape('enabled') && typeof value.enabled === 'boolean'; break;
+    // Task 23.8: the owner's activity signal; no payload.
+    case 'presence': valid = shape(); break;
   }
   return valid ? value as GameCommand : null;
 }
@@ -77,7 +79,10 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'presence'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    // Task 23.8: the rate check above recorded the owner's activity signal (consume_command_rate). Presence writes nothing
+    // else: no operation receipt, which would be permanent.
+    if (command.kind === 'presence') return jsonResponse({ ok: true }, 200, origin);
     const result = command.kind === 'create-character' ? await deps.database.createGladiator(actor, command)
       : command.kind === 'set-tournament-opt-in' ? await deps.database.setTournamentOptIn(actor, command as OptInCommand)
         : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)

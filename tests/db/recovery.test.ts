@@ -304,6 +304,10 @@ async function waitForEpochAtPhaseFour(tx: Sql) {
   await tx`truncate private.season_epoch`;
   await tx`update private.coordinator set published_slot=${RATED - 1},lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
   await tx`update public.gladiators set processed_slot_index=${RATED - 1} where id in ${tx(world.all.map(f => f.gid))}`;
+  // Task 23.8: their owners signalled at RATED's start, so the characters play boundary RATED, far after the world, instead
+  // of resting at home.
+  await tx`insert into private.owner_signals(owner_id,last_signal_ms) select owner_id,${RATED * SLOT} from public.gladiators
+    where id in ${tx(world.all.map(f => f.gid))} on conflict (owner_id) do update set last_signal_ms=excluded.last_signal_ms`;
   const advance = async () => (await tx`select public.advance_boundary(${RATED},${token}) as step`)[0].step as Outcome;
   expect(await advance()).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
   await prepareAll(tx);

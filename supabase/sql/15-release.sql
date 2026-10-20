@@ -2,7 +2,8 @@
 -- (supabase/migrations/*_release.sql, Task 23.1, access hardening), M18 (*_timing.sql, Task 23.2, the second part below) and
 -- M19 (*_dispatch_released.sql, Task 23.3, the third part: settlements released by due reveals), corrected by M20
 -- (*_shared_reveal.sql, Task 23.3 fix round 1: the third part's claim_jobs leases a reveal several settlements share once),
--- and M21 (*_job_payloads.sql, Task 23.7, the fourth part: settled jobs' payloads compacted, the 500 MB budget).
+-- M21 (*_job_payloads.sql, Task 23.7, the fourth part: settled jobs' payloads compacted, the 500 MB budget) and M22
+-- (*_idle_rest.sql, Task 23.8, the fifth part: idle characters rest at home after 14 days without an owner's signal).
 -- Release access hardening (plan 2026-10-19-task-23-release-readiness, Task 23.1, and the controller's rulings on the access
 -- matrix's findings). tests/db/access-matrix.test.ts derives every expectation from the catalog through the exported audit
 -- scripts/access-audit.sql. On the M01-M16 replay it found these client privileges, all revoked here:
@@ -742,6 +743,429 @@ begin
 end $$;
 -- The operator's, as before: nobody else may EXECUTE it.
 revoke all on function private.health_report(bigint) from public, anon, authenticated, service_role;
+
+-- ===== Task 23.8: idle characters rest at home (M22) =====
+-- Database budget design C (docs/superpowers/specs/2026-10-19-database-budget-design.md; Avi's decision A + C + D, 2026-10-19,
+-- with spec §4.3 changed the same day): the schedule continues while the player is offline until the owner has sent no
+-- activity signal for 14 days; then the character rests at home until the owner returns.
+--   - The signal. private.owner_signals.last_signal_ms, one row per owner, written by public.consume_command_rate for the
+--     verified actor of every command the Edge function receives (the payload-free `presence` included, and before the rate
+--     decision, so a refused or rate-limited attempt counts too), at database time sampled after the account's rate lock, at
+--     most once an hour: only when the stored signal is at least 3600000 ms older (an operational window, not a rule).
+--   - The rule, at the freeze of boundary phase 3. A character rests at boundary `target` when
+--     target x 4800000 - greatest(last signal, gladiators.created_at_ms) >= private.idle_rules()->afterMs, RULES_V1.idle.afterMs
+--     restated (1209600000: 14 days, 252 slots; tests/db/idle.test.ts compares them). The scheduled start, never the wall
+--     clock: a late or catch-up boundary classifies each slot as it would have on time. A signal recorded before the late
+--     boundary freezes its cohort counts for it, even one after its scheduled start. Creation counts like a signal.
+--   - Resting. The character is not a member: no preparation job, snapshot, activity, settlement, settled slot, pairing or
+--     bracket entry, and no season rating row (phase 4 inserts members' rows only, so a character resting through a whole
+--     season is absent from that season's standings). Phase 8 advances its processed_slot_index with the cohort's, so the
+--     straggler wait, the commands' processing answers, the cleanup checkpoint and coordinate_work see it as everyone else.
+--     Its tournament opt-in is kept. Changes queued while it rests (each comes with a signal) wait for its first boundary
+--     back, which applies pending builds and reads the latest schedule revision effective by then. The activity of the slot
+--     before it began resting settles normally (phase 1). Resting slots are never back-filled or rewarded.
+--   - public.character_rests, one row per character that has rested: since_slot, the first slot of its latest rest;
+--     through_slot, the last slot a boundary rested it in; signalled_at_ms, its owner's first signal since that rest began
+--     (null until then). It rests in its processed slot P while since_slot <= P <= through_slot. A rest that reached the
+--     previous slot continues (through_slot moves); otherwise a new one replaces the row. The owner reads its own row
+--     (owner_read, as builds). public.owner_state shows currentActivity null while it rests and restingUntilSlot
+--     through_slot + 1 once signalled_at_ms is set: normally P + 1, or P + 2 when the signal came after boundary P + 1 had
+--     frozen its cohort with the character resting. private.project_character publishes `resting` on the public actor
+--     (with location 'camp', activity status 'idle', and no activity, times or stage).
+--   - Waking. The first signal after the rest began sets signalled_at_ms (consume_command_rate, for a rest whose
+--     through_slot is at or after the processed slot); the next boundary that freezes its cohort classifies it playing.
+--   - Locks. Phase 3 takes the owner's rate lock (hashtextextended(owner, 1), which consume_command_rate holds while it records
+--     a signal) for each character its first read finds idle, then reads the signal again: a signal committed while the
+--     boundary waited counts, and one recorded after the boundary commits finds the rest row and marks it. consume_command_rate
+--     holds nothing else while it waits for that lock, and phase 3 touches a rest row only after taking it, so they never wait
+--     on each other in a cycle. Phase 8 takes the resting characters' account locks (hashtextextended(owner, 0)) in one
+--     gladiator-ordered pass with the members' (10-tournament-results.sql exception 1), before any row lock.
+--   - Deploy day. Existing owners have no signal yet: the backfill below gives every owner of a character the deploy time
+--     (reapplicable: a recorded signal is kept), so nobody rests on the first boundary after M22. Every actor is then
+--     republished with its `resting` flag (public.refresh_projections()).
+--   - The health report counts the characters resting in the current slot (cohort.restingCharacters).
+
+-- RULES_V1.idle (supabase/functions/_shared/domain/rules-v1.ts), restated as 13-seasons.sql restates RULES_V1.seasons.
+create or replace function private.idle_rules() returns jsonb language sql immutable security invoker set search_path='' as $$
+  select '{"afterMs":1209600000}'::jsonb
+$$;
+
+-- The owner's latest activity signal, database time in ms. Backend only.
+create table if not exists private.owner_signals (
+  owner_id uuid primary key references auth.users(id),
+  last_signal_ms bigint not null check (last_signal_ms >= 0)
+);
+alter table private.owner_signals enable row level security;
+revoke all on private.owner_signals from public, anon, authenticated, service_role;
+grant select, insert, update on private.owner_signals to service_role;
+drop policy if exists backend_only on private.owner_signals;
+create policy backend_only on private.owner_signals to service_role using (true) with check (true);
+
+-- A character's rest at home (above). Its owner reads it, like its builds; only the backend writes it.
+create table if not exists public.character_rests (
+  gladiator_id uuid primary key references public.gladiators(id),
+  since_slot bigint not null check (since_slot >= 1),
+  through_slot bigint not null,
+  signalled_at_ms bigint check (signalled_at_ms >= 0),
+  check (through_slot >= since_slot)
+);
+alter table public.character_rests enable row level security;
+revoke all on public.character_rests from public, anon, authenticated, service_role;
+grant select on public.character_rests to authenticated;
+grant select, insert, update on public.character_rests to service_role;
+drop policy if exists owner_read on public.character_rests;
+create policy owner_read on public.character_rests for select to authenticated
+  using (gladiator_id in (select id from public.gladiators where owner_id=(select auth.uid())));
+
+-- 01-identity.sql's rate limit, plus the owner's activity signal.
+create or replace function public.consume_command_rate(actor_id uuid, is_creation boolean) returns integer
+language plpgsql security invoker set search_path = '' as $$
+declare now_at timestamptz; oldest timestamptz; attempts integer; maximum integer; signal_ms bigint; recorded integer;
+begin
+  if actor_id is null or is_creation is null then raise exception 'invalid actor'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,1));
+  now_at := clock_timestamp();
+  -- Task 23.8: the owner's activity signal at database time sampled after the rate lock, at most once an hour. A refused or
+  -- rate-limited attempt is the owner's activity too, so it is recorded before the rate decision.
+  signal_ms := private.planning_now_ms();
+  insert into private.owner_signals as s(owner_id,last_signal_ms) values(consume_command_rate.actor_id,signal_ms)
+    on conflict (owner_id) do update set last_signal_ms=excluded.last_signal_ms where s.last_signal_ms<=excluded.last_signal_ms-3600000;
+  get diagnostics recorded = row_count;
+  if recorded>0 then
+    -- The first signal since a rest began (a rest not yet ended: through_slot at or after the processed slot) marks it; the
+    -- next boundary that freezes its cohort returns the character.
+    update public.character_rests r set signalled_at_ms=signal_ms from public.gladiators g
+      where g.owner_id=consume_command_rate.actor_id and r.gladiator_id=g.id and r.signalled_at_ms is null
+        and r.through_slot>=g.processed_slot_index;
+  end if;
+  delete from private.command_attempts a where a.actor_id=consume_command_rate.actor_id and a.attempted_at <= now_at-interval '1 minute';
+  select count(*), min(attempted_at) into attempts, oldest from private.command_attempts a
+    where a.actor_id=consume_command_rate.actor_id and a.is_creation=consume_command_rate.is_creation;
+  maximum := case when is_creation then 5 else 60 end;
+  if attempts >= maximum then return greatest(1,ceil(extract(epoch from (oldest+interval '1 minute'-now_at))*1000)::integer); end if;
+  insert into private.command_attempts(actor_id,is_creation,attempted_at) values(actor_id,is_creation,now_at);
+  return null;
+end $$;
+
+-- Boundary phase 3 (03-activities-jobs.sql), unchanged except the rest at the freeze.
+create or replace function private.boundary_apply_changes(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare b private.boundaries%rowtype; m record; starts_at bigint:=target*4800000;
+  idle_ms bigint:=(private.idle_rules()->>'afterMs')::bigint;
+begin
+  select * into b from private.boundaries where slot_index=target for update;
+  if not b.members_frozen then
+    -- A never-started character whose creation committed after an earlier cohort froze joins this cohort; its
+    -- orientation simply extends to this cutoff. A participating straggler is an inconsistency for the operator.
+    for m in select g.id,g.owner_id from public.gladiators g where g.processed_slot_index<target-1
+      and not exists(select 1 from public.activities a where a.gladiator_id=g.id) order by g.id loop
+      perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+      update public.gladiators set processed_slot_index=target-1,orientation_end_ms=target*4800000
+        where id=m.id and processed_slot_index<target-1;
+    end loop;
+    if exists(select 1 from public.gladiators where processed_slot_index<target-1) then return 'straggler'; end if;
+    -- Task 23.8: a character whose owner's last signal (or its creation, when later) is RULES_V1.idle before this boundary's
+    -- scheduled start rests at home instead of joining the cohort. Each one the first read finds idle is read again under its
+    -- owner's rate lock (consume_command_rate's), so a signal committed while the boundary waited counts.
+    for m in select g.id,g.owner_id from public.gladiators g left join private.owner_signals s on s.owner_id=g.owner_id
+      where g.processed_slot_index=target-1 and starts_at-greatest(s.last_signal_ms,g.created_at_ms)>=idle_ms order by g.id loop
+      perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,1));
+      if (select starts_at-greatest(s.last_signal_ms,g.created_at_ms) from public.gladiators g
+        left join private.owner_signals s on s.owner_id=g.owner_id where g.id=m.id)>=idle_ms then
+        -- A rest that reached the previous slot continues; any other starts here, without a signal.
+        insert into public.character_rests as r(gladiator_id,since_slot,through_slot,signalled_at_ms) values(m.id,target,target,null)
+          on conflict (gladiator_id) do update set since_slot=case when r.through_slot=target-1 then r.since_slot else excluded.since_slot end,
+            signalled_at_ms=case when r.through_slot=target-1 then r.signalled_at_ms end,through_slot=excluded.through_slot;
+      end if;
+    end loop;
+    insert into private.boundary_members(slot_index,gladiator_id,owner_id)
+      select target,g.id,g.owner_id from public.gladiators g where g.processed_slot_index=target-1
+        and not exists(select 1 from public.character_rests r where r.gladiator_id=g.id and r.through_slot=target)
+      on conflict do nothing;
+    update private.boundaries set members_frozen=true,member_count=(select count(*) from private.boundary_members where slot_index=target)
+      where slot_index=target;
+  end if;
+  for m in select bm.gladiator_id,bm.owner_id from private.boundary_members bm where bm.slot_index=target order by bm.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+    perform 1 from public.gladiators where id=m.gladiator_id for update;
+    -- Repeat-safe: an already-applied or later-effective pending build returns false.
+    perform private.apply_pending_build(m.gladiator_id,target);
+  end loop;
+  return null;
+end $$;
+
+-- Boundary phase 8 (10-tournament-results.sql), unchanged except the resting characters' locks and checkpoints.
+create or replace function private.boundary_start(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare a record; now_ms bigint:=private.planning_now_ms();
+begin
+  -- Check every member before any debit so an unsupported executor never leaves a partially started slot.
+  if exists(select 1 from public.activities x where x.slot_index=target and x.status='preparing' and not private.activity_executor_ready(x.resolved_kind)) then
+    return 'integration';
+  end if;
+  -- Exception 1: a member's jobs can reference another member's rows (an Arena battle job is anchored to side 0, whichever
+  -- side comes first), so every account lock is held before the first such foreign key takes KEY SHARE on those rows.
+  -- Task 23.8: the characters resting at this boundary take their account locks in the same gladiator-ordered pass.
+  for a in select locked.owner_id from (
+      select bm.gladiator_id,bm.owner_id from public.activities x
+        join private.boundary_members bm on bm.slot_index=target and bm.gladiator_id=x.gladiator_id
+        where x.slot_index=target and x.status='preparing'
+      union all
+      select g.id,g.owner_id from public.character_rests r join public.gladiators g on g.id=r.gladiator_id
+        where r.through_slot=target and g.processed_slot_index=target-1) locked
+    order by locked.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(a.owner_id::text,0));
+  end loop;
+  for a in select x.id,x.gladiator_id,x.stamina_debit,x.debited,bm.owner_id from public.activities x
+    join private.boundary_members bm on bm.slot_index=target and bm.gladiator_id=x.gladiator_id
+    where x.slot_index=target and x.status='preparing' order by x.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(a.owner_id::text,0));
+    perform 1 from public.gladiators where id=a.gladiator_id for update;
+    if not a.debited then update public.gladiators set stamina_current=stamina_current-a.stamina_debit where id=a.gladiator_id; end if;
+    perform private.prepare_activity_jobs(a.id);
+    update public.activities set debited=true,status='active',published_at_ms=now_ms where id=a.id;
+    update public.gladiators set processed_slot_index=target where id=a.gladiator_id and processed_slot_index=target-1;
+  end loop;
+  -- Task 23.8: a resting character's checkpoint advances with the cohort's.
+  update public.gladiators g set processed_slot_index=target from public.character_rests r
+    where r.gladiator_id=g.id and r.through_slot=target and g.processed_slot_index=target-1;
+  return private.boundary_published(target);
+end $$;
+
+-- 14-operations.sql's projector, unchanged except the resting actor.
+create or replace function private.project_character(gid uuid) returns void
+language plpgsql security invoker set search_path='' as $$
+declare g public.gladiators%rowtype; b jsonb; a public.activities%rowtype; actor jsonb; silhouettes jsonb; awarded_prestige jsonb;
+  resting boolean;
+begin
+  select * into g from public.gladiators where id=gid;
+  if not found then return; end if;
+  select current_build into b from public.builds where gladiator_id=gid;
+  if b is null then return; end if;
+  -- Only an authoritative published activity is visible. Preparing snapshots remain private.
+  select * into a from public.activities where gladiator_id=gid and status<>'preparing'
+    and published_at_ms is not null and published_at_ms<=floor(extract(epoch from clock_timestamp())*1000)::bigint
+    order by slot_index desc limit 1;
+  -- Task 23.8: resting in its processed slot, it shows no activity, whatever its latest one was.
+  resting:=exists(select 1 from public.character_rests r where r.gladiator_id=gid and r.since_slot<=g.processed_slot_index
+    and g.processed_slot_index<=r.through_slot);
+  select coalesce(jsonb_agg(silhouette order by silhouette),'[]'::jsonb) into silhouettes from (
+    select case split_part(i.item->>'catalogId',':',1)
+      when 'sword' then 'weapon-sword' when 'axe' then 'weapon-axe' when 'spear' then 'weapon-spear' when 'bow' then 'weapon-bow'
+      when 'round-shield' then 'offhand-shield' when 'leather-hood' then 'head-hood' when 'iron-helmet' then 'head-helmet'
+      when 'light-armor' then 'armor-light' when 'heavy-armor' then 'armor-heavy' when 'light-boots' then 'feet-light'
+      when 'heavy-boots' then 'feet-heavy' end as silhouette
+    from public.item_instances i where i.gladiator_id=gid
+      and i.id in (select value::uuid from jsonb_each_text(b->'equipment') where value is not null)
+  ) equipment where silhouette is not null;
+  actor:=jsonb_build_object('gladiatorId',g.id,'name',g.name,'classId',b->'classId','equipmentSilhouettes',silhouettes,
+    'league',g.league,'level',g.level,
+    'phase',private.slot_phase(case when resting then g.processed_slot_index else coalesce(a.slot_index,g.processed_slot_index) end),
+    'location',case when resting then 'camp' when a.id is null then 'orientation' when a.resolved_kind='expedition' then 'expedition:'||(a.requested->>'expeditionId') else a.resolved_kind end,
+    'activityId',case when not resting then a.id end,'activityStatus',case when resting then 'idle' when a.id is null then 'active' else a.status end,
+    'startsAtMs',case when not resting then coalesce(a.starts_at_ms,g.created_at_ms) end,
+    'endsAtMs',case when not resting then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
+  insert into public.world_actors(gladiator_id,actor,processed_slot_index) values(gid,actor,g.processed_slot_index)
+    on conflict(gladiator_id) do update set actor=excluded.actor,processed_slot_index=excluded.processed_slot_index
+    where (world_actors.actor,world_actors.processed_slot_index) is distinct from (excluded.actor,excluded.processed_slot_index);
+  -- Task 21: prestige, one entry per season award.
+  select coalesce(jsonb_agg(jsonb_build_object('seasonIndex',x.season_index,'league',x.league,'place',x.place,'badge',x.badge,'title',x.title)
+    order by x.season_index),'[]'::jsonb) into awarded_prestige from private.season_awards x where x.gladiator_id=gid;
+  -- Combined combat strength/league score belongs to Task 16. Never label gear history as that score.
+  insert into public.public_profiles(gladiator_id,rating,prestige) values(gid,g.rating,awarded_prestige) on conflict(gladiator_id) do update
+    set rating=excluded.rating,prestige=excluded.prestige
+    where (public_profiles.rating,public_profiles.prestige) is distinct from (excluded.rating,excluded.prestige);
+  -- Task 22 (exception 4b): only new or changed rows reach the upsert; an unchanged row is neither written nor locked.
+  insert into public.recent_results(activity_id,gladiator_id,name,reveal_at_ms,summary)
+    select p.activity_id,p.gladiator_id,p.name,p.reveal_at_ms,p.summary from (
+      select x.id as activity_id,gid as gladiator_id,g.name as name,x.settled_at_ms as reveal_at_ms,jsonb_build_object('activityId',x.id,'resolvedKind',x.resolved_kind,
+        'result',x.summary->'result','success',x.summary->'success','settledAtMs',x.settled_at_ms,
+        'replayExpiry',case when x.summary->'replayExpiry'->>'state'='available' then jsonb_build_object('state','available','expiresAtMs',x.summary->'replayExpiry'->'expiresAtMs') else jsonb_build_object('state','expired') end) as summary
+      from public.activities x where x.gladiator_id=gid and x.status='completed' and x.summary is not null and x.settled_at_ms is not null
+    ) p
+    where not exists(select 1 from public.recent_results r where r.activity_id=p.activity_id
+      and (r.name,r.summary,r.reveal_at_ms) is not distinct from (p.name,p.summary,p.reveal_at_ms))
+    on conflict(activity_id) do update set name=excluded.name,summary=excluded.summary,reveal_at_ms=excluded.reveal_at_ms
+    where (recent_results.name,recent_results.summary,recent_results.reveal_at_ms) is distinct from (excluded.name,excluded.summary,excluded.reveal_at_ms);
+  -- Task 16: every league-season rating record of the character, as public standings (rating and human counters only).
+  insert into public.arena_standings(gladiator_id,league,season_index,name,rating,human_wins,human_losses)
+    select r.gladiator_id,r.league,r.season_index,g.name,r.rating,r.human_wins,r.human_losses from private.arena_ratings r where r.gladiator_id=gid
+    on conflict(gladiator_id,league,season_index) do update set name=excluded.name,rating=excluded.rating,
+      human_wins=excluded.human_wins,human_losses=excluded.human_losses
+    where (arena_standings.name,arena_standings.rating,arena_standings.human_wins,arena_standings.human_losses)
+      is distinct from (excluded.name,excluded.rating,excluded.human_wins,excluded.human_losses);
+end $$;
+
+-- 04-inventory-shops.sql's owner view, unchanged except currentActivity null while resting and restingUntilSlot. create or
+-- replace keeps its grants and its security_invoker option.
+create or replace view public.owner_state with (security_invoker=true) as
+select g.owner_id,jsonb_build_object(
+  'gladiatorId',g.id,'name',g.name,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,
+  'schedule',s.schedule,'scheduleVersion',s.version,'wallets',jsonb_build_object('money',w.money,'renown',w.renown),
+  'reservedFees',jsonb_build_object('money',coalesce((select sum(r.money) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0),
+    'renown',coalesce((select sum(r.renown) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0)),
+  'inventory',coalesce((select jsonb_agg(i.item order by i.id) from public.item_instances i where i.gladiator_id=g.id),'[]'::jsonb),'inventoryCapacity',60,
+  'ownedCosmetics',coalesce((select jsonb_agg(jsonb_build_object('catalogId',c.catalog_id,'catalogVersion',c.catalog_version,'binding',c.binding) order by c.catalog_id) from public.owned_cosmetics c where c.gladiator_id=g.id),'[]'::jsonb),
+  'progression',jsonb_build_object('level',g.level,'xp',g.xp,'earnedAttributePoints',g.earned_points,'unspentAttributePoints',g.unspent_points,'league',g.league,'peakStrength',g.peak_strength,'rating',g.rating),
+  'stamina',jsonb_build_object('current',g.stamina_current,'maximum',g.stamina_maximum),'tournamentOptIn',g.tournament_opt_in,'processedSlotIndex',g.processed_slot_index,
+  'currentActivity',case when rest.gladiator_id is null then coalesce((select jsonb_build_object('id',a.id,'kind',coalesce(a.resolved_kind,a.requested->>'kind'),
+      'status',case when a.status='completed' then 'completed' when a.status='preparing' then 'queued'
+        when extract(epoch from statement_timestamp())*1000<a.ends_at_ms then 'active' else 'processing' end,
+      'startsAtMs',a.starts_at_ms,'endsAtMs',a.ends_at_ms,
+      'label',case coalesce(a.resolved_kind,a.requested->>'kind') when 'training' then 'Training'
+        when 'rest' then case when a.fallback then 'Resting (not enough stamina)' else 'Resting' end
+        when 'expedition' then 'Expedition' when 'arena' then 'Arena' else 'Tournament' end)
+    from public.activities a where a.gladiator_id=g.id order by a.slot_index desc limit 1),
+    jsonb_build_object('id',g.id,'kind','orientation','status',case when extract(epoch from statement_timestamp())*1000<g.orientation_end_ms then 'active' else 'processing' end,
+      'startsAtMs',g.created_at_ms,'endsAtMs',g.orientation_end_ms,'label','Orientation')) end,
+  'restingUntilSlot',case when rest.signalled_at_ms is not null then rest.through_slot+1 end) as state
+from public.gladiators g join public.builds b on b.gladiator_id=g.id join public.schedules s on s.gladiator_id=g.id join public.wallets w on w.gladiator_id=g.id
+  left join public.character_rests rest on rest.gladiator_id=g.id and rest.since_slot<=g.processed_slot_index and g.processed_slot_index<=rest.through_slot;
+
+-- Task 23.7's report (above), unchanged except cohort.restingCharacters.
+create or replace function private.health_report(now_ms bigint) returns jsonb
+language plpgsql volatile security invoker set search_path='' as $$
+declare
+  coord private.coordinator%rowtype; st private.retention_state%rowtype; enabled boolean; current_slot bigint; more boolean; more_since bigint;
+  failures bigint; failure_states jsonb; overdue_total bigint; operator_total bigint; v_boundaries jsonb; v_jobs jsonb; v_attempts jsonb;
+  v_dispatch jsonb; v_cleanup jsonb; v_events jsonb; v_resources jsonb; v_cohort jsonb; report jsonb;
+begin
+  if now_ms is null or now_ms<0 then raise exception 'invalid health time' using errcode='22023'; end if;
+  current_slot:=now_ms/4800000;
+  select * into coord from private.coordinator where singleton;
+  select * into st from private.retention_state where singleton;
+  enabled:=coalesce((select s.enabled from private.scheduler s where s.singleton),false);
+
+  -- Boundaries not yet complete (normally only the next one), lowest slot first, at most 20; waitingMs since it opened.
+  select coalesce(jsonb_agg(jsonb_build_object('slot',b.slot_index,'phase',b.phase,'status',b.status,'waitReason',b.wait_reason,
+      'lastError',case when b.last_error is null then null when b.last_error ~ '^[0-9A-Z]{5}$' then b.last_error else 'unrecognized' end,
+      'waitingMs',now_ms-b.opened_at_ms) order by b.slot_index),'[]'::jsonb)
+    into v_boundaries from (select * from private.boundaries x where x.status<>'complete' order by x.slot_index limit 20) b;
+
+  -- Jobs: counts by kind and status; overdue (pending more than 10 minutes past due, or leased with a lease expired more
+  -- than 10 minutes ago) and operator jobs, at most 20 each, oldest first, with their totals.
+  select count(*) into overdue_total from private.jobs j
+    where (j.status='pending' and j.due_at_ms<now_ms-600000) or (j.status='leased' and j.lease_until_ms<now_ms-600000);
+  select count(*) into operator_total from private.jobs j where j.status='operator';
+  v_jobs:=jsonb_build_object(
+    'counts',coalesce((select jsonb_object_agg(k.kind,k.statuses) from (select x.kind,jsonb_object_agg(x.status,x.n) as statuses
+      from (select j.kind,j.status,count(*) as n from private.jobs j group by j.kind,j.status) x group by x.kind) k),'{}'::jsonb),
+    'overdueTotal',overdue_total,
+    'overdue',coalesce((select jsonb_agg(jsonb_build_object('jobId',o.id,'kind',o.kind,'slot',o.slot_index,'status',o.status,
+        'dueAtMs',o.due_at_ms,'overdueMs',now_ms-o.due_at_ms,'attempts',o.attempts) order by o.due_at_ms,o.id) from (
+      select j.id,j.kind,j.slot_index,j.status,j.due_at_ms,j.attempts from private.jobs j
+      where (j.status='pending' and j.due_at_ms<now_ms-600000) or (j.status='leased' and j.lease_until_ms<now_ms-600000)
+      order by j.due_at_ms,j.id limit 20) o),'[]'::jsonb),
+    'operatorTotal',operator_total,
+    'operator',coalesce((select jsonb_agg(jsonb_build_object('jobId',o.id,'kind',o.kind,'slot',o.slot_index,'attempts',o.attempts,
+        'lastFailure',case when o.last_failure is null then null when o.last_failure ~ '^[a-z0-9][a-z0-9-]{0,63}$' then o.last_failure
+          else 'unrecognized' end) order by o.slot_index,o.id) from (
+      select j.id,j.kind,j.slot_index,j.attempts,j.last_failure from private.jobs j where j.status='operator'
+      order by j.slot_index,j.id limit 20) o),'[]'::jsonb));
+
+  -- Attempts claimed in the last 24 hours: their count, failures by code, and per-kind durations (finished_at_ms -
+  -- claimed_at_ms) of the completed ones. CPU time is not exposed per request by the Edge runtime (Decision 8).
+  with w as (
+    select a.outcome,a.failure_code,a.claimed_at_ms,a.finished_at_ms,j.kind from private.job_attempts a join private.jobs j on j.id=a.job_id
+    where a.claimed_at_ms>now_ms-86400000 and a.claimed_at_ms<=now_ms)
+  select jsonb_build_object('count',(select count(*) from w),'failed',(select count(*) from w where w.outcome in ('failed','expired')),
+    'failuresByCode',coalesce((select jsonb_object_agg(f.code,f.n) from (
+      select case when coalesce(w.failure_code,'unknown') ~ '^[a-z0-9][a-z0-9-]{0,63}$' then coalesce(w.failure_code,'unknown')
+        else 'unrecognized' end as code,count(*) as n from w where w.outcome in ('failed','expired') group by 1) f),'{}'::jsonb),
+    'durations',coalesce((select jsonb_object_agg(d.kind,jsonb_build_object('count',d.n,'p50Ms',d.p50,'p95Ms',d.p95,'maxMs',d.longest)) from (
+      select w.kind,count(*) as n,percentile_disc(0.5) within group (order by w.finished_at_ms-w.claimed_at_ms) as p50,
+        percentile_disc(0.95) within group (order by w.finished_at_ms-w.claimed_at_ms) as p95,max(w.finished_at_ms-w.claimed_at_ms) as longest
+      from w where w.outcome='completed' and w.finished_at_ms is not null group by w.kind) d),'{}'::jsonb))
+  into v_attempts;
+
+  v_dispatch:=jsonb_build_object('lastAtMs',(select max(d.dispatched_at_ms) from private.dispatch_log d where d.dispatched_at_ms<=now_ms),
+    'lastHour',(select count(*) from private.dispatch_log d where d.dispatched_at_ms>now_ms-3600000 and d.dispatched_at_ms<=now_ms));
+
+  -- Cleanup: the watermarks and the last successful run's result (its durations surface the growth of each pass); since
+  -- when every cleanup tick has still had more to do; the failed cleanup ticks since the last successful one.
+  more:=coalesce(st.last_result->'detail'->'more'='true'::jsonb,false) or coalesce(st.last_result->'summary'->'more'='true'::jsonb,false)
+    or coalesce(st.last_result->'ledger'->'more'='true'::jsonb,false);
+  if more then
+    with ev as (
+      select e.id,e.at_ms,coalesce(e.detail->'detail'->'more'='true'::jsonb,false) or coalesce(e.detail->'summary'->'more'='true'::jsonb,false)
+        or coalesce(e.detail->'ledger'->'more'='true'::jsonb,false) as more
+      from private.operations_events e where e.source='cleanup' and e.ok and e.at_ms<=now_ms)
+    select min(ev.at_ms) into more_since from ev where ev.more and ev.id>coalesce((select max(x.id) from ev x where not x.more),0);
+  end if;
+  with streak as (
+    select e.sqlstate from private.operations_events e where e.source='cleanup' and not e.ok and e.at_ms<=now_ms
+      and e.id>coalesce((select max(x.id) from private.operations_events x where x.source='cleanup' and x.ok and x.at_ms<=now_ms),0))
+  select (select count(*) from streak),(select coalesce(jsonb_agg(x.sqlstate order by x.sqlstate collate "C"),'[]'::jsonb)
+    from (select distinct s.sqlstate from streak s where s.sqlstate is not null) x)
+  into failures,failure_states;
+  v_cleanup:=jsonb_build_object('lastRunAtMs',st.last_run_at_ms,'detailThroughSlot',st.detail_through_slot,
+    'summaryThroughSlot',st.summary_through_slot,'more',more,
+    'durationMs',case when jsonb_typeof(st.last_result->'durationMs')='number' then st.last_result->'durationMs' end,
+    'detail',jsonb_build_object('more',coalesce(st.last_result->'detail'->'more'='true'::jsonb,false),
+      'blockedSlot',case when jsonb_typeof(st.last_result->'detail'->'blockedSlot')='number' then st.last_result->'detail'->'blockedSlot' end,
+      'durationMs',case when jsonb_typeof(st.last_result->'detail'->'durationMs')='number' then st.last_result->'detail'->'durationMs' end),
+    'summary',jsonb_build_object('more',coalesce(st.last_result->'summary'->'more'='true'::jsonb,false),
+      'durationMs',case when jsonb_typeof(st.last_result->'summary'->'durationMs')='number' then st.last_result->'summary'->'durationMs' end),
+    'ledger',jsonb_build_object('more',coalesce(st.last_result->'ledger'->'more'='true'::jsonb,false)),
+    'moreSinceMs',more_since,'failures',jsonb_build_object('consecutive',failures,'sqlstates',failure_states));
+
+  -- Events per source: the latest failure in 24 hours, and the failures of the last hour aggregated (count and distinct
+  -- SQLSTATEs, including those a sweep keeps in its detail), never one entry per row.
+  with w as (
+    select e.id,e.source,e.at_ms,e.sqlstate,e.detail from private.operations_events e
+    where not e.ok and e.at_ms>now_ms-86400000 and e.at_ms<=now_ms
+  ), codes as (
+    select w.id,w.sqlstate as code from w where w.sqlstate is not null
+    union
+    select w.id,t.code from w cross join lateral jsonb_array_elements_text(case when jsonb_typeof(w.detail->'sqlstates')='array'
+      then w.detail->'sqlstates' else '[]'::jsonb end) t(code)
+  ), valid as (
+    select c.id,c.code from codes c where c.code ~ '^[0-9A-Z]{5}$'
+  )
+  select jsonb_object_agg(s.source,jsonb_build_object(
+    'latestFailure',(select jsonb_build_object('atMs',l.at_ms,
+        'sqlstates',(select coalesce(jsonb_agg(v.code order by v.code collate "C"),'[]'::jsonb) from valid v where v.id=l.id),
+        'failedSellers',case when jsonb_typeof(l.detail->'failedSellers')='number' then l.detail->'failedSellers' end)
+      from w l where l.source=s.source order by l.at_ms desc,l.id desc limit 1),
+    'lastHour',jsonb_build_object('failures',(select count(*) from w h where h.source=s.source and h.at_ms>now_ms-3600000),
+      'sqlstates',(select coalesce(jsonb_agg(x.code order by x.code collate "C"),'[]'::jsonb) from (
+        select distinct v.code from valid v join w h on h.id=v.id where h.source=s.source and h.at_ms>now_ms-3600000) x))))
+  into v_events from (values ('market-sweep'),('dispatch'),('cleanup')) s(source);
+
+  -- Resources against the 500 MB budget (Task 23.7); egress and function invocations are read from the hosting dashboard.
+  v_resources:=jsonb_build_object('databaseBytes',pg_database_size(current_database()),'budgetBytes',524288000,
+    'largestTables',coalesce((select jsonb_agg(jsonb_build_object('name',t.name,'bytes',t.bytes) order by t.bytes desc,t.name collate "C") from (
+      select n.nspname||'.'||r.relname as name,pg_total_relation_size(r.oid) as bytes from pg_class r join pg_namespace n on n.oid=r.relnamespace
+      where r.relkind in ('r','m') and n.nspname not in ('pg_catalog','information_schema') and n.nspname not like 'pg\_toast%'
+        and n.nspname not like 'pg\_temp%'
+      order by 2 desc,1 limit 10) t),'[]'::jsonb));
+
+  -- Task 23.7: the characters with an activity in the current slot (unique per character and slot; activities_slot_status_idx).
+  -- Task 23.8: the characters resting in the current slot (a rest covers since_slot to through_slot).
+  v_cohort:=jsonb_build_object('activeCharacters',(select count(*) from public.activities a where a.slot_index=current_slot),
+    'restingCharacters',(select count(*) from public.character_rests r where r.since_slot<=current_slot and current_slot<=r.through_slot));
+
+  report:=jsonb_build_object('checkedAtMs',now_ms,'currentSlot',current_slot,'publishedSlot',coord.published_slot,
+    'slotsBehind',current_slot-coord.published_slot,
+    'coordinator',jsonb_build_object('lastError',case when coord.last_error is null then null when coord.last_error ~ '^[0-9A-Z]{5}$' then coord.last_error
+        else 'unrecognized' end,'lastFailedSlot',coord.last_failed_slot,'leaseHeld',coalesce(coord.lease_token is not null and coord.lease_until_ms>now_ms,false)),
+    'scheduler',jsonb_build_object('enabled',enabled),'boundaries',v_boundaries,'jobs',v_jobs,'attempts24h',v_attempts,'dispatch',v_dispatch,
+    'cleanup',v_cleanup,'events',v_events,'resources',v_resources,'cohort',v_cohort,'cpu','not available');
+  return report||jsonb_build_object('alerts',private.health_alerts(report));
+end $$;
+
+revoke all on function private.idle_rules(), public.consume_command_rate(uuid,boolean), private.boundary_apply_changes(bigint),
+  private.boundary_start(bigint), private.project_character(uuid) from public, anon, authenticated;
+grant execute on function private.idle_rules(), public.consume_command_rate(uuid,boolean), private.boundary_apply_changes(bigint),
+  private.boundary_start(bigint), private.project_character(uuid) to service_role;
+-- The operator's, as before.
+revoke all on function private.health_report(bigint) from public, anon, authenticated, service_role;
+
+-- Deploy day (Task 23.8): every owner of a character gets the deploy time as its last signal, so nobody rests on the first
+-- boundary after M22. Reapplicable: a recorded signal is kept. A generated migration omits it (append it to M22).
+insert into private.owner_signals(owner_id,last_signal_ms)
+  select g.owner_id,private.planning_now_ms() from public.gladiators g
+  on conflict (owner_id) do nothing;
+-- Every actor republished with its resting flag.
+select public.refresh_projections();
 
 notify pgrst, 'reload schema';
 commit;

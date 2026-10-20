@@ -103,6 +103,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.item_instances': { retention: 'player' }, 'public.owned_cosmetics': { retention: 'player' }, 'public.pending_build_items': { retention: 'player' },
   'private.pending_build_preparations': { retention: 'player' }, 'public.public_profiles': { retention: 'player' },
   'public.world_actors': { retention: 'player' }, 'private.market_listings': { retention: 'player' }, 'public.market_offers': { retention: 'player' },
+  // Task 23.8: one signal per owner and one rest row per character that has rested.
+  'private.owner_signals': { retention: 'player' }, 'public.character_rests': { retention: 'player' },
   'private.arena_ratings': { retention: 'season' }, 'public.arena_standings': { retention: 'season' }, 'public.season_standings': { retention: 'season' },
   'private.season_awards': { retention: 'season' }, 'public.seasons': { retention: 'season' },
   'private.command_attempts': { retention: 'operational', windowSlots: 1 }, 'private.dispatch_log': { retention: 'operational', windowSlots: RETENTION.dispatchLogSlots },

@@ -38,4 +38,7 @@ export const RULES_V1 = freezeDomain({
   seasons: { durationSlots: 504, durationMs: 2_419_200_000, minimumHumanBouts: 5,
     placements: [{ money: 500, renown: 100, title: 'champion', badge: 'gold' }, { money: 300, renown: 60, title: null, badge: 'silver' }, { money: 200, renown: 40, title: null, badge: 'bronze' }] },
   retention: { replayMs: 604_800_000, summaryMs: 7_776_000_000 },
+  // Task 23.8 (Avi's decision, 2026-10-19): a character rests at home at a boundary whose scheduled start is at least
+  // afterMs (14 days, 252 slots) after its owner's last activity signal. SQL restates it as private.idle_rules().
+  idle: { afterMs: 1_209_600_000 },
 });

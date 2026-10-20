@@ -144,6 +144,8 @@ const SERVICE_ROLE = [
   'function private.guard_tournament_bout(): EXECUTE',
   'function private.guard_tournament_bout_result(): EXECUTE',
   'function private.guard_wallet_checkpoint(): EXECUTE',
+  // Task 23.8 (M22): RULES_V1.idle, restated for boundary phase 3.
+  'function private.idle_rules(): EXECUTE',
   'function private.initial_schedule_revision(): EXECUTE',
   'function private.inventory_command(uuid, uuid, jsonb, text): EXECUTE',
   'function private.json_project(jsonb, text[]): EXECUTE',
@@ -219,6 +221,8 @@ const SERVICE_ROLE = [
   'relation private.jobs: DELETE,INSERT,SELECT,UPDATE',
   'relation private.market_listings: INSERT,SELECT,UPDATE',
   'relation private.operations_events: SELECT',
+  // Task 23.8 (M22): the owner's activity signal, written by consume_command_rate and read by boundary phase 3.
+  'relation private.owner_signals: INSERT,SELECT,UPDATE',
   'relation private.pending_build_preparations: DELETE,INSERT,SELECT,UPDATE',
   'relation private.retention_state: SELECT',
   'relation private.rules_versions: SELECT',
@@ -236,6 +240,8 @@ const SERVICE_ROLE = [
   'relation public.arena_standing_reads: SELECT',
   'relation public.arena_standings: DELETE,INSERT,SELECT,UPDATE',
   'relation public.builds: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
+  // Task 23.8 (M22): a character's rest at home, written by boundary phase 3 and consume_command_rate.
+  'relation public.character_rests: INSERT,SELECT,UPDATE',
   'relation public.gladiators: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.item_instances: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.market_offers: DELETE,INSERT,SELECT',
@@ -535,6 +541,8 @@ describe('release access matrix', () => {
       const [{ item }] = await sql`select id as item from public.item_instances where gladiator_id=${gid} order by id limit 1`;
       await sql`insert into public.pending_build_items(item_id,gladiator_id,operation_id) values(${item},${gid},${operationId})`;
       await sql`insert into public.owned_cosmetics(gladiator_id,catalog_id,catalog_version,binding) values(${gid},'banner','v1','bound')`;
+      // Task 23.8: a rest at home, as boundary phase 3 writes it.
+      await sql`insert into public.character_rests(gladiator_id,since_slot,through_slot) values(${gid},${slot},${slot})`;
       return [activityId];
     };
     const [ownerActivities, otherActivities] = [await seed(owner.gid), await seed(other.gid)];

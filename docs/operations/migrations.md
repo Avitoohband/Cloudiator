@@ -1,5 +1,124 @@
 # Local identity backend and migrations
 
+## Task 23.8: idle characters rest at home (M22)
+
+M22 is `supabase/migrations/20261020075858_idle_rest.sql`, section C of the
+[database budget design](../superpowers/specs/2026-10-19-database-budget-design.md) (Avi's decision A + C + D, 2026-10-19;
+spec §4.3 changed the same day). The design notes are the fifth part of `supabase/sql/15-release.sql`.
+- **Generation.** CLI 2.120.0, `db pull idle_rest --local --schema public,private --yes` (engine `migra`). The input was the
+  tested fifth part, applied once (the whole file, through the psql fallback after the container label check) to a clean
+  M01–M21 reset.
+- **Completion.** The draft was completed from that source; M01–M21 are unchanged.
+
+**What M22 changes.**
+- **`private.owner_signals(owner_id, last_signal_ms)`**: the owner's last activity signal, backend only (`service_role`
+  SELECT, INSERT, UPDATE; RLS with `backend_only`).
+  - `public.consume_command_rate` writes it for the verified actor of every command the Edge function receives
+    (`presence` included), before the rate decision. It uses `private.planning_now_ms()` sampled after the account's rate
+    lock, and writes at most once an hour (only when the stored signal is at least 3,600,000 ms older).
+- **`public.character_rests(gladiator_id, since_slot, through_slot, signalled_at_ms)`**: one row per character that has
+  rested. Its owner may read it (`owner_read`, as `builds`); only the backend writes it (`service_role` SELECT, INSERT,
+  UPDATE).
+  - A character rests in its processed slot P while `since_slot <= P <= through_slot`.
+  - `signalled_at_ms` is its owner's first signal since the rest began.
+- **`private.idle_rules()`**: `RULES_V1.idle` restated (`{"afterMs": 1209600000}`, 14 days), IMMUTABLE, backend EXECUTE.
+- **Phase 3 (`private.boundary_apply_changes`)**, at the freeze: a character rests at boundary T when
+  `T × 4,800,000 − greatest(last signal, created_at_ms) >= afterMs`.
+  - It measures from the scheduled start, so a late boundary classifies each slot as it would have on time.
+  - A candidate is read again under its owner's rate lock (`hashtextextended(owner, 1)`).
+  - A resting character joins no cohort.
+- **Phase 8 (`private.boundary_start`)**: a resting character's `processed_slot_index` advances with the cohort's, its
+  account lock taken in the members' gladiator-ordered pass.
+- **`private.project_character`**: the public actor gains `resting`. A resting actor shows location `camp`, status `idle`
+  and no activity, times or stage.
+- **`public.owner_state`**: `currentActivity` is null while resting, and `restingUntilSlot` (`through_slot + 1`) appears
+  once the owner has signalled.
+- **`private.health_report`**: adds `cohort.restingCharacters`.
+- **Deploy day.** Every owner of a character gets the deploy time as its signal (`on conflict do nothing`), and every actor
+  is republished with its `resting` flag (`public.refresh_projections()`).
+
+**The draft needed five completions** (checked against the source):
+1. The `owner_state` statement. The generated `create or replace view` named no options and would have dropped
+   `security_invoker`, so the source's statement replaced it, as in M18.
+2. The two tables' `revoke all … from public, anon, authenticated, service_role` before their grants. Without it, a new
+   table keeps the owner's default privileges for `service_role`.
+3. The six function ACLs: `idle_rules` is new, the rest are restated as the source does; `health_report` stays the owner's.
+4. The deploy-time signal backfill and the projection refresh, after the table and the projector exist.
+   `tests/rule-retention.test.ts` needs no allowance: the backfill is an `insert … on conflict do nothing`, not a
+   top-level `update`.
+5. A provenance header and `notify pgrst`.
+
+The rest is as generated. The six function statements are byte-identical to the source-applied `pg_get_functiondef`
+(2,173, 178, 3,571, 2,621, 11,357 and 6,022 bytes, compared programmatically). M22 re-emits no unchanged function.
+`tests/db/idle.test.ts` ("ships the deploy-time backfill in M22 after its table exists") checks that the backfill in M22 is
+the source's statement, once, after `private.owner_signals` is created.
+
+**Source iteration.** As for M17–M21: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/15-release.sql`).
+The whole file is reapplicable (`create table if not exists`, `drop policy if exists`, `on conflict do nothing`).
+- **Observed (Task 23.8):** a `git checkout` of `15-release.sql` rewrote its working copy with CRLF line endings
+  (`core.autocrlf=true`). Applying that copy stored CRLF in every function body of the file, so six unchanged functions
+  of M17–M21 fingerprinted differently. Converting the working copy back to LF (invisible to git) and reapplying on a
+  clean reset removed the difference. Apply this source only from an LF working copy.
+
+**Tests** (RED first, on the M21 source with the new tests; every case failed on the missing `private.owner_signals`):
+- `tests/db/idle.test.ts`:
+  - 14 days minus 1 ms plays, exactly 14 days rests, and creation counts like a signal.
+  - Classification by scheduled start: the same cohort on time, 20 days late and decades late. A signal after the start but
+    before the late boundary counts.
+  - A resting character advances with the cohort and has no member, job, activity, snapshot, settled slot or rating row.
+    The next boundary runs without a straggler wait, the cleanup checkpoint moves, and its commands answer like the active
+    character's.
+  - Pairing and brackets: resting entrants are left out and keep their opt-in. A bracket below the minimum takes the
+    insufficient-entrants path.
+  - Waking: a presence, or a refused command, returns the character at the next boundary, with no back-fill.
+  - Queued changes: a schedule change and a build change made while resting apply at the first boundary back. The resting
+    slot grants and debits nothing.
+  - Deploy day: without the backfill an owner with no signal rests; with it the owner plays, and a recorded signal is
+    kept. M22 ships the backfill.
+  - Owner and public views: `restingUntilSlot` is null until a signal, then `processedSlotIndex + 1`, and `+ 2` when the
+    signal arrives after the next boundary froze its cohort. The public `resting` flag is shown to a visitor. Another
+    account sees no rest row, and a visitor cannot read the table.
+  - Presence answers `{ok: true}` in process and through the served Edge function, with no receipt, both attempts charged.
+  - The signal is written at most once an hour (boundary exact at 3,600,000 ms), a rate-limited attempt counts, and time
+    is sampled after a wait on the rate lock.
+  - Concurrency: a signal committed while the boundary waits on the owner's rate lock counts for that boundary.
+- `tests/db/seasons.test.ts`: a character resting through season 1 has no season 1 rating, archive or standings row.
+- `tests/db/health.test.ts`: `restingCharacters` over a rest's slots.
+- `tests/db/access-matrix.test.ts`: three service_role snapshot lines, and an owner-read seed row in `character_rests`.
+- `tests/backend/commands.test.ts`: presence parsing and its answer after the rate check.
+- `tests/db/recovery.test.ts`: the two phase-4 season cases at slot 3000, about 2,000 slots after the world's last
+  activity, give the world's owners a signal at that slot, so they play instead of resting.
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M21 matched Task 23.7's recorded M21 replay fingerprint byte for byte
+  (1,138 lines).
+- The source-applied fingerprint (1,160 lines; the fingerprint adds a `seed-owner-signals` line) differs from it only in:
+  - the five replaced function body hashes, with ACLs, security, volatility and `search_path` unchanged;
+  - the new function;
+  - the two tables, their columns, constraints, indexes and policies;
+  - the `owner_state` view hash, with its ACL and `security_invoker=true` unchanged.
+- A clean reset replayed M01–M22, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte, and again after the full test run.
+- Inspection of the replay:
+  - the five backend functions `{postgres=X/postgres,service_role=X/postgres}` and `health_report` `{postgres=X/postgres}`;
+    all invoker, `search_path=""`;
+  - `character_rests` `{postgres=arwdDxtm/postgres,authenticated=r/postgres,service_role=arw/postgres}` with row security;
+  - `owner_signals` `{postgres=arwdDxtm/postgres,service_role=arw/postgres}` with row security;
+  - `owner_state` keeps `security_invoker=true`; 44/44 `public`/`private` triggers enabled; both cron jobs active;
+  - no function executable by anon or authenticated; anon reads neither table;
+  - 22 migrations recorded.
+- Lint is empty. Advisors on the fresh replay: 36 INFO `unused_index` notices (no statistics yet), none on M22's tables, and
+  no warnings or errors.
+- `npm run test:db`: 299/299 on the M01–M22 replay, the Edge container's start time unchanged across the run.
+
+**Release (Task 24).** Deploy M22 with the Edge function and the client that sends `presence` (Task 23.9).
+- The backfill gives every existing owner the deploy time, so the first resting boundary is 14 days after the deploy at the
+  earliest.
+- Deploy M22 before the Edge function. With M22 alone, every command of the previous Edge function already records the
+  signal; only the new Edge function answers `presence` (the previous one refuses it as `invalid`, which the client must
+  tolerate during the deploy).
+
 ## Task 23.7: settled jobs' payloads and the 500 MB budget (M21)
 
 M21 is `supabase/migrations/20261019180659_job_payloads.sql`, sections A.1 and D of the
@@ -624,7 +743,8 @@ The report holds:
 - `cleanup`: the watermarks, the last run's durations and `more` flags, `moreSinceMs`, and the current failure streak;
 - `events`: per source, the latest failure in 24 hours and the last hour's failures with their distinct SQLSTATEs;
 - `resources`: database size against the budget (250 MB in M16; 500 MB since M21, Task 23.7) and the ten largest tables;
-- `cohort` (M21): `activeCharacters`, the characters with an activity in the current slot;
+- `cohort` (M21): `activeCharacters`, the characters with an activity in the current slot, and (M22) `restingCharacters`,
+  the characters resting at home in it;
 - `cpu: "not available"`;
 - `alerts`.
 

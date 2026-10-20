@@ -55,6 +55,28 @@ it('validates every discriminant and rejects invalid counts, prices, booleans an
     { ...commands[9], enabled: 'false' }]) expect(parseCommand({ ...command, operationId })).toBeNull();
 });
 
+it('parses presence with its operation id and nothing else (Task 23.8)', () => {
+  expect(parseCommand({ kind: 'presence', operationId })).toEqual({ kind: 'presence', operationId });
+  for (const body of [{ kind: 'presence' }, { kind: 'presence', operationId: 'bad' }, { kind: 'presence', operationId, payload: 1 },
+    { kind: 'presence', operationId, ownerId: operationId }]) expect(parseCommand(body)).toBeNull();
+});
+
+it('answers presence with ok after the rate check, writing nothing else (Task 23.8)', async () => {
+  const calls: string[] = [];
+  const refuse = (name: string) => async () => { calls.push(name); throw new Error('must not execute'); };
+  const database = { consumeRateLimit: async (_: unknown, creation: boolean) => { calls.push(`rate:${creation}`); return null; },
+    plan: refuse('plan'), inventory: refuse('inventory'), createGladiator: refuse('createGladiator'), market: refuse('market'),
+    setTournamentOptIn: refuse('setTournamentOptIn') } as unknown as CommandDependencies['database'];
+  const answer = await handleCommand(req({ kind: 'presence', operationId }), { ...deps, database });
+  expect(answer.status).toBe(200);
+  expect(answer.headers.get('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:3000');
+  expect(await answer.json()).toEqual({ ok: true });
+  expect(calls).toEqual(['rate:false']);
+  const limited = await handleCommand(req({ kind: 'presence', operationId }), { ...deps, database: { ...database, consumeRateLimit: async () => 900 } });
+  expect(limited.status).toBe(429);
+  expect(await limited.json()).toEqual({ ok: false, code: 'rate-limited', retryAfterMs: 900 });
+});
+
 it('uses exact origin CORS and bounded streamed bodies', async () => {
   const good = await handleCommand(req(create), deps);
   expect(good.status).toBe(200);

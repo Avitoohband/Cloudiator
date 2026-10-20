@@ -46,8 +46,8 @@ type Health = {
   events: Record<'market-sweep' | 'dispatch' | 'cleanup', {
     latestFailure: { atMs: number; sqlstates: string[]; failedSellers: number | null } | null; lastHour: Failures }>;
   resources: { databaseBytes: number; budgetBytes: number; largestTables: { name: string; bytes: number }[] };
-  /** Task 23.7: the characters with an activity in the current slot (Task 23.8 adds the resting ones). */
-  cohort: { activeCharacters: number };
+  /** Task 23.7: the characters with an activity in the current slot; Task 23.8: those resting in it. */
+  cohort: { activeCharacters: number; restingCharacters: number };
   cpu: string;
   alerts: { code: string; severity: 'warn' | 'alert'; detail: Record<string, unknown> }[];
 };
@@ -322,7 +322,7 @@ describe('Task 22.3: operator health', () => {
       others.push(created.value.gladiatorId);
     }
     await rollback(async tx => {
-      expect((await report(tx)).cohort).toEqual({ activeCharacters: 0 });
+      expect((await report(tx)).cohort).toEqual({ activeCharacters: 0, restingCharacters: 0 });
       // Two characters in the current slot S, one only in the slots before and after it.
       const activity = (character: string, slot: number) => tx`insert into public.activities(gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,
         resolved_kind,status) values(${character},${slot},${slot * SLOT},${(slot + 1) * SLOT},'{"kind":"training"}','training','active')`;
@@ -331,13 +331,33 @@ describe('Task 22.3: operator health', () => {
       await activity(others[1], S - 1);
       await activity(others[1], S + 1);
       await activity(gid, S - 1);
-      expect((await report(tx)).cohort).toEqual({ activeCharacters: 2 });
-      expect((await report(tx, (S + 1) * SLOT)).cohort).toEqual({ activeCharacters: 1 });
-      expect((await report(tx, S * SLOT - 1)).cohort).toEqual({ activeCharacters: 2 });
+      expect((await report(tx)).cohort).toEqual({ activeCharacters: 2, restingCharacters: 0 });
+      expect((await report(tx, (S + 1) * SLOT)).cohort).toEqual({ activeCharacters: 1, restingCharacters: 0 });
+      expect((await report(tx, S * SLOT - 1)).cohort).toEqual({ activeCharacters: 2, restingCharacters: 0 });
       // An index read, never a scan of the activity history: the operator runs the report on every check.
       await tx`set local enable_seqscan=off`;
       const [plan] = await tx`explain (format json) select count(*) from public.activities a where a.slot_index=${S}`;
       expect(JSON.stringify(plan)).toMatch(/Index (Only )?Scan/);
+    });
+  });
+
+  it('counts the characters resting in the current slot', async () => {
+    // Task 23.8: a rest covers its slots since_slot to through_slot (the last slot a boundary rested it in).
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const owner = await account();
+      const created = await commands.createGladiator({ userId: owner.id }, creation('Resting ' + randomUUID().slice(0, 8)));
+      if (!created.ok) throw new Error('creation failed');
+      ids.push(created.value.gladiatorId);
+    }
+    await rollback(async tx => {
+      expect((await report(tx)).cohort).toEqual({ activeCharacters: 0, restingCharacters: 0 });
+      // Resting since S - 3 through S; rested S - 5 to S - 1 and returned at S; classified to rest from S + 1.
+      await tx`insert into public.character_rests(gladiator_id,since_slot,through_slot) values
+        (${ids[0]},${S - 3},${S}),(${ids[1]},${S - 5},${S - 1}),(${ids[2]},${S + 1},${S + 1})`;
+      expect((await report(tx)).cohort).toEqual({ activeCharacters: 0, restingCharacters: 1 });
+      expect((await report(tx, (S + 1) * SLOT)).cohort).toEqual({ activeCharacters: 0, restingCharacters: 1 });
+      expect((await report(tx, (S - 1) * SLOT)).cohort).toEqual({ activeCharacters: 0, restingCharacters: 2 });
     });
   });
 

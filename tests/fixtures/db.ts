@@ -75,6 +75,8 @@ export async function resetIdentity() {
   // No schema creation here: missing schema must produce an honest RED result.
   await sql`truncate public.gladiators cascade`;
   await sql`truncate private.command_attempts`;
+  // Task 23.8: owners' activity signals are keyed by the account, outside the gladiators cascade.
+  await sql`truncate private.owner_signals`;
   // Season rows and the standings archive have no foreign key to characters (Task 21), so the cascade does not reach them.
   await sql`truncate public.seasons, public.season_standings, private.season_awards`;
   // Retention state (Task 22): the operations log and wallet checkpoints start empty, and the singleton is reseeded (recreated

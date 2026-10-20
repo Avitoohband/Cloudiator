@@ -928,6 +928,37 @@ describe('closing each season at its slot boundary (phase 2)', () => {
     expect({ state: await closeState(), wallets: await Promise.all(trio.map(walletOf)) }).toEqual(paid);
   }, 60_000);
 
+  it('creates no season rating row for a character that rests through a whole season', async () => {
+    // Task 23.8: a resting character leaves the boundary cohort, so phase 4 never creates its rating row. r plays slot 503,
+    // the last of season 0, and rests from boundary 504 on (its owner's last signal is 14 days minus 1 ms before slot 503
+    // starts); p's owner signals throughout, so p plays every boundary and keeps its rows and standings.
+    await resetBoundaries(502);
+    const p = await player({ firstSlot: 503, schedule: TRAINING }), r = await player({ firstSlot: 503, schedule: TRAINING });
+    await sql`update public.gladiators set created_at_ms=1 where id=${r.gid}`;
+    await sql`insert into private.owner_signals(owner_id,last_signal_ms)
+      values(${p.id},${2000 * SLOT}),(${r.id},${503 * SLOT - RULES_V1.idle.afterMs + 1})`;
+    const token = await coordinatorLease();
+    expect(await runBoundary(503, token)).toMatchObject({ status: 'complete' });
+    expect(await settleAll()).toHaveLength(2);
+    expect(await runBoundary(504, token)).toMatchObject({ status: 'complete' });
+    expect(await settleAll()).toHaveLength(1);
+    // As if boundaries 505 to 1006 ran: both checkpoints at slot 1006, r resting through it.
+    await sql`update public.gladiators set processed_slot_index=1006 where id in ${sql([p.gid, r.gid])}`;
+    await sql`update public.character_rests set through_slot=1006 where gladiator_id=${r.gid}`;
+    await sql`update private.coordinator set published_slot=1006 where singleton`;
+    expect(await runBoundary(1007, token)).toMatchObject({ status: 'complete' });
+    expect(await settleAll()).toHaveLength(1);
+    // Boundary 1008 closes season 1, the season r rested through.
+    expect(await runBoundary(1008, token)).toMatchObject({ status: 'complete' });
+    expect((await ratingsOf(r)).map(row => row.season)).toEqual([0]);
+    expect((await ratingsOf(p)).map(row => row.season)).toEqual([0, 1, 2]);
+    expect((await archive(0)).map(row => row.gid).sort()).toEqual([p.gid, r.gid].sort());
+    expect((await archive(1)).map(row => row.gid)).toEqual([p.gid]);
+    expect(await sql`select season_index::int as season from public.arena_standings where gladiator_id=${r.gid}`).toEqual([{ season: 0 }]);
+    expect(await sql`select since_slot::int as since, through_slot::int as through from public.character_rests where gladiator_id=${r.gid}`)
+      .toEqual([{ since: 504, through: 1008 }]);
+  }, 60_000);
+
   it('replays a completed boundary with no new awards', async () => {
     await resetBoundaries(503);
     const trio = await players(3, { firstSlot: 504, schedule: TRAINING });

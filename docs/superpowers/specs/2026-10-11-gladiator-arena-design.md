@@ -76,7 +76,7 @@ The camp contains training grounds, resting quarters, merchant stalls, expeditio
 
 Player activity locations derive from authoritative activity records. Browsers animate movement and ambient routines locally, using stable character/slot identifiers and time offsets. The database does not track every step. Ambient conversations and NPC movement do not alter progression. Path choices avoid buildings; sprite depth ordering prevents characters drawing over walls incorrectly.
 
-The camp remains lively when the viewer is idle. Morning, afternoon, and evening change lighting, sky tint, and torch intensity without hiding readable characters or controls. Characters remain represented when their owners are offline. Characters on expeditions are away from the camp, with an away indicator in the roster. Arrival/departure transitions are visible when viewing a boundary; returning later shows the current location directly.
+The camp remains lively when the viewer is idle. Morning, afternoon, and evening change lighting, sky tint, and torch intensity without hiding readable characters or controls. Characters remain represented when their owners are offline, until a character rests at home after 14 days without an activity signal from its owner (§4.3; Avi's decision, 2026-10-19): a resting character is not drawn in the camp, and its profile card and the Gladiators list say "Resting at home: back when {name}'s owner returns." Characters on expeditions are away from the camp, with an away indicator in the roster. Arrival/departure transitions are visible when viewing a boundary; returning later shows the current location directly.
 
 The arena complex includes staging space and multiple sparring positions so simultaneous regular fights have room. Selecting a fight opens its expanded replay. Tournament participants visibly wait, fight, or spectate according to the tournament timeline. Decorative spectators use bounded populations.
 
@@ -136,7 +136,7 @@ Changing Endurance preserves absolute current stamina, clamping it to a reduced 
 
 ### 4.3 Offline behavior and processing delays
 
-The repeating schedule continues while the player is offline, until changed. There is no login-based earnings cap in this proposed release. The server normally advances slots continuously; returning players receive summaries of completed activities.
+The repeating schedule continues while the player is offline, until changed, until the owner has sent no activity signal for 14 days; then the character rests at home until the owner returns (Avi's decision, 2026-10-19). Every command is an activity signal, including a lightweight presence signal that the signed-in game sends after sign-in or page load and then at most every 6 hours while the page is open. Idle time is measured against each boundary's scheduled start, never the wall clock, so catch-up classifies every slot as it would have on time. A resting character has no activity, gains and spends nothing, and enters no Arena pairing or tournament bracket (its tournament opt-in is kept); its schedule applies again from the first boundary after its owner's next signal, and resting slots are never back-filled. Until then the owner's activity line reads "Resting at home: back on your schedule at {time}". There is no login-based earnings cap in this proposed release. The server normally advances slots continuously; returning players receive summaries of completed activities.
 
 If processing is delayed or temporarily unavailable, jobs catch up in chronological slot order from saved state, preserving historical schedule revisions, item ownership changes, and season assignment. Catch-up is bounded per worker invocation and continues across invocations. It never applies a new edit retroactively or awards the same slot twice. Until catch-up reaches the current boundary, dependent mutation requests return a processing/retry state, preventing purchases or build edits against stale balances.
 
@@ -425,7 +425,7 @@ The public release is complete when these flows work against the deployed backen
 
 1. A new user opens the link, uses Google sign-in, creates exactly one persistent gladiator, and configures a schedule.
 2. Time-boundary tests confirm shared phases, repeat behavior, late-edit exclusion, next-boundary builds, fee refunds, and conservation of earned attribute points.
-3. Closing the browser for at least three game days still yields the exact scheduled progression on return; outage/catch-up tests preserve revisions and award each activity once.
+3. Closing the browser for at least three game days (and up to 14 days without any activity signal, §4.3) still yields the exact scheduled progression on return; outage/catch-up tests preserve revisions and award each activity once.
 4. Stamina fallback, Endurance capacity changes, and overweight equipment behave exactly as previewed, without free refill exploits.
 5. The camp displays a representative 50-character population in correct zones, with varied animations, NPC routines, depth sorting, selectable characters, camera pan/zoom, and changing lighting.
 6. An expedition shows only revealed stages, maintains health correctly, returns success/failure results at its end, and keeps the same result after reload or replay.

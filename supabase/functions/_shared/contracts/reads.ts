@@ -33,10 +33,11 @@ export type OwnerState = {
    * Task 23.8, the idle rest (`RULES_V1.idle`). At each boundary a character rests at home, with no activity, when its owner's
    * last activity signal (any command, `presence` included; stored at most once an hour) is at least `idle.afterMs` before
    * that boundary's scheduled start. While it rests in its current slot (`processedSlotIndex`, so `currentActivity` is null),
-   * this is the slot whose boundary returns it to its schedule: `processedSlotIndex + 1`, once its owner has signalled since
-   * it began resting (that next boundary's start minus the owner's last signal is then under `idle.afterMs`).
+   * this is the slot whose boundary returns it to its schedule, once its owner has signalled since it began resting:
+   * normally `processedSlotIndex + 1`, or `processedSlotIndex + 2` when the signal came while the next boundary was being
+   * processed and had already rested it (show this value; never derive it).
    * Null otherwise: when it is not resting, and while it rests with no signal since (it would rest at the next boundary too;
-   * a `presence` command, then a fresh read, makes it the next slot).
+   * a `presence` command, then a fresh read, gives the slot).
    */
   restingUntilSlot: number | null;
 };

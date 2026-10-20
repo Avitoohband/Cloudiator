@@ -8,7 +8,9 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { worldToScreen } from '../../src/game/iso';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote, remoteRequest } from './remote';
+import { reviewShot360 } from './review-shots';
 import { closeMenu, expectOwnerShown, menuDialog, openMenu } from './shell-helpers';
+import { expectTimeOnOneLine, slotTime } from './slot-time';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -533,6 +535,18 @@ test.describe('the Arena card and league standings', () => {
     await expect(card(page).getByRole('region', { name: 'Credited' })).toContainText('Rating +13');
     await card(page).screenshot({ path: testInfo.outputPath('arena-card-human-credited.png') });
     expect(remote).toEqual([]);
+  });
+
+  // Task 24.0b: the warm-up's reveal time is a short local time, as every slot time is (Task 23.10), never the fixed
+  // two-digit form, and it stays on one line in a 360 px viewport.
+  test('shows the warm-up reveal time short, on one line at 360 px', async ({ page }, testInfo) => {
+    const key = 'ownerHumanWin';
+    await arenaFlow.openAtMinute(page, 30, key);
+    const detail = card(page).getByText(/^In the arena staging area/);
+    const reveal = await slotTime(page, startOf(key) + 60 * MIN, startOf(key) + 30 * MIN);
+    await expect(detail).toHaveText(`In the arena staging area until the bout is revealed at minute 60 (${reveal}). The warm-up grants no training.`);
+    await expectTimeOnOneLine(page, detail, 'the reveal time');
+    await reviewShot360(page, testInfo, 'ends-arena-reveal', card(page));
   });
 
   test('reports NPC and human losses with no lasting injury, crediting their reduced rewards', async ({ page }, testInfo) => {

@@ -11,6 +11,7 @@ import { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_STANDINGS, ARENA_TIMELINES, a
 import { worldFixture } from '../fixtures/domain';
 import { FIXTURE_SEASONS } from '../fixtures/seasons';
 import { createFixtureGateway } from '@/lib/api/fixture-gateway';
+import { slotTimeText } from '@/features/schedule/slot-time';
 
 const MIN = 60_000;
 const NOW = worldFixture.serverNowMs;
@@ -110,6 +111,22 @@ describe('Arena card', () => {
     expect(html).not.toMatch(/Minute 60 has passed|MINUTE \d/);
     // With a known start, the late bout still says so.
     expect(text(card('ownerDelayed', 65))).toContain('Minute 60 has passed');
+  });
+
+  // Task 24.0b: the warm-up's reveal time is shown as every slot time is (`slotTimeText` against the card's display time,
+  // Task 23.10), never in the fixed two-digit form; a time that cannot be shown leaves the brackets out, never a throw.
+  it('shows the warm-up reveal time in the short slot-time style, or leaves it out when it cannot be shown', () => {
+    const { gladiator, slotsAgo, owner } = ARENA_ACTIVITIES.ownerHumanWin;
+    const state = renderArenaStage(ARENA_TIMELINES[arenaActivityId('ownerHumanWin')], SLOT_START - slotsAgo * ARENA_SLOT_MS + 30 * MIN,
+      { entrantId: ARENA_GLADIATORS[gladiator].id, owner });
+    expect(state.phase).toBe('warming-up');
+    const view = (s: typeof state) => renderToStaticMarkup(createElement(ArenaCardView, { model: { state: s, owner, entrantName: 'Aster', opponent: null, fixture: true }, onWatch: noop }));
+    const reveal = slotTimeText(state.startMs! + 60 * MIN, state.displayNowMs);
+    expect(reveal).not.toBe('');
+    expect(view(state)).toContain(`until the bout is revealed at minute 60 (${reveal}). The warm-up grants no training.`);
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(text(view({ ...state, startMs: bad })), `start ${bad}`).toContain('until the bout is revealed at minute 60. The warm-up grants no training.');
+    }
   });
 
   it('renders names as text', () => {

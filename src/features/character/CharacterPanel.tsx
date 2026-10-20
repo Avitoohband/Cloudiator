@@ -12,13 +12,13 @@ import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
+import { slotTimeText } from '../schedule/slot-time';
 import { activityStatus } from './activity-status';
 import type { Viewer } from './useGameState';
 import styles from './CharacterPanel.module.css';
 
 const TICK_MS = 1000;
 const title = (value: string) => value[0].toUpperCase() + value.slice(1);
-const time = (ms: number) => new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(ms);
 
 /** The display clock's time, every second while the tab is visible and whenever the clock is held or moved. */
 function useNow(clock: DisplayClock) {
@@ -40,6 +40,8 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   const staminaId = useId();
   const activity = owner.currentActivity;
   const status = activityStatus(owner, slotIndex ?? 0, now, { resting });
+  // The end is shown as every slot time is (Task 24.0b); one that cannot be shown (`slotTimeText` gives '') is left out.
+  const ends = status.endsAtMs === null ? '' : slotTimeText(status.endsAtMs, now);
   return (
     <section className={styles.summary} aria-labelledby={headingId}>
       <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
@@ -54,7 +56,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
       <div className={styles.activity}>
         <span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span>
         {activity && <p>{activity.label}</p>}
-        <p className={styles.status} role="status">{status.label}{status.endsAtMs !== null ? ` · ends ${time(status.endsAtMs)}` : ''}</p>
+        <p className={styles.status} role="status">{status.label}{ends ? ` · ends ${ends}` : ''}</p>
       </div>
       <label className={styles.stamina} htmlFor={staminaId}>Stamina <span>{owner.stamina.current} / {owner.stamina.maximum}</span></label>
       <progress id={staminaId} className={styles.bar} value={owner.stamina.current} max={owner.stamina.maximum} />

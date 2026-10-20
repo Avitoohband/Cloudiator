@@ -23,7 +23,37 @@ function panel(owner: OwnerState, nowMs: number, slotIndex = SLOT, resting = fal
   }));
 }
 
+/** The activity line exactly: the panel's status paragraph holding `line` and nothing else. */
+const statusLine = (line: string) => new RegExp(`role="status"[^>]*>${line.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}<`);
+
 describe('My gladiator', () => {
+  // Task 24.0b (Avi, 2026-10-20): the activity's end is shown as every slot time is (`slotTimeText` against the display time
+  // the panel is at, Task 23.10), never in the fixed two-digit form (`04:20 AM`).
+  it('ends the activity line with its end time in the short slot-time style', () => {
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    const owner: OwnerState = { ...structuredClone(ownerFixture), processedSlotIndex: SLOT };
+    const end = owner.currentActivity!.endsAtMs;
+    expect(panel(owner, nowMs)).toMatch(statusLine(`In progress · ends ${slotTimeText(end, nowMs)}`));
+    // A later day says which: here the short weekday (two days ahead), where the fixed form gave the time alone.
+    const later = nowMs + 2 * 86_400_000;
+    const scheduled: OwnerState = { ...owner, currentActivity: { ...owner.currentActivity!, startsAtMs: nowMs + 60_000, endsAtMs: later } };
+    expect(panel(scheduled, nowMs)).toMatch(statusLine(`Scheduled · ends ${slotTimeText(later, nowMs)}`));
+    expect(slotTimeText(later, nowMs)).toMatch(/^\p{L}+ /u);
+  });
+
+  // An end that cannot be shown (`slotTimeText` gives '' for a value that is not a finite number) leaves the suffix out,
+  // never "· ends " with nothing after it, and never a throw during render.
+  it('leaves "· ends" out when the end time cannot be shown', () => {
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const owner: OwnerState = { ...structuredClone(ownerFixture), processedSlotIndex: SLOT };
+      owner.currentActivity = { ...owner.currentActivity!, endsAtMs: bad };
+      const html = panel(owner, nowMs);
+      expect(html, `end ${bad}`).toMatch(statusLine('In progress'));
+      expect(text(html), `end ${bad}`).not.toContain('ends');
+    }
+  });
+
   // Task 23.9 (Task 23.8's OwnerState.restingUntilSlot): the owner's activity line while the gladiator rests at home.
   it('shows the owner "Resting at home: back on your schedule at {time}" until that boundary', () => {
     const owner: OwnerState = { ...structuredClone(ownerFixture), currentActivity: null, processedSlotIndex: SLOT, restingUntilSlot: SLOT + 1 };

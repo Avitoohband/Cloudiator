@@ -1,6 +1,9 @@
 import { expect, test } from './fixtures';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads } from './live-routes';
-import { joinButton, openMenu, railMenus, revealRail } from './shell-helpers';
+import { reviewShot360 } from './review-shots';
+import { expectOwnerShown, joinButton, openMenu, railMenus, revealRail } from './shell-helpers';
+import { expectTimeOnOneLine, slotTime } from './slot-time';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 /** A visitor's My gladiator panel and its sign-in button (Task 13.6). */
@@ -19,6 +22,21 @@ test('management shell labels local fixture data and exposes an accessible sched
   await expect(page.getByText('This preview cannot save schedule changes.')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('fixture-shell.png'), fullPage: true });
+});
+
+// Task 24.0b (Avi, 2026-10-20): the activity's end is a short local time, as every slot time is (Task 23.10), never the fixed
+// two-digit form (`04:20 AM`), and it stays on one line in a 360 px viewport.
+test('My gladiator ends its activity line with a short end time, on one line at 360 px', async ({ page }, testInfo) => {
+  test.skip(production, 'Fixture data is deliberately unavailable in production.');
+  await page.goto('/game/?mode=fixture');
+  await expectOwnerShown(page, 'Aster');
+  // The fixture's time: 40 minutes into the owner's training, which ends at the next boundary.
+  await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), worldFixture.serverNowMs);
+  const mine = await openMenu(page, 'My gladiator');
+  const line = mine.locator('p[role="status"]').filter({ hasText: /^In progress/ });
+  await expect(line).toHaveText(`In progress · ends ${await slotTime(page, ownerFixture.currentActivity!.endsAtMs, worldFixture.serverNowMs)}`);
+  await expectTimeOnOneLine(page, line, 'the activity end');
+  await reviewShot360(page, testInfo, 'ends-my-gladiator', line);
 });
 
 test('normal entry exposes Google sign-in with an explicit configuration state', async ({ page, context }, testInfo) => {

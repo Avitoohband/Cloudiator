@@ -25,10 +25,23 @@ function exportedSite() {
   writeFileSync(join(directory, 'assets/manifest.json'), '{}');
   return directory;
 }
-function finish(directory: string, env: Record<string, string | undefined> = {}) {
-  const childEnv: Record<string, string | undefined> = { ...process.env, NEXT_PUBLIC_SUPABASE_URL: undefined, ...env };
+/** An empty project folder: the script loads `.env*` from its working directory, as `next build` does (Task 24.1). */
+function project(files: Record<string, string> = {}) {
+  const directory = mkdtempSync(join(tmpdir(), 'cloudiator-project-'));
+  directories.push(directory);
+  for (const [name, content] of Object.entries(files)) writeFileSync(join(directory, name), content);
+  return directory;
+}
+/**
+ * Runs the script as `npm run build` does after `next build`: a production build (no NODE_ENV, which vitest sets to `test`),
+ * no Supabase URL and no browser-test switch unless `env` gives them, in `cwd` (by default an empty project folder, so the
+ * repository's own `.env*` files never reach a test).
+ */
+function finish(directory: string, env: Record<string, string | undefined> = {}, cwd = project()) {
+  const childEnv: Record<string, string | undefined> = { ...process.env, NEXT_PUBLIC_SUPABASE_URL: undefined, CLOUDIATOR_BROWSER_TEST: undefined,
+    NODE_ENV: undefined, __NEXT_PROCESSED_ENV: undefined, ...env };
   for (const key of Object.keys(childEnv)) if (childEnv[key] === undefined) delete childEnv[key];
-  return spawnSync(process.execPath, [resolve('scripts/build-headers.mjs'), directory], { encoding: 'utf8', env: childEnv as NodeJS.ProcessEnv });
+  return spawnSync(process.execPath, [resolve('scripts/build-headers.mjs'), directory], { encoding: 'utf8', env: childEnv as NodeJS.ProcessEnv, cwd });
 }
 
 describe('the Decision 7 policy', () => {
@@ -84,10 +97,50 @@ describe('scripts/build-headers.mjs', () => {
     expect(result.stdout).toContain(`connect-src 'self' ${PROJECT}`);
   });
 
-  it('writes the self-only policy for a build without a Supabase URL', () => {
+  it('writes the self-only policy for the browser-test export, which is built without a Supabase URL', () => {
     const directory = exportedSite();
-    expect(finish(directory).status).toBe(0);
+    expect(finish(directory, { CLOUDIATOR_BROWSER_TEST: 'true' }).status).toBe(0);
     expect(readFileSync(join(directory, '_headers'), 'utf8')).toBe(headersFile(null));
+  });
+
+  // Task 24.1 (plan Decision 12): a production export names its project in connect-src. Without a URL the policy would block
+  // every backend request of the deployed site, so the export fails loudly instead of writing `connect-src 'self'`.
+  it('refuses a production export without a Supabase URL, and writes and removes nothing', () => {
+    const directory = exportedSite();
+    const result = finish(directory);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('NEXT_PUBLIC_SUPABASE_URL is not set');
+    expect(result.stderr).toContain('.env.production.local');
+    expect(existsSync(join(directory, '_headers'))).toBe(false);
+    expect(existsSync(join(directory, 'assets/gallery.html'))).toBe(true);
+  });
+
+  // Task 24.1 (Decision 12): `next build` inlines NEXT_PUBLIC_SUPABASE_URL from `.env*` files too (Next's @next/env), so the
+  // headers must come from the same place, or a deploy built from `.env.production.local` would ship a self-only policy.
+  it('takes the URL from .env.production.local, as next build does, and names the file it loaded, never a value', () => {
+    const directory = exportedSite();
+    const result = finish(directory, {}, project({ '.env.production.local': `NEXT_PUBLIC_SUPABASE_URL=${PROJECT}\nNEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_fake_for_tests\n` }));
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(directory, '_headers'), 'utf8')).toBe(headersFile(PROJECT));
+    expect(result.stdout).toContain('build environment from .env.production.local');
+    expect(result.stdout).not.toContain('sb_publishable_fake_for_tests');
+  });
+
+  it('loads the files in next build\'s order: the shell first, then .env.production.local, .env.local, .env.production, .env', () => {
+    const other = 'https://otherprojectabcdef.supabase.co';
+    const files = { '.env': `NEXT_PUBLIC_SUPABASE_URL=${other}\n`, '.env.production': `NEXT_PUBLIC_SUPABASE_URL=${other}\n`,
+      '.env.local': `NEXT_PUBLIC_SUPABASE_URL=${other}\n`, '.env.production.local': `NEXT_PUBLIC_SUPABASE_URL=${PROJECT}\n` };
+    const fromFile = exportedSite();
+    expect(finish(fromFile, {}, project(files)).status).toBe(0);
+    expect(readFileSync(join(fromFile, '_headers'), 'utf8')).toBe(headersFile(PROJECT));
+    const fromShell = exportedSite();
+    expect(finish(fromShell, { NEXT_PUBLIC_SUPABASE_URL: other }, project(files)).status).toBe(0);
+    expect(readFileSync(join(fromShell, '_headers'), 'utf8')).toBe(headersFile(other));
+    // A development-only file is not read by a production build.
+    const devOnly = exportedSite();
+    const result = finish(devOnly, {}, project({ '.env.development.local': `NEXT_PUBLIC_SUPABASE_URL=${PROJECT}\n` }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('NEXT_PUBLIC_SUPABASE_URL is not set');
   });
 
   it('refuses an unexpected Supabase URL and writes nothing', () => {

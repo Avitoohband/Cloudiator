@@ -11,10 +11,17 @@
  *
  * Usage: `node scripts/build-headers.mjs [export directory]`. The default is the directory next.config.ts exports to:
  * `.next/browser-test` when CLOUDIATOR_BROWSER_TEST=true, otherwise `out`. scripts/verify-static.mjs checks the result.
+ *
+ * Task 24.1 (plan Decision 12): the build environment is read the way `next build` reads it, with Next's own `@next/env`
+ * (installed with Next): the shell's variables first, then `.env.production.local`, `.env.local`, `.env.production` and `.env`
+ * in the working directory, so `_headers` names the URL the bundle was built with. Only the loaded files' names are printed,
+ * never a value. A production export without NEXT_PUBLIC_SUPABASE_URL fails (its policy would block every backend request);
+ * only the browser-test export (CLOUDIATOR_BROWSER_TEST=true) is built without one and connects to the site alone.
  */
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import nextEnv from '@next/env';
 
 const HOSTED = /^[a-z0-9]+(?:-[a-z0-9]+)*\.supabase\.co$/;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost']);
@@ -79,14 +86,30 @@ export function headersFile(origin) {
 export const exportRoot = (env = process.env) => (env.CLOUDIATOR_BROWSER_TEST === 'true' ? '.next/browser-test' : 'out');
 
 /**
- * Writes `_headers` into `root` and removes the art gallery. Refuses a directory without an exported `index.html` and an
- * unexpected Supabase URL, before writing anything.
+ * Loads `dir`'s `.env*` files into process.env exactly as `next build` does (`loadEnvConfig(dir, false)`: production mode
+ * unless NODE_ENV says otherwise; a variable already set wins). Returns the names of the files it loaded. A file that cannot
+ * be read is reported by name only.
+ * @param {string} [dir]
+ */
+export function loadBuildEnv(dir = process.cwd()) {
+  const quiet = { info() {}, error(message) { console.error(String(message)); } };
+  return nextEnv.loadEnvConfig(dir, false, quiet).loadedEnvFiles.map(file => file.path);
+}
+
+/**
+ * Writes `_headers` into `root` and removes the art gallery. Refuses a directory without an exported `index.html`, an
+ * unexpected Supabase URL, and a production export without one (Task 24.1), before writing or removing anything.
  * @param {string} root
  * @param {NodeJS.ProcessEnv} env
  */
 export function finishExport(root, env = process.env) {
   if (!existsSync(join(root, 'index.html'))) throw new Error(`${root} is not a static export: index.html is missing. Run next build first.`);
   const origin = connectOrigin(env.NEXT_PUBLIC_SUPABASE_URL);
+  if (!origin && env.CLOUDIATOR_BROWSER_TEST !== 'true') {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set: a production export must name its Supabase project in connect-src. Set it '
+      + 'in the build environment or in .env.production.local (a loopback URL for a local build); only the browser-test export '
+      + '(CLOUDIATOR_BROWSER_TEST=true) is built without one.');
+  }
   writeFileSync(join(root, '_headers'), headersFile(origin));
   const gallery = existsSync(join(root, GALLERY));
   if (gallery) rmSync(join(root, GALLERY));
@@ -94,11 +117,12 @@ export function finishExport(root, env = process.env) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const root = resolve(process.argv[2] ?? exportRoot());
   try {
+    const files = loadBuildEnv();
+    const root = resolve(process.argv[2] ?? exportRoot());
     const { origin, galleryRemoved } = finishExport(root);
-    console.log(`Export finished: _headers written (connect-src 'self'${origin ? ` ${origin}` : ''}); `
-      + `${galleryRemoved ? 'art gallery removed' : 'no art gallery present'}.`);
+    console.log(`Export finished: build environment from ${files.length ? files.join(', ') : 'the shell only'}; `
+      + `_headers written (connect-src 'self'${origin ? ` ${origin}` : ''}); ${galleryRemoved ? 'art gallery removed' : 'no art gallery present'}.`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

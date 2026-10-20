@@ -69,7 +69,7 @@ Nothing is hosted yet. Task 24 fills these in; until then every value is unknown
 
 | Name | Kind | Used by | Where it lives |
 |---|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | public configuration | the browser bundle | the static build's environment (hosting build settings; locally the shell or Playwright config) |
+| `NEXT_PUBLIC_SUPABASE_URL` | public configuration | the browser bundle and the generated `_headers` (`connect-src`) | the static build's environment (hosting build settings; locally the shell, `.env.production.local` or the Playwright config). Since Task 24.1 a production export without it fails; `scripts/build-headers.mjs` reads it as `next build` does (`@next/env`), and `npm run verify:static -- --origin <url>` checks that a deploy build names exactly that origin |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public key | the browser bundle | the static build's environment; a production build refuses the test-only value (`next.config.ts`) |
 | `NEXT_PUBLIC_FIXTURE_ENABLED` | development flag | fixture mode | `.env.example` documents it; production builds always force it off |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | platform configuration | both Edge functions | injected by the platform (hosted) or by `supabase functions serve` (local) |

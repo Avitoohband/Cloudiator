@@ -3,7 +3,7 @@
  * that order, one after another in this worktree, so a build never shares an output directory with a running browser suite
  * and nothing builds, browses or edits while the database tests run:
  *   1. `npm test`, `npm run typecheck`, the asset check;
- *   2. `npm run build` (which also writes `_headers`), `npm run verify:static`;
+ *   2. `npm run build` (which also writes `_headers`) for the local stack's API origin, `npm run verify:static` requiring it;
  *   3. the Edge runtime settled (C22, below), then `CAPACITY_GATE=1 npm run test:db`;
  *   4. the development browser suite;
  *   5. the isolated production build, its static scan, the production browser gate (CSP violations fail it);
@@ -47,6 +47,8 @@ import { pathToFileURL } from 'node:url';
 
 /** The words tests/browser/fixtures.ts adds to a failed test whose request failed in the host's network stack (host-faults.ts). */
 export const HOST_FAULT_MARKER = 'Probable host fault:';
+/** The local stack's API origin (supabase/config.toml `[api] port`, as playwright.config.ts uses): the gate's `out/` build URL. */
+export const LOCAL_API_ORIGIN = 'http://127.0.0.1:54321';
 
 /**
  * Failures that are known, named and owned. They make the gate exit 2 (blocked), never 0. Each entry is
@@ -80,8 +82,12 @@ export function gateSteps(options = {}) {
     { id: 'typecheck', title: 'Type checks (TypeScript, Deno)', display: 'npm run typecheck', guide: 'npm run typecheck', ...npm('run', 'typecheck') },
     { id: 'assets', title: 'Asset check', display: 'node assets/source/build-assets.mjs --check', guide: 'node assets/source/build-assets.mjs --check',
       ...node('assets/source/build-assets.mjs', '--check') },
-    { id: 'build', title: 'Production build and headers', display: 'npm run build', guide: 'npm run build', ...npm('run', 'build') },
-    { id: 'static', title: 'Static scan of out/', display: 'npm run verify:static', guide: 'npm run verify:static', ...npm('run', 'verify:static'), needs: ['build'] },
+    // Task 24.1 (plan Decision 12): a production export needs its Supabase URL; the gate builds `out/` for the local stack's API
+    // origin, and the scan requires exactly that origin in connect-src.
+    { id: 'build', title: 'Production build and headers', display: `NEXT_PUBLIC_SUPABASE_URL=${LOCAL_API_ORIGIN} npm run build`,
+      guide: `NEXT_PUBLIC_SUPABASE_URL=${LOCAL_API_ORIGIN} npm run build`, ...npm('run', 'build'), env: { NEXT_PUBLIC_SUPABASE_URL: LOCAL_API_ORIGIN } },
+    { id: 'static', title: 'Static scan of out/', display: `npm run verify:static -- --origin ${LOCAL_API_ORIGIN}`,
+      guide: `npm run verify:static -- --origin ${LOCAL_API_ORIGIN}`, ...npm('run', 'verify:static', '--', '--origin', LOCAL_API_ORIGIN), needs: ['build'] },
     { id: 'edge', title: 'Edge runtime settled (C22)', display: 'pre-read supabase/functions, wait for a stable Edge container', kind: 'edge' },
     { id: 'db', title: 'Database, Auth and Edge tests with the capacity gate', display: 'CAPACITY_GATE=1 npm run test:db', kind: 'db', report: dbReport,
       ...node('scripts/test-db.mjs', '--reporter=default', `--reporter=${resolve('scripts/vitest-gate-reporter.mjs')}`),

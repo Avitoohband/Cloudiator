@@ -1,9 +1,26 @@
+/**
+ * The release scan of a static export (Task 23.6): `npm run verify:static [-- <export directory>] [--origin <url>]`.
+ * `--origin <url>` (Task 24.1, plan Decision 12): `_headers`' connect-src must name exactly that origin (a hosted project
+ * `https://<project>.supabase.co` or a loopback URL, given as an origin or a project URL), so a deploy build scanned with its
+ * project's URL fails when it carries another project's origin or none.
+ */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { GALLERY, connectOrigin, headersFile } from './build-headers.mjs';
 
-const root = resolve(process.argv[2] ?? 'out');
 const failures = [];
+let directory, required = null;
+for (let i = 2; i < process.argv.length; i++) {
+  const arg = process.argv[i];
+  if (arg === '--origin') {
+    const value = process.argv[++i];
+    if (!value || value.startsWith('--')) { failures.push('--origin needs a URL: the project origin the export must connect to.'); continue; }
+    try { required = connectOrigin(value); } catch { failures.push(`--origin ${value} is not a hosted project (https://<project>.supabase.co) or a loopback URL.`); }
+  } else if (arg.startsWith('--')) failures.push(`Unknown option ${arg}`);
+  else if (directory === undefined) directory = arg;
+  else failures.push(`Unexpected argument ${arg}: give one export directory.`);
+}
+const root = resolve(directory ?? 'out');
 for (const route of ['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html']) {
   if (!existsSync(join(root, route))) failures.push(`Missing fixed route: ${route}`);
 }
@@ -20,6 +37,7 @@ else {
   try { expected = headersFile(connectOrigin(origin ?? undefined)); } catch { failures.push(`Unexpected connect-src origin in _headers: ${origin}`); }
   if (expected !== null && text !== expected) failures.push('Unexpected _headers content: it must be exactly what scripts/build-headers.mjs writes.');
   if (origin) connect = origin;
+  if (required && origin !== required) failures.push(`_headers' connect-src names ${origin ?? 'no origin'}, not the required ${required} (--origin).`);
 }
 // Plan Decision 2: the hand-written art gallery is a development tool, never part of a production export.
 if (existsSync(join(root, GALLERY))) failures.push(`Development-only art gallery in the export: ${GALLERY}`);
@@ -77,6 +95,7 @@ if (failures.length) {
   console.error(failures.join('\n'));
   process.exitCode = 1;
 } else {
-  console.log(`Static export verified: 5 fixed routes; _headers as generated (connect-src 'self'${connect === 'none' ? '' : ` ${connect}`}); `
+  console.log(`Static export verified: 5 fixed routes; _headers as generated (connect-src 'self'${connect === 'none' ? '' : ` ${connect}`}`
+    + `${required ? ', as required by --origin' : ''}); `
     + `no art gallery; ${scanned} assets scanned; no forbidden backend material; no fixture preview data.`);
 }

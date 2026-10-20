@@ -97,8 +97,9 @@ describe('the gate steps', () => {
     const order = /## Safe order in one worktree\n([\s\S]*?)\n## /.exec(doc)?.[1] ?? '';
     expect(order).toMatch(/^1\. /m);
     const positions = gateSteps().filter(step => step.guide).map(step => [step.guide!, order.indexOf(step.guide!)] as const);
-    expect(positions.map(([guide]) => guide)).toEqual(['npm test', 'npm run typecheck', 'node assets/source/build-assets.mjs --check', 'npm run build',
-      'npm run verify:static', 'npx playwright test', 'CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true',
+    expect(positions.map(([guide]) => guide)).toEqual(['npm test', 'npm run typecheck', 'node assets/source/build-assets.mjs --check',
+      'NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build', 'npm run verify:static -- --origin http://127.0.0.1:54321',
+      'npx playwright test', 'CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true',
       'npm run verify:static -- .next/browser-test', 'PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test', 'git diff --check']);
     for (const [guide, at] of positions) expect(at, guide).toBeGreaterThanOrEqual(0);
     expect(positions.map(([, at]) => at)).toEqual([...positions.map(([, at]) => at)].sort((a, b) => a - b));
@@ -125,6 +126,18 @@ describe('the gate steps', () => {
     expect(db.env?.CLOUDIATOR_GATE_REPORT).toMatch(/db\.json$/);
     expect(db.args).toEqual(expect.arrayContaining(['--reporter=default', expect.stringMatching(/--reporter=.*vitest-gate-reporter\.mjs$/)]));
     expect(db.needs).toEqual(['edge']);
+  });
+
+  // Task 24.1 (plan Decision 12): a production export without NEXT_PUBLIC_SUPABASE_URL now fails, so the gate builds `out/`
+  // for the local stack's API origin (supabase/config.toml's port, as the Playwright config uses) and its scan requires
+  // exactly that origin in connect-src.
+  it('build the production export for the local stack\'s origin, and require that origin in its scan', () => {
+    const steps = gateSteps();
+    expect(byId(steps, 'build')).toMatchObject({ display: 'NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build',
+      env: { NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321' } });
+    expect(byId(steps, 'static').display).toBe('npm run verify:static -- --origin http://127.0.0.1:54321');
+    expect(byId(steps, 'static').args?.slice(-3)).toEqual(['--', '--origin', 'http://127.0.0.1:54321']);
+    expect(readFileSync('supabase/config.toml', 'utf8')).toMatch(/^\[api\][^[]*?^port = 54321$/ms);
   });
 
   it('build the isolated production export without the test transport, then scan and browse it', () => {

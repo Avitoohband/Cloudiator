@@ -13,7 +13,7 @@ A Next.js build or export and a browser check must not use the same output direc
 
 1. `npm test` and `npm run typecheck` (no Next output).
 2. `node assets/source/build-assets.mjs --check`.
-3. `npm run build`, then `npm run verify:static`.
+3. `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build`, then `npm run verify:static -- --origin http://127.0.0.1:54321`. Since Task 24.1 a production export without a Supabase URL fails (`scripts/build-headers.mjs`), so the gate builds `out/` for the local stack's API origin and the scan requires that origin in `connect-src`.
 4. The development browser suite (`npx playwright test`, or a private config on its own port). Wait until it has finished and its dev server has exited.
 5. The isolated production gate, only after step 4: the `CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true` build, `npm run verify:static -- .next/browser-test`, then `PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test`.
 6. `git diff --check`.

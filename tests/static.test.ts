@@ -18,8 +18,8 @@ function exportedSite(content = '<main>Cloudiator</main>', headers: string | nul
   if (headers !== null) writeFileSync(join(directory, '_headers'), headers);
   return directory;
 }
-function scan(directory: string) {
-  return spawnSync(process.execPath, [resolve('scripts/verify-static.mjs'), directory], { encoding: 'utf8' });
+function scan(directory: string, ...options: string[]) {
+  return spawnSync(process.execPath, [resolve('scripts/verify-static.mjs'), directory, ...options], { encoding: 'utf8' });
 }
 
 test('scanner accepts a complete clean static export', () => {
@@ -114,6 +114,37 @@ describe('the security headers', () => {
     const result = scan(exportedSite(undefined, headersFile(PROJECT)));
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(`connect-src 'self' ${PROJECT}`);
+  });
+
+  // Task 24.1 (plan Decision 12): a deploy build is scanned with the origin it must connect to, so a build that picked up
+  // another project's URL (or none) fails before it is published.
+  test('with --origin, accepts exactly that connect-src origin, given as an origin or a project URL', () => {
+    for (const origin of [PROJECT, `${PROJECT}/`]) {
+      const result = scan(exportedSite(undefined, headersFile(PROJECT)), '--origin', origin);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`connect-src 'self' ${PROJECT}, as required by --origin`);
+    }
+    // The option may come before the export folder too.
+    const directory = exportedSite(undefined, headersFile(PROJECT));
+    const first = spawnSync(process.execPath, [resolve('scripts/verify-static.mjs'), '--origin', PROJECT, directory], { encoding: 'utf8' });
+    expect(first.status, first.stderr).toBe(0);
+  });
+
+  test.each([
+    ['another project', headersFile(PROJECT), 'https://otherprojectabcdef.supabase.co',
+      `connect-src names ${PROJECT}, not the required https://otherprojectabcdef.supabase.co`],
+    ['a self-only export', headersFile(null), PROJECT, `connect-src names no origin, not the required ${PROJECT}`],
+  ])('with --origin, refuses %s', (_name, headers, origin, message) => {
+    const result = scan(exportedSite(undefined, headers), '--origin', origin);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+  });
+
+  test.each([['an origin that is not a project or loopback URL', ['--origin', 'https://evil.example']], ['a missing value', ['--origin']],
+    ['an unknown option', ['--origins', PROJECT]]])('refuses %s', (_name, options) => {
+    const result = scan(exportedSite(undefined, headersFile(PROJECT)), ...options);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/--origin|Unknown option/);
   });
 
   test('refuses an export without _headers', () => {

@@ -506,6 +506,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         else if (existing.walk) existing.walk.then = { action: placement.action, facing: placement.facing };
         else { existing.action = placement.action; existing.facing = placement.facing; }
       }
+      // Departures walk out through the gate; anyone else no longer placed (gone from the world, or resting at home, which
+      // `layoutCamp` never places; Task 23.9) is no longer drawn.
       for (const [id, v] of views) {
         if (v.kind !== 'player' || seen.has(id)) continue;
         const leaving = layout.away.some(a => a.gladiatorId === id);

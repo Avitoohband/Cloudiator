@@ -7,6 +7,8 @@ import { worldFixture } from '../fixtures/domain';
 
 const noop = () => {};
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+/** React escapes an apostrophe in text. */
+const unescaped = (html: string) => html.replace(/&#x27;/g, "'");
 const ACTOR: PublicActor = {
   ...worldFixture.actors[0], name: 'Aster', classId: 'duelist', league: 'bronze', level: 4, location: 'training',
   equipmentSilhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet'],
@@ -96,6 +98,25 @@ describe('profile card', () => {
     expect(pending).toContain('Cassia');
     expect(pending).toMatch(/Record\s+6–4/);
     expect(pending).toContain('Loading the profile…');
+  });
+
+  // Task 23.9 (Task 23.8's PublicActor.resting, the approved copy): anyone sees where a resting gladiator is.
+  it('shows everyone "Resting at home: back when {name}\'s owner returns." as where a resting gladiator is now', () => {
+    const resting: PublicActor = { ...ACTOR, name: 'Otho', location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, resting: true };
+    const line = "Resting at home: back when Otho's owner returns.";
+    for (const props of [{ actor: resting }, { actor: resting, profile: { ...PROFILE, actor: resting } }, { actor: resting, own: true }]) {
+      expect(unescaped(card(props))).toContain(`<dt>Now</dt><dd>${line}</dd>`);
+    }
+    // Not drawn in the camp, so Follow gives its reason (the scene's roster lists only those it draws).
+    const layer = text(renderToStaticMarkup(createElement(ProfileLayer, {
+      target: { gladiatorId: resting.gladiatorId, name: 'Otho', screen: null, record: null, focus: true },
+      world: { ...worldFixture, actors: [resting] }, reads: null, ownerId: null, roster: { inCamp: [], away: [] }, sceneStatus: 'ready', following: null,
+      onFollow: noop, onWatch: noop, onOpenMenu: noop, onClose: noop,
+    })));
+    expect(unescaped(layer)).toContain(`Now ${line}`);
+    expect(unescaped(layer)).toContain('Otho is not in the camp right now.');
+    // A gladiator who is not resting reads its place as before.
+    expect(text(card())).not.toContain('Resting at home');
   });
 
   it('sits above a clicked gladiator, or below when there is no room, right of the rail and below the chip', () => {

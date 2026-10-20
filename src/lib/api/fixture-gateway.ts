@@ -8,6 +8,7 @@ import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID 
 import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
 import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
 import { FIXTURE_SEASONS } from '../../../tests/fixtures/seasons';
+import { RESTING_ACTOR, RESTING_OWNER, RESTING_PROFILE, restingActor } from '../../../tests/fixtures/resting';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
@@ -23,25 +24,42 @@ export const FIXTURE_ARENA: readonly { activityId: string; label: string; gladia
 export const FIXTURE_TOURNAMENTS: readonly { id: string; label: string; asOfMs: number }[] = TOURNAMENT_SAMPLES;
 // The owner's own settled tournament activities carry its credited summary, read by the Tournaments panel (Task 19 2b).
 const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARENA_TIMELINES, ...TOURNAMENT_OWNER_TIMELINES };
-/** The owner plus the current slot's Arena entrants, warming up at the fixture time (minute 40). */
-const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS] };
+/**
+ * The owner plus the current slot's Arena entrants, warming up at the fixture time (minute 40), and Otho, resting at home
+ * (Task 23.9: listed, not drawn in the camp).
+ */
+const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS, RESTING_ACTOR] };
+const FIXTURE_PROFILES = { ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE };
+const OWNER_ID = RESTING_OWNER.gladiatorId;
 
-/** Pure local preview: no transport, auth session, storage, clock, or side effects. */
-export function createFixtureGateway(): GameGateway {
+/**
+ * Pure local preview: no transport, auth session, storage, clock, or side effects. Commands are refused; the owner's
+ * presence is answered (Task 23.9). `resting` (the game page's `?mode=fixture&as=resting`) previews the owner's gladiator
+ * resting at home in the current slot: drawn nowhere in the camp, and with no `restingUntilSlot` until this preview has
+ * answered a presence, then the next slot, as the server answers it (Task 23.8).
+ */
+export function createFixtureGateway(options: { resting?: boolean } = {}): GameGateway {
+  const resting = options.resting === true;
+  /** The resting preview: whether a presence has been answered since the gladiator began resting. */
+  let signalled = false;
+  const world = resting ? { ...FIXTURE_WORLD, actors: FIXTURE_WORLD.actors.map(a => (a.gladiatorId === OWNER_ID ? restingActor(a) : a)) } : FIXTURE_WORLD;
+  const profiles = resting ? { ...FIXTURE_PROFILES, [OWNER_ID]: { ...FIXTURE_PROFILES[OWNER_ID], actor: restingActor(FIXTURE_PROFILES[OWNER_ID].actor) } } : FIXTURE_PROFILES;
   const unavailable = async (): Promise<never> => {
     throw Object.assign(new Error('This read is unavailable in the fixture preview.'), { code: 'unavailable' as const });
   };
   return {
     command: async () => ({ ok: false, code: 'unavailable' }),
-    // The owner fixture with the rating and renown of its credited Arena samples.
-    owner: async () => structuredClone(ARENA_OWNER),
+    sendPresence: async () => { signalled = true; return { ok: true }; },
+    // The owner fixture with the rating and renown of its credited Arena samples (resting, in the resting preview).
+    owner: async () => (resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
+      : structuredClone(ARENA_OWNER)),
     // The fixture world's slot is published (Task 23.2's published slot, C5).
-    world: async () => ({ ...structuredClone(FIXTURE_WORLD), publishedSlotIndex: worldFixture.slotIndex }),
+    world: async () => ({ ...structuredClone(world), publishedSlotIndex: worldFixture.slotIndex }),
     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex, publishedSlotIndex: worldFixture.slotIndex }),
     // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Expedition and Arena
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
-    profile: async id => (Object.hasOwn(ARENA_PROFILES, id) ? structuredClone(ARENA_PROFILES[id]) : unavailable()),
+    profile: async id => (Object.hasOwn(profiles, id) ? structuredClone(profiles[id]) : unavailable()),
     // The seasons newest first: the current one (open) and the closed season before it, built with seasonAt.
     seasons: async () => structuredClone([...FIXTURE_SEASONS]),
     // Pages of at most 50 rows, with the live read's rules: the season is the cursor's (`season:rank`), else the named one, else

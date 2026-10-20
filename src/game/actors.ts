@@ -182,7 +182,12 @@ export type LayoutOptions = {
   previous?: Map<string, Placement>;
 };
 
-export function layoutCamp(actors: PublicActor[], map: MapData, slotIndex: number, options: LayoutOptions = {}): { placements: Map<string, Placement>; away: PublicActor[] } {
+/**
+ * A gladiator resting at home (Task 23.9; Task 23.8's PublicActor.resting) is neither placed nor away: it is not drawn in the
+ * camp, and its previous spot is not kept for it.
+ */
+export function layoutCamp(all: PublicActor[], map: MapData, slotIndex: number, options: LayoutOptions = {}): { placements: Map<string, Placement>; away: PublicActor[] } {
+  const actors = all.filter(actor => !actor.resting);
   const placements = new Map<string, Placement>();
   const away: PublicActor[] = [];
   const taken = new Set<string>(options.reserved ?? []);

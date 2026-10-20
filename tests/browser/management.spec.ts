@@ -4,7 +4,7 @@ import type { GameCommand } from '../../supabase/functions/_shared/contracts/com
 import type { OwnerState, PublicActor, ResultRow } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
-import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
 import { closeMenu, cornerChip, expectOwnerShown, menuDialog, openMenu, railMenus, touchLayout } from './shell-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
@@ -282,7 +282,8 @@ test.describe('live results and a signed-in player through a slot end', () => {
     const commands: GameCommand[] = [];
     await context.route(`${SUPABASE_URL}/functions/v1/**`, async route => {
       const request = route.request();
-      if (request.method() === 'OPTIONS') return route.fallback();
+      // The player's presence (Task 23.9) is the live transport's.
+      if (request.method() === 'OPTIONS' || isPresence(request)) return route.fallback();
       const command = request.postDataJSON() as GameCommand;
       commands.push(command);
       if (command.kind !== 'queue-build') throw new Error(`Unexpected command ${command.kind}`);

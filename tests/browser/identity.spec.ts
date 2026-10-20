@@ -3,7 +3,7 @@ import { expect, test, type BrowserContext, type Page } from './fixtures';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
-import { emptyWorld, routeLiveReads } from './live-routes';
+import { emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { chipToggle, creationDialog, joinButton, openMenu, signOutFromChip } from './shell-helpers';
 
 /** A visitor's My gladiator panel (Task 13.6). */
@@ -79,6 +79,8 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
       }
       return json(owner ? [{ state: owner }] : []);
     }
+    // A created gladiator's presence (Task 23.9) is the live transport's.
+    if (url.pathname === '/functions/v1/game-command' && isPresence(request)) return route.fallback();
     if (url.pathname === '/functions/v1/game-command') {
       const command = request.postDataJSON() as GameCommand;
       commands.push(command);

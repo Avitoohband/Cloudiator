@@ -1,4 +1,4 @@
-import type { ActivityId, CommandResult, GameCommand, GladiatorId, LeagueId } from '@contracts/commands';
+import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
@@ -10,12 +10,18 @@ export { GatewayReadError } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
- * tournament, tournament log, recent results) can be read without a session. `owner()` and `command()` require a signed-in account.
+ * tournament, tournament log, recent results) can be read without a session. `owner()`, `command()` and `sendPresence()` require a
+ * signed-in account.
  */
 export interface GameGateway {
   /** Session identity changes invalidate pending reads and synchronized caches. */
   subscribeSession?(listener: () => void): () => void;
   command<T>(input: GameCommand): Promise<CommandResult<T>>;
+  /**
+   * The owner's activity signal (Task 23.8's `presence` command; Task 23.9 sends it from `useGameState`), each with a new
+   * operation id. It answers `{ ok: true }` with no receipt, or a refusal; it never throws.
+   */
+  sendPresence(): Promise<PresenceResult>;
   owner(): Promise<OwnerState>;
   world(): Promise<WorldSnapshot>;
   revision(): Promise<RevisionState>;
@@ -55,6 +61,12 @@ export interface GameGateway {
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
 
+const API_ERROR_CODES: readonly string[] = ['unauthenticated', 'invalid', 'conflict', 'processing', 'insufficient-funds', 'inventory-full', 'sold', 'expired',
+  'not-found', 'rate-limited', 'unavailable'] satisfies readonly ApiErrorCode[];
+/** A typed business refusal from the command endpoint (`retryAfterMs` kept when the server sent one). */
+const isRefusal = (result: object): result is { ok: false; code: ApiErrorCode; retryAfterMs?: number } =>
+  'ok' in result && result.ok === false && 'code' in result && typeof result.code === 'string' && API_ERROR_CODES.includes(result.code);
+
 /**
  * How many tournament battle logs (9–14 KB each) the live gateway keeps, most recently used first (Task 23.4, C7). It holds
  * the camp's six rings' current and next windows and the panel's watched replay with room to spare, but never a whole
@@ -89,6 +101,24 @@ export function createLiveGateway(): GameGateway {
       if (!result.ok) throw result.error;
       return result.value;
     } catch (error) { throw error instanceof GatewayReadError ? error : new GatewayReadError('unavailable'); }
+  }
+  /**
+   * Posts a command to the `game-command` Edge function with the session's token. Refused locally (`sent: false`) without a
+   * configured backend, without a live session, or when the request or its JSON answer fails; otherwise the parsed answer
+   * and whether its HTTP status was a success (fetch keeps the typed business error envelope on non-2xx statuses).
+   */
+  async function post(input: GameCommand): Promise<{ sent: false; refusal: { ok: false; code: 'unavailable' | 'unauthenticated' } } | { sent: true; result: unknown; httpOk: boolean }> {
+    const client = getBrowserClient();
+    if (!client) return { sent: false, refusal: { ok: false, code: 'unavailable' } };
+    try {
+      const { data, error } = await client.auth.getSession();
+      if (error || !data.session || (data.session.expires_at ?? 0) * 1000 <= Date.now()) return { sent: false, refusal: { ok: false, code: 'unauthenticated' } };
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/game-command`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, Authorization: `Bearer ${data.session.access_token}` },
+        body: JSON.stringify(input),
+      });
+      return { sent: true, result: await response.json() as unknown, httpOk: response.ok };
+    } catch { return { sent: false, refusal: { ok: false, code: 'unavailable' } }; }
   }
   /**
    * A public read: a visitor and a signed-in reader see the same projections, so it needs no session. `account` is the
@@ -126,28 +156,30 @@ export function createLiveGateway(): GameGateway {
       return () => data.subscription.unsubscribe();
     },
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
-      const client = getBrowserClient();
-      if (!client) return { ok: false, code: 'unavailable' };
+      // A presence has no receipt: it goes through `sendPresence`.
       if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
         'buy-listing', 'set-tournament-opt-in'].includes(input.kind)) {
         return { ok: false, code: 'unavailable' };
       }
-      try {
-        const { data, error } = await client.auth.getSession();
-        if (error || !data.session || (data.session.expires_at ?? 0) * 1000 <= Date.now()) return { ok: false, code: 'unauthenticated' };
-        // fetch keeps the typed business error envelope even on non-2xx HTTP statuses.
-        const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/game-command`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, Authorization: `Bearer ${data.session.access_token}` },
-          body: JSON.stringify(input),
-        });
-        const result: unknown = await response.json();
-        if (result && typeof result === 'object' && 'ok' in result) {
-          if (result.ok === true && response.ok && 'receiptId' in result && typeof result.receiptId === 'string' && 'value' in result) return result as CommandResult<T>;
-          if (result.ok === false && 'code' in result && typeof result.code === 'string'
-            && ['unauthenticated', 'invalid', 'conflict', 'processing', 'insufficient-funds', 'inventory-full', 'sold', 'expired', 'not-found', 'rate-limited', 'unavailable'].includes(result.code)) return result as CommandResult<T>;
-        }
-        return { ok: false, code: 'unavailable' };
-      } catch { return { ok: false, code: 'unavailable' }; }
+      const answer = await post(input);
+      if (!answer.sent) return answer.refusal;
+      const { result, httpOk } = answer;
+      if (result && typeof result === 'object' && 'ok' in result) {
+        if (result.ok === true && httpOk && 'receiptId' in result && typeof result.receiptId === 'string' && 'value' in result) return result as CommandResult<T>;
+        if (isRefusal(result)) return result;
+      }
+      return { ok: false, code: 'unavailable' };
+    },
+    async sendPresence(): Promise<PresenceResult> {
+      // A new operation id every time, even after a failure: the server checks it but stores no receipt for a presence.
+      const answer = await post({ kind: 'presence', operationId: crypto.randomUUID() });
+      if (!answer.sent) return answer.refusal;
+      const { result, httpOk } = answer;
+      if (result && typeof result === 'object' && 'ok' in result) {
+        if (result.ok === true && httpOk) return { ok: true };
+        if (isRefusal(result)) return result;
+      }
+      return { ok: false, code: 'unavailable' };
     },
     owner: () => read(readOwner),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),

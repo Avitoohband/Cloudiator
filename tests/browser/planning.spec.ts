@@ -2,7 +2,7 @@ import { test, expect, type BrowserContext } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import { ownerFixture } from '../fixtures/domain';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
-import { emptyWorld, routeLiveReads } from './live-routes';
+import { emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { openMenu } from './shell-helpers';
 
 async function planningFlow(context: BrowserContext) {
@@ -29,6 +29,8 @@ async function planningFlow(context: BrowserContext) {
     if (path === '/auth/v1/user') return json(user);
     if (path === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
     if (path === '/rest/v1/owner_state') return json([{ state }]);
+    // The player's presence (Task 23.9) is the live transport's.
+    if (path === '/functions/v1/game-command' && isPresence(request)) return route.fallback();
     if (path === '/functions/v1/game-command') {
       const command = request.postDataJSON() as GameCommand; commands.push(command);
       expect(request.headers().authorization).toMatch(/^Bearer /);

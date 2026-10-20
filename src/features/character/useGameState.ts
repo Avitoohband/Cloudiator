@@ -8,6 +8,7 @@ import type { OwnerState, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import { refreshSession, signOut, useSession, type SessionState } from '../../lib/api/session';
 import { createSync, type SyncController, type SyncState } from '../../lib/api/sync';
+import { createPresence, type Presence, type PresenceInput } from '../../lib/api/presence';
 import { createDisplayClock, type DisplayClock } from '../../game/display-clock';
 import { withDemoCrowd } from '../../game/demo-world';
 
@@ -71,6 +72,10 @@ const codeOf = (error: unknown) => (error && typeof error === 'object' && 'code'
  *   so the reads continue as a visitor's (final review Minor 3: a device clock running slow, or a transient rejection,
  *   no longer discards the refresh token). A sign-out that fails and keeps the session is tried again at each later
  *   publish that still reports it. A successful read lets a later rejection be refreshed once again.
+ * - The owner's activity signal (Task 23.9, `createPresence`): a player sends a presence once its gladiator is shown (after
+ *   sign-in or a page load), then every 6 hours while the page is visible; a visitor or an account without a gladiator
+ *   never does. Failures are not shown. An answered presence of a gladiator resting with no signal yet reads the owner
+ *   again, except with `clockOnly`, which reads the owner once per account.
  */
 export function useGameState(gateway: GameGateway | null, options: { fixture: boolean; previewAs?: 'visitor' | 'player'; clockOnly?: boolean }): GameUiState {
   const { fixture, previewAs, clockOnly = false } = options;
@@ -221,6 +226,25 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   const read = account !== null && ownerRead?.account === account ? ownerRead : null;
   const owner = read?.owner ?? null;
+
+  // The presence follows the gateway (the fixture one once loaded) and the viewer: created per gateway with the viewer as
+  // last seen, then told each change of account or owner read (the same account's reads never send another).
+  const presence = useRef<Presence | null>(null);
+  const presenceInput = useRef<PresenceInput>({ account: null, owner: null });
+  useEffect(() => {
+    if (!gateway) return;
+    const current = createPresence({
+      send: () => gateway.sendPresence(),
+      reread: () => { if (!clockOnly) void latestLoadOwner.current().catch(() => undefined); },
+    });
+    presence.current = current;
+    current.update(presenceInput.current);
+    return () => { current.stop(); if (presence.current === current) presence.current = null; };
+  }, [gateway, clockOnly]);
+  useEffect(() => {
+    presenceInput.current = { account, owner };
+    presence.current?.update(presenceInput.current);
+  }, [account, owner]);
   let viewer: Viewer;
   if (fixture) viewer = previewAs === 'visitor' ? 'visitor' : owner ? 'player' : read?.failed ? 'unavailable' : 'loading';
   else if (session.status === 'loading') viewer = 'loading';

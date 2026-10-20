@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ownerFixture, itemFixture } from '../fixtures/domain';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
-import { emptyWorld, routeLiveReads } from './live-routes';
+import { emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { openMenu } from './shell-helpers';
 
 async function inventoryFlow(context: BrowserContext) {
@@ -30,6 +30,8 @@ async function inventoryFlow(context: BrowserContext) {
     if (path === '/auth/v1/user') return json(user);
     if (path === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
     if (path === '/rest/v1/owner_state') return json([{ state }]);
+    // The player's presence (Task 23.9) is the live transport's.
+    if (path === '/functions/v1/game-command' && isPresence(request)) return route.fallback();
     if (path === '/functions/v1/game-command') {
       const command = request.postDataJSON() as GameCommand; commands.push(command);
       expect(request.headers().authorization).toMatch(/^Bearer /);

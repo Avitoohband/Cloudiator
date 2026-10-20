@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CurrentActivity, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import { activityStatus } from '../../src/features/character/activity-status';
+import { slotTimeText } from '../../src/features/schedule/slot-time';
 
 const SLOT_MS = 4_800_000;
 const slot = 373_248;
@@ -57,5 +58,23 @@ describe('activity status', () => {
 
   it('shows Preparing your next activity while no activity has been published yet', () => {
     expect(activityStatus({ processedSlotIndex: slot - 1, currentActivity: null }, slot, start + 1)).toEqual({ status: 'preparing', label: 'Preparing your next activity', endsAtMs: null });
+  });
+
+  // Task 23.9: a gladiator resting at home (Task 23.8's OwnerState.restingUntilSlot, the approved copy).
+  it('shows the owner "Resting at home: back on your schedule at {time}" until that boundary', () => {
+    const back = slot + 1, boundary = back * SLOT_MS;
+    const resting = { processedSlotIndex: slot, currentActivity: null, restingUntilSlot: back };
+    // {time} is the start of that slot in the viewer's local time, formatted as the Schedule panel formats its starts.
+    expect(slotTimeText(boundary)).toBe(new Date(boundary).toLocaleString());
+    const line = `Resting at home: back on your schedule at ${slotTimeText(boundary)}`;
+    for (const now of [start, start + 1, boundary - 1]) {
+      expect(activityStatus(resting, slot, now), `${boundary - now} ms before the boundary`).toEqual({ status: 'resting', label: line, endsAtMs: null });
+    }
+    // From the boundary (by the display clock, or by a revision read already in that slot) the schedule applies again:
+    // the next activity is being prepared until the owner state is read once more.
+    expect(activityStatus(resting, slot, boundary)).toEqual({ status: 'preparing', label: 'Preparing your next activity', endsAtMs: null });
+    expect(activityStatus(resting, back, boundary - 1).status).toBe('preparing');
+    // Resting with no signal since it began (null until the owner's presence and a fresh read): no time to show yet.
+    expect(activityStatus({ ...resting, restingUntilSlot: null }, slot, start + 1).status).toBe('preparing');
   });
 });

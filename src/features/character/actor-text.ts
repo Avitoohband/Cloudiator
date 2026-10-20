@@ -13,8 +13,14 @@ const GEAR: Record<EquipmentSilhouette, string> = {
 export const title = (value: string) => (value ? value[0].toUpperCase() + value.slice(1) : value);
 /** Whether the gladiator is away from the camp on an expedition. */
 export const isAway = (actor: Pick<PublicActor, 'location'>) => actor.location.startsWith('expedition:');
-/** Where the gladiator is now, from its public location. */
-export const placeOf = (actor: Pick<PublicActor, 'location'>) => (isAway(actor) ? 'On an expedition' : PLACE[actor.location] ?? 'At camp');
+/**
+ * A gladiator resting at home (Task 23.9; Task 23.8's PublicActor.resting: its owner has sent no activity signal for 14
+ * days), as everyone sees it.
+ */
+export const restingText = (name: string) => `Resting at home: back when ${name}'s owner returns.`;
+/** Where the gladiator is now, from its public location (or that it rests at home). */
+export const placeOf = (actor: Pick<PublicActor, 'location' | 'name' | 'resting'>) => (actor.resting ? restingText(actor.name)
+  : isAway(actor) ? 'On an expedition' : PLACE[actor.location] ?? 'At camp');
 /** "Guardian · Level 1 · Bronze league". */
 export const classLine = (actor: Pick<PublicActor, 'classId' | 'level' | 'league'>) => `${title(actor.classId)} · Level ${actor.level} · ${title(actor.league)} league`;
 /** The equipped gear the world shows, e.g. "Sword, shield, helmet". */

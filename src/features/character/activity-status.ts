@@ -1,7 +1,8 @@
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
+import { slotTimeText } from '../schedule/slot-time';
 
-export type ActivityStatus = 'scheduled' | 'in-progress' | 'processing' | 'preparing' | 'completed';
+export type ActivityStatus = 'scheduled' | 'in-progress' | 'processing' | 'preparing' | 'completed' | 'resting';
 
 const PROCESSING = { status: 'processing', label: 'Processing results', endsAtMs: null } as const;
 const PREPARING = { status: 'preparing', label: 'Preparing your next activity', endsAtMs: null } as const;
@@ -17,11 +18,17 @@ const SLOT_MS = RULES_V1.clock.slotMs;
  *
  * The current slot is the later of `slotIndex` (the last revision read's, up to 30 s old) and the slot of `nowMs`, so a
  * slot index read before the boundary never shows an ended activity as Completed.
+ *
+ * A gladiator resting at home (Task 23.9; Task 23.8's `restingUntilSlot`, set once its owner has signalled) reads
+ * "Resting at home: back on your schedule at {time}" until the current slot reaches that slot, whose start {time} is, in
+ * the viewer's local time as the Schedule panel shows its starts. From then its schedule applies again.
  */
-export function activityStatus(owner: Pick<OwnerState, 'currentActivity' | 'processedSlotIndex'>, slotIndex: number, nowMs: number):
-  { status: ActivityStatus; label: string; endsAtMs: number | null } {
+export function activityStatus(owner: Pick<OwnerState, 'currentActivity' | 'processedSlotIndex'> & Partial<Pick<OwnerState, 'restingUntilSlot'>>, slotIndex: number,
+  nowMs: number): { status: ActivityStatus; label: string; endsAtMs: number | null } {
   const activity = owner.currentActivity;
   const current = Math.max(slotIndex, Math.floor(nowMs / SLOT_MS));
+  const back = owner.restingUntilSlot ?? null;
+  if (back !== null && current < back) return { status: 'resting', label: `Resting at home: back on your schedule at ${slotTimeText(back * SLOT_MS)}`, endsAtMs: null };
   const behind = owner.processedSlotIndex < current;
   if (!activity) return { ...PREPARING };
   const ended = nowMs >= activity.endsAtMs;

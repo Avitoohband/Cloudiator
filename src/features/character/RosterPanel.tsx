@@ -6,11 +6,12 @@
 // camp (the bridge's `view-expedition`, Task 13.8); the menu stays open beneath it to come back to. Each name opens
 // that gladiator's profile card (Task 13.7). Every world click has this keyboard path. Without a camp view (no WebGL,
 // art that failed to load), or for a gladiator the camp does not draw, the buttons stay, disabled with the reason.
+// A gladiator resting at home (Task 23.9) is listed but not drawn: its row says so, and that is its buttons' reason.
 // Names render as React text.
 import { useId, useState } from 'react';
 import type { WorldSnapshot } from '@contracts/reads';
 import type { SceneBridge } from '../../game/bridge';
-import { classLine, isAway, placeOf } from './actor-text';
+import { classLine, isAway, placeOf, restingText } from './actor-text';
 import styles from './CharacterPanel.module.css';
 
 /** The scene's last `roster` event: who is drawn in the camp, and who is away. */
@@ -61,17 +62,19 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
       {actors.length === 0 ? <p className="muted">{world ? `No gladiator matches “${filter.trim()}”.` : 'The world is still loading.'}</p> : (
         <ul className={styles.list} aria-label="Gladiators">
           {actors.map(actor => {
-            // Neither drawn in the camp nor away (13.5 review): the row says why its buttons are off.
+            // Neither drawn in the camp nor away (13.5 review): the row says why its buttons are off. A resting gladiator is
+            // never drawn, whatever the roster last said; its row says where it is instead, once.
             const away = isAway(actor);
-            const absent = !reason && !away && !inCamp.has(actor.gladiatorId);
+            const resting = actor.resting && !away;
+            const absent = !reason && !away && (resting || !inCamp.has(actor.gladiatorId));
             const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
             return (
               <li key={actor.gladiatorId} className={styles.row}>
                 <p className={styles.who}>
                   <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
                   {actor.gladiatorId === ownerId ? ' (you)' : ''}
-                  <span>{classLine(actor)} · {placeOf(actor)}</span>
-                  {absent && <span id={`${absentId}-${actor.gladiatorId}`}>Not in the camp right now.</span>}
+                  <span>{resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`}</span>
+                  {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>{resting ? restingText(actor.name) : 'Not in the camp right now.'}</span>}
                 </p>
                 {away ? (actor.activityId ? (
                   <span className={styles.actions}>

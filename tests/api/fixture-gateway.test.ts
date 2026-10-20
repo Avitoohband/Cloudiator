@@ -10,6 +10,38 @@ test('fixture commands cannot mutate even the local owner preview', async () => 
   });
   expect(result).toEqual({ ok: false, code: 'unavailable' });
   expect((await gateway.owner()).schedule).toEqual(before.schedule);
+  // Task 23.9: the preview answers the owner's presence (no receipt), which changes nothing it shows.
+  expect(await gateway.sendPresence()).toEqual({ ok: true });
+  expect(await gateway.owner()).toEqual(before);
+});
+
+test('fixture preview: a gladiator resting at home, and with ?as=resting the owner resting until its presence', async () => {
+  const { RESTING_ACTOR, RESTING_PROFILE } = await import('../fixtures/resting');
+  // Otho rests at home in the default preview's world: public, with no activity (Task 23.8's PublicActor.resting).
+  const world = await createFixtureGateway().world();
+  const otho = world.actors.find(a => a.resting)!;
+  expect(otho).toEqual(RESTING_ACTOR);
+  expect(otho).toMatchObject({ name: 'Otho', location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null });
+  expect(world.actors.filter(a => a.resting)).toHaveLength(1);
+  expect(await createFixtureGateway().profile(otho.gladiatorId)).toEqual(RESTING_PROFILE);
+  // The resting preview: Aster rests at home in the current slot. Before its first presence the owner state cannot say
+  // when it returns; after it, the next slot's boundary (OwnerState.restingUntilSlot, processedSlotIndex + 1).
+  const resting = createFixtureGateway({ resting: true });
+  const restingWorld = await resting.world();
+  const aster = restingWorld.actors.find(a => a.name === 'Aster')!;
+  expect(aster).toMatchObject({ resting: true, location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null });
+  expect(restingWorld.actors.filter(a => a.resting)).toHaveLength(2);
+  const before = await resting.owner();
+  expect(before).toMatchObject({ currentActivity: null, processedSlotIndex: restingWorld.slotIndex, restingUntilSlot: null });
+  expect(await resting.sendPresence()).toEqual({ ok: true });
+  const after = await resting.owner();
+  expect(after.restingUntilSlot).toBe(restingWorld.slotIndex + 1);
+  expect({ ...after, restingUntilSlot: null }).toEqual(before);
+  // Each preview keeps its own owner: a new one starts with no presence yet, and the default preview never rests.
+  expect((await createFixtureGateway({ resting: true }).owner()).restingUntilSlot).toBeNull();
+  const plain = createFixtureGateway();
+  await plain.sendPresence();
+  expect(await plain.owner()).toMatchObject({ restingUntilSlot: null, currentActivity: { kind: 'training' } });
 });
 
 test('fixture owner reads cannot share mutable state with callers', async () => {
@@ -24,8 +56,8 @@ test('fixture owner reads cannot share mutable state with callers', async () => 
 test('fixture public actors omit private owner management state', async () => {
   const gateway = createFixtureGateway();
   const world = await gateway.world();
-  // The owner, plus the current slot's Arena entrants (Task 17).
-  expect(world.actors).toHaveLength(14);
+  // The owner, the current slot's Arena entrants (Task 17) and a gladiator resting at home (Task 23.9).
+  expect(world.actors).toHaveLength(15);
   const actor = world.actors[0];
   expect(actor.name).toBe('Aster');
   expect(actor.location).toBe('training');
@@ -34,7 +66,8 @@ test('fixture public actors omit private owner management state', async () => {
     // The camp projection never carries a battle log.
     expect(a.visibleStage?.battleLog).toBeUndefined();
   }
-  expect(world.actors.slice(1).every(a => a.location === 'arena' && a.visibleStage?.kind === 'staging')).toBe(true);
+  expect(world.actors.slice(1, 14).every(a => a.location === 'arena' && a.visibleStage?.kind === 'staging')).toBe(true);
+  expect(world.actors[14]).toMatchObject({ name: 'Otho', resting: true });
   const revision = await gateway.revision();
   // The fixture world's slot is published (Task 23.2's published slot; Task 23.4, C5).
   expect(world.publishedSlotIndex).toBe(world.slotIndex);

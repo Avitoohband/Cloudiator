@@ -237,6 +237,30 @@ describe('actor routines', () => {
     expect(withDemoCrowd(base).actors.slice(base.actors.length).some(a => a.location === 'arena')).toBe(false);
   });
 
+  // Task 23.9 (Task 23.8's PublicActor.resting): a gladiator resting at home is neither in the camp nor away.
+  it('does not draw a resting gladiator in the camp', () => {
+    const rest = { location: 'camp' as const, activityId: null, activityStatus: 'idle' as const, startsAtMs: null, endsAtMs: null, resting: true };
+    const world = createDemoWorld(1_791_592_800_000, 44, 6);
+    const resting = [actor(990, 'camp', rest), actor(991, 'camp', rest)];
+    const { placements, away } = layoutCamp([...world.actors, ...resting], camp, world.slotIndex);
+    expect(placements.size).toBe(44);
+    expect(away).toHaveLength(6);
+    for (const a of resting) {
+      expect(placements.has(a.gladiatorId)).toBe(false);
+      expect(away.some(b => b.gladiatorId === a.gladiatorId)).toBe(false);
+    }
+    // Everyone else keeps the spot they would have without them.
+    const without = layoutCamp(world.actors, camp, world.slotIndex).placements;
+    for (const [id, p] of without) expect(`${placements.get(id)!.x},${placements.get(id)!.y}`, id).toBe(`${p.x},${p.y}`);
+    // A drawn gladiator that starts resting leaves the camp (its kept spot is not kept), and one that wakes is drawn again.
+    const sleeper = world.actors.find(a => without.has(a.gladiatorId))!;
+    const next = layoutCamp(world.actors.map(a => (a === sleeper ? { ...a, ...rest } : a)), camp, world.slotIndex, { previous: without });
+    expect(next.placements.has(sleeper.gladiatorId)).toBe(false);
+    expect(next.away.some(a => a.gladiatorId === sleeper.gladiatorId)).toBe(false);
+    const woke = layoutCamp(world.actors, camp, world.slotIndex, { previous: next.placements });
+    expect(woke.placements.has(sleeper.gladiatorId)).toBe(true);
+  });
+
   it('leaves everyone else in place when one gladiator arrives or leaves', () => {
     const world = createDemoWorld(1_791_592_800_000, 50, 6);
     const first = layoutCamp(world.actors, camp, world.slotIndex).placements;

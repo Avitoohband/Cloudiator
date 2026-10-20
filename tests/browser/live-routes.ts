@@ -84,9 +84,13 @@ export type LiveData = {
 export type LiveRequest = { table: string; reader: string | null; query: URLSearchParams };
 /** One Auth API call of a stored session: its path (`/auth/v1/logout`), query (`scope=local`) and reader. */
 export type AuthRequest = { path: string; reader: string | null; query: URLSearchParams };
+/** One owner's presence (Task 23.9) the transport answered: its operation id and reader. */
+export type PresenceRequest = { operationId: string; reader: string | null };
 export type LiveTransport = {
   /** Every Data API request so far, with the reader: a user id, or null for a visitor. */
   readonly requests: readonly LiveRequest[];
+  /** Every presence so far (answered `{ ok: true }`, as the Edge function answers a signed-in owner's). */
+  readonly presences: readonly PresenceRequest[];
   /** Every Auth API request so far (`/auth/v1/user`, `/auth/v1/logout`, `/auth/v1/token`). */
   readonly authRequests: readonly AuthRequest[];
   count(table: string): number;
@@ -138,8 +142,10 @@ const INVALID_READER = 'invalid-token';
 /**
  * Routes `${SUPABASE_URL}/**` for `context`: the public projections for visitors and signed-in readers alike, the owner
  * state and owner-only activity summaries for signed-in readers only (a visitor is refused, as `anon` is), and the
- * Auth calls of a stored session or of a test-only Google sign-in. Commands and any other request fail the test. Register a spec's own handler for
- * commands or special reads after this one; it runs first, and `route.fallback()` hands everything else here.
+ * Auth calls of a stored session or of a test-only Google sign-in, and a signed-in player's presence (Task 23.9: answered
+ * `{ ok: true }`, no receipt). Other commands and any other request fail the test. Register a spec's own handler for
+ * commands or special reads after this one; it runs first, and `route.fallback()` hands everything else here (a command
+ * handler hands a presence back with `isPresence`).
  */
 export async function routeLiveReads(context: BrowserContext, initial: LiveData): Promise<LiveTransport> {
   const data: LiveData = { ...initial };
@@ -148,6 +154,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
   const now = data.serverNowMs ?? (() => base + (Date.now() - started));
   const requests: LiveRequest[] = [];
   const authRequests: AuthRequest[] = [];
+  const presences: PresenceRequest[] = [];
   let failedLogouts = 0;
   let renewals = 0, renewalsAccepted = true;
   /** Access tokens issued by an accepted renewal: the server takes them even while rejecting stored sessions. */
@@ -179,6 +186,11 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
       }
       return auth(route, url, readerOf(request), rejecting && !renewed.has(bearerOf(request) ?? ''), google);
     }
+    if (url.pathname === '/functions/v1/game-command' && isPresence(request)) {
+      const command = request.postDataJSON() as { operationId: string };
+      presences.push({ operationId: command.operationId, reader: readerOf(request) });
+      return readerOf(request) === null ? json(route, { ok: false, code: 'unauthenticated' }, 401) : json(route, { ok: true });
+    }
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
     if (!table || request.method() !== 'GET') throw new Error(`Unexpected live transport request ${request.method()} ${url.pathname}`);
     const reader = readerOf(request);
@@ -202,6 +214,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
   });
   return {
     requests,
+    presences,
     authRequests,
     count: table => requests.filter(r => r.table === table).length,
     setWorld: next => { world = next; },
@@ -225,6 +238,15 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     serverNowMs: now,
     googleUser: google.user,
   };
+}
+
+/**
+ * Whether a request is the owner's presence (Task 23.9), which a signed-in player's page sends on its own: a spec's command
+ * handler hands it back to `routeLiveReads` with `route.fallback()`, so its own command list holds only what it is about.
+ */
+export function isPresence(request: Request): boolean {
+  if (request.method() !== 'POST') return false;
+  try { return (request.postDataJSON() as { kind?: unknown } | null)?.kind === 'presence'; } catch { return false; }
 }
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) });

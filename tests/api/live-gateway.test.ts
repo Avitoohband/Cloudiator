@@ -124,3 +124,46 @@ test.each([['a visitor', null], ['a signed-in reader', { user: { id: 'first' }, 
     expect(requests).toHaveLength(8);
     expect(sent).not.toHaveBeenCalled();
   });
+
+// Task 23.9: the owner's activity signal (Task 23.8's `presence` command), answered with no receipt.
+test('sends each presence with a fresh operation id, takes an answer without a receipt, and never throws', async () => {
+  // Without a configured backend, a visitor, or a session that has expired: refused locally, nothing sent.
+  const sent: { url: string; body: Record<string, unknown>; auth: string | null }[] = [];
+  const answers: (() => Response)[] = [];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    sent.push({ url: String(url), body: JSON.parse(String(init.body)), auth: new Headers(init.headers).get('Authorization') });
+    return answers.shift()!();
+  });
+  expect(await createLiveGateway().sendPresence()).toEqual({ ok: false, code: 'unavailable' });
+  api(null);
+  expect(await createLiveGateway().sendPresence()).toEqual({ ok: false, code: 'unauthenticated' });
+  api({ user: { id: 'first' }, access_token: 'first', expires_at: Math.floor(Date.now() / 1000) - 1 } as Session);
+  expect(await createLiveGateway().sendPresence()).toEqual({ ok: false, code: 'unauthenticated' });
+  expect(sent).toEqual([]);
+
+  api({ user: { id: 'first' }, access_token: 'first', expires_at: Math.floor(Date.now() / 1000) + 3600 } as Session);
+  const gateway = createLiveGateway();
+  const json = (body: unknown, status = 200) => () => new Response(JSON.stringify(body), { status });
+  answers.push(json({ ok: true }), json({ ok: true }), json({ ok: false, code: 'rate-limited', retryAfterMs: 1000 }, 429),
+    json({ ok: true }, 500), json({ ok: false, code: 'not-a-code' }, 409), () => { throw new TypeError('network'); }, () => new Response('not json'));
+  const results = [];
+  for (let i = 0; i < 7; i++) results.push(await gateway.sendPresence());
+  expect(results).toEqual([{ ok: true }, { ok: true }, { ok: false, code: 'rate-limited', retryAfterMs: 1000 },
+    { ok: false, code: 'unavailable' }, { ok: false, code: 'unavailable' }, { ok: false, code: 'unavailable' }, { ok: false, code: 'unavailable' }]);
+  // The authenticated command endpoint, with only the kind and a new operation id each time (never reused, even after a failure).
+  expect(sent).toHaveLength(7);
+  for (const request of sent) {
+    expect(request.url).toMatch(/\/functions\/v1\/game-command$/);
+    expect(request.auth).toBe('Bearer first');
+    expect(Object.keys(request.body).sort()).toEqual(['kind', 'operationId']);
+    expect(request.body.kind).toBe('presence');
+    expect(request.body.operationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  }
+  expect(new Set(sent.map(request => request.body.operationId)).size).toBe(7);
+  // A presence is not a receipted command: `command()` still refuses it locally, and an ordinary command still needs its receipt.
+  expect(await gateway.command({ kind: 'presence', operationId: 'd43f7844-52e0-4302-b8e4-740035047765' })).toEqual({ ok: false, code: 'unavailable' });
+  answers.push(json({ ok: true }));
+  expect(await gateway.command({ kind: 'set-tournament-opt-in', operationId: 'd43f7844-52e0-4302-b8e4-740035047765', enabled: true }))
+    .toEqual({ ok: false, code: 'unavailable' });
+  expect(sent).toHaveLength(8);
+});

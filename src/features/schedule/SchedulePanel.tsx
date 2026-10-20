@@ -9,6 +9,7 @@ import { RULES_V1 } from '@domain/rules-v1';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { useOutcomeFocus } from '../shell/focus-lost';
+import { slotTimeText } from './slot-time';
 
 const phases = ['morning', 'afternoon', 'evening'] as const;
 const choiceKey = (choice: ActivityChoice) => choice.kind === 'expedition' ? `expedition:${choice.expeditionId}` : choice.kind;
@@ -98,7 +99,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
         <option value="training">Training</option><option value="rest">Rest</option><option value="arena">Arena</option>
         {Object.values(CATALOG_V1.expeditions).map(entry => <option key={entry.id} value={`expedition:${entry.id}`} disabled={owner.progression.level < entry.requiredLevel}>{entry.name} · Level {entry.requiredLevel}</option>)}
       </select>
-      {slot !== null && <p>Estimated next start: {new Date(nextPhaseStart(phase, slot * SLOT_MS)).toLocaleString()}</p>}
+      {slot !== null && <p>Estimated next start: {slotTimeText(nextPhaseStart(phase, slot * SLOT_MS))}</p>}
       <button onClick={() => void save(phase)} disabled={busy} aria-describedby={answered?.phase === phase && (message || error) ? outcomeId : undefined}>Save {phase}</button>
     </article>)}</div>
     <p className="muted">The server confirms the effective time when you save.</p>

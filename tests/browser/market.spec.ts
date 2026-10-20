@@ -7,7 +7,7 @@ import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 import { ARENA_OWNER } from '../fixtures/arena-build';
 import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
-import { SUPABASE_URL, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
+import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
@@ -113,7 +113,8 @@ async function marketFlow(context: BrowserContext): Promise<Flow> {
   }
   await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
     const request = route.request();
-    if (request.method() !== 'POST') return route.fallback();
+    // The player's presence (Task 23.9) is the live transport's.
+    if (request.method() !== 'POST' || isPresence(request)) return route.fallback();
     const command = request.postDataJSON() as GameCommand;
     commands.push(command);
     expect(request.headers().authorization).toMatch(/^Bearer /);
@@ -498,7 +499,7 @@ test('never takes a focus the player moved while a keyboard trade was pending', 
   const held = new Promise<void>(resolve => { release = resolve; });
   let sent = false;
   await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
-    if (route.request().method() === 'POST') { sent = true; await held; }
+    if (route.request().method() === 'POST' && !isPresence(route.request())) { sent = true; await held; }
     await route.fallback();
   });
   const market = await openMarket(page);

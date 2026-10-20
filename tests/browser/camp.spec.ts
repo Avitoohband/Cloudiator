@@ -48,7 +48,8 @@ test.describe('living isometric camp', () => {
     await openCamp(page);
     const state = await campState(page);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors.length)).toBeLessThanOrEqual(50);
-    expect({ players: state.players, ambientNpcs: state.ambientNpcs, away: state.away }).toEqual({ players: 44, ambientNpcs: 6, away: 6 });
+    // 50 public rows: 6 away, and 44 in the camp, of whom Otho rests at home and is not drawn (Task 23.9).
+    expect({ players: state.players, ambientNpcs: state.ambientNpcs, away: state.away }).toEqual({ players: 43, ambientNpcs: 6, away: 6 });
     const posts = npcPostTiles();
     const players = state.actors.filter(a => a.kind === 'player');
     expect(new Set(players.map(a => a.location)).size).toBeGreaterThanOrEqual(4);
@@ -389,7 +390,7 @@ test.describe('living isometric camp', () => {
     }
     await page.waitForFunction(id => !window.__cloudiatorCamp!.state()!.actors.some(a => a.id === id), leaver.id, { timeout: 40_000 });
     const final = await campState(page);
-    expect(final.players).toBe(44);
+    expect(final.players).toBe(43);
     expect(final.away).toBe(6);
   });
 

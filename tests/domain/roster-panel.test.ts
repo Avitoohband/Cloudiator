@@ -47,6 +47,34 @@ describe('Gladiators', () => {
     expect(unknown).toContain('On an expedition');
   });
 
+  // Task 23.9 (Task 23.8's PublicActor.resting, the approved copy): a resting gladiator is listed, not drawn in the camp.
+  it('shows everyone "Resting at home: back when {name}\'s owner returns." in a resting gladiator\'s row', () => {
+    const otho: PublicActor = { ...actor('Otho', 'camp'), activityStatus: 'idle', startsAtMs: null, endsAtMs: null, resting: true };
+    const line = "Resting at home: back when Otho's owner returns.";
+    const html = panel({ world: { ...WORLD, actors: [...WORLD.actors, otho] } }).replace(/&#x27;/g, "'");
+    const row = /<li[^>]*>(?:(?!<\/li>).)*aria-label="Profile: Otho"(?:(?!<\/li>).)*<\/li>/.exec(html)![0];
+    expect(row).toContain(line);
+    // It is said once: the class line names no other place, and the row does not add "Not in the camp right now."
+    expect(row.split(line)).toHaveLength(2);
+    expect(row).toContain('Guardian · Level 1 · Bronze league<');
+    expect(row).not.toContain('Not in the camp right now.');
+    // Its Find and Follow stay, disabled, with that sentence as their reason.
+    for (const label of ['Find Otho', 'Follow Otho']) {
+      const b = button(html, label);
+      expect(b, label).toContain('disabled');
+      const id = /aria-describedby="([^"]+)"/.exec(b)![1];
+      expect(new RegExp(`id="${id}"[^>]*>([^<]*)<`).exec(html)![1]).toBe(line);
+    }
+    // Even a stale roster that still lists it as drawn does not offer to find it.
+    const stale = panel({ world: { ...WORLD, actors: [...WORLD.actors, otho] }, roster: { ...ROSTER, inCamp: [...ROSTER.inCamp, otho.gladiatorId] } });
+    expect(button(stale, 'Find Otho')).toContain('disabled');
+    // While the camp view is unavailable the rows name that reason, and the resting sentence still says where it is.
+    const unavailable = panel({ world: { ...WORLD, actors: [otho] }, sceneStatus: 'unavailable' }).replace(/&#x27;/g, "'");
+    expect(unavailable).toContain(line);
+    const reason = /aria-describedby="([^"]+)"/.exec(button(unavailable, 'Find Otho'))![1];
+    expect(new RegExp(`id="${reason}"[^>]*>([^<]*)<`).exec(unavailable)![1]).toContain('The camp view is unavailable');
+  });
+
   it('opens each gladiator’s profile card from its name (the keyboard path of a camp click)', () => {
     const html = panel();
     for (const name of ['Aster', 'Brutus', 'Corvina']) expect(html).toContain(`aria-label="Profile: ${name}"`);

@@ -12,7 +12,7 @@ import { EXPEDITION_FIXTURES } from '../fixtures/expedition-ids';
 import { MARKET_ROWS } from '../fixtures/market';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
-import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession, testUser } from './live-routes';
+import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
@@ -48,7 +48,8 @@ async function livePlayer(page: Page, owner: OwnerState = structuredClone(ARENA_
   const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'live-1' }, owner, market: MARKET_ROWS.map(o => structuredClone(o)) });
   const commands: GameCommand[] = [];
   await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
-    if (route.request().method() !== 'POST') return route.fallback();
+    // The player's presence (Task 23.9) is the live transport's.
+    if (route.request().method() !== 'POST' || isPresence(route.request())) return route.fallback();
     commands.push(route.request().postDataJSON() as GameCommand);
     // Every command is refused as invalid input: these checks are about how a refusal is shown, never about its effect.
     return route.fulfill({ status: 409, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'invalid' }) });

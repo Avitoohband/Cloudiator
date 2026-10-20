@@ -46,25 +46,14 @@ import { pathToFileURL } from 'node:url';
 /** The words tests/browser/fixtures.ts adds to a failed test whose request failed in the host's network stack (host-faults.ts). */
 export const HOST_FAULT_MARKER = 'Probable host fault:';
 
-/** Failures that are known, named and owned. They make the gate exit 2 (blocked), never 0. */
-export const KNOWN_BLOCKERS = Object.freeze([Object.freeze({
-  id: 'database-budget',
-  name: 'database budget',
-  owner: 'Task 23.7 (Avi\'s decision A + C + D, 2026-10-19: trims, a 14-day idle pause, a 500 MB budget with a 400 MB warning)',
-  file: 'tests/db/capacity.test.ts',
-  test: /measures database growth/,
-  /**
-   * One failure of the case is the blocker when it is one of its database budget checks with a measured share of at least 1
-   * (a finite number: `expected NaN …` is a broken measurement, not the blocker). Any other failure of it is a real failure.
-   * @param {string} message the first line of the error
-   */
-  matches(message) {
-    const share = /^(?:AssertionError: )?database (?:at 90 days|after one year), [^:]+: expected (\S+) to be less than 1$/.exec(message)?.[1];
-    const value = share === undefined ? NaN : Number(share);
-    return Number.isFinite(value) && value >= 1;
-  },
-  evidence: 'docs/operations/release-evidence.md, "Lane A: capacity"',
-})]);
+/**
+ * Failures that are known, named and owned. They make the gate exit 2 (blocked), never 0. Each entry is
+ * `{ id, name, owner, file, test: RegExp (the test's full name), matches(firstLineOfError): boolean, evidence }`.
+ * Empty: the database budget (owner Task 23.7) was the only one; Task 23.7 cleared it (M21, the 500 MB budget), and Task 23.8
+ * retired it, so a capacity budget failure is an ordinary failure (exit 1).
+ * @type {readonly { id: string, name: string, owner: string, file: string, test: RegExp, matches: (message: string) => boolean, evidence: string }[]}
+ */
+export const KNOWN_BLOCKERS = Object.freeze([]);
 
 /**
  * @typedef {{ id: string, title: string, display: string, guide?: string, command?: string, args?: string[], shell?: boolean,
@@ -207,7 +196,7 @@ export function classifyBrowser(report) {
  * io: exec(step) → exit code; settleEdge() → { ok, startedAt, recreated, files, waitedMs, note }; edgeStartedAt() → string|null;
  * readDbReport() → the gate reporter's report or null; readBrowserReport(step) → Playwright's JSON report or null; log(text).
  */
-export async function runGate(steps, io) {
+export async function runGate(steps, io, blockers = KNOWN_BLOCKERS) {
   const results = [];
   const statusOf = (id) => results.find(r => r.id === id)?.status;
   for (const [index, step] of steps.entries()) {
@@ -221,7 +210,7 @@ export async function runGate(steps, io) {
       results.push({ ...base, status: edge.ok ? 'passed' : 'infrastructure', durationMs: Date.now() - started, note: edgeNote(edge), edge });
       continue;
     }
-    if (step.kind === 'db') { results.push({ ...base, ...(await runDatabase(step, io)), durationMs: Date.now() - started }); continue; }
+    if (step.kind === 'db') { results.push({ ...base, ...(await runDatabase(step, io, blockers)), durationMs: Date.now() - started }); continue; }
     if (step.kind === 'browser') { results.push({ ...base, ...(await runBrowser(step, io)), durationMs: Date.now() - started }); continue; }
     const code = await io.exec(step);
     results.push({ ...base, status: code === 0 ? 'passed' : 'failed', durationMs: Date.now() - started, note: code === 0 ? '' : `exit ${code}` });
@@ -248,7 +237,7 @@ async function runBrowser(step, io) {
 }
 /** The approved database rerun (verification-gates.md): exactly once, after the Edge container changed during a run. */
 const DB_RERUNS = 1;
-async function runDatabase(step, io) {
+async function runDatabase(step, io, blockers) {
   const discarded = [];
   for (let attempt = 0; attempt <= DB_RERUNS; attempt++) {
     if (attempt > 0) {
@@ -261,9 +250,9 @@ async function runDatabase(step, io) {
     const after = io.edgeStartedAt();
     const report = io.readDbReport();
     if (before !== after) { discarded.push(`${before} -> ${after}`); continue; }
-    const db = classifyDb(report);
+    const db = classifyDb(report, blockers);
     const status = code !== 0 && db.status === 'passed' ? 'failed' : db.status;
-    const names = [...new Set(db.blocked.map(b => KNOWN_BLOCKERS.find(k => k.id === b.blocker)?.name ?? b.blocker))];
+    const names = [...new Set(db.blocked.map(b => blockers.find(k => k.id === b.blocker)?.name ?? b.blocker))];
     const note = [`${db.passed} passed`, db.failed && `${db.failed} failed`, names.length && `known blocker: ${names.join(', ')}`,
       code !== 0 && status === 'failed' && !db.failed && !db.failures.length && `exit ${code}`,
       `Edge container unchanged (${after})`, discarded.length && `${discarded.length} run discarded (Edge recreated: ${discarded.join('; ')})`]
@@ -274,7 +263,7 @@ async function runDatabase(step, io) {
 }
 
 /** The summary text and exit code. */
-export function summarize(results) {
+export function summarize(results, blockers = KNOWN_BLOCKERS) {
   const failed = results.filter(r => r.status === 'failed' || r.status === 'infrastructure');
   const blocked = results.filter(r => r.status === 'blocked');
   const status = failed.length ? 'failed' : blocked.length ? 'blocked' : 'passed';
@@ -288,7 +277,7 @@ export function summarize(results) {
     for (const f of r.db?.failures ?? []) lines.push(`      failed: ${f.file ? `${f.file.replace(/^.*?(tests\/)/, '$1')} > ` : ''}${f.test}: ${f.message}`);
   }
   const ids = new Set(blocked.flatMap(r => r.db?.blocked.map(b => b.blocker) ?? []));
-  for (const blocker of KNOWN_BLOCKERS.filter(b => ids.has(b.id))) {
+  for (const blocker of blockers.filter(b => ids.has(b.id))) {
     lines.push(`Known blocker (not a pass): ${blocker.name} (${blocker.file}). Owner: ${blocker.owner}. Evidence: ${blocker.evidence}.`);
   }
   lines.push(`Result: ${status.toUpperCase()}${failed.length ? ` (${failed.length} step${failed.length === 1 ? '' : 's'} failed)` : ''}`

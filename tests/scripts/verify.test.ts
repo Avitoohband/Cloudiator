@@ -8,8 +8,9 @@ import { HOST_FAULT_MARKER } from '../browser/host-faults.ts';
 
 // Task 23.6 (R3): `npm run verify` runs every gate of the approved docs/operations/verification-gates.md, in its order, one
 // after another, runs every step whose input is valid even after another one failed, and ends with one summary. The capacity
-// case runs with CAPACITY_GATE=1; its database budget is a known blocker (Task 23.7) that is reported by name, never as a pass,
-// and only when nothing else failed (fix round 1, Important 1). A database run during which the Edge container was recreated is
+// case runs with CAPACITY_GATE=1. A known blocker is reported by name, never as a pass, and only when nothing else failed (fix
+// round 1, Important 1); the database budget was one until Task 23.7 cleared it, and Task 23.8 retired it, so the list is empty
+// and the mechanism's tests use their own fixture list. A database run during which the Edge container was recreated is
 // discarded and run exactly once more (C22). A browser failure beside a host network fault is labelled, never rerun (fix round
 // 1, Important 3). Pure tests with a fake runner, plus the Edge refresh on a scratch folder (Windows).
 
@@ -39,6 +40,23 @@ function dbReport(tests: Test[], extra: { suiteErrors?: Record<string, string[]>
 const SUITE = 'Task 23.3: capacity against the free-tier budgets';
 const CAPACITY = { file: 'tests/db/capacity.test.ts', name: 'measures database growth, invocations and egress over accelerated boundaries with the real worker', suites: [SUITE] };
 const BUDGET_FAILURES = ['database at 90 days, mixed schedules: expected 1.781 to be less than 1', 'database after one year, new-character schedule: expected 2.274 to be less than 1'];
+/**
+ * A fixture known-blocker list (Task 23.8): the mechanism keeps its tests now that the gate's own list is empty. It has the shape
+ * the retired database-budget blocker had: a named budget check of the capacity case, with a finite measured share of at least 1.
+ */
+const FIXTURE_BLOCKERS = [{
+  id: 'fixture-budget',
+  name: 'fixture budget',
+  owner: 'Task F (a fixture owner)',
+  file: 'tests/db/capacity.test.ts',
+  test: /measures database growth/,
+  matches(message: string) {
+    const share = /^(?:AssertionError: )?database (?:at 90 days|after one year), [^:]+: expected (\S+) to be less than 1$/.exec(message)?.[1];
+    const value = share === undefined ? NaN : Number(share);
+    return Number.isFinite(value) && value >= 1;
+  },
+  evidence: 'a fixture evidence section',
+}];
 
 /** A Playwright JSON report: the failed tests and their error messages (one test per entry). */
 function browserReport(failed: string[][]) {
@@ -151,41 +169,49 @@ describe('the database result', () => {
     expect(classifyDb(dbReport([{ name: 'a' }, { name: 'b' }]))).toMatchObject({ status: 'passed', passed: 2, failed: 0 });
   });
 
-  it('names the database budget as the known blocker when it is the only failure', () => {
-    const result = classifyDb(dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }]));
+  it('fails a database budget failure: Task 23.7 cleared the budget, so it is no longer a known blocker (Task 23.8)', () => {
+    expect(KNOWN_BLOCKERS).toEqual([]);
+    for (const errors of [BUDGET_FAILURES, ['database at 90 days, mixed schedules: expected 1 to be less than 1']]) {
+      const result = classifyDb(dbReport([{ name: 'a' }, { ...CAPACITY, errors }]));
+      expect(result, errors[0]).toMatchObject({ status: 'failed', passed: 1, failed: 1, blocked: [] });
+      expect(result.failures).toEqual([expect.objectContaining({ test: expect.stringContaining('measures database growth'), message: errors[0] })]);
+    }
+  });
+
+  it('names a known blocker when it is the only failure', () => {
+    const result = classifyDb(dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }]), FIXTURE_BLOCKERS);
     expect(result).toMatchObject({ status: 'blocked', passed: 1, failed: 0 });
-    expect(result.blocked).toEqual([expect.objectContaining({ blocker: 'database-budget' })]);
-    expect(KNOWN_BLOCKERS.find(b => b.id === 'database-budget')).toMatchObject({ name: 'database budget', owner: expect.stringContaining('Task 23.7') });
+    expect(result.blocked).toEqual([expect.objectContaining({ blocker: 'fixture-budget' })]);
   });
 
   it('fails a run with any other failure, also when the blocker fails beside it', () => {
-    expect(classifyDb(dbReport([{ name: 'a', errors: ['expected 1 to be 2'] }, { ...CAPACITY, errors: BUDGET_FAILURES }]))).toMatchObject({ status: 'failed', failed: 1 });
+    expect(classifyDb(dbReport([{ name: 'a', errors: ['expected 1 to be 2'] }, { ...CAPACITY, errors: BUDGET_FAILURES }]), FIXTURE_BLOCKERS)).toMatchObject({ status: 'failed', failed: 1 });
     // Another budget in the same capacity case is not the known blocker.
-    expect(classifyDb(dbReport([{ ...CAPACITY, errors: [...BUDGET_FAILURES, 'raw egress, 31 days: expected 1.2 to be less than 1'] }]))).toMatchObject({ status: 'failed' });
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: [...BUDGET_FAILURES, 'raw egress, 31 days: expected 1.2 to be less than 1'] }]), FIXTURE_BLOCKERS)).toMatchObject({ status: 'failed' });
     // A module that failed outside its tests (an import, a top-level hook) is a failure.
-    expect(classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { moduleErrors: ['afterAll hook timed out'] }))).toMatchObject({ status: 'failed' });
-    expect(classifyDb(null)).toMatchObject({ status: 'failed' });
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { moduleErrors: ['afterAll hook timed out'] }), FIXTURE_BLOCKERS)).toMatchObject({ status: 'failed' });
+    expect(classifyDb(null, FIXTURE_BLOCKERS)).toMatchObject({ status: 'failed' });
   });
 
   it('fails a describe-level hook failure beside the blocker (its tests are skipped, not failed)', () => {
-    const result = classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { suiteErrors: { 'Task 22.2: recovery': ['beforeAll: connection refused'] } }));
+    const result = classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { suiteErrors: { 'Task 22.2: recovery': ['beforeAll: connection refused'] } }), FIXTURE_BLOCKERS);
     expect(result).toMatchObject({ status: 'failed' });
     expect(result.failures).toEqual([expect.objectContaining({ test: 'Task 22.2: recovery', message: 'beforeAll: connection refused' })]);
     // A failed suite that encloses no blocked test is a failure even without its own errors.
-    expect(classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { suiteErrors: { 'an unrelated suite': [] } }))).toMatchObject({ status: 'failed' });
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { suiteErrors: { 'an unrelated suite': [] } }), FIXTURE_BLOCKERS)).toMatchObject({ status: 'failed' });
   });
 
   it('fails an unhandled error beside the blocker', () => {
-    const result = classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { unhandled: ['late unhandled failure'] }));
+    const result = classifyDb(dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], { unhandled: ['late unhandled failure'] }), FIXTURE_BLOCKERS);
     expect(result).toMatchObject({ status: 'failed' });
     expect(result.failures).toEqual([expect.objectContaining({ test: '(unhandled error)', message: 'late unhandled failure' })]);
   });
 
-  it('counts a budget check as the blocker only for a finite share of at least 1', () => {
+  it('counts a failure as the blocker only when the blocker matches every error', () => {
     for (const value of ['NaN', 'Infinity', '0.5', 'undefined']) {
-      expect(classifyDb(dbReport([{ ...CAPACITY, errors: [`database at 90 days, mixed schedules: expected ${value} to be less than 1`] }])), value).toMatchObject({ status: 'failed' });
+      expect(classifyDb(dbReport([{ ...CAPACITY, errors: [`database at 90 days, mixed schedules: expected ${value} to be less than 1`] }]), FIXTURE_BLOCKERS), value).toMatchObject({ status: 'failed' });
     }
-    expect(classifyDb(dbReport([{ ...CAPACITY, errors: ['database at 90 days, mixed schedules: expected 1 to be less than 1'] }]))).toMatchObject({ status: 'blocked' });
+    expect(classifyDb(dbReport([{ ...CAPACITY, errors: ['database at 90 days, mixed schedules: expected 1 to be less than 1'] }]), FIXTURE_BLOCKERS)).toMatchObject({ status: 'blocked' });
   });
 });
 
@@ -211,22 +237,33 @@ describe('the gate run', () => {
     expect(summary.text).toMatch(/failed\s+unit/);
   });
 
-  it('reports the database budget blocker by name and exits 2 when nothing else failed', async () => {
+  it('fails a database budget failure with exit 1, naming the failed check (Task 23.8)', async () => {
     const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }])] });
     const results = await runGate(gateSteps(), io);
-    expect(results.find(r => r.id === 'db')).toMatchObject({ status: 'blocked' });
+    expect(results.find(r => r.id === 'db')).toMatchObject({ status: 'failed' });
     const summary = summarize(results);
+    expect(summary).toMatchObject({ status: 'failed', exitCode: 1 });
+    expect(summary.text).toContain('database at 90 days, mixed schedules: expected 1.781 to be less than 1');
+    expect(summary.text).not.toContain('Known blocker');
+  });
+
+  it('reports a known blocker by name and exits 2 when nothing else failed', async () => {
+    const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }])] });
+    const results = await runGate(gateSteps(), io, FIXTURE_BLOCKERS);
+    expect(results.find(r => r.id === 'db')).toMatchObject({ status: 'blocked' });
+    expect(results.find(r => r.id === 'db')!.note).toContain('known blocker: fixture budget');
+    const summary = summarize(results, FIXTURE_BLOCKERS);
     expect(summary).toMatchObject({ status: 'blocked', exitCode: 2 });
-    expect(summary.text).toContain('database budget');
-    expect(summary.text).toContain('Task 23.7');
+    expect(summary.text).toContain('Known blocker (not a pass): fixture budget');
+    expect(summary.text).toContain('Task F (a fixture owner)');
   });
 
   it('exits 1 for a describe-hook failure or an unhandled error beside the blocker', async () => {
     for (const extra of [{ suiteErrors: { 'Task 22.2: recovery': ['beforeAll: connection refused'] } }, { unhandled: ['late unhandled failure'] }]) {
       const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ ...CAPACITY, errors: BUDGET_FAILURES }], extra)] });
-      const results = await runGate(gateSteps(), io);
+      const results = await runGate(gateSteps(), io, FIXTURE_BLOCKERS);
       expect(results.find(r => r.id === 'db'), JSON.stringify(extra)).toMatchObject({ status: 'failed' });
-      expect(summarize(results)).toMatchObject({ status: 'failed', exitCode: 1 });
+      expect(summarize(results, FIXTURE_BLOCKERS)).toMatchObject({ status: 'failed', exitCode: 1 });
     }
   });
 

@@ -67,7 +67,7 @@ const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack 
 
 /** A fake runner: exit codes by step id (0 when absent; a list is used up call by call), a stable Edge unless told otherwise. */
 function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: unknown[]; browserReports?: Record<string, unknown[]>;
-  starts?: (string | null)[]; edge?: { ok: boolean; note?: string }[] } = {}) {
+  starts?: (string | null)[]; edge?: { ok: boolean; note?: string; tolerated?: { count: number; examples: string[] } }[] } = {}) {
   const ran: string[] = [];
   const codeOf = (id: string) => { const c = options.codes?.[id]; return Array.isArray(c) ? c.shift() ?? 0 : c ?? 0; };
   const starts = [...(options.starts ?? [])];
@@ -78,7 +78,8 @@ function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: 
     ran,
     io: {
       exec: async (step: Step) => { ran.push(step.id); return codeOf(step.id); },
-      settleEdge: async () => { ran.push('settle'); const e = edges.shift() ?? { ok: true }; return { ok: e.ok, startedAt: started, recreated: false, files: 40, waitedMs: 30_000, note: e.note }; },
+      settleEdge: async () => { ran.push('settle'); const e = edges.shift() ?? { ok: true };
+        return { ok: e.ok, startedAt: started, recreated: false, files: 40, waitedMs: 30_000, note: e.note, ...(e.tolerated ? { tolerated: e.tolerated } : {}) }; },
       edgeStartedAt: () => { const next = starts.shift(); if (next !== undefined && next !== null) started = next; return started; },
       readDbReport: () => reports.shift() ?? null,
       readBrowserReport: (step: Step) => options.browserReports?.[step.id]?.shift() ?? null,
@@ -112,6 +113,9 @@ describe('the gate steps', () => {
     expect(rules).toMatch(/`npm run verify` \(`scripts\/verify\.mjs`\)/);
     for (const phrase of ['FILE_FLAG_OPEN_REPARSE_POINT', 'skipped and never descended into', 'must lie under the resolved `supabase/functions`',
       'fails the Edge step as an infrastructure fault', 'repeated at most once', 'no browser step is']) expect(rules, phrase).toContain(phrase);
+    // Task 24.0: the dependency cache's modification times are tolerated and reported; the check holds everywhere else.
+    for (const phrase of ['Observed 2026-10-20 (Task 24.0)', 'a modification-time change under `supabase/functions/node_modules` (Deno\'s dependency cache) is tolerated',
+      'reported in the Edge step note', 'everywhere else it still fails the step']) expect(rules, phrase).toContain(phrase);
   });
 
   it('run the capacity case with its budgets enforced, beside the whole database suite', () => {
@@ -287,6 +291,21 @@ describe('the gate run', () => {
     expect(summarize(results)).toMatchObject({ status: 'failed', exitCode: 1 });
   });
 
+  it('passes the Edge step when only the dependency cache changed during the refresh, and reports it in the step note (Task 24.0)', async () => {
+    const tolerated = { count: 7, examples: ['node_modules/.deno', 'node_modules/.deno/@supabase'] };
+    const { io, ran } = fakeIo({ edge: [{ ok: true, tolerated }] });
+    const results = await runGate(gateSteps(), io);
+    expect(ran).toContain('db');
+    const edge = results.find(r => r.id === 'edge')!;
+    expect(edge.status).toBe('passed');
+    expect(edge.note).toContain('modification time changed under the dependency cache (tolerated) on 7 entries: node_modules/.deno, node_modules/.deno/@supabase, …');
+    expect(summarize(results)).toMatchObject({ status: 'passed', exitCode: 0 });
+    // All entries listed: no ellipsis.
+    const all = await runGate(gateSteps(), fakeIo({ edge: [{ ok: true, tolerated: { count: 1, examples: ['node_modules/.deno'] } }] }).io);
+    expect(all.find(r => r.id === 'edge')!.note).toContain('on 1 entry: node_modules/.deno;');
+    expect(all.find(r => r.id === 'edge')!.note).not.toContain('…');
+  });
+
   it('skips the database tests when the Edge runtime does not settle or serve', async () => {
     const { io, ran } = fakeIo({ edge: [{ ok: false, note: 'the worker did not answer' }] });
     const results = await runGate(gateSteps(), io);
@@ -380,6 +399,72 @@ describe('the Edge access-time refresh (C22)', () => {
     const { base, root, inside } = scratch();
     try {
       expect(prepareEdge(root)).toMatchObject({ ok: true, files: 2, ...(windows ? { refreshed: inside.length, skipped: 0 } : {}) });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // Task 24.0 (Decision 10). Observed 2026-10-20: a gate run failed its Edge step because the modification time of
+  // `supabase/functions/node_modules/.deno` (Deno's dependency cache, `nodeModulesDir: "auto"`) changed during the walk, a
+  // concurrent write by a writer that was never identified. `concurrentWrite` is the refresh's test seam: the walk changes that
+  // entry's modification time right after setting its access time, as a concurrent writer would.
+  /** The scratch tree plus a dependency cache like Deno's: root/node_modules/.deno/pkg/index.js. */
+  function withCache() {
+    const tree = scratch();
+    const cache = [join(tree.root, 'node_modules'), join(tree.root, 'node_modules', '.deno'), join(tree.root, 'node_modules', '.deno', 'pkg'),
+      join(tree.root, 'node_modules', '.deno', 'pkg', 'index.js')];
+    mkdirSync(cache[2], { recursive: true });
+    writeFileSync(cache[3], 'export {};');
+    const old = new Date('2026-01-01T00:00:00Z');
+    for (const entry of [...cache, tree.root]) utimesSync(entry, old, old);
+    return { ...tree, cache, entries: [...tree.inside, ...cache], old };
+  }
+
+  it.skipIf(!windows)('tolerates a mid-walk modification-time change under node_modules/.deno, refreshes its access times and reports it', () => {
+    const { base, root, entries, cache, old } = withCache();
+    try {
+      const started = Date.now();
+      const refresh = refreshAccessTimes(root, { concurrentWrite: 'node_modules/.deno' });
+      expect(refresh).toEqual({ ok: true, count: entries.length, skipped: 0, tolerated: { count: 1, examples: ['node_modules/.deno'] } });
+      // The change did happen; the access time of the changed folder and of everything below it was still refreshed.
+      expect(statSync(cache[1], { bigint: true }).mtimeMs).toBeGreaterThan(BigInt(old.getTime()));
+      for (const entry of cache) expect(Number(statSync(entry, { bigint: true }).atimeNs / 1_000_000n), entry).toBeGreaterThanOrEqual(started - 2_000);
+      // The Edge preparation passes (it reads every file) and carries the report.
+      expect(prepareEdge(root, { concurrentWrite: 'node_modules/.deno' })).toMatchObject({ ok: true, files: 3, refreshed: entries.length, skipped: 0,
+        tolerated: { count: 1, examples: ['node_modules/.deno'] } });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(!windows)('tolerates a change to the cache folder itself and to a file inside it', () => {
+    const { base, root, entries } = withCache();
+    try {
+      for (const entry of ['node_modules', 'node_modules/.deno/pkg/index.js']) {
+        expect(refreshAccessTimes(root, { concurrentWrite: entry }), entry).toEqual({ ok: true, count: entries.length, skipped: 0, tolerated: { count: 1, examples: [entry] } });
+      }
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(!windows)('still fails a mid-walk modification-time change anywhere else, naming the entry', () => {
+    const { base, root } = withCache();
+    try {
+      // Look-alikes of the cache: a nested node_modules, and a sibling whose name only starts like it.
+      mkdirSync(join(root, '_shared', 'node_modules'));
+      mkdirSync(join(root, 'node_modules_old'));
+      const old = new Date('2026-01-01T00:00:00Z');
+      for (const entry of [join(root, '_shared', 'node_modules'), join(root, 'node_modules_old'), join(root, '_shared'), root]) utimesSync(entry, old, old);
+      for (const entry of ['_shared', '_shared/domain', '_shared/domain/types.ts', 'deno.json', '_shared/node_modules', 'node_modules_old']) {
+        // The temp folder may be spelled with its 8.3 short name; compare the entry's own tail.
+        const refresh = refreshAccessTimes(root, { concurrentWrite: entry });
+        expect(refresh, entry).toMatchObject({ ok: false, reason: expect.stringMatching(/^modification time changed: /) });
+        expect((refresh as { reason: string }).reason.endsWith(`\\${entry.replace(/\//g, '\\')}`), entry).toBe(true);
+      }
+      expect(prepareEdge(root, { concurrentWrite: '_shared/domain' })).toMatchObject({ ok: false, files: 0,
+        reason: expect.stringContaining('access-time refresh failed: modification time changed: ') });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(!windows)('reports no tolerated change when nothing changed during the walk', () => {
+    const { base, root, entries } = withCache();
+    try {
+      expect(refreshAccessTimes(root)).toEqual({ ok: true, count: entries.length, skipped: 0 });
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 });

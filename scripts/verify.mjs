@@ -21,7 +21,9 @@
  * and compares the start time before and after the run: a changed start time discards the run (an infrastructure fault) and
  * the run is repeated exactly once on a settled runtime. A refresh that fails (Windows) fails the Edge step as an
  * infrastructure fault, with its reason. Links (junctions, symbolic links) are skipped and never followed. System settings
- * are never changed.
+ * are never changed. Task 24.0 (observed 2026-10-20): a modification time that changes under supabase/functions/node_modules
+ * (Deno's dependency cache, `nodeModulesDir: "auto"`, written by processes other than this gate) is tolerated and reported in
+ * the Edge step note; the access times there are still refreshed, and the check is unchanged everywhere else.
  *
  * The database verdict comes from scripts/vitest-gate-reporter.mjs: `blocked` only when every failed test is a named known
  * blocker, every failed suite encloses one and has no error of its own, and the run had no module or unhandled error.
@@ -222,6 +224,9 @@ function edgeNote(edge) {
   if (!edge.ok && !edge.waitedMs) return [`container started ${edge.startedAt ?? 'never'}`, edge.note].filter(Boolean).join('; ');
   return [`container started ${edge.startedBefore && edge.startedBefore !== edge.startedAt ? `${edge.startedBefore} -> ` : ''}${edge.startedAt ?? 'never'}`,
     edge.refreshed !== undefined && `access times refreshed on ${edge.refreshed} files and folders (${edge.skipped} links skipped)`,
+    // Task 24.0: a dependency cache that another process wrote to during the walk is no fault (Decision 10), but it is said.
+    edge.tolerated && `modification time changed under the dependency cache (tolerated) on ${edge.tolerated.count} ${edge.tolerated.count === 1 ? 'entry' : 'entries'}: `
+      + `${edge.tolerated.examples.join(', ')}${edge.tolerated.count > edge.tolerated.examples.length ? ', …' : ''}`,
     `${edge.files} files pre-read`,
     `settled in ${Math.round(edge.waitedMs / 1000)} s`, `recreated while settling: ${edge.recreated ? 'yes' : 'no'}`, edge.note].filter(Boolean).join('; ');
 }
@@ -319,10 +324,17 @@ function startedAt(container) {
  *   FILE_FLAG_OPEN_REPARSE_POINT, so it never acts on what a link points to; SetFileTime changes the access time alone.
  * - A link (any reparse point: junction, symbolic link) is skipped and never descended into; every entry must lie under the
  *   resolved root; every entry's modification time is checked unchanged.
- * Returns { ok: true, count, skipped }, { ok: false, reason } when anything fails, or undefined off Windows.
+ * - The one exception (Task 24.0, Decision 10): the folder `node_modules` directly under the root and everything below it is a
+ *   dependency cache that other processes write. Its access times are refreshed like the rest, but a changed modification time
+ *   there is counted and reported, not a failure. A nested `node_modules` anywhere else is not the cache.
+ * Returns { ok: true, count, skipped, tolerated?: { count, examples (the first five, relative to `directory`) } },
+ * { ok: false, reason } when anything fails, or undefined off Windows.
+ * `options.concurrentWrite` is a test seam (the gate passes none): a path relative to `directory` whose modification time the
+ * walk changes right after setting its access time, as a concurrent writer would.
  * @param {string} directory
+ * @param {{ concurrentWrite?: string }} [options]
  */
-export function refreshAccessTimes(directory) {
+export function refreshAccessTimes(directory, options = {}) {
   if (process.platform !== 'win32') return undefined;
   const type = [
     'using System; using System.ComponentModel; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;',
@@ -341,6 +353,9 @@ export function refreshAccessTimes(directory) {
     '}',
   ].join(' ');
   const literal = directory.replace(/'/g, "''");
+  // Test seam (the gate passes none): the walk changes this entry's modification time right after setting its access time,
+  // as a concurrent writer would. A path relative to `directory`.
+  const simulate = options.concurrentWrite ? `'${options.concurrentWrite.replace(/\//g, '\\').replace(/'/g, "''")}'` : '$null';
   const script = [
     "$ErrorActionPreference='Stop'",
     'try {',
@@ -348,24 +363,39 @@ export function refreshAccessTimes(directory) {
     `  $top = Get-Item -LiteralPath '${literal}' -Force`,
     "  if ($top.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'the folder itself is a link' }",
     "  $root = $top.FullName.TrimEnd('\\')",
-    '  $now = [DateTime]::UtcNow.ToFileTimeUtc(); $script:n = 0; $script:skipped = 0',
+    '  $now = [DateTime]::UtcNow.ToFileTimeUtc(); $script:n = 0; $script:skipped = 0; $script:tolerated = 0; $script:examples = @()',
+    `  $simulate = ${simulate}`,
     '  function Visit($item) {',
     "    if (-not ($item.FullName -eq $root -or $item.FullName.StartsWith($root + '\\', [StringComparison]::OrdinalIgnoreCase))) { throw ('outside the folder: ' + $item.FullName) }",
     '    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { $script:skipped++; return }',
+    "    $rel = if ($item.FullName -eq $root) { '' } else { $item.FullName.Substring($root.Length + 1) }",
     '    $m = $item.LastWriteTimeUtc',
     '    [CloudiatorAccessTime]::Set($item.FullName, $now)',
-    "    if ((Get-Item -LiteralPath $item.FullName -Force).LastWriteTimeUtc -ne $m) { throw ('modification time changed: ' + $item.FullName) }",
+    '    if ($simulate -and $rel -eq $simulate) { (Get-Item -LiteralPath $item.FullName -Force).LastWriteTimeUtc = $m.AddSeconds(7) }',
+    '    if ((Get-Item -LiteralPath $item.FullName -Force).LastWriteTimeUtc -ne $m) {',
+    // The dependency cache (Deno, nodeModulesDir "auto") is written by processes that are not this gate: its changed times
+    // are counted and reported, not a failure. Everywhere else a changed modification time stops the refresh.
+    "      if ($rel -eq 'node_modules' -or $rel.StartsWith('node_modules\\', [StringComparison]::OrdinalIgnoreCase)) {",
+    '        $script:tolerated++',
+    '        if ($script:examples.Count -lt 5) { $script:examples += $rel }',
+    "      } else { throw ('modification time changed: ' + $item.FullName) }",
+    '    }',
     '    $script:n++',
     '    if ($item.PSIsContainer) { foreach ($child in @(Get-ChildItem -LiteralPath $item.FullName -Force)) { Visit $child } }',
     '  }',
     '  Visit $top',
-    '  "ok $($script:n) $($script:skipped)"',
+    '  foreach ($e in $script:examples) { "tolerated $e" }',
+    '  "ok $($script:n) $($script:skipped) $($script:tolerated)"',
     '} catch { "error $($_.Exception.Message)"; exit 3 }',
   ].join('\n');
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  const out = String(result.stdout ?? '').trim().split(/\r?\n/).at(-1) ?? '';
-  const ok = /^ok (\d+) (\d+)$/.exec(out);
-  if (result.status === 0 && ok) return { ok: true, count: Number(ok[1]), skipped: Number(ok[2]) };
+  const lines = String(result.stdout ?? '').trim().split(/\r?\n/);
+  const out = lines.at(-1) ?? '';
+  const ok = /^ok (\d+) (\d+) (\d+)$/.exec(out);
+  if (result.status === 0 && ok) {
+    const examples = lines.filter(line => line.startsWith('tolerated ')).map(line => line.slice('tolerated '.length).replace(/\\/g, '/'));
+    return { ok: true, count: Number(ok[1]), skipped: Number(ok[2]), ...(Number(ok[3]) ? { tolerated: { count: Number(ok[3]), examples } } : {}) };
+  }
   const reason = /^error (.*)$/.exec(out)?.[1] ?? (firstLine(result.stderr ?? '') || (result.error ? String(result.error.message) : `PowerShell exited ${result.status}`));
   return { ok: false, reason };
 }
@@ -373,15 +403,17 @@ export function refreshAccessTimes(directory) {
  * Prepares the Edge source for a database run: refreshes the access times (Windows) and reads every file. A failed refresh
  * makes the preparation fail with its reason.
  * @param {string} directory
+ * @param {{ concurrentWrite?: string }} [refreshOptions] the refresh's test seam
  */
-export function prepareEdge(directory) {
+export function prepareEdge(directory, refreshOptions = {}) {
   if (!existsSync(directory)) {
     const refresh = refreshAccessTimes(directory);
     return { ok: false, files: 0, reason: `access-time refresh failed: ${refresh && !refresh.ok ? refresh.reason : `no folder ${directory}`}` };
   }
-  const refresh = refreshAccessTimes(directory);
+  const refresh = refreshAccessTimes(directory, refreshOptions);
   if (refresh && !refresh.ok) return { ok: false, files: 0, reason: `access-time refresh failed: ${refresh.reason}` };
-  return { ok: true, files: preRead(directory), ...(refresh ? { refreshed: refresh.count, skipped: refresh.skipped } : {}) };
+  return { ok: true, files: preRead(directory), ...(refresh ? { refreshed: refresh.count, skipped: refresh.skipped,
+    ...(refresh.tolerated ? { tolerated: refresh.tolerated } : {}) } : {}) };
 }
 /** Reads every file under `directory` (contents discarded) and returns how many. */
 function preRead(directory) {
@@ -406,7 +438,7 @@ async function settleEdge({ container, probe }, { quietMs, timeoutMs }) {
   const startedBefore = startedAt(container);
   const prepared = prepareEdge('supabase/functions');
   if (!prepared.ok) return { ok: false, startedBefore, startedAt: startedBefore, recreated: false, files: 0, waitedMs: 0, note: prepared.reason };
-  const { refreshed, skipped, files } = prepared;
+  const { refreshed, skipped, files, tolerated } = prepared;
   const begin = Date.now();
   let last = startedAt(container), since = Date.now(), changed = false, served = false;
   while (Date.now() - begin < timeoutMs) {
@@ -416,7 +448,8 @@ async function settleEdge({ container, probe }, { quietMs, timeoutMs }) {
     if (now && Date.now() - since >= quietMs && await serves(probe)) { served = true; break; }
   }
   const serve = 'start `npx supabase functions serve --env-file .env.edge.local` in this worktree once the stack is healthy';
-  return { ok: served, startedBefore, startedAt: last, recreated: changed || startedBefore !== last, refreshed, skipped, files, waitedMs: Date.now() - begin,
+  return { ok: served, startedBefore, startedAt: last, recreated: changed || startedBefore !== last, refreshed, skipped, ...(tolerated ? { tolerated } : {}), files,
+    waitedMs: Date.now() - begin,
     note: served ? '' : last ? `the worker did not answer at ${probe} within ${Math.round(timeoutMs / 1000)} s (${serve})` : `no container ${container} (${serve})` };
 }
 

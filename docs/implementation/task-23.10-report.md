@@ -121,7 +121,7 @@ change the build" and a sample schedule), so these three come from `planning.spe
 
 - **A lone "AM" can wrap at 360 px.** In Chrome the space before AM or PM is an ordinary space, so a long line can break
   before it (the owner line in My gladiator reads `…schedule at 4:20` then `AM`). A no-break space in the time would stop it,
-  but that changes the text and the literal tests; not done. Say if Avi wants it.
+  but that changes the text and the literal tests; not done at first. Done in the follow-up below, at the controller's request.
 - **The shell renders once a minute.** `CampShell` (for the owner's resting line in Gladiators) uses `useMinuteNow`, which sets
   state at most once a minute; the camp scene is its own component. The browser suites passed with it.
 - **The same-day rule includes earlier times of the day.** A boundary earlier today (for example after the clock is moved
@@ -129,3 +129,44 @@ change the build" and a sample schedule), so these three come from `planning.spe
 - **Browser expectations are worked out in the page.** The only race is a clock within a second of local midnight when a case
   reads it; the midnight case holds the zone and clock.
 - **Skill upkeep.** Nothing reusable to change in a skill came out of this task.
+
+## Follow-up: keep a slot time on one line
+
+Controller request: the mobile owner-line shot wrapped `4:20` and `AM` onto two lines at 360 px. Commit `fix: keep a slot time on one line`.
+
+**The fix (`src/features/schedule/slot-time.ts`).** `slotTimeText` formats with `formatToParts` and joins the pieces of the time
+part (hour, minute, day period, in the locale's own order, with whatever literals sit between them) with U+00A0. What comes
+before the time (`tomorrow `, `Sat `, `Oct 26, `) keeps its ordinary space, so a line may still break before the time. All four
+forms are affected alike, and a locale that puts the day period first stays together too (`오후 4:20`).
+- `Intl` gives the space before the day period as an ordinary space from `format` (V8 maps U+202F to it for web compatibility)
+  but as U+202F from `formatToParts` (Node 22; Chrome may differ). The pieces are joined with U+00A0 either way, so the text
+  and its width are the same as before in every engine, instead of a narrower U+202F in some. No-break either way.
+- In the source the characters are written as `'\xA0'` and `/\s/`, never as the literal characters.
+
+**Tests, watched failing first for the right reason.**
+- `tests/domain/slot-time.test.ts` (now 10 cases): each of the four forms is the prefix plus `4:20`, U+00A0, `AM`; the time part
+  matches no breakable whitespace (any whitespace but U+00A0), the prefix ends in an ordinary space, noon, midnight and
+  afternoon times too, and the ko-KR order. They failed with the ordinary space (the text read identically); the earlier
+  wording cases now read the no-break space as an ordinary one through a `plain` helper.
+- `tests/browser/slot-time.ts` `expectTimeOnOneLine(page, locator, what)`: at 360 x 740 it takes a range over the first time in the
+  locator's text and requires that its client rects all start at one height (one line); the viewport is put back. In
+  `resting.spec.ts` it checks the owner line, the owner's own Gladiators row and its own profile card; in `planning.spec.ts`
+  the pending build's "Effective", the saved "Effective", and the three estimated starts (the midnight case). Before the fix the
+  owner line failed on both projects with 2 lines (`4:20 AM is on one line at 360 px: expected 1, received 2`).
+- Existing assertions that read text now read the no-break space as an ordinary one where they compare with written-out times
+  (`planning.spec.ts`'s `times`, `character-panel.test.ts`'s `text`, `activity-status.test.ts`'s time-only line).
+
+**Gates (same order, Lane B).**
+
+| Step | Result |
+|---|---|
+| `npm test` | 1,251 passed (65 files), 0 failed |
+| `npm run typecheck` | passed |
+| `node assets/source/build-assets.mjs --check`, `npm run build`, `npm run verify:static` | passed |
+| Dev browser suite (private config, port 3300) | 541 passed, 35 skipped, 0 failed (10.4 min) |
+| Isolated production build, `verify:static -- .next/browser-test` | passed |
+| Production gate (`PLAYWRIGHT_STATIC=true`, port 4173) | 34 passed, 542 skipped, 0 failed |
+| `git diff --check` | clean |
+
+**Screenshots refreshed** (overwritten in `task-23.10-shots/`, all 16 from the final dev run): the owner line now reads
+`Resting at home: back on your schedule at` and `4:20 AM` together on the next line, on desktop and mobile.

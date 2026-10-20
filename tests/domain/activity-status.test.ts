@@ -72,7 +72,8 @@ describe('activity status', () => {
     }
     // The wording follows the display time, not the boundary alone: a day or more ahead it is not the time of day alone.
     const early = boundary - 36 * 3_600_000;
-    const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(boundary);
+    // (The time's own space is a no-break space: see slot-time.test.ts.)
+    const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(boundary).replace(/\s/g, '\xA0');
     expect(activityStatus(resting, slot, early).label).toBe(lineAt(early));
     expect(activityStatus(resting, slot, early).label).not.toBe(`Resting at home: back on your schedule at ${timeOnly}`);
     expect(lineAt(boundary - 1)).toBe(`Resting at home: back on your schedule at ${timeOnly}`);

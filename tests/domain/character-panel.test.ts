@@ -32,7 +32,7 @@ describe('My gladiator', () => {
     const nowMs = SLOT * SLOT_MS + 40 * 60_000;
     const line = `Resting at home: back on your schedule at ${slotTimeText(boundary, nowMs)}`;
     const resting = panel(owner, nowMs);
-    expect(text(resting)).toContain(line);
+    expect(text(resting)).toContain(text(line)); // (`text` reads the time's no-break space as an ordinary one)
     // It is the activity line itself (a status), and nothing says the gladiator has an activity.
     expect(resting).toMatch(new RegExp(`role="status"[^>]*>${line.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}<`));
     expect(text(resting)).not.toMatch(/In progress|Scheduled|ends /);

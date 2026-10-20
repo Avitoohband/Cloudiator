@@ -9,7 +9,7 @@ import { RESTING_ACTOR, restingActor } from '../fixtures/resting';
 import { contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
 import { SLOT_MS, SUPABASE_URL, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot360 } from './review-shots';
-import { slotTime as slotTimeAt } from './slot-time';
+import { expectTimeOnOneLine, slotTime as slotTimeAt } from './slot-time';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -115,6 +115,7 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     await expect(activityLine(mine)).toHaveText(line);
     await expect(mine.getByText('Training at the practice yard')).toHaveCount(0);
     expect(await contrastIssues(mine), 'My gladiator while resting').toEqual([]);
+    await expectTimeOnOneLine(page, activityLine(mine), 'the owner line');
     await reviewShot360(page, testInfo, 'resting-owner-line', activityLine(mine));
     // Fix round 1 (review Important 1): the owner's own row, its Find and Follow, and its own card say the same line, never
     // the public "back when Aster's owner returns."; others keep the public sentence.
@@ -131,6 +132,7 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     }
     await expect(roster.getByText('Your gladiator is away from the camp.')).toHaveCount(0);
     expect(await contrastIssues(mineRow), 'the owner\'s own resting row').toEqual([]);
+    await expectTimeOnOneLine(page, mineRow, 'the owner\'s own row');
     await reviewShot360(page, testInfo, 'resting-own-gladiators-row', mineRow);
     await watchFocus(page);
     await mineRow.getByRole('button', { name: 'Profile: Aster', exact: true }).focus();
@@ -141,6 +143,7 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     await expect(fact(card, 'Now')).toHaveText(line);
     await expect(card).not.toContainText(ASTER);
     expect(await contrastIssues(card), 'the owner\'s own resting card').toEqual([]);
+    await expectTimeOnOneLine(page, fact(card, 'Now'), 'the owner\'s own card');
     await reviewShot360(page, testInfo, 'resting-own-profile-card', card);
     await page.keyboard.press('Escape');
     await expect(card).toHaveCount(0);

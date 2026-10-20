@@ -5,7 +5,7 @@ import type { GameCommand } from '../../supabase/functions/_shared/contracts/com
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
-import { slotTime } from './slot-time';
+import { expectTimeOnOneLine, slotTime } from './slot-time';
 
 async function planningFlow(context: BrowserContext) {
   let state = structuredClone(ownerFixture);
@@ -84,6 +84,7 @@ test('queues, confirms and cancels pending builds without optimistic current rep
   const effective = page.getByTestId('pending-build').getByText(/^Effective /);
   await expect(effective).toHaveText(`Effective ${await slotTime(page, (flow.processedSlotIndex + 1) * SLOT_MS, await clockNow(page))}`);
   await expect(effective).not.toContainText(/\d:\d\d:\d\d|\d\/\d/);
+  await expectTimeOnOneLine(page, effective, 'the pending build\'s effective time');
   await reviewShot360(page, testInfo, 'planning-build-effective', effective);
   await page.locator('.planning-form').screenshot({ path: testInfo.outputPath('planning.png') });
   await page.getByRole('button', { name: 'Cancel pending build' }).click();
@@ -125,6 +126,7 @@ test('edits future repeating phases and retries processing without local authori
   // The server's effective time, as a short local time, shown against the display clock (Task 23.10).
   const saved = page.getByRole('status').filter({ hasText: 'Effective' });
   await expect(saved).toHaveText(`Effective ${await slotTime(page, (flow.processedSlotIndex + 3) * SLOT_MS, await clockNow(page))} for morning and future occurrences.`);
+  await expectTimeOnOneLine(page, saved, 'the saved effective time');
   await reviewShot360(page, testInfo, 'planning-schedule-saved', saved);
   expect(flow.commands[0]).toEqual(flow.commands[1]);
   await expect(page.getByLabel('afternoon activity').locator('option[value="expedition:mountain"]')).toBeDisabled();
@@ -161,10 +163,12 @@ test.describe('estimated starts around local midnight', () => {
     const starts = page.locator('.planning-form p').filter({ hasText: /^Estimated next start:/ });
     await expect(starts).toHaveCount(3);
     await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
-    const times = async () => (await starts.allTextContents()).map(text => text.replace('Estimated next start: ', '')).sort();
+    // (The time's own spaces are no-break spaces; the expected texts below are written with ordinary ones.)
+    const times = async () => (await starts.allTextContents()).map(text => text.replace('Estimated next start: ', '').replace(/\xA0/g, ' ')).sort();
     // 22:00 on 14 July 2026 in New York (02:00 UTC): the next three boundaries (80 minutes apart) are 22:40, midnight and 01:20.
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), Date.UTC(2026, 6, 15, 2, 0));
     await expect.poll(times).toEqual(['10:40 PM', 'tomorrow 12:00 AM', 'tomorrow 1:20 AM'].sort());
+    for (const index of [0, 1, 2]) await expectTimeOnOneLine(page, starts.nth(index), `estimated start ${index + 1}`);
     await reviewShot360(page, testInfo, 'planning-schedule-tomorrow', starts.first());
     // Half past midnight: all three are on the same local day as the clock now, so the time alone.
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), Date.UTC(2026, 6, 15, 4, 30));

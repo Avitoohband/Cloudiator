@@ -67,7 +67,8 @@ const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack 
 
 /** A fake runner: exit codes by step id (0 when absent; a list is used up call by call), a stable Edge unless told otherwise. */
 function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: unknown[]; browserReports?: Record<string, unknown[]>;
-  starts?: (string | null)[]; edge?: { ok: boolean; note?: string; tolerated?: { count: number; examples: string[] } }[] } = {}) {
+  starts?: (string | null)[]; edge?: { ok: boolean; note?: string; tolerated?: { count: number; examples: string[] };
+    unavailable?: { count: number; examples: string[] } }[] } = {}) {
   const ran: string[] = [];
   const codeOf = (id: string) => { const c = options.codes?.[id]; return Array.isArray(c) ? c.shift() ?? 0 : c ?? 0; };
   const starts = [...(options.starts ?? [])];
@@ -79,7 +80,8 @@ function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: 
     io: {
       exec: async (step: Step) => { ran.push(step.id); return codeOf(step.id); },
       settleEdge: async () => { ran.push('settle'); const e = edges.shift() ?? { ok: true };
-        return { ok: e.ok, startedAt: started, recreated: false, files: 40, waitedMs: 30_000, note: e.note, ...(e.tolerated ? { tolerated: e.tolerated } : {}) }; },
+        return { ok: e.ok, startedAt: started, recreated: false, files: 40, waitedMs: 30_000, note: e.note, ...(e.tolerated ? { tolerated: e.tolerated } : {}),
+          ...(e.unavailable ? { unavailable: e.unavailable } : {}) }; },
       edgeStartedAt: () => { const next = starts.shift(); if (next !== undefined && next !== null) started = next; return started; },
       readDbReport: () => reports.shift() ?? null,
       readBrowserReport: (step: Step) => options.browserReports?.[step.id]?.shift() ?? null,
@@ -319,6 +321,16 @@ describe('the gate run', () => {
     expect(all.find(r => r.id === 'edge')!.note).not.toContain('…');
   });
 
+  it('passes the Edge step when cache entries vanished or could not be opened, and says which (Task 24.1)', async () => {
+    const unavailable = { count: 2, examples: ['node_modules/.deno/a', 'node_modules/.deno/b'] };
+    const results = await runGate(gateSteps(), fakeIo({ edge: [{ ok: true, unavailable }] }).io);
+    const edge = results.find(r => r.id === 'edge')!;
+    expect(edge.status).toBe('passed');
+    expect(edge.note).toContain('dependency cache entries gone or unreadable during the walk (tolerated) on 2 entries: node_modules/.deno/a, node_modules/.deno/b;');
+    expect(edge.note).not.toContain('modification time changed');
+    expect(summarize(results)).toMatchObject({ status: 'passed', exitCode: 0 });
+  });
+
   it('skips the database tests when the Edge runtime does not settle or serve', async () => {
     const { io, ran } = fakeIo({ edge: [{ ok: false, note: 'the worker did not answer' }] });
     const results = await runGate(gateSteps(), io);
@@ -478,6 +490,82 @@ describe('the Edge access-time refresh (C22)', () => {
     const { base, root, entries } = withCache();
     try {
       expect(refreshAccessTimes(root)).toEqual({ ok: true, count: entries.length, skipped: 0 });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // Task 24.1 (24.0 review M1): the cache exception is about a folder named node_modules, never about what a link of that
+  // name points to. A junction named node_modules directly under the root is skipped like any link, and its target is
+  // untouched, also when the test seam would change it.
+  it.skipIf(!windows)('still skips a junction named node_modules under the root, tolerating nothing and leaving its target untouched', () => {
+    const { base, root, outside, inside } = scratch();
+    try {
+      symlinkSync(outside, join(root, 'node_modules'), 'junction');
+      const target = statSync(join(outside, 'target.ts'), { bigint: true });
+      const folder = statSync(outside, { bigint: true });
+      for (const options of [{}, { concurrentWrite: 'node_modules' }, { concurrentWrite: 'node_modules/target.ts' }, { concurrentRemove: 'node_modules' }]) {
+        expect(refreshAccessTimes(root, options), JSON.stringify(options)).toEqual({ ok: true, count: inside.length, skipped: 1 });
+      }
+      for (const [entry, before] of [[join(outside, 'target.ts'), target], [outside, folder]] as const) {
+        const after = statSync(entry, { bigint: true });
+        expect(after.atimeNs, entry).toBe(before.atimeNs);
+        expect(after.mtimeNs, entry).toBe(before.mtimeNs);
+      }
+      expect(prepareEdge(root)).toMatchObject({ ok: true, files: 2, refreshed: inside.length, skipped: 1 });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // Task 24.1 (24.0 review M6): a cache entry can also disappear (or fail to open) while the walk passes, as when Deno
+  // replaces a package. Under node_modules that is tolerated and reported; anywhere else it fails the refresh, naming the
+  // entry. `concurrentRemove` is the test seam: the walk removes that entry (a folder with everything in it) right before
+  // opening it, as a concurrent writer would. An entry that exists but cannot be opened takes the same path (any failure to
+  // open it, read it back or list it); it is not simulated separately.
+  it.skipIf(!windows)('tolerates a cache entry that vanishes mid-walk, and reports it', () => {
+    for (const [entry, gone] of [['node_modules/.deno/pkg/index.js', 1], ['node_modules/.deno', 3], ['node_modules', 4]] as const) {
+      const { base, root, entries } = withCache();
+      try {
+        expect(refreshAccessTimes(root, { concurrentRemove: entry }), entry).toEqual({ ok: true, count: entries.length - gone, skipped: 0,
+          unavailable: { count: 1, examples: [entry] } });
+      } finally { rmSync(base, { recursive: true, force: true }); }
+    }
+    const { base, root, entries } = withCache();
+    try {
+      expect(prepareEdge(root, { concurrentRemove: 'node_modules/.deno/pkg/index.js' })).toMatchObject({ ok: true, files: 2,
+        refreshed: entries.length - 1, skipped: 0, unavailable: { count: 1, examples: ['node_modules/.deno/pkg/index.js'] } });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // The pre-read is the preparation's second walk: the same rule holds there. `read` is its test seam (default readFileSync).
+  it('tolerates a cache file that vanishes or cannot be read during the pre-read, and fails any other, naming it', () => {
+    const { base, root } = withCache();
+    try {
+      const failing = (tail: string, code: string) => (path: string) => {
+        if (path.replace(/\\/g, '/').endsWith(tail)) throw Object.assign(new Error(`${code}: simulated`), { code });
+        return readFileSync(path);
+      };
+      expect(prepareEdge(root, { read: failing('node_modules/.deno/pkg/index.js', 'ENOENT') })).toMatchObject({ ok: true, files: 2,
+        unavailable: { count: 1, examples: ['node_modules/.deno/pkg/index.js'] } });
+      expect(prepareEdge(root, { read: failing('_shared/domain/types.ts', 'EBUSY') })).toEqual({ ok: false, files: 0,
+        reason: 'pre-read failed: _shared/domain/types.ts: EBUSY' });
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(!windows)('still fails an entry that vanishes mid-walk anywhere else, naming it', () => {
+    for (const entry of ['_shared', '_shared/domain', '_shared/domain/types.ts', 'deno.json', '_shared/node_modules', 'node_modules_old']) {
+      const { base, root, old } = withCache();
+      try {
+        mkdirSync(join(root, '_shared', 'node_modules'));
+        mkdirSync(join(root, 'node_modules_old'));
+        for (const folder of [join(root, '_shared', 'node_modules'), join(root, 'node_modules_old'), join(root, '_shared'), root]) utimesSync(folder, old, old);
+        const refresh = refreshAccessTimes(root, { concurrentRemove: entry }) as { ok: boolean; reason: string };
+        expect(refresh, entry).toMatchObject({ ok: false, reason: expect.stringMatching(/^cannot open: /) });
+        // The temp folder may be spelled with its 8.3 short name; compare the entry's own tail.
+        expect(refresh.reason.includes(`\\${entry.replace(/\//g, '\\')}: `), refresh.reason).toBe(true);
+      } finally { rmSync(base, { recursive: true, force: true }); }
+    }
+    const { base, root } = withCache();
+    try {
+      expect(prepareEdge(root, { concurrentRemove: 'deno.json' })).toMatchObject({ ok: false, files: 0,
+        reason: expect.stringContaining('access-time refresh failed: cannot open: ') });
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 });

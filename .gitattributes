@@ -1,0 +1,3 @@
+# Every text file is checked out with LF, also on Windows hosts that set core.autocrlf=true.
+# SQL function bodies (and so the migration fingerprints) and the workflow test depend on it.
+* text=auto eol=lf

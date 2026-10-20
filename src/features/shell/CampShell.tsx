@@ -31,6 +31,7 @@ import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../character/useGameState';
 import { CharacterPanel } from '../character/CharacterPanel';
+import { ownRestingText } from '../character/activity-status';
 import { CreateCharacter } from '../character/CreateCharacter';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
 import { ProfileLayer } from '../character/ProfileCard';
@@ -281,11 +282,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
   const ownerId = owner?.gladiatorId ?? null;
+  // The owner's own words while its gladiator rests at home (Task 23.9 fix round 1): when it is back on its schedule once
+  // that is known, else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
+  const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot) : null;
   const content = (id: MenuId) => {
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
-        onCreate={joining.offer} />;
+        onCreate={joining.offer} resting={game.ownResting} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} />
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} preview={fixture}
@@ -301,7 +305,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} />;
-      case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
+      case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;
     }
@@ -329,7 +333,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
-      {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} roster={roster} sceneStatus={game.sceneStatus}
+      {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}

@@ -18,6 +18,7 @@ import type { MenuId } from '../shell/menus';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import type { Roster } from './RosterPanel';
 import { classLine, gearText, isAway, placeOf } from './actor-text';
+import { ownRestingText } from './activity-status';
 import { badgeText, titleText } from '../seasons/season-text';
 import styles from './ProfileCard.module.css';
 
@@ -36,13 +37,19 @@ export type ProfileTarget = {
   focus: boolean;
 };
 
-export function ProfileCard({ actor, profile, profileFailed = false, own, record = null, followReason = null, following = false, onFollow, onWatch, onOpenMenu }: {
+export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, onFollow, onWatch,
+  onOpenMenu }: {
   actor: PublicActor;
   /** The public profile, once loaded (null while it loads or when it failed). */
   profile: PublicProfile | null;
   profileFailed?: boolean;
   /** The viewer's own gladiator: the card adds the management shortcuts. */
   own: boolean;
+  /**
+   * The owner's own words while its gladiator rests at home (`ownRestingText`; Task 23.9 fix round 1): its own card's Now
+   * says this, never the public "back when {name}'s owner returns."
+   */
+  ownPlace?: string | null;
   record?: ProfileRecord | null;
   /** Why Follow is unavailable now, or null. */
   followReason?: string | null;
@@ -68,7 +75,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, record
       {awards.length > 0 && <ul className={styles.badges} aria-label="Season badges">{awards.map(award => <li key={award.seasonId}>{badgeText(award)}</li>)}</ul>}
     </div>
     <dl className={styles.facts}>
-      <div><dt>Now</dt><dd>{placeOf(actor)}</dd></div>
+      <div><dt>Now</dt><dd>{own && actor.resting ? ownPlace ?? ownRestingText(null) : placeOf(actor)}</dd></div>
       <div><dt>{record ? 'Rating · record' : 'Rating'}</dt><dd>{record ? `${rating} · ${record.wins}–${record.losses}` : rating}</dd></div>
       <div><dt>Equipped</dt><dd>{gearText(actor.equipmentSilhouettes)}</dd></div>
     </dl>
@@ -106,22 +113,27 @@ export function placeCard(screen: Point | null, card: Size, view: Size): { left:
   };
 }
 
-/** Why Follow cannot apply to `actor` now (the camera only follows a gladiator drawn in the camp), or null. */
+/**
+ * Why Follow cannot apply to `actor` now (the camera only follows a gladiator drawn in the camp), or null. A gladiator
+ * resting at home is never drawn, whatever the roster last said (Task 23.9 fix round 1).
+ */
 function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 'loading' | 'ready' | 'unavailable'): string | null {
   if (sceneStatus === 'unavailable') return 'The camp view is unavailable, so gladiators cannot be shown on the map.';
   if (sceneStatus === 'loading' || !roster) return 'The camp view is still opening.';
-  if (roster.inCamp.includes(actor.gladiatorId)) return null;
+  if (!actor.resting && roster.inCamp.includes(actor.gladiatorId)) return null;
   return isAway(actor) ? `${actor.name} is away on an expedition.` : `${actor.name} is not in the camp right now.`;
 }
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
-export function ProfileLayer({ target, world, reads, ownerId, roster, sceneStatus, following, onFollow, onWatch, onOpenMenu, onClose }: {
+export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, onFollow, onWatch, onOpenMenu, onClose }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
   /** Public profile reads (null until the fixture preview's reads load). */
   reads: Pick<GameGateway, 'profile'> | null;
   /** The viewer's own gladiator, or null. */
   ownerId: string | null;
+  /** The owner's own words while its gladiator rests at home, for its own card (Task 23.9 fix round 1). */
+  ownPlace?: string | null;
   roster: Roster | null;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   /** The gladiator the camera follows, or null. */
@@ -169,7 +181,7 @@ export function ProfileLayer({ target, world, reads, ownerId, roster, sceneStatu
     <section ref={card} className={styles.card} role="dialog" aria-label={`Profile: ${name}`} tabIndex={-1} style={style} data-profile-card="">
       <button type="button" className={styles.close} aria-label="Close profile" onClick={onClose}>×</button>
       {actor ? (
-        <ProfileCard actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} record={target.record}
+        <ProfileCard actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
           followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} onFollow={onFollow}
           onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} />
       ) : <>

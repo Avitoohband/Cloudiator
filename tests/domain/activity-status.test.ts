@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CurrentActivity, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
-import { activityStatus } from '../../src/features/character/activity-status';
+import { activityStatus, ownRestingText } from '../../src/features/character/activity-status';
 import { slotTimeText } from '../../src/features/schedule/slot-time';
 
 const SLOT_MS = 4_800_000;
@@ -76,5 +76,23 @@ describe('activity status', () => {
     expect(activityStatus(resting, back, boundary - 1).status).toBe('preparing');
     // Resting with no signal since it began (null until the owner's presence and a fresh read): no time to show yet.
     expect(activityStatus({ ...resting, restingUntilSlot: null }, slot, start + 1).status).toBe('preparing');
+    // The owner's own words for its card and its list row (fix round 1) are the same line.
+    expect(ownRestingText(back)).toBe(line);
+  });
+
+  // Fix round 1 (review Minor 1): resting in the world, before its presence is answered.
+  it('shows the owner "Resting at home." while its gladiator rests and its return is not known yet', () => {
+    const waiting = { processedSlotIndex: slot, currentActivity: null, restingUntilSlot: null };
+    expect(ownRestingText(null)).toBe('Resting at home.');
+    for (const now of [start, start + 1, end - 1]) {
+      expect(activityStatus(waiting, slot, now, { resting: true })).toEqual({ status: 'resting', label: 'Resting at home.', endsAtMs: null });
+    }
+    // Not resting in the world (a new gladiator whose activity is not published yet), or past its slot: as before.
+    expect(activityStatus(waiting, slot, start + 1).status).toBe('preparing');
+    expect(activityStatus(waiting, slot, start + 1, { resting: false }).status).toBe('preparing');
+    expect(activityStatus(waiting, slot, end, { resting: true }).status).toBe('preparing');
+    expect(activityStatus(waiting, slot + 1, end - 1, { resting: true }).status).toBe('preparing');
+    // Once its return is known, the line says when.
+    expect(activityStatus({ ...waiting, restingUntilSlot: slot + 1 }, slot, start + 1, { resting: true }).label).toBe(ownRestingText(slot + 1));
   });
 });

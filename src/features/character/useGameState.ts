@@ -19,6 +19,8 @@ export type GameUiState = {
   revision: string | null; slotIndex: number | null; clock: DisplayClock;
   /** The revision's published slot (Task 23.2, C5): the latest slot whose boundary is published; null before the first coordination. */
   publishedSlotIndex: number | null;
+  /** The owner's own gladiator rests at home in the shared world (its public actor's `resting`; Task 23.9 fix round 1). */
+  ownResting: boolean;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
   /**
@@ -74,8 +76,8 @@ const codeOf = (error: unknown) => (error && typeof error === 'object' && 'code'
  *   publish that still reports it. A successful read lets a later rejection be refreshed once again.
  * - The owner's activity signal (Task 23.9, `createPresence`): a player sends a presence once its gladiator is shown (after
  *   sign-in or a page load), then every 6 hours while the page is visible; a visitor or an account without a gladiator
- *   never does. Failures are not shown. An answered presence of a gladiator resting with no signal yet reads the owner
- *   again, except with `clockOnly`, which reads the owner once per account.
+ *   never does. Failures are not shown; one that the resting gladiator waits on is retried once. An answered presence of a
+ *   gladiator resting with no signal yet reads the owner again, except with `clockOnly`, which reads the owner once per account.
  */
 export function useGameState(gateway: GameGateway | null, options: { fixture: boolean; previewAs?: 'visitor' | 'player'; clockOnly?: boolean }): GameUiState {
   const { fixture, previewAs, clockOnly = false } = options;
@@ -229,8 +231,10 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   // The presence follows the gateway (the fixture one once loaded) and the viewer: created per gateway with the viewer as
   // last seen, then told each change of account or owner read (the same account's reads never send another).
+  const ownId = owner?.gladiatorId ?? null;
+  const ownResting = ownId !== null && (world?.actors ?? []).some(a => a.gladiatorId === ownId && a.resting);
   const presence = useRef<Presence | null>(null);
-  const presenceInput = useRef<PresenceInput>({ account: null, owner: null });
+  const presenceInput = useRef<PresenceInput>({ account: null, owner: null, resting: false });
   useEffect(() => {
     if (!gateway) return;
     const current = createPresence({
@@ -242,9 +246,9 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
     return () => { current.stop(); if (presence.current === current) presence.current = null; };
   }, [gateway, clockOnly]);
   useEffect(() => {
-    presenceInput.current = { account, owner };
+    presenceInput.current = { account, owner, resting: ownResting };
     presence.current?.update(presenceInput.current);
-  }, [account, owner]);
+  }, [account, owner, ownResting]);
   let viewer: Viewer;
   if (fixture) viewer = previewAs === 'visitor' ? 'visitor' : owner ? 'player' : read?.failed ? 'unavailable' : 'loading';
   else if (session.status === 'loading') viewer = 'loading';
@@ -253,7 +257,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   else viewer = owner ? 'player' : read?.missing ? 'no-gladiator' : read?.failed ? 'unavailable' : 'loading';
 
   return {
-    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, clock,
+    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, ownResting, clock,
     sceneStatus, refreshOwner, setSceneStatus, ownerCreated,
   };
 }

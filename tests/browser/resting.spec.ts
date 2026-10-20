@@ -112,11 +112,35 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     await expect(mine.getByText('Training at the practice yard')).toHaveCount(0);
     expect(await contrastIssues(mine), 'My gladiator while resting').toEqual([]);
     await reviewShot360(page, testInfo, 'resting-owner-line', activityLine(mine));
-    // Everyone, the owner too, sees the public sentence in the list; its own gladiator cannot be found in the camp.
-    const roster = await openMenu(page, 'Gladiators');
+    // Fix round 1 (review Important 1): the owner's own row, its Find and Follow, and its own card say the same line, never
+    // the public "back when Aster's owner returns."; others keep the public sentence.
+    const roster = await settled(await openMenu(page, 'Gladiators'));
     // (The demo crowd has another Aster: the owner's row is the one marked "(you)".)
-    await expect(rosterRow(page, roster, 'Aster').filter({ hasText: '(you)' })).toContainText(ASTER);
-    await expect(roster.getByRole('button', { name: 'Find my gladiator' })).toBeDisabled();
+    const mineRow = rosterRow(page, roster, 'Aster').filter({ hasText: '(you)' });
+    await expect(mineRow).toContainText(line);
+    await expect(mineRow).not.toContainText(ASTER);
+    await expect(rosterRow(page, roster, 'Otho')).toContainText(OTHO);
+    for (const name of ['Find my gladiator', 'Follow my gladiator']) {
+      const button = roster.getByRole('button', { name, exact: true });
+      await expect(button).toBeDisabled();
+      await expect(button).toHaveAccessibleDescription(line);
+    }
+    await expect(roster.getByText('Your gladiator is away from the camp.')).toHaveCount(0);
+    expect(await contrastIssues(mineRow), 'the owner\'s own resting row').toEqual([]);
+    await reviewShot360(page, testInfo, 'resting-own-gladiators-row', mineRow);
+    await watchFocus(page);
+    await mineRow.getByRole('button', { name: 'Profile: Aster', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    const card = page.getByRole('dialog', { name: 'Profile: Aster', exact: true });
+    await expect(card).toBeFocused();
+    await settled(card);
+    await expect(fact(card, 'Now')).toHaveText(line);
+    await expect(card).not.toContainText(ASTER);
+    expect(await contrastIssues(card), 'the owner\'s own resting card').toEqual([]);
+    await reviewShot360(page, testInfo, 'resting-own-profile-card', card);
+    await page.keyboard.press('Escape');
+    await expect(card).toHaveCount(0);
+    expect(await focusDrops(page)).toEqual([]);
     // At that boundary its schedule applies again: the line no longer says it rests.
     const back = await openMenu(page, 'My gladiator');
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), (worldFixture.slotIndex + 1) * SLOT_MS);

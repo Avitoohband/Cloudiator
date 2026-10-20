@@ -104,7 +104,8 @@ describe('profile card', () => {
   it('shows everyone "Resting at home: back when {name}\'s owner returns." as where a resting gladiator is now', () => {
     const resting: PublicActor = { ...ACTOR, name: 'Otho', location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, resting: true };
     const line = "Resting at home: back when Otho's owner returns.";
-    for (const props of [{ actor: resting }, { actor: resting, profile: { ...PROFILE, actor: resting } }, { actor: resting, own: true }]) {
+    // Another player's card, before and after its profile loads (an owner's line is for its own card only).
+    for (const props of [{ actor: resting }, { actor: resting, profile: { ...PROFILE, actor: resting } }, { actor: resting, ownPlace: 'Resting at home.' }]) {
       expect(unescaped(card(props))).toContain(`<dt>Now</dt><dd>${line}</dd>`);
     }
     // Not drawn in the camp, so Follow gives its reason (the scene's roster lists only those it draws).
@@ -117,6 +118,48 @@ describe('profile card', () => {
     expect(unescaped(layer)).toContain('Otho is not in the camp right now.');
     // A gladiator who is not resting reads its place as before.
     expect(text(card())).not.toContain('Resting at home');
+  });
+
+  // Fix round 1 (review Important 1): the returning owner's own card says when it is back, never "back when Aster's owner returns."
+  it('shows the owner its own resting line as its own card\'s Now', () => {
+    const me: PublicActor = { ...ACTOR, location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, resting: true };
+    const own = 'Resting at home: back on your schedule at 10/10/2026, 4:20:00 AM';
+    const html = unescaped(card({ actor: me, own: true, ownPlace: own }));
+    expect(html).toContain(`<dt>Now</dt><dd>${own}</dd>`);
+    expect(html).not.toContain("Aster's owner returns");
+    // Before its return is known: "Resting at home."
+    expect(unescaped(card({ actor: me, own: true, ownPlace: 'Resting at home.' }))).toContain('<dt>Now</dt><dd>Resting at home.</dd>');
+    // The layer hands the owner's line to its own card only.
+    const layer = (gladiator: PublicActor, ownerId: string | null) => unescaped(text(renderToStaticMarkup(createElement(ProfileLayer, {
+      target: { gladiatorId: gladiator.gladiatorId, name: gladiator.name, screen: null, record: null, focus: false },
+      world: { ...worldFixture, actors: [gladiator] }, reads: null, ownerId, roster: { inCamp: [], away: [] }, sceneStatus: 'ready', following: null,
+      ownPlace: own, onFollow: noop, onWatch: noop, onOpenMenu: noop, onClose: noop,
+    }))));
+    expect(layer(me, me.gladiatorId)).toContain(`Now ${own}`);
+    expect(layer(me, null)).toContain("Now Resting at home: back when Aster's owner returns.");
+    // Not resting: its place as before, whatever the owner's line.
+    expect(layer({ ...ACTOR }, ACTOR.gladiatorId)).toContain('Now Training');
+  });
+
+  // Fix round 1 (review Minor 2): Follow trusts the resting flag, not a scene roster that may be stale.
+  it('never offers to follow a resting gladiator, even while a stale roster still lists it as drawn', () => {
+    const resting: PublicActor = { ...ACTOR, name: 'Otho', location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, resting: true };
+    const html = renderToStaticMarkup(createElement(ProfileLayer, {
+      target: { gladiatorId: resting.gladiatorId, name: 'Otho', screen: null, record: null, focus: false },
+      world: { ...worldFixture, actors: [resting] }, reads: null, ownerId: null, roster: { inCamp: [resting.gladiatorId], away: [] }, sceneStatus: 'ready',
+      following: null, onFollow: noop, onWatch: noop, onOpenMenu: noop, onClose: noop,
+    }));
+    const follow = /<button([^>]*)>Follow<\/button>/.exec(html)![1];
+    expect(follow).toContain('disabled');
+    const described = /aria-describedby="([^"]+)"/.exec(follow)![1];
+    expect(new RegExp(`id="${described}"[^>]*>([^<]*)<`).exec(html)![1]).toBe('Otho is not in the camp right now.');
+    // A drawn gladiator that is not resting can still be followed.
+    const drawn = renderToStaticMarkup(createElement(ProfileLayer, {
+      target: { gladiatorId: ACTOR.gladiatorId, name: 'Aster', screen: null, record: null, focus: false },
+      world: { ...worldFixture, actors: [ACTOR] }, reads: null, ownerId: null, roster: { inCamp: [ACTOR.gladiatorId], away: [] }, sceneStatus: 'ready',
+      following: null, onFollow: noop, onWatch: noop, onOpenMenu: noop, onClose: noop,
+    }));
+    expect(/<button([^>]*)>Follow<\/button>/.exec(drawn)![1]).not.toContain('disabled');
   });
 
   it('sits above a clicked gladiator, or below when there is no room, right of the rail and below the chip', () => {

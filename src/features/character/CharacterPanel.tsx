@@ -32,14 +32,14 @@ function useNow(clock: DisplayClock) {
   return now;
 }
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, onRetry }: {
-  owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; onRetry(): void;
+function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry }: {
+  owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
 }) {
   const now = useNow(clock);
   const headingId = useId();
   const staminaId = useId();
   const activity = owner.currentActivity;
-  const status = activityStatus(owner, slotIndex ?? 0, now);
+  const status = activityStatus(owner, slotIndex ?? 0, now, { resting });
   return (
     <section className={styles.summary} aria-labelledby={headingId}>
       <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
@@ -63,7 +63,8 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, onRetry }: {
   );
 }
 
-export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate }: {
+export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
+  resting = false }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -79,11 +80,13 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   refreshOwner(): Promise<void>;
   /** Opens the "Create your gladiator" dialog over the camp (signed in without a gladiator). */
   onCreate(): void;
+  /** The owner's own gladiator rests at home in the shared world (Task 23.9 fix round 1). */
+  resting?: boolean;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   if (owner) {
     return <>
-      <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} onRetry={retry} />
+      <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry} />
       {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
         : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} />}
     </>;

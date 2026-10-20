@@ -6,21 +6,25 @@
 // camp (the bridge's `view-expedition`, Task 13.8); the menu stays open beneath it to come back to. Each name opens
 // that gladiator's profile card (Task 13.7). Every world click has this keyboard path. Without a camp view (no WebGL,
 // art that failed to load), or for a gladiator the camp does not draw, the buttons stay, disabled with the reason.
-// A gladiator resting at home (Task 23.9) is listed but not drawn: its row says so, and that is its buttons' reason.
-// Names render as React text.
+// A gladiator resting at home (Task 23.9) is listed but not drawn: its row says so, and that is its buttons' reason. The
+// owner's own resting gladiator says it in the owner's own words (`ownPlace`, fix round 1), in its row and as the reason
+// Find and Follow my gladiator are off. Names render as React text.
 import { useId, useState } from 'react';
 import type { WorldSnapshot } from '@contracts/reads';
 import type { SceneBridge } from '../../game/bridge';
 import { classLine, isAway, placeOf, restingText } from './actor-text';
+import { ownRestingText } from './activity-status';
 import styles from './CharacterPanel.module.css';
 
 /** The scene's last `roster` event: who is drawn in the camp, and who is away. */
 export type Roster = { inCamp: readonly string[]; away: readonly { gladiatorId: string; name: string; location: string }[] };
 
-export function RosterPanel({ world, ownerId, roster, sceneStatus, following, bridge, onDone, onProfile }: {
+export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStatus, following, bridge, onDone, onProfile }: {
   world: WorldSnapshot | null;
   /** The player's own gladiator, or null for a visitor. */
   ownerId: string | null;
+  /** The owner's own words while its gladiator rests at home (`ownRestingText`), or null (Task 23.9 fix round 1). */
+  ownPlace?: string | null;
   roster: Roster | null;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   /** The gladiator the camera follows (the scene's last `follow-character` answer), or null. */
@@ -42,7 +46,10 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
   const actors = [...(world?.actors ?? [])].filter(a => a.name.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
   const find = (gladiatorId: string) => { bridge.emit('find-character', { gladiatorId }); onDone(); };
   const follow = (gladiatorId: string) => { bridge.emit('follow-character', { gladiatorId: following === gladiatorId ? null : gladiatorId }); onDone(); };
-  const ownerAway = ownerId !== null && !reason && !inCamp.has(ownerId);
+  // The owner's gladiator resting at home is never drawn, whatever the roster last said.
+  const ownResting = ownerId !== null && (world?.actors ?? []).some(a => a.gladiatorId === ownerId && a.resting && !isAway(a));
+  const ownLine = ownPlace ?? ownRestingText(null);
+  const ownerAway = ownerId !== null && !reason && (ownResting || !inCamp.has(ownerId));
   const mineDisabled = !!reason || ownerAway;
   const mineDescribedBy = reason ? reasonId : ownerAway ? awayId : undefined;
   return (
@@ -54,7 +61,7 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
           <button type="button" disabled={mineDisabled} aria-describedby={mineDescribedBy} aria-pressed={following === ownerId && !mineDisabled}
             onClick={() => follow(ownerId)}>Follow my gladiator</button>
         </div>
-        {ownerAway && <p id={awayId} className={styles.reason}>Your gladiator is away from the camp.</p>}
+        {ownerAway && <p id={awayId} className={styles.reason}>{ownResting ? ownLine : 'Your gladiator is away from the camp.'}</p>}
       </>}
       <label className={styles.filter}>Filter by name
         <input type="search" value={filter} onChange={event => setFilter(event.target.value)} autoComplete="off" spellCheck={false} />
@@ -74,7 +81,9 @@ export function RosterPanel({ world, ownerId, roster, sceneStatus, following, br
                   <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
                   {actor.gladiatorId === ownerId ? ' (you)' : ''}
                   <span>{resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`}</span>
-                  {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>{resting ? restingText(actor.name) : 'Not in the camp right now.'}</span>}
+                  {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>
+                    {!resting ? 'Not in the camp right now.' : actor.gladiatorId === ownerId ? ownLine : restingText(actor.name)}
+                  </span>}
                 </p>
                 {away ? (actor.activityId ? (
                   <span className={styles.actions}>

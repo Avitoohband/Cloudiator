@@ -157,6 +157,12 @@ whole file is reapplicable: the new column is added with `add column if not exis
   - only at or below the watermark, which cleanup moves across settled slots just before it compacts them.
   Any other update of a completed job raises `immutable job`, including the same shape on a job above the watermark, on an
   unfinished job, or a second time. The trigger is unchanged, so `scripts/restore-invariants.sql` still finds `guard_job`.
+  - **The next schema change to `private.jobs`** (Task 23.7 review M1; kept deferred by the Task 23 final review): the
+    compaction branch compares the other columns of `private.jobs` by name, the 19 of M21 (`(new.id, …, new.completed_at_ms)
+    is not distinct from (old.id, …, old.completed_at_ms)`). A column added later would not be in that list, so a compaction
+    could change it unchecked. The migration that changes `private.jobs` must therefore also switch that comparison, in a
+    new migration (M21 stays as committed), to `to_jsonb(new)-'input'-'result' = to_jsonb(old)-'input'-'result'`, which
+    covers every column but the two payloads.
 - **`private.health_report(now_ms)`.**
   - `resources.budgetBytes` is 524,288,000 (500 MB of 2^20 bytes). `private.health_alerts` is unchanged, so it warns from
     419,430,400 bytes (400 MB, 80 %) and alerts from 100 %, both on the physical `pg_database_size`.
@@ -1405,6 +1411,22 @@ Task 4 uses Supabase CLI **2.120.0**, supabase-js **2.117.3**, npm Deno **2.9.6*
 Only the local `Cloudiator` stack is used here. Do not link, reset, or otherwise reuse unrelated hosted projects. Never print `supabase status` credentials, gateway configuration, or local environment files. The test runner reads status into memory and refuses non-loopback URLs. CLI status/telemetry and Docker may require the approved Windows sandbox escalation.
 
 ## Fresh checkout
+
+**Line endings on Windows (Task 23 final review).** `.gitattributes` (`* text=auto eol=lf`, `7d36068`) checks every text
+file out with LF, also where `core.autocrlf=true`. A Windows clone made before that commit keeps its CRLF working files
+after a merge or pull, with `git status` clean: git rewrites only the files a merge changes (the final review found 116
+`i/lf w/crlf` files and 8 mixed in such a clone). With a clean tree (commit or stash first; ignored files such as
+`.env.edge.local` are left alone), rewrite every tracked file once from the index, or clone afresh:
+
+```powershell
+git status --short   # must print nothing
+git rm -r --cached . -q
+git reset --hard
+git ls-files --eol   # every text file must show w/lf (binary files w/-text)
+```
+
+Apply any SQL source, and run Task 24's `db push`, only from such an LF working copy: a CRLF copy stores CRLF in every
+function body, so the hosted bodies would not match the recorded fingerprints (the Task 23.8 observation under M22).
 
 ```powershell
 npm ci

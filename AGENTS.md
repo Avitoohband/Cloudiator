@@ -131,6 +131,11 @@ the owning and affected access-denial tests, lint and advisors. Reapplying
 source after reset is not migration-artifact proof. Never edit an already
 committed migration; generate a new one for subsequent corrections. Follow
 the exact local workflow and evidence in [the migration guide](docs/operations/migrations.md).
+Avi approved on 2026-10-20 (Task 23.1 lesson): when `db pull` or `db diff` reports no change for a
+privilege-only source change (grants and revokes), create the file with `supabase migration new` and
+complete it verbatim from the tested source; after every migration, run the access audit
+(`scripts/access-audit.sql` and `tests/db/access-matrix.test.ts`). The `migration new` completion was
+tested in Task 23.1; the rule as a general practice is adopted, not separately tested.
 Avi approved one more rule on 2026-10-14: restore any test-only function
 stand-in from the `pg_get_functiondef` text captured before it was installed,
 never by replaying a migration or source statement through a shell tool that

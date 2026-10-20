@@ -18,7 +18,7 @@ A Next.js build or export and a browser check must not use the same output direc
 5. The isolated production gate, only after step 4: the `CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true` build, `npm run verify:static -- .next/browser-test`, then `PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test`.
 6. `git diff --check`.
 
-Never start a build in a worktree whose development browser run or dev server is still active. Run the gate steps in that worktree one after another.
+Never start a build in a worktree whose development browser run or dev server is still active. Run the gate steps in that worktree one after another. Do not edit source files in a worktree while its browser suite runs (Task 23.5 lesson; approved by Avi on 2026-10-20).
 
 ## Database tests and the local Edge runtime
 

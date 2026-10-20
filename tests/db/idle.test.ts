@@ -221,6 +221,35 @@ describe('Task 23.8: idle characters rest at home', () => {
     expect(await slotsOf(idle)).toEqual([]);
   });
 
+  // Final review Minor 5: one catch-up runs several boundaries in a row under one coordinator lease, all decades after their
+  // scheduled starts. A character whose 14-day line falls among them plays each boundary before the line and rests from it
+  // on, judged by each boundary's own scheduled start; its processed slot advances with the cohort at every step.
+  it("crosses a character's 14-day line within one catch-up of several boundaries", async () => {
+    // The line is boundary S + 2's start: S and S + 1 start 2 and 1 slots inside 14 days; S + 2 is exactly 14 days.
+    const crossing = await fighter({ signal: (S + 2) * SLOT - IDLE });
+    const steady = await fighter({ signal: (S + 10) * SLOT });
+    const both = [crossing.gid, steady.gid].sort();
+    const token = await coordinatorLease();
+    const steps: { slot: number; members: string[]; processed: number[] }[] = [];
+    for (let slot = S; slot <= S + 3; slot++) {
+      expect(await runBoundary(slot, token), `boundary ${slot}`).toMatchObject({ status: 'complete' });
+      steps.push({ slot, members: await members(slot), processed: [await processedOf(crossing), await processedOf(steady)] });
+      // The catch-up's worker settles the slot's activities before the next boundary.
+      await settleAll();
+    }
+    expect(steps).toEqual([
+      { slot: S, members: both, processed: [S, S] },
+      { slot: S + 1, members: both, processed: [S + 1, S + 1] },
+      { slot: S + 2, members: [steady.gid], processed: [S + 2, S + 2] },
+      { slot: S + 3, members: [steady.gid], processed: [S + 3, S + 3] },
+    ]);
+    expect(await slotsOf(crossing)).toEqual([S, S + 1]);
+    expect(await slotsOf(steady)).toEqual([S, S + 1, S + 2, S + 3]);
+    // One rest, from the line on, with no signal since it began.
+    expect(await restOf(crossing)).toEqual({ since: S + 2, through: S + 3, signalled: null });
+    expect(await restOf(steady)).toBeUndefined();
+  });
+
   it("advances a resting character's processed slot with the cohort and writes no rows for it", async () => {
     const active = await fighter({ signal: (S + 10) * SLOT });
     const resting = await fighter();

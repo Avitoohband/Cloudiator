@@ -455,3 +455,19 @@ Expected platform rows (accepted exception E; the local replay shows exactly the
 Not yet run against a hosted project (none exists before Task 24); Task 24 verifies the export format and the comparison.
 Rehearsed locally in Task 24.1: steps 1, 2, 4, 5 and 6 with a "hosted" file made from the local one, re-quoted, with one row
 changed and one added; step 5 listed exactly those three lines.
+
+## Schema fingerprint and hosted checks
+
+Task 24.1 (plan Decision 1). Two more read-only files, each one SELECT, for the hosted steps of Task 24; each file's header
+lists its sections and how to run it (the hosted SQL editor as the database owner, no row limit, downloaded as CSV; or
+locally through the container after the label check). Neither prints a secret, key, token or email.
+- `scripts/schema-fingerprint.sql`: one `line` per function, relation, column, policy, trigger, constraint, index, schema ACL,
+  default ACL and cron job, plus the seed counts. It is the fingerprint the migration replays compared since Task 13; compare
+  the hosted output with a clean local replay of the same commit right after `db push`, as sets of lines (step 4 above reads
+  a `line` column the same way), with the same `current_schemas(false)` on both sides.
+- `scripts/hosted-checks.sql`: `section | item | value` rows for migration parity, the scheduler and epoch, dispatches per
+  scheduled minute, job-attempt durations per kind, boundary publication latency, pg_net response codes, duplicate grants,
+  one character per account and the trade fee and owner checks.
+`tests/db/hosted-checks.test.ts` runs both inside a read-only transaction. Neither has been run against a hosted project yet:
+the hosted owner's privileges on `vault.secrets`, `auth.users`, `auth.identities`, `net._http_response` and `cron.job` are
+untested.

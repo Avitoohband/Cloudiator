@@ -108,7 +108,8 @@ revoke all on function private.mirror_published_slot() from public, anon, authen
 update public.world_revision_state r set published_slot_index=c.published_slot from private.coordinator c
   where r.singleton and c.singleton and r.published_slot_index is distinct from c.published_slot;
 -- 06-projections.sql's view with the copy appended. create or replace keeps its grants (SELECT for anon, authenticated and
--- service_role; Task 13.1 and the access matrix's OPEN list) and its security_invoker option.
+-- service_role; Task 13.1 and the access matrix's OPEN list). It stays security_invoker because the WITH
+-- (security_invoker=true) clause below restates it, not because create or replace keeps it.
 create or replace view public.world_revision with(security_invoker=true) as
   select r.revision::text||':'||floor(extract(epoch from statement_timestamp())*1000/4800000)::bigint::text||':'||
     coalesce((select max(reveal_at_ms) from public.visible_events),0)::text as revision,
@@ -995,7 +996,8 @@ begin
 end $$;
 
 -- 04-inventory-shops.sql's owner view, unchanged except currentActivity null while resting and restingUntilSlot. create or
--- replace keeps its grants and its security_invoker option.
+-- replace keeps its grants. It stays security_invoker because the WITH (security_invoker=true) clause below restates it, not
+-- because create or replace keeps it.
 create or replace view public.owner_state with (security_invoker=true) as
 select g.owner_id,jsonb_build_object(
   'gladiatorId',g.id,'name',g.name,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,

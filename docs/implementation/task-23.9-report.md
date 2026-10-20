@@ -129,3 +129,54 @@ To see them live: `/game/?mode=fixture` (Otho) and `/game/?mode=fixture&as=resti
   same way at `f1cf073` before any change here.
 - **Lane A integration.** `routeLiveReads` now answers presence for live specs; the Edge function (23.8) must accept
   `{ kind: 'presence', operationId }` with no other field, which is all the client sends.
+
+## Fix round 1
+
+Review: `.superpowers/sdd/2026-10-19-task-23-release-readiness/task-23.9-review.md` (Lane A worktree), with the controller's
+binding rulings. Commit: `9375a46` fix: show the returning owner their own resting line. Each finding's tests were watched
+failing for the right reason (missing `ownRestingText`, the public sentence or "Preparing" shown, Follow enabled, no retry)
+before the code.
+
+**Important 1: the returning owner saw the public sentence for its own gladiator. Fixed.**
+- `ownRestingText(restingUntilSlot)` (`src/features/character/activity-status.ts:13`) is the owner's own words: the exact
+  owner line with `slotTimeText`, or `Resting at home.` before the slot is known. My gladiator uses it too.
+- `CampShell.tsx:287` computes `ownPlace` from `owner` (the owner line when `restingUntilSlot` is set; `Resting at home.`
+  when the owner's own actor rests and it is null) and passes it to `RosterPanel` and `ProfileLayer`.
+- `RosterPanel.tsx:50–52, 64, 85`: the "(you)" row's sentence and the reason Find and Follow my gladiator are off (instead of
+  "Your gladiator is away from the camp.") while the owner's actor rests; a stale roster cannot enable them. Other rows keep
+  the public sentence.
+- `ProfileCard.tsx:78`: the own card's Now. Others' cards keep the public sentence.
+- `useGameState` exposes `ownResting` (the owner's public actor rests; `useGameState.ts:235`).
+- `tests/browser/resting.spec.ts:115–143` (it asserted the defect at :118) now checks the own row, both buttons' accessible
+  description, the own card's Now, contrast and focus; unit cases in `roster-panel.test.ts` and `profile-card.test.ts`.
+
+**Minor 1: a returning owner's failed presence waited 6 hours; the line said "Preparing your next activity". Fixed.**
+- `presence.ts:72–82`: only while the gladiator rests waiting on the presence (its actor resting, no activity,
+  `restingUntilSlot` null), a failed presence is retried once, after `retryAfterMs` or 60 s (`PRESENCE_RETRY_MS`); a failed
+  retry waits for the next one due; the 6-hour cadence is unchanged; a retry due while hidden is sent on the next visible
+  moment. `PresenceInput.resting` carries the actor's flag (`useGameState.ts:249`).
+- `activity-status.ts:44` and `CharacterPanel.tsx:42`: in that state My gladiator reads `Resting at home.`; past its slot,
+  or for a gladiator not resting in the world, it reads as before.
+- Fake-timer unit tests (`tests/api/presence.test.ts`), `activity-status.test.ts`, `character-panel.test.ts`.
+
+**Minor 2: Follow on the profile card trusted the scene roster. Fixed** (`ProfileCard.tsx:123`, `profile-card.test.ts`): a
+resting gladiator is never followable, even while a stale roster lists it.
+
+Left as ruled: Minor 3 polish, the see-through card (pre-existing), the slot-time format, `tests/workflow.test.ts`.
+
+**Gates after the fixes** (the documented order, one after another):
+
+| Step | Result |
+|---|---|
+| `npm test` | 1,236 passed, 3 failed: only the 3 known `tests/workflow.test.ts` CRLF failures |
+| `npm run typecheck` | passed |
+| `node assets/source/build-assets.mjs --check` | assets up to date (28 files) |
+| `npm run build`, `npm run verify:static` | passed |
+| Dev browser suite (port 3300) | 537 passed, 35 skipped, 2 failed, then both passed on a rerun of those two: `identity.spec.ts:152` a host fault (`net::ERR_NO_BUFFER_SPACE` loading a Next chunk, flagged by the harness), `release.spec.ts:518` the expedition scene's "Returned to camp" read mid-fade (alpha 0.02). Neither touches this change; both passed in the first full run |
+| Isolated production build, `verify:static -- .next/browser-test` | passed (no test publishable key) |
+| Production gate (port 4173) | 34 passed, 540 skipped, 0 failed; no CSP violation |
+| `git diff --check` | clean |
+
+**Screenshots** (overwritten in `task-23.9-shots/`): the six earlier ones, plus `resting-{desktop,mobile}-own-gladiators-row-360.png`
+and `resting-{desktop,mobile}-own-profile-card-360.png` (the owner's own "(you)" row with "Resting at home: back on your schedule
+at 10/10/2026, 4:20:00 AM" as its sentence and as the disabled Find and Follow my gladiator's reason, and its own card's Now).

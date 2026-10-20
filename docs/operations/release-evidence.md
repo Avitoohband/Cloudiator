@@ -548,6 +548,10 @@ UI only, on Task 23.8's contract: no database, SQL or Edge change. Both are buil
 
 **Status (gate of record, 2026-10-20): passed.** The gate exited 0 at `d75e3fc`, the finished branch with Tasks 23.7–23.10
 built and reviewed: 12 of 12 steps passed ("Gate of record" below). No known blocker is listed.
+**Status (after the final fix wave, 2026-10-20): passed.** The final fix wave changed `src` (an unknown slot time renders
+safely) and added one catch-up test; `npm run verify` then passed 12 of 12 again at `7260b59` (units 1254, `test:db` 300 with
+the Edge start time unchanged, development 541/0/35, production 34/0/542). Its first run exited 1 on two gate issues carried
+to Task 24 preparation ([fix-wave report](../implementation/task-23-fix-wave.md)).
 **Status (Task 23.8): passed.** `npm run verify` exited 0 on the M01–M22 replay at `46f176e` ("Task 23.8 runs" below, run 2;
 run 1 failed on one browser flake). The database budget is no longer a known blocker.
 **Status (Task 23.7): passed.** `npm run verify` exited 0 on the M01–M21 replay ("Task 23.7 run" below): the database budget

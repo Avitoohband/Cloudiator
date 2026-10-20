@@ -21,7 +21,8 @@ ceiling is a named risk.** Task 23.3 measured the database as a blocker against 
 Avi's decision (2026-10-19):
 - The internal database budget is 500 MB (524,288,000 bytes), and the health report warns at 400 MB.
 - Completed jobs' payloads are emptied once their slot has settled (M21; `docs/operations/migrations.md`).
-- Idle characters pausing (C) is Task 23.8 and is not in these figures.
+- Idle characters pausing (C) is Task 23.8, built and reviewed since (M22). These figures do not count it: every character
+  stays active.
 
 **Command and run.**
 - `node scripts/resource-report.mjs` (50 players, 50 viewers, 4 slots), 18:30:56–18:33:24 UTC on the M01–M21 replay.
@@ -72,10 +73,11 @@ Avi's decision (2026-10-19):
   - `tests/performance/simulation.test.ts` (pure code, also in `npm test`);
   - `tests/db/capacity.test.ts` (also in `npm run test:db`).
   The arithmetic is in `tests/performance/capacity-model.ts`, pinned by `tests/performance/capacity-model.test.ts`.
-- **Gate** (controller ruling, 2026-10-19): `tests/db/capacity.test.ts` enforces the database, invocation and raw-egress
-  budgets only with `CAPACITY_GATE=1`.
+- **Gate** (controller ruling, 2026-10-19): `tests/db/capacity.test.ts` enforces the database budget at 90 days (both
+  scenarios), the invocation budget and the raw-egress budget only with `CAPACITY_GATE=1`. Since Task 23.7 the one-year
+  database figures are recorded and reported as a risk, never enforced.
   - Without the flag (a plain `npm run test:db`), the case still measures and records every number and checks the run itself.
-    The suite therefore stays green while the blockers are open.
+    A plain run therefore never fails on a budget.
   - The boundary-publication check (every window under 120 s) has been on since the fix, at up to 50 characters (spec §10.4's
     load). With `--players` above 50 the windows are still recorded, and the report's boundary line gives their verdict.
   - The cadence case (`publishes within 120 s after a slot of expeditions …`) always runs 50 characters, whatever `--players`
@@ -84,7 +86,9 @@ Avi's decision (2026-10-19):
     `npm test` or `npm run test:db` prints none of them (fix round 1), and since Task 23.6 neither does the gate's
     `CAPACITY_GATE=1` run, whose failed checks name their numbers (C23). A measurement the suites did not produce is reported
     as `missing` and fails the report, never `ok`.
-  - Task 23.6's release gate runs the file with the flag, and fails until every blocker below is resolved.
+  - Task 23.6's release gate runs the file with the flag. Since Task 23.7 it passes: at 90 days the database is at 82.0 % and
+    69.2 % of 500 MB. The one-year figures (129.9 % and 107.9 %) remain a named risk, with the structural compactions after
+    launch (risk 1; "Gate of record" below).
   - The report's verdicts and exit code do not depend on the flag.
 - **Environment:**
   - 13th Gen Intel Core i9-13900K (32 logical cores, 32 GiB), Windows 11 Pro 10.0.26200;
@@ -446,7 +450,8 @@ beside the players for 3 always-on visitors.
      - or raise the cutoff tick's capacity: a larger simple batch, or more invocations in the cutoff minute, within the
        invocation budget (risk 3).
    - The idle pause (a character whose owner has sent no activity signal for 14 days leaves the boundary cohort) reduces the
-     active cohort. Avi approved it on 2026-10-19 (the database budget design, C); it is Task 23.8 and not built yet.
+     active cohort. Avi approved it on 2026-10-19 (the database budget design, C). Task 23.8 built it (M22) and Task 23.9
+     shows it in the camp, both reviewed; the health report counts the resting characters as `cohort.restingCharacters`.
    - Hosted dispatch spacing is still C4 (Task 24).
 
 ## Lane B: render cost
@@ -522,8 +527,27 @@ The `tests/browser/read-render.spec.ts` checks:
 | A failed ring log | asked again after 30 s of display time (never with a held clock) | after 2 s, then 4, 8 and 16 s, then every 30 s, by real time |
 | Late joiner, 50-entrant bracket (Task 13.9 measure, unchanged) | 8 of 34 revealed bout logs | 8 of 34 |
 
+### Tasks 23.9 and 23.10: the resting screens and short slot times
+
+UI only, on Task 23.8's contract: no database, SQL or Edge change. Both are built and reviewed, and integrated in
+`claude/task-23` (`docs/implementation/task-23.9-report.md`, `task-23.10-report.md`).
+- **Task 23.9: the presence and the resting screens.**
+  - A player's page sends a presence (`{kind: 'presence'}`, no receipt) once its gladiator is shown, then every 6 hours
+    while the page is visible.
+  - Others see a resting gladiator as "Resting at home: back when {name}'s owner returns."
+  - The owner sees "Resting at home: back on your schedule at {time}" on My gladiator, its own Gladiators row and its own
+    profile card; "Resting at home." while its return is not known yet.
+  - Screenshots at 360 px were sent to Avi on 2026-10-20. Avi kept the resting wording and asked for shorter slot times.
+- **Task 23.10: short slot times** (Avi's decision, 2026-10-20).
+  - One rule, `slotTimeText`, for the Schedule panel's estimates and saved message, the Build panel's effective time and
+    the owner's resting line. It gives `4:20 AM` on the same local day, `tomorrow 4:20 AM`, a short weekday within the
+    week (`Sat 4:20 AM`), else the short month and day (`Oct 26, 4:20 AM`), never seconds.
+  - The time is kept on one line (`d75e3fc`): its pieces are joined by no-break spaces, checked at 360 px.
+
 ## Release gate (Task 23.6)
 
+**Status (gate of record, 2026-10-20): passed.** The gate exited 0 at `d75e3fc`, the finished branch with Tasks 23.7–23.10
+built and reviewed: 12 of 12 steps passed ("Gate of record" below). No known blocker is listed.
 **Status (Task 23.8): passed.** `npm run verify` exited 0 on the M01–M22 replay at `46f176e` ("Task 23.8 runs" below, run 2;
 run 1 failed on one browser flake). The database budget is no longer a known blocker.
 **Status (Task 23.7): passed.** `npm run verify` exited 0 on the M01–M21 replay ("Task 23.7 run" below): the database budget
@@ -711,7 +735,8 @@ output, which holds the local keys, goes to a file in `RUNNER_TEMP`), a random w
 without printing it, `npx supabase functions serve` in the background, then `npm run verify -- --json "$RUNNER_TEMP/verify.json"`,
 and the results and traces as an artifact. Validated locally: the YAML parses (PyYAML 6.0.3), and `tests/workflow.test.ts`
 checks the order, that every `npm run` script and `node` file it calls exists, and that it prints no credential. **Not run:**
-the controller pushes and records the first run. It stays red until Task 23.7 (exit 2, the database budget).
+the controller pushes and records the first run. No known blocker remains: Task 23.8 emptied `KNOWN_BLOCKERS`, so any failed
+step exits 1. Exit 2 is reserved for named known blockers, and none is listed.
 
 ### Device metrics and the budget arithmetic
 
@@ -722,7 +747,8 @@ the controller pushes and records the first run. It stays red until Task 23.7 (e
 ### Before the public release
 
 - **Task 23.7:** done (M21). The database budget is met at 90 days, and the gate passes ("Task 23.7 run" below).
-- **Tasks 23.8 and 23.9:** idle characters pausing, and their copy in the camp.
+- **Tasks 23.8–23.10:** done and reviewed. Idle characters rest at home (M22), the camp shows the presence and the resting
+  screens (23.9), and slot times are short (23.10). The gate of record passes ("Gate of record" below).
 - **Task 24 blockers:**
   1. mobile 30 fps on the device (`?perf=1` on the deployed production build);
   2. hosted CPU and dispatch spacing (C4);
@@ -820,3 +846,27 @@ expedition scene, "Returned to camp" was measured at text alpha 0.03 (ratio 1.09
 - Task 23.8 changes no scene or style.
 - It is recorded as a load-timing flake for the final review's flake triage, not as product evidence; the gate's no-rerun
   rule stands, so run 2 is a whole new run.
+
+### Gate of record (d75e3fc, 2026-10-20)
+
+`node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs` on branch `claude/task-23` at `d75e3fc` (Tasks
+23.1–23.10 integrated; M01–M22, no migration since Task 23.8), with no other worktree's browser suite running. **Exit 0
+(passed): 12 of 12 steps.**
+
+| Step | Gate of record |
+|---|---|
+| `npm test` | 1,251 passed |
+| `npm run typecheck` (tsc, deno check, deno test) | passed |
+| `node assets/source/build-assets.mjs --check` | passed |
+| `npm run build`, `npm run verify:static` | passed |
+| Edge settled | 714 files and folders refreshed; settled through one recreation before the run |
+| `CAPACITY_GATE=1 npm run test:db` | **passed**: 299; the Edge container's start time unchanged across the run |
+| Development browser suite | 541 / 0 / 35 |
+| Production build, its scan, production gate | passed; 34 / 0 / 542 |
+| `git diff --check` | clean |
+
+**The earlier integration run at `81a57d7`** (23.9 integrated, before 23.10): 11 of 12 steps passed. The development suite
+had one failure, `[desktop] retention.spec.ts:157` ("keeps offering a replay until its expiry by server time"), beside a
+probable host fault (`net::ERR_NO_BUFFER_SPACE`), while another worktree's browser suite (Task 23.10's) ran at the same time.
+Run alone it passed 3/3. It is recorded as a probable host fault, not product evidence; the gate's no-rerun rule stands, and the run
+above, with no other browser suite active, is the gate of record.

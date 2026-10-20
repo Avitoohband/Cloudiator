@@ -62,7 +62,7 @@ describe('fighter looks', () => {
     expect(look.atlas).toBe('gladiators');
     expect(look.layers.map(l => l.id)).toEqual(['body', 'cloth', 'armor-light', 'accent', 'head-helmet', 'head-helmet-crest', 'weapon-sword', 'offhand-shield', 'held']);
     const camp = planActorRoutine({ gladiatorId: 'g1', name: 'X', classId: 'guardian', equipmentSilhouettes: [], league: 'bronze', level: 1, phase: 'morning',
-      location: 'arena', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null }, 1);
+      location: 'arena', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null, resting: false }, 1);
     const tint = Object.fromEntries(look.layers.map(l => [l.id, l.tint]));
     expect(tint).toMatchObject({ body: camp.tint.skin, cloth: camp.tint.cloth, accent: camp.tint.cloth, 'head-helmet-crest': camp.tint.cloth, 'weapon-sword': null, 'armor-light': null });
     expect(look.animations.attack).toBe('gladiator/attack/se');

@@ -76,7 +76,7 @@ function awayActor(timeline: RevealedTimeline): PublicActor {
   const start = timeline.stages[0].startedAtMs;
   return { gladiatorId: EXPEDITION_GLADIATORS.varro.id, name: 'Varro', classId: 'duelist', equipmentSilhouettes: ['weapon-sword'], league: 'bronze', level: 6,
     phase: 'afternoon', location: 'expedition:outpost', activityId: timeline.activityId, activityStatus: 'active', startsAtMs: start, endsAtMs: start + SLOT_MS,
-    visibleStage: null };
+    visibleStage: null, resting: false };
 }
 
 test.describe('replays and expeditions over the camp (fixture preview)', () => {

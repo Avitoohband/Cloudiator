@@ -15,6 +15,16 @@ export type ApiErrorCode = 'unauthenticated' | 'invalid' | 'conflict' | 'process
 export type CommandResult<T> = { ok: true; receiptId: string; value: T } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
 
 type Operation = { operationId: OperationId };
+/**
+ * Task 23.8: the owner's activity signal, with no payload. Its operation id is checked like every command's but never stored:
+ * it writes no operation receipt. The Edge function charges the command rate limit, which records the owner's signal (every
+ * command records it, at most once an hour per owner), and answers `PresenceResult`. A character rests at home after
+ * `RULES_V1.idle.afterMs` without a signal (OwnerState.restingUntilSlot); the signed-in game sends this once after sign-in or
+ * page load, then at most every 6 hours while the page is open.
+ */
+export type PresenceCommand = Operation & { kind: 'presence' };
+/** The answer to a `PresenceCommand`: no receipt and no value. */
+export type PresenceResult = { ok: true } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
   | { kind: 'create-character'; name: string; classId: ClassId; allocation: Attributes }
@@ -28,4 +38,5 @@ export type GameCommand = Operation & (
   | { kind: 'cancel-listing'; listingId: string }
   | { kind: 'buy-listing'; listingId: string }
   | { kind: 'set-tournament-opt-in'; enabled: boolean }
+  | { kind: 'presence' }
 );

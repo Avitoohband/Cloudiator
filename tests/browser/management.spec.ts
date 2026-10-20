@@ -211,7 +211,7 @@ test.describe('a camp click on an Arena entrant', () => {
     const slotStart = Math.floor(Date.now() / SLOT_MS) * SLOT_MS;
     const actor = (name: string, location: PublicActor['location'], activityId: string | null): PublicActor => ({
       gladiatorId: randomUUID(), name, classId: 'berserker', equipmentSilhouettes: ['weapon-axe'], league: 'bronze', level: 3, phase: 'morning',
-      location, activityId, activityStatus: 'active', startsAtMs: slotStart, endsAtMs: slotStart + SLOT_MS, visibleStage: null,
+      location, activityId, activityStatus: 'active', startsAtMs: slotStart, endsAtMs: slotStart + SLOT_MS, visibleStage: null, resting: false,
     });
     // Warming up in staging at minute 40 (no bout revealed yet, so the Arena card reads no opponent profile), and a trainee.
     const entrant = actor('Bellator', 'arena', randomUUID());

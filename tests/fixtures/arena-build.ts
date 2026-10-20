@@ -131,7 +131,7 @@ export function buildArenaFixtures(logs: Readonly<Record<ArenaBoutKey, BattleLog
     return {
       gladiatorId: g.id, name: g.name, classId: info.classId, equipmentSilhouettes: [...info.silhouettes], league: info.league, level: info.level,
       phase: worldFixture.actors[0].phase, location: 'arena', activityId: timeline.activityId, activityStatus: 'active',
-      startsAtMs: SLOT_START, endsAtMs: SLOT_START + SLOT_MS, visibleStage,
+      startsAtMs: SLOT_START, endsAtMs: SLOT_START + SLOT_MS, visibleStage, resting: false,
     };
   };
   const worldActors: PublicActor[] = ARENA_CAMP_KEYS.map(campActor);
@@ -141,7 +141,7 @@ export function buildArenaFixtures(logs: Readonly<Record<ArenaBoutKey, BattleLog
     const actor: PublicActor = worldActors.find(a => a.gladiatorId === g.id)
       ?? worldFixture.actors.find(a => a.gladiatorId === g.id)
       ?? { gladiatorId: g.id, name: g.name, classId: info.classId, equipmentSilhouettes: [...info.silhouettes], league: info.league, level: info.level,
-        phase: worldFixture.actors[0].phase, location: 'rest', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null };
+        phase: worldFixture.actors[0].phase, location: 'rest', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null, resting: false };
     // Season awards from the closed season's archive (Aster: a bronze badge from season '0').
     return [g.id, { actor, combatStrength: info.combatStrength, rating: info.rating, prestige: fixturePrestige(g.id) }];
   }));

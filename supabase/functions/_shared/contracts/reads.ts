@@ -29,6 +29,16 @@ export type OwnerState = {
   stamina: { current: number; maximum: number };
   tournamentOptIn: boolean; processedSlotIndex: number;
   currentActivity: CurrentActivity | null;
+  /**
+   * Task 23.8, the idle rest (`RULES_V1.idle`). At each boundary a character rests at home, with no activity, when its owner's
+   * last activity signal (any command, `presence` included; stored at most once an hour) is at least `idle.afterMs` before
+   * that boundary's scheduled start. While it rests in its current slot (`processedSlotIndex`, so `currentActivity` is null),
+   * this is the slot whose boundary returns it to its schedule: `processedSlotIndex + 1`, once its owner has signalled since
+   * it began resting (that next boundary's start minus the owner's last signal is then under `idle.afterMs`).
+   * Null otherwise: when it is not resting, and while it rests with no signal since (it would rest at the next boundary too;
+   * a `presence` command, then a fresh read, makes it the next slot).
+   */
+  restingUntilSlot: number | null;
 };
 /** Whitelisted public projection: never spread an OwnerState into this shape. */
 export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena' | 'tournament' | 'expedition:woodland' | 'expedition:outpost' | 'expedition:mountain';
@@ -38,6 +48,12 @@ export type PublicActor = {
   league: LeagueId; level: number; phase: Phase; location: CampLocation;
   activityId: ActivityId | null; activityStatus: CurrentActivity['status'] | 'idle';
   startsAtMs: number | null; endsAtMs: number | null; visibleStage: RevealedStage | null;
+  /**
+   * Task 23.8: true while the character rests at home in its current slot (OwnerState.restingUntilSlot): it then has no
+   * activity, so `location` is 'camp', `activityId` null, `activityStatus` 'idle', and the times and stage are null. Players
+   * see "Resting at home: back when {name}'s owner returns."
+   */
+  resting: boolean;
 };
 export type RevisionState = {
   revision: string; serverNowMs: number; slotIndex: number;

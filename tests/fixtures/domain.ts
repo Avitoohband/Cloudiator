@@ -17,6 +17,7 @@ export const ownerFixture: OwnerState = {
   processedSlotIndex: 373247,
   currentActivity: { id: '9fce3cd5-e831-4a66-8ca1-16b4576b1499', kind: 'training', status: 'active',
     startsAtMs: 1791590400000, endsAtMs: 1791595200000, label: 'Training at the practice yard' },
+  restingUntilSlot: null,
 };
 
 export const worldFixture: WorldSnapshot = {
@@ -24,7 +25,7 @@ export const worldFixture: WorldSnapshot = {
   actors: [{ gladiatorId: ownerFixture.gladiatorId, name: 'Aster', classId: 'guardian',
     equipmentSilhouettes: [], league: 'bronze', level: 1, phase: 'morning', location: 'training',
     activityId: ownerFixture.currentActivity!.id, activityStatus: 'active',
-    startsAtMs: 1791590400000, endsAtMs: 1791595200000, visibleStage: null }],
+    startsAtMs: 1791590400000, endsAtMs: 1791595200000, visibleStage: null, resting: false }],
 };
 
 export const buildInputFixture: BuildInput = {

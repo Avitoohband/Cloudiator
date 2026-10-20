@@ -47,6 +47,7 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
       startsAtMs,
       endsAtMs: startsAtMs + SLOT_MS,
       visibleStage: null,
+      resting: false,
     };
   });
   return { revision: `demo-${slotIndex}`, serverNowMs, slotIndex, actors };

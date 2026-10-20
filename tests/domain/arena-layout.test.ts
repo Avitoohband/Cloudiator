@@ -24,7 +24,7 @@ const fightsAt = (t: number, actors: readonly PublicActor[] = ARENA_WORLD_ACTORS
 const inRing = (slot: RingSlot, t: number) => slot.enterAtMs <= t && t < slot.leaveAtMs;
 const arenaActor = (i: number): PublicActor => ({
   gladiatorId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, name: `Gladiator ${i}`, classId: 'duelist', equipmentSilhouettes: ['weapon-sword'],
-  league: 'bronze', level: 1, phase: 'morning', location: 'arena', activityId: `activity-${i}`, activityStatus: 'active', startsAtMs: S, endsAtMs: S + ARENA_SLOT_MS, visibleStage: null,
+  league: 'bronze', level: 1, phase: 'morning', location: 'arena', activityId: `activity-${i}`, activityStatus: 'active', startsAtMs: S, endsAtMs: S + ARENA_SLOT_MS, visibleStage: null, resting: false,
 });
 
 describe('arena sparring rings', () => {

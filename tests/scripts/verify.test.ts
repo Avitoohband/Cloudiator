@@ -119,6 +119,11 @@ describe('the gate steps', () => {
     // Task 24.0: the dependency cache's modification times are tolerated and reported; the check holds everywhere else.
     for (const phrase of ['Observed 2026-10-20 (Task 24.0)', 'a modification-time change under `supabase/functions/node_modules` (Deno\'s dependency cache) is tolerated',
       'reported in the Edge step note', 'everywhere else it still fails the step']) expect(rules, phrase).toContain(phrase);
+    // Task 24.1 fix round 1 (Minor 3): the history stays; the Task 24.0 limit is marked superseded, then the 24.1 result follows.
+    const superseded = 'A cache entry that disappears or cannot be opened during the walk is not covered by this change and still fails the '
+      + 'step. *(Superseded by Task 24.1, below: such a cache entry is now tolerated.)*';
+    expect(rules).toContain(superseded);
+    expect(rules.indexOf(superseded)).toBeLessThan(rules.indexOf('**Tested (Task 24.1, 2026-10-20; scratch folders).**'));
   });
 
   it('run the capacity case with its budgets enforced, beside the whole database suite', () => {

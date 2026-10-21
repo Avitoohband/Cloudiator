@@ -41,11 +41,17 @@ import { RULES_V1 } from '../supabase/functions/_shared/domain/rules-v1.ts';
 // creation: the classes rotate and the allocations vary with the seed, but endurance stays 2, so every character affords
 // exactly three expeditions before it rests and all of them stay in step (three all-expedition boundaries in every four).
 //
-// Refusals. The SQL refuses (raises, and saves nothing) unless the project is empty and not activated: no account at all (a
-// bench seed account means it was seeded already; any other means it is not the new bench project), no character, no season
-// epoch, and the scheduler off. It takes an advisory lock first, so two runs at once cannot both pass. It is one DO block, so
+// Refusals. The SQL refuses (raises, and saves nothing) unless the database is marked as the bench and the project is empty
+// and not activated. The mark (fix round 1) is the database comment 'cloudiator-bench' or the schema cloudiator_bench_marker,
+// set by a separate bench-only runbook step that this file never takes, since an empty production project before activation
+// looks like an empty bench in every other way. Empty and not activated: no account at all (a bench seed account means it
+// was seeded already; any other means it is not the new bench project), no character, no season epoch, and the scheduler
+// off. It takes an advisory lock first, so two runs at once cannot both pass. It is one DO block, so
 // any failure (a refusal, a refused insert, or a slot boundary passing between a creation and its schedule edits) leaves
-// nothing behind; a read-only SELECT then prints the counts to paste back.
+// nothing behind; a read-only SELECT then prints the counts to paste back, with the seeding slot and time and the first
+// boundary with members. Creation records the creation slot S as each character's processed slot, the coordinator starts at
+// S + 1, and a boundary with members before the season epoch waits for it forever (the epoch cannot change once set), so the
+// bench's epoch must be at most S + 1, even if that slot has passed (fix round 1; the runbook's "Bench seed").
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** The default output: git-ignored (`/bench-seed.sql` in .gitignore). */
@@ -124,11 +130,12 @@ export function benchSeedSql({ count, seed }) {
     `-- Cloudiator bench seed: ${count} characters (node scripts/bench-seed.mjs --count ${count} --seed ${seed}).`,
     '-- Task 24.2b, plan Decision 4. How to run it and what to paste back: docs/operations/runbook.md, "Bench seed".',
     '-- ONLY for the temporary bench project ("cloudiator-bench"), once, in its SQL editor, after the migrations and before',
-    '-- activation. It refuses (raises, and saves nothing) unless the project is empty and not activated: no account, no',
-    '-- character, no season epoch, the scheduler off. Each owner is a synthetic account on the reserved bench.invalid domain,',
-    '-- with no password and a Google identity no real Google account can match; each character is created and scheduled',
-    '-- through the game\'s own functions, every phase on the Woodland expedition. One DO block: any failure leaves nothing',
-    '-- behind. The SELECT at the end prints counts and a slot number only.',
+    '-- activation. It refuses (raises, and saves nothing) unless the database is marked as the bench (a separate runbook step)',
+    '-- and the project is empty and not activated: no account, no character, no season epoch, the scheduler off. Set the',
+    '-- bench\'s season epoch at most at first_member_boundary (the last SELECT). Each owner is a synthetic account on the',
+    '-- reserved bench.invalid domain, with no password and a Google identity no real Google account can match; each character',
+    '-- is created and scheduled through the game\'s own functions, every phase on the Woodland expedition. One DO block: any',
+    '-- failure leaves nothing behind. The SELECT at the end prints counts, slot numbers and the seeding time only.',
     'do $bench_seed$',
     'declare',
     '  characters constant jsonb := $bench_json$[',
@@ -143,10 +150,17 @@ export function benchSeedSql({ count, seed }) {
     '  existing_characters bigint;',
     '  epoch_set boolean;',
     '  scheduler_on boolean;',
+    '  marked boolean;',
     "  reasons text[] := '{}';",
     'begin',
     '  -- One seed at a time: a second run started meanwhile waits here, then sees this one\'s accounts and refuses.',
     "  perform pg_advisory_xact_lock(hashtextextended('cloudiator-bench-seed', 0));",
+    '  -- Only a database marked as the bench, by a separate bench-only step that this file never takes: the database comment',
+    "  -- 'cloudiator-bench', or (where the owner cannot comment on the database) the schema cloudiator_bench_marker. An empty",
+    '  -- production project before activation looks like an empty bench in every other way.',
+    "  marked := coalesce(shobj_description((select oid from pg_database where datname = current_database()), 'pg_database'), '') = 'cloudiator-bench'",
+    "    or to_regnamespace('cloudiator_bench_marker') is not null;",
+    "  if not marked then reasons := reasons || 'this database is not marked as the bench'::text; end if;",
     "  select count(*) filter (where email like 'bench-%@bench.invalid'), count(*) filter (where email is null or email not like 'bench-%@bench.invalid')",
     '    into bench_accounts, other_accounts from auth.users;',
     '  select count(*) into existing_characters from public.gladiators;',
@@ -159,7 +173,7 @@ export function benchSeedSql({ count, seed }) {
     "  if scheduler_on then reasons := reasons || 'the scheduler is enabled (activation comes after seeding)'::text; end if;",
     '  if cardinality(reasons) > 0 then',
     "    raise exception using message = 'bench seed refused: ' || array_to_string(reasons, '; '),",
-    "      hint = 'Run it only on the new, empty bench project, after the migrations and before activation (docs/operations/runbook.md, \"Bench seed\").';",
+    "      hint = 'Run it only on the new, empty bench project, marked as the bench, after the migrations and before activation (docs/operations/runbook.md, \"Bench seed\").';",
     '  end if;',
     '  for c in select value from jsonb_array_elements(characters) loop',
     "    actor := (c->>'userId')::uuid;",
@@ -196,7 +210,9 @@ export function benchSeedSql({ count, seed }) {
     '$bench_seed$;',
     '-- What to paste back: this one row. Expected: bench_accounts, accounts, characters and all_expedition_schedules all equal',
     '-- to the count above, epoch_set and scheduler_enabled false; every slot from all_expedition_from_slot on is an expedition',
-    '-- for every character.',
+    '-- for every character. The bench\'s season epoch must be at most first_member_boundary, even if that slot has passed:',
+    '-- the coordinator starts at min(processed_slot_index) + 1 and waits for the epoch forever if that boundary comes before it',
+    '-- (the epoch cannot be changed once set). seeded_slot and seeded_at_utc date the seed: the owners go idle 14 days later.',
     'select',
     "  (select count(*)::int from auth.users where email like 'bench-%@bench.invalid') as bench_accounts,",
     '  (select count(*)::int from auth.users) as accounts,',
@@ -204,7 +220,11 @@ export function benchSeedSql({ count, seed }) {
     `  (select count(*)::int from public.schedules where schedule = '${ALL_WOODLAND}'::jsonb) as all_expedition_schedules,`,
     '  exists(select 1 from private.season_epoch) as epoch_set,',
     '  (select coalesce(bool_or(enabled), false) from private.scheduler) as scheduler_enabled,',
-    '  (select max(effective_slot_index) from public.schedule_revisions) as all_expedition_from_slot;',
+    '  (select max(effective_slot_index) from public.schedule_revisions) as all_expedition_from_slot,',
+    '  (select min(processed_slot_index) from public.gladiators) as seeded_slot,',
+    "  (select to_char(to_timestamp((min(created_at_ms) / 1000.0)::double precision) at time zone 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC'",
+    '    from public.gladiators) as seeded_at_utc,',
+    '  (select min(processed_slot_index) + 1 from public.gladiators) as first_member_boundary;',
   ];
   return `${lines.join('\n')}\n`;
 }

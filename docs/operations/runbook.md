@@ -546,27 +546,55 @@ Task 23.3's worst case). `scripts/bench-seed.mjs` writes the SQL on this machine
 Avi runs it once in the bench project's SQL editor. It holds no password, key, token or real identity.
 
 **When.** After the bench's migrations (24.4) and before its activation (24.7: the season epoch and the scheduler). Production
-is created only after the bench is seeded (Decision 4), and the seed is never run there: it cannot tell an empty production
-project from an empty bench, so the project name in the dashboard is the check.
+is created only after the bench is seeded (Decision 4), and the seed never runs there: an empty production project before
+activation looks like an empty bench in every other way, so the seed refuses any database that a separate, bench-only step
+has not marked as the bench (fix round 1).
 
-1. **Generate** the file in any worktree at the commit being rehearsed (Node 22.19, the project's version):
+1. **Mark the bench** (bench only, never production; the seed file never does this itself). In the SQL editor of the project
+   whose name is `cloudiator-bench`, try the database comment first, since it creates no object:
+   ```sql
+   comment on database postgres is 'cloudiator-bench';
+   ```
+   If it is refused (`must be owner of database postgres`: the hosted owner may not own the database), create the marker schema
+   instead; either marker suffices, and neither appears in `scripts/access-audit.sql` or `scripts/schema-fingerprint.sql`, which
+   read `public` and `private` only:
+   ```sql
+   create schema cloudiator_bench_marker;
+   ```
+2. **Generate** the file in any worktree at the commit being rehearsed (Node 22.19, the project's version):
    ```powershell
    node scripts/bench-seed.mjs        # 50 characters, seed "bench": writes bench-seed.sql in the repository root (git-ignored)
    ```
    It prints the path, the count, the seed and the file's SHA-256, nothing else. The same options always write the same bytes
    (`--count 1-200`, `--seed`, `--out <file>` change them).
-2. **Run** it: in the dashboard, open the project whose name is `cloudiator-bench`, then the SQL editor, a new query; paste the
-   whole file and run it.
-3. **Paste back** the one result row, counts and a slot number only:
+3. **Run** it: in the same project's SQL editor, a new query; paste the whole file and run it.
+4. **Paste back** the one result row, counts, slot numbers and the seeding time only:
    `bench_accounts 50, accounts 50, characters 50, all_expedition_schedules 50, epoch_set false, scheduler_enabled false,
-   all_expedition_from_slot <slot>`. Every slot from that one on is an expedition for every character.
-4. **A refusal** reads `bench seed refused: …` and saves nothing. Its reasons, each with a count: `accounts that are not bench
+   all_expedition_from_slot <slot>, seeded_slot <S>, seeded_at_utc <YYYY-MM-DD HH:MI UTC>, first_member_boundary <S + 1>`.
+   Record `seeded_slot` and `seeded_at_utc` in the release evidence: they date the window below. Every slot from
+   `all_expedition_from_slot` on is an expedition for every character.
+5. **A refusal** reads `bench seed refused: …` and saves nothing. Its reasons: `this database is not marked as the bench` (step 1
+   was not done here: if this is the bench, mark it; if it is not, stop), and, each with a count, `accounts that are not bench
    seed accounts` (not the new bench project: stop), `bench seed accounts (already seeded)` (it ran before: nothing to do),
    `characters`, `the season epoch is set` and `the scheduler is enabled` (activation came first: the bench needs a new project
    or `db reset --linked`, Avi's call). Paste the message; it holds counts only. Any other failure also saves nothing (one DO
    block): `… schedule edit of Bench NNN failed: processing` means a slot boundary passed during the seed (run it again);
    `permission denied for table users` or `… identities` means the hosted owner may not write Auth rows (stop and report; there
    is no fallback without a new decision).
+
+**The bench's season epoch (Task 24.7 on the bench).** Set it **at most at `first_member_boundary`**, even if that slot has
+already passed. Creation records the creation slot as each character's processed slot, the coordinator starts at
+`min(processed_slot_index) + 1`, and a boundary with members before the epoch waits for it (`wait_reason` `epoch`) forever: the
+epoch cannot be changed once set (its row is guarded), so a later epoch stalls the bench for good. The rule "the epoch is the
+next full slot, never in the past" applies only to the empty production project, which has no characters. Activate the bench
+soon after seeding: the coordinator replays every boundary from `first_member_boundary` to the present, up to 6 a tick, before
+it publishes the current one.
+
+**Production must carry neither marker.** In production's parity step (24.4), as the database owner, this must print `false`:
+```sql
+select coalesce(shobj_description((select oid from pg_database where datname = current_database()), 'pg_database'), '') = 'cloudiator-bench'
+  or to_regnamespace('cloudiator_bench_marker') is not null as marked_as_bench;
+```
 
 What it creates, per character: an owner account inserted directly into `auth.users` and `auth.identities` (no SQL function of
 the Auth server creates one, and every game table that names an owner references `auth.users`), shaped like the local
@@ -576,15 +604,17 @@ through the game's own functions in the Edge handler's order, the rate checks (w
 `create_gladiator` with the Edge function's prepared input, and two `edit_schedule` commands that put the morning and the
 evening on Woodland (the afternoon already is). Classes rotate and allocations vary; endurance is 2 everywhere (104 stamina),
 so each character goes on three expeditions, then rests once, all in step: three of every four boundaries follow an
-all-expedition slot. The SQL takes an advisory lock and checks every refusal before it writes anything.
+all-expedition slot. The SQL takes an advisory lock and checks the marker and every other refusal before it writes anything.
 
 Afterwards the accounts and characters stay until Avi deletes the bench project (24.12); none can sign in. Their owners'
-activity signal is the seeding time, and a character whose owner sends no signal for 14 days rests at home (Task 23.8), so run
-24.9's benchmark and 24.11's phone test within 14 days of seeding.
+activity signal is the seeding time (`seeded_at_utc`), and a character whose owner sends no signal for 14 days rests at home
+(Task 23.8), so run 24.9's benchmark and 24.11's phone test within 14 days of `seeded_at_utc`.
 
 Tested locally: `tests/db/bench-seed.test.ts` applies the generated file, as the SQL editor would (all statements in one
-request), inside a transaction that first empties the local database and always rolls back: 50 accounts with the Auth admin
-API's null and empty columns, 50 characters with 50 owners, three receipts each, every phase on Woodland, no epoch; a second
-run, an account of its own (with or without a character), the epoch and the scheduler each refuse and change nothing.
-`tests/scripts/bench-seed.test.ts` covers the options, the determinism and the guards' order. Not yet run on a hosted
-project: the hosted owner's INSERT on the two Auth tables, and the hosted Auth server reading these accounts, are untested.
+request), inside a transaction that first empties the local database, marks it (the comment, or the marker schema in one case;
+both are transactional) and always rolls back: 50 accounts with the Auth admin API's null and empty columns, 50 characters with
+50 owners, three receipts each, every phase on Woodland, no epoch, and `seeded_slot`, `seeded_at_utc` and
+`first_member_boundary` as the database has them; a second run, an account of its own (with or without a character), the
+epoch, the scheduler and an unmarked database each refuse and change nothing. `tests/scripts/bench-seed.test.ts` covers the
+options, the determinism and the guards' order. Not yet run on a hosted project: the hosted owner's comment on the database,
+its INSERT on the two Auth tables, and the hosted Auth server reading these accounts are untested.

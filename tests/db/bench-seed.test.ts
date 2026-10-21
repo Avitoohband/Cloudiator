@@ -12,6 +12,10 @@ import { benchCharacters, benchSeedSql } from '../../scripts/bench-seed.mjs';
 // row trigger) and the scheduler off — and always rolls back. No function stand-in is installed. Sequences that a creation
 // advances (as every database test does) are the only thing a rollback does not restore. The last case checks the local
 // database is otherwise as it was.
+// Fix round 1 (Important 2): the seed runs only on a database marked as the bench, by the database comment 'cloudiator-bench'
+// or the schema cloudiator_bench_marker (the runbook's separate bench-only step). COMMENT and CREATE SCHEMA are
+// transactional, so each case marks the emptied database inside its transaction (the comment unless it says otherwise) and
+// the rollback removes the mark; the last case compares the database comment with the one before.
 
 const SLOT = 4_800_000;
 const COUNT = 50;
@@ -20,8 +24,8 @@ const CHARACTERS = benchCharacters({ count: COUNT, seed: 'bench' });
 const WOODLAND = { kind: 'expedition', expeditionId: 'woodland' };
 
 class RolledBack extends Error {}
-/** Runs `work` on an emptied, not yet activated project, then rolls everything back. */
-async function onEmptyProject<T>(work: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+/** Runs `work` on an emptied, not yet activated project, marked as the bench by `marker`, then rolls everything back. */
+async function onEmptyProject<T>(work: (tx: postgres.TransactionSql) => Promise<T>, marker: 'comment' | 'schema' | 'none' = 'comment'): Promise<T> {
   const probe = postgres(process.env.LOCAL_DB_URL!, { max: 1, onnotice: () => {} });
   let seen: T | undefined;
   try {
@@ -30,6 +34,8 @@ async function onEmptyProject<T>(work: (tx: postgres.TransactionSql) => Promise<
       await tx`truncate auth.users cascade`;
       await tx`truncate private.season_epoch`;
       await tx`update private.scheduler set enabled=false where singleton`;
+      if (marker === 'comment') await tx`comment on database postgres is 'cloudiator-bench'`;
+      if (marker === 'schema') await tx`create schema cloudiator_bench_marker`;
       seen = await work(tx);
       throw new RolledBack();
     }).catch(error => { if (!(error instanceof RolledBack)) throw error; });
@@ -50,7 +56,9 @@ async function refusal(tx: postgres.TransactionSql) {
 async function counts(db: postgres.Sql | postgres.TransactionSql) {
   const [row] = await db`select (select count(*)::int from auth.users) as accounts, (select count(*)::int from public.gladiators) as characters,
     (select count(*)::int from public.operation_receipts) as receipts, (select count(*)::int from private.owner_signals) as signals,
-    (select coalesce(json_agg(epoch_slot), '[]') from private.season_epoch) as epoch, (select enabled from private.scheduler where singleton) as scheduler`;
+    (select coalesce(json_agg(epoch_slot), '[]') from private.season_epoch) as epoch, (select enabled from private.scheduler where singleton) as scheduler,
+    shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as comment,
+    to_regnamespace('cloudiator_bench_marker') is not null as marker_schema`;
   return row;
 }
 /** Each column's shape (null, empty string, or JSON type), never its value. */
@@ -95,6 +103,14 @@ describe('the bench seed', () => {
       const [{ slot }] = await tx`select (floor(extract(epoch from clock_timestamp())*1000)::bigint / ${SLOT})::int as slot`;
       expect(Number(summary.all_expedition_from_slot)).toBeGreaterThan(slot);
       expect(Number(summary.all_expedition_from_slot)).toBeLessThanOrEqual(slot + 3);
+      // Fix round 1 (Important 1): the seeding slot and time, and the first boundary with members (the coordinator starts at
+      // min(processed_slot_index) + 1), which the bench's season epoch must not pass.
+      const [{ first, created }] = await tx`select min(processed_slot_index)::int + 1 as first, min(created_at_ms)::bigint as created from public.gladiators`;
+      expect(Number(summary.seeded_slot)).toBe(slot);
+      expect(Number(summary.first_member_boundary)).toBe(first);
+      expect(Number(summary.first_member_boundary)).toBe(slot + 1);
+      const at = new Date(Number(created));
+      expect(summary.seeded_at_utc).toBe(`${at.toISOString().slice(0, 10)} ${at.toISOString().slice(11, 16)} UTC`);
 
       const users = await tx`select u.id::text, u.email, u.encrypted_password = '' as no_password, u.raw_app_meta_data as app, i.id::text as identity,
         i.provider, i.provider_id, i.identity_data from auth.users u join auth.identities i on i.user_id=u.id order by u.email`;
@@ -156,6 +172,29 @@ describe('the bench seed', () => {
       expect((await refusal(tx))?.message).toBe('bench seed refused: the season epoch is set (activation comes after seeding)');
       expect(await counts(tx)).toMatchObject({ accounts: 0, characters: 0, receipts: 0, signals: 0 });
     });
+  });
+
+  it('refuses an empty project that is not marked as the bench, such as production before activation', async () => {
+    await onEmptyProject(async tx => {
+      expect(await counts(tx)).toMatchObject({ marker_schema: false });
+      expect((await counts(tx)).comment).not.toBe('cloudiator-bench');
+      const unmarked = await refusal(tx);
+      expect(unmarked?.message).toBe('bench seed refused: this database is not marked as the bench');
+      expect(unmarked?.hint).toMatch(/"Bench seed"/);
+      // A comment that is not exactly the bench's does not count.
+      await tx`comment on database postgres is 'cloudiator-bench '`;
+      expect((await refusal(tx))?.message).toBe('bench seed refused: this database is not marked as the bench');
+      expect(await counts(tx)).toMatchObject({ accounts: 0, characters: 0, receipts: 0, signals: 0 });
+    }, 'none');
+  });
+
+  it('accepts the marker schema where the database cannot be commented on', async () => {
+    await onEmptyProject(async tx => {
+      expect(await counts(tx)).toMatchObject({ marker_schema: true });
+      expect((await counts(tx)).comment).not.toBe('cloudiator-bench');
+      const [summary] = await applySeed(tx);
+      expect(summary).toMatchObject({ bench_accounts: COUNT, characters: COUNT, all_expedition_schedules: COUNT, epoch_set: false });
+    }, 'schema');
   });
 
   it('leaves the local database as it was', async () => {

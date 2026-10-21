@@ -105,14 +105,31 @@ describe('the SQL', () => {
     const guards = [
       "perform pg_advisory_xact_lock(hashtextextended('cloudiator-bench-seed', 0));",
       'from auth.users', 'from public.gladiators', 'from private.season_epoch', 'from private.scheduler', 'raise exception',
+      // Fix round 1 (Important 2): either bench marker, the database comment or the marker schema.
+      "shobj_description((select oid from pg_database where datname = current_database()), 'pg_database'), '') = 'cloudiator-bench'",
+      "to_regnamespace('cloudiator_bench_marker') is not null",
     ];
     for (const guard of guards) {
       expect(body.indexOf(guard), guard).toBeGreaterThan(0);
       expect(body.indexOf(guard), guard).toBeLessThan(firstWrite);
     }
-    for (const reason of ['that are not bench seed accounts', 'already seeded', 'characters', 'the season epoch is set', 'the scheduler is enabled']) {
+    for (const reason of ['this database is not marked as the bench', 'that are not bench seed accounts', 'already seeded', 'characters',
+      'the season epoch is set', 'the scheduler is enabled']) {
       expect(body.slice(0, firstWrite), reason).toContain(reason);
     }
+  });
+
+  it('never marks the database as the bench itself: that is a separate step on the bench only', () => {
+    expect(text).not.toMatch(/\bcomment\s+on\s+database\b/i);
+    expect(text).not.toMatch(/\bcreate\s+schema\b/i);
+  });
+
+  it('reports the seeding slot and time and the first boundary with members, which the bench\'s epoch must not pass', () => {
+    const select = text.slice(text.indexOf('$bench_seed$;'));
+    expect(select).toContain('(select min(processed_slot_index) from public.gladiators) as seeded_slot');
+    expect(select).toContain('(select min(processed_slot_index) + 1 from public.gladiators) as first_member_boundary');
+    expect(select).toMatch(/to_char\([^;]*min\(created_at_ms\)[^;]*'UTC'[^;]* as seeded_at_utc/s);
+    expect(select).toMatch(/epoch[^\n]*at most[^\n]*first_member_boundary/);
   });
 
   it('creates and schedules through the game\'s own functions, and inserts only the two Auth rows directly', () => {

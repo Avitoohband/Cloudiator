@@ -742,6 +742,40 @@ checks the order, that every `npm run` script and `node` file it calls exists, a
 the controller pushes and records the first run. No known blocker remains: Task 23.8 emptied `KNOWN_BLOCKERS`, so any failed
 step exits 1. Exit 2 is reserved for named known blockers, and none is listed.
 
+### The first CI run and the CI render exception (Tasks 24.0 and 24.0c)
+
+**Run 39452911203** (2026-10-20, the gate from 15:57 to 17:10 UTC; the push of `codex/gladiator-arena`, then at `0d4a1b0`):
+**exit 1, one step failed.** The development browser suite: **51 failed, 490 passed, 35 skipped** in 63 min 49 s. Every other
+step passed: `npm test` 1,251 (3 Windows-only cases skipped), typecheck, the asset check, the build and its scan, the Edge
+settle (612 files read, 31 s, not recreated), `CAPACITY_GATE=1 npm run test:db` **300 passed** with the Edge start time
+unchanged, the isolated production build and its scan, the **production gate 34 passed** (59 s), and `git diff --check`.
+
+- **Observed:** 49 of the 51 failures were test timeouts while the camp or a scene rendered: 47 at 30 s (for example a
+  `page.screenshot` still waiting at `arena.spec.ts:119`), and `release.spec.ts:89` and `:253` at their own 240 s.
+  **Attributed (the controller):** the GitHub-hosted runner has no GPU, so Chrome renders WebGL in software. A case passed on both projects took a median 1.8
+  times as long on the desktop project as on the mobile one (187 cases over 3 s; for example 29.0 s against 13.7 s).
+- **Two failures were not timeouts** (tagged with the rest by the ruling below; each still needs its own triage):
+  `seasons.spec.ts:170` "fits the standings sheet at 360 px" on both projects (the table 342 px wide in its 332 px box; the
+  runner's fallback for the `system-ui` font is the likely cause, inferred, not verified), and `seasons.spec.ts:239` (live
+  mode: one season view read fewer than expected after a revision, 4 instead of 5; a timing difference under load, inferred).
+- **Ruling (the controller's CI exception, 2026-10-20):** CI's development browser step leaves out the render-bound tests.
+  The local `npm run verify` stays the gate of record and still runs every test. No test's assertions changed.
+- **Mechanism (Task 24.0c):** the render-bound tests carry the Playwright tag `@render`. `.github/workflows/checks.yml` sets
+  `CLOUDIATOR_CI_RENDER=exclude` on the release-gate step only. `playwright.config.ts` (through `scripts/ci-render.mjs`) then
+  gives the desktop and mobile projects `grepInvert` for the tag in the development suite; never in the production gate, and
+  never without the variable. Any other value is refused. `scripts/verify.mjs` lists the tagged tests (`--list --grep`, no
+  test runs) and ends the browser step's summary line with "excluded N render-bound tests (CI, no GPU)", never silently.
+- **What is tagged: 75 tests (150 with both projects, of 580).** The 42 tests behind the 51 failures (a tag covers both
+  projects), 32 tests of the same describe blocks (for the top-level market and visitor cases, the same file) that passed
+  in the run but used at least two-thirds of their timeout in either project (20 s of 30 s; 156 s of 180 s for
+  `release.spec.ts:518`), and Task 24.0b's new Arena card case, which has not run on CI yet and opens the Arena camp and
+  takes 360 px page screenshots like its failing neighbours. The list, with each reason, is in
+  [the Task 24.0c report](../implementation/task-24.0c-report.md).
+- **Risk, not tagged:** 13 passing tests outside those describe blocks also used two-thirds of their 30 s on that run (the
+  slowest: `inventory.spec.ts` 28.8 s, the live Tournaments panel 28.0 s, `live-camp.spec.ts` 27.0 s). They may still time
+  out on a later run; they are listed in the report.
+- **Not yet observed:** a CI run with the exception. The controller pushes and records it.
+
 ### Device metrics and the budget arithmetic
 
 - Device metrics are Lane B's ("Lane B: render cost"): desktop at the 170 Hz vsync ceiling in every phase; the Pixel 7 emulation
@@ -759,7 +793,8 @@ step exits 1. Exit 2 is reserved for named known blockers, and none is listed.
   3. hosted egress and compression (Lane A, risk 2);
   4. CORS parity: the hosted `GAME_ALLOWED_ORIGINS` and Auth redirects for the exact Pages origin;
   5. the remote export rehearsal (`scripts/export-db.ps1 -Remote`, then the restore check).
-- **Also open:** the first GitHub Actions run (the controller's push); the hosted `connect-src` origin (the
+- **Also open:** a passing GitHub Actions run (the first, 39452911203, failed only in the development browser step: "The
+  first CI run and the CI render exception" above); the hosted `connect-src` origin (the
   production build sets `NEXT_PUBLIC_SUPABASE_URL`, and the scanner then names that origin); Lane A's risk 5 (boundary headroom
   at 50 characters).
 

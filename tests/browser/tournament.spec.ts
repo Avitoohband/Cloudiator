@@ -67,7 +67,7 @@ test.describe('tournament registration and brackets', () => {
   test.skip(production, 'The tournament samples need the fixture preview, which production exports never include.');
   test.use({ timezoneId: 'UTC' });
 
-  test('keeps every future result hidden before round 1 (plan Step 1)', async ({ page, baseURL }, testInfo) => {
+  test('keeps every future result hidden before round 1 (plan Step 1)', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openBeforeRound(page, 1);
     await expect(page.getByText('Result preparing')).toBeVisible();
@@ -90,7 +90,7 @@ test.describe('tournament registration and brackets', () => {
     expect(remote).toEqual([]);
   });
 
-  test('reveals each round on the display clock, shows the owner’s loss and spectating, and replays a completed bout inline', async ({ page, baseURL }, testInfo) => {
+  test('reveals each round on the display clock, shows the owner’s loss and spectating, and replays a completed bout inline', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openAtMinute(page, 'completed', 20 + 5 / 60);
     await expect(card(page).getByText('Bout in progress')).toHaveCount(4);
@@ -133,7 +133,7 @@ test.describe('tournament registration and brackets', () => {
     expect(remote).toEqual([]);
   });
 
-  test('moves between rounds with the arrow keys, Home and End', async ({ page }, testInfo) => {
+  test('moves between rounds with the arrow keys, Home and End', { tag: '@render' }, async ({ page }, testInfo) => {
     await tournamentFlow.openAtMinute(page, 'midway', 45);
     const tabs = card(page).getByRole('tablist', { name: 'Rounds' });
     await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Semifinals');
@@ -154,7 +154,7 @@ test.describe('tournament registration and brackets', () => {
     await card(page).screenshot({ path: testInfo.outputPath('tournament-byes-midway.png') });
   });
 
-  test('rings a focused round tab and Watch replay with the panel’s gold outline', async ({ page }) => {
+  test('rings a focused round tab and Watch replay with the panel’s gold outline', { tag: '@render' }, async ({ page }) => {
     // Task 23.4 review I1: a broken selector list had dropped the panel's own focus ring (3 px gold at a 2 px offset) from
     // the round tabs, Watch replay and the sample buttons, leaving the global ring at a 5 px offset.
     await tournamentFlow.openAtMinute(page, 'completed', 79);
@@ -197,7 +197,7 @@ test.describe('tournament registration and brackets', () => {
     expect(remote).toEqual([]);
   });
 
-  test('explains the one-entrant fallback: regular Arena this slot', async ({ page }, testInfo) => {
+  test('explains the one-entrant fallback: regular Arena this slot', { tag: '@render' }, async ({ page }, testInfo) => {
     await tournamentFlow.openAtMinute(page, 'insufficient', 30);
     await expect(card(page).getByRole('status')).toHaveText('Not held: too few entrants');
     await expect(card(page)).toContainText('Only 1 gladiator qualified in the Gold league, so no bracket was held: that entrant fought regular Arena this slot (with an NPC opponent where needed).');
@@ -210,7 +210,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(page.getByRole('region', { name: 'Tournament schedule' }).getByRole('definition')).toHaveText(['Sat 10 Oct, 17:20 UTC', '30 min 0 s']);
   });
 
-  test('marks a due round as preparing while its results are unpublished, and asks again', async ({ page }, testInfo) => {
+  test('marks a due round as preparing while its results are unpublished, and asks again', { tag: '@render' }, async ({ page }, testInfo) => {
     // The mid-way view was read at minute 45; by minute 65 its final is due but not published.
     await tournamentFlow.openAtMinute(page, 'midway', 65);
     await expect(card(page).getByRole('status')).toHaveText('Processing results');
@@ -235,7 +235,7 @@ test.describe('tournament registration and brackets', () => {
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
   });
 
-  test('holds each sample at the server time its view was projected at, so it shows what its label says', async ({ page }) => {
+  test('holds each sample at the server time its view was projected at, so it shows what its label says', { tag: '@render' }, async ({ page }) => {
     await openTournaments(page);
     const shows: [TournamentKey, string, string][] = [
       ['opening', 'In progress', 'You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.'],
@@ -285,7 +285,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(page.getByText('Tournament brackets cannot be loaded right now.')).toBeVisible();
   });
 
-  test('backs processing re-reads off from 30 s to 5 minutes, pauses them in a hidden tab, re-reads once on focus and resets when the status changes', async ({ page }) => {
+  test('backs processing re-reads off from 30 s to 5 minutes, pauses them in a hidden tab, re-reads once on focus and resets when the status changes', { tag: '@render' }, async ({ page }) => {
     // The late view (final revealed, placements pending) after minute 80 is a stuck settlement: processing, no mark left.
     const reads = () => page.evaluate(() => window.__cloudiatorTournaments!.reads());
     const at = (seconds: number) => page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('late') + 85 * MIN + seconds * 1000);
@@ -329,7 +329,7 @@ test.describe('tournament registration and brackets', () => {
     await expect.poll(reads).toBe(n + 1);
   });
 
-  test('loads a bout’s battle log only when its replay is watched, and only once', async ({ page }) => {
+  test('loads a bout’s battle log only when its replay is watched, and only once', { tag: '@render' }, async ({ page }) => {
     await tournamentFlow.openAtMinute(page, 'completed', 79);
     const logReads = () => page.evaluate(() => window.__cloudiatorTournaments!.logReads());
     // Every round is revealed and decided, and no log has been asked for.
@@ -357,7 +357,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(card(page).getByText('Bout in progress')).toHaveCount(2);
   });
 
-  test('works by keyboard alone', async ({ page }) => {
+  test('works by keyboard alone', { tag: '@render' }, async ({ page }) => {
     await openTournaments(page);
     const sample = page.getByRole('button', { name: TOURNAMENTS.pair.label, exact: true });
     await sample.focus();
@@ -697,7 +697,7 @@ test.describe('tournament entrants in the camp', () => {
   test.skip(production, 'The camp harness runs on the fixture preview only.');
   test.use({ timezoneId: 'UTC' });
 
-  test('waits every entrant in staging, then fights each revealed bout in a sparring ring', async ({ page }, testInfo) => {
+  test('waits every entrant in staging, then fights each revealed bout in a sparring ring', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // entrants take their spots at once
     await openCampTournament(page, 5);
     let state = await campState(page);
@@ -736,7 +736,7 @@ test.describe('tournament entrants in the camp', () => {
     await page.screenshot({ path: testInfo.outputPath('camp-tournament-round-1.png') });
   });
 
-  test('sends the eliminated to spectator spots outside the wall and marks the champion at the end', async ({ page }, testInfo) => {
+  test('sends the eliminated to spectator spots outside the wall and marks the champion at the end', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openCampTournament(page, 5);
     const players = (await campState(page)).players;
@@ -797,7 +797,7 @@ test.describe('tournament entrants in the camp', () => {
     expect(state.actors.filter(a => a.marker === 'Champion').map(a => a.id)).toEqual([varro]);
   });
 
-  test('walks the eliminated out to their spots and keeps them there across world updates', async ({ page }) => {
+  test('walks the eliminated out to their spots and keeps them there across world updates', { tag: '@render' }, async ({ page }) => {
     await openCampTournament(page, 5);
     // The display clock runs while frozen frames are drawn, so step it through the walk out.
     for (let t = startOf('completed') + 29 * MIN; t <= startOf('completed') + 30 * MIN; t += 500) await freezeCamp(page, t);
@@ -853,7 +853,7 @@ test.describe('tournament entrants in the camp', () => {
     expect(await logReads()).toBe(6);
   });
 
-  test('changes a tournament ring and the panel over at the same moment', async ({ page }) => {
+  test('changes a tournament ring and the panel over at the same moment', { tag: '@render' }, async ({ page }) => {
     // Task 20 review: the ring shows a bout's result from the stage core's decision, the moment the Tournaments panel
     // shows its winner, on the one shared clock. The camp reads the polled view itself, so the ring is scheduled from
     // the fight summary; the pairs take their ring spots at once with reduced motion.

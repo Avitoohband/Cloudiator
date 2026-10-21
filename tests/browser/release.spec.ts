@@ -86,7 +86,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await shot(page, testInfo, 'art-failed-schedule');
   });
 
-  test('completes a keyboard-only journey through every menu with focus never on body', async ({ page }, testInfo) => {
+  test('completes a keyboard-only journey through every menu with focus never on body', { tag: '@render' }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop', 'The pointer layout; the touch layout has its own journey below.');
     test.setTimeout(240_000);
     await watchFocus(page);
@@ -250,7 +250,7 @@ test.describe('release accessibility in the fixture preview', () => {
     expect(await focusDrops(page)).toEqual([]);
   });
 
-  test('names every focusable control and links each validation message to its field', async ({ page }, testInfo) => {
+  test('names every focusable control and links each validation message to its field', { tag: '@render' }, async ({ page }, testInfo) => {
     test.setTimeout(240_000);
     // The fixture camp: the rail, the chip, every menu (with an Arena card and the archived season), a profile card and both scenes.
     await openFixtureCamp(page);
@@ -437,7 +437,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect.poll(() => focusDrops(page)).toEqual([{ from: '<button> Short-lived', after: 'a DOM change' }]);
   });
 
-  test('pins the rail, a menu frame, a scene and the profile card in accessibility snapshots', async ({ page }, testInfo) => {
+  test('pins the rail, a menu frame, a scene and the profile card in accessibility snapshots', { tag: '@render' }, async ({ page }, testInfo) => {
     // Plan Decision 8 (fix round 1, I3). The rail: the eight menus, and the camera controls on a pointer only.
     await openFixtureCamp(page);
     await revealRail(page);
@@ -515,7 +515,7 @@ test.describe('release accessibility in the fixture preview', () => {
     void testInfo;
   });
 
-  test('meets 4.5:1 contrast on panel text and 3:1 on controls', async ({ page }, testInfo) => {
+  test('meets 4.5:1 contrast on panel text and 3:1 on controls', { tag: '@render' }, async ({ page }, testInfo) => {
     test.setTimeout(180_000);
     await openFixtureCamp(page);
     // The rail with a focused icon: its focus ring against the rail.
@@ -569,7 +569,7 @@ test.describe('release accessibility in the fixture preview', () => {
     for (const label of ['My gladiator', 'Marketplace']) expect(await contrastIssues(await settled(await openMenu(page, label))), `${label} (visitor)`).toEqual([]);
   });
 
-  test('meets the contrast minimums in the player forms', async ({ page }, testInfo) => {
+  test('meets the contrast minimums in the player forms', { tag: '@render' }, async ({ page }, testInfo) => {
     await livePlayer(page, poorPlayer());
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
@@ -589,7 +589,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await shot(page, testInfo, 'form-market-sell');
   });
 
-  test('respects reduced motion in the rail, panels and scenes', async ({ page }, testInfo) => {
+  test('respects reduced motion in the rail, panels and scenes', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openFixtureCamp(page);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.state()!.reducedMotion)).toBe(true);

@@ -391,7 +391,7 @@ test.describe('battle-log replay', () => {
     await page.screenshot({ path: testInfo.outputPath('replay-360-result.png'), fullPage: true });
   });
 
-  test('stages both fighters facing each other inside the frame, with effects on the defender, for every action', async ({ page }, testInfo) => {
+  test('stages both fighters facing each other inside the frame, with effects on the defender, for every action', { tag: '@render' }, async ({ page }, testInfo) => {
     for (const c of [CASES[0], CASES[2]]) {
       const log = LOGS[c.log];
       await openReplay(page, c.activity, c.stage);

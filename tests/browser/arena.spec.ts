@@ -54,7 +54,7 @@ const freezeAt = async (page: Page, ms: number) => { await page.evaluate(t => wi
 test.describe('arena staging and sparring rings in the camp', () => {
   test.skip(production, 'The camp harness runs on the fixture preview only.');
 
-  test('warms every entrant up in staging before minute 60, with no pairing or ring shown', async ({ page }, testInfo) => {
+  test('warms every entrant up in staging before minute 60, with no pairing or ring shown', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // added entrants take their staging spots at once
     await openArena(page, 40);
     const state = await campState(page);
@@ -75,7 +75,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     await page.screenshot({ path: testInfo.outputPath('arena-minute-40-warm-up.png') });
   });
 
-  test('walks each revealed pair into its own ring, face to face, and plays its bout from the log', async ({ page }, testInfo) => {
+  test('walks each revealed pair into its own ring, face to face, and plays its bout from the log', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // pairs step into their rings at once
     await openArena(page, 60);
     let state = await campState(page);
@@ -184,7 +184,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     expect(state.arena.fights.find(f => f.battleId === fight.battleId)!.status).toBe('done');
   });
 
-  test('lists the fights in the rings as buttons that find the pair', async ({ page }, testInfo) => {
+  test('lists the fights in the rings as buttons that find the pair', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openArena(page, 60.25);
     const menu = await openMenu(page, 'Arena');
@@ -213,7 +213,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     expect((await campState(page)).selected).toBe(ARENA_GLADIATORS.bellator.id);
   });
 
-  test('selects a fighter by a click on its body in the ring', async ({ page }) => {
+  test('selects a fighter by a click on its body in the ring', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openArena(page, 60.25);
     const state = await campState(page);
@@ -251,7 +251,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     expect(state.arena.plans).toEqual([]);
   });
 
-  test('keeps damage labels clear of the fighters’ nameplates and the NPC tag', async ({ page }, testInfo) => {
+  test('keeps damage labels clear of the fighters’ nameplates and the NPC tag', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // the pairs stand in their rings at once
     await openArena(page, 60);
     const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
@@ -293,7 +293,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     await page.locator('canvas').screenshot({ path: testInfo.outputPath('arena-labels-clear-of-nameplates.png') });
   });
 
-  test('walks pairs into their rings within the walk-in time and back to staging after the result', async ({ page }) => {
+  test('walks pairs into their rings within the walk-in time and back to staging after the result', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openArena(page, 59);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -322,7 +322,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     for (const id of fight.fighters.filter((x): x is string => !!x)) expect(state.actors.find(a => a.id === id)!.walking, 'walking back to staging').toBe(true);
   });
 
-  test('jogs pairs into their rings at three times the walking pace with a quicker step, and walks them back at the normal pace', async ({ page }) => {
+  test('jogs pairs into their rings at three times the walking pace with a quicker step, and walks them back at the normal pace', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openArena(page, 59);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -401,7 +401,7 @@ test.describe('arena staging and sparring rings in the camp', () => {
     }
   });
 
-  test('keeps each fight’s damage labels clear of every nameplate in the six-fight view', async ({ page }) => {
+  test('keeps each fight’s damage labels clear of every nameplate in the six-fight view', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' }); // the pairs stand in their rings at once
     await openArena(page, 60);
     const inRings = (await campState(page)).arena.fights.filter(f => f.status !== 'queued');
@@ -497,7 +497,7 @@ test('flags only requests that leave the test origin or reach Supabase, on any d
 test.describe('the Arena card and league standings', () => {
   test.skip(production, 'The Arena samples need the fixture preview, which production exports never include.');
 
-  test('reveals the bout at minute 60 and discloses an NPC fallback (plan Step 1)', async ({ page, baseURL }) => {
+  test('reveals the bout at minute 60 and discloses an NPC fallback (plan Step 1)', { tag: '@render' }, async ({ page, baseURL }) => {
     const remote = forbidRemote(page, baseURL);
     await arenaFlow.openAtMinute(page, 59);
     await expect(page.getByText('Warming up')).toBeVisible();
@@ -515,7 +515,7 @@ test.describe('the Arena card and league standings', () => {
     expect(remote).toEqual([]);
   });
 
-  test('stages, reveals, completes and credits a human bout, crediting nothing before minute 80', async ({ page, baseURL }, testInfo) => {
+  test('stages, reveals, completes and credits a human bout, crediting nothing before minute 80', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     const key = 'ownerHumanWin';
     await arenaFlow.openAtMinute(page, 30, key);
@@ -539,7 +539,7 @@ test.describe('the Arena card and league standings', () => {
 
   // Task 24.0b: the warm-up's reveal time is a short local time, as every slot time is (Task 23.10), never the fixed
   // two-digit form, and it stays on one line in a 360 px viewport.
-  test('shows the warm-up reveal time short, on one line at 360 px', async ({ page }, testInfo) => {
+  test('shows the warm-up reveal time short, on one line at 360 px', { tag: '@render' }, async ({ page }, testInfo) => {
     const key = 'ownerHumanWin';
     await arenaFlow.openAtMinute(page, 30, key);
     const detail = card(page).getByText(/^In the arena staging area/);
@@ -549,7 +549,7 @@ test.describe('the Arena card and league standings', () => {
     await reviewShot360(page, testInfo, 'ends-arena-reveal', card(page));
   });
 
-  test('reports NPC and human losses with no lasting injury, crediting their reduced rewards', async ({ page }, testInfo) => {
+  test('reports NPC and human losses with no lasting injury, crediting their reduced rewards', { tag: '@render' }, async ({ page }, testInfo) => {
     await arenaFlow.openAtMinute(page, 80, 'ownerNpcLoss');
     await expect(card(page).getByRole('region', { name: 'Result' })).toContainText('Defeat');
     await expect(card(page)).toContainText('no lasting injury and no gear lost');
@@ -563,7 +563,7 @@ test.describe('the Arena card and league standings', () => {
     await expect(card(page).getByRole('region', { name: 'Result' })).toContainText('A seeded tie-break named Aster the winner.');
   });
 
-  test('says Preparing while the worker is late, invents no result, and asks again', async ({ page }, testInfo) => {
+  test('says Preparing while the worker is late, invents no result, and asks again', { tag: '@render' }, async ({ page }, testInfo) => {
     await arenaFlow.openAtMinute(page, 65, 'ownerDelayed');
     await expect(card(page).getByRole('status')).toHaveText('Preparing');
     await expect(card(page)).toContainText('has not been published yet');
@@ -586,7 +586,7 @@ test.describe('the Arena card and league standings', () => {
     expect((await arenaState(page))!.owner).toBe(false);
   });
 
-  test('opens the selected bout as an expanded replay over the camp and returns to the camp', async ({ page }) => {
+  test('opens the selected bout as an expanded replay over the camp and returns to the camp', { tag: '@render' }, async ({ page }) => {
     await arenaFlow.openAtMinute(page, 61, 'ownerNpcWin');
     await page.getByRole('button', { name: 'Watch replay' }).click();
     // Task 13.8: the replay is a scene over the camp, a history entry on the camp's own route (plan Decision 4).
@@ -633,7 +633,7 @@ test.describe('the Arena card and league standings', () => {
   });
 
   for (const motion of ['reduce', 'no-preference'] as const) {
-    test(`scrolls the card into view and focuses its heading when a camp bout opens it (${motion} motion)`, async ({ page }, testInfo) => {
+    test(`scrolls the card into view and focuses its heading when a camp bout opens it (${motion} motion)`, { tag: '@render' }, async ({ page }, testInfo) => {
       await page.emulateMedia({ reducedMotion: motion });
       await page.goto('/game/?mode=fixture');
       await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
@@ -699,7 +699,7 @@ test.describe('the Arena card and league standings', () => {
     expect((await box()).scrollY, 'the menu did not scroll').toBe(before.scrollY);
   });
 
-  test('ends the ring fight when its card shows the result, never before', async ({ page }) => {
+  test('ends the ring fight when its card shows the result, never before', { tag: '@render' }, async ({ page }) => {
     await page.goto('/game/?mode=fixture');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     const start = S + 60 * MIN;
@@ -724,7 +724,7 @@ test.describe('the Arena card and league standings', () => {
     expect(seen.get(end)).toEqual(['result', 'victory']);
   });
 
-  test('opens the card from a fighting pair in the camp, by click and by keyboard', async ({ page }) => {
+  test('opens the card from a fighting pair in the camp, by click and by keyboard', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/game/?mode=fixture');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
@@ -751,7 +751,7 @@ test.describe('the Arena card and league standings', () => {
     expect((await arenaState(page))!.activityId).toBe(arenaActivityId('lucilla'));
   });
 
-  test('pages league standings and shows the owner’s rating, renown and current strength apart from them', async ({ page, baseURL }, testInfo) => {
+  test('pages league standings and shows the owner’s rating, renown and current strength apart from them', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await openGame(page);
     // The standings live in the Arena menu, below the Arena card (Task 13.5).
@@ -780,7 +780,7 @@ test.describe('the Arena card and league standings', () => {
     expect(remote).toEqual([]);
   });
 
-  test('opens a spectator Arena card from the camp without owner rewards', async ({ page, baseURL }) => {
+  test('opens a spectator Arena card from the camp without owner rewards', { tag: '@render' }, async ({ page, baseURL }) => {
     const remote = forbidRemote(page, baseURL);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     // The visitor preview: the fixture camp and reads, with no owner.

@@ -54,7 +54,7 @@ const restoredFromCache = (page: Page) => page.evaluate(() => window.dispatchEve
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live mode uses development-only intercepted Supabase transport.'); });
 
-test('lets a visitor watch the camp and open every public menu without sending a command', async ({ page, context }, testInfo) => {
+test('lets a visitor watch the camp and open every public menu without sending a command', { tag: '@render' }, async ({ page, context }, testInfo) => {
   const world = liveWorld();
   const live = await routeLiveReads(context, { world });
   const commands = watchCommands(page);
@@ -124,7 +124,7 @@ test('starts Google sign-in from the corner chip', async ({ page, context }) => 
   await expect(joinButton(page)).toHaveAccessibleName((await touchLayout(page)) ? 'Sign in to join' : 'Sign in with Google to join');
 });
 
-test('opens the create dialog over the running camp after sign-in without a gladiator', async ({ page, context }, testInfo) => {
+test('opens the create dialog over the running camp after sign-in without a gladiator', { tag: '@render' }, async ({ page, context }, testInfo) => {
   const world = liveWorld();
   const live = await routeLiveReads(context, { world, owner: null });
   const commands = watchCommands(page);
@@ -197,7 +197,7 @@ test('returns a cancelled sign-in to the visitor view with a short message', asy
   await expect(joinButton(page)).toBeVisible();
 });
 
-test('closes a private menu and shows no private value when the session ends', async ({ page, context }) => {
+test('closes a private menu and shows no private value when the session ends', { tag: '@render' }, async ({ page, context }) => {
   await seedSession(context);
   const owner: OwnerState = { ...structuredClone(ownerFixture), name: 'Private Tester', wallets: { money: 4321, renown: 87 } };
   await routeLiveReads(context, { world: emptyWorld(), owner });

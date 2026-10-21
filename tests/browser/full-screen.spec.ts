@@ -95,7 +95,7 @@ test.describe('the camp shell with a pointer', () => {
     await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
   });
 
-  test('names each rail icon on hover', async ({ page }) => {
+  test('names each rail icon on hover', { tag: '@render' }, async ({ page }) => {
     await openCamp(page);
     await revealRail(page);
     const icons = railMenus(page).getByRole('button');
@@ -111,7 +111,7 @@ test.describe('the camp shell with a pointer', () => {
     }
   });
 
-  test('reaches the skip link on the first Tab, reveals the rail on the next and returns focus to the icon on Escape', async ({ page }) => {
+  test('reaches the skip link on the first Tab, reveals the rail on the next and returns focus to the icon on Escape', { tag: '@render' }, async ({ page }) => {
     await openCamp(page);
     // Task 23.5 (C19): the first Tab reaches the skip link; the shell no longer takes it for the rail.
     await page.keyboard.press('Tab');
@@ -141,7 +141,7 @@ test.describe('the camp shell with a pointer', () => {
     await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
   });
 
-  test('opens one panel at a time; the camp, Escape or the same icon closes it', async ({ page }) => {
+  test('opens one panel at a time; the camp, Escape or the same icon closes it', { tag: '@render' }, async ({ page }) => {
     await openCamp(page);
     const schedule = await openMenu(page, 'Schedule');
     await expect(schedule.getByRole('heading', { name: 'Repeating schedule' })).toBeVisible();
@@ -175,7 +175,7 @@ test.describe('the camp shell with a pointer', () => {
     await expect(openSurfaces(page)).toHaveCount(0);
   });
 
-  test('never lets a panel cover the corner chip', async ({ page }) => {
+  test('never lets a panel cover the corner chip', { tag: '@render' }, async ({ page }) => {
     for (const size of [{ width: 1280, height: 720 }, { width: 1024, height: 640 }]) {
       await page.setViewportSize(size);
       await openCamp(page);
@@ -387,7 +387,7 @@ test.describe('the camp shell on touch', () => {
     expect(await camera(page)).toEqual(before);
   });
 
-  test('fits sheets at 360×640 with no horizontal scroll', async ({ page }) => {
+  test('fits sheets at 360×640 with no horizontal scroll', { tag: '@render' }, async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 640 });
     await openCamp(page);
     for (const label of LABELS) {

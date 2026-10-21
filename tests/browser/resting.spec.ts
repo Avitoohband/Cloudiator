@@ -43,7 +43,7 @@ const slotTime = (page: Page, slot: number) => slotTimeAt(page, slot * SLOT_MS, 
 test.describe('a gladiator resting at home in the fixture preview', () => {
   test.skip(production, 'The fixture preview is a development build feature.');
 
-  test('lists a resting gladiator with where it is, draws it nowhere in the camp, and says so on its profile card', async ({ page }, testInfo) => {
+  test('lists a resting gladiator with where it is, draws it nowhere in the camp, and says so on its profile card', { tag: '@render' }, async ({ page }, testInfo) => {
     await watchFocus(page);
     await openFixtureCamp(page, '/game/?mode=fixture');
     expect(await listedResting(page, RESTING_ACTOR.gladiatorId)).toBe(true);
@@ -104,7 +104,7 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     expect(await page.evaluate(() => window.__cloudiatorCamp!.state()!.players)).toBe(players);
   });
 
-  test('previews the owner resting at home: back on its schedule at the next boundary once its presence is answered', async ({ page }, testInfo) => {
+  test('previews the owner resting at home: back on its schedule at the next boundary once its presence is answered', { tag: '@render' }, async ({ page }, testInfo) => {
     await openFixtureCamp(page, '/game/?mode=fixture&as=resting');
     expect(await listedResting(page, ownerFixture.gladiatorId)).toBe(true);
     expect(await drawn(page, ownerFixture.gladiatorId)).toBe(false);

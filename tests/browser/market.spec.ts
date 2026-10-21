@@ -178,7 +178,7 @@ async function buy(page: Page, market: Locator, listing: MarketListing) {
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live mode uses development-only intercepted Supabase transport.'); });
 
-test('lets a visitor browse listings with no command and no buy or sell controls', async ({ page, context }, info) => {
+test('lets a visitor browse listings with no command and no buy or sell controls', { tag: '@render' }, async ({ page, context }, info) => {
   const live = await routeLiveReads(context, { world: world(), market: MARKET_ROWS });
   const commands = watchCommands(page);
   await page.goto('/game/');
@@ -229,7 +229,7 @@ test('shows a signed-in account without a gladiator Browse only, with no trading
   expect(live.count('market_offers')).toBeGreaterThan(0);
 });
 
-test('buys a listing, shows the receipt and the item in inventory', async ({ page, context }, info) => {
+test('buys a listing, shows the receipt and the item in inventory', { tag: '@render' }, async ({ page, context }, info) => {
   const flow = await marketFlow(context);
   const market = await openMarket(page);
   await expect(market.getByText('Available money: 2,000')).toBeVisible();
@@ -259,7 +259,7 @@ test('buys a listing, shows the receipt and the item in inventory', async ({ pag
   await expect(inventory.getByTestId(`item-${flow.bought[0].id}`)).toContainText('Level 10 · rare · Tradable');
 });
 
-test('lists an eligible item with the fee and NPC value shown, then cancels it', async ({ page, context }, info) => {
+test('lists an eligible item with the fee and NPC value shown, then cancels it', { tag: '@render' }, async ({ page, context }, info) => {
   const flow = await marketFlow(context);
   const market = await openMarket(page);
   // The tabs answer the arrow keys.
@@ -312,7 +312,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await expect(back.getByTestId(`item-${flow.listable.id}`)).toContainText('Available');
 });
 
-test('explains sold and expired results and refreshes the page', async ({ page, context }) => {
+test('explains sold and expired results and refreshes the page', { tag: '@render' }, async ({ page, context }) => {
   const flow = await marketFlow(context);
   const market = await openMarket(page);
   // Each time, the page is stale: another buyer took the spear, the boots' listing expired, then Cassia cancelled her shield,
@@ -336,7 +336,7 @@ test('explains sold and expired results and refreshes the page', async ({ page, 
   expect(flow.bought).toEqual([]);
 });
 
-test('reads the owner when the menu opens and on Refresh, after listings sold elsewhere', async ({ page, context }) => {
+test('reads the owner when the menu opens and on Refresh, after listings sold elsewhere', { tag: '@render' }, async ({ page, context }) => {
   // Final review I1: a sale changes the seller's wallet and inventory without a new world revision (Ruling 2), so nothing
   // else reads her owner state again. Aster has 1,000 money and five listings; two sell while the menu is closed.
   const flow = await marketFlow(context);
@@ -379,7 +379,7 @@ test('reads the owner when the menu opens and on Refresh, after listings sold el
   for (const sold of [sword, boots, hood]) await expect(inventory.getByTestId(`item-${sold.item.id}`)).toHaveCount(0);
 });
 
-test('keeps a failed purchase input for a retry with the same operation', async ({ page, context }) => {
+test('keeps a failed purchase input for a retry with the same operation', { tag: '@render' }, async ({ page, context }) => {
   const flow = await marketFlow(context);
   const market = await openMarket(page);
   const alert = market.getByRole('alert');
@@ -533,7 +533,7 @@ test('never takes a focus the player moved while a keyboard trade was pending', 
   expect(await focusDrops(page)).toEqual([]);
 });
 
-test('moves the focus to the outcome of each trade, never to the page', async ({ page, context }, info) => {
+test('moves the focus to the outcome of each trade, never to the page', { tag: '@render' }, async ({ page, context }, info) => {
   await watchFocus(page);
   const flow = await marketFlow(context);
   const market = await openMarket(page);

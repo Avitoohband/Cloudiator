@@ -53,7 +53,7 @@ async function shot(page: Page, testInfo: TestInfo, name: string, align: { top?:
 test.describe('seasons in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');
 
-  test('shows the current season countdown, prizes and own qualification progress', async ({ page, baseURL }, testInfo) => {
+  test('shows the current season countdown, prizes and own qualification progress', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await openStandings(page);
     const section = standings(page);
@@ -94,7 +94,7 @@ test.describe('seasons in the fixture preview', () => {
   });
 
   for (const visitor of [false, true]) {
-    test(`switches to a finished season with medals, no Your standing and the promotion footnote${visitor ? ' (visitor)' : ''}`, async ({ page, baseURL }, testInfo) => {
+    test(`switches to a finished season with medals, no Your standing and the promotion footnote${visitor ? ' (visitor)' : ''}`, { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
       const remote = forbidRemote(page, baseURL);
       await openStandings(page, visitor);
       const section = standings(page);
@@ -142,7 +142,7 @@ test.describe('seasons in the fixture preview', () => {
     });
   }
 
-  test('shows the champion title and badges on a profile card, and nothing for a gladiator without prestige', async ({ page }, testInfo) => {
+  test('shows the champion title and badges on a profile card, and nothing for a gladiator without prestige', { tag: '@render' }, async ({ page }, testInfo) => {
     await openStandings(page);
     await picker(page).selectOption({ label: 'Season 1 · ended Sat 26 Sep' });
     await standings(page).getByRole('group', { name: 'League' }).getByRole('button', { name: 'Silver' }).click();
@@ -167,7 +167,7 @@ test.describe('seasons in the fixture preview', () => {
     await expect(varro).not.toContainText(/Season \d|Champion ·/);
   });
 
-  test('fits the standings sheet at 360 px with no horizontal scroll', async ({ page }, testInfo) => {
+  test('fits the standings sheet at 360 px with no horizontal scroll', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 360, height: 760 });
     await openStandings(page);
     const sheet = menuDialog(page, 'Arena');
@@ -236,7 +236,7 @@ test.describe('seasons in live mode', () => {
   });
 
   // Task 21.3 review M2: each page costs a season lookup, so the panel must not read more than it needs at a new revision.
-  test('reads the current season again at each new revision, a picked finished season never, and the season list only when stale', async ({ page, context }) => {
+  test('reads the current season again at each new revision, a picked finished season never, and the season list only when stale', { tag: '@render' }, async ({ page, context }) => {
     const world = emptyWorld();
     const filler = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
     const current: StandingsPage = { league: 'bronze', seasonId: '7', archived: false, nextCursor: null, rows: [liveRow(1, filler(1), 'Livia')] };

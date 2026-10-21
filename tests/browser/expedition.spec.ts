@@ -86,7 +86,7 @@ test.describe('followable expedition scenes', () => {
     await page.screenshot({ path: testInfo.outputPath('expedition-outpost-minute-65-safe-point.png') });
   });
 
-  test('walks the minute table for a success and for a defeat in each encounter', async ({ page }) => {
+  test('walks the minute table for a success and for a defeat in each encounter', { tag: '@render' }, async ({ page }) => {
     const minutes = [19, 20, 39, 40, 59, 60, 79, 80];
     await expeditionFlow.open(page, 'woodland', 10);
     // Before any revealed log names whose journey this is, the header claims nobody.
@@ -484,7 +484,7 @@ test.describe('followable expedition scenes', () => {
     expect(live.requests.every(r => r.reader === null)).toBe(true);
   });
 
-  test('follows the gladiator by default and pans freely after a drag', async ({ page }) => {
+  test('follows the gladiator by default and pans freely after a drag', { tag: '@render' }, async ({ page }) => {
     await expeditionFlow.open(page, 'woodland', 5);
     await expeditionFlow.sceneReady(page);
     await expeditionFlow.hold(page, 'woodland', 5);
@@ -680,7 +680,7 @@ test.describe('followable expedition scenes', () => {
     expect(requests.filter(url => /54321/.test(url)).every(url => /\/rest\/v1\/(world_revision|visible_events|recent_results)\?/.test(url))).toBe(true);
   });
 
-  test('draws the gladiator on walkable tiles with the shared depth rule, and fades the tree that hides it', async ({ page }, testInfo) => {
+  test('draws the gladiator on walkable tiles with the shared depth rule, and fades the tree that hides it', { tag: '@render' }, async ({ page }, testInfo) => {
     const map = MAPS.woodland;
     const journey = journeyMap(map);
     await expeditionFlow.open(page, 'woodland', 1);

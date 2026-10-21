@@ -63,7 +63,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview, which production exports never include.');
   test.use({ timezoneId: 'UTC' });
 
-  test('explains retention in Recent results and offers no replay once a result is older than seven days', async ({ page }, testInfo) => {
+  test('explains retention in Recent results and offers no replay once a result is older than seven days', { tag: '@render' }, async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
     const results = await openMenu(page, 'Results');
@@ -118,7 +118,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'This expedition’s replays are no longer kept' })).toBeVisible({ timeout: 45_000 });
   });
 
-  test('says a tournament replay is no longer kept after seven days and when its log was pruned', async ({ page }, testInfo) => {
+  test('says a tournament replay is no longer kept after seven days and when its log was pruned', { tag: '@render' }, async ({ page }, testInfo) => {
     await page.goto('/game/?mode=fixture');
     const panel = await openMenu(page, 'Tournaments');
     await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible({ timeout: 45_000 });

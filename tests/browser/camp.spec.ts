@@ -65,7 +65,7 @@ test.describe('living isometric camp', () => {
     await page.screenshot({ path: testInfo.outputPath('camp-overview.png') });
   });
 
-  test('opens on the owner and finds or follows them from the Gladiators menu', async ({ page }) => {
+  test('opens on the owner and finds or follows them from the Gladiators menu', { tag: '@render' }, async ({ page }) => {
     await openCamp(page);
     const ownerId = await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors[0].gladiatorId);
     const near = async () => {
@@ -111,7 +111,7 @@ test.describe('living isometric camp', () => {
     expect((await campState(page)).following).toBe(ownerId);
   });
 
-  test('selects the gladiator whose body is under the pointer, not a neighbour', async ({ page }) => {
+  test('selects the gladiator whose body is under the pointer, not a neighbour', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openCamp(page);
     const ownerId = await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors[0].gladiatorId);
@@ -174,7 +174,7 @@ test.describe('living isometric camp', () => {
     expect(new Set(players.map(a => `${Math.floor(a.x)},${Math.floor(a.y)}`)).size).toBe(50);
   });
 
-  test('keeps the camera inside the map after panning far beyond its edges', async ({ page }) => {
+  test('keeps the camera inside the map after panning far beyond its edges', { tag: '@render' }, async ({ page }) => {
     await openCamp(page);
     const box = (await page.locator('canvas').boundingBox())!;
     for (const [fx, fy, tx, ty] of [[0.9, 0.9, 0.05, 0.05], [0.9, 0.9, 0.05, 0.05], [0.1, 0.1, 0.95, 0.95], [0.1, 0.1, 0.95, 0.95], [0.1, 0.1, 0.95, 0.95]]) {
@@ -191,7 +191,7 @@ test.describe('living isometric camp', () => {
     }
   });
 
-  test('zooms in fixed steps from buttons, keys and the wheel, and leaves browser shortcuts alone', async ({ page }, testInfo) => {
+  test('zooms in fixed steps from buttons, keys and the wheel, and leaves browser shortcuts alone', { tag: '@render' }, async ({ page }, testInfo) => {
     await openCamp(page);
     const zoom = async () => (await campState(page)).camera.zoom;
     for (let i = 0; i < 12; i += 1) await zoomInStep(page);

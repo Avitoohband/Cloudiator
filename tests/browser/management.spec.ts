@@ -39,7 +39,7 @@ const boxOf = async (locator: Locator) => (await locator.boundingBox())!;
 test.describe('profile cards and merchants in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');
 
-  test('opens a public profile card from a camp click, the Gladiators list and the standings', async ({ page }, testInfo) => {
+  test('opens a public profile card from a camp click, the Gladiators list and the standings', { tag: '@render' }, async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture&as=visitor');
     const touch = await touchLayout(page);
     // A camp click on Aster, who is training: the card shows the public actor and its loaded rating, and nothing private.
@@ -104,7 +104,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(profileCard(page, fillerName)).toContainText('This profile is not available right now.');
   });
 
-  test('shows management shortcuts only on the viewer’s own card', async ({ page }, testInfo) => {
+  test('shows management shortcuts only on the viewer’s own card', { tag: '@render' }, async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
     await clickInCamp(page, ASTER);

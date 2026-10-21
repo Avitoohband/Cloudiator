@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, childEnv, classifyBrowser, classifyDb, gateSteps, parseOptions, prepareEdge,
+import { HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, childEnv, classifyBrowser, classifyDb, countExcluded, countListed, gateSteps, parseOptions, prepareEdge,
   refreshAccessTimes, runGate, summarize } from '../../scripts/verify.mjs';
+import { CI_RENDER_ENV, RENDER_PATTERN, RENDER_TAG } from '../../scripts/ci-render.mjs';
 import { HOST_FAULT_MARKER } from '../browser/host-faults.ts';
 
 // Task 23.6 (R3): `npm run verify` runs every gate of the approved docs/operations/verification-gates.md, in its order, one
@@ -68,8 +69,9 @@ const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack 
 /** A fake runner: exit codes by step id (0 when absent; a list is used up call by call), a stable Edge unless told otherwise. */
 function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: unknown[]; browserReports?: Record<string, unknown[]>;
   starts?: (string | null)[]; edge?: { ok: boolean; note?: string; tolerated?: { count: number; examples: string[] };
-    unavailable?: { count: number; examples: string[] } }[] } = {}) {
+    unavailable?: { count: number; examples: string[] } }[]; excluded?: number | null } = {}) {
   const ran: string[] = [];
+  const counted: string[] = [];
   const codeOf = (id: string) => { const c = options.codes?.[id]; return Array.isArray(c) ? c.shift() ?? 0 : c ?? 0; };
   const starts = [...(options.starts ?? [])];
   const reports = [...(options.reports ?? [dbReport([{ name: 'ok' }])])];
@@ -77,8 +79,10 @@ function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: 
   let started = '2026-10-19T14:23:38.1Z';
   return {
     ran,
+    counted,
     io: {
       exec: async (step: Step) => { ran.push(step.id); return codeOf(step.id); },
+      countExcluded: async (step: Step) => { counted.push(step.id); return options.excluded === undefined ? 150 : options.excluded; },
       settleEdge: async () => { ran.push('settle'); const e = edges.shift() ?? { ok: true };
         return { ok: e.ok, startedAt: started, recreated: false, files: 40, waitedMs: 30_000, note: e.note, ...(e.tolerated ? { tolerated: e.tolerated } : {}),
           ...(e.unavailable ? { unavailable: e.unavailable } : {}) }; },
@@ -372,6 +376,83 @@ describe('a browser run', () => {
     const results = await runGate(gateSteps(), io);
     expect(ran.filter(id => id === 'browser')).toEqual(['browser']);
     expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'failed' });
+  });
+});
+
+// Task 24.0c, the controller's CI exception (2026-10-20): on the GPU-less GitHub runner (checks.yml sets CLOUDIATOR_CI_RENDER
+// =exclude) the development suite leaves out the tests tagged @render (playwright.config.ts). The gate never does this
+// silently: the browser step's summary line says how many it left out. Locally nothing is left out, and the production gate
+// never leaves anything out.
+describe('the CI render exclusion', () => {
+  it('runs the development suite with the exclusion only when asked, and the production gate never', () => {
+    const plain = gateSteps();
+    expect(byId(plain, 'browser').env?.[CI_RENDER_ENV]).toBeUndefined();
+    expect(byId(plain, 'browser').unset).toContain(CI_RENDER_ENV);
+    expect(byId(plain, 'browser').exclude).toBeUndefined();
+    const ci = gateSteps({ excludeRender: true, config: 'node_modules/.cache/pw-x.config.mjs' });
+    expect(byId(ci, 'browser').env).toMatchObject({ [CI_RENDER_ENV]: 'exclude' });
+    expect(byId(ci, 'browser').unset ?? []).not.toContain(CI_RENDER_ENV);
+    // The count lists the tagged tests of the same configuration, without running them (no web server).
+    expect(byId(ci, 'browser').exclude).toEqual({ tag: RENDER_TAG, listArgs: ['node_modules/@playwright/test/cli.js', 'test', '--config',
+      'node_modules/.cache/pw-x.config.mjs', '--list', '--reporter=json', '--grep', RENDER_PATTERN.source] });
+    for (const steps of [plain, ci]) {
+      expect(byId(steps, 'production').exclude).toBeUndefined();
+      expect(byId(steps, 'production').unset).toContain(CI_RENDER_ENV);
+      expect(childEnv(byId(steps, 'production'), { [CI_RENDER_ENV]: 'exclude' })[CI_RENDER_ENV]).toBeUndefined();
+    }
+    expect(childEnv(byId(plain, 'browser'), { [CI_RENDER_ENV]: 'exclude' })[CI_RENDER_ENV]).toBeUndefined();
+    expect(childEnv(byId(ci, 'browser'), {})[CI_RENDER_ENV]).toBe('exclude');
+  });
+
+  it("names how many render-bound tests it left out on the browser step's summary line", async () => {
+    const { io, ran, counted } = fakeIo({ excluded: 150 });
+    const results = await runGate(gateSteps({ excludeRender: true }), io);
+    expect(ran).toEqual(['unit', 'typecheck', 'assets', 'build', 'static', 'settle', 'db', 'browser', 'browser-build', 'browser-static', 'production', 'diff']);
+    expect(counted).toEqual(['browser']);
+    const browser = results.find(r => r.id === 'browser')!;
+    expect(browser).toMatchObject({ status: 'passed', note: 'excluded 150 render-bound tests (CI, no GPU)', excluded: { tag: RENDER_TAG, count: 150 } });
+    const summary = summarize(results);
+    expect(summary).toMatchObject({ status: 'passed', exitCode: 0 });
+    expect(summary.text.split('\n').find(line => /^\s+passed\s+browser\s/.test(line))).toMatch(/npx playwright test {2}\[\d+ s\] {2}excluded 150 render-bound tests \(CI, no GPU\)$/);
+    expect(results.find(r => r.id === 'production')).toMatchObject({ note: '' });
+    expect(results.find(r => r.id === 'production')).not.toHaveProperty('excluded');
+  });
+
+  it('still names the exclusion beside a failure, and when the count is not known', async () => {
+    const failed = fakeIo({ excluded: 1, codes: { browser: 1 }, browserReports: { browser: [browserReport([['Error: expect(received).toBe(expected)']])] } });
+    const results = await runGate(gateSteps({ excludeRender: true }), failed.io);
+    expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'failed', note: 'exit 1; 1 failed; excluded 1 render-bound test (CI, no GPU)' });
+    const unknown = fakeIo({ excluded: null });
+    const counted = await runGate(gateSteps({ excludeRender: true }), unknown.io);
+    expect(counted.find(r => r.id === 'browser')).toMatchObject({ status: 'passed', note: 'excluded the render-bound tests (CI, no GPU; count unavailable)',
+      excluded: { tag: RENDER_TAG, count: null } });
+  });
+
+  it('leaves the gate as it was without the exclusion: nothing counted, nothing said', async () => {
+    const { io, counted } = fakeIo();
+    const results = await runGate(gateSteps(), io);
+    expect(counted).toEqual([]);
+    expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'passed', note: '' });
+    expect(results.find(r => r.id === 'browser')).not.toHaveProperty('excluded');
+    expect(summarize(results).text).not.toContain('render-bound');
+  });
+
+  // The real count: Playwright lists the repository's tagged tests (no test runs, no web server), with the step's environment
+  // but never the exclusion itself, so it counts what the run leaves out. CI sets CLOUDIATOR_CI_RENDER for this very run.
+  it('counts the tagged tests the development suite leaves out, with the repository configuration', () => {
+    const count = countExcluded(byId(gateSteps({ excludeRender: true }), 'browser'));
+    expect(count).toBeGreaterThan(0);
+    expect(count! % 2, 'each tagged test in both projects').toBe(0);
+    expect(countExcluded(byId(gateSteps(), 'browser'))).toBeNull();
+  }, 60_000);
+
+  it("counts the tests of a Playwright listing, in every project and nested suite", () => {
+    const spec = (title: string, projects: string[]) => ({ title, tags: ['render'], tests: projects.map(projectName => ({ projectName, results: [] })) });
+    expect(countListed({ suites: [{ title: 'a.spec.ts', specs: [spec('one', ['desktop', 'mobile'])],
+      suites: [{ title: 'a describe', specs: [spec('two', ['desktop', 'mobile']), spec('three', ['desktop'])] }] }, { title: 'b.spec.ts', specs: [] }] })).toBe(5);
+    expect(countListed({ suites: [] })).toBe(0);
+    expect(countListed(null)).toBeNull();
+    expect(countListed({ errors: [{ message: 'x' }] })).toBeNull();
   });
 });
 

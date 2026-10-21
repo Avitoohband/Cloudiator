@@ -55,6 +55,13 @@ jobs:
           nohup npx supabase functions serve --env-file .env.edge.local > "$RUNNER_TEMP/edge.log" 2>&1 &
 
       - name: Release gate
+        # The controller's CI exception (Task 24.0c, 2026-10-20): this runner has no GPU, so Chrome renders WebGL in software,
+        # and the first run (39452911203) failed only in the development browser step: 51 of 576 tests, almost all 30 s
+        # timeouts while the camp or a scene rendered. Here the development suite leaves out the tests tagged @render, and the
+        # gate's summary says how many (scripts/ci-render.mjs, scripts/verify.mjs). The local `npm run verify`, the gate of
+        # record, still runs every test, and the production gate is unchanged.
+        env:
+          CLOUDIATOR_CI_RENDER: exclude
         run: |
           npm run verify -- --json "$RUNNER_TEMP/verify.json"
 

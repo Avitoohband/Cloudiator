@@ -1,19 +1,21 @@
 -- Schema fingerprint (Task 24.1, plan Decision 1). READ-ONLY: one SELECT over the catalog plus the seed rows' counts. It writes
 -- nothing and prints no values beyond definitions: function, view, trigger and index definitions as md5 hashes, policy
--- expressions, constraint definitions, column types and defaults, ACLs, function settings and view options, the pg_cron
--- schedules (job name, schedule, command) and counts of the rows the migrations seed. It reads no secret, key, token, email,
--- Vault value or player data.
+-- expressions, constraint definitions, column types and defaults, ACLs, function settings and view options as their names with
+-- an md5 of their values (never a value), Cloudiator's two pg_cron jobs (name, schedule, md5 of the command; no other job) and
+-- counts of the rows the migrations seed. It reads no secret, key, token, email, Vault value or player data.
 --
 -- It is the fingerprint every migration replay since Task 13 compared (scratch copies until now; Task 23.8's copy printed 1,160
 -- lines on a clean M01-M22 replay), committed for the first time as one statement so it also runs in the hosted SQL editor.
--- Each row is one `line`, `<section>|<field>|...`, exactly as the scratch psql copy printed it (`\pset format unaligned`,
--- `fieldsep '|'`: booleans t/f, NULL empty), in an order that does not depend on the database's collation.
+-- Each row is one `line`, `<section>|<field>|...`, as the scratch psql copy printed it (`\pset format unaligned`,
+-- `fieldsep '|'`: booleans t/f, NULL empty), in an order that does not depend on the database's collation, except (Task 24.1
+-- fix round 1) the settings, options and cron command fields, so these lines differ from the scratch copies' recorded ones.
 --
--- Sections, in order: fn (definition hash, security definer, volatility, settings, ACL), rel (kind, ACL, row security, forced,
--- options, view definition hash), col (number, name, type, not null, default, column ACL), pol (permissive, roles, command,
--- USING, WITH CHECK), trg (definition hash), con (definition), idx (definition hash), nsp (schema ACL), defacl (every
--- default-privilege entry, the platform's included), cron, seed-rules, seed-revision, seed-singletons, trg-enabled,
--- seed-retention, seed-published-mirror, seed-retention-jobs, seed-owner-signals.
+-- Sections, in order: fn (definition hash, security definer, volatility, settings as `<names> md5:<hash>`, ACL), rel (kind,
+-- ACL, row security, forced, options as `<names> md5:<hash>`, view definition hash), col (number, name, type, not null,
+-- default, column ACL), pol (permissive, roles, command, USING, WITH CHECK), trg (definition hash), con (definition), idx
+-- (definition hash), nsp (schema ACL), defacl (every default-privilege entry, the platform's included), cron (name, schedule,
+-- command hash), seed-rules, seed-revision, seed-singletons, trg-enabled, seed-retention, seed-published-mirror,
+-- seed-retention-jobs, seed-owner-signals.
 --
 -- Run it locally after the container label check (docs/operations/runbook.md), from an LF working copy:
 --   docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At < scripts/schema-fingerprint.sql
@@ -28,12 +30,14 @@
 with f(part, k1, k2, k3, line) as (
   select 1, p.oid::regprocedure::text, null::bigint, null::text,
     array_to_string(array['fn', p.oid::regprocedure::text, md5(pg_get_functiondef(p.oid)), left(p.prosecdef::text, 1), p.provolatile::text,
-      coalesce(array_to_string(p.proconfig, ','), ''), coalesce(p.proacl::text, '')], '|', '')
+      coalesce((select string_agg(split_part(s.setting, '=', 1), ',' order by split_part(s.setting, '=', 1) collate "C")
+        from unnest(p.proconfig) s(setting)) || ' md5:' || md5(array_to_string(p.proconfig, ',')), ''), coalesce(p.proacl::text, '')], '|', '')
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private')
   union all
   select 2, n.nspname || '.' || c.relname, null, null,
     array_to_string(array['rel', n.nspname || '.' || c.relname, c.relkind::text, coalesce(c.relacl::text, ''), left(c.relrowsecurity::text, 1),
-      left(c.relforcerowsecurity::text, 1), coalesce(array_to_string(c.reloptions, ','), ''),
+      left(c.relforcerowsecurity::text, 1), coalesce((select string_agg(o.option_name, ',' order by o.option_name collate "C")
+        from pg_options_to_table(c.reloptions) o) || ' md5:' || md5(array_to_string(c.reloptions, ',')), ''),
       case when c.relkind in ('v', 'm') then md5(pg_get_viewdef(c.oid)) else '' end], '|', '')
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname in ('public', 'private') and c.relkind in ('r', 'v', 'm', 'p', 'f', 'S')
@@ -71,7 +75,8 @@ with f(part, k1, k2, k3, line) as (
       defaclacl::text], '|', '')
     from pg_default_acl
   union all
-  select 10, jobname::text, null, null, array_to_string(array['cron', jobname::text, schedule, command], '|', '') from cron.job
+  select 10, jobname::text, null, null, array_to_string(array['cron', jobname::text, schedule, md5(command)], '|', '') from cron.job
+    where jobname in ('cloudiator-coordinate', 'cloudiator-cleanup')
   union all
   select 11, version, null, null, array_to_string(array['seed-rules', version, left(active::text, 1)], '|', '') from private.rules_versions
   union all

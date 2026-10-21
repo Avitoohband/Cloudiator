@@ -74,10 +74,29 @@ describe('the read-only hosted SQL kits', () => {
     expect((await readOnly(FINGERPRINT)).map(row => row.line)).toEqual(lines);
     const [{ functions }] = await sql`select count(*)::int as functions from pg_proc where pronamespace in ('public'::regnamespace,'private'::regnamespace)`;
     expect(lines.filter(line => line.startsWith('fn|'))).toHaveLength(functions);
-    // The line shapes of the scratch psql copy: booleans t/f, the settings and the ACL as text.
-    expect(lines).toContainEqual(expect.stringMatching(/^fn\|private\.health_report\(bigint\)\|[0-9a-f]{32}\|f\|[vsi]\|search_path=""\|\{postgres=X\/postgres\}$/));
-    expect(lines).toContain('cron|cloudiator-coordinate|* * * * *|select private.cron_tick()');
+    // The line shapes of the scratch psql copy (booleans t/f, the ACL as text), except that fix round 1 (Minor 6) prints a
+    // function's settings and a view's options as their names and an md5 of their values, and Cloudiator's cron jobs only,
+    // with the command hashed.
+    const md5 = (text: string) => createHash('md5').update(text).digest('hex');
+    expect(lines).toContainEqual(expect.stringMatching(new RegExp(`^fn\\|private\\.health_report\\(bigint\\)\\|[0-9a-f]{32}\\|f\\|[vsi]\\|search_path md5:${md5('search_path=""')}\\|\\{postgres=X/postgres\\}$`)));
+    expect(lines).toContainEqual(expect.stringMatching(/^rel\|public\.owner_state\|v\|.*\|security_invoker md5:[0-9a-f]{32}\|[0-9a-f]{32}$/));
+    expect(lines.filter(line => line.startsWith('cron|'))).toEqual([`cron|cloudiator-cleanup|23 * * * *|${md5('select private.cleanup_tick()')}`,
+      `cron|cloudiator-coordinate|* * * * *|${md5('select private.cron_tick()')}`]);
+    expect(lines.filter(line => /search_path=|security_invoker=|select private\./.test(line))).toEqual([]);
     expect(lines).toContain('seed-singletons|1|1');
+  });
+
+  it('prints no setting value and no other cron job in the fingerprint (fix round 1, Minor 6)', async () => {
+    const VALUE = `fp-probe-value-${randomUUID()}`;
+    const lines = await rolledBack(async tx => {
+      await tx.unsafe(`create function private.fp_probe() returns int language sql set search_path='' set application_name='${VALUE}' as 'select 1'`);
+      await tx.unsafe(`create view public.fp_probe_view with (security_barrier=true) as select 1 as id`);
+      await tx.unsafe(`select cron.schedule('fp-probe-job', '* * * * *', 'select 1 /* ${VALUE} */')`);
+      return ([...await tx.unsafe(FINGERPRINT)] as unknown as { line: string }[]).map(row => row.line);
+    });
+    expect(lines).toContainEqual(expect.stringMatching(/^fn\|private\.fp_probe\(\)\|[0-9a-f]{32}\|f\|v\|application_name,search_path md5:[0-9a-f]{32}\|/));
+    expect(lines).toContainEqual(expect.stringMatching(/^rel\|public\.fp_probe_view\|v\|.*\|security_barrier md5:[0-9a-f]{32}\|[0-9a-f]{32}$/));
+    expect(lines.filter(line => line.includes(VALUE) || line.includes('fp-probe-job') || line.includes('=true'))).toEqual([]);
   });
 
   it('prints the hosted checks read-only, every section in order and every value as text', async () => {

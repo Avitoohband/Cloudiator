@@ -25,7 +25,8 @@
 --                     newest characters by hashed account (Task 24.8: one character per account)
 --   trades            listings by status; for every sale whether the buyer paid the price and the seller received the price
 --                     less the 5 % fee floored, and whether the item has exactly one owner, the buyer; the 10 newest sales
---                     (Task 24.8)
+--                     (Task 24.8). Cleanup folds ledger rows older than 90 days into wallet checkpoints, so an older sale
+--                     reads `missing` there; an item its buyer later sold or discarded reads `other` or `gone`.
 --
 -- Run it in the hosted SQL editor as the database owner (no row limit) and download the result as CSV, or locally after the
 -- container label check (docs/operations/runbook.md):

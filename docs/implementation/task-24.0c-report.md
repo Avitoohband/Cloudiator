@@ -17,9 +17,10 @@ killed part-way. It is discarded as an interruption, not evidence. Every result 
 ## Part 1: CI leaves out the render-bound browser tests (the controller's ruling, 2026-10-20)
 
 **The first run.** Run 39452911203 is recorded in `docs/operations/release-evidence.md` ("The first CI run and the CI render
-exception"). Only the development browser step failed: 51 failed, 490 passed and 35 skipped in 63 min 49 s. 49 of the 51
-were test timeouts while the camp or a scene rendered (47 at 30 s, and 2 at their own 240 s). Every other step passed,
-including `test:db` 300 and the production gate 34.
+exception"). Only the development browser step failed: 51 failed, 490 passed and 35 skipped in 63 min 49 s. 48 of the 51
+were test timeouts while the camp or a scene rendered (46 at 30 s, and 2 at their own 240 s); the other 3 failures, in two
+seasons tests, were not timeouts (corrected in fix round 1, below). Every other step passed, including `test:db` 300 and the
+production gate 34.
 
 **Mechanism.**
 - `scripts/ci-render.mjs` (new) holds the tag `@render`, the variable `CLOUDIATOR_CI_RENDER` and
@@ -64,7 +65,8 @@ including `test:db` 300 and the production gate 34.
   that the comment carries its phrases. RED before the workflow change.
 
 **What is tagged: 75 tests, which is 150 runs across both projects, out of 582.** One tag covers both projects. No
-assertion changed.
+assertion changed. (Fix round 1, below, untags the two seasons tests and tags the expedition stage-time case: 74 tests,
+148 runs.)
 
 *The 42 tests behind the 51 failures.* A test is listed once by title. The last column gives the projects it failed on in
 run 39452911203.
@@ -173,7 +175,8 @@ blocks, so the ruling leaves them out. They remain a risk for the next CI run:
 - `visitor.spec.ts`, keyboard dialog, "keeps Tab and Escape…": 22.8 s;
 - `scenes.spec.ts`, "opens an expedition result over the camp…": 21.3 s.
 
-**Two of the tagged failures were not timeouts.** The ruling tags them with the rest, but each still needs its own triage:
+**Three of the tagged failures, in two tests, were not timeouts.** The ruling tagged them with the rest; fix round 1 (below)
+fixed both and removed their tags:
 - `seasons.spec.ts:170` failed on both projects with "table 342 px in 332 px". The likely cause is the runner's fallback
   font for `system-ui`; that is inferred, not verified.
 - `seasons.spec.ts:239` saw 4 season views read where 5 were expected. A timing difference under load is likely; that is
@@ -236,3 +239,106 @@ gate it still lists 582. The private config gives the same counts.
 - **Visible:** the log's labels no longer line up when the times differ in width ("12:40 AM", then "1:00 AM"); before, the
   fixed two-digit form kept them aligned. This is Avi's to judge from the screenshot.
 - The private config edit lives under `node_modules/.cache` and is lost on `npm ci`.
+
+## Fix round 1 (the controller's rulings, 2026-10-21)
+
+Commits (on top of Task 24.1b's `14e56ba`, `8dd9843` and `d1f260d`, which are kept and untouched):
+- `96144cf` fix: give the standings table slack at 360 px
+- `2afe0d6` test: wait for the armed sync poll and the settled read counts
+- `f8931e0` fix: align the expedition log times
+- this update: docs: report Task 24.0c fix round 1
+
+The concerns above about the live-camp failure, the two seasons failures and the jog in the log's labels are resolved
+below. The other concerns stand.
+
+**Important 1a: the 360 px standings table (`seasons.spec.ts:170`).** The narrowest the table can be is set by the headers
+("Gladiator", "Human"), the one-line medal note ("🥇 1st · Champion", as the approved mockup shows) and the cell padding.
+
+Reproduced locally: with Verdana forced, the archived table was 344 px wide in its 332 px box (CI: 342 px). Segoe UI fits.
+
+The narrowest width (min-content) of the archived Bronze table at 360 px, per candidate:
+
+| Candidate | Verdana | Segoe UI | Medal note |
+|---|---|---|---|
+| As it was | 344 px | 306 px | one line |
+| Let the medal note wrap | fits | fits | wraps under Segoe UI too, so not taken |
+| The fix | 315 px | 276 px | one line under both |
+
+- **The fix** (`StandingsPanel.module.css`, phones only, `max-width: 480px`):
+  - cell side padding 0.3 → 0.2 rem;
+  - no letter spacing on the headers or the medal note;
+  - medal padding 0.4 → 0.25 rem.
+- **Slack:** 17 px with Verdana, 56 px with Segoe UI.
+- **Test:** the assertions are unchanged. The test now runs its fit check again with `Verdana, "DejaVu Sans"` forced by a
+  test-only stylesheet, on the archived season and then the current one. RED before the CSS change (344 px in 332 px, both
+  projects); GREEN after. The `@render` tag is removed.
+- **Screenshots** (both show the top of the sheet; the test checks the table itself):
+  - `C:\Users\AVI_OP~1\AppData\Local\Temp\claude\C--Avi-Studies-Projects-Cloudiator\3db047ee-76dd-4924-8e1d-0104fb108aef\scratchpad\task-24.0c-shots\standings-mobile-archived-360.png`
+  - `C:\Users\AVI_OP~1\AppData\Local\Temp\claude\C--Avi-Studies-Projects-Cloudiator\3db047ee-76dd-4924-8e1d-0104fb108aef\scratchpad\task-24.0c-shots\standings-mobile-archived-wide-font-360.png`
+
+**Important 1b and 3: the sync-poll races (`seasons.spec.ts:239`, `live-camp.spec.ts:234`).**
+
+*Cause.* `src/lib/api/sync.ts` arms the next 30 s poll only when a refresh finishes, and a poll that fires during a refresh
+joins it. A fast-forward sent as soon as a request was seen could therefore fire nothing. In the failed live-camp run, the
+trace shows two fast-forwards 9 ms apart: the first step had passed on a late start-up read, not on its own poll.
+
+*Helper.* `tests/browser/sync-poll.ts` (test-only) adds an init script that records, inside the page:
+- the poll's timers: the 30 s timeouts whose callback refreshes;
+- the sync reads in flight: `world_revision` and `world_actor_reads`.
+
+It offers two calls:
+- `idle()` waits until no sync read is in flight and a poll was armed after the last read settled.
+- `nextSyncPoll()` waits for an idle controller with a poll armed since the previous step, then fast-forwards 30 s.
+
+*Test changes.* The assertions are the same in both tests.
+- **live-camp** takes its baseline counts once idle and fires each poll with `nextSyncPoll()`.
+- **seasons** fires each poll with `nextSyncPoll()`. Instead of reading its counters once after a fixed 500 ms, it polls
+  them to the expected values and checks them again 500 ms later, so a late extra read still fails. The `@render` tag is
+  removed.
+
+*Before and after, with the same loads* (load scripts in the session scratchpad; nothing committed):
+
+| Load | live-camp, before | live-camp, after | seasons, before | seasons, after |
+|---|---|---|---|---|
+| The page's CPU throttled 6x from start-up (CDP), 4 workers | **3 of 16 failed** (owner reads "Expected: 2, Received: 1", as observed) | 16 of 16 passed | 16 of 16 passed | 16 of 16 passed |
+| The same at 8x | 32 of 32 passed | 32 of 32 passed | not run | not run |
+| A 32-thread CPU burner, 8 workers | 40 of 40 passed | 20 of 20 passed | 40 of 40 passed | 20 of 20 passed |
+
+The seasons race (4 view reads where 5 were expected, on CI) was not reproduced locally. The fix removes its observed
+cause, the single read after a fixed 500 ms. Injecting latency into the routed reads changed the tests' behaviour beyond
+timing (both versions failed), so it was not used as evidence.
+
+**Important 2: the expedition log time column.**
+- **Fix:** `.log time` gets `min-width: 5em` and `text-align: right`. It already had `flex: none` and tabular numerals.
+- **Test:** the 360 px browser test now checks that every row's label left edge and time right edge are the same. RED
+  before: label edges at 104 and 97 px. GREEN after.
+- **Screenshot (refreshed; the desktop copy is beside it):**
+  `C:\Users\AVI_OP~1\AppData\Local\Temp\claude\C--Avi-Studies-Projects-Cloudiator\3db047ee-76dd-4924-8e1d-0104fb108aef\scratchpad\task-24.0c-shots\expedition-mobile-stage-list-360.png`
+- **Limit:** a start on another local day ("Oct 19, 11:50 PM") is wider than 5em, so that row's label starts further right.
+
+**Minors.**
+- **Counts corrected** here and in `release-evidence.md`: 48 timeouts (46 at 30 s, 2 at 240 s), plus 3 non-timeout
+  failures in two seasons tests; 582 tests listed.
+- **Newly tagged:** `expedition.spec.ts:624`, the stage-time case (formerly `:622`). It takes 360 px screenshots of the
+  expedition view, with the scene on the page.
+- **Tagged now:** 74 tests, 148 runs.
+
+**Verification (Lane B gate order, at `f8931e0`):**
+
+| Step | Result |
+|---|---|
+| `npm test` | 1282 passed (68 files; includes Task 24.1b's tests) |
+| `npm run typecheck`, the asset check | clean; assets up to date (28 files) |
+| `npm run build`, `npm run verify:static` | clean (91 assets) |
+| Development suite (port 3300, 2 workers) | **547 passed, 0 failed, 35 skipped** of 582 (10.2 min) |
+| The same with `CLOUDIATOR_CI_RENDER=exclude`, through the gate's browser step | 434 run: **405 passed, 0 failed, 29 skipped** (7.0 min). The summary line ends `excluded 148 render-bound tests (CI, no GPU)`, and the result is PASSED |
+| Isolated production build, `verify:static -- .next/browser-test` | clean |
+| Production gate (port 4173) | **34 passed, 0 failed, 548 skipped** |
+| `git diff --check` | clean |
+
+**Concerns after fix round 1.**
+- The 13 untagged tests near the CI timeout (listed above) remain a risk for the next CI run.
+- The CI font is inferred, not observed. The slack was checked with Verdana, a wide Windows font, and the test forces
+  DejaVu Sans where Verdana is missing.
+- The seasons race is fixed by construction; it was not reproduced locally.
+- No CI run with the exception has been observed yet.

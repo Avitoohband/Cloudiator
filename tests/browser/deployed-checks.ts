@@ -51,6 +51,15 @@ export function supabaseOrigin(env: Env): string {
 /** The release scan's fixed routes (scripts/release-scan.mjs), as URL paths. */
 export const ROUTES: string[] = FIXED_ROUTES.map((file: string) => `/${file.replace(/index\.html$/, '')}`);
 
+/**
+ * A response status other than 200 as a problem (null for 200), so fixedRoutesReload and securityHeaders collect it and still
+ * reach their evidence line (Task 24.2b fix round 1). `status` is undefined when the browser got no response at all.
+ */
+export function statusProblem(label: string, status: number | undefined): string | null {
+  if (status === 200) return null;
+  return status === undefined ? `${label}: no response, expected 200` : `${label}: status ${status}, expected 200`;
+}
+
 /** `text` with every publishable key masked: a page's or Playwright's message can quote the key the bundle carries. */
 export function maskKeys(text: string): string {
   return text.replace(/sb_publishable_[A-Za-z0-9_-]+/g, '<publishable key>');

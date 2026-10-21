@@ -497,8 +497,8 @@ block `Deployed evidence (one line per check):` with one line for each check tha
 evidence. The list reporter shows no annotations, which hold the same text. The lines hold counts, statuses, codes, origins
 and our own header values only:
 ```text
-deployed evidence | desktop | fixedRoutesReload | 5 routes loaded and reloaded; console errors 0; favicon: /favicon.ico answered 404 on <n> loads (recorded, not failed)
-deployed evidence | desktop | securityHeaders | connect-src origin https://<project>.supabase.co; 6 paths compared with _headers; 0 differences
+deployed evidence | desktop | fixedRoutesReload | 5 of 5 routes loaded and reloaded with 200; problems 0; favicon: /favicon.ico answered 404 on <n> loads (recorded, not failed)
+deployed evidence | desktop | securityHeaders | connect-src origin https://<project>.supabase.co; 6 paths checked against _headers; 0 problems
 deployed evidence | desktop | connectSrc | connect-src exactly 'self' https://<project>.supabase.co on 5 of 5 routes
 deployed evidence | desktop | compression | <n> of <n> responses br or gzip
 deployed evidence | desktop | cors | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 unauthenticated
@@ -506,10 +506,11 @@ deployed evidence | desktop | anonDenied | 14 of 14 anonymous probes refused as 
 deployed evidence | desktop | authProvidersGoogleOnly | GET /auth/v1/settings 200; Google only, sign-up open
 deployed evidence | desktop | shippedAssetsClean | scanned <n> assets, <m> of them JavaScript; 0 problems
 ```
-The phone, `mobile`, has its own `fixedRoutesReload` line, and each attested check's line lists its values. When the bundle
-carries no single publishable key, `anonDenied` and `authProvidersGoogleOnly` give that as their line; a check that stops
-before it measures anything else (an unset variable, a failed crawl) has no line, and its error names the cause. Copy the
-block into the release evidence.
+The phone, `mobile`, has its own `fixedRoutesReload` line, and each attested check's line lists its values. `fixedRoutesReload` and
+`securityHeaders` count a status other than 200, a page that does not render and a failed crawl among their problems, so
+their line always prints (fix round 1). When the bundle carries no single publishable key, `anonDenied` and
+`authProvidersGoogleOnly` give that as their line; any other check that stops before it measures anything (an unset
+variable, a failed crawl) has no line, and its error names the cause. Copy the block into the release evidence.
 
 - **Automatic** (`@automatic`): `fixedRoutesReload` (desktop and phone: each fixed route loads and reloads with 200 and no
   console error; a 404 for `/favicon.ico` is recorded, not failed: the site has no icon), `securityHeaders` (each route and a

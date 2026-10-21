@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type APIResponse, type Page } fro
 import {
   ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences, compressionProblem,
   connectSrcProblems, consoleError, denialProblem, deployedOrigin, expectedHeaders, foreignPreflightProblems, headerMismatches,
-  maskKeys, policyOrigin, preflightProblems, publishableKey, shippedProblems, supabaseOrigin, workerProblems, type AttestedCheck,
+  maskKeys, policyOrigin, preflightProblems, publishableKey, shippedProblems, statusProblem, supabaseOrigin, workerProblems, type AttestedCheck,
 } from './deployed-checks';
 
 // Task 24.2: the deployed acceptance checks (plan Decisions 1, 8 and 9; Tasks 24.5, 24.6 and 24.8). They run only with
@@ -96,38 +96,48 @@ async function rendered(page: Page, path: string) {
 test.describe('deployedChecks (automatic)', () => {
   test('fixedRoutesReload', { tag: ['@automatic', '@browser'] }, async ({ page }) => {
     const { errors, recorded } = watchErrors(page);
+    // A route that does not answer 200, or does not render, is a problem like a console error, so the evidence line prints.
+    const visit = async (label: string, path: string, go: () => Promise<{ status(): number } | null>) => {
+      let status: number | undefined;
+      try { status = (await go())?.status(); } catch { status = undefined; }
+      const problem = statusProblem(label, status);
+      if (problem) { errors.push(problem); return false; }
+      try { await rendered(page, path); return true; } catch (error) {
+        errors.push(maskKeys(`${label}: ${String(error instanceof Error ? error.message : error).split('\n')[0]}`));
+        return false;
+      }
+    };
+    let loaded = 0;
     for (const path of ROUTES) {
-      const first = await page.goto(path);
-      expect(first?.status(), path).toBe(200);
-      await rendered(page, path);
-      const again = await page.reload();
-      expect(again?.status(), `${path} after a reload`).toBe(200);
-      await rendered(page, path);
+      if (await visit(path, path, () => page.goto(path)) && await visit(`${path} after a reload`, path, () => page.reload())) loaded++;
     }
     for (const note of recorded) test.info().annotations.push({ type: 'recorded', description: note });
-    evidence(`${ROUTES.length} routes loaded and reloaded; console errors ${errors.length}; favicon: `
+    evidence(`${loaded} of ${ROUTES.length} routes loaded and reloaded with 200; problems ${errors.length}; favicon: `
       + (recorded.length ? `/favicon.ico answered 404 on ${recorded.length} ${recorded.length === 1 ? 'load' : 'loads'} (recorded, not failed)`
         : 'no /favicon.ico 404'));
     expect(errors).toEqual([]);
   });
 
   test('securityHeaders', AUTOMATIC, async ({ request }) => {
-    const assets = await shippedAssets(request);
+    // A failed crawl, a missing chunk or a status other than 200 is a problem, so the evidence line prints (fix round 1).
+    const problems: string[] = [];
+    let assets = new Map<string, string>();
+    try { assets = await shippedAssets(request); } catch (error) { problems.push(maskKeys(`crawl: ${(error as Error).message}`)); }
     const chunk = [...assets.keys()].find(path => path.startsWith('/_next/static/'));
-    expect(chunk, 'a /_next/static/ chunk the routes reference').toBeDefined();
+    if (!chunk) problems.push('no /_next/static/ chunk among the routes\' references');
     // The expected headers are those the generated `_headers` gives each path, for the origin the served policy names
     // (connectSrc checks that origin).
-    const problems: string[] = [];
     let connect: string | null = null;
     try { connect = policyOrigin((await request.get('/')).headers()['content-security-policy'] ?? ''); } catch (error) { problems.push(`/: ${(error as Error).message}`); }
     test.info().annotations.push({ type: 'connect-src', description: connect ?? "'self' only" });
-    const paths = [...ROUTES, chunk!];
+    const paths = chunk ? [...ROUTES, chunk] : [...ROUTES];
     for (const path of paths) {
       const response = await request.get(path);
-      expect(response.status(), path).toBe(200);
-      problems.push(...headerMismatches(path, expectedHeaders(connect, path), response.headers()));
+      const status = statusProblem(path, response.status());
+      if (status) problems.push(status);
+      else problems.push(...headerMismatches(path, expectedHeaders(connect, path), response.headers()));
     }
-    evidence(`connect-src origin ${connect ?? "none ('self' only)"}; ${paths.length} paths compared with _headers; ${problems.length} differences`);
+    evidence(`connect-src origin ${connect ?? "none ('self' only)"}; ${paths.length} paths checked against _headers; ${problems.length} problems`);
     expect(problems).toEqual([]);
   });
 

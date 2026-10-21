@@ -7,8 +7,8 @@ import { FIXED_ROUTES } from '../scripts/release-scan.mjs';
 import {
   ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences,
   compressionProblem, connectSrcProblems, consoleError, denialProblem, deployedOrigin, evidenceLine, expectedHeaders, foreignPreflightProblems,
-  headerMismatches, maskKeys, parseCsp, policyOrigin, preflightProblems, publishableKey, recordingFlags, shippedProblems, supabaseOrigin,
-  workerProblems,
+  headerMismatches, maskKeys, parseCsp, policyOrigin, preflightProblems, publishableKey, recordingFlags, shippedProblems, statusProblem,
+  supabaseOrigin, workerProblems,
 } from './browser/deployed-checks.ts';
 
 // Task 24.2 (plan Decisions 1, 8 and 9): the pure pieces of the deployed acceptance checks (tests/browser/deployed.spec.ts),
@@ -55,6 +55,13 @@ describe('the fixed routes', () => {
   it('are the release scan\'s five routes, as URL paths', () => {
     expect(FIXED_ROUTES).toEqual(['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html']);
     expect(ROUTES).toEqual(['/', '/game/', '/auth/callback/', '/replay/', '/expedition/']);
+  });
+
+  it('name a status other than 200 as a problem, so a check goes on to its evidence line (fix round 1)', () => {
+    expect(statusProblem('/game/', 200)).toBeNull();
+    expect(statusProblem('/game/', 404)).toBe('/game/: status 404, expected 200');
+    expect(statusProblem('/replay/ after a reload', 503)).toBe('/replay/ after a reload: status 503, expected 200');
+    expect(statusProblem('/', undefined)).toBe('/: no response, expected 200');
   });
 });
 

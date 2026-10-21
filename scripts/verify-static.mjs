@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { GALLERY, connectOrigin, headersFile } from './build-headers.mjs';
+import { FIXED_ROUTES, forbiddenMaterial } from './release-scan.mjs';
 
 const failures = [];
 let directory, required = null;
@@ -21,7 +22,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else failures.push(`Unexpected argument ${arg}: give one export directory.`);
 }
 const root = resolve(directory ?? 'out');
-for (const route of ['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html']) {
+for (const route of FIXED_ROUTES) {
   if (!existsSync(join(root, route))) failures.push(`Missing fixed route: ${route}`);
 }
 // Task 23.6 (plan Decision 7): the export carries exactly the `_headers` scripts/build-headers.mjs generates for one allowed
@@ -41,42 +42,7 @@ else {
 }
 // Plan Decision 2: the hand-written art gallery is a development tool, never part of a production export.
 if (existsSync(join(root, GALLERY))) failures.push(`Development-only art gallery in the export: ${GALLERY}`);
-const forbidden = [
-  /(?:SUPABASE_)?SERVICE_ROLE(?:_KEY)?/i,
-  /SUPABASE_SECRET_KEY/i,
-  /(?:GAME_)?WORKER_(?:SECRET|TOKEN|KEY|AUTH)/i,
-  /sb_secret_[a-zA-Z0-9_-]+/,
-  // Next's router uses seed:null/seed:identifier. Private game seeds are string inputs.
-  // Quotes can have repeated backslashes when JSON is nested in JavaScript strings.
-  /\bseed(?:\\*["'])?\s*[:=]\s*\\*["'`]/i,
-  /\b(?:private_?seed|private_?plan)(?:\\*["'])?\s*:/i,
-  /(?:encounter_?plan|private_?fixture_?plan|future_?opponent_?snapshot)/i,
-  // Task 23.6 (C27): any JWT (three base64url segments, the first a JSON header). The browser uses only the publishable key.
-  // It starts at a word boundary, or right after a percent-encoded byte (`Bearer%20eyJ…`) or an escape (`\n`, `\t`, `\u0022`,
-  // `\x22`), whose last character is a letter or digit (fix round 1).
-  /(?:(?<![A-Za-z0-9_-])|(?<=%[0-9A-Fa-f]{2})|(?<=\\[nrtbfv0])|(?<=\\u[0-9A-Fa-f]{4})|(?<=\\x[0-9A-Fa-f]{2}))eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
-  // ...and `service_role` base64- or base64url-encoded at any of its three byte alignments (a JWT payload, an encoded key).
-  ...base64Needles('service_role').map(needle => new RegExp(needle.replace(/[+/]/g, '\\$&'))),
-];
-/**
- * The parts of `text`'s base64 encodings that do not depend on the bytes around it: for each start offset modulo 3, the
- * characters whose six bits all come from `text`, in the standard and the URL-safe alphabet.
- */
-function base64Needles(text) {
-  const needles = new Set();
-  for (let offset = 0; offset < 3; offset++) {
-    const encoded = Buffer.from('\0'.repeat(offset) + text).toString('base64');
-    const inner = encoded.slice(Math.ceil((offset * 8) / 6), Math.floor(((offset + text.length) * 8) / 6));
-    needles.add(inner);
-    needles.add(inner.replace(/\+/g, '-').replace(/\//g, '_'));
-  }
-  return [...needles];
-}
-// The fixture preview (its gateway and sample data) exists only in development builds with fixtures enabled; every
-// export this scanner checks is a production build, where next.config.ts forces NEXT_PUBLIC_FIXTURE_ENABLED off, so
-// its lazy chunk must be absent (final review Minor 4). Markers: the fixture gateway's own refusal, and the sample
-// summaries' receipt ids.
-const fixtureMarkers = ['unavailable in the fixture preview', 'fixture-receipt-'];
+// The forbidden-material patterns and the fixture preview markers: scripts/release-scan.mjs (shared with the deployed checks).
 let scanned = 0;
 function scan(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -86,8 +52,9 @@ function scan(directory) {
     scanned++;
     // Search every asset, including sourcemaps, JSON, and binary files with embedded strings.
     const content = readFileSync(file).toString('utf8');
-    if (forbidden.some((pattern) => pattern.test(content))) failures.push(`Forbidden backend material in ${relative(root, file)}`);
-    if (fixtureMarkers.some((marker) => content.includes(marker))) failures.push(`Fixture preview data in ${relative(root, file)}`);
+    const found = forbiddenMaterial(content);
+    if (found.includes('backend')) failures.push(`Forbidden backend material in ${relative(root, file)}`);
+    if (found.includes('fixture')) failures.push(`Fixture preview data in ${relative(root, file)}`);
   }
 }
 if (existsSync(root)) scan(root);

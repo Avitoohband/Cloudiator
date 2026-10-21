@@ -164,3 +164,18 @@ describe('scripts/build-headers.mjs', () => {
     expect(pkg.scripts.build).toBe('next build && node scripts/build-headers.mjs');
   });
 });
+
+// Task 24.2: the Cloudflare Pages reading of `_headers` (every matching rule applies; a repeated header is joined with ", ")
+// is shared by scripts/serve-static.mjs and the deployed checks, which expect on each path what the generated file gives it.
+describe('reading _headers', () => {
+  it('gives each path the headers of every rule that matches it', async () => {
+    const { headersFor, parseHeaders } = await import('../../scripts/build-headers.mjs');
+    const rules = parseHeaders(headersFile(PROJECT));
+    const page = { 'Content-Security-Policy': contentSecurityPolicy(PROJECT), 'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()' };
+    expect(headersFor(rules, '/game/')).toEqual(page);
+    expect(headersFor(rules, '/_next/static/chunks/a.js')).toEqual({ ...page, 'Cache-Control': 'public, max-age=31536000, immutable' });
+    expect(headersFor(parseHeaders('/*\n  X-A: 1\n/game/*\n  X-A: 2\n'), '/game/')).toEqual({ 'X-A': '1, 2' });
+    expect(() => parseHeaders('  X-A: 1\n')).toThrow('Malformed _headers line: X-A: 1');
+  });
+});

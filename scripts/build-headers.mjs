@@ -82,6 +82,47 @@ export function headersFile(origin) {
   ].join('\n');
 }
 
+/**
+ * Reads a `_headers` file as Cloudflare Pages does: a path pattern line (`*` matches anything, `:name` one segment), then its
+ * indented `Name: value` lines. Moved here from scripts/serve-static.mjs in Task 24.2, so the local export host and the
+ * deployed checks (tests/browser/deployed-checks.ts) read the generated file the same way.
+ * @param {string} text
+ * @returns {{ pattern: RegExp, headers: [string, string][] }[]}
+ */
+export function parseHeaders(text) {
+  /** @type {{ pattern: RegExp, headers: [string, string][] }[]} */
+  const rules = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    if (!/^\s/.test(line)) {
+      const pattern = line.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:\w+/g, '[^/]+');
+      rules.push({ pattern: new RegExp(`^${pattern}$`), headers: [] });
+      continue;
+    }
+    const at = line.indexOf(':');
+    if (!rules.length || at < 0) throw new Error(`Malformed _headers line: ${line.trim()}`);
+    rules[rules.length - 1].headers.push([line.slice(0, at).trim(), line.slice(at + 1).trim()]);
+  }
+  return rules;
+}
+
+/**
+ * The headers `rules` give `pathname`: every rule whose pattern matches adds its headers, and a repeated header is joined with
+ * ", " (Cloudflare Pages).
+ * @param {{ pattern: RegExp, headers: [string, string][] }[]} rules
+ * @param {string} pathname
+ * @returns {Record<string, string>}
+ */
+export function headersFor(rules, pathname) {
+  /** @type {Record<string, string>} */
+  const headers = {};
+  for (const rule of rules) {
+    if (!rule.pattern.test(pathname)) continue;
+    for (const [name, value] of rule.headers) headers[name] = headers[name] ? `${headers[name]}, ${value}` : value;
+  }
+  return headers;
+}
+
 /** The export directory next.config.ts writes for this environment. */
 export const exportRoot = (env = process.env) => (env.CLOUDIATOR_BROWSER_TEST === 'true' ? '.next/browser-test' : 'out');
 

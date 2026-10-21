@@ -9,35 +9,12 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, sep, extname, join } from 'node:path';
+// The Cloudflare Pages reading of `_headers` (shared with the deployed checks since Task 24.2).
+import { headersFor, parseHeaders } from './build-headers.mjs';
 
 const root = resolve(process.env.CLOUDIATOR_STATIC_ROOT ?? 'out');
 const port = Number(process.env.CLOUDIATOR_STATIC_PORT ?? 4173);
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.txt': 'text/plain', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
-
-/** Cloudflare Pages `_headers`: a path pattern line (`*` matches anything), then its indented `Name: value` lines. */
-function parseHeaders(text) {
-  const rules = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.trim() || line.trimStart().startsWith('#')) continue;
-    if (!/^\s/.test(line)) {
-      const pattern = line.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:\w+/g, '[^/]+');
-      rules.push({ pattern: new RegExp(`^${pattern}$`), headers: [] });
-      continue;
-    }
-    const at = line.indexOf(':');
-    if (!rules.length || at < 0) throw new Error(`Malformed _headers line: ${line.trim()}`);
-    rules.at(-1).headers.push([line.slice(0, at).trim(), line.slice(at + 1).trim()]);
-  }
-  return rules;
-}
-function headersFor(rules, pathname) {
-  const headers = {};
-  for (const rule of rules) {
-    if (!rule.pattern.test(pathname)) continue;
-    for (const [name, value] of rule.headers) headers[name] = headers[name] ? `${headers[name]}, ${value}` : value;
-  }
-  return headers;
-}
 
 if (!existsSync(join(root, '_headers'))) {
   console.error(`No _headers in ${root}: build the export with npm run build (scripts/build-headers.mjs) before serving it.`);

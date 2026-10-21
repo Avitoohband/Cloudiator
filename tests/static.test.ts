@@ -217,3 +217,19 @@ describe('JWT and base64 service-role material', () => {
     expect(scan(exportedSite(content)).status).toBe(0);
   });
 });
+
+// Task 24.2: the scan's patterns live in scripts/release-scan.mjs, so the deployed checks (tests/browser/deployed-checks.ts)
+// apply exactly the patterns this scanner applies to an export. The matcher names what it found, never the matched text.
+describe('the shared matcher', () => {
+  test('finds the same material the scanner refuses', async () => {
+    const { forbiddenMaterial } = await import('../scripts/release-scan.mjs');
+    expect(forbiddenMaterial('<main>Cloudiator</main>')).toEqual([]);
+    expect(forbiddenMaterial('previousTree:i,url:t,nextUrl:r,seed:n; exitStatus:2,url:n,seed:null')).toEqual([]);
+    for (const content of ['SUPABASE_SERVICE_ROLE_KEY', 'GAME_WORKER_SECRET', 'sb_secret_example', `const key="${FAKE_JWT}";`,
+      String.raw`const payload = "{\"seed\":\"private-input\"}";`, Buffer.from('x{"role":"service_role"}').toString('base64url')]) {
+      expect(forbiddenMaterial(content), content).toEqual(['backend']);
+    }
+    expect(forbiddenMaterial('const s={receiptId:"fixture-receipt-pvp"}')).toEqual(['fixture']);
+    expect(forbiddenMaterial('SUPABASE_SECRET_KEY fixture-receipt-x')).toEqual(['backend', 'fixture']);
+  });
+});

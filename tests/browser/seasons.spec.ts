@@ -7,6 +7,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
 import { expectOwnerShown, menuDialog, openMenu } from './shell-helpers';
+import { watchSyncPoll } from './sync-poll';
 
 // Task 21.4 (plan Decision 8, the approved mockup): seasons inside Arena standings. A season picker, the current season's
 // countdown, end time (local and UTC), prizes and rule; the owner's season rank and progress to five human bouts; an
@@ -246,13 +247,15 @@ test.describe('seasons in live mode', () => {
   });
 
   // Task 21.3 review M2: each page costs a season lookup, so the panel must not read more than it needs at a new revision.
-  test('reads the current season again at each new revision, a picked finished season never, and the season list only when stale', { tag: '@render' }, async ({ page, context }) => {
+  test('reads the current season again at each new revision, a picked finished season never, and the season list only when stale', async ({ page, context }) => {
     const world = emptyWorld();
     const filler = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
     const current: StandingsPage = { league: 'bronze', seasonId: '7', archived: false, nextCursor: null, rows: [liveRow(1, filler(1), 'Livia')] };
     const archive: StandingsPage = { league: 'bronze', seasonId: '6', archived: true, nextCursor: null, rows: [liveRow(1, filler(2), 'Varro', { awardPlace: 1 })] };
     const live = await routeLiveReads(context, { world, standings: [current, archive], seasons: liveSeasons(world.serverNowMs) });
     await page.clock.install();
+    // Each publish fires the next 30 s poll once it is armed (tests/browser/sync-poll.ts; Task 24.0c fix round 1).
+    const poll = await watchSyncPoll(page);
     await page.goto('/game/');
     await openMenu(page, 'Arena');
     await expect(rowOf(page, 'Bronze', 'Livia')).toContainText('✓ Eligible');
@@ -263,31 +266,40 @@ test.describe('seasons in live mode', () => {
     const worlds = () => live.count('world_actor_reads');
     // (The development server's React Strict Mode mounts the panel's effects twice, so counts at opening are not pinned.)
     await expect.poll(lists).toBeGreaterThan(0);
+    const counts = () => [views(), lookups(), lists(), frozen()];
     /** The server publishes a new revision, and the sync controller's next poll (30 s) loads it. */
     const publish = async (revision: string) => {
       const seen = worlds();
       live.setWorld({ ...world, revision });
-      await page.clock.fastForward(30_000);
+      await poll.nextSyncPoll();
       await expect.poll(worlds).toBeGreaterThan(seen);
+    };
+    /**
+     * The panel's reads for a new revision land some time after the world's (Task 24.0c fix round 1: a fixed 500 ms was too
+     * short on CI): the counts must reach `expected` and still be `expected` 500 ms later, so a late extra read fails too.
+     */
+    const settlesAt = async (expected: number[]) => {
+      await expect.poll(counts).toEqual(expected);
       await page.waitForTimeout(500);
+      expect(counts()).toEqual(expected);
     };
     // The current season: its page again (one season lookup, one view read); the list is not stale, so it is not read.
-    let before = [views(), lookups(), lists(), frozen()];
+    let before = counts();
     await publish('empty-2');
-    expect([views(), lookups(), lists(), frozen()]).toEqual([before[0] + 1, before[1] + 1, before[2], before[3]]);
+    await settlesAt([before[0] + 1, before[1] + 1, before[2], before[3]]);
     // A picked finished season is read once; its frozen archive is not read again at a new revision, nor anything else.
     await picker(page).selectOption('6');
     await expect(rowOf(page, 'Bronze', 'Varro')).toContainText('🥇 1st · Champion');
-    before = [views(), lookups(), lists(), frozen()];
+    before = counts();
     expect(before[3]).toBeGreaterThan(0);
     await publish('empty-3');
-    expect([views(), lookups(), lists(), frozen()]).toEqual(before);
+    await settlesAt(before);
     // Back to the current season: read at the pick, and again at the next revision.
     await picker(page).selectOption('7');
     await expect(rowOf(page, 'Bronze', 'Livia')).toContainText('✓ Eligible');
-    before = [views(), lookups(), lists(), frozen()];
+    before = counts();
     await publish('empty-4');
-    expect([views(), lookups(), lists(), frozen()]).toEqual([before[0] + 1, before[1] + 1, before[2], before[3]]);
+    await settlesAt([before[0] + 1, before[1] + 1, before[2], before[3]]);
   });
 
   test('follows the current season to the next one when the newest season was closed at opening', async ({ page, context }) => {

@@ -10,6 +10,7 @@ import { tournamentCampActors } from '../fixtures/tournament-build';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
+import { watchSyncPoll } from './sync-poll';
 
 // Task 13.3: the game page mounts the camp in live mode from the public reads, with one sync controller owning the
 // shared display clock (`window.__cloudiatorShell.clock`, fixture-enabled builds only) and the owner state.
@@ -239,6 +240,8 @@ test('a signed-in player sees the camp on their gladiator and re-reads the owner
   const started = Date.now();
   const live = await routeLiveReads(context, { world, owner: ownerFixture, serverNowMs: () => world.serverNowMs + skipped + (Date.now() - started) });
   await page.clock.install();
+  // Each step fires the next 30 s poll once it is armed (tests/browser/sync-poll.ts; Task 24.0c fix round 1).
+  const poll = await watchSyncPoll(page);
   await page.goto('/game/');
   await waitForCamp(page, world.actors.length);
   await openMenu(page, 'My gladiator');
@@ -247,19 +250,21 @@ test('a signed-in player sees the camp on their gladiator and re-reads the owner
   await expect(page.getByRole('button', { name: 'Find my gladiator' })).toBeVisible();
   const owners = () => live.count('owner_state');
   const revisions = () => live.count('world_revision');
+  // Counted once the start-up reads have settled, so a late one is not taken for the first poll.
+  await poll.idle();
   let read = owners(), polled = revisions();
   // The same revision in the same slot: only the revision is read.
-  await page.clock.fastForward(30_000);
+  await poll.nextSyncPoll();
   await expect.poll(revisions).toBe(++polled);
   expect(owners()).toBe(read);
   // A new revision.
   live.setWorld({ ...world, revision: 'live-2' });
-  await page.clock.fastForward(30_000);
+  await poll.nextSyncPoll();
   await expect.poll(owners).toBe(++read);
   polled = revisions();
   // The next slot.
   skipped = SLOT_MS;
-  await page.clock.fastForward(30_000);
+  await poll.nextSyncPoll();
   await expect.poll(revisions).toBe(++polled);
   await expect.poll(owners).toBe(++read);
   // The tab comes back (visibilitychange and focus fire together) more than 2 s after the last owner read: one read

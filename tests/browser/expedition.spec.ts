@@ -10,6 +10,8 @@ import { drawSlices, hidesActor } from '../../src/game/depth';
 import type { MapData } from '../../src/game/assets';
 import { emptyWorld, routeLiveReads } from './live-routes';
 import { openMenu } from './shell-helpers';
+import { reviewShot360 } from './review-shots';
+import { expectTimeOnOneLine, slotTime } from './slot-time';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -612,6 +614,25 @@ test.describe('followable expedition scenes', () => {
     await expect(page.getByRole('button', { name: 'Follow the gladiator' })).toHaveAttribute('aria-pressed', 'false');
     await page.keyboard.press('f');
     await expect(page.getByRole('button', { name: 'Follow the gladiator' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  // Task 24.0c (after Avi's 2026-10-20 decision for the activity end times): each stage start in the activity log is a short
+  // local time against the view's display time, as every slot time is (Task 23.10), never the fixed two-digit form
+  // (`01:00 AM`), and it stays on one line in a 360 px viewport. Minute 65 shows starts past the first hour of the slot.
+  test('shows each stage start in the activity log short, on one line at 360 px', async ({ page }, testInfo) => {
+    await expeditionFlow.openAtMinute(page, 65);
+    await expeditionFlow.hold(page, 'woodland', 65);
+    const { displayNowMs } = await expeditionFlow.state(page);
+    const log = page.getByRole('list', { name: 'Activity log' });
+    const times = log.locator('time');
+    await expect(times).toHaveCount(renderExpeditionStage(TIMELINES.woodland, displayNowMs).stages.length);
+    for (const time of await times.all()) {
+      const ms = Date.parse((await time.getAttribute('datetime'))!);
+      await expect(time).toHaveText(await slotTime(page, ms, displayNowMs));
+    }
+    await expect(times.last()).not.toHaveText(/^0\d:/);
+    await expectTimeOnOneLine(page, logItems(page).last(), 'a stage start');
+    await reviewShot360(page, testInfo, 'expedition-stage-list', log);
   });
 
   test('reads the timeline once per reveal mark, not on focus alone, and sends no command or remote request', async ({ page }) => {

@@ -32,6 +32,7 @@ import { ExpeditionViewport } from '../../game/ExpeditionViewport';
 import { createSceneBridge } from '../../game/bridge';
 import { layersFor, tintFor } from '../../game/actors';
 import { prefersReducedMotion } from '../../game/webgl';
+import { slotTimeText } from '../schedule/slot-time';
 import styles from './ExpeditionView.module.css';
 
 export type ExpeditionReads = Pick<GameGateway, 'timeline'>;
@@ -63,9 +64,18 @@ const TICK_MS = 250;
 const ORDINALS = ['first', 'second', 'third'];
 let activeLoops = 0;
 
-const clockTime = (ms: number) => new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(ms);
 const day = (ms: number) => new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(ms);
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * A stage's start in the activity log, shown as every slot time is (`slotTimeText` against the view's display time; Task
+ * 24.0c, after Avi's 2026-10-20 decision for the activity end times): `4:20 AM`, or with the day once the display time is on
+ * another local day. A start that cannot be shown (`slotTimeText` gives '') leaves the time out.
+ */
+export function StageStart({ startedAtMs, nowMs }: { startedAtMs: number; nowMs: number }) {
+  const text = slotTimeText(startedAtMs, nowMs);
+  return text ? <time dateTime={new Date(startedAtMs).toISOString()}>{text}</time> : null;
+}
 
 /** The expedition environment: the public location when known, else the published departure label. */
 function environmentOf(timeline: RevealedTimeline | null, actor: PublicActor | null): ExpeditionEnvironment | null {
@@ -412,7 +422,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
           <Section id={logId}>Activity log</Section>
           <ol className={styles.log} aria-label="Activity log">
             {state.stages.map(stage => <li key={stage.id} aria-current={stage.id === state.current?.id ? 'step' : undefined} className={stage.id === state.current?.id ? styles.current : undefined}>
-              <time dateTime={new Date(stage.startedAtMs).toISOString()}>{clockTime(stage.startedAtMs)}</time>
+              <StageStart startedAtMs={stage.startedAtMs} nowMs={state.displayNowMs} />
               <span className={styles.logLabel}>{stage.label}</span>
               {stage.inProgress && <span className={styles.badge}>in progress</span>}
               {stage.replay && (overCamp

@@ -31,8 +31,8 @@ function format(ms: number, options: Intl.DateTimeFormatOptions): string {
  * - anything else, from the 7th day ahead or on an earlier day: the short month, day and time (`Oct 26, 4:20 AM`).
  * The time part itself never breaks across lines (its pieces are joined by no-break spaces); a line may break before it.
  * The Schedule panel's estimated starts and effective times, the Build panel's effective time and the owner's resting line
- * (Task 23.9) all show their times this way (Task 23.10), and so do My gladiator's activity end (`· ends …`) and the Arena
- * card's reveal time (Task 24.0b).
+ * (Task 23.9) all show their times this way (Task 23.10), and so do My gladiator's activity end (`· ends …`), the Arena
+ * card's reveal time (Task 24.0b) and each stage start in the expedition's activity log (Task 24.0c).
  *
  * A time or display time that is not a finite number (missing from a read, or a broken clock) gives `''`, never a throw
  * during render or a made-up date; each caller then leaves its time out (Task 23 final review, Minor 4).

@@ -619,7 +619,9 @@ test.describe('followable expedition scenes', () => {
   // Task 24.0c (after Avi's 2026-10-20 decision for the activity end times): each stage start in the activity log is a short
   // local time against the view's display time, as every slot time is (Task 23.10), never the fixed two-digit form
   // (`01:00 AM`), and it stays on one line in a 360 px viewport. Minute 65 shows starts past the first hour of the slot.
-  test('shows each stage start in the activity log short, on one line at 360 px', async ({ page }, testInfo) => {
+  // Fix round 1: the times are a right-aligned column of one width, so every label starts at the same left edge whether
+  // its time is "12:40 AM" or "1:00 AM". Tagged @render: it screenshots the expedition scene (the CI exception).
+  test('shows each stage start in the activity log short, on one line at 360 px', { tag: '@render' }, async ({ page }, testInfo) => {
     await expeditionFlow.openAtMinute(page, 65);
     await expeditionFlow.hold(page, 'woodland', 65);
     const { displayNowMs } = await expeditionFlow.state(page);
@@ -632,6 +634,16 @@ test.describe('followable expedition scenes', () => {
     }
     await expect(times.last()).not.toHaveText(/^0\d:/);
     await expectTimeOnOneLine(page, logItems(page).last(), 'a stage start');
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.waitForTimeout(500);
+    const edges = await logItems(page).evaluateAll(items => items.map(item => {
+      const time = item.querySelector('time')!.getBoundingClientRect(), label = item.querySelector('time + span')!.getBoundingClientRect();
+      return { timeRight: Math.round(time.right), labelLeft: Math.round(label.left), text: item.querySelector('time')!.textContent };
+    }));
+    expect(new Set(edges.map(e => e.labelLeft)).size, `label left edges: ${JSON.stringify(edges)}`).toBe(1);
+    expect(new Set(edges.map(e => e.timeRight)).size, `time right edges: ${JSON.stringify(edges)}`).toBe(1);
+    if (size) await page.setViewportSize(size);
     await reviewShot360(page, testInfo, 'expedition-stage-list', log);
   });
 

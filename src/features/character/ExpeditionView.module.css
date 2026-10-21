@@ -242,8 +242,15 @@
   border-bottom: 1px solid var(--line);
 }
 
+/*
+ * Stage starts are short slot times (Task 24.0c): "12:40 AM", then "1:00 AM". A right-aligned column of one width keeps every
+ * label at the same left edge (fix round 1); 5em holds "12:40 AM" in wider fonts than Segoe UI too. A start on another day
+ * ("Oct 19, 11:50 PM") is wider and simply widens its own row.
+ */
 .log time {
   flex: none;
+  min-width: 5em;
+  text-align: right;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }

@@ -487,14 +487,40 @@ npx playwright test --config tests/browser/playwright.deployed.config.ts --grep-
 npx playwright test --config tests/browser/playwright.deployed.config.ts                             # all, after the journey
 ```
 
+Never pass `--trace` (in any form) or open the UI mode (`--ui`, which always records one): a trace records every request's
+headers, the probes' `apikey` included, into `test-results/`. A flag would override the config's `trace: 'off'`, so the config
+refuses to load with either (Task 24.2b). Any publishable key in a console error, an uncaught exception or a failed request's
+message is masked as `<publishable key>` before it is printed.
+
+After the list reporter's summary, the config's evidence reporter (`tests/browser/deployed-reporter.ts`, Task 24.2b) prints a
+block `Deployed evidence (one line per check):` with one line for each check that ran, passing or failing, for the release
+evidence. The list reporter shows no annotations, which hold the same text. The lines hold counts, statuses, codes, origins
+and our own header values only:
+```text
+deployed evidence | desktop | fixedRoutesReload | 5 routes loaded and reloaded; console errors 0; favicon: /favicon.ico answered 404 on <n> loads (recorded, not failed)
+deployed evidence | desktop | securityHeaders | connect-src origin https://<project>.supabase.co; 6 paths compared with _headers; 0 differences
+deployed evidence | desktop | connectSrc | connect-src exactly 'self' https://<project>.supabase.co on 5 of 5 routes
+deployed evidence | desktop | compression | <n> of <n> responses br or gzip
+deployed evidence | desktop | cors | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 unauthenticated
+deployed evidence | desktop | anonDenied | 14 of 14 anonymous probes refused as expected
+deployed evidence | desktop | authProvidersGoogleOnly | GET /auth/v1/settings 200; Google only, sign-up open
+deployed evidence | desktop | shippedAssetsClean | scanned <n> assets, <m> of them JavaScript; 0 problems
+```
+The phone, `mobile`, has its own `fixedRoutesReload` line, and each attested check's line lists its values. When the bundle
+carries no single publishable key, `anonDenied` and `authProvidersGoogleOnly` give that as their line; a check that stops
+before it measures anything else (an unset variable, a failed crawl) has no line, and its error names the cause. Copy the
+block into the release evidence.
+
 - **Automatic** (`@automatic`): `fixedRoutesReload` (desktop and phone: each fixed route loads and reloads with 200 and no
   console error; a 404 for `/favicon.ico` is recorded, not failed: the site has no icon), `securityHeaders` (each route and a
   `/_next/static/` chunk carry exactly what the generated `_headers` gives that path), `connectSrc` (exactly `'self'` and the
   project), `compression` (every route's HTML and crawled chunk `br` or `gzip`), `cors` (the command preflight from the site:
   204 or 200, exactly the site's grant, never `*`, `Access-Control-Max-Age: 7200`; from another origin 403 with no grant; the
   worker without its secret 401 `unauthenticated`), `anonDenied` (14 anonymous probes from `tests/db/access-matrix.test.ts`
-  that change nothing even if granted: backend-only and owner RPCs with null arguments, empty inserts, a no-row update and
-  delete, the unexposed `private` schema), `authProvidersGoogleOnly` (`/auth/v1/settings`: Google alone, sign-up open),
+  that change nothing even if granted: backend-only and owner RPCs with null arguments, empty inserts, an update and a delete
+  filtered on `is.null` of a NOT NULL primary-key column, and the unexposed `private` schema, a table read and a call of the
+  STRICT `schedule_effective_slot` with null arguments; no function that acts without arguments, such as `cleanup_tick`, is
+  called; `tests/deployed.test.ts` checks these rules against the migrations), `authProvidersGoogleOnly` (`/auth/v1/settings`: Google alone, sign-up open),
   `shippedAssetsClean` (the release scan's patterns, `scripts/release-scan.mjs`, over every asset the routes reference or load).
   Every page runs under the CSP-violation listener.
 - **Attested** (`@attested`, Decision 8): after the real journey, Avi runs `scripts/hosted-checks.sql` and pastes the sanitized

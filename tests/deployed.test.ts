@@ -1,12 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { IMMUTABLE, PERMISSIONS_POLICY, contentSecurityPolicy } from '../scripts/build-headers.mjs';
 import { FIXED_ROUTES } from '../scripts/release-scan.mjs';
 import {
   ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences,
-  compressionProblem, connectSrcProblems, consoleError, denialProblem, deployedOrigin, expectedHeaders, foreignPreflightProblems,
-  headerMismatches, parseCsp, policyOrigin, preflightProblems, publishableKey, shippedProblems, supabaseOrigin, workerProblems,
+  compressionProblem, connectSrcProblems, consoleError, denialProblem, deployedOrigin, evidenceLine, expectedHeaders, foreignPreflightProblems,
+  headerMismatches, maskKeys, parseCsp, policyOrigin, preflightProblems, publishableKey, recordingFlags, shippedProblems, supabaseOrigin,
+  workerProblems,
 } from './browser/deployed-checks.ts';
 
 // Task 24.2 (plan Decisions 1, 8 and 9): the pure pieces of the deployed acceptance checks (tests/browser/deployed.spec.ts),
@@ -63,6 +65,15 @@ describe('fixedRoutesReload\'s console errors', () => {
     expect(consoleError('/replay/', NOT_FOUND, `${SITE}/game/__next.game.__PAGE__.txt?_rsc=abc`, SITE))
       .toBe(`/replay/: console error: ${NOT_FOUND} (/game/__next.game.__PAGE__.txt)`);
     expect(consoleError('/game/', 'TypeError: x is undefined', `${SITE}/_next/static/chunks/a.js`, SITE)).toBe('/game/: console error: TypeError: x is undefined');
+  });
+
+  it('masks any publishable key in a console error or an uncaught exception before it is printed', () => {
+    const text = `TypeError: request with apikey ${FAKE_KEY} failed; also sb_publishable_other-Key_9`;
+    expect(maskKeys(text)).toBe('TypeError: request with apikey <publishable key> failed; also <publishable key>');
+    const problem = consoleError('/game/', text, `${SITE}/_next/static/chunks/a.js`, SITE);
+    expect(problem).toBe('/game/: console error: TypeError: request with apikey <publishable key> failed; also <publishable key>');
+    expect(consoleError('/', `Failed to load resource: the server responded with a status of 401 (${FAKE_KEY})`, `${PROJECT}/rest/v1/x`, SITE))
+      .not.toContain(FAKE_KEY);
   });
 
   it('records the browser\'s own request for the missing site icon instead of failing on it', () => {
@@ -182,18 +193,72 @@ describe('cors', () => {
   });
 });
 
+/** Every migration, in order, as one text: the column definitions and function signatures the probes rely on. */
+const MIGRATIONS = readdirSync('supabase/migrations').filter(name => name.endsWith('.sql')).sort()
+  .map(name => readFileSync(join('supabase/migrations', name), 'utf8')).join('\n');
+const quoted = (name: string) => `"?${name}"?`;
+/**
+ * Whether the migrations define `public.<table>.<column>` NOT NULL and in the table's primary key, and never relax either: no
+ * later DROP NOT NULL on it, and no dropped primary key or table. Both generated styles are read: pg_dump's quoted
+ * `CREATE TABLE …` with `ALTER TABLE ONLY … ADD CONSTRAINT … PRIMARY KEY (…)`, and migra's `create table` whose unique index
+ * becomes the key (`PRIMARY KEY using index`).
+ */
+function notNullPrimaryKey(table: string, column: string): boolean {
+  const create = new RegExp(`create table (?:if not exists )?${quoted('public')}\\.${quoted(table)} \\(([\\s\\S]*?)\\n\\s*\\);`, 'i').exec(MIGRATIONS);
+  const definition = create && new RegExp(`^\\s*${quoted(column)}\\s+([^\\n]*)$`, 'im').exec(create[1]);
+  if (!definition || !/\bnot null\b/i.test(definition[1])) return false;
+  const target = `alter table (?:only )?${quoted('public')}\\.${quoted(table)}`;
+  const pkey = quoted(`${table}_pkey`);
+  if (new RegExp(`${target}\\s+alter column ${quoted(column)}\\s+drop not null`, 'i').test(MIGRATIONS)) return false;
+  if (new RegExp(`${target}\\s+drop constraint ${pkey}|drop table (?:if exists )?${quoted('public')}\\.${quoted(table)}\\b`, 'i').test(MIGRATIONS)) return false;
+  const dumped = new RegExp(`${target}\\s+add constraint ${pkey} primary key \\(([^)]*)\\)`, 'i').exec(MIGRATIONS)?.[1];
+  const promoted = new RegExp(`${target}\\s+add constraint ${pkey} primary key using index ${pkey}`, 'i').test(MIGRATIONS)
+    ? new RegExp(`create unique index ${pkey} on ${quoted('public')}\\.${quoted(table)} using btree \\(([^)]*)\\)`, 'i').exec(MIGRATIONS)?.[1]
+    : undefined;
+  return !!(dumped ?? promoted)?.split(',').map(part => part.trim().replaceAll('"', '')).includes(column);
+}
+/** The argument names of every definition of `<schema>.<name>` in the migrations. */
+function signatures(schema: string, name: string): string[][] {
+  return [...MIGRATIONS.matchAll(new RegExp(`create or replace function ${quoted(schema)}\\.${quoted(name)}\\s*\\(([^)]*)\\)`, 'gi'))]
+    .map(match => match[1].split(',').map(arg => arg.trim().split(/\s+/)[0].replaceAll('"', '')).filter(Boolean));
+}
+
 describe('anonDenied', () => {
   it('probes backend-only functions with null arguments, table writes that match no row, and the private schema', () => {
     const rpcs = ANON_PROBES.filter(p => p.path.startsWith('/rest/v1/rpc/') && !p.profile).map(p => p.path.slice('/rest/v1/rpc/'.length));
     expect(rpcs).toEqual(['create_gladiator', 'edit_schedule', 'buy_listing', 'claim_jobs', 'complete_job', 'renew_job', 'settle_activity']);
-    for (const probe of ANON_PROBES.filter(p => p.path.startsWith('/rest/v1/rpc/'))) {
-      expect(Object.values(probe.body ?? {}).every(value => value === null), probe.label).toBe(true);
-    }
-    // Updates and deletes filter on `is.null` of a key column, so even a granted privilege would change no row.
-    for (const probe of ANON_PROBES.filter(p => p.method === 'PATCH' || p.method === 'DELETE')) expect(probe.path, probe.label).toMatch(/\?\w+=is\.null$/);
     expect(ANON_PROBES.filter(p => p.method === 'POST' && !p.path.includes('/rpc/')).map(p => p.label))
       .toEqual(['insert wallets', 'insert item_instances', 'insert world_actors']);
-    expect(ANON_PROBES.filter(p => p.profile === 'private').map(p => p.expected)).toEqual([['PGRST106'], ['PGRST106']]);
+    expect(ANON_PROBES.filter(p => p.profile === 'private').map(p => [p.label, p.expected]))
+      .toEqual([['read private.jobs', ['PGRST106']], ['rpc private.schedule_effective_slot', ['PGRST106']]]);
+    expect(ANON_PROBES).toHaveLength(14);
+  });
+
+  it('calls only functions that take arguments, each argument null, by the names the migrations define', () => {
+    // A zero-argument function acts on its own (coordinate_work, refresh_projections, private.cleanup_tick), so none is probed.
+    for (const probe of ANON_PROBES.filter(p => p.path.startsWith('/rest/v1/rpc/'))) {
+      const args = Object.keys(probe.body ?? {});
+      expect(args.length, probe.label).toBeGreaterThan(0);
+      expect(Object.values(probe.body ?? {}).every(value => value === null), probe.label).toBe(true);
+      expect(signatures(probe.profile ?? 'public', probe.path.slice('/rest/v1/rpc/'.length)), probe.label).toContainEqual(args);
+    }
+    expect(signatures('private', 'cleanup_tick')).toEqual([[]]);
+  });
+
+  it('filters every update and delete on is.null of a NOT NULL primary-key column, so no row can match', () => {
+    const writes = ANON_PROBES.filter(p => p.method === 'PATCH' || p.method === 'DELETE');
+    expect(writes.map(p => p.label)).toEqual(['update wallets', 'delete operation_receipts']);
+    for (const probe of writes) {
+      const [, table, column] = /^\/rest\/v1\/(\w+)\?(\w+)=is\.null$/.exec(probe.path) ?? [];
+      expect(table, probe.label).toBeDefined();
+      expect(notNullPrimaryKey(table, column), `${probe.label}: ${table}.${column}`).toBe(true);
+    }
+    // The reading is not vacuous: a nullable column, a NOT NULL column outside the key, and a migra-style key.
+    expect(notNullPrimaryKey('operation_receipts', 'gladiator_id')).toBe(false);
+    expect(notNullPrimaryKey('operation_receipts', 'receipt_id')).toBe(false);
+    expect(notNullPrimaryKey('operation_receipts', 'operation_id')).toBe(true);
+    expect(notNullPrimaryKey('world_actors', 'gladiator_id')).toBe(true);
+    expect(notNullPrimaryKey('world_actors', 'actor')).toBe(false);
   });
 
   const rpc = ANON_PROBES.find(p => p.label === 'rpc claim_jobs')!;
@@ -293,6 +358,47 @@ describe('the attested checks', () => {
   });
 });
 
+describe('the evidence lines and the recording guard (Task 24.2b)', () => {
+  it('print one masked line per check, named by project and check', () => {
+    expect(evidenceLine('desktop', 'compression', '96 of 96 responses br or gzip'))
+      .toBe('deployed evidence | desktop | compression | 96 of 96 responses br or gzip');
+    expect(evidenceLine('mobile', 'fixedRoutesReload', `favicon: none; key ${FAKE_KEY}`)).not.toContain(FAKE_KEY);
+    // One line each: a description never breaks the line or the columns.
+    expect(evidenceLine('desktop', 'cors', 'a\nb | c')).toBe('deployed evidence | desktop | cors | a b / c');
+  });
+
+  it('refuse the command line flags that record traces: --trace in any form, and the UI mode', () => {
+    for (const argv of [['--trace', 'on'], ['--trace=retain-on-failure'], ['--ui'], ['--ui-port=0'], ['--ui-host', '0.0.0.0']]) {
+      expect(recordingFlags(['node', 'cli.js', 'test', ...argv]), argv.join(' ')).toEqual([argv[0].split('=')[0]]);
+    }
+    expect(recordingFlags(['node', 'cli.js', 'test', '--config', 'x.ts', '--grep-invert', '@attested', '--headed'])).toEqual([]);
+  });
+
+  it('are printed by the evidence reporter after the run, one per check, masked', async () => {
+    const { default: EvidenceReporter } = await import('./browser/deployed-reporter.ts');
+    const reporter = new EvidenceReporter();
+    const ended = (title: string, annotations: { type: string; description?: string }[]) =>
+      reporter.onTestEnd({ title, parent: { project: () => ({ name: 'desktop' }) } } as never, { annotations } as never);
+    ended('compression', [{ type: 'compression', description: 'not evidence' }, { type: 'evidence', description: '3 of 3 responses br or gzip' }]);
+    ended('anonDenied', [{ type: 'evidence', description: `no key ${FAKE_KEY}` }]);
+    ended('cors', []);
+    const written: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { written.push(String(chunk)); return true; });
+    try { reporter.onEnd(); } finally { write.mockRestore(); }
+    expect(written.join('')).toBe('\nDeployed evidence (one line per check):\n'
+      + 'deployed evidence | desktop | compression | 3 of 3 responses br or gzip\n'
+      + 'deployed evidence | desktop | anonDenied | no key <publishable key>\n');
+    expect(reporter.printsToStdio()).toBe(true);
+  });
+
+  it('are described in the runbook, with the rule never to pass --trace', () => {
+    const runbook = readFileSync('docs/operations/runbook.md', 'utf8');
+    const section = runbook.slice(runbook.indexOf('## Running the deployed checks'));
+    expect(section).toContain('Never pass `--trace`');
+    expect(section).toContain('deployed evidence |');
+  });
+});
+
 // The release gate never runs the deployed checks: `npm run verify` runs the repository config in both modes (development, and
 // PLAYWRIGHT_STATIC=true for the production gate), and both ignore deployed.spec.ts. Playwright itself loads each config and
 // lists the tests it would run; nothing starts a server or a browser.
@@ -317,11 +423,12 @@ function listed(args: string[], env: Record<string, string>) {
 
 describe('the Playwright configs', () => {
   it('keep deployed.spec.ts out of both release gate modes, and the deployed config runs it alone', { timeout: 120_000 }, async () => {
-    const [development, production, deployed, unset] = await Promise.all([
+    const [development, production, deployed, unset, traced] = await Promise.all([
       listed([], {}),
       listed([], { PLAYWRIGHT_STATIC: 'true' }),
       listed(['--config', 'tests/browser/playwright.deployed.config.ts'], { CLOUDIATOR_DEPLOYED_ORIGIN: SITE }),
       listed(['--config', 'tests/browser/playwright.deployed.config.ts'], {}),
+      listed(['--config', 'tests/browser/playwright.deployed.config.ts', '--trace', 'on'], { CLOUDIATOR_DEPLOYED_ORIGIN: SITE }),
     ]);
     for (const [mode, run] of [['development', development], ['production', production]] as const) {
       expect(run.status, `${mode}: ${run.stderr}`).toBe(0);
@@ -334,6 +441,10 @@ describe('the Playwright configs', () => {
     // Without an origin the deployed config refuses to load, naming the variable, instead of guessing one.
     expect(unset.status).not.toBe(0);
     expect(unset.stderr).toContain('CLOUDIATOR_DEPLOYED_ORIGIN is not set');
+    // A trace would record the apikey header the anonymous probes send: the config refuses `--trace` (Task 24.2b).
+    expect(traced.status).not.toBe(0);
+    expect(traced.stderr).toContain('The deployed checks never record a trace');
+    expect(traced.files).toEqual([]);
   });
 
   it('points the deployed config at the origin, with the CSP listener on, no web server and no traces', async () => {
@@ -343,6 +454,7 @@ describe('the Playwright configs', () => {
       const { default: config } = await import('./browser/playwright.deployed.config.ts');
       expect(config.use).toMatchObject({ baseURL: SITE, listenForCsp: true, trace: 'off', screenshot: 'off', video: 'off' });
       expect(config.webServer).toBeUndefined();
+      expect(config.reporter).toEqual([['list'], ['./deployed-reporter.ts']]);
       expect(config.projects?.map(p => p.name)).toEqual(['desktop', 'mobile']);
     } finally {
       if (previous === undefined) delete process.env.CLOUDIATOR_DEPLOYED_ORIGIN; else process.env.CLOUDIATOR_DEPLOYED_ORIGIN = previous;

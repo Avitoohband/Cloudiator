@@ -51,17 +51,43 @@ export function supabaseOrigin(env: Env): string {
 /** The release scan's fixed routes (scripts/release-scan.mjs), as URL paths. */
 export const ROUTES: string[] = FIXED_ROUTES.map((file: string) => `/${file.replace(/index\.html$/, '')}`);
 
+/** `text` with every publishable key masked: a page's or Playwright's message can quote the key the bundle carries. */
+export function maskKeys(text: string): string {
+  return text.replace(/sb_publishable_[A-Za-z0-9_-]+/g, '<publishable key>');
+}
+
+/**
+ * A check's one evidence line (Task 24.2b): `deployed evidence | <project> | <check> | <description>`, the description on one
+ * line, with no column separator of its own, and with any publishable key masked. The list reporter shows no annotations, so
+ * tests/browser/deployed-reporter.ts prints each check's `evidence` annotation this way after the run (compression x of y,
+ * the assets scanned, the connect-src origin, the favicon, …).
+ */
+export function evidenceLine(project: string, check: string, description: string): string {
+  return `deployed evidence | ${project} | ${check} | ${maskKeys(description).replace(/\s*\n\s*/g, ' ').replaceAll('|', '/')}`;
+}
+
+/**
+ * The command line flags under which Playwright records a trace: `--trace` in any form, and the UI mode, which always does. A
+ * trace holds every request's headers, so it would record the apikey the anonymous probes send; the deployed config refuses
+ * them, since a flag overrides its `trace: 'off'`.
+ */
+export function recordingFlags(argv: readonly string[]): string[] {
+  const flags = argv.map(arg => arg.split('=')[0]).filter(flag => flag === '--trace' || flag === '--ui' || flag.startsWith('--ui-'));
+  return [...new Set(flags)];
+}
+
 /**
  * fixedRoutesReload: a console error on the page at `path` as a problem, naming the resource a failed load was for (its path,
- * never its query). One is recorded instead (null): the browser's own request for the site icon, `/favicon.ico`, answered 404
- * because the export has no icon (observed on the local stand-in, Task 24.2). Adding an icon is a product choice.
+ * never its query), with any publishable key masked. One is recorded instead (null): the browser's own request for the site
+ * icon, `/favicon.ico`, answered 404 because the export has no icon (observed on the local stand-in, Task 24.2). Adding an
+ * icon is a product choice.
  */
 export function consoleError(path: string, text: string, resourceUrl: string | undefined, site: string): string | null {
   let resource: URL | null = null;
   try { resource = resourceUrl ? new URL(resourceUrl) : null; } catch { /* no resource */ }
   const failedLoad = /^Failed to load resource: the server responded with a status of (\d+)/.exec(text);
   if (failedLoad?.[1] === '404' && resource?.origin === site && resource.pathname === '/favicon.ico') return null;
-  return `${path}: console error: ${text}${failedLoad && resource ? ` (${resource.origin === site ? resource.pathname : resource.origin + resource.pathname})` : ''}`;
+  return maskKeys(`${path}: console error: ${text}${failedLoad && resource ? ` (${resource.origin === site ? resource.pathname : resource.origin + resource.pathname})` : ''}`);
 }
 
 /** The headers the generated `_headers` (scripts/build-headers.mjs, for a build connecting to `connect`) gives `pathname`. */
@@ -176,8 +202,11 @@ const rpc = (name: string, args: string[]): AnonProbe => ({ label: `rpc ${name}`
 /**
  * anonDenied: a representative set from tests/db/access-matrix.test.ts, chosen so that a probe changes nothing even if a
  * privilege had been granted: backend-only and owner functions called with null arguments only (each refuses or finds nothing
- * with them), inserts of an empty row, an update and a delete whose filter matches no row, and the private schema, which the
- * Data API must not serve at all. Functions that act without arguments (coordinate_work, refresh_projections) are left out.
+ * with them), inserts of an empty row, an update and a delete filtered on `is.null` of a NOT NULL primary-key column (so no
+ * row can match), and the private schema, which the Data API must not serve at all: a table read, and a call of the STRICT
+ * private.schedule_effective_slot with null arguments (STRICT returns null without running). No function that acts without
+ * arguments is called (coordinate_work, refresh_projections, private.cleanup_tick). tests/deployed.test.ts checks each rule
+ * against the migrations.
  */
 export const ANON_PROBES: AnonProbe[] = [
   rpc('create_gladiator', ['actor_id', 'operation_id', 'input']),
@@ -191,9 +220,10 @@ export const ANON_PROBES: AnonProbe[] = [
   { label: 'insert item_instances', method: 'POST', path: '/rest/v1/item_instances', body: {}, expected: ['42501'] },
   { label: 'insert world_actors', method: 'POST', path: '/rest/v1/world_actors', body: {}, expected: ['42501'] },
   { label: 'update wallets', method: 'PATCH', path: '/rest/v1/wallets?gladiator_id=is.null', body: { money: 0 }, expected: ['42501'] },
-  { label: 'delete operation_receipts', method: 'DELETE', path: '/rest/v1/operation_receipts?gladiator_id=is.null', expected: ['42501'] },
+  { label: 'delete operation_receipts', method: 'DELETE', path: '/rest/v1/operation_receipts?owner_id=is.null', expected: ['42501'] },
   { label: 'read private.jobs', method: 'GET', path: '/rest/v1/jobs?select=id&limit=1', profile: 'private', expected: ['PGRST106'] },
-  { label: 'rpc private.cleanup_tick', method: 'POST', path: '/rest/v1/rpc/cleanup_tick', body: {}, profile: 'private', expected: ['PGRST106'] },
+  { label: 'rpc private.schedule_effective_slot', method: 'POST', path: '/rest/v1/rpc/schedule_effective_slot', body: { phase: null, now_ms: null },
+    profile: 'private', expected: ['PGRST106'] },
 ];
 
 /** anonDenied: null when `probe` was refused with one of its codes; otherwise its status and code, never the response text. */

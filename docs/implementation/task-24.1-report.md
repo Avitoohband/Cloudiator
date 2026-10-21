@@ -150,3 +150,64 @@ the record again (data line aside), and the rerun above passed 305/305; the hash
   `planning_now_ms` before a database run after any crash or restart would catch it earlier.
 - The local database's `planning_now_ms` body carries CRLF line endings (recorded so in Task 23.8's replay); a clean LF
   replay will hash it differently. Worth knowing before 24.4 compares local and hosted fingerprints.
+
+## Fix round 1 (2026-10-21)
+
+The controller's rulings after review, on `claude/task-24` after Task 24.2's commits (`4e1351c`, `b06d10e`, `6f20661`, kept as
+they are). Commits:
+- `58904f9` fix: count every seller credit in the hosted checks
+- `f0181f6` docs: mark the Task 24.0 vanished-entry limit as superseded
+- `6c81c22` fix: recommend the shell URL and resolve @next/env through next
+- `4678633` fix: print no setting values or cron commands in the fingerprint
+- `726942e` test: give the Edge refresh cases room under the full unit suite
+- this section: docs: report Task 24.1 fix round 1
+
+**Important: a sale credited twice aborted the hosted checks.** `scripts/hosted-checks.sql` read the seller's market-sale
+credit with a scalar subquery, and market-sale receipts are not unique per listing, so the case duplicate-grants check 6
+exists for aborted the whole kit with SQLSTATE 21000. Each sale now sums and counts its seller credits (`:56-63`). A sale reads
+"fee right" only with exactly one credit of the price less the fee (`:185-188`), and its row says
+`seller received N in K credits`.
+- **RED:** a second market-sale receipt and ledger row planted for a sold listing in a rolled-back transaction made the kit fail
+  with "more than one row returned by a subquery used as an expression" (psql).
+- **GREEN:** the trade case of `tests/db/hosted-checks.test.ts` now plants the same pair in a rolled-back transaction. The kit
+  prints every section, check 6 = 1, the total 1, and `seller received 192 in 2 credits, fee right false`.
+
+**Minor 3.** `docs/operations/verification-gates.md:52` keeps the Task 24.0 sentence that a vanished or unopenable cache entry
+still fails the step, marked *superseded by Task 24.1*. RED: the doc test's new check that the sentence precedes the 24.1
+paragraph failed (the sentence was missing). GREEN: 40/40.
+
+**Minor 4.** The missing-URL error (`scripts/build-headers.mjs:155-161`) and the `NEXT_PUBLIC_SUPABASE_URL` row of
+`docs/operations/environment.md` now recommend the shell variable for a local build. Both say `.env.production.local` is also
+read by the isolated browser-test build, whose bundle and `_headers` would then carry that URL. RED: the refusal case lacked
+both sentences.
+
+**Minor 5.** `@next/env` is now loaded through next's own package (`createRequire` on `next/package.json`,
+`scripts/build-headers.mjs:26-31`). That is the copy `next build` uses, with no `package.json` entry and no bare import. The
+resolved path is exported as `NEXT_ENV_PATH`. RED: `NEXT_ENV_PATH` was undefined. GREEN: build-headers 22/22; with the static
+and deployed tests, 126/126.
+
+**Minor 6.** `scripts/schema-fingerprint.sql` printed function settings (`search_path=""`), view options
+(`security_invoker=true`) and every cron job's full command. It now prints:
+- the settings and options as their sorted names with an md5 of the values (`search_path md5:<hash>`; `:33-34`, `:39-40`), so
+  a changed value still shows;
+- only Cloudiator's two cron jobs, with the command hashed (`:78-79`).
+
+RED: the updated fingerprint case and a new rolled-back probe (a function with a planted `application_name`, a
+`security_barrier` view and a third cron job) failed on the printed values. GREEN: 5/5; no line contains `search_path=`,
+`security_invoker=`, a cron command, the probe's value or the probe job. **The local fingerprint is still 1,160 lines** (both
+cron jobs are ours). Its `fn`, `rel` and `cron` lines differ from the scratch fingerprints recorded in Tasks 13–23.8, so a
+replay is compared with this file's output from now on.
+
+**Unit-suite timing (observed, fixed).** The first `npm test` of this round failed one Task 24.0 refresh case with "Test timed
+out in 5000ms", under the full suite's load. Its seven PowerShell walks take 2.7 s alone, and a rerun passed. The refresh block
+now allows 30 s (test-only).
+
+**Verification (2026-10-21).**
+- `npm test`: 66 files, 1328 tests.
+- `npm run typecheck`: passed (Deno tests 3/3).
+- `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build`, `npm run verify:static` and
+  `npm run verify:static -- --origin http://127.0.0.1:54321`: passed.
+- `npm run test:db`, after the Edge refresh and settle: 306 of 306 (20 files), with the Edge container's start time unchanged
+  (`09:16:34.152Z`) across the run. Before it, the `planning_now_ms` hash was still the restored `b7cc78e6…`.
+- `git diff --check`: clean.
+- No browser suite was run.

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { connectOrigin, contentSecurityPolicy, headersFile } from '../../scripts/build-headers.mjs';
 
 // Task 23.6, plan Decision 7: a generated `_headers` for Cloudflare Pages, built from the production Supabase URL, and plan
@@ -110,9 +111,22 @@ describe('scripts/build-headers.mjs', () => {
     const result = finish(directory);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('NEXT_PUBLIC_SUPABASE_URL is not set');
-    expect(result.stderr).toContain('.env.production.local');
+    // Fix round 1 (Minor 4): the shell variable is the recommended local route, because the isolated browser-test build reads
+    // `.env.production.local` too, and its bundle and `_headers` would then carry that URL.
+    expect(result.stderr).toContain('set it in the shell for a local build: NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build');
+    expect(result.stderr).toContain('.env.production.local is also read by the isolated browser-test build');
     expect(existsSync(join(directory, '_headers'))).toBe(false);
     expect(existsSync(join(directory, 'assets/gallery.html'))).toBe(true);
+  });
+
+  // Fix round 1 (Minor 5): @next/env is Next's own dependency, not ours, so it is resolved through next (the copy next build
+  // uses), never by a bare import that would need it in package.json.
+  it('loads @next/env through next, the copy next build itself uses', async () => {
+    const { NEXT_ENV_PATH } = await import('../../scripts/build-headers.mjs') as { NEXT_ENV_PATH?: string };
+    const require = createRequire(import.meta.url);
+    expect(NEXT_ENV_PATH).toBe(createRequire(require.resolve('next/package.json')).resolve('@next/env'));
+    expect(readFileSync('scripts/build-headers.mjs', 'utf8')).not.toMatch(/from '@next\/env'|import\('@next\/env'\)/);
+    expect(JSON.parse(readFileSync('package.json', 'utf8')).dependencies['@next/env']).toBeUndefined();
   });
 
   // Task 24.1 (Decision 12): `next build` inlines NEXT_PUBLIC_SUPABASE_URL from `.env*` files too (Next's @next/env), so the

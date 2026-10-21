@@ -13,15 +13,22 @@
  * `.next/browser-test` when CLOUDIATOR_BROWSER_TEST=true, otherwise `out`. scripts/verify-static.mjs checks the result.
  *
  * Task 24.1 (plan Decision 12): the build environment is read the way `next build` reads it, with Next's own `@next/env`
- * (installed with Next): the shell's variables first, then `.env.production.local`, `.env.local`, `.env.production` and `.env`
+ * (resolved through next, not a dependency of ours): the shell's variables first, then `.env.production.local`, `.env.local`, `.env.production` and `.env`
  * in the working directory, so `_headers` names the URL the bundle was built with. Only the loaded files' names are printed,
  * never a value. A production export without NEXT_PUBLIC_SUPABASE_URL fails (its policy would block every backend request);
  * only the browser-test export (CLOUDIATOR_BROWSER_TEST=true) is built without one and connects to the site alone.
  */
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import nextEnv from '@next/env';
+
+// @next/env is Next's own dependency, not one of ours (no package.json entry): it is resolved from next's package, so this is
+// always the copy `next build` itself uses (Task 24.1 fix round 1).
+const nextRequire = createRequire(createRequire(import.meta.url).resolve('next/package.json'));
+/** The resolved path of the @next/env this script loads (next's own). */
+export const NEXT_ENV_PATH = nextRequire.resolve('@next/env');
+const nextEnv = nextRequire(NEXT_ENV_PATH);
 
 const HOSTED = /^[a-z0-9]+(?:-[a-z0-9]+)*\.supabase\.co$/;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost']);
@@ -148,8 +155,11 @@ export function finishExport(root, env = process.env) {
   const origin = connectOrigin(env.NEXT_PUBLIC_SUPABASE_URL);
   if (!origin && env.CLOUDIATOR_BROWSER_TEST !== 'true') {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set: a production export must name its Supabase project in connect-src. Set it '
-      + 'in the build environment or in .env.production.local (a loopback URL for a local build); only the browser-test export '
-      + '(CLOUDIATOR_BROWSER_TEST=true) is built without one.');
+      + 'in the hosting build settings for a deploy, and set it in the shell for a local build: '
+      + 'NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build (a hosted project URL for a local deploy build). '
+      + 'Avoid .env.production.local for this: .env.production.local is also read by the isolated browser-test build, whose '
+      + 'bundle and _headers would then carry that URL. Only the browser-test export (CLOUDIATOR_BROWSER_TEST=true) is built '
+      + 'without one.');
   }
   writeFileSync(join(root, '_headers'), headersFile(origin));
   const gallery = existsSync(join(root, GALLERY));

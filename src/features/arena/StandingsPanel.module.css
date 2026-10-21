@@ -320,10 +320,25 @@
   color: var(--ink);
 }
 
+/*
+ * A phone: slack for a wider system font than Segoe UI (Task 24.0c fix round 1). CI's Linux runner laid the archived table
+ * out 342 px wide in its 332 px box at 360 px; Verdana gave 344 px. The narrowest the table can be is set by the headers,
+ * the medal note (one line, as the approved mockup shows) and the padding, so these trim the side padding, the medal's
+ * padding and the letter spacing: 315 px with Verdana, 276 px with Segoe UI. Nothing wraps that did not before.
+ */
 @media (max-width: 480px) {
   .table th,
   .table td {
-    padding: 0.35rem 0.3rem;
+    padding: 0.35rem 0.2rem;
+  }
+
+  .table thead th {
+    letter-spacing: 0;
+  }
+
+  .medal {
+    padding: 0 0.25rem;
+    letter-spacing: 0;
   }
 }
 

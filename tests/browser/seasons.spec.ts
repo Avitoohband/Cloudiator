@@ -167,7 +167,7 @@ test.describe('seasons in the fixture preview', () => {
     await expect(varro).not.toContainText(/Season \d|Champion ·/);
   });
 
-  test('fits the standings sheet at 360 px with no horizontal scroll', { tag: '@render' }, async ({ page }, testInfo) => {
+  test('fits the standings sheet at 360 px with no horizontal scroll', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 360, height: 760 });
     await openStandings(page);
     const sheet = menuDialog(page, 'Arena');
@@ -189,6 +189,16 @@ test.describe('seasons in the fixture preview', () => {
     await expect(rowOf(page, 'Bronze', 'Severus')).toContainText('🥇 1st · Champion');
     await fits();
     await shot(page, testInfo, 'phone-archived', { top: standings(page) });
+    // Task 24.0c fix round 1: the fit must not depend on Segoe UI. CI's Linux runner, with another system-ui font, found the
+    // archived table 342 px wide in its 332 px box. A wider stack (Verdana here, DejaVu Sans where Verdana is missing),
+    // forced for this check only, must fit too: the archived season with its medal notes, then the current one.
+    await page.addStyleTag({ content: 'body, body * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }' });
+    await page.evaluate(() => document.fonts.ready);
+    await fits();
+    await shot(page, testInfo, 'phone-archived-wide-font', { top: standings(page) });
+    await picker(page).selectOption({ label: 'Season 2 · current' });
+    await expect(standings(page).getByRole('region', { name: 'Season 2 ends in 13 days 23 h' })).toBeVisible();
+    await fits();
   });
 });
 

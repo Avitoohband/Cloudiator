@@ -375,7 +375,9 @@ describe('a browser run', () => {
   });
 });
 
-describe('the Edge access-time refresh (C22)', () => {
+// Each refresh is a PowerShell process (about 0.4 s alone); the cases with up to seven walks took 2.7 s alone and exceeded the
+// default 5 s once under the full unit suite's load (observed 2026-10-21, Task 24.1 fix round 1), so the block allows 30 s.
+describe('the Edge access-time refresh (C22)', { timeout: 30_000 }, () => {
   const windows = process.platform === 'win32';
   /** A scratch tree under the test temp folder: root/{deno.json, _shared/domain/types.ts} and `outside/` beside it. */
   function scratch() {

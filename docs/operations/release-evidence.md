@@ -807,7 +807,9 @@ without printing it, `npx supabase functions serve` in the background, then `npm
 and the results and traces as an artifact. Validated locally: the YAML parses (PyYAML 6.0.3), and `tests/workflow.test.ts`
 checks the order, that every `npm run` script and `node` file it calls exists, and that it prints no credential. **Not run:**
 the controller pushes and records the first run. No known blocker remains: Task 23.8 emptied `KNOWN_BLOCKERS`, so any failed
-step exits 1. Exit 2 is reserved for named known blockers, and none is listed.
+step exits 1. Exit 2 is reserved for named known blockers, and none is listed. **Since Task 24.0d** the release-gate step sets
+`CLOUDIATOR_CI=github`, and the gate does not run the development browser suite there: it reports the step as `not run on CI`,
+never silently ("The second CI run and the development browser step (Task 24.0d)", below). Every other step runs.
 
 ### The first CI run and the CI render exception (Tasks 24.0 and 24.0c)
 
@@ -828,7 +830,7 @@ unchanged, the isolated production build and its scan, the **production gate 34 
   has slack at 360 px (checked with Verdana forced: 315 px of 332), and the test polls for its counts.
 - **Ruling (the controller's CI exception, 2026-10-20):** CI's development browser step leaves out the render-bound tests.
   The local `npm run verify` stays the gate of record and still runs every test. No test's assertions changed.
-- **Mechanism (Task 24.0c):** the render-bound tests carry the Playwright tag `@render`. `.github/workflows/checks.yml` sets
+- **Mechanism (Task 24.0c; removed by Task 24.0d, below, which keeps the tags):** the render-bound tests carry the Playwright tag `@render`. `.github/workflows/checks.yml` sets
   `CLOUDIATOR_CI_RENDER=exclude` on the release-gate step only. `playwright.config.ts` (through `scripts/ci-render.mjs`) then
   gives the desktop and mobile projects `grepInvert` for the tag in the development suite; never in the production gate, and
   never without the variable. Any other value is refused. `scripts/verify.mjs` lists the tagged tests (`--list --grep`, no
@@ -842,7 +844,51 @@ unchanged, the isolated production build and its scan, the **production gate 34 
 - **Risk, not tagged:** 13 passing tests outside those describe blocks also used two-thirds of their 30 s on that run (the
   slowest: `inventory.spec.ts` 28.8 s, the live Tournaments panel 28.0 s, `live-camp.spec.ts` 27.0 s). They may still time
   out on a later run; they are listed in the report.
-- **Not yet observed:** a CI run with the exception. The controller pushes and records it.
+- **Observed afterwards:** run 39588134783 (below) was the first with the exception. It excluded 148 runs, still failed 50
+  development tests, and led the controller to the ruling that replaces this mechanism (Task 24.0d).
+
+### The second CI run and the development browser step (Task 24.0d)
+
+**Run 39588134783** (2026-10-21, the push of `codex/gladiator-arena` at `f3e7bf1`; the gate ran from 10:57 to 12:00 UTC):
+**exit 1, two steps failed** (`Result: FAILED (2 steps failed)`). Every other step passed: typecheck, the asset check, the build
+and its scan, the Edge settle (612 files read, not recreated), `CAPACITY_GATE=1 npm run test:db` **312 passed** with the Edge
+start time unchanged (7 min 33 s), the isolated production build and its scan, the **production gate 34 passed** (1.7 min), and
+`git diff --check`.
+
+- **unit: 1 failed, 1,380 passed, 10 skipped (of 1,391).** `tests/domain/expedition-view.test.ts` "is the short slot time against
+  the display time, with its exact instant as the machine-readable time": `expect(markup).not.toContain('04:20')`. **Observed:**
+  the assertion reads the whole markup, and the `dateTime` attribute is the instant in UTC, `2026-10-20T04:20:00.000Z` on the
+  runner (UTC), against `01:20Z` in Asia/Jerusalem, where the development host passes. **Tested (Task 24.0d):** `TZ=UTC npx
+  vitest run tests/domain/expedition-view.test.ts` failed with that message before the change. The file now pins its zone
+  (`process.env.TZ`, restored afterwards, as `tests/domain/slot-time.test.ts` does) and checks the shown text only; it passed
+  under `TZ=UTC`, Asia/Jerusalem, America/Los_Angeles, Pacific/Auckland and Asia/Kolkata.
+- **browser (development suite): 50 failed, 355 passed, 29 skipped in 52.0 min**, with the 148 `@render` runs already left out
+  (its summary line said so). The failures are in 19 of the files (tournament 7; read-render 5; full-screen 5; scenes 4;
+  live-camp 4; planning, market, identity, arena 3 each; seasons, replay, management 2 each; one each in visitor, shell,
+  retention, release, inventory, expedition and camp). **40 were 30 s test timeouts**; 10 were assertions on timing-sensitive
+  state (a poll count, a focus, a rail reveal, a replay attribute). **Attributed (the controller):** the free runner is too
+  slow for the development suite in general (`next dev` compiles each route on demand), not only for WebGL. Not tested on the
+  runner.
+- **Ruling (the controller, 2026-10-21):** CI's release gate does not run the development browser step, and says so. The
+  production gate and every other step still run on CI; the local `npm run verify` runs everything and is the gate of record.
+- **Mechanism (Task 24.0d).** `.github/workflows/checks.yml` sets `CLOUDIATOR_CI=github` on the release-gate step only (any other
+  value is refused before the gate starts; GitHub's own `CI` and `GITHUB_ACTIONS` change nothing). `scripts/verify.mjs` then marks
+  the `browser` step `not run on CI` without running it: its summary line reads "development browser suite not run on CI (runner
+  too slow); the local gate of record runs it", and the result line is `Result: PASSED (development browser suite not run on
+  CI); exit 0` (beside failures: `FAILED (1 step failed; development browser suite not run on CI)`). Never a bare PASSED. The
+  exit code is 0 when everything else passes. Tested with a fake runner (`tests/scripts/verify.test.ts`, "the CI exception"); the
+  real gate was not run in CI mode.
+- **The Task 24.0c exclusion is removed:** `scripts/ci-render.mjs`, the `grepInvert` in `playwright.config.ts` and the count in
+  `scripts/verify.mjs` are gone. No test's assertions changed. The 74 `@render` tags remain as documentation of which tests are
+  render-bound, and as a manual filter: `npx playwright test --list --grep @render` lists 148 of the 582 tests, and
+  `--grep-invert @render` the other 434.
+- **Time zone (Task 24.0d).** Besides the unit test above, the 360 px stage-time test of `tests/browser/expedition.spec.ts`
+  depended on the host zone (found in the Task 24.0c review). **Observed:** under a scratch host zone of Europe/Berlin it failed
+  (the fixture's first stages start at 11:20 PM on 9 October there, the display time is after midnight, so those starts read
+  "Oct 9, 11:20 PM" and their wider rows shift the label edges: 3 distinct left edges instead of 1); UTC, America/New_York,
+  Asia/Tokyo and Asia/Jerusalem passed. **Tested:** the test now sits in its own describe with `timezoneId: 'Asia/Jerusalem'` and
+  `locale: 'en-US'`, and passed under all five host zones, Berlin included.
+- **Not yet observed:** a CI run with this change. The controller pushes and records it.
 
 ### Device metrics and the budget arithmetic
 
@@ -861,8 +907,9 @@ unchanged, the isolated production build and its scan, the **production gate 34 
   3. hosted egress and compression (Lane A, risk 2);
   4. CORS parity: the hosted `GAME_ALLOWED_ORIGINS` and Auth redirects for the exact Pages origin;
   5. the remote export rehearsal (`scripts/export-db.ps1 -Remote`, then the restore check).
-- **Also open:** a passing GitHub Actions run (the first, 39452911203, failed only in the development browser step: "The
-  first CI run and the CI render exception" above); the hosted `connect-src` origin (the
+- **Also open:** a passing GitHub Actions run (the first, 39452911203, failed only in the development browser step; the second,
+  39588134783, in that step and one unit test: "The first CI run and the CI render exception" and "The second CI run and the
+  development browser step" above; Task 24.0d answers both, and its own run is not yet observed); the hosted `connect-src` origin (the
   production build sets `NEXT_PUBLIC_SUPABASE_URL`, and the scanner then names that origin); Lane A's risk 5 (boundary headroom
   at 50 characters).
 

@@ -544,6 +544,47 @@ UI only, on Task 23.8's contract: no database, SQL or Edge change. Both are buil
     week (`Sat 4:20 AM`), else the short month and day (`Oct 26, 4:20 AM`), never seconds.
   - The time is kept on one line (`d75e3fc`): its pieces are joined by no-break spaces, checked at 360 px.
 
+### Task 24.1b: the `__next.*.txt` prefetch 404s (23.5 M7)
+
+**Observed** (`npm run build` on this Windows host, then `scripts/serve-static.mjs` and Chrome, 2026-10-21). The `/replay/` and
+`/expedition/` pages prefetch the camp for their links to `/game/`. Two of those requests fail:
+- 200: `/__next._tree.txt`, `/__next.__PAGE__.txt`, `/game/__next._tree.txt`;
+- **404: `/game/__next.game.__PAGE__.txt`** (twice), each with a console error.
+- After a click on the link, the page lands on `/game/` through a fallback read of `/game/index.txt` (200).
+
+**Cause: a Windows-only path separator in Next 16.4.0's export.** The client names a segment file with
+`convertSegmentPathToStaticExportFilename(segmentPath)`, which replaces each `/` with `.`, giving `__next.game.__PAGE__.txt`.
+The export builds `segmentPath` from `path.relative` over the build's segment folder (`next/dist/export/index.js`,
+`collectSegmentPaths`). On Windows that gives `game\__PAGE__`, so the backslash survives the replacement, and `path.join`
+writes `out/game/__next.game/__PAGE__.txt`, a folder.
+- **Affected:** every route below the root (`/game/`, `/replay/`, `/expedition/`, `/auth/callback/`, `/_not-found/`), and only
+  their page segment: 5 of this build's 18 exported segment files. The `_tree` and `_full` files and the root's `__PAGE__`
+  are named alike either way. Replayed with POSIX path rules, the same code gives `__next.game.__PAGE__.txt`, the name
+  the client asked for.
+- **Not `trailingSlash`.** The client strips the route's trailing slash before adding the file name, and the export writes
+  the files into the route's own folder, so `/game/` and `out/game/` agree.
+
+**Tested: with the POSIX names the requests succeed.** A copy of `out` with only those 5 files renamed to the POSIX names (what
+the same Next code writes on Linux), served and probed the same way, answered every `.txt` request with 200. The click on
+the link used the prefetch: no `index.txt` fallback. The only 404 left in either run is `/favicon.ico`, a separate gap: the
+export has no favicon.
+
+**Effect:** harmless. A failed segment prefetch is a cache miss. Navigation still works, at the cost of one 404, one console
+error and one extra read per prefetch.
+
+**Hosting.**
+- The Pages Git integration (Decision 3) builds on Linux, as does CI (`ubuntu-24.04`), so their exports should carry the
+  POSIX names. Expected, not yet observed: no export has been built on Linux in this task.
+- Any static host serves these names as ordinary files, and `serve-static.mjs` serves the POSIX copy. Cloudflare Pages is
+  not verified for them yet.
+- A Windows-built export (this host's production gate, or a direct upload from Windows) keeps the 404s.
+
+**Decision:** no change. No documented Next option renames segment files. Turning prefetch off for the links
+(`prefetch={false}`) would only hide the defect and lose the working prefetch on the Linux build.
+
+**To check on the deployed origin (Task 24.2 or 24.8):** loading `/replay/` and `/expedition/` gives no `__next.*.txt` 404.
+Deploy only exports built by the Pages integration.
+
 ## Release gate (Task 23.6)
 
 **Status (gate of record, 2026-10-20): passed.** The gate exited 0 at `d75e3fc`, the finished branch with Tasks 23.7–23.10

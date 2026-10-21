@@ -121,9 +121,24 @@ describe('the read-only hosted SQL kits', () => {
     expect(value(clean, 'trades', 'sales with a wrong or missing ledger row')).toBe('0');
     expect(value(clean, 'trades', 'sales whose item has one owner, the buyer')).toBe('1');
     expect(value(clean, 'trades', `sale ${hash(listingId)}`)).toMatch(
-      /^price 101, fee 5, buyer paid 101, seller received 96, fee right true, owners 1, owner buyer, sold \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+      /^price 101, fee 5, buyer paid 101, seller received 96 in 1 credit, fee right true, owners 1, owner buyer, sold \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     expect(value(corrupted, 'trades', 'sales with a wrong or missing ledger row')).toBe('1');
-    expect(value(corrupted, 'trades', `sale ${hash(listingId)}`)).toContain('seller received 97, fee right false');
+    expect(value(corrupted, 'trades', `sale ${hash(listingId)}`)).toContain('seller received 97 in 1 credit, fee right false');
+
+    // Fix round 1 (Important): a sale credited twice is exactly what duplicate-grants check 6 exists for, so the kit must still
+    // print every section then, and report it. A second market-sale receipt and ledger row for the same listing is planted.
+    const doubled = await rolledBack(async tx => {
+      const [{ receipt }] = await tx`insert into public.operation_receipts(owner_id,operation_id,gladiator_id,request,request_digest,result)
+        values(${seller.id},${randomUUID()},${seller.gid},${tx.json({ kind: 'market-sale', listingId } as never)},'\\x00'::bytea,'{"ok":true}'::jsonb)
+        returning receipt_id::text as receipt`;
+      await tx`insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason) values(${seller.gid},${receipt},96,0,'market-sale')`;
+      return [...await tx.unsafe(CHECKS)] as unknown as Check[];
+    });
+    expect([...new Set(doubled.map(row => row.section))]).toEqual(CHECK_SECTIONS);
+    expect(value(doubled, 'duplicate-grants', 'sales credited more than once')).toBe('1');
+    expect(value(doubled, 'duplicate-grants', 'total (duplicateGrants)')).toBe('1');
+    expect(value(doubled, 'trades', 'sales with a wrong or missing ledger row')).toBe('1');
+    expect(value(doubled, 'trades', `sale ${hash(listingId)}`)).toContain('seller received 192 in 2 credits, fee right false');
 
     expect(value(clean, 'characters', 'characters')).toBe('2');
     expect(value(clean, 'characters', 'accounts with a character')).toBe('2');
@@ -136,7 +151,7 @@ describe('the read-only hosted SQL kits', () => {
     expect(value(clean, 'duplicate-grants', 'total (duplicateGrants)')).toBe('0');
     // Nothing that identifies an account or carries a secret: no Vault value, account id, gladiator id, item or listing id, email.
     const forbidden = [SECRET, URL_VALUE, seller.id, buyer.id, seller.gid, buyer.gid, itemId, listingId, '@'];
-    for (const row of [...clean, ...corrupted]) {
+    for (const row of [...clean, ...corrupted, ...doubled]) {
       for (const needle of forbidden) expect(`${row.section} ${row.item} ${row.value}`, `${row.section} ${row.item}`).not.toContain(needle);
     }
   });

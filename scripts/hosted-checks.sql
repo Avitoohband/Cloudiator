@@ -24,7 +24,9 @@
 --   characters        accounts, characters, accounts with more than one character, identities per provider, and the 20
 --                     newest characters by hashed account (Task 24.8: one character per account)
 --   trades            listings by status; for every sale whether the buyer paid the price and the seller received the price
---                     less the 5 % fee floored, and whether the item has exactly one owner, the buyer; the 10 newest sales
+--                     less the 5 % fee floored in exactly one credit (every credit is summed and counted, so a sale credited
+--                     twice is reported here and in duplicate-grants, never an error), and whether the item has exactly
+--                     one owner, the buyer; the 10 newest sales
 --                     (Task 24.8). Cleanup folds ledger rows older than 90 days into wallet checkpoints, so an older sale
 --                     reads `missing` there; an item its buyer later sold or discarded reads `other` or `gone`.
 --
@@ -51,9 +53,14 @@ with
     select l.id, l.price, l.price * 5 / 100 as fee, l.seller_gladiator_id as seller, l.buyer_gladiator_id as buyer, l.item_id,
       (select w.money_delta from public.wallet_ledger w where w.receipt_id = l.terminal_receipt_id and w.reason = 'market-purchase'
         and w.gladiator_id = l.buyer_gladiator_id) as buyer_delta,
-      (select w.money_delta from public.operation_receipts r join public.wallet_ledger w on w.receipt_id = r.receipt_id
+      -- Every seller credit of the sale, summed and counted: market-sale receipts are not unique per listing, so a sale
+      -- credited twice (duplicate-grants check 6) must be reported here, not abort the kit (fix round 1).
+      (select sum(w.money_delta) from public.operation_receipts r join public.wallet_ledger w on w.receipt_id = r.receipt_id
         where r.request ->> 'kind' = 'market-sale' and r.request ->> 'listingId' = l.id::text and w.reason = 'market-sale'
           and w.gladiator_id = l.seller_gladiator_id) as seller_delta,
+      (select count(*) from public.operation_receipts r join public.wallet_ledger w on w.receipt_id = r.receipt_id
+        where r.request ->> 'kind' = 'market-sale' and r.request ->> 'listingId' = l.id::text and w.reason = 'market-sale'
+          and w.gladiator_id = l.seller_gladiator_id) as seller_credits,
       (select count(*) from public.item_instances i where i.id = l.item_id) as owners,
       (select i.gladiator_id from public.item_instances i where i.id = l.item_id) as owner,
       (select r.created_at from public.operation_receipts r where r.receipt_id = l.terminal_receipt_id) as sold_at
@@ -175,14 +182,17 @@ with
     -- trades
     union all select 'trades', 1, 'listings ' || s.status, count(l.id)::text
       from (values ('open'), ('sold'), ('cancelled'), ('expired')) s(status) left join private.market_listings l on l.status = s.status group by s.status
-    union all select 'trades', 2, 'sales with the price paid and the fee right', count(*) filter (where buyer_delta = -price and seller_delta = price - fee)::text from sales
+    union all select 'trades', 2, 'sales with the price paid and the fee right', count(*) filter (where buyer_delta = -price
+        and seller_credits = 1 and seller_delta = price - fee)::text from sales
     union all select 'trades', 3, 'sales with a wrong or missing ledger row', count(*) filter (where buyer_delta is distinct from -price
-        or seller_delta is distinct from price - fee)::text from sales
+        or seller_credits <> 1 or seller_delta is distinct from price - fee)::text from sales
     union all select 'trades', 4, 'sales whose item has one owner, the buyer', count(*) filter (where owners = 1 and owner = buyer)::text from sales
     union all select 'trades', 5, 'sales whose item is elsewhere or gone', count(*) filter (where owners <> 1 or owner is distinct from buyer)::text from sales
     union all select 'trades', 6, 'sale ' || left(md5(s.id::text), 12), 'price ' || s.price || ', fee ' || s.fee
         || ', buyer paid ' || coalesce((-s.buyer_delta)::text, 'missing') || ', seller received ' || coalesce(s.seller_delta::text, 'missing')
-        || ', fee right ' || (s.buyer_delta is not distinct from -s.price and s.seller_delta is not distinct from s.price - s.fee)::text
+        || ' in ' || s.seller_credits || case when s.seller_credits = 1 then ' credit' else ' credits' end
+        || ', fee right ' || (s.buyer_delta is not distinct from -s.price and s.seller_credits = 1
+          and s.seller_delta is not distinct from s.price - s.fee)::text
         || ', owners ' || s.owners || ', owner ' || case when s.owner = s.buyer then 'buyer' when s.owner = s.seller then 'seller'
           when s.owner is null then 'gone' else 'other' end
         || ', sold ' || coalesce(to_char(s.sold_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), 'unknown')

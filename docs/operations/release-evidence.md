@@ -502,7 +502,8 @@ Task 23.4, measured 2026-10-19 on branch `claude/task-23-ui`.
 - **Desktop target (60 fps):** met in every phase. The harness checks it softly, at a mean of at least 59 on the camp phases.
 - **Mobile target (at least 30 fps on the test device):** not measured. The Pixel 7 emulation runs on this desktop's GPU, so it says nothing about a phone's GPU.
   - It stays a named launch blocker until Avi's phone is measured with `?perf=1` on the deployed production build (Task 24, plan Decision 2).
-  - The overlay shows the same four numbers with the WebGL renderer, so that measurement can be added to this table.
+  - The overlay shows the same four numbers per phase and over the last 10 s, with the WebGL renderer (Task 24.1b below), so
+    that measurement can be added to this table.
 
 ### Render-cost changes this measurement covers
 
@@ -543,6 +544,31 @@ UI only, on Task 23.8's contract: no database, SQL or Edge change. Both are buil
     the owner's resting line. It gives `4:20 AM` on the same local day, `tomorrow 4:20 AM`, a short weekday within the
     week (`Sat 4:20 AM`), else the short month and day (`Oct 26, 4:20 AM`), never seconds.
   - The time is kept on one line (`d75e3fc`): its pieces are joined by no-break spaces, checked at 360 px.
+
+### Task 24.1b: the `?perf=1` overlay for the device run (23.4 M3)
+
+UI only, branch `claude/task-24-ui` (`14e56ba`). Plan Decision 11; it lands before Avi's phone run (Task 24.11).
+- **What it shows, once a second:**
+  1. the phase, its age and the frames of the last second (`camp · 42 s · 60 fps`);
+  2. the phase's mean and p5 rates and its frame count;
+  3. the phase's shares of frames over 16.7 ms and over 33.3 ms;
+  4. the last 10 seconds, whatever the phase (`10 s: mean … · p5 … · >33.3 ms …%`);
+  5. the WebGL renderer, wrapped onto as many lines as it needs (it was cut short before).
+- **Phases.** `loading`, then `camp` from camp-ready. Each scene open starts `replay` or `expedition`; another scene or replay
+  stage is a new phase, and closing it starts `camp` again. `camp unavailable` if the camp view fails. Pan and zoom are not
+  phases: for those, read the 10 s line after at least 10 s of each.
+- **How it counts.** `FrameMeter` (`src/lib/frame-stats.ts`) does constant work per frame. It fills two 1 ms histograms:
+  one per phase, and one for the frames whose intervals ended in the last 10 s. The rolling window is a ring of at most
+  5,000 frames. Memory is fixed: about 130 KB. Before, it sorted up to 200,000 intervals every second, counted from the
+  overlay's mount.
+- **Accuracy, tested** against the sort-based `frameStats` (the FPS harness's definitions, unchanged) on 40 seeded random sets
+  and 15 adversarial sets (bucket edges, the exact budget-plus-jitter thresholds, nearest-rank boundaries, invalid values):
+  - frame count, mean and both over-budget shares are equal;
+  - the 95th-percentile interval is within 1 ms (the mean of the 1 ms bucket holding the nearest-rank interval).
+  - An interval of 2 s or more falls in one top bucket, so a p95 that long reads as at most 0.5 fps.
+- **Browser check** (`read-render.spec.ts`, both projects): the phase restarts at the replay's open and at its close; the
+  renderer line at 360 px is the whole string, `white-space: normal` and not clipped; this machine's renderer takes two lines.
+  Before the fix, the same check read `nowrap`, clipped, one line. Off without `?perf=1`, as before.
 
 ### Task 24.1b: the `__next.*.txt` prefetch 404s (23.5 M7)
 

@@ -50,7 +50,7 @@ import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
-import { PerfOverlay } from './PerfOverlay';
+import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
@@ -284,6 +284,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
+  // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
+  const perfPhase = perfPhaseOf(game.sceneStatus, scene);
   const ownerId = owner?.gladiatorId ?? null;
   // The owner's own words while its gladiator rests at home (Task 23.9 fix round 1): when it is back on its schedule once
   // that is known (a short time, Task 23.10), else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
@@ -356,7 +358,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
       )}
-      {perf && <PerfOverlay />}
+      {perf && <PerfOverlay phase={perfPhase.label} phaseKey={perfPhase.key} />}
     </div>
   );
 }

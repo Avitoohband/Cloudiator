@@ -414,18 +414,66 @@ test.describe('the frame-rate overlay (Decision 2)', () => {
     const frames = async () => Number(/(\d+) frames/.exec((await overlay.textContent()) ?? '')?.[1] ?? 0);
     const first = await frames();
     await expect.poll(frames).toBeGreaterThan(first);
+    // Task 24.1b (Decision 11): the numbers are the current phase's, named with its age, beside a rolling 10 s line.
+    await expect(overlay).toContainText(production ? /^(loading|camp|camp unavailable) · \d+ s · \d+ fps/ : /^camp · \d+ s · \d+ fps/);
+    await expect(overlay).toContainText(/10 s: mean \d+(\.\d)? · p5 \d+(\.\d)? · >33\.3 ms \d+(\.\d)?%/);
     await reviewShot(page, testInfo, 'perf-overlay-camp');
-    await reviewShot360(page, testInfo, 'perf-overlay-camp');
+    // At 360 px the renderer line wraps onto as many lines as it needs: nothing of it is cut short or hidden.
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.waitForTimeout(500);
+    const expected = await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl');
+      if (!gl) return 'no WebGL';
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return name;
+    });
+    const rendererLine = overlay.locator('p').last();
+    await expect(rendererLine).toHaveText(expected);
+    const wrap = await rendererLine.evaluate(el => {
+      const box = el.closest('[data-perf-overlay]')!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const lines = new Set([...range.getClientRects()].map(r => Math.round(r.top))).size;
+      // The same text on one line, measured off-screen: wider than the line box means it has to wrap.
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:fixed;left:-9999px;white-space:nowrap;';
+      probe.style.font = getComputedStyle(el).font;
+      probe.textContent = el.textContent;
+      document.body.append(probe);
+      const natural = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { whiteSpace: getComputedStyle(el).whiteSpace, clipped: el.scrollWidth > el.clientWidth, lines, needed: natural > el.clientWidth,
+        inside: box.left >= 0 && box.right <= window.innerWidth };
+    });
+    expect(wrap, `the renderer line at 360 px: ${JSON.stringify(wrap)}`).toMatchObject({ whiteSpace: 'normal', clipped: false, inside: true });
+    if (wrap.needed) expect(wrap.lines, 'a renderer string wider than the box wraps').toBeGreaterThan(1);
+    await reviewShot(page, testInfo, 'perf-overlay-camp-360');
+    if (size) {
+      await page.setViewportSize(size);
+      await page.waitForTimeout(300);
+    }
     if (!production) {
+      // The camp's phase runs on until a scene opens (at least 6 s here, so its reset shows in the age).
+      await expect(overlay).toContainText(/^camp · ([6-9]|\d{2,}) s/, { timeout: 20_000 });
       // It stays over a scene, so a device run measures the scenes too.
       await page.evaluate(id => window.__cloudiatorCamp!.emit('view-replay', { activityId: id }), REPLAY_FIXTURES.pvp.activityId);
       await expect(scene(page, 'Replay')).toBeVisible();
+      // Opening the scene starts a new phase: the replay's own numbers, from its opening.
+      await expect(overlay).toContainText(/^replay · [0-4] s · \d+ fps/);
       await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
       // A manual popover, raised again above the scene's modal dialog in the top layer (the screenshot shows it on top).
       await expect(overlay).toBeVisible();
       await expect.poll(() => overlay.evaluate(el => el.matches(':popover-open'))).toBe(true);
-      await expect.poll(frames).toBeGreaterThan(first + 30);
+      const opened = await frames();
+      await expect.poll(frames).toBeGreaterThan(opened + 30);
       await reviewShot(page, testInfo, 'perf-overlay-scene');
+      // Closing it starts the camp's phase again.
+      await backToCamp(page).click();
+      await expect(scene(page, 'Replay')).toHaveCount(0);
+      await expect(overlay).toContainText(/^camp · [0-4] s · \d+ fps/);
     }
   });
 });

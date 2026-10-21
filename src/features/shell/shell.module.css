@@ -533,9 +533,10 @@
   white-space: nowrap;
 }
 
-.perfRenderer {
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* The renderer string wraps onto as many lines as it needs, never cut short (Task 24.1b); it outranks `.perf p`. */
+.perf .perfRenderer {
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-weight: 400;
   opacity: 0.8;
 }

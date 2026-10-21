@@ -15,3 +15,5 @@ supabase/.temp/
 *.key
 *.log
 .backups/
+# The bench seed (scripts/bench-seed.mjs, Task 24.2b): generated, run once in the bench project, never committed.
+/bench-seed.sql

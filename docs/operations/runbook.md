@@ -511,3 +511,54 @@ npx playwright test --config tests/browser/playwright.deployed.config.ts        
 with `*` and no Max-Age, before the function); `connectSrc` fails on the browser-test export (built without a project URL);
 `anonDenied` and `authProvidersGoogleOnly` fail (a local build carries no publishable key), and the latter would also find
 Google off. `fixedRoutesReload` fails on the `__next.*.txt` prefetch 404s (Task 23.5 M7) until that triage lands.
+
+## Bench seed
+
+Task 24.2b (plan Decision 4). The temporary bench project ("cloudiator-bench") gets its characters before activation: the
+world for the 50-actor phone test (24.11) and the hosted 50-character boundary benchmark (24.9, all-expedition schedules like
+Task 23.3's worst case). `scripts/bench-seed.mjs` writes the SQL on this machine, without any connection or credential, and
+Avi runs it once in the bench project's SQL editor. It holds no password, key, token or real identity.
+
+**When.** After the bench's migrations (24.4) and before its activation (24.7: the season epoch and the scheduler). Production
+is created only after the bench is seeded (Decision 4), and the seed is never run there: it cannot tell an empty production
+project from an empty bench, so the project name in the dashboard is the check.
+
+1. **Generate** the file in any worktree at the commit being rehearsed (Node 22.19, the project's version):
+   ```powershell
+   node scripts/bench-seed.mjs        # 50 characters, seed "bench": writes bench-seed.sql in the repository root (git-ignored)
+   ```
+   It prints the path, the count, the seed and the file's SHA-256, nothing else. The same options always write the same bytes
+   (`--count 1-200`, `--seed`, `--out <file>` change them).
+2. **Run** it: in the dashboard, open the project whose name is `cloudiator-bench`, then the SQL editor, a new query; paste the
+   whole file and run it.
+3. **Paste back** the one result row, counts and a slot number only:
+   `bench_accounts 50, accounts 50, characters 50, all_expedition_schedules 50, epoch_set false, scheduler_enabled false,
+   all_expedition_from_slot <slot>`. Every slot from that one on is an expedition for every character.
+4. **A refusal** reads `bench seed refused: …` and saves nothing. Its reasons, each with a count: `accounts that are not bench
+   seed accounts` (not the new bench project: stop), `bench seed accounts (already seeded)` (it ran before: nothing to do),
+   `characters`, `the season epoch is set` and `the scheduler is enabled` (activation came first: the bench needs a new project
+   or `db reset --linked`, Avi's call). Paste the message; it holds counts only. Any other failure also saves nothing (one DO
+   block): `… schedule edit of Bench NNN failed: processing` means a slot boundary passed during the seed (run it again);
+   `permission denied for table users` or `… identities` means the hosted owner may not write Auth rows (stop and report; there
+   is no fallback without a new decision).
+
+What it creates, per character: an owner account inserted directly into `auth.users` and `auth.identities` (no SQL function of
+the Auth server creates one, and every game table that names an owner references `auth.users`), shaped like the local
+fixtures' accounts, with an address on the reserved `.invalid` domain (`bench-001@bench.invalid` and so on), an empty password
+and a Google identity whose provider id is the account's UUID, which never equals a Google account's numeric subject; then,
+through the game's own functions in the Edge handler's order, the rate checks (which record the owner's activity signal),
+`create_gladiator` with the Edge function's prepared input, and two `edit_schedule` commands that put the morning and the
+evening on Woodland (the afternoon already is). Classes rotate and allocations vary; endurance is 2 everywhere (104 stamina),
+so each character goes on three expeditions, then rests once, all in step: three of every four boundaries follow an
+all-expedition slot. The SQL takes an advisory lock and checks every refusal before it writes anything.
+
+Afterwards the accounts and characters stay until Avi deletes the bench project (24.12); none can sign in. Their owners'
+activity signal is the seeding time, and a character whose owner sends no signal for 14 days rests at home (Task 23.8), so run
+24.9's benchmark and 24.11's phone test within 14 days of seeding.
+
+Tested locally: `tests/db/bench-seed.test.ts` applies the generated file, as the SQL editor would (all statements in one
+request), inside a transaction that first empties the local database and always rolls back: 50 accounts with the Auth admin
+API's null and empty columns, 50 characters with 50 owners, three receipts each, every phase on Woodland, no epoch; a second
+run, an account of its own (with or without a character), the epoch and the scheduler each refuse and change nothing.
+`tests/scripts/bench-seed.test.ts` covers the options, the determinism and the guards' order. Not yet run on a hosted
+project: the hosted owner's INSERT on the two Auth tables, and the hosted Auth server reading these accounts, are untested.

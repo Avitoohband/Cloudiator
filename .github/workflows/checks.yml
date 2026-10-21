@@ -1,7 +1,8 @@
 # The release gate on a GitHub-hosted runner (Task 23.6, R4, Avi decision 3): a fresh local Supabase stack with every
 # migration replayed, the local Edge functions, then `npm run verify` (scripts/verify.mjs), the same gate as on a
-# development machine. No hosted project, key or secret is used: the stack is local to the runner and the worker secret is
-# generated for the run. Nothing here prints the local keys (`supabase start` writes them only to a file in RUNNER_TEMP).
+# development machine except for one step: the development browser suite is not run here (see the Release gate step). No
+# hosted project, key or secret is used: the stack is local to the runner and the worker secret is generated for the run.
+# Nothing here prints the local keys (`supabase start` writes them only to a file in RUNNER_TEMP).
 # Exit 2 from the gate is reserved for failures that are all named known blockers (still a red run). None is listed
 # (scripts/verify.mjs KNOWN_BLOCKERS is empty since Task 23.8), so today any failure exits 1.
 # Actions are pinned to full commit SHAs, each resolved read-only on 2026-10-19 (`gh api repos/<action>/commits/<tag>`); each
@@ -55,13 +56,15 @@ jobs:
           nohup npx supabase functions serve --env-file .env.edge.local > "$RUNNER_TEMP/edge.log" 2>&1 &
 
       - name: Release gate
-        # The controller's CI exception (Task 24.0c, 2026-10-20): this runner has no GPU, so Chrome renders WebGL in software,
-        # and the first run (39452911203) failed only in the development browser step: 51 of 576 tests, almost all 30 s
-        # timeouts while the camp or a scene rendered. Here the development suite leaves out the tests tagged @render, and the
-        # gate's summary says how many (scripts/ci-render.mjs, scripts/verify.mjs). The local `npm run verify`, the gate of
-        # record, still runs every test, and the production gate is unchanged.
+        # The controller's CI exception (Task 24.0d, 2026-10-21): this free runner is too slow for the development browser suite
+        # (next dev compiles each route on demand, and Chrome renders WebGL in software, with no GPU). Run 39452911203 failed 51
+        # of its tests there, and run 39588134783, with the 148 render-bound runs already left out, still failed 50 in 52 min,
+        # mostly 30 s timeouts across 19 files. CLOUDIATOR_CI=github (set here and nowhere else) makes scripts/verify.mjs mark
+        # that one step `not run on CI` and say so on its summary line and in the result line, never silently. Every other
+        # step runs, and the production gate (the isolated production build and its browser run) is unchanged. The local
+        # `npm run verify`, the gate of record, runs every step, the development browser suite included.
         env:
-          CLOUDIATOR_CI_RENDER: exclude
+          CLOUDIATOR_CI: github
         run: |
           npm run verify -- --json "$RUNNER_TEMP/verify.json"
 

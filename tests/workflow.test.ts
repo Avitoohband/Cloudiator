@@ -44,20 +44,20 @@ describe('the checks workflow', () => {
     expect(run.indexOf('functions serve')).toBeLessThan(run.indexOf('npm run verify'));
   });
 
-  // Task 24.0c, the controller's CI exception (2026-10-20): the runner has no GPU, so the release gate step, and only it, sets
-  // CLOUDIATOR_CI_RENDER=exclude (the development suite leaves out the tests tagged @render; scripts/verify.mjs names how
-  // many). The comment says why, and that the local gate runs everything.
-  it('excludes the render-bound browser tests in the release gate step only, and says why', () => {
+  // Task 24.0d, the controller's CI exception (2026-10-21): the free runner is too slow for the development browser suite, so the
+  // release gate step, and only it, sets CLOUDIATOR_CI=github, and scripts/verify.mjs then reports that step as `not run on CI`
+  // (never silently). The comment says why, and that the local gate runs everything. Task 24.0c's CLOUDIATOR_CI_RENDER is gone.
+  it('does not run the development browser suite in the release gate step only, and says why', () => {
     // The step's own lines: everything indented under `- name: Release gate`, up to the next step.
     const gate = /^ {6}- name: Release gate\n((?: {8}.*\n|\n)*)/m.exec(text)?.[1] ?? '';
-    expect(gate).toMatch(/^ {8}env:\n {10}CLOUDIATOR_CI_RENDER: exclude$/m);
+    expect(gate).toMatch(/^ {8}env:\n {10}CLOUDIATOR_CI: github$/m);
     expect(gate).toMatch(/^ {8}run: \|\n {10}npm run verify\b/m);
     const comment = gate.split('\n').filter(line => /^ {8}#/.test(line)).map(line => line.replace(/^ {8}# ?/, '')).join(' ');
-    for (const phrase of ["controller's CI exception", 'no GPU', '@render', '39452911203', 'gate of record', 'production gate is unchanged']) {
-      expect(comment, phrase).toContain(phrase);
-    }
+    for (const phrase of ["controller's CI exception", 'too slow', 'not run on CI', 'never silently', '39588134783', 'gate of record',
+      'production gate']) expect(comment, phrase).toContain(phrase);
     // Set once, there: no other step, and not the whole job.
-    expect(text.match(/CLOUDIATOR_CI_RENDER:/g)).toHaveLength(1);
+    expect(text.match(/CLOUDIATOR_CI:/g)).toHaveLength(1);
+    expect(text).not.toContain('CLOUDIATOR_CI_RENDER');
   });
 
   it('calls only scripts and files that exist', () => {

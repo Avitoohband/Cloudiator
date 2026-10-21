@@ -35,11 +35,15 @@
  * host fault in the summary, beside its own first error. It is never rerun, and it fails the gate. Each browser step keeps
  * its own traces under --results (test-results/development, …/production).
  *
- * The controller's CI exception (Task 24.0c, 2026-10-20; scripts/ci-render.mjs): with CLOUDIATOR_CI_RENDER=exclude, which only
- * .github/workflows/checks.yml sets (the GitHub runner has no GPU), the development browser suite leaves out the tests tagged
- * @render, and its summary line says how many ("excluded N render-bound tests (CI, no GPU)"), never silently. Unset, as on a
- * development machine, nothing is left out: the local run is the gate of record. The production gate never leaves anything
- * out. Any other value is refused before the gate starts.
+ * The controller's CI exception (Task 24.0d, 2026-10-21; it replaces Task 24.0c's exclusion of the tests tagged @render): with
+ * CLOUDIATOR_CI=github, which only .github/workflows/checks.yml sets, this script does not run the development browser step.
+ * The GitHub-hosted runner is too slow for it (next dev compiles each route on demand, and Chrome renders WebGL in software
+ * without a GPU): run 39588134783 failed 50 tests there in 52 min with the 148 render-bound runs already left out. The step is
+ * reported as `not run on CI`, its summary line reads "development browser suite not run on CI (runner too slow); the local
+ * gate of record runs it", and the result line says so too ("PASSED (development browser suite not run on CI)"), never
+ * silently. Every other step runs, the production browser gate included, and the exit code is 0 when they all pass. Unset, as
+ * on a development machine, every step runs: the local run is the gate of record. Any other value is refused before the gate
+ * starts.
  *
  * Options: --config <playwright config> (both browser steps), --dev-port <n>, --static-port <n> (the repository config's
  * ports; defaults 3100 and 4173), --results <dir> (test-results), --json <file> (the results as JSON), --edge-quiet <s> (30),
@@ -52,12 +56,28 @@ import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CI_RENDER_ENV, RENDER_PATTERN, RENDER_TAG, renderExclusion } from './ci-render.mjs';
 
 /** The words tests/browser/fixtures.ts adds to a failed test whose request failed in the host's network stack (host-faults.ts). */
 export const HOST_FAULT_MARKER = 'Probable host fault:';
 /** The local stack's API origin (supabase/config.toml `[api] port`, as playwright.config.ts uses): the gate's `out/` build URL. */
 export const LOCAL_API_ORIGIN = 'http://127.0.0.1:54321';
+/** The variable .github/workflows/checks.yml sets, and only it: `github` on the GitHub-hosted runner (the CI exception above). */
+export const CI_ENV = 'CLOUDIATOR_CI';
+/** The status of a step the CI exception leaves out: neither a pass nor a failure, and always named in the summary. */
+export const NOT_RUN_ON_CI = 'not run on CI';
+
+/**
+ * Whether this is the GitHub-hosted runner: CLOUDIATOR_CI=github. Unset or empty is every other run (false). Any other
+ * value throws, so a mistyped value never runs a gate whose scope nobody chose.
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {boolean}
+ */
+export function onCi(env = process.env) {
+  const value = env[CI_ENV];
+  if (value === undefined || value === '') return false;
+  if (value !== 'github') throw new Error(`${CI_ENV} must be unset or "github", not "${value}"`);
+  return true;
+}
 
 /**
  * Failures that are known, named and owned. They make the gate exit 2 (blocked), never 0. Each entry is
@@ -71,14 +91,14 @@ export const KNOWN_BLOCKERS = Object.freeze([]);
 /**
  * @typedef {{ id: string, title: string, display: string, guide?: string, command?: string, args?: string[], shell?: boolean,
  *   env?: Record<string, string>, unset?: string[], needs?: string[], kind?: 'edge' | 'db' | 'browser', report?: string,
- *   exclude?: { tag: string, listArgs: string[] } }} Step
+ *   notRun?: { label: string, reason: string } }} Step
  */
 
 /**
  * The gate's steps, in order. `guide` is the step as the approved docs/operations/verification-gates.md writes it in its
  * "Safe order in one worktree" (the Edge settle and the database tests follow its database rule instead).
- * `excludeRender` (the CI exception above): the development suite leaves out the tests tagged @render, and `exclude` lists them.
- * @param {{ config?: string, devPort?: number, staticPort?: number, dbReport?: string, results?: string, excludeRender?: boolean }} options
+ * `ci` (the CI exception above): the development browser step is marked `notRun`, and runGate reports it without running it.
+ * @param {{ config?: string, devPort?: number, staticPort?: number, dbReport?: string, results?: string, ci?: boolean }} options
  * @returns {Step[]}
  */
 export function gateSteps(options = {}) {
@@ -105,11 +125,8 @@ export function gateSteps(options = {}) {
       env: { CAPACITY_GATE: '1', CLOUDIATOR_GATE_REPORT: dbReport }, needs: ['edge'] },
     { id: 'browser', title: 'Development browser suite', display: 'npx playwright test', guide: 'npx playwright test', kind: 'browser', report: report('development'),
       ...node(...playwright('development')), env: { PLAYWRIGHT_JSON_OUTPUT_NAME: report('development'),
-        ...(options.devPort ? { PLAYWRIGHT_DEV_PORT: String(options.devPort) } : {}), ...(options.excludeRender ? { [CI_RENDER_ENV]: 'exclude' } : {}) },
-      // The gate decides the scope, never a stray variable: without the exception the variable is removed.
-      ...(options.excludeRender ? { exclude: { tag: RENDER_TAG,
-        listArgs: ['node_modules/@playwright/test/cli.js', 'test', ...config, '--list', '--reporter=json', '--grep', RENDER_PATTERN.source] } }
-        : { unset: [CI_RENDER_ENV] }) },
+        ...(options.devPort ? { PLAYWRIGHT_DEV_PORT: String(options.devPort) } : {}) },
+      ...(options.ci ? { notRun: { label: 'development browser suite', reason: 'runner too slow' } } : {}) },
     { id: 'browser-build', title: 'Isolated production build', display: 'CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true npm run build',
       guide: 'CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true',
       ...npm('run', 'build'), env: { CLOUDIATOR_BROWSER_TEST: 'true', NEXT_PUBLIC_FIXTURE_ENABLED: 'true' },
@@ -122,7 +139,7 @@ export function gateSteps(options = {}) {
       guide: 'PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test',
       kind: 'browser', report: report('production'), ...node(...playwright('production')), env: { PLAYWRIGHT_STATIC: 'true',
         PLAYWRIGHT_STATIC_ROOT: '.next/browser-test', PLAYWRIGHT_JSON_OUTPUT_NAME: report('production'),
-        ...(options.staticPort ? { PLAYWRIGHT_STATIC_PORT: String(options.staticPort) } : {}) }, unset: [CI_RENDER_ENV], needs: ['browser-build'] },
+        ...(options.staticPort ? { PLAYWRIGHT_STATIC_PORT: String(options.staticPort) } : {}) }, needs: ['browser-build'] },
     // core.safecrlf=false only silences the line-ending notices of a Windows checkout (core.autocrlf), which are no finding.
     { id: 'diff', title: 'Whitespace check', display: 'git diff --check', guide: 'git diff --check', command: 'git', args: ['-c', 'core.safecrlf=false', 'diff', '--check'] },
   ];
@@ -215,28 +232,23 @@ export function classifyBrowser(report) {
 }
 
 /**
- * How many tests a Playwright JSON report lists (every project's instance of every spec, in nested suites), or null for no
- * report or one with errors. The CI exception counts the tests it leaves out with `--list --grep` (no test runs).
- * @param {any} report
- * @returns {number | null}
- */
-export function countListed(report) {
-  if (!report || !Array.isArray(report.suites) || report.errors?.length) return null;
-  const count = (suite) => (suite.specs ?? []).reduce((n, spec) => n + (spec.tests?.length ?? 0), 0) + (suite.suites ?? []).reduce((n, child) => n + count(child), 0);
-  return report.suites.reduce((n, suite) => n + count(suite), 0);
-}
-
-/**
  * Runs `steps` in order through `io` and returns one result per step.
  * io: exec(step) → exit code; settleEdge() → { ok, startedAt, recreated, files, waitedMs, note }; edgeStartedAt() → string|null;
- * readDbReport() → the gate reporter's report or null; readBrowserReport(step) → Playwright's JSON report or null;
- * countExcluded(step) → how many tests a step's `exclude` leaves out, or null; log(text).
+ * readDbReport() → the gate reporter's report or null; readBrowserReport(step) → Playwright's JSON report or null; log(text).
+ * A step with `notRun` (the CI exception) is reported as NOT_RUN_ON_CI and never executed.
  */
 export async function runGate(steps, io, blockers = KNOWN_BLOCKERS) {
   const results = [];
   const statusOf = (id) => results.find(r => r.id === id)?.status;
   for (const [index, step] of steps.entries()) {
     const base = { id: step.id, title: step.title, display: step.display };
+    if (step.notRun) {
+      const note = `${step.notRun.label} not run on CI (${step.notRun.reason}); the local gate of record runs it`;
+      io.log(`
+=== [${index + 1}/${steps.length}] ${step.title}: ${note}`);
+      results.push({ ...base, status: NOT_RUN_ON_CI, durationMs: 0, note, label: step.notRun.label });
+      continue;
+    }
     const missing = (step.needs ?? []).find(id => statusOf(id) !== 'passed');
     if (missing) { results.push({ ...base, status: 'skipped', durationMs: 0, note: `not run: ${missing} did not pass` }); continue; }
     io.log(`\n=== [${index + 1}/${steps.length}] ${step.title}: ${step.display}`);
@@ -267,25 +279,15 @@ function edgeNote(edge) {
     `${edge.files} files pre-read`,
     `settled in ${Math.round(edge.waitedMs / 1000)} s`, `recreated while settling: ${edge.recreated ? 'yes' : 'no'}`, edge.note].filter(Boolean).join('; ');
 }
-/**
- * A browser step: one run, never repeated (fix round 1, Important 3). A step that leaves tests out (the CI exception) says how
- * many, before the run and in its summary line.
- */
+/** A browser step: one run, never repeated (fix round 1, Important 3). */
 async function runBrowser(step, io) {
-  const excluded = step.exclude ? { tag: step.exclude.tag, count: await io.countExcluded(step) } : null;
-  if (excluded) io.log(`${CI_RENDER_ENV}=exclude: the development suite ${excludedText(excluded)}; the local gate runs them.`);
   const code = await io.exec(step);
   const browser = classifyBrowser(io.readBrowserReport(step));
   const status = code === 0 ? 'passed' : 'failed';
   const faults = browser.failures.filter(f => f.hostFault).length;
   const note = [code !== 0 && `exit ${code}`, browser.failed && `${browser.failed} failed`,
-    faults && `${faults} beside a probable host fault`, excluded && excludedText(excluded)].filter(Boolean).join('; ');
-  return { status, note, browser, ...(excluded ? { excluded } : {}) };
-}
-/** @param {{ count: number | null }} excluded */
-function excludedText({ count }) {
-  return count === null ? 'excluded the render-bound tests (CI, no GPU; count unavailable)'
-    : `excluded ${count} render-bound test${count === 1 ? '' : 's'} (CI, no GPU)`;
+    faults && `${faults} beside a probable host fault`].filter(Boolean).join('; ');
+  return { status, note, browser };
 }
 /** The approved database rerun (verification-gates.md): exactly once, after the Edge container changed during a run. */
 const DB_RERUNS = 1;
@@ -332,7 +334,10 @@ export function summarize(results, blockers = KNOWN_BLOCKERS) {
   for (const blocker of blockers.filter(b => ids.has(b.id))) {
     lines.push(`Known blocker (not a pass): ${blocker.name} (${blocker.file}). Owner: ${blocker.owner}. Evidence: ${blocker.evidence}.`);
   }
-  lines.push(`Result: ${status.toUpperCase()}${failed.length ? ` (${failed.length} step${failed.length === 1 ? '' : 's'} failed)` : ''}`
+  // A step the CI exception left out is never a silent pass: the result line names it beside any failures.
+  const notes = [failed.length && `${failed.length} step${failed.length === 1 ? '' : 's'} failed`,
+    ...results.filter(r => r.status === NOT_RUN_ON_CI).map(r => `${r.label} not run on CI`)].filter(Boolean);
+  lines.push(`Result: ${status.toUpperCase()}${notes.length ? ` (${notes.join('; ')})` : ''}`
     + `${blocked.length ? `; ${ids.size} known blocker${ids.size === 1 ? '' : 's'}` : ''}; exit ${exitCode}`);
   return { status, exitCode, text: lines.join('\n') };
 }
@@ -350,22 +355,6 @@ function exec(step) {
     child.on('error', () => done(127));
     child.on('exit', (code, signal) => done(code ?? (signal ? 1 : 0)));
   });
-}
-/**
- * The CI exception's count: the step's tagged tests listed (`--list`: nothing runs, no web server starts) with the step's own
- * configuration and environment, without the exclusion itself. Null when the listing fails.
- * @param {Step} step
- * @returns {number | null}
- */
-export function countExcluded(step) {
-  if (!step.exclude) return null;
-  const file = join(tmpdir(), `cloudiator-verify-${process.pid}-render-list.json`);
-  const env = { ...childEnv(step), PLAYWRIGHT_JSON_OUTPUT_NAME: file };
-  delete env[CI_RENDER_ENV];
-  try {
-    const result = spawnSync(process.execPath, step.exclude.listArgs, { env, stdio: 'ignore' });
-    return result.status === 0 ? countListed(JSON.parse(readFileSync(file, 'utf8'))) : null;
-  } catch { return null; } finally { rmSync(file, { force: true }); }
 }
 /** The Supabase project id and the API gateway port, from supabase/config.toml. */
 function localStack() {
@@ -580,8 +569,7 @@ export function parseOptions(argv) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   let options;
-  try { options = { ...parseOptions(process.argv.slice(2)), excludeRender: renderExclusion(process.env) !== undefined }; }
-  catch (error) { console.error(String(error instanceof Error ? error.message : error)); process.exit(1); }
+  try { options = { ...parseOptions(process.argv.slice(2)), ci: onCi(process.env) }; } catch (error) { console.error(String(error instanceof Error ? error.message : error)); process.exit(1); }
   const stack = localStack();
   const steps = gateSteps(options);
   const report = steps.find(step => step.kind === 'db').report;
@@ -592,7 +580,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     edgeStartedAt: () => startedAt(stack.container),
     readDbReport: () => { try { return JSON.parse(readFileSync(report, 'utf8')); } catch { return null; } },
     readBrowserReport: (step) => { try { return JSON.parse(readFileSync(step.report, 'utf8')); } catch { return null; } },
-    countExcluded: async (step) => countExcluded(step),
     log: (text) => console.log(text),
   });
   rmSync(report, { force: true });

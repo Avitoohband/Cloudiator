@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, childEnv, classifyBrowser, classifyDb, countExcluded, countListed, gateSteps, parseOptions, prepareEdge,
+import { CI_ENV, HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, NOT_RUN_ON_CI, childEnv, classifyBrowser, classifyDb, gateSteps, onCi, parseOptions, prepareEdge,
   refreshAccessTimes, runGate, summarize } from '../../scripts/verify.mjs';
-import { CI_RENDER_ENV, RENDER_PATTERN, RENDER_TAG } from '../../scripts/ci-render.mjs';
 import { HOST_FAULT_MARKER } from '../browser/host-faults.ts';
 
 // Task 23.6 (R3): `npm run verify` runs every gate of the approved docs/operations/verification-gates.md, in its order, one
@@ -69,9 +68,8 @@ const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack 
 /** A fake runner: exit codes by step id (0 when absent; a list is used up call by call), a stable Edge unless told otherwise. */
 function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: unknown[]; browserReports?: Record<string, unknown[]>;
   starts?: (string | null)[]; edge?: { ok: boolean; note?: string; tolerated?: { count: number; examples: string[] };
-    unavailable?: { count: number; examples: string[] } }[]; excluded?: number | null } = {}) {
+    unavailable?: { count: number; examples: string[] } }[] } = {}) {
   const ran: string[] = [];
-  const counted: string[] = [];
   const codeOf = (id: string) => { const c = options.codes?.[id]; return Array.isArray(c) ? c.shift() ?? 0 : c ?? 0; };
   const starts = [...(options.starts ?? [])];
   const reports = [...(options.reports ?? [dbReport([{ name: 'ok' }])])];
@@ -79,10 +77,8 @@ function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: 
   let started = '2026-10-19T14:23:38.1Z';
   return {
     ran,
-    counted,
     io: {
       exec: async (step: Step) => { ran.push(step.id); return codeOf(step.id); },
-      countExcluded: async (step: Step) => { counted.push(step.id); return options.excluded === undefined ? 150 : options.excluded; },
       settleEdge: async () => { ran.push('settle'); const e = edges.shift() ?? { ok: true };
         return { ok: e.ok, startedAt: started, recreated: false, files: 40, waitedMs: 30_000, note: e.note, ...(e.tolerated ? { tolerated: e.tolerated } : {}),
           ...(e.unavailable ? { unavailable: e.unavailable } : {}) }; },
@@ -379,80 +375,86 @@ describe('a browser run', () => {
   });
 });
 
-// Task 24.0c, the controller's CI exception (2026-10-20): on the GPU-less GitHub runner (checks.yml sets CLOUDIATOR_CI_RENDER
-// =exclude) the development suite leaves out the tests tagged @render (playwright.config.ts). The gate never does this
-// silently: the browser step's summary line says how many it left out. Locally nothing is left out, and the production gate
-// never leaves anything out.
-describe('the CI render exclusion', () => {
-  it('runs the development suite with the exclusion only when asked, and the production gate never', () => {
-    const plain = gateSteps();
-    expect(byId(plain, 'browser').env?.[CI_RENDER_ENV]).toBeUndefined();
-    expect(byId(plain, 'browser').unset).toContain(CI_RENDER_ENV);
-    expect(byId(plain, 'browser').exclude).toBeUndefined();
-    const ci = gateSteps({ excludeRender: true, config: 'node_modules/.cache/pw-x.config.mjs' });
-    expect(byId(ci, 'browser').env).toMatchObject({ [CI_RENDER_ENV]: 'exclude' });
-    expect(byId(ci, 'browser').unset ?? []).not.toContain(CI_RENDER_ENV);
-    // The count lists the tagged tests of the same configuration, without running them (no web server).
-    expect(byId(ci, 'browser').exclude).toEqual({ tag: RENDER_TAG, listArgs: ['node_modules/@playwright/test/cli.js', 'test', '--config',
-      'node_modules/.cache/pw-x.config.mjs', '--list', '--reporter=json', '--grep', RENDER_PATTERN.source] });
-    for (const steps of [plain, ci]) {
-      expect(byId(steps, 'production').exclude).toBeUndefined();
-      expect(byId(steps, 'production').unset).toContain(CI_RENDER_ENV);
-      expect(childEnv(byId(steps, 'production'), { [CI_RENDER_ENV]: 'exclude' })[CI_RENDER_ENV]).toBeUndefined();
-    }
-    expect(childEnv(byId(plain, 'browser'), { [CI_RENDER_ENV]: 'exclude' })[CI_RENDER_ENV]).toBeUndefined();
-    expect(childEnv(byId(ci, 'browser'), {})[CI_RENDER_ENV]).toBe('exclude');
+// Task 24.0d, the controller's CI exception (2026-10-21), which replaces Task 24.0c's exclusion of the tests tagged @render: the
+// GitHub-hosted runner is too slow for the development browser suite (run 39588134783 failed 50 tests there with the render-bound
+// runs already left out), so with CLOUDIATOR_CI=github (set only by .github/workflows/checks.yml) the gate does not run that
+// one step and says so, never silently. Every other step runs, the production gate included. Locally every step runs.
+describe('the CI exception: the development browser suite is not run on the GitHub runner', () => {
+  const BROWSER_NOTE = 'development browser suite not run on CI (runner too slow); the local gate of record runs it';
+  const ALL = ['unit', 'typecheck', 'assets', 'build', 'static', 'settle', 'db', 'browser', 'browser-build', 'browser-static', 'production', 'diff'];
+  const lineOf = (text: string, id: string) => text.split('\n').find(row => new RegExp(`^ {2}\\S.*?\\s${id}\\s`).test(row))!;
+
+  it('marks only the development browser step, and only when asked', () => {
+    expect(gateSteps().some(step => step.notRun)).toBe(false);
+    const ci = gateSteps({ ci: true, config: 'node_modules/.cache/pw-x.config.mjs' });
+    expect(ci.map(step => step.id)).toEqual(ORDER);
+    expect(ci.filter(step => step.notRun).map(step => step.id)).toEqual(['browser']);
+    expect(byId(ci, 'browser').notRun).toEqual({ label: 'development browser suite', reason: 'runner too slow' });
+    // Nothing else about any step changes, and the production gate stays exactly what it was.
+    const strip = (steps: Step[]) => steps.map(({ notRun: _notRun, ...step }) => step);
+    expect(strip(gateSteps({ ci: true }))).toEqual(strip(gateSteps()));
+    expect(byId(ci, 'production').notRun).toBeUndefined();
+    expect(byId(ci, 'production').needs).toEqual(['browser-build']);
   });
 
-  it("names how many render-bound tests it left out on the browser step's summary line", async () => {
-    const { io, ran, counted } = fakeIo({ excluded: 150 });
-    const results = await runGate(gateSteps({ excludeRender: true }), io);
-    expect(ran).toEqual(['unit', 'typecheck', 'assets', 'build', 'static', 'settle', 'db', 'browser', 'browser-build', 'browser-static', 'production', 'diff']);
-    expect(counted).toEqual(['browser']);
-    const browser = results.find(r => r.id === 'browser')!;
-    expect(browser).toMatchObject({ status: 'passed', note: 'excluded 150 render-bound tests (CI, no GPU)', excluded: { tag: RENDER_TAG, count: 150 } });
+  it('does not run the browser step, says so on its line and in the result, and still passes: exit 0', async () => {
+    const { io, ran } = fakeIo();
+    const logged: string[] = [];
+    const results = await runGate(gateSteps({ ci: true }), { ...io, log: (text: string) => { logged.push(text); } });
+    // The development suite never ran; every other step, the production browser gate included, did, in the usual order.
+    expect(ran).toEqual(ALL.filter(id => id !== 'browser'));
+    expect(NOT_RUN_ON_CI).toBe('not run on CI');
+    expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'not run on CI', durationMs: 0, note: BROWSER_NOTE, label: 'development browser suite' });
+    expect(results.filter(r => r.id !== 'browser').map(r => r.status)).toEqual(ORDER.filter(id => id !== 'browser').map(() => 'passed'));
+    expect(logged.join('\n')).toContain(`Development browser suite: ${BROWSER_NOTE}`);
     const summary = summarize(results);
     expect(summary).toMatchObject({ status: 'passed', exitCode: 0 });
-    expect(summary.text.split('\n').find(line => /^\s+passed\s+browser\s/.test(line))).toMatch(/npx playwright test {2}\[\d+ s\] {2}excluded 150 render-bound tests \(CI, no GPU\)$/);
-    expect(results.find(r => r.id === 'production')).toMatchObject({ note: '' });
-    expect(results.find(r => r.id === 'production')).not.toHaveProperty('excluded');
+    expect(lineOf(summary.text, 'browser')).toMatch(/^ {2}not run on CI {2}browser {9}npx playwright test {2}\[0 s\] {2}development browser suite not run on CI \(runner too slow\); the local gate of record runs it$/);
+    expect(lineOf(summary.text, 'production')).toMatch(/^ {2}passed /);
+    // Never a bare PASSED: the result line names the step that was not run.
+    expect(summary.text.split('\n').at(-1)).toBe('Result: PASSED (development browser suite not run on CI); exit 0');
   });
 
-  it('still names the exclusion beside a failure, and when the count is not known', async () => {
-    const failed = fakeIo({ excluded: 1, codes: { browser: 1 }, browserReports: { browser: [browserReport([['Error: expect(received).toBe(expected)']])] } });
-    const results = await runGate(gateSteps({ excludeRender: true }), failed.io);
-    expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'failed', note: 'exit 1; 1 failed; excluded 1 render-bound test (CI, no GPU)' });
-    const unknown = fakeIo({ excluded: null });
-    const counted = await runGate(gateSteps({ excludeRender: true }), unknown.io);
-    expect(counted.find(r => r.id === 'browser')).toMatchObject({ status: 'passed', note: 'excluded the render-bound tests (CI, no GPU; count unavailable)',
-      excluded: { tag: RENDER_TAG, count: null } });
+  it('names the step beside a failure too, and a failed production gate still fails the gate', async () => {
+    const { io, ran } = fakeIo({ codes: { production: 1 }, browserReports: { production: [browserReport([['Error: expect(received).toBe(expected)']])] } });
+    const results = await runGate(gateSteps({ ci: true }), io);
+    expect(ran).not.toContain('browser');
+    expect(ran).toContain('production');
+    const summary = summarize(results);
+    expect(summary).toMatchObject({ status: 'failed', exitCode: 1 });
+    expect(summary.text.split('\n').at(-1)).toBe('Result: FAILED (1 step failed; development browser suite not run on CI); exit 1');
   });
 
-  it('leaves the gate as it was without the exclusion: nothing counted, nothing said', async () => {
-    const { io, counted } = fakeIo();
+  it('names the step beside a known blocker too (exit 2, never a pass)', async () => {
+    const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }])] });
+    const results = await runGate(gateSteps({ ci: true }), io, FIXTURE_BLOCKERS);
+    const summary = summarize(results, FIXTURE_BLOCKERS);
+    expect(summary).toMatchObject({ status: 'blocked', exitCode: 2 });
+    expect(summary.text.split('\n').at(-1)).toBe('Result: BLOCKED (development browser suite not run on CI); 1 known blocker; exit 2');
+  });
+
+  it('runs every step, with nothing said about it, without the exception: the local run is the gate of record', async () => {
+    const { io, ran } = fakeIo();
     const results = await runGate(gateSteps(), io);
-    expect(counted).toEqual([]);
+    expect(ran).toEqual(ALL);
     expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'passed', note: '' });
-    expect(results.find(r => r.id === 'browser')).not.toHaveProperty('excluded');
-    expect(summarize(results).text).not.toContain('render-bound');
+    expect(results.find(r => r.id === 'browser')).not.toHaveProperty('label');
+    const summary = summarize(results);
+    expect(summary.text).not.toContain('not run on CI');
+    expect(summary.text.split('\n').at(-1)).toBe('Result: PASSED; exit 0');
   });
 
-  // The real count: Playwright lists the repository's tagged tests (no test runs, no web server), with the step's environment
-  // but never the exclusion itself, so it counts what the run leaves out. CI sets CLOUDIATOR_CI_RENDER for this very run.
-  it('counts the tagged tests the development suite leaves out, with the repository configuration', () => {
-    const count = countExcluded(byId(gateSteps({ excludeRender: true }), 'browser'));
-    expect(count).toBeGreaterThan(0);
-    expect(count! % 2, 'each tagged test in both projects').toBe(0);
-    expect(countExcluded(byId(gateSteps(), 'browser'))).toBeNull();
-  }, 60_000);
+  it('is switched on by CLOUDIATOR_CI=github alone, and refuses any other value', () => {
+    expect(CI_ENV).toBe('CLOUDIATOR_CI');
+    expect(onCi({ [CI_ENV]: 'github' })).toBe(true);
+    for (const env of [{}, { [CI_ENV]: undefined }, { [CI_ENV]: '' }]) expect(onCi(env), JSON.stringify(env)).toBe(false);
+    // GitHub's own variables never switch the gate: with CLOUDIATOR_CI unset, every step runs wherever the gate runs.
+    expect(onCi({ CI: 'true', GITHUB_ACTIONS: 'true' })).toBe(false);
+    for (const value of ['true', '1', 'yes', 'GitHub', 'exclude']) expect(() => onCi({ [CI_ENV]: value }), value).toThrow(/CLOUDIATOR_CI must be unset or "github"/);
+  });
 
-  it("counts the tests of a Playwright listing, in every project and nested suite", () => {
-    const spec = (title: string, projects: string[]) => ({ title, tags: ['render'], tests: projects.map(projectName => ({ projectName, results: [] })) });
-    expect(countListed({ suites: [{ title: 'a.spec.ts', specs: [spec('one', ['desktop', 'mobile'])],
-      suites: [{ title: 'a describe', specs: [spec('two', ['desktop', 'mobile']), spec('three', ['desktop'])] }] }, { title: 'b.spec.ts', specs: [] }] })).toBe(5);
-    expect(countListed({ suites: [] })).toBe(0);
-    expect(countListed(null)).toBeNull();
-    expect(countListed({ errors: [{ message: 'x' }] })).toBeNull();
+  it("gives no step the variable: it is the runner's, and no child reads it", () => {
+    for (const step of gateSteps({ ci: true })) expect(step.env?.[CI_ENV], step.id).toBeUndefined();
   });
 });
 

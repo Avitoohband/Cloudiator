@@ -1,7 +1,8 @@
 // The browser suites' `test` (Task 23.6). Every spec imports `test` and `expect` from here (tests/harness.test.ts checks it).
 // - Plan Decision 7: in the production gate (PLAYWRIGHT_STATIC=true, served with the export's own `_headers` by
 //   scripts/serve-static.mjs) each test listens for Content-Security-Policy violations in every page of its context and
-//   fails on any. The development server sends no policy, so there the listener does nothing.
+//   fails on any. The development server sends no policy, so there the listener does nothing. The deployed checks
+//   (tests/browser/playwright.deployed.config.ts, Task 24.2) turn it on with the `listenForCsp` option.
 // - C21 triage: in both gates, a failed test whose context saw a request fail in the host's network stack
 //   (tests/browser/host-faults.ts) gets one more error naming that fault after its own errors. scripts/verify.mjs labels the
 //   failure a probable host fault in its summary, beside the test's own first error; the test still fails, and nothing is
@@ -17,12 +18,17 @@ export type CspViolation = { source: 'event' | 'console'; directive: string; blo
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const BINDING = '__cloudiatorCspViolation';
 
-export const test = base.extend<{ cspViolations: CspViolation[]; allowCspViolations: boolean; hostFaults: string[] }>({
+/** The options a Playwright config may set (`defineConfig<FixtureOptions>`). */
+export type FixtureOptions = { allowCspViolations: boolean; listenForCsp: boolean };
+
+export const test = base.extend<{ cspViolations: CspViolation[]; hostFaults: string[] } & FixtureOptions>({
   /** Off only for a case that makes a violation on purpose and checks `cspViolations` itself. */
   allowCspViolations: [false, { option: true }],
-  cspViolations: [async ({ context, allowCspViolations }, use) => {
+  /** On in the production gate, and in the deployed checks' config (Task 24.2). */
+  listenForCsp: [production, { option: true }],
+  cspViolations: [async ({ context, allowCspViolations, listenForCsp }, use) => {
     const violations: CspViolation[] = [];
-    if (production) {
+    if (listenForCsp) {
       await context.exposeBinding(BINDING, (_source, violation: Omit<CspViolation, 'source'>) => { violations.push({ source: 'event', ...violation }); });
       await context.addInitScript(binding => {
         document.addEventListener('securitypolicyviolation', event => {
@@ -36,7 +42,7 @@ export const test = base.extend<{ cspViolations: CspViolation[]; allowCspViolati
       });
     }
     await use(violations);
-    if (production && !allowCspViolations) expect(violations, 'Content-Security-Policy violations in the production export').toEqual([]);
+    if (listenForCsp && !allowCspViolations) expect(violations, 'Content-Security-Policy violations in the production export').toEqual([]);
   }, { auto: true }],
   hostFaults: [async ({ context }, use, testInfo) => {
     const faults: string[] = [];

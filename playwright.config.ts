@@ -7,6 +7,8 @@ const devPort = Number(process.env.PLAYWRIGHT_DEV_PORT ?? 3100);
 const staticPort = Number(process.env.PLAYWRIGHT_STATIC_PORT ?? 4173);
 export default defineConfig({
   testDir: './tests/browser',
+  // The deployed acceptance checks run only with their own config, against a public origin (Task 24.2); never in the gate.
+  testIgnore: '**/deployed.spec.ts',
   fullyParallel: true,
   use: {
     baseURL: production ? `http://127.0.0.1:${staticPort}` : `http://127.0.0.1:${devPort}`,

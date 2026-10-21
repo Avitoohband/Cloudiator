@@ -471,3 +471,43 @@ locally through the container after the label check). Neither prints a secret, k
 `tests/db/hosted-checks.test.ts` runs both inside a read-only transaction. Neither has been run against a hosted project yet:
 the hosted owner's privileges on `vault.secrets`, `auth.users`, `auth.identities`, `net._http_response` and `cron.job` are
 untested.
+
+## Running the deployed checks
+
+Task 24.2 (plan Decisions 1, 8 and 9). `tests/browser/deployed.spec.ts` checks the public origin with its own config,
+`tests/browser/playwright.deployed.config.ts`; the release gate's config ignores it, so `npm run verify` never runs it. The
+per-project deployment checklist (`docs/operations/deployment.md`, Tasks 24.5, 24.6 and 24.8) says when to run which set. No
+check signs in or sends a credential: the worker is asked without its secret, and the Data API and Auth are asked anonymously
+with the publishable key the deployed bundle carries (public by design; kept in memory, never printed; traces are off).
+
+```powershell
+$env:CLOUDIATOR_DEPLOYED_ORIGIN = 'https://cloudiator.pages.dev'        # required: the config refuses to load without it
+$env:CLOUDIATOR_SUPABASE_ORIGIN = 'https://<project>.supabase.co'      # for connectSrc, cors, anonDenied, authProvidersGoogleOnly
+npx playwright test --config tests/browser/playwright.deployed.config.ts --grep-invert '@attested'   # the automatic checks
+npx playwright test --config tests/browser/playwright.deployed.config.ts                             # all, after the journey
+```
+
+- **Automatic** (`@automatic`): `fixedRoutesReload` (desktop and phone: each fixed route loads and reloads with 200 and no
+  console error; a 404 for `/favicon.ico` is recorded, not failed: the site has no icon), `securityHeaders` (each route and a
+  `/_next/static/` chunk carry exactly what the generated `_headers` gives that path), `connectSrc` (exactly `'self'` and the
+  project), `compression` (every route's HTML and crawled chunk `br` or `gzip`), `cors` (the command preflight from the site:
+  204 or 200, exactly the site's grant, never `*`, `Access-Control-Max-Age: 7200`; from another origin 403 with no grant; the
+  worker without its secret 401 `unauthenticated`), `anonDenied` (14 anonymous probes from `tests/db/access-matrix.test.ts`
+  that change nothing even if granted: backend-only and owner RPCs with null arguments, empty inserts, a no-row update and
+  delete, the unexposed `private` schema), `authProvidersGoogleOnly` (`/auth/v1/settings`: Google alone, sign-up open),
+  `shippedAssetsClean` (the release scan's patterns, `scripts/release-scan.mjs`, over every asset the routes reference or load).
+  Every page runs under the CSP-violation listener.
+- **Attested** (`@attested`, Decision 8): after the real journey, Avi runs `scripts/hosted-checks.sql` and pastes the sanitized
+  rows; set each variable from its row (a check fails, naming the variable and row, until it is set):
+  `CLOUDIATOR_ATTEST_NEW_ACCOUNT_CHARACTERS` (`characters / account <hash>` of the new account, expected 1),
+  `CLOUDIATOR_ATTEST_BOUNDARIES_COMPLETED` (`boundary-latency / last 24 h boundaries`, at least 1),
+  `CLOUDIATOR_ATTEST_BOUNDARIES_OVER_120S` (0), `CLOUDIATOR_ATTEST_DUPLICATE_GRANTS` (`duplicate-grants / total`, 0),
+  `CLOUDIATOR_ATTEST_TRADE_OWNERS` (the trade's `trades / sale <hash>` owners, 1), `CLOUDIATOR_ATTEST_TRADE_FEE_CORRECT`
+  (its `fee right`, true).
+
+**Local stand-in** (Task 24.2): serve an export with `scripts/serve-static.mjs` on a free port and point
+`CLOUDIATOR_DEPLOYED_ORIGIN` at it, with `CLOUDIATOR_SUPABASE_ORIGIN=http://127.0.0.1:54321`. Expected to differ from hosted:
+`compression` fails (the local host does not compress); `cors` fails (the local Kong gateway answers every preflight itself
+with `*` and no Max-Age, before the function); `connectSrc` fails on the browser-test export (built without a project URL);
+`anonDenied` and `authProvidersGoogleOnly` fail (a local build carries no publishable key), and the latter would also find
+Google off. `fixedRoutesReload` fails on the `__next.*.txt` prefetch 404s (Task 23.5 M7) until that triage lands.

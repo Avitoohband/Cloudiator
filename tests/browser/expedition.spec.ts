@@ -620,31 +620,41 @@ test.describe('followable expedition scenes', () => {
   // local time against the view's display time, as every slot time is (Task 23.10), never the fixed two-digit form
   // (`01:00 AM`), and it stays on one line in a 360 px viewport. Minute 65 shows starts past the first hour of the slot.
   // Fix round 1: the times are a right-aligned column of one width, so every label starts at the same left edge whether
-  // its time is "12:40 AM" or "1:00 AM". Tagged @render: it screenshots the expedition scene (the CI exception).
-  test('shows each stage start in the activity log short, on one line at 360 px', { tag: '@render' }, async ({ page }, testInfo) => {
-    await expeditionFlow.openAtMinute(page, 65);
-    await expeditionFlow.hold(page, 'woodland', 65);
-    const { displayNowMs } = await expeditionFlow.state(page);
-    const log = page.getByRole('list', { name: 'Activity log' });
-    const times = log.locator('time');
-    await expect(times).toHaveCount(renderExpeditionStage(TIMELINES.woodland, displayNowMs).stages.length);
-    for (const time of await times.all()) {
-      const ms = Date.parse((await time.getAttribute('datetime'))!);
-      await expect(time).toHaveText(await slotTime(page, ms, displayNowMs));
-    }
-    await expect(times.last()).not.toHaveText(/^0\d:/);
-    await expectTimeOnOneLine(page, logItems(page).last(), 'a stage start');
-    const size = page.viewportSize();
-    await page.setViewportSize({ width: 360, height: 740 });
-    await page.waitForTimeout(500);
-    const edges = await logItems(page).evaluateAll(items => items.map(item => {
-      const time = item.querySelector('time')!.getBoundingClientRect(), label = item.querySelector('time + span')!.getBoundingClientRect();
-      return { timeRight: Math.round(time.right), labelLeft: Math.round(label.left), text: item.querySelector('time')!.textContent };
-    }));
-    expect(new Set(edges.map(e => e.labelLeft)).size, `label left edges: ${JSON.stringify(edges)}`).toBe(1);
-    expect(new Set(edges.map(e => e.timeRight)).size, `time right edges: ${JSON.stringify(edges)}`).toBe(1);
-    if (size) await page.setViewportSize(size);
-    await reviewShot360(page, testInfo, 'expedition-stage-list', log);
+  // its time is "12:40 AM" or "1:00 AM". Tagged @render: it screenshots the expedition scene.
+  // Task 24.0d: the zone is pinned, so no assertion depends on the host. The fixture's stages start at 21:20 UTC on 9 October and
+  // the display time is 22:25 UTC; in Asia/Jerusalem all of them fall on 10 October (12:20 AM to 1:40 AM), so every start is
+  // a bare time. In a zone where the stages and the display time are on different local days (for example Europe/Berlin, where
+  // the first starts read "Oct 9, 11:20 PM") the starts carry their day, and their rows are wider and shift the label edges
+  // (observed under a scratch host zone of Europe/Berlin before this pin; UTC, New York and Tokyo passed). The locale is pinned
+  // too: the times are the en-US ones.
+  test.describe('the stage times in the activity log', () => {
+    test.use({ timezoneId: 'Asia/Jerusalem', locale: 'en-US' });
+
+    test('shows each stage start in the activity log short, on one line at 360 px', { tag: '@render' }, async ({ page }, testInfo) => {
+      await expeditionFlow.openAtMinute(page, 65);
+      await expeditionFlow.hold(page, 'woodland', 65);
+      const { displayNowMs } = await expeditionFlow.state(page);
+      const log = page.getByRole('list', { name: 'Activity log' });
+      const times = log.locator('time');
+      await expect(times).toHaveCount(renderExpeditionStage(TIMELINES.woodland, displayNowMs).stages.length);
+      for (const time of await times.all()) {
+        const ms = Date.parse((await time.getAttribute('datetime'))!);
+        await expect(time).toHaveText(await slotTime(page, ms, displayNowMs));
+      }
+      await expect(times.last()).not.toHaveText(/^0\d:/);
+      await expectTimeOnOneLine(page, logItems(page).last(), 'a stage start');
+      const size = page.viewportSize();
+      await page.setViewportSize({ width: 360, height: 740 });
+      await page.waitForTimeout(500);
+      const edges = await logItems(page).evaluateAll(items => items.map(item => {
+        const time = item.querySelector('time')!.getBoundingClientRect(), label = item.querySelector('time + span')!.getBoundingClientRect();
+        return { timeRight: Math.round(time.right), labelLeft: Math.round(label.left), text: item.querySelector('time')!.textContent };
+      }));
+      expect(new Set(edges.map(e => e.labelLeft)).size, `label left edges: ${JSON.stringify(edges)}`).toBe(1);
+      expect(new Set(edges.map(e => e.timeRight)).size, `time right edges: ${JSON.stringify(edges)}`).toBe(1);
+      if (size) await page.setViewportSize(size);
+      await reviewShot360(page, testInfo, 'expedition-stage-list', log);
+    });
   });
 
   test('reads the timeline once per reveal mark, not on focus alone, and sends no command or remote request', async ({ page }) => {

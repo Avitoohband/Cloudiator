@@ -86,3 +86,56 @@ passing between a creation and its edits, `processing`) saves nothing. A second 
    advances are not restored, as in every DB test.
 6. **First `.mjs` script that imports TypeScript** (`commands.ts`, `database.ts`) through Node's type stripping (Node ≥ 22.18;
    the project pins 22.19.0).
+
+## Fix round 1
+
+The controller's rulings on the review (two Important, one minor), on `590ac6e`. Commits:
+- `f5b4651` fix: report the bench's first boundary and refuse unmarked databases
+- `56902b9` test: always print the deployed evidence line
+- this section: docs: report Task 24.2b fix round 1
+
+**Important 1, the bench's first boundary.** Creation records the creation slot S as each character's processed slot. The
+coordinator starts at `min(processed_slot_index) + 1`, and a boundary with members before the immutable epoch waits for it
+forever. The seed's final SELECT now also reports `seeded_slot`, `seeded_at_utc` and `first_member_boundary`
+(`scripts/bench-seed.mjs:224-227`). The runbook's "Bench seed" (`docs/operations/runbook.md:586`) says:
+- the bench's epoch must be at most `first_member_boundary`, even if that slot has passed;
+- "next full slot" applies to the empty production project only;
+- activate soon after seeding: every boundary since S is replayed, up to 6 a tick;
+- the paste-back now includes the three new columns, so the 14-day idle window can be checked.
+
+The DB test asserts `seeded_slot` = the creation slot, `first_member_boundary` = `min(processed_slot_index) + 1` = S + 1, and
+`seeded_at_utc` against `min(created_at_ms)` (`tests/db/bench-seed.test.ts:110-114`). This rule was not exercised by a
+coordinator run here. It rests on the reviewer's reading of the coordinator, which the ruling adopted.
+
+**Important 2, refuse unmarked databases.** The seed checks for a bench marker before any write, as the first refusal reason,
+"this database is not marked as the bench" (`scripts/bench-seed.mjs:161`). Either marker suffices: the database comment
+`cloudiator-bench` (exact match) or the schema `cloudiator_bench_marker` (`to_regnamespace`). The seed file never sets either; a
+unit test pins that. The runbook adds a separate bench-only step 1 (`runbook.md:554`):
+- try `comment on database postgres is 'cloudiator-bench';` first, since it creates no object;
+- if the comment is refused (ownership), use `create schema cloudiator_bench_marker;`. Neither marker appears in the access
+  audit or the schema fingerprint, which read `public` and `private` only.
+
+It also adds a one-line check for production's parity step, which must print `false` (`runbook.md:594`).
+`scripts/hosted-checks.sql` is unchanged. In the DB tests, the success path marks the database with the comment inside the
+rolled-back transaction (COMMENT is transactional; locally `postgres` owns the database). New cases: an unmarked database and
+a near-miss comment (`'cloudiator-bench '`) both refuse; the schema marker seeds 50 (`tests/db/bench-seed.test.ts:177`, `:191`).
+The last case also compares the database comment and the marker schema with their state before the run.
+
+**Minor, the evidence line.** `statusProblem` (`tests/browser/deployed-checks.ts:58`) names a status other than 200 or a
+missing response. `fixedRoutesReload` (`tests/browser/deployed.spec.ts:100`) collects it, plus a page that does not render,
+among its problems, and goes on to its evidence line. `securityHeaders` (`deployed.spec.ts:136`) does the same with a failed
+crawl and a missing chunk. On a stand-in copy of `out/` without `game/index.html`, both lines printed: "3 of 5 routes loaded
+and reloaded with 200; problems 8" and "5 paths checked against _headers; 3 problems".
+
+**Verification.**
+- RED: the unit tests failed 3 (the marker guards, the new columns, `statusProblem`) and the bench DB file failed 2 (the new
+  columns, the unmarked refusal).
+- Mutation: removing the marker refusal failed the unmarked case.
+- `npm test`: 1363/1363. `npm run typecheck`: passed.
+- `npm run test:db`, after the Edge refresh and settle: **312/312** (21 files). Edge start time unchanged
+  (`10:24:52.817Z`).
+- `git diff --check`: clean.
+
+**Concerns.**
+- Whether the hosted owner may comment on the database is untested; the marker schema is the documented fallback.
+- The epoch rule for a seeded bench depends on Avi setting the epoch from the pasted `first_member_boundary`.

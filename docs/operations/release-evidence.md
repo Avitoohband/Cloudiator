@@ -809,7 +809,9 @@ checks the order, that every `npm run` script and `node` file it calls exists, a
 the controller pushes and records the first run. No known blocker remains: Task 23.8 emptied `KNOWN_BLOCKERS`, so any failed
 step exits 1. Exit 2 is reserved for named known blockers, and none is listed. **Since Task 24.0d** the release-gate step sets
 `CLOUDIATOR_CI=github`, and the gate does not run the development browser suite there: it reports the step as `not run on CI`,
-never silently ("The second CI run and the development browser step (Task 24.0d)", below). Every other step runs.
+never silently ("The second CI run and the development browser step (Task 24.0d)", below). Every other step runs. **Since Task
+24.2c** `verify.json` says it at its top level too: `notRun` lists the step (empty when every step ran) and `resultLine` is the
+summary's result line, so a reader that never opens `results` does not see a bare pass.
 
 ### The first CI run and the CI render exception (Tasks 24.0 and 24.0c)
 

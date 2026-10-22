@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CI_ENV, HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, NOT_RUN_ON_CI, childEnv, classifyBrowser, classifyDb, gateSteps, onCi, parseOptions, prepareEdge,
-  refreshAccessTimes, runGate, summarize } from '../../scripts/verify.mjs';
+import { CI_ENV, HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, NOT_RUN_ON_CI, childEnv, classifyBrowser, classifyDb, gateReport, gateSteps, onCi, parseOptions,
+  prepareEdge, refreshAccessTimes, runGate, summarize } from '../../scripts/verify.mjs';
 import { HOST_FAULT_MARKER } from '../browser/host-faults.ts';
 
 // Task 23.6 (R3): `npm run verify` runs every gate of the approved docs/operations/verification-gates.md, in its order, one
@@ -442,6 +442,44 @@ describe('the CI exception: the development browser suite is not run on the GitH
     const summary = summarize(results);
     expect(summary.text).not.toContain('not run on CI');
     expect(summary.text.split('\n').at(-1)).toBe('Result: PASSED; exit 0');
+  });
+
+  // Task 24.2c (the Task 24.0d review's M2): a consumer of `--json` that reads only the top level (the CI artifact, a script)
+  // must never see a bare pass when the CI exception left a step out. The step is named there, beside the verdict.
+  describe('the --json document', () => {
+    const STARTED = '2026-10-22T08:00:00.000Z', FINISHED = '2026-10-22T08:10:00.000Z';
+    /** What a reader of the top level alone sees: every field but the per-step results. */
+    const topLevel = (report: object) => { const { results: _results, ...top } = JSON.parse(JSON.stringify(report)); return top; };
+
+    it('names the step the CI exception left out at the top level, beside the verdict', async () => {
+      const { io } = fakeIo();
+      const results = await runGate(gateSteps({ ci: true }), io);
+      const report = gateReport(results, summarize(results), STARTED, FINISHED);
+      const top = topLevel(report);
+      expect(top).toEqual({ startedAt: STARTED, finishedAt: FINISHED, status: 'passed', exitCode: 0,
+        resultLine: 'Result: PASSED (development browser suite not run on CI); exit 0',
+        notRun: [{ id: 'browser', label: 'development browser suite', note: BROWSER_NOTE }] });
+      expect(JSON.stringify(top)).toContain('not run on CI');
+      // The per-step results are kept as they were: the step's own status is the new value, and every other step passed.
+      expect(report.results).toBe(results);
+      expect(results.find(r => r.id === 'browser')).toMatchObject({ status: 'not run on CI' });
+    });
+
+    it('names it beside a failure and a known blocker too', async () => {
+      const failed = await runGate(gateSteps({ ci: true }), fakeIo({ codes: { production: 1 }, browserReports: { production: [browserReport([['Error: x']])] } }).io);
+      expect(topLevel(gateReport(failed, summarize(failed), STARTED, FINISHED))).toMatchObject({ status: 'failed', exitCode: 1,
+        resultLine: 'Result: FAILED (1 step failed; development browser suite not run on CI); exit 1', notRun: [{ id: 'browser' }] });
+      const { io } = fakeIo({ codes: { db: 1 }, reports: [dbReport([{ name: 'a' }, { ...CAPACITY, errors: BUDGET_FAILURES }])] });
+      const blocked = await runGate(gateSteps({ ci: true }), io, FIXTURE_BLOCKERS);
+      expect(topLevel(gateReport(blocked, summarize(blocked, FIXTURE_BLOCKERS), STARTED, FINISHED))).toMatchObject({ status: 'blocked', exitCode: 2,
+        resultLine: 'Result: BLOCKED (development browser suite not run on CI); 1 known blocker; exit 2', notRun: [{ id: 'browser' }] });
+    });
+
+    it('lists nothing as not run on a local run, where every step runs', async () => {
+      const results = await runGate(gateSteps(), fakeIo().io);
+      expect(topLevel(gateReport(results, summarize(results), STARTED, FINISHED))).toEqual({ startedAt: STARTED, finishedAt: FINISHED,
+        status: 'passed', exitCode: 0, resultLine: 'Result: PASSED; exit 0', notRun: [] });
+    });
   });
 
   it('is switched on by CLOUDIATOR_CI=github alone, and refuses any other value', () => {

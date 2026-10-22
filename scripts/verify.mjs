@@ -43,7 +43,8 @@
  * gate of record runs it", and the result line says so too ("PASSED (development browser suite not run on CI)"), never
  * silently. Every other step runs, the production browser gate included, and the exit code is 0 when they all pass. Unset, as
  * on a development machine, every step runs: the local run is the gate of record. Any other value is refused before the gate
- * starts.
+ * starts. The `--json` document says it at its top level too (Task 24.2c): `notRun` lists the step, and `resultLine` is the
+ * summary's result line, so a reader that never opens `results` does not see a bare pass.
  *
  * Options: --config <playwright config> (both browser steps), --dev-port <n>, --static-port <n> (the repository config's
  * ports; defaults 3100 and 4173), --results <dir> (test-results), --json <file> (the results as JSON), --edge-quiet <s> (30),
@@ -337,9 +338,24 @@ export function summarize(results, blockers = KNOWN_BLOCKERS) {
   // A step the CI exception left out is never a silent pass: the result line names it beside any failures.
   const notes = [failed.length && `${failed.length} step${failed.length === 1 ? '' : 's'} failed`,
     ...results.filter(r => r.status === NOT_RUN_ON_CI).map(r => `${r.label} not run on CI`)].filter(Boolean);
-  lines.push(`Result: ${status.toUpperCase()}${notes.length ? ` (${notes.join('; ')})` : ''}`
-    + `${blocked.length ? `; ${ids.size} known blocker${ids.size === 1 ? '' : 's'}` : ''}; exit ${exitCode}`);
-  return { status, exitCode, text: lines.join('\n') };
+  const resultLine = `Result: ${status.toUpperCase()}${notes.length ? ` (${notes.join('; ')})` : ''}`
+    + `${blocked.length ? `; ${ids.size} known blocker${ids.size === 1 ? '' : 's'}` : ''}; exit ${exitCode}`;
+  lines.push(resultLine);
+  return { status, exitCode, text: lines.join('\n'), resultLine };
+}
+
+/**
+ * The `--json` document (Task 24.2c). Its top level holds the verdict, the summary's result line and `notRun`, every step the
+ * CI exception left out (empty when every step ran), so a reader of the top level alone never sees a bare pass; `results`
+ * keeps one entry per step, as before.
+ * @param {{ id: string, status: string, label?: string, note?: string }[]} results
+ * @param {{ status: string, exitCode: number, resultLine: string }} summary the summarize() of `results`
+ * @param {string} startedAt
+ * @param {string} finishedAt
+ */
+export function gateReport(results, summary, startedAt, finishedAt) {
+  const notRun = results.filter(r => r.status === NOT_RUN_ON_CI).map(r => ({ id: r.id, label: r.label, note: r.note }));
+  return { startedAt, finishedAt, status: summary.status, exitCode: summary.exitCode, resultLine: summary.resultLine, notRun, results };
 }
 function duration(ms) {
   const s = Math.round((ms ?? 0) / 1000);
@@ -585,7 +601,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   rmSync(report, { force: true });
   const summary = summarize(results);
   console.log(summary.text);
-  if (options.json) writeFileSync(options.json, `${JSON.stringify({ startedAt: startedAtIso, finishedAt: new Date().toISOString(), status: summary.status,
-    exitCode: summary.exitCode, results }, null, 2)}\n`);
+  if (options.json) writeFileSync(options.json, `${JSON.stringify(gateReport(results, summary, startedAtIso, new Date().toISOString()), null, 2)}\n`);
   process.exitCode = summary.exitCode;
 }

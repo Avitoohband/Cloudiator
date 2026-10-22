@@ -465,7 +465,8 @@ locally through the container after the label check). Neither prints a secret, k
   default ACL and cron job, plus the seed counts. It is the fingerprint the migration replays compared since Task 13; compare
   the hosted output with a clean local replay of the same commit right after `db push`, as sets of lines (step 4 above reads
   a `line` column the same way), with the same `current_schemas(false)` on both sides.
-- `scripts/hosted-checks.sql`: `section | item | value` rows for migration parity, the scheduler and epoch, dispatches per
+- `scripts/hosted-checks.sql`: `section | item | value` rows for migration parity (and whether the database carries the bench
+  marker: `absent`, or `present (comment)` or `present (schema)`, never any other comment text), the scheduler and epoch, dispatches per
   scheduled minute, job-attempt durations per kind, boundary publication latency, pg_net response codes, duplicate grants,
   one character per account and the trade fee and owner checks.
 `tests/db/hosted-checks.test.ts` runs both inside a read-only transaction. Neither has been run against a hosted project yet:
@@ -591,7 +592,9 @@ next full slot, never in the past" applies only to the empty production project,
 soon after seeding: the coordinator replays every boundary from `first_member_boundary` to the present, up to 6 a tick, before
 it publishes the current one.
 
-**Production must carry neither marker.** In production's parity step (24.4), as the database owner, this must print `false`:
+**Production must carry neither marker.** In production's parity step (24.4), the `bench marker` row of the `parity` section of
+`scripts/hosted-checks.sql` must read `absent` (Task 24.2c). The fallback, if that kit cannot run, is this query as the database
+owner, which must print `false`:
 ```sql
 select coalesce(shobj_description((select oid from pg_database where datname = current_database()), 'pg_database'), '') = 'cloudiator-bench'
   or to_regnamespace('cloudiator_bench_marker') is not null as marked_as_bench;

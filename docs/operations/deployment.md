@@ -260,7 +260,7 @@ result as CSV.
    `<work>` path.
 2. **[Avi]** In the SQL editor, with the project selector showing this project's name:
    - `select current_schemas(false);` **Paste** the result (expected `{public,extensions}`, the same as locally).
-   - Production only: `select shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as comment, to_regnamespace('cloudiator_bench_marker') as marker;` **Paste** both values: production must show neither `cloudiator-bench` nor a marker schema.
+   - Production's bench marker needs no query of its own: the `bench marker` row of `scripts/hosted-checks.sql`'s `parity` section (the third file below) must read `absent`, and Claude checks it in step 3. Fallback, only if that kit cannot run on production (Task 24.2c): `select shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as comment, to_regnamespace('cloudiator_bench_marker') as marker;` **Paste** both values: production must show neither `cloudiator-bench` nor a marker schema.
    - Run `scripts/schema-fingerprint.sql`; save as `<work>\hosted-schema-fingerprint.csv`.
    - Run `scripts/access-audit.sql`; save as `<work>\hosted-access-audit.csv`.
    - Run `scripts/hosted-checks.sql`; save as `<work>\hosted-checks.csv`.
@@ -272,7 +272,9 @@ result as CSV.
    - access audit: the runbook's steps 4–6; only `platform-default` and `database` rows may differ, and no finding row may
      appear on either side;
    - hosted checks, `parity`: migrations count 22, last `20261020075858`, server version 17, the same search-path schemas,
-     0 triggers disabled, and a functions digest equal to the local one;
+     0 triggers disabled, a functions digest equal to the local one, and `bench marker` `absent` (the bench is marked only
+     later, in its seeding step, so this holds on both projects; on production it must hold for good, and anything else
+     stops the run);
    - hosted checks, `scheduler`: scheduler `false`, epoch `unset`, both cron jobs (`cloudiator-coordinate` `* * * * *`,
      `cloudiator-cleanup` `23 * * * *`) `active=true`, both Vault names `missing` (they come later).
    - `pg_net.ttl`: if it reads `absent`, Claude adds the guarded `net._http_response` delete as a new reviewed migration

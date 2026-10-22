@@ -9,7 +9,10 @@
 --   parity            migrations (count, first, last, versions), the server version, the schemas the search path resolves to,
 --                     pg_net.ttl, and object counts with a digest of every public/private function (name, body hash, ACL), to
 --                     set beside the same file's output on the local M01-M22 replay (Task 24.4; scripts/schema-fingerprint.sql
---                     is the full comparison)
+--                     is the full comparison); and `bench marker`: `absent`, or `present (comment)`, `present (schema)` or
+--                     `present (comment, schema)` when the database carries the bench's mark (the database comment
+--                     'cloudiator-bench', exactly, or the schema cloudiator_bench_marker; scripts/bench-seed.mjs). Production
+--                     must read `absent` (Task 24.2c). It never prints any other comment text.
 --   scheduler         the scheduler flag and dispatch budget, the season epoch, the current and next slot, the coordinator
 --                     (published slot, last SQLSTATE, lease), open boundaries, both cron jobs, the two Vault secrets by name,
 --                     and the lowest processed slot of any character (Tasks 24.5 and 24.7)
@@ -37,6 +40,9 @@
 with
   clock as (select private.planning_now_ms() as now_ms),
   scheduler as (select s.enabled, s.max_dispatch_per_minute from private.scheduler s where s.singleton),
+  bench as (
+    select coalesce(shobj_description((select d.oid from pg_database d where d.datname = current_database()), 'pg_database'), '') = 'cloudiator-bench' as by_comment,
+      to_regnamespace('cloudiator_bench_marker') is not null as by_schema),
   minutes as (
     select d.dispatched_at_ms / 60000 as minute, count(*) as n from private.dispatch_log d, clock
     where d.dispatched_at_ms > clock.now_ms - 86400000 and d.dispatched_at_ms <= clock.now_ms group by 1),
@@ -87,6 +93,9 @@ with
       where not t.tgisinternal and c.relnamespace in ('public'::regnamespace, 'private'::regnamespace)
     union all select 'parity', 13, 'triggers disabled', count(*)::text from pg_trigger t join pg_class c on c.oid = t.tgrelid
       where not t.tgisinternal and t.tgenabled = 'D' and c.relnamespace in ('public'::regnamespace, 'private'::regnamespace)
+    union all select 'parity', 14, 'bench marker', case when by_comment or by_schema
+        then 'present (' || concat_ws(', ', case when by_comment then 'comment' end, case when by_schema then 'schema' end) || ')' else 'absent' end
+      from bench
     -- scheduler
     union all select 'scheduler', 1, 'scheduler enabled', coalesce((select enabled::text from scheduler), 'missing')
     union all select 'scheduler', 2, 'scheduler maxDispatchPerMinute', coalesce((select max_dispatch_per_minute::text from scheduler), 'missing')

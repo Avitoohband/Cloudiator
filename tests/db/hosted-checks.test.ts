@@ -111,6 +111,49 @@ describe('the read-only hosted SQL kits', () => {
     expect(value(rows, 'duplicate-grants', 'total (duplicateGrants)')).toBe('0');
   });
 
+  // Task 24.2c (the Task 24.2b review's minor): production must carry neither bench marker (the database comment
+  // 'cloudiator-bench' or the schema cloudiator_bench_marker, the two marks scripts/bench-seed.mjs looks for), so the kit's
+  // parity section reports whether either is present, by marker name, and never any other comment text. Each mark is planted
+  // inside a transaction that always rolls back.
+  it('reports whether the database carries a bench marker, by marker name only, and leaves the local database unmarked', { timeout: 30_000 }, async () => {
+    const marked = async () => {
+      const [row] = await sql`select shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as comment,
+        to_regnamespace('cloudiator_bench_marker') is not null as marker_schema`;
+      return row.comment === 'cloudiator-bench' || row.marker_schema === true;
+    };
+    expect(await marked(), 'the local database starts unmarked').toBe(false);
+    const markerRow = (rows: Check[]) => rows.filter(r => r.item === 'bench marker');
+    const withMarks = (plant: (tx: postgres.TransactionSql) => Promise<unknown>) => rolledBack(async tx => {
+      await plant(tx);
+      return [...await tx.unsafe(CHECKS)] as unknown as Check[];
+    });
+    const reads = (value: string) => [{ section: 'parity', item: 'bench marker', value }];
+
+    const absent = await readOnly(CHECKS) as unknown as Check[];
+    expect(markerRow(absent)).toEqual(reads('absent'));
+    const comment = await withMarks(tx => tx`comment on database postgres is 'cloudiator-bench'`);
+    expect(markerRow(comment)).toEqual(reads('present (comment)'));
+    const schema = await withMarks(tx => tx`create schema cloudiator_bench_marker`);
+    expect(markerRow(schema)).toEqual(reads('present (schema)'));
+    const both = await withMarks(async tx => { await tx`comment on database postgres is 'cloudiator-bench'`; await tx`create schema cloudiator_bench_marker`; });
+    expect(markerRow(both)).toEqual(reads('present (comment, schema)'));
+
+    // Any other comment is no marker (the seed compares exactly), and its text is never printed.
+    const OTHER = `bench-marker-probe-${randomUUID()}`;
+    const other = await withMarks(tx => tx.unsafe(`comment on database postgres is '${OTHER}'`));
+    expect(markerRow(other)).toEqual(reads('absent'));
+    const nearMiss = await withMarks(tx => tx`comment on database postgres is 'cloudiator-bench '`);
+    expect(markerRow(nearMiss)).toEqual(reads('absent'));
+    for (const r of other) expect(`${r.section} ${r.item} ${r.value}`).not.toContain(OTHER);
+    // The row sits in the parity section and every section is still printed.
+    for (const rows of [absent, comment, schema, both, other, nearMiss]) {
+      expect([...new Set(rows.map(r => r.section))]).toEqual(CHECK_SECTIONS);
+      expect(rows.filter(r => r.item === 'bench marker').map(r => r.section)).toEqual(['parity']);
+    }
+
+    expect(await marked(), 'the local database is left unmarked').toBe(false);
+  });
+
   it('reports a two-account trade, one character per account and the Vault secrets by name, never a secret, id or email', { timeout: 60_000 }, async () => {
     const seller = await fighter(1000), buyer = await fighter(1000);
     const entry = CATALOG_V1.items['sword:1:common'];

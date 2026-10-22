@@ -46,7 +46,7 @@ unit tests' own path, printed by a scratch script, and `tests/scripts/verify.tes
 
 **The 24.0c tag mechanism: removed; the tags kept as documentation.** Deleted `scripts/ci-render.mjs`; `playwright.config.ts`
 is back to its pre-24.0c form (no `grepInvert`); `scripts/verify.mjs` lost `exclude`, `excludeRender`, `countExcluded` and
-`countListed`. This was the smaller clean change: the 74 `{ tag: '@render' }` annotations in 13 spec files stay (no spec
+`countListed`. This was the smaller clean change: the 74 tests (72 `{ tag: '@render' }` annotations in 13 spec files, 148 runs) stay tagged (no spec
 edit beyond the one test below), they document which tests are render-bound, and Playwright filters on them natively:
 `npx playwright test --list --grep @render` lists 148 of the 582 tests, `--grep-invert @render` the other 434 (run
 2026-10-21, matching the Task 24.0c count). Nothing reads them in a gate, so there is no half-used path.

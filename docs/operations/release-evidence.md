@@ -881,7 +881,7 @@ start time unchanged (7 min 33 s), the isolated production build and its scan, t
   exit code is 0 when everything else passes. Tested with a fake runner (`tests/scripts/verify.test.ts`, "the CI exception"); the
   real gate was not run in CI mode.
 - **The Task 24.0c exclusion is removed:** `scripts/ci-render.mjs`, the `grepInvert` in `playwright.config.ts` and the count in
-  `scripts/verify.mjs` are gone. No test's assertions changed. The 74 `@render` tags remain as documentation of which tests are
+  `scripts/verify.mjs` are gone. No test's assertions changed. The 74 `@render` tests (72 annotations, 148 runs) remain tagged as documentation of which tests are
   render-bound, and as a manual filter: `npx playwright test --list --grep @render` lists 148 of the 582 tests, and
   `--grep-invert @render` the other 434.
 - **Time zone (Task 24.0d).** Besides the unit test above, the 360 px stage-time test of `tests/browser/expedition.spec.ts`

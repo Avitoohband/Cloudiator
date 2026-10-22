@@ -112,9 +112,13 @@ describe('scripts/build-headers.mjs', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('NEXT_PUBLIC_SUPABASE_URL is not set');
     // Fix round 1 (Minor 4): the shell variable is the recommended local route, because the isolated browser-test build reads
-    // `.env.production.local` too, and its bundle and `_headers` would then carry that URL.
+    // the `.env*` files too, and its bundle and `_headers` would then carry that URL. Task 24.2c (the Task 24.1 review's minor):
+    // every file `next build` reads does that, not only `.env.production.local`, and the message says so.
     expect(result.stderr).toContain('set it in the shell for a local build: NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build');
-    expect(result.stderr).toContain('.env.production.local is also read by the isolated browser-test build');
+    expect(result.stderr).toContain('Any .env file that next build reads (.env.production.local, .env.local, .env.production, .env) is also read by the '
+      + 'isolated browser-test build, whose bundle and _headers would then carry that URL.');
+    expect(result.stderr).not.toContain('Avoid .env.production.local for this');
+    expect(result.stderr).not.toContain('.env.production.local is also read');
     expect(existsSync(join(directory, '_headers'))).toBe(false);
     expect(existsSync(join(directory, 'assets/gallery.html'))).toBe(true);
   });

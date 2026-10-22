@@ -157,9 +157,9 @@ export function finishExport(root, env = process.env) {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set: a production export must name its Supabase project in connect-src. Set it '
       + 'in the hosting build settings for a deploy, and set it in the shell for a local build: '
       + 'NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 npm run build (a hosted project URL for a local deploy build). '
-      + 'Avoid .env.production.local for this: .env.production.local is also read by the isolated browser-test build, whose '
-      + 'bundle and _headers would then carry that URL. Only the browser-test export (CLOUDIATOR_BROWSER_TEST=true) is built '
-      + 'without one.');
+      + 'Any .env file that next build reads (.env.production.local, .env.local, .env.production, .env) is also read by the '
+      + 'isolated browser-test build, whose bundle and _headers would then carry that URL. Keep the URL in the shell variable, '
+      + 'out of those files. Only the browser-test export (CLOUDIATOR_BROWSER_TEST=true) is built without one.');
   }
   writeFileSync(join(root, '_headers'), headersFile(origin));
   const gallery = existsSync(join(root, GALLERY));

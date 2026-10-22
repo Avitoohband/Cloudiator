@@ -462,9 +462,12 @@ Task 24.1 (plan Decision 1). Two more read-only files, each one SELECT, for the 
 lists its sections and how to run it (the hosted SQL editor as the database owner, no row limit, downloaded as CSV; or
 locally through the container after the label check). Neither prints a secret, key, token or email.
 - `scripts/schema-fingerprint.sql`: one `line` per function, relation, column, policy, trigger, constraint, index, schema ACL,
-  default ACL and cron job, plus the seed counts. It is the fingerprint the migration replays compared since Task 13; compare
-  the hosted output with a clean local replay of the same commit right after `db push`, as sets of lines (step 4 above reads
-  a `line` column the same way), with the same `current_schemas(false)` on both sides.
+  default ACL and cron job, plus the seed counts. It is the fingerprint the migration replays compared since Task 13, with one
+  caveat: since Task 24.1 its `fn`, `rel` and `cron` lines print names and md5 hashes (a function's settings and a view's options
+  as their names and an md5 of their values, a cron job's command as an md5), so compare it only with an output of the same
+  script, never with a scratch copy's lines from before. Compare the hosted output with a clean local replay of the same commit
+  right after `db push`, as sets of lines (step 4 above reads a `line` column the same way), with the same
+  `current_schemas(false)` on both sides.
 - `scripts/hosted-checks.sql`: `section | item | value` rows for migration parity (and whether the database carries the bench
   marker: `absent`, or `present (comment)` or `present (schema)`, never any other comment text), the scheduler and epoch, dispatches per
   scheduled minute, job-attempt durations per kind, boundary publication latency, pg_net response codes, duplicate grants,

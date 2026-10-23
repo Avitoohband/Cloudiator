@@ -177,7 +177,11 @@ Names only; never print the values.
   `GAME_ALLOWED_ORIGINS` (configuration, not a secret). Locally they live in the git-ignored `.env.edge.local`.
   `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform.
 
-Rotating the worker secret on a live database (both sides must hold the same value):
+Rotating the worker secret on a live database (both sides must hold the same value): pause the scheduler, run
+`node scripts/set-worker-secret.mjs --project-ref <ref>` from the worktree linked to that project (it generates a new value,
+sets the Edge secret and both Vault secrets without displaying it, and confirms both Vault names), then resume and run the
+health check as in step 5. It also serves after a restore, because it creates absent Vault names. The manual steps below are
+the fallback when the script cannot run:
 1. Pause the scheduler.
 2. Generate a new value without displaying it into a private, git-ignored file outside the repository. Let node write the file,
    with its path as an argument: never redirect with `>`, which in Windows PowerShell 5.1 writes UTF-16LE that

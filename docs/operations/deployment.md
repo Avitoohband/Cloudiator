@@ -287,18 +287,15 @@ result as CSV.
 
 ### Edge secrets
 
-1. **[Avi]** Write the Edge env file without displaying the secret ([runbook, "Secret rotation"](runbook.md#secret-rotation)
-   step 2: node writes the file; `wx` refuses to overwrite; never redirect with `>`, which writes UTF-16 in PowerShell 5.1):
-   ```powershell
-   node -e "require('fs').writeFileSync(process.argv[1], 'GAME_ALLOWED_ORIGINS=' + process.argv[2] + '\nGAME_WORKER_SECRET=' + require('crypto').randomBytes(32).toString('base64url') + '\n', { flag: 'wx' })" '<private folder>\<project>-edge.env' '<origin>'
-   ```
-   `GAME_ALLOWED_ORIGINS` is the exact `<origin>`: one origin, no trailing slash (`game-command` refuses to start on
-   anything that is not an exact origin).
-2. **[Avi]** `npx supabase secrets set --help`, then
-   `npx supabase secrets set --env-file '<private folder>\<project>-edge.env' --project-ref <ref>`.
-3. **[Avi]** `npx supabase secrets list --project-ref <ref>`. **Paste** the names only: `GAME_ALLOWED_ORIGINS`,
-   `GAME_WORKER_SECRET` and the platform's `SUPABASE_*` names. Never the digest column.
-4. **[Avi]** Keep the file until the Vault step below.
+1. **[Claude]** Set the allowed origin (configuration, not a secret): the exact `<origin>`, one origin, no trailing slash
+   (`game-command` refuses to start on anything that is not an exact origin):
+   `npx supabase secrets set GAME_ALLOWED_ORIGINS=<origin> --project-ref <ref>`.
+2. **[Avi]** From the worktree linked to `<ref>`, with the scheduler off: `node scripts/set-worker-secret.mjs --project-ref <ref>`.
+   It generates the worker secret and sets the same value as the Edge secret `GAME_WORKER_SECRET` and the Vault secrets
+   `game_worker_url` and `game_worker_secret` (see "Vault secrets" below). The value is never displayed and its private
+   temporary folder is deleted afterwards. **Paste:** the `ok`/`failed` lines.
+3. **[Claude]** `npx supabase secrets list --project-ref <ref>`, names only: `GAME_ALLOWED_ORIGINS`, `GAME_WORKER_SECRET`
+   and the platform's `SUPABASE_*` names. Never the digest column.
 
 ### Deploy the functions
 
@@ -330,28 +327,15 @@ curl.exe -s -i -X POST "$fn/game-worker"
   tells Avi, redeploys `game-command` after Avi's go, and probes again. The handler already verifies the Google user.
 - A 5xx from a function means it did not start (a missing or malformed secret, or missing legacy keys): check the Edge secrets
   and the project's legacy keys.
-- Commit `ops: verify hosted CORS and the worker boundary` (24.5) after the Vault step.
+- Commit `ops: verify hosted CORS and the worker boundary` (24.5) after the Edge secrets step.
 
 ### Vault secrets
 
-Always `vault.create_secret`, never `vault.update_secret`: on a new database there is no row to update, and `update_secret`
-then changes nothing without an error ([runbook, "After a restore, create both Vault secrets"](runbook.md#secret-rotation)).
-
-1. **[Avi]** Copy the worker secret to the clipboard without displaying it:
-   ```powershell
-   $line = Get-Content -LiteralPath '<private folder>\<project>-edge.env' | Where-Object { $_.StartsWith('GAME_WORKER_SECRET=') }
-   Set-Clipboard -Value $line.Substring('GAME_WORKER_SECRET='.Length); Remove-Variable line
-   ```
-2. **[Avi]** In a **new, unsaved** SQL editor query (never a snippet), paste the secret between the quotes of the second line
-   and run:
-   ```sql
-   select vault.create_secret('<project-url>/functions/v1/game-worker', 'game_worker_url');
-   select vault.create_secret('<paste>', 'game_worker_secret');
-   ```
-   Then delete that query and its history entry, clear the clipboard (`Set-Clipboard -Value ' '`), and delete the env file
-   (`Remove-Item -LiteralPath '<private folder>\<project>-edge.env'`): both sides now hold the value.
-3. **[Avi]** In a new query: `select name from vault.secrets where name in ('game_worker_url', 'game_worker_secret') order by name;`
-   **Paste:** the two names. (If the owner cannot read `vault.secrets`, read the names in Integrations → Vault instead.)
+Set by `scripts/set-worker-secret.mjs` in the Edge secrets step. It creates each name when absent (a new or restored database
+has no row, and `vault.update_secret` alone would change nothing without an error) and updates it when present. It sends one
+SELECT, so the query statistics store its values as placeholders, and its last line confirms both names are present. If any
+line reads `failed`, keep the scheduler off and rerun the script. The manual fallback is in the
+[runbook, "Secret rotation"](runbook.md#secret-rotation).
 
 ### Pages variables
 

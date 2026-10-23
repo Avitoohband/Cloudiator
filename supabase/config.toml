@@ -35,8 +35,10 @@ enable_signup = false
 enable_signup = false
 # Google provider credentials and exact production redirect/origins are configured in Task24.
 # Command verification additionally requires a verified Google identity, even locally.
+# Task 24 Decision 9: hosted projects sign user tokens with an asymmetric key (ECC P-256), which the gateway's legacy JWT
+# check does not cover, so the gateway check is off. The handler verifies every caller through Auth (getUser) itself.
 [functions.game-command]
-verify_jwt = true
+verify_jwt = false
 # The handler checks an explicit server-only worker secret; JWTs and publishable keys are not authorization.
 [functions.game-worker]
 verify_jwt = false

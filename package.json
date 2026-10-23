@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.3",
-    "next": "16.4.0",
+    "next": "16.4.3",
     "phaser": "4.2.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"

@@ -7,8 +7,8 @@ as the database owner, from the operator's own shell or the hosting dashboard's 
 
 Ground rules for every section:
 - Never print `supabase status`, keys, JWTs, connection strings or `.env*` contents. Secrets are named here, never shown.
-- Connection strings live only in the operator's shell environment (`CLOUDIATOR_DB_URL`, `CLOUDIATOR_EXPORT_DB_URL`), never in
-  a file in the repository, a command argument or a chat.
+- Connection strings live only in the operator's shell environment (`CLOUDIATOR_DB_URL`, `CLOUDIATOR_EXPORT_DB_URL`,
+  `CLOUDIATOR_RESTORE_DB_URL`), never in a file in the repository, a command argument or a chat.
 - Where this guide says "SQL", run it as the database owner (`postgres`) in the hosted SQL editor, or locally with
   `docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1` after checking the container's
   `com.supabase.cli.project` label is `Cloudiator` (see `docs/operations/environment.md`).
@@ -29,7 +29,8 @@ finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr); Remove-Variabl
 Remove-Item Env:CLOUDIATOR_DB_URL
 ```
 
-Use `CLOUDIATOR_EXPORT_DB_URL` in place of `CLOUDIATOR_DB_URL` for the export. In Git Bash the equivalent is
+Use `CLOUDIATOR_EXPORT_DB_URL` in place of `CLOUDIATOR_DB_URL` for the export and `CLOUDIATOR_RESTORE_DB_URL` for a hosted
+restore. In Git Bash the equivalent is
 `read -rs CLOUDIATOR_DB_URL && export CLOUDIATOR_DB_URL`, then `unset CLOUDIATOR_DB_URL`. After pasting from the dashboard's
 copy button, clear the clipboard. If a connection string ever reached a command line, delete that line from the history file
 and rotate the database password in the dashboard.
@@ -343,12 +344,60 @@ the copy, the restored checkpoint is published and replays structurally, and the
 `guard_frozen` and `guard_receipt`) refuse a second settlement and a deletion in the copy. The replay alone is not that
 proof; the guard probes are. It is a separate database in the
 local cluster, so roles come from that cluster and pg_cron is absent. Restoring the hosted service itself (a new project,
-migrations, the data, the Vault secrets, the cron jobs) is Task 24's procedure.
+migrations, the data, the Vault secrets, the cron jobs) is ["Hosted restore"](#hosted-restore) below.
 
 **Seeding a local world for the check.** A fresh local database has no published boundary to replay. Build a small real world
 first with `npm run test:db -- tests/db/restore-world.test.ts` (four characters, an open listing and a catch-up through
 boundary 1009 that closes season 1); that file deliberately leaves its world in place. Follow the database-test rule in
 `docs/operations/verification-gates.md`.
+
+### Hosted restore
+
+Task 24.10. When the hosted project is lost or damaged, rebuild it from the newest backup whose restore check passed. The data
+goes into a **new** project after its migrations; `scripts/restore-hosted.ps1` refuses any project that already has an
+account, a character, a season epoch or the scheduler on, or whose migrations differ from the backup's, so it cannot overwrite
+a live database. The roles, the platform schemas, the migration history and both cron schedules come from `db push`, not
+from the backup.
+
+1. **New project** ([deployment checklist](deployment.md), Part 2): create it, the Data API, Auth and the Google client, link it,
+   `db push` (the backup's migrations: the manifest lists them), parity, the Edge secrets, the functions and the probes. Do not
+   set Vault secrets, the epoch or the scheduler yet. A new project has a new URL: the client needs the new Pages variables and a
+   new deploy, and the Google client the new authorized domain and redirect URI.
+2. **The data [Operator].** Copy the project's CA into the local container as for the export
+   (["Connections and TLS"](#connections-and-tls)), set `CLOUDIATOR_RESTORE_DB_URL` at the secure prompt
+   (["Entering a connection string"](#entering-a-connection-string)) plus `?sslmode=verify-full` (the session pooler if the
+   direct host fails), then:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-hosted.ps1 -Backup '<private folder>ackups<stamp>'
+   "exit $LASTEXITCODE"
+   Remove-Item Env:CLOUDIATOR_RESTORE_DB_URL
+   ```
+   It verifies the checksums, reads the project's facts (`scripts/restore-hosted-facts.sql`), keeps the data dump's listing to the
+   public and private tables and sequences plus `auth.users` and `auth.identities` (`HOSTED_RESTORE_DATA` in
+   `scripts/restore-compare.mjs`), and loads them in one transaction: `scripts/restore-hosted-before.sql` (the refusal again,
+   the game's triggers off, the rows the migrations seeded truncated), the data, `scripts/restore-hosted-after.sql` (the
+   triggers on, the scheduler off). The hosted `postgres` may not set `session_replication_role` (permission denied on the
+   bench, 2026-10-24), so the restore check's replica mode is not used; foreign keys stay checked, in the dump's own order.
+   Then `scripts/restore-invariants.sql` runs on the project. Exit `0`: every table's rows equal the manifest's and every
+   invariant holds; `1`: a check failed after the load (do not open the game; restore again into another new project);
+   `2`: refused or failed before or during the load, which rolled back (`target-not-fresh`, `migrations-mismatch`,
+   `checksum-mismatch`, `facts-failed`, `data-restore-failed`, the URL and container codes of the export). It discards
+   psql's error text, which can quote a row; `data-restore-failed` therefore names no statement: rerun the restore check on
+   the backup locally to find it. **Paste:** the exit line, `ok`, `counts`, `mismatches` and `leftOut.entries`.
+   Left out, and reported: the other sign-in tables (audit log, MFA, OAuth, SSO, WebAuthn and Auth's own migration history),
+   the platform's tables and the cron schedules (the new project's own stay). Players sign in again; their Google identity
+   lands on the restored account.
+3. **Vault [Claude]:** `node scripts/set-worker-secret.mjs --project-ref <ref>` creates both names (a restored database
+   never carries them; ["Secret rotation"](#secret-rotation)) and sets the matching Edge secret.
+4. **The scheduler [Operator]:** the restored season epoch stays; enable with the deployment checklist's Activation step 4
+   statement (the epoch and both Vault names must exist), then `select private.cleanup_tick();`.
+5. **Health:** the health check until `slotsBehind` is `0`. Catch-up replays every boundary since the backup at up to 6 a
+   minute, then cleanup catches up hourly (["Free-tier pausing"](#free-tier-pausing)).
+
+Tested locally (2026-10-24): the Task 22.4 restore world exported through `host.docker.internal`, the local database reset
+to its 22 migrations, then the restore: exit 0, 56 tables and 1,059 rows equal to the manifest, every invariant held, the
+triggers enabled, the scheduler off, both migration-made cron jobs present; a second run refused with `target-not-fresh`.
+The local `postgres` is not a superuser either. The bench rehearsal (deployment checklist, 24.10) is the hosted test.
 
 ## Free-tier pausing
 

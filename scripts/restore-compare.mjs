@@ -109,21 +109,72 @@ const ENTRY = /^(\d+); \d+ \d+ ([A-Z][A-Z ]*[A-Z]) (\S+) (.*)$/;
 const excludedBy = (entry, rule) => (rule.type === '*' || rule.type === entry.type) && rule.schema === entry.schema
   && (rule.name === '*' || rule.name === entry.name);
 
+/** One pg_restore -l entry as {id, type, schema, name}, or null for a comment or blank line. */
+function listEntry(line) {
+  const match = ENTRY.exec(line.replace(/\r$/, ''));
+  if (!match) return null;
+  const [, id, type, schema, rest] = match;
+  const owner = rest.endsWith(' ') ? '' : rest.slice(rest.lastIndexOf(' ') + 1);
+  const name = owner ? rest.slice(0, rest.length - owner.length - 1) : rest.trimEnd();
+  return { id: Number(id), type, schema, name };
+}
+
 /** Removes the RESTORE_EXCLUSIONS entries from a pg_restore -l listing. Returns the listing to restore and what was left out. */
 export function filterRestoreList(listing) {
   const excluded = [];
   const kept = listing.split('\n').filter(line => {
-    const match = ENTRY.exec(line.replace(/\r$/, ''));
-    if (!match) return true;
-    const [, id, type, schema, rest] = match;
-    const owner = rest.endsWith(' ') ? '' : rest.slice(rest.lastIndexOf(' ') + 1);
-    const name = owner ? rest.slice(0, rest.length - owner.length - 1) : rest.trimEnd();
-    const entry = { id: Number(id), type, schema, name };
-    if (!RESTORE_EXCLUSIONS.some(rule => excludedBy(entry, rule))) return true;
+    const entry = listEntry(line);
+    if (!entry || !RESTORE_EXCLUSIONS.some(rule => excludedBy(entry, rule))) return true;
     excluded.push(entry);
     return false;
   });
   return { list: kept.join('\n'), excluded };
+}
+
+/**
+ * The data a hosted restore (Task 24.10, scripts/restore-hosted.ps1) loads into a new project after `db push`: the game's
+ * tables and sequences, and the accounts with their Google identities, so a player's next Google sign-in lands on the same
+ * account and character. The new project already holds its migration history, its platform tables and the two cron
+ * schedules (the migrations create them), and nothing else of the backup is game state: the other sign-in tables (audit log,
+ * MFA, OAuth and SSO, auth's own migration history) are left out and reported, and players sign in again.
+ */
+export const HOSTED_RESTORE_DATA = Object.freeze({ schemas: Object.freeze(['public', 'private']),
+  tables: Object.freeze(['auth.users', 'auth.identities']) });
+
+const hostedKeeps = entry => (entry.type === 'TABLE DATA' || entry.type === 'SEQUENCE SET')
+  && (HOSTED_RESTORE_DATA.schemas.includes(entry.schema)
+    || (entry.type === 'TABLE DATA' && HOSTED_RESTORE_DATA.tables.includes(`${entry.schema}.${entry.name}`)));
+
+/**
+ * Keeps only HOSTED_RESTORE_DATA's entries of a data dump's pg_restore -l listing, in the listing's own order (pg_dump sorts
+ * a data-only dump's tables by their foreign keys). Returns the listing to restore, what it keeps and what it leaves out.
+ */
+export function filterHostedList(listing) {
+  const kept = [], leftOut = [];
+  const list = listing.split('\n').filter(line => {
+    const entry = listEntry(line);
+    if (!entry) return true;
+    (hostedKeeps(entry) ? kept : leftOut).push(entry);
+    return hostedKeeps(entry);
+  });
+  return { list: list.join('\n'), kept, leftOut };
+}
+
+/**
+ * Whether a hosted project may receive a backup (Task 24.10): a new project, exactly at the backup's migrations, with no
+ * account, no character, no season epoch and the scheduler off. Anything else could be a live database, so it is refused.
+ *   facts: {migrations: [{version, name}], accounts, characters, epochSet, schedulerEnabled} (scripts/restore-hosted.ps1)
+ */
+export function checkHostedTarget(manifest, facts) {
+  const versions = list => Array.isArray(list) && list.every(m => typeof m?.version === 'string') ? list.map(m => m.version) : null;
+  const expected = versions(manifest?.migrations);
+  if (!expected || expected.length === 0) return { ok: false, code: 'manifest-invalid' };
+  const actual = versions(facts?.migrations);
+  if (!actual || !isCount(facts.accounts) || !isCount(facts.characters) || typeof facts.epochSet !== 'boolean'
+    || typeof facts.schedulerEnabled !== 'boolean') return { ok: false, code: 'target-facts-invalid' };
+  if (facts.accounts > 0 || facts.characters > 0 || facts.epochSet || facts.schedulerEnabled) return { ok: false, code: 'target-not-fresh' };
+  if (actual.join(',') !== expected.join(',')) return { ok: false, code: 'migrations-mismatch' };
+  return { ok: true, migrations: expected.length };
 }
 
 /** Counts data rows per COPY block in pg_restore's SQL output, line by line. A block without its terminator throws. */
@@ -258,6 +309,46 @@ const commands = {
     writeFileSync(join(work, `${kind}-excluded.json`), JSON.stringify(excluded) + '\n');
     process.stdout.write(JSON.stringify({ ok: true, kind, excluded: excluded.length }) + '\n');
     return 0;
+  },
+  /** hosted-target <backupDir> <facts.json>: whether the hosted project may receive this backup (checkHostedTarget). */
+  async 'hosted-target'(dir, factsPath) {
+    const verdict = checkHostedTarget(readManifest(dir), readJson(factsPath));
+    process.stdout.write(JSON.stringify(verdict) + '\n');
+    return verdict.ok ? 0 : 1;
+  },
+  /** hosted-list <workDir>: filters data.toc into data.list (filterHostedList) and writes data-left-out.json. */
+  async 'hosted-list'(work) {
+    const { list, kept, leftOut } = filterHostedList(readFileSync(join(work, 'data.toc'), 'utf8'));
+    writeFileSync(join(work, 'data.list'), list.endsWith('\n') ? list : list + '\n');
+    writeFileSync(join(work, 'data-left-out.json'), JSON.stringify(leftOut) + '\n');
+    process.stdout.write(JSON.stringify({ ok: true, kept: kept.length, leftOut: leftOut.length }) + '\n');
+    return 0;
+  },
+  /**
+   * hosted-compare <backupDir> <workDir>: the hosted restore's report from <workDir>/invariants.json (scripts/restore-invariants.sql
+   * on the project) and data-left-out.json. The load leaves the scheduler off; the next step is the Vault secrets (runbook).
+   */
+  async 'hosted-compare'(dir, work) {
+    const manifest = readManifest(dir);
+    const restored = readJson(join(work, 'invariants.json'));
+    const leftOut = readJson(join(work, 'data-left-out.json'));
+    const result = compareRestore(manifest, { counts: restored.counts, checksums: await fileChecksums(dir, manifest),
+      invariants: restored.invariants });
+    const report = {
+      ok: result.ok,
+      backup: { name: basename(dir), createdAt: manifest.createdAt, source: manifest.source, commit: manifest.commit,
+        migrations: manifest.migrations?.length ?? 0 },
+      counts: { tables: Object.keys(manifest.tables).length, rows: total(manifest.tables),
+        restoredTables: Object.keys(restored.counts ?? {}).length, restoredRows: total(restored.counts ?? {}), mismatched: result.mismatches.length },
+      mismatches: result.mismatches,
+      checksums: result.checksums,
+      invariants: result.invariants,
+      leftOut: { entries: leftOut.length, tables: leftOut.filter(e => e.type === 'TABLE DATA').map(e => `${e.schema}.${e.name}`) },
+      scheduler: 'off',
+      next: 'vault-secrets',
+    };
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    return result.ok ? 0 : 1;
   },
   /** verify <backupDir>: the files' checksums against the manifest, before anything is restored. */
   async verify(dir) {

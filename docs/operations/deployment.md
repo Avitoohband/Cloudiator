@@ -517,9 +517,26 @@ browsers); the harness covers every credential-free check.
    `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-check.ps1 -Backup '<private folder>\backups\<stamp>'`.
    **Paste:** both exit codes, the stamp, `duplicateGrants`, `lostItems`, `resume.status` (must be `replayed`) and the number
    of mismatches. Never psql error text: it can quote `auth.users` rows.
-5. **Bench [Avi, with Claude's procedure]:** the disaster-restore rehearsal, from the procedure Claude writes into the
-   runbook in 24.10 before Avi runs it: migrations, the data, both Vault secrets with `vault.create_secret` (never
-   `update_secret`), the scheduler, the health check. Commit `ops: rehearse the hosted export and restore`.
+5. **Bench: the disaster-restore rehearsal** ([runbook, "Hosted restore"](runbook.md#hosted-restore)), on the bench's own
+   export from steps 3 and 4 (its restore check passed). The reset replaces the bench's data with the backup's, so the bench
+   measurements (24.9, 24.11) may run before or after it. **Never reset a project that is not the bench:** run step b while
+   this folder is linked to the bench, before production's link (Part 2 for production); after that, only from a separate
+   worktree linked to the bench alone.
+   1. **[Claude]** Pauses the bench scheduler (`db query --linked --project-ref <bench-ref>`, runbook "Pausing and resuming
+      the scheduler").
+   2. **[Avi]** In his own PowerShell window, in that folder: `Get-Content -LiteralPath supabase.tempproject-ref` must
+      print `<bench-ref>`; then `npx supabase db reset --linked --no-seed` (the database password at the prompt only).
+      **Paste:** `bench reset: yes` and the CLI's last line.
+   3. **[Claude]** Deletes both Vault secrets on the bench, so the restore creates them as on a new project (never
+      `update_secret`): `delete from vault.secrets where name in ('game_worker_url', 'game_worker_secret');`, then reads
+      `scripts/restore-hosted-facts.sql` there: 22 migrations, 0 accounts, 0 characters, no epoch, the scheduler off. If
+      accounts remain after the reset, Claude stops and decides with Avi.
+   4. **[Avi]** The data, runbook "Hosted restore" step 2, with the bench's connection string. **Paste:** the exit line,
+      `ok`, `counts`, `mismatches` and `leftOut.entries`.
+   5. **[Claude]** `node scripts/set-worker-secret.mjs --project-ref <bench-ref>` (it creates both Vault names), the
+      scheduler with the Activation step 4 guard, `select private.cleanup_tick();`, then `scripts/hosted-checks.sql` and
+      the health report until `slotsBehind` is `0`: `duplicateGrants` 0 and the same 50 bench characters.
+   Commit `ops: rehearse the hosted export and restore`.
 
 ### Mobile frame rate (24.11)
 

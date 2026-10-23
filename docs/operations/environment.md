@@ -16,7 +16,7 @@ One local Supabase stack (CLI project id `Cloudiator`, `supabase/config.toml`) s
 | Containers | `supabase_db_Cloudiator`, `supabase_auth_Cloudiator`, `supabase_rest_Cloudiator`, `supabase_kong_Cloudiator`, `supabase_edge_runtime_Cloudiator`; each carries the label `com.supabase.cli.project=Cloudiator` |
 | Disabled services | Studio, Realtime, Storage, analytics, local SMTP (`config.toml`; `npx supabase start --exclude studio,realtime,storage-api,imgproxy,mailpit,logflare,vector,supavisor`) |
 | Seed | none (`[db.seed] enabled = false`); `db reset --local --no-seed --yes` replays M01–M16 |
-| Edge functions | `game-command` (JWT verified by the gateway) and `game-worker` (no JWT; the worker secret is the authorization), served with `npx supabase functions serve --env-file .env.edge.local` from one worktree |
+| Edge functions | `game-command` (the handler verifies every caller through Auth; `verify_jwt = false`, Task 24 Decision 9) and `game-worker` (no JWT; the worker secret is the authorization), served with `npx supabase functions serve --env-file .env.edge.local` from one worktree |
 | Scheduler | `private.scheduler.enabled = false` locally and no Vault worker secrets, so pg_cron's two jobs run but stay inert and nothing is dispatched |
 
 Before any script or manual command touches the database container, check its label:

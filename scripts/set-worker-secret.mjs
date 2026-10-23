@@ -100,7 +100,10 @@ export function setWorkerSecret({ ref }, io) {
   try {
     const envFile = join(dir, 'worker.env');
     writeFileSync(envFile, `GAME_WORKER_SECRET=${secret}\n`, { mode: 0o600, flag: 'wx' });
-    if (!step('Edge secret GAME_WORKER_SECRET', ['secrets', 'set', '--env-file', envFile, '--project-ref', ref])) return 1;
+    if (!step('Edge secret GAME_WORKER_SECRET', ['secrets', 'set', '--env-file', envFile, '--project-ref', ref])) {
+      io.log('       Vault did not change, but the Edge secret may have: keep the scheduler off and rerun this script.');
+      return 1;
+    }
     const sqlFile = join(dir, 'vault.sql');
     writeFileSync(sqlFile, vaultSql(`https://${ref}.supabase.co/functions/v1/game-worker`, secret), { mode: 0o600, flag: 'wx' });
     if (!step('Vault secrets game_worker_url and game_worker_secret', [...database, '--file', sqlFile])) {

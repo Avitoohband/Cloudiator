@@ -86,6 +86,7 @@ describe('set-worker-secret', () => {
     const f = fake({ fail: 'secrets' });
     expect(setWorkerSecret({ ref: REF }, f.io)).toBe(1);
     expect(f.calls).toHaveLength(1);
+    expect(f.lines.join('\n')).toMatch(/rerun this script/i);
     expect(f.lines.join('\n')).toContain('<hidden>');
     expect(f.lines.join('\n')).not.toContain(SECRET);
     f.done();

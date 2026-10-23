@@ -305,9 +305,8 @@ result as CSV.
    npx supabase functions deploy game-worker --project-ref <ref>
    npx supabase functions deploy game-command --project-ref <ref>
    ```
-   `verify_jwt` comes from `supabase/config.toml`: `false` for `game-worker` (its secret is the authorization) and, since
-   Decision 9 on 2026-10-23 (the bench signs user tokens with an ECC P-256 key), `false` for `game-command` too (its handler
-   verifies every caller through Auth). Never pass `--no-verify-jwt` by hand. If `--help` offers a choice of bundler,
+   `verify_jwt` comes from `supabase/config.toml`: `false` for `game-worker` (its secret is the authorization), `true` for
+   `game-command` unless Decision 9 changed it. Never pass `--no-verify-jwt` by hand. If `--help` offers a choice of bundler,
    use the one the bench proved and record it. A bundling failure shows here first, on the bench.
 
 ### Probes

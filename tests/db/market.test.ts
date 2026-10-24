@@ -570,6 +570,7 @@ describe('marketplace listings in the database', () => {
     });
     const reversedPid = await held;
     let purchase: Promise<unknown> | undefined;
+    let outcome: unknown;
     try {
       purchase = database.market({ userId: high.id }, retried);
       // Some session (the Data API's) waits on B's lock while holding the lower account.
@@ -581,23 +582,38 @@ describe('marketplace listings in the database', () => {
       }
       expect(waiting).toBe(true);
       proceed();
-      expect(await purchase).toEqual({ ok: false, code: 'processing', retryAfterMs: 1000 });
+      outcome = await purchase;
       expect(await reversed).toBe('both');
     } finally {
       proceed();
       await reversed.catch(() => undefined);
       await purchase?.catch(() => undefined);
     }
-    // Atomic: no receipt, no money, no item moved; the listing is still open.
-    expect(await receipts(retried.operationId)).toBe(0);
-    expect(await saleReceipts(second)).toBe(0);
-    expect(await wallets()).toEqual(before);
-    expect(await listingRow(second)).toMatchObject({ status: 'open', buyer: null, receipt: null });
-    expect(await itemRow(axe.id)).toMatchObject({ owner: low.gid, item: { reservation: { kind: 'listing', referenceId: second } } });
-    // The same operation, sent again, completes once.
-    const done = await database.market({ userId: high.id }, retried);
-    expect(done).toMatchObject({ ok: true, value: { listingId: second, itemId: axe.id, price: 40, fee: 2 } });
-    expect(await database.market({ userId: high.id }, retried)).toEqual(done);
+    // PostgreSQL aborts the purchase as the deadlock victim. The Data API then either answers the error, which the adapter
+    // turns into a retryable `processing` (PostgREST 16, the CLI's default local image), or runs the whole rolled-back
+    // transaction again, which completes (PostgREST 14.18, the hosted projects' version, which `supabase start` also uses in
+    // a checkout linked to one: observed 2026-10-24). Either way nothing is partial and the purchase happens once.
+    if ((outcome as { ok?: boolean }).ok === false) {
+      expect(outcome).toEqual({ ok: false, code: 'processing', retryAfterMs: 1000 });
+      // Atomic: no receipt, no money, no item moved; the listing is still open.
+      expect(await receipts(retried.operationId)).toBe(0);
+      expect(await saleReceipts(second)).toBe(0);
+      expect(await wallets()).toEqual(before);
+      expect(await listingRow(second)).toMatchObject({ status: 'open', buyer: null, receipt: null });
+      expect(await itemRow(axe.id)).toMatchObject({ owner: low.gid, item: { reservation: { kind: 'listing', referenceId: second } } });
+      // The same operation, sent again, completes once.
+      const done = await database.market({ userId: high.id }, retried);
+      expect(done).toMatchObject({ ok: true, value: { listingId: second, itemId: axe.id, price: 40, fee: 2 } });
+      expect(await database.market({ userId: high.id }, retried)).toEqual(done);
+    } else {
+      // The retried transaction sold the axe exactly once: one receipt each, the price and the 5 % fee moved once.
+      expect(outcome).toMatchObject({ ok: true, value: { listingId: second, itemId: axe.id, price: 40, fee: 2 } });
+      expect(await receipts(retried.operationId)).toBe(1);
+      expect(await saleReceipts(second)).toBe(1);
+      expect(await wallets()).toEqual([before[0] - 40, before[1] + 38]);
+      // The same operation, sent again, replays it.
+      expect(await database.market({ userId: high.id }, retried)).toEqual(outcome);
+    }
     expect(await itemRow(axe.id)).toMatchObject({ owner: high.gid, item: { ownerId: high.gid, reservation: null } });
   });
 

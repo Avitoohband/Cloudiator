@@ -602,7 +602,11 @@ test.describe('the Arena card and league standings', () => {
     await scene.getByRole('button', { name: 'Back to camp' }).click();
     await expect(scene).toHaveCount(0);
     expect(new URL(page.url()).search).toBe('?mode=fixture');
-    expect(await page.evaluate(() => ({ ready: window.__cloudiatorCamp!.state()!.ready, canvases: window.__cloudiatorCamp!.canvases() }))).toEqual({ ready: true, canvases: 1 });
+    // One camp, ready. Polled: early in a full development run (this test is among the first), the dev server's on-demand
+    // compilation can remount the camp while the replay is open, so it was briefly not ready twice in seven gate runs
+    // (2026-10-24; 24 of 24 warm repeats passed; production exports have no hot reload). A leaked second canvas still fails.
+    await expect.poll(() => page.evaluate(() => ({ ready: window.__cloudiatorCamp?.state()?.ready ?? false, canvases: window.__cloudiatorCamp?.canvases() ?? 0 })),
+      { timeout: 45_000 }).toEqual({ ready: true, canvases: 1 });
     // The card is where it was, and the focus is back on its button.
     await expect(page.getByRole('button', { name: 'Watch replay' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Watch replay' })).toBeFocused();

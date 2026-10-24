@@ -26,6 +26,10 @@ const panelState = (page: Page) => page.evaluate(() => window.__cloudiatorTourna
 
 async function openTournaments(page: Page) {
   await page.goto('/game/?mode=fixture');
+  // The camp ready and the owner shown first, as every other spec opens the fixture camp: a menu tapped while the page is
+  // still starting can be lost or replaced (the phone layout failed this way in two gate runs on 2026-10-24).
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+  await expectOwnerShown(page, 'Aster');
   await openMenu(page, 'Tournaments');
   await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible({ timeout: 45_000 });
 }

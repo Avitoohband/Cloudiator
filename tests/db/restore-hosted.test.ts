@@ -44,9 +44,15 @@ describe('the hosted restore SQL', () => {
     for (const key of ['accounts', 'identities', 'characters']) expect(Number.isSafeInteger(facts[key])).toBe(true);
   });
 
-  it('refuses inside the transaction when the project is not new', async () => {
+  it.each([
+    ['the scheduler on', 'update private.scheduler set enabled = true where singleton'],
+    ['a season epoch', 'insert into private.season_epoch (epoch_slot) values (1000)'],
+  ])('refuses inside the transaction when a new project has %s', async (_, condition) => {
+    // A new project first, so the one condition under test is the only reason to refuse.
+    expect(await rolledBack(async tx => { await asNewProject(tx); await tx.unsafe(BEFORE); return 'accepted'; })).toBe('accepted');
     await expect(rolledBack(async tx => {
-      await tx`update private.scheduler set enabled = true where singleton`;
+      await asNewProject(tx);
+      await tx.unsafe(condition);
       await tx.unsafe(BEFORE);
     })).rejects.toThrow('target-not-fresh');
   });

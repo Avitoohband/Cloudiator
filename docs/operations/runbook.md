@@ -365,9 +365,10 @@ account, and the restore then refuses.
    new build with the new Pages variables (step 5).
 2. **The backup's migrations [Claude after Avi's go].** Push from a worktree at the backup's commit (`manifest.json`
    `commit`), never from a newer checkout, whose extra migrations would make the restore refuse with `migrations-mismatch`:
-   `git worktree add <path> <commit>`, check that its `supabase/migrations` holds exactly the manifest's `migrations`
-   versions, have Avi link that worktree to the new project, then `db push --dry-run` and `db push` from it (Part 2,
-   "Migrations"; the line-endings check first).
+   `git worktree add <path> <commit>`, then `npm ci` there (its lockfile pins that commit's CLI; without it `npx` would
+   offer an unpinned download), check that its `supabase/migrations` holds exactly the manifest's `migrations` versions,
+   have Avi link that worktree to the new project, then `db push --dry-run` and `db push` from it (Part 2, "Migrations";
+   the line-endings check first).
 3. **The data [Avi].** Copy the project's CA into the local container as for the export
    (["Connections and TLS"](#connections-and-tls)), set `CLOUDIATOR_RESTORE_DB_URL` at the secure prompt
    (["Entering a connection string"](#entering-a-connection-string)) plus `?sslmode=verify-full` (the session pooler if the
@@ -391,9 +392,9 @@ account, and the restore then refuses.
      The project is no longer new: do not open the game; restore again into another new project.
    - Exit `2`: refused or failed before or during the load, which rolled back, so the project is as `db push` left it
      (`target-not-fresh`, `migrations-mismatch`, `checksum-mismatch`, `facts-failed`, `data-restore-failed`, and the URL
-     and container codes of the export). A failed load adds `at`: psql's own file, line and SQLSTATE, never row text. If
-     the connection dropped during the commit, check before anything else: run `scripts/restore-hosted-facts.sql` in the SQL
-     editor; 0 accounts and no epoch means the load rolled back.
+     and container codes of the export). A failed load adds `at`: psql's own file, line and SQLSTATE, never row text. A
+     `data-restore-failed` without `at` can mean the connection dropped, possibly during the commit: before anything else,
+     run `scripts/restore-hosted-facts.sql` in the SQL editor; 0 accounts and no epoch means the load rolled back.
    To investigate a load failure away from the hosted project, repeat it locally as in "Tested locally" below (the restore
    check loads as a superuser in replica mode, so it does not exercise this path). **Paste:** the exit line, `ok`, `counts`,
    `identities`, `mismatches`, `leftOut.entries`, and `at` on a failure. Left out, and reported: the other sign-in tables

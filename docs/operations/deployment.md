@@ -541,7 +541,7 @@ browsers); the harness covers every credential-free check.
    2. **[Avi]** In his own PowerShell window, in that folder; on any error or any other output, stop before the reset:
       ```powershell
       Get-Content -LiteralPath supabase\.temp\project-ref   # must print <bench-ref>
-      npx supabase db query --linked "select shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as marker"   # must show cloudiator-bench
+      npx supabase db query --linked --project-ref <bench-ref> "select shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as marker"   # must show cloudiator-bench (the reset's own flags)
       npx supabase db reset --help                           # must list --linked, --project-ref and --no-seed
       npx supabase db reset --linked --project-ref <bench-ref> --no-seed
       ```

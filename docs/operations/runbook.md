@@ -354,50 +354,68 @@ boundary 1009 that closes season 1); that file deliberately leaves its world in 
 ### Hosted restore
 
 Task 24.10. When the hosted project is lost or damaged, rebuild it from the newest backup whose restore check passed. The data
-goes into a **new** project after its migrations; `scripts/restore-hosted.ps1` refuses any project that already has an
-account, a character, a season epoch or the scheduler on, or whose migrations differ from the backup's, so it cannot overwrite
-a live database. The roles, the platform schemas, the migration history and both cron schedules come from `db push`, not
-from the backup.
+goes into a **new** project at exactly the backup's migrations; `scripts/restore-hosted.ps1` refuses any project that
+already has an account, an identity, a character, a season epoch or the scheduler on, or whose migrations differ from the
+backup's, so it cannot overwrite a live database. The roles, the platform schemas, the migration history and both cron
+schedules come from `db push`, not from the backup. Nobody signs in to the new project before step 3: a sign-in creates an
+account, and the restore then refuses.
 
-1. **New project** ([deployment checklist](deployment.md), Part 2): create it, the Data API, Auth and the Google client, link it,
-   `db push` (the backup's migrations: the manifest lists them), parity, the Edge secrets, the functions and the probes. Do not
-   set Vault secrets, the epoch or the scheduler yet. A new project has a new URL: the client needs the new Pages variables and a
-   new deploy, and the Google client the new authorized domain and redirect URI.
-2. **The data [Operator].** Copy the project's CA into the local container as for the export
+1. **New project [Avi]** ([deployment checklist](deployment.md), Part 2): create it, the Data API, Auth and the Google
+   client. A new project has a new URL: the Google client needs the new authorized domain and redirect URI, and the client a
+   new build with the new Pages variables (step 5).
+2. **The backup's migrations [Claude after Avi's go].** Push from a worktree at the backup's commit (`manifest.json`
+   `commit`), never from a newer checkout, whose extra migrations would make the restore refuse with `migrations-mismatch`:
+   `git worktree add <path> <commit>`, check that its `supabase/migrations` holds exactly the manifest's `migrations`
+   versions, have Avi link that worktree to the new project, then `db push --dry-run` and `db push` from it (Part 2,
+   "Migrations"; the line-endings check first).
+3. **The data [Avi].** Copy the project's CA into the local container as for the export
    (["Connections and TLS"](#connections-and-tls)), set `CLOUDIATOR_RESTORE_DB_URL` at the secure prompt
    (["Entering a connection string"](#entering-a-connection-string)) plus `?sslmode=verify-full` (the session pooler if the
    direct host fails), then:
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-hosted.ps1 -Backup '<private folder>ackups<stamp>'
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-hosted.ps1 -Backup '<private folder>\backups\<stamp>'
    "exit $LASTEXITCODE"
    Remove-Item Env:CLOUDIATOR_RESTORE_DB_URL
    ```
-   It verifies the checksums, reads the project's facts (`scripts/restore-hosted-facts.sql`), keeps the data dump's listing to the
-   public and private tables and sequences plus `auth.users` and `auth.identities` (`HOSTED_RESTORE_DATA` in
-   `scripts/restore-compare.mjs`), and loads them in one transaction: `scripts/restore-hosted-before.sql` (the refusal again,
-   the game's triggers off, the rows the migrations seeded truncated), the data, `scripts/restore-hosted-after.sql` (the
-   triggers on, the scheduler off). The hosted `postgres` may not set `session_replication_role` (permission denied on the
-   bench, 2026-10-24), so the restore check's replica mode is not used; foreign keys stay checked, in the dump's own order.
-   Then `scripts/restore-invariants.sql` runs on the project. Exit `0`: every table's rows equal the manifest's and every
-   invariant holds; `1`: a check failed after the load (do not open the game; restore again into another new project);
-   `2`: refused or failed before or during the load, which rolled back (`target-not-fresh`, `migrations-mismatch`,
-   `checksum-mismatch`, `facts-failed`, `data-restore-failed`, the URL and container codes of the export). It discards
-   psql's error text, which can quote a row; `data-restore-failed` therefore names no statement: rerun the restore check on
-   the backup locally to find it. **Paste:** the exit line, `ok`, `counts`, `mismatches` and `leftOut.entries`.
-   Left out, and reported: the other sign-in tables (audit log, MFA, OAuth, SSO, WebAuthn and Auth's own migration history),
-   the platform's tables and the cron schedules (the new project's own stay). Players sign in again; their Google identity
-   lands on the restored account.
-3. **Vault [Claude]:** `node scripts/set-worker-secret.mjs --project-ref <ref>` creates both names (a restored database
-   never carries them; ["Secret rotation"](#secret-rotation)) and sets the matching Edge secret.
-4. **The scheduler [Operator]:** the restored season epoch stays; enable with the deployment checklist's Activation step 4
+   It verifies the checksums, reads the project's facts (`scripts/restore-hosted-facts.sql`), keeps the data dump's listing
+   to the public and private tables and sequences plus `auth.users` and `auth.identities` (`HOSTED_RESTORE_DATA` in
+   `scripts/restore-compare.mjs`; a line it cannot read stops it), and loads them in one transaction:
+   `scripts/restore-hosted-before.sql` (the refusal again, the game's triggers off, the rows the migrations seeded
+   truncated), the data, `scripts/restore-hosted-after.sql` (the triggers on, the scheduler off). The hosted `postgres` may
+   not set `session_replication_role` (permission denied on the bench, 2026-10-24), so the restore check's replica mode is
+   not used; foreign keys stay checked, in the dump's own order. Then `scripts/restore-invariants.sql` and the facts run on
+   the project.
+   - Exit `0`: every table's rows equal the manifest's, `auth.identities` equals the dump's own rows, every invariant holds
+     and the scheduler is off.
+   - Exit `1`: the load committed, but a check after it failed or differed (the report, or `{"ok":false,…,"loaded":true}`).
+     The project is no longer new: do not open the game; restore again into another new project.
+   - Exit `2`: refused or failed before or during the load, which rolled back, so the project is as `db push` left it
+     (`target-not-fresh`, `migrations-mismatch`, `checksum-mismatch`, `facts-failed`, `data-restore-failed`, and the URL
+     and container codes of the export). A failed load adds `at`: psql's own file, line and SQLSTATE, never row text. If
+     the connection dropped during the commit, check before anything else: run `scripts/restore-hosted-facts.sql` in the SQL
+     editor; 0 accounts and no epoch means the load rolled back.
+   To investigate a load failure away from the hosted project, repeat it locally as in "Tested locally" below (the restore
+   check loads as a superuser in replica mode, so it does not exercise this path). **Paste:** the exit line, `ok`, `counts`,
+   `identities`, `mismatches`, `leftOut.entries`, and `at` on a failure. Left out, and reported: the other sign-in tables
+   (audit log, MFA, OAuth, SSO, WebAuthn and Auth's own migration history), the platform's tables and the cron schedules
+   (the new project's own stay). Players sign in again; their Google identity lands on the restored account.
+4. **Later migrations [Claude after Avi's go].** If the release commit has migrations after the backup's, push them from
+   the release worktree (re-linked by Avi) with Part 2's "Migrations" and "Parity"; they transform the restored data as on
+   the live database. Then remove the backup-commit worktree.
+5. **The rest of Part 2, roles as labelled there,** in Decision 2's order: the Edge secrets (on a new project
+   `set-worker-secret.mjs` creates both Vault names, never `update_secret`; ["Secret rotation"](#secret-rotation)), the
+   functions, the probes, the Pages variables and the client.
+6. **The scheduler [Avi]:** the restored season epoch stays; enable with the deployment checklist's Activation step 4
    statement (the epoch and both Vault names must exist), then `select private.cleanup_tick();`.
-5. **Health:** the health check until `slotsBehind` is `0`. Catch-up replays every boundary since the backup at up to 6 a
+7. **Health:** the health check until `slotsBehind` is `0`. Catch-up replays every boundary since the backup at up to 6 a
    minute, then cleanup catches up hourly (["Free-tier pausing"](#free-tier-pausing)).
 
 Tested locally (2026-10-24): the Task 22.4 restore world exported through `host.docker.internal`, the local database reset
-to its 22 migrations, then the restore: exit 0, 56 tables and 1,059 rows equal to the manifest, every invariant held, the
-triggers enabled, the scheduler off, both migration-made cron jobs present; a second run refused with `target-not-fresh`.
-The local `postgres` is not a superuser either. The bench rehearsal (deployment checklist, 24.10) is the hosted test.
+to its 22 migrations (`db reset --local --no-seed`), then the restore through `host.docker.internal`: exit 0, every table's
+rows and `auth.identities` equal, every invariant held, the triggers enabled, the scheduler off, both migration-made cron
+jobs present; a second run refused with `target-not-fresh`. The local `postgres` is not a superuser either.
+`tests/db/restore-hosted.test.ts` runs the facts, the refusal and the trigger handling in rolled-back transactions. The
+bench rehearsal (deployment checklist, 24.10 step 5) is the hosted test.
 
 ## Free-tier pausing
 

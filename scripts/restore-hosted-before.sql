@@ -4,11 +4,13 @@
 -- replica mode is unavailable; instead the owner turns its own triggers off for the load. Foreign keys stay checked: pg_dump
 -- orders a data-only dump's tables by their foreign keys, and the accounts load before the characters that reference them.
 
--- Still a new project: the same refusal as checkHostedTarget, now inside the transaction.
+-- Still a new project: the same refusal as checkHostedTarget, now inside the transaction. With row security off, a row
+-- hidden by a policy fails the check instead of passing it.
+set local row_security = off;
 do $$
 begin
-  if exists (select 1 from auth.users) or exists (select 1 from public.gladiators) or exists (select 1 from private.season_epoch)
-    or coalesce((select bool_or(enabled) from private.scheduler), false) then
+  if exists (select 1 from auth.users) or exists (select 1 from auth.identities) or exists (select 1 from public.gladiators)
+    or exists (select 1 from private.season_epoch) or coalesce((select bool_or(enabled) from private.scheduler), false) then
     raise exception 'target-not-fresh' using errcode = 'P0001';
   end if;
 end $$;

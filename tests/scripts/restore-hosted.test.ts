@@ -19,7 +19,7 @@ const manifest = {
   files: { 'schema.dump': 'a'.repeat(64), 'data.dump': 'b'.repeat(64) },
 };
 /** The facts scripts/restore-hosted.ps1 reads from a new project right after `db push`. */
-const fresh = { migrations, accounts: 0, characters: 0, epochSet: false, schedulerEnabled: false };
+const fresh = { migrations, accounts: 0, identities: 0, characters: 0, epochSet: false, schedulerEnabled: false };
 
 describe('filterHostedList', () => {
   // A pg_restore -l listing of a data dump in the format of the PostgreSQL 17 dumps (id; tableoid oid type schema name owner).
@@ -73,6 +73,11 @@ describe('filterHostedList', () => {
     ]);
   });
 
+  it('refuses an entry line it cannot read instead of passing it to pg_restore (an allow-list fails closed)', () => {
+    expect(() => filterHostedList(['; header', '4822;0 1 TABLE DATA net _http_response x', ''].join('\n'))).toThrow('unreadable listing line');
+    expect(filterHostedList(['; header', '', ';', ''].join('\n')).kept).toEqual([]);
+  });
+
   it('restores exactly the tables the manifest counts, plus the identities', () => {
     expect(HOSTED_RESTORE_DATA).toEqual({ schemas: ['public', 'private'], tables: ['auth.users', 'auth.identities'] });
   });
@@ -85,6 +90,7 @@ describe('checkHostedTarget', () => {
 
   it.each([
     ['an account', { accounts: 1 }],
+    ['an identity', { identities: 1 }],
     ['a character', { characters: 1 }],
     ['a season epoch', { epochSet: true }],
     ['the scheduler on', { schedulerEnabled: true }],
@@ -102,6 +108,7 @@ describe('checkHostedTarget', () => {
 
   it('refuses facts it cannot read instead of passing', () => {
     expect(checkHostedTarget(manifest, { ...fresh, accounts: null })).toEqual({ ok: false, code: 'target-facts-invalid' });
+    expect(checkHostedTarget(manifest, { ...fresh, identities: undefined })).toEqual({ ok: false, code: 'target-facts-invalid' });
     expect(checkHostedTarget(manifest, { migrations })).toEqual({ ok: false, code: 'target-facts-invalid' });
     expect(checkHostedTarget({ ...manifest, migrations: undefined }, fresh)).toEqual({ ok: false, code: 'manifest-invalid' });
   });
@@ -136,17 +143,28 @@ describe('restore-compare.mjs hosted commands', () => {
       'itemsSingleOwner', 'inventoryCap', 'seasonAwardsUnique', 'foreignKeys', 'guardsIntact'].map(name => [name, { ok: true, violations: 0 }]));
     writeFileSync(join(work, 'invariants.json'), JSON.stringify({ counts: manifest.tables, invariants }));
     writeFileSync(join(work, 'data-left-out.json'), JSON.stringify([{ id: 4820, type: 'TABLE DATA', schema: 'cron', name: 'job' }]));
+    // The data dump's own COPY counts (auth.identities is not in the manifest) and the project's facts after the load.
+    writeFileSync(join(work, 'dump-counts.json'), JSON.stringify({ ...manifest.tables, 'auth.identities': 8, 'cron.job': 2 }));
+    const after = { ...fresh, accounts: 4, identities: 8, characters: 4, epochSet: true };
+    writeFileSync(join(work, 'facts-after.json'), JSON.stringify(after));
     const passed = run('hosted-compare', backup, work);
     const report = JSON.parse(passed.stdout);
     expect(passed.status).toBe(0);
     expect(report).toMatchObject({ ok: true, backup: { name: 'backup', source: 'remote', migrations: 2 },
       counts: { tables: 3, rows: 48, restoredTables: 3, restoredRows: 48, mismatched: 0 }, mismatches: [],
-      checksums: { 'data.dump': true, 'schema.dump': true }, leftOut: { entries: 1, tables: ['cron.job'] },
-      scheduler: 'off', next: 'vault-secrets' });
+      checksums: { 'data.dump': true, 'schema.dump': true }, identities: { expected: 8, actual: 8 },
+      leftOut: { entries: 1, tables: ['cron.job'] }, scheduler: 'off', next: 'vault-secrets' });
     expect(Object.values(report.invariants).every(value => (value as { ok: boolean }).ok)).toBe(true);
     writeFileSync(join(work, 'invariants.json'), JSON.stringify({ counts: { ...manifest.tables, 'public.gladiators': 3 }, invariants }));
     const failed = run('hosted-compare', backup, work);
     expect([failed.status, JSON.parse(failed.stdout).mismatches]).toEqual([1, [{ table: 'public.gladiators', expected: 4, actual: 3 }]]);
+    writeFileSync(join(work, 'invariants.json'), JSON.stringify({ counts: manifest.tables, invariants }));
+    writeFileSync(join(work, 'facts-after.json'), JSON.stringify({ ...after, identities: 7 }));
+    const lost = run('hosted-compare', backup, work);
+    expect([lost.status, JSON.parse(lost.stdout).mismatches]).toEqual([1, [{ table: 'auth.identities', expected: 8, actual: 7 }]]);
+    writeFileSync(join(work, 'facts-after.json'), JSON.stringify({ ...after, schedulerEnabled: true }));
+    const running = run('hosted-compare', backup, work);
+    expect([running.status, JSON.parse(running.stdout).scheduler]).toEqual([1, 'on']);
   });
 
   it('hosted-list writes the list and the left-out entries next to the listing', () => {

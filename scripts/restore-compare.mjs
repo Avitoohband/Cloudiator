@@ -148,12 +148,16 @@ const hostedKeeps = entry => (entry.type === 'TABLE DATA' || entry.type === 'SEQ
 /**
  * Keeps only HOSTED_RESTORE_DATA's entries of a data dump's pg_restore -l listing, in the listing's own order (pg_dump sorts
  * a data-only dump's tables by their foreign keys). Returns the listing to restore, what it keeps and what it leaves out.
+ * An allow-list fails closed: a line that is neither a comment, blank, nor a readable entry throws (Task 24.10 review).
  */
 export function filterHostedList(listing) {
   const kept = [], leftOut = [];
   const list = listing.split('\n').filter(line => {
     const entry = listEntry(line);
-    if (!entry) return true;
+    if (!entry) {
+      if (/^(;.*)?\r?$/.test(line)) return true;
+      throw new TypeError('unreadable listing line');
+    }
     (hostedKeeps(entry) ? kept : leftOut).push(entry);
     return hostedKeeps(entry);
   });
@@ -163,16 +167,19 @@ export function filterHostedList(listing) {
 /**
  * Whether a hosted project may receive a backup (Task 24.10): a new project, exactly at the backup's migrations, with no
  * account, no character, no season epoch and the scheduler off. Anything else could be a live database, so it is refused.
- *   facts: {migrations: [{version, name}], accounts, characters, epochSet, schedulerEnabled} (scripts/restore-hosted.ps1)
+ *   facts: {migrations: [{version, name}], accounts, identities, characters, epochSet, schedulerEnabled}
+ *          (scripts/restore-hosted-facts.sql)
  */
 export function checkHostedTarget(manifest, facts) {
   const versions = list => Array.isArray(list) && list.every(m => typeof m?.version === 'string') ? list.map(m => m.version) : null;
   const expected = versions(manifest?.migrations);
   if (!expected || expected.length === 0) return { ok: false, code: 'manifest-invalid' };
   const actual = versions(facts?.migrations);
-  if (!actual || !isCount(facts.accounts) || !isCount(facts.characters) || typeof facts.epochSet !== 'boolean'
-    || typeof facts.schedulerEnabled !== 'boolean') return { ok: false, code: 'target-facts-invalid' };
-  if (facts.accounts > 0 || facts.characters > 0 || facts.epochSet || facts.schedulerEnabled) return { ok: false, code: 'target-not-fresh' };
+  if (!actual || !isCount(facts.accounts) || !isCount(facts.identities) || !isCount(facts.characters)
+    || typeof facts.epochSet !== 'boolean' || typeof facts.schedulerEnabled !== 'boolean') return { ok: false, code: 'target-facts-invalid' };
+  if (facts.accounts > 0 || facts.identities > 0 || facts.characters > 0 || facts.epochSet || facts.schedulerEnabled) {
+    return { ok: false, code: 'target-not-fresh' };
+  }
   if (actual.join(',') !== expected.join(',')) return { ok: false, code: 'migrations-mismatch' };
   return { ok: true, migrations: expected.length };
 }
@@ -215,7 +222,7 @@ export function manifestCounts(counts) {
 // failure prints only a short code.
 
 const CONTAINER = 'supabase_db_Cloudiator';
-const CONTAINER_DUMP = /^\/tmp\/cloudiator-(export|restore)-\d{8}T\d{6}Z\/[a-z]+\.dump$/;
+const CONTAINER_DUMP = /^\/tmp\/cloudiator-(export|restore|restore-hosted)-\d{8}T\d{6}Z\/[a-z]+\.dump$/;
 const DUMPS = ['data.dump', 'schema.dump'];
 
 const sha256 = path => new Promise((resolve, reject) => {
@@ -324,18 +331,33 @@ const commands = {
     process.stdout.write(JSON.stringify({ ok: true, kept: kept.length, leftOut: leftOut.length }) + '\n');
     return 0;
   },
+  /** hosted-counts <workDir> <containerDataDump>: the data dump's COPY row counts, all tables, into <workDir>/dump-counts.json. */
+  async 'hosted-counts'(work, dataDump) {
+    writeFileSync(join(work, 'dump-counts.json'), JSON.stringify(await dumpCounts(dataDump)) + '\n');
+    process.stdout.write(JSON.stringify({ ok: true }) + '\n');
+    return 0;
+  },
   /**
    * hosted-compare <backupDir> <workDir>: the hosted restore's report from <workDir>/invariants.json (scripts/restore-invariants.sql
-   * on the project) and data-left-out.json. The load leaves the scheduler off; the next step is the Vault secrets (runbook).
+   * on the project), facts-after.json (scripts/restore-hosted-facts.sql after the load), dump-counts.json and
+   * data-left-out.json. The manifest does not count auth.identities, so its rows are compared with the dump's own COPY rows:
+   * a player's next Google sign-in lands on the restored account only through them. The load leaves the scheduler off; the
+   * next step is the Vault secrets (docs/operations/runbook.md, "Hosted restore").
    */
   async 'hosted-compare'(dir, work) {
     const manifest = readManifest(dir);
     const restored = readJson(join(work, 'invariants.json'));
+    const after = readJson(join(work, 'facts-after.json'));
+    const dumped = readJson(join(work, 'dump-counts.json'));
     const leftOut = readJson(join(work, 'data-left-out.json'));
     const result = compareRestore(manifest, { counts: restored.counts, checksums: await fileChecksums(dir, manifest),
       invariants: restored.invariants });
+    const identities = { expected: isCount(dumped['auth.identities']) ? dumped['auth.identities'] : 0,
+      actual: isCount(after.identities) ? after.identities : null };
+    if (identities.actual !== identities.expected) result.mismatches.push({ table: 'auth.identities', ...identities });
+    const schedulerOff = after.schedulerEnabled === false;
     const report = {
-      ok: result.ok,
+      ok: result.ok && identities.actual === identities.expected && schedulerOff,
       backup: { name: basename(dir), createdAt: manifest.createdAt, source: manifest.source, commit: manifest.commit,
         migrations: manifest.migrations?.length ?? 0 },
       counts: { tables: Object.keys(manifest.tables).length, rows: total(manifest.tables),
@@ -343,12 +365,13 @@ const commands = {
       mismatches: result.mismatches,
       checksums: result.checksums,
       invariants: result.invariants,
+      identities,
       leftOut: { entries: leftOut.length, tables: leftOut.filter(e => e.type === 'TABLE DATA').map(e => `${e.schema}.${e.name}`) },
-      scheduler: 'off',
+      scheduler: schedulerOff ? 'off' : 'on',
       next: 'vault-secrets',
     };
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-    return result.ok ? 0 : 1;
+    return report.ok ? 0 : 1;
   },
   /** verify <backupDir>: the files' checksums against the manifest, before anything is restored. */
   async verify(dir) {

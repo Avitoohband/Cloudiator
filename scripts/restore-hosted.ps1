@@ -20,13 +20,16 @@
     4. One psql --single-transaction with ON_ERROR_STOP: scripts/restore-hosted-before.sql (the same refusal again, the
        game's triggers off, the migration-seeded rows truncated), the data, scripts/restore-hosted-after.sql (the triggers
        back on, the scheduler off). Any failure rolls back to the state `db push` left.
-    5. scripts/restore-invariants.sql on the project (read-only): every table's rows against the manifest and the grant,
-       ledger and ownership invariants.
+    5. scripts/restore-invariants.sql and scripts/restore-hosted-facts.sql on the project (read-only): every table's rows
+       against the manifest, auth.identities against the dump's own rows, the grant, ledger and ownership invariants, and
+       the scheduler still off.
   The Vault secrets, the scheduler and the health check follow by hand (docs/operations/runbook.md, "Hosted restore").
 
   Output: the JSON report on stdout (counts, checksums, invariants, the entries left out: no connection string, key,
-  password or raw error text); progress on stderr. Exit 0 when everything matches, 1 when a check fails after the load,
-  2 when the procedure fails or refuses ({"ok":false,"code":...}).
+  password or raw error text); progress on stderr. Exit 0 when everything matches. Exit 1 once the load has committed and
+  anything after it fails or differs: the report, or {"ok":false,"code":...,"loaded":true}; the project is no longer new.
+  Exit 2 when the procedure refuses or fails before or during the load, which rolled back ({"ok":false,"code":...}); a
+  failed load adds "at":{"file","line","sqlstate"} from psql's own error line (no row text, VERBOSITY=sqlstate).
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-hosted.ps1 -Backup '<private folder>\backups\20261024T002400Z'
@@ -90,6 +93,8 @@ function Invoke-Verdict([string]$Code, [string[]]$Arguments) {
 $exitCode = 2
 $hostWork = $null
 $containerWork = $false
+$loaded = $false
+$script:loadError = $null
 try {
   # The connection string is parsed and validated before anything else; only its short failure code is shown.
   $previous = $ErrorActionPreference
@@ -123,7 +128,7 @@ try {
   }
 
   Write-Step 'checking that the project is new and at the backup migrations'
-  $null = Invoke-Project 'facts-failed' @('-At', '-o', "$Work/facts.json", '-f', "$Work/restore-hosted-facts.sql")
+  $null = Invoke-Project 'facts-failed' @('-q', '-At', '-o', "$Work/facts.json", '-f', "$Work/restore-hosted-facts.sql")
   $null = Invoke-Checked 'copy-failed' 'docker' @('cp', "${Container}:$Work/facts.json", (Join-Path $hostWork 'facts.json'))
   $null = Invoke-Verdict 'target-check-failed' @('hosted-target', $Backup, (Join-Path $hostWork 'facts.json'))
 
@@ -134,13 +139,34 @@ try {
   $null = Invoke-Checked 'copy-failed' 'docker' @('cp', (Join-Path $hostWork 'data.list'), "${Container}:$Work/data.list")
   $null = Invoke-Checked 'sql-failed' 'docker' @('exec', $Container, 'pg_restore', '-L', "$Work/data.list", '-f', "$Work/data.sql", "$Work/data.dump")
 
+  $null = Invoke-Checked 'counts-failed' 'node' @($Compare, 'hosted-counts', $hostWork, "$Work/data.dump")
+
   Write-Step 'loading the data in one transaction'
-  $null = Invoke-Project 'data-restore-failed' @('-q', '--single-transaction', '-f', "$Work/restore-hosted-before.sql",
-    '-f', "$Work/data.sql", '-f', "$Work/restore-hosted-after.sql")
+  # psql's stderr goes to a file inside the container; only its "ERROR:  <SQLSTATE>" line with file and line number is
+  # ever read back (VERBOSITY=sqlstate and SHOW_CONTEXT=never keep row values out of it). No double quotes: Windows
+  # PowerShell 5.1 does not escape them for native commands, and $Work holds no spaces.
+  $load = 'psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate -v SHOW_CONTEXT=never --single-transaction -f $1/restore-hosted-before.sql ' +
+    '-f $1/data.sql -f $1/restore-hosted-after.sql 2> $1/load.err'
+  try {
+    $null = Invoke-Checked 'data-restore-failed' 'node' (@($OperatorDb, 'exec', $UrlVariable, 'docker', 'exec', '-e', 'PGHOST', '-e', 'PGPORT', '-e', 'PGUSER',
+      '-e', 'PGPASSWORD', '-e', 'PGDATABASE', '-e', 'PGSSLMODE', $Container, 'sh', '-c', $load, 'sh', $Work))
+  } catch {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $line = (& docker exec $Container grep -m1 -oE '^psql:[^ ]+:[0-9]+: ERROR:  [0-9A-Z]{5}$' "$Work/load.err") -join '' } finally { $ErrorActionPreference = $previous }
+    if ($line -match '^psql:(?:.*/)?([a-z0-9.-]+):([0-9]+): ERROR:  ([0-9A-Z]{5})$') {
+      $script:loadError = '{"file":"' + $Matches[1] + '","line":' + $Matches[2] + ',"sqlstate":"' + $Matches[3] + '"}'
+    }
+    throw
+  }
+  $loaded = $true
 
   Write-Step 'checking counts and invariants on the project'
   $null = Invoke-Project 'invariants-failed' @('-At', '-o', "$Work/invariants.json", '-f', "$Work/restore-invariants.sql")
-  $null = Invoke-Checked 'copy-failed' 'docker' @('cp', "${Container}:$Work/invariants.json", (Join-Path $hostWork 'invariants.json'))
+  $null = Invoke-Project 'facts-failed' @('-q', '-At', '-o', "$Work/facts-after.json", '-f', "$Work/restore-hosted-facts.sql")
+  foreach ($file in @('invariants.json', 'facts-after.json')) {
+    $null = Invoke-Checked 'copy-failed' 'docker' @('cp', "${Container}:$Work/$file", (Join-Path $hostWork $file))
+  }
 
   $previous = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
@@ -154,7 +180,15 @@ try {
   $code = 'restore-hosted-failed'
   if ($message -like 'cloudiator:*') { $code = $message.Substring(11) }
   else { Write-Step "unexpected $($_.Exception.GetType().Name) at line $($_.InvocationInfo.ScriptLineNumber)" }
-  [Console]::Out.WriteLine('{"ok":false,"code":"' + $code + '"}')
+  if ($loaded) {
+    # The load committed: the project is no longer new, so this is a failed check (exit 1), not a rolled-back failure.
+    [Console]::Out.WriteLine('{"ok":false,"code":"' + $code + '","loaded":true}')
+    $exitCode = 1
+  } elseif ($script:loadError) {
+    [Console]::Out.WriteLine('{"ok":false,"code":"' + $code + '","at":' + $script:loadError + '}')
+  } else {
+    [Console]::Out.WriteLine('{"ok":false,"code":"' + $code + '"}')
+  }
 } finally {
   if ($containerWork) {
     & docker exec $Container rm -rf $Work

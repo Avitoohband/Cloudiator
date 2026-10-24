@@ -60,7 +60,7 @@ Nothing is hosted yet. Task 24 fills these in; until then every value is unknown
 | Data API URL | TBD (Task 24) |
 | Static site host and exact origin(s) | TBD (Task 24); also `GAME_ALLOWED_ORIGINS` and the Auth redirect URLs |
 | Google OAuth client | TBD (Task 24), configured in the hosted Auth provider settings |
-| Database owner connection | Dashboard only; used through `CLOUDIATOR_DB_URL` / `CLOUDIATOR_EXPORT_DB_URL` in the operator's shell |
+| Database owner connection | Dashboard only; used through `CLOUDIATOR_DB_URL` / `CLOUDIATOR_EXPORT_DB_URL` / `CLOUDIATOR_RESTORE_DB_URL` in the operator's shell |
 | `pg_net.ttl` | Check after deploying M16 (`docs/operations/migrations.md`, M16 release notes); 6 hours locally |
 | Season epoch, scheduler | Set the epoch, then enable `private.scheduler` (M09 and M16 release notes) |
 | Plan and budgets | Free tier: 500 MB database (warning at 400 MB; Avi's decision, 2026-10-19), 3 GB monthly egress, 300,000 monthly Edge Function invocations (runbook, "Budgets") |
@@ -79,6 +79,7 @@ Nothing is hosted yet. Task 24 fills these in; until then every value is unknown
 | Vault `game_worker_url`, `game_worker_secret` | **secret** (database) | `private.dispatch_workers` | the hosted database's Vault only; unset locally. Never exported (runbook, "Weekly export") |
 | `CLOUDIATOR_DB_URL` | **secret** (owner connection string) | `scripts/health.mjs` | the operator's shell, for one session |
 | `CLOUDIATOR_EXPORT_DB_URL` | **secret** (owner connection string) | `scripts/export-db.ps1 -Remote` | the operator's shell, for one session |
+| `CLOUDIATOR_RESTORE_DB_URL` | **secret** (the new project's owner connection string) | `scripts/restore-hosted.ps1` | the operator's shell, for one session (runbook, "Hosted restore") |
 | `NODE_EXTRA_CA_CERTS` | path | `scripts/health.mjs` with `sslmode=verify-full` | the operator's shell (runbook, "Connections and TLS") |
 | `LOCAL_DB_TEST`, `LOCAL_API_URL`, `LOCAL_DB_URL`, `LOCAL_ANON_KEY`, `LOCAL_SERVICE_KEY`, `LOCAL_JWT_SECRET`, `LOCAL_WORKER_SECRET` | local test credentials | the database tests | set in memory by `scripts/test-db.mjs` from the local CLI and `.env.edge.local`; never set by hand |
 | `CLOUDIATOR_BROWSER_TEST`, `PLAYWRIGHT_STATIC`, `PLAYWRIGHT_STATIC_ROOT`, `CLOUDIATOR_STATIC_ROOT` | test configuration | builds and browser tests | the command line (`docs/operations/verification-gates.md`) |

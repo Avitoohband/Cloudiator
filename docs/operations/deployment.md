@@ -44,11 +44,17 @@ under "What Avi may paste". Claude records them (names only) in `environment.md`
   Avi's "go" for that command on that project. Before asking, Claude states the command, the project name and ref, and the
   commit. A "go" covers one command once. If any command Claude runs asks for a password or token, Claude stops it and hands
   the step to Avi.
+- **Avi's standing go (2026-10-23):** "u are approved to do whatever needed ... stop only if you need something from [me]
+  and you can't do it urself." Under it Claude also runs credential-free SQL on the hosted projects through the CLI's
+  Management API (`db query --linked --project-ref <ref>`, no password): the read-only kits and health reports, the bench's
+  marker, seed, activation and pauses, and the bench rehearsal's writes, each of those conditioned on the bench marker. The
+  steps labelled [Avi] stay Avi's: sign-ins, accounts, passwords, connection strings, `link`, `secrets set` with the
+  worker secret, and the reset.
 - **No paid upgrade, ever** (Global Constraints). Never choose a paid plan or add-on: no Supabase Pro, compute size, IPv4
   add-on, point-in-time recovery or custom domain; no Cloudflare Workers Paid; no billing account on the Google Cloud project.
   If a screen offers one as the way forward, stop and tell Claude.
 - **Never run** `supabase config push` (it would overwrite the hosted Auth settings with the local `127.0.0.1` ones),
-  `db reset --linked` (except Decision 4's fallback, below), `supabase status`, or any CLI flag that carries a credential
+  `db reset --linked` (except Decision 4's fallback, below, and the bench restore rehearsal, Recovery step 5), `supabase status`, or any CLI flag that carries a credential
   (`--db-url`, `-p`/`--password`, `--token`). Never type a connection string on a command line: use the runbook's
   [secure prompt](runbook.md#entering-a-connection-string).
 - **Soft launch** (Decision 7): the production URL stays unannounced until Part 3 passes. Test characters are real and
@@ -519,23 +525,45 @@ browsers); the harness covers every credential-free check.
    of mismatches. Never psql error text: it can quote `auth.users` rows.
 5. **Bench: the disaster-restore rehearsal** ([runbook, "Hosted restore"](runbook.md#hosted-restore)), on the bench's own
    export from steps 3 and 4 (its restore check passed). The reset replaces the bench's data with the backup's, so the bench
-   measurements (24.9, 24.11) may run before or after it. **Never reset a project that is not the bench:** run step b while
-   this folder is linked to the bench, before production's link (Part 2 for production); after that, only from a separate
-   worktree linked to the bench alone.
-   1. **[Claude]** Pauses the bench scheduler (`db query --linked --project-ref <bench-ref>`, runbook "Pausing and resuming
-      the scheduler").
-   2. **[Avi]** In his own PowerShell window, in that folder: `Get-Content -LiteralPath supabase.tempproject-ref` must
-      print `<bench-ref>`; then `npx supabase db reset --linked --no-seed` (the database password at the prompt only).
-      **Paste:** `bench reset: yes` and the CLI's last line.
-   3. **[Claude]** Deletes both Vault secrets on the bench, so the restore creates them as on a new project (never
-      `update_secret`): `delete from vault.secrets where name in ('game_worker_url', 'game_worker_secret');`, then reads
-      `scripts/restore-hosted-facts.sql` there: 22 migrations, 0 accounts, 0 characters, no epoch, the scheduler off. If
-      accounts remain after the reset, Claude stops and decides with Avi.
-   4. **[Avi]** The data, runbook "Hosted restore" step 2, with the bench's connection string. **Paste:** the exit line,
-      `ok`, `counts`, `mismatches` and `leftOut.entries`.
-   5. **[Claude]** `node scripts/set-worker-secret.mjs --project-ref <bench-ref>` (it creates both Vault names), the
-      scheduler with the Activation step 4 guard, `select private.cleanup_tick();`, then `scripts/hosted-checks.sql` and
-      the health report until `slotsBehind` is `0`: `duplicateGrants` 0 and the same 50 bench characters.
+   measurements (24.9, 24.11) may run before or after it, but nobody signs in to the bench between sub-steps 2 and 4 (a
+   sign-in creates an account, and the restore refuses). **Never reset a project that is not the bench:** run sub-step 2
+   while this folder is linked to the bench, before production's link (Part 2 for production); after that, only from a
+   separate worktree linked to the bench alone. Every bench write below is conditioned on the bench marker, which
+   production never carries and a reset keeps (it is a comment on the database itself).
+   1. **[Claude]** Pauses the bench scheduler through `db query --linked --project-ref <bench-ref>`, only on the marked bench:
+      ```sql
+      update private.scheduler set enabled = false
+      where singleton
+        and shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') = 'cloudiator-bench'
+      returning enabled;
+      ```
+      It must return `false`. No row means this is not the bench: stop.
+   2. **[Avi]** In his own PowerShell window, in that folder; on any error or any other output, stop before the reset:
+      ```powershell
+      Get-Content -LiteralPath supabase\.temp\project-ref   # must print <bench-ref>
+      npx supabase db query --linked "select shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') as marker"   # must show cloudiator-bench
+      npx supabase db reset --help                           # must list --linked, --project-ref and --no-seed
+      npx supabase db reset --linked --project-ref <bench-ref> --no-seed
+      ```
+      The database password at the prompt only. **Paste:** `bench reset: yes` and the CLI's last line.
+   3. **[Claude]** Deletes both Vault secrets, only on the marked bench, so the restore's later `set-worker-secret.mjs` creates
+      them as on a new project (never `update_secret`):
+      ```sql
+      delete from vault.secrets
+      where name in ('game_worker_url', 'game_worker_secret')
+        and shobj_description((select oid from pg_database where datname = current_database()), 'pg_database') = 'cloudiator-bench';
+      ```
+      Then the count of those two names (must be 0) and `scripts/restore-hosted-facts.sql`: 22 migrations, 0 accounts, 0
+      identities, 0 characters, no epoch, the scheduler off. If accounts remain after the reset, Claude deletes them with the
+      same marker condition (`delete from auth.users where …`) and reads the facts again; anything else that is not new: stop
+      and decide with Avi.
+   4. **[Avi]** The data: runbook "Hosted restore" step 3, with the bench's connection string. **Paste:** the exit line, `ok`,
+      `counts`, `identities`, `mismatches` and `leftOut.entries`.
+   5. **[Avi]** `node scripts/set-worker-secret.mjs --project-ref <bench-ref>` (Edge secrets step 2): both Vault names
+      created (0 before, present after). **Paste:** the `ok`/`failed` lines.
+   6. **[Claude]** The scheduler with the Activation step 4 guard, `select private.cleanup_tick();`, then
+      `scripts/hosted-checks.sql` and the health report until `slotsBehind` is `0`: `duplicateGrants` 0 and the same 50
+      bench characters.
    Commit `ops: rehearse the hosted export and restore`.
 
 ### Mobile frame rate (24.11)

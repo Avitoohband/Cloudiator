@@ -562,7 +562,10 @@ test.describe('release accessibility in the fixture preview', () => {
     expect(await contrastIssues(await settled(scene(page, 'Replay')), { focusRing: true }), 'the replay scene').toEqual([]);
     await page.goto(`/game/?mode=fixture&view=expedition&activity=${EXPEDITION_FIXTURES.woodland.activityId}`);
     await expect(scene(page, 'Expedition').getByRole('heading', { name: 'Activity log' })).toBeVisible({ timeout: 45_000 });
-    expect(await contrastIssues(await settled(scene(page, 'Expedition'))), 'the expedition scene').toEqual([]);
+    // Measured again until it holds: "Returned to camp" appears when the playback reaches camp and fades in over 600 ms,
+    // which can begin after a single settle (measured mid-fade at 0.08 opacity once, 2026-10-24). A real failure persists.
+    await expect.poll(async () => contrastIssues(await settled(scene(page, 'Expedition'))), { message: 'the expedition scene', timeout: 15_000 })
+      .toEqual([]);
     // A visitor's chip and menus.
     await openFixtureCamp(page, '/game/?mode=fixture&as=visitor');
     expect(await contrastIssues(cornerChip(page)), 'the visitor chip').toEqual([]);

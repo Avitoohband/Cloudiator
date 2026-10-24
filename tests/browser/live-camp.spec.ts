@@ -45,15 +45,19 @@ test('mounts the camp from live public reads, polling only the revision every 30
   // The shared clock shows the server's time from the timed revision read (days behind this browser's wall clock here).
   expect(Math.abs(await shownTime(page) - live.serverNowMs())).toBeLessThan(5_000);
   const revisions = live.count('world_revision'), loads = live.count('world_actor_reads');
-  for (let poll = 1; poll <= 3; poll++) {
-    await page.clock.fastForward(30_000);
-    await expect.poll(() => live.count('world_revision')).toBe(revisions + poll);
-  }
+  // The next poll's timer is set once the browser has handled the previous read, which can trail the request this route
+  // counts on a loaded host (2026-10-24, two gate runs). So: 25 s with no poll (the installed clock also runs on in real
+  // time, hence the slack), then a second at a time until it comes.
+  const nextPoll = async (count: () => number, expected: number) => {
+    await page.clock.fastForward(25_000);
+    expect(count()).toBe(expected - 1);
+    await expect.poll(async () => { await page.clock.fastForward(1_000); return count(); }, { timeout: 15_000 }).toBe(expected);
+  };
+  for (let poll = 1; poll <= 3; poll++) await nextPoll(() => live.count('world_revision'), revisions + poll);
   expect(live.count('world_actor_reads')).toBe(loads);
   // A changed revision loads the world once, and the camp shows it.
   live.setWorld({ ...world, revision: 'live-2', actors: world.actors.slice(1) });
-  await page.clock.fastForward(30_000);
-  await expect.poll(() => live.count('world_actor_reads')).toBe(loads + 1);
+  await nextPoll(() => live.count('world_actor_reads'), loads + 1);
   await waitForCamp(page, world.actors.length - 1);
   // A visitor: only anonymous public reads, never the owner state or a command.
   expect(live.requests.every(r => r.reader === null)).toBe(true);

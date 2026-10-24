@@ -402,6 +402,9 @@ test.describe('arena staging and sparring rings in the camp', () => {
   });
 
   test('keeps each fight’s damage labels clear of every nameplate in the six-fight view', { tag: '@render' }, async ({ page }) => {
+    // It steps every 100 ms of all six bouts twice (reduced and full motion): about 24 s alone on Next 16.4.0 and 16.4.3
+    // alike (2026-10-24), which the default 30 s exceeded under the full suite's parallel load in two gate runs.
+    test.setTimeout(90_000);
     await page.emulateMedia({ reducedMotion: 'reduce' }); // the pairs stand in their rings at once
     await openArena(page, 60);
     const inRings = (await campState(page)).arena.fights.filter(f => f.status !== 'queued');

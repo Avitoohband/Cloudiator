@@ -328,7 +328,9 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     await runBoundary(300);
     const [first] = await claim('settlement');
     expect(first.expiresAtMs - Date.now()).toBeGreaterThan(110_000);
-    expect(first.expiresAtMs - Date.now()).toBeLessThanOrEqual(120_000);
+    // The lease ends 120 s after the database clock; Date.now() is the host's. The Docker VM's clock runs within a few
+    // milliseconds of it (expected 120002 to be at most 120000 in one gate run, 2026-10-24), so allow 250 ms of skew.
+    expect(first.expiresAtMs - Date.now()).toBeLessThanOrEqual(120_250);
     expect(await rpc('renew_job', { job_id: first.id, lease_token: first.token })).toMatchObject({ ok: true });
     await sql`update private.jobs set lease_until_ms=0 where id=${first.id}`;
     expect(await rpc('renew_job', { job_id: first.id, lease_token: first.token })).toHaveCode('conflict');

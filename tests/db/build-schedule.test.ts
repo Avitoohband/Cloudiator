@@ -5,12 +5,38 @@ import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
-import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands.ts';
+import type { DayScheduleValue, GameCommand, Phase, Schedule } from '../../supabase/functions/_shared/contracts/commands.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 
 const database = createDatabase(admin);
 const deps = { database, verifyActor: makeVerifier(anonymous), allowedOrigins: ['http://127.0.0.1:3000'] };
 const send = async (token: string, body: GameCommand) => (await handleCommand(request(token, body), deps)).json();
+const SLOT = 4_800_000;
+const PHASES: readonly Phase[] = ['morning', 'afternoon', 'evening'];
+/** `private.schedule_effective_slot` restated: the next slot of `phase` strictly after the slot `nowMs` falls in. */
+const nextSlotOf = (phase: Phase, nowMs: number) => {
+  const slot = Math.floor(nowMs / SLOT), offset = (PHASES.indexOf(phase) - (slot % 3) + 3) % 3;
+  return slot + (offset || 3);
+};
+/** Creation's day (01-identity.sql): training, the woodland expedition, rest. */
+const CREATED: Schedule = { morning: { kind: 'training' }, afternoon: { kind: 'expedition', expeditionId: 'woodland' }, evening: { kind: 'rest' } };
+const dayCommand = (expectedVersion: number, day: Schedule): Extract<GameCommand, { kind: 'edit-day-schedule' }> =>
+  ({ kind: 'edit-day-schedule', operationId: randomUUID(), expectedVersion, day });
+/** The day command as the backend sends it, past the Edge parser: SQL alone must refuse what the parser would. */
+async function dayRpc(actor: string, command: Record<string, unknown>) {
+  const { data, error } = await admin.rpc('edit_day_schedule', { actor_id: actor, operation_id: command.operationId, input: { command, prepared: null } });
+  if (error) throw new Error(`edit_day_schedule: ${error.message}`);
+  return data;
+}
+async function scheduleRpc(actor: string, command: Record<string, unknown>) {
+  const { data, error } = await admin.rpc('edit_schedule', { actor_id: actor, operation_id: command.operationId, input: { command, prepared: null } });
+  if (error) throw new Error(`edit_schedule: ${error.message}`);
+  return data;
+}
+/** Every revision after creation's (version 1), in version then phase order. */
+const revisionsAfterCreation = async (gid: string) => (await sql`select phase, version::int as version, choice, received_at_ms::float8 as received,
+  effective_slot_index::float8 as effective from public.schedule_revisions where gladiator_id=${gid} and version>1 order by version, phase`).map(row => ({ ...row }));
+const receiptCount = async (operationId: string) => (await sql`select count(*)::int as n from public.operation_receipts where operation_id=${operationId}`)[0].n as number;
 async function fighter() {
   const owner = await account();
   const result = await send(owner.token, creation('Plan ' + randomUUID().slice(0, 8)));
@@ -34,8 +60,8 @@ describe('schedule revisions and pending reservations', () => {
   afterAll(() => sql.end());
   it('exposes backend-only schedule/build/cancel RPCs', async () => {
     const rows = await sql`select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='public' and proname in ('edit_schedule','queue_build','cancel_build')`;
-    expect(rows.map(row => row.proname).sort()).toEqual(['cancel_build', 'edit_schedule', 'queue_build']);
+      where n.nspname='public' and proname in ('edit_schedule','edit_day_schedule','queue_build','cancel_build')`;
+    expect(rows.map(row => row.proname).sort()).toEqual(['cancel_build', 'edit_day_schedule', 'edit_schedule', 'queue_build']);
   });
   it('reserves combined 200 from 300 without replacing the active build and refunds cancellation once', async () => {
     const owner = await fighter();
@@ -87,6 +113,160 @@ describe('schedule revisions and pending reservations', () => {
     expect(results.filter(r => r.code === 'conflict')).toHaveLength(1);
     expect(await send(owner.token, { ...command, operationId: randomUUID(), expectedVersion: 2, choice: { kind: 'expedition', expeditionId: 'mountain' } })).toMatchObject({ ok: false, code: 'invalid' });
     expect((await owner.state()).scheduleVersion).toBe(2);
+  });
+
+  // Launch feedback (2026-10-25): one save for the whole day, applied all at once or not at all, and Arena only in the evening.
+  it('edit-day-schedule saves three parts in one version', async () => {
+    const owner = await fighter();
+    expect(await owner.state()).toMatchObject({ schedule: CREATED, scheduleVersion: 1 });
+    const day: Schedule = { morning: { kind: 'rest' }, afternoon: { kind: 'training' }, evening: { kind: 'arena' } };
+    const saved = await send(owner.token, dayCommand(1, day));
+    expect(saved).toMatchObject({ ok: true, receiptId: expect.any(String) });
+    const value = saved.value as DayScheduleValue;
+    // Each changed part starts at its own next occurrence after the slot the save was received in.
+    const effective = (phase: Phase) => nextSlotOf(phase, value.receivedAtMs);
+    expect(value).toEqual({ version: 2, receivedAtMs: expect.any(Number),
+      parts: Object.fromEntries(PHASES.map(phase => [phase, { effectiveSlotIndex: effective(phase), effectiveAtMs: effective(phase) * SLOT }])) });
+    expect(Math.abs(value.receivedAtMs - Date.now())).toBeLessThan(5000);
+    expect(await owner.state()).toMatchObject({ schedule: day, scheduleVersion: 2 });
+    // One version for the day: one revision per changed part, all at version 2.
+    expect(await revisionsAfterCreation(owner.gid)).toEqual((['afternoon', 'evening', 'morning'] as const).map(phase =>
+      ({ phase, version: 2, choice: day[phase], received: value.receivedAtMs, effective: effective(phase) })));
+
+    // Only the evening changes: one revision at version 3, and the unchanged parts answer null.
+    const evening: Schedule = { ...day, evening: { kind: 'expedition', expeditionId: 'woodland' } };
+    const next = await send(owner.token, dayCommand(2, evening));
+    expect(next).toMatchObject({ ok: true });
+    const nextValue = next.value as DayScheduleValue;
+    expect(nextValue).toEqual({ version: 3, receivedAtMs: expect.any(Number), parts: { morning: null, afternoon: null,
+      evening: { effectiveSlotIndex: nextSlotOf('evening', nextValue.receivedAtMs), effectiveAtMs: nextSlotOf('evening', nextValue.receivedAtMs) * SLOT } } });
+    expect(await owner.state()).toMatchObject({ schedule: evening, scheduleVersion: 3 });
+    expect((await revisionsAfterCreation(owner.gid)).filter(row => row.version === 3)).toEqual([{ phase: 'evening', version: 3,
+      choice: evening.evening, received: nextValue.receivedAtMs, effective: nextSlotOf('evening', nextValue.receivedAtMs) }]);
+  });
+
+  it('edit-day-schedule saves through the real authenticated Edge runtime', async () => {
+    const owner = await fighter();
+    const day: Schedule = { ...CREATED, evening: { kind: 'arena' } };
+    const response = directEdge(owner.token, dayCommand(1, day));
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ ok: true, value: { version: 2, parts: { morning: null, afternoon: null, evening: { effectiveSlotIndex: expect.any(Number) } } } });
+    expect(await owner.state()).toMatchObject({ schedule: day, scheduleVersion: 2 });
+  });
+
+  it('edit-day-schedule refuses a stale version and writes nothing', async () => {
+    const owner = await fighter();
+    // Two tabs save different days against version 1 at once: exactly one wins, the other is a conflict, nothing is half saved.
+    const first = dayCommand(1, { ...CREATED, morning: { kind: 'rest' } });
+    const second = dayCommand(1, { ...CREATED, afternoon: { kind: 'training' }, evening: { kind: 'arena' } });
+    const results = await Promise.all([send(owner.token, first), send(owner.token, second)]);
+    expect(results.filter(r => r.ok)).toHaveLength(1);
+    expect(results.filter(r => r.code === 'conflict')).toHaveLength(1);
+    const won = results[0].ok ? first : second;
+    expect(await owner.state()).toMatchObject({ schedule: won.day, scheduleVersion: 2 });
+    const saved = await revisionsAfterCreation(owner.gid);
+    expect(saved.map(row => row.version)).toEqual(won === first ? [2] : [2, 2]);
+    // A stale version again: a conflict, and the schedule, its version and its revisions stay as they were.
+    const stale = dayCommand(1, { morning: { kind: 'rest' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } });
+    expect(await send(owner.token, stale)).toEqual({ ok: false, code: 'conflict' });
+    expect(await send(owner.token, { ...stale, operationId: randomUUID(), expectedVersion: 3 })).toEqual({ ok: false, code: 'conflict' });
+    expect(await owner.state()).toMatchObject({ schedule: won.day, scheduleVersion: 2 });
+    expect(await revisionsAfterCreation(owner.gid)).toEqual(saved);
+  });
+
+  it('edit-day-schedule replays its receipt', async () => {
+    const owner = await fighter();
+    const command = dayCommand(1, { morning: { kind: 'rest' }, afternoon: { kind: 'training' }, evening: { kind: 'arena' } });
+    const first = await send(owner.token, command);
+    expect(first).toMatchObject({ ok: true, value: { version: 2 } });
+    // A lost reply sent again, twice at once: the stored result, never a second version bump.
+    expect(await Promise.all([send(owner.token, command), send(owner.token, command)])).toEqual([first, first]);
+    expect(await receiptCount(command.operationId)).toBe(1);
+    expect((await owner.state()).scheduleVersion).toBe(2);
+    expect(await revisionsAfterCreation(owner.gid)).toHaveLength(3);
+    // The same operation with another day is a conflict and writes nothing.
+    expect(await send(owner.token, { ...command, day: { ...command.day, evening: { kind: 'rest' } } })).toEqual({ ok: false, code: 'conflict' });
+    // While the character is behind, the receipt still replays first; a new save answers processing, which is not stored.
+    await sql`update public.gladiators set processed_slot_index=processed_slot_index-1 where id=${owner.gid}`;
+    expect(await send(owner.token, command)).toEqual(first);
+    const later = dayCommand(2, { ...command.day, morning: { kind: 'training' } });
+    expect(await send(owner.token, later)).toMatchObject({ ok: false, code: 'processing' });
+    expect(await receiptCount(later.operationId)).toBe(0);
+    await sql`update public.gladiators set processed_slot_index=floor(extract(epoch from clock_timestamp())*1000/4800000) where id=${owner.gid}`;
+    expect(await send(owner.token, later)).toMatchObject({ ok: true, value: { version: 3, parts: { morning: expect.any(Object), afternoon: null, evening: null } } });
+    expect((await owner.state()).scheduleVersion).toBe(3);
+  });
+
+  it('edit-day-schedule refuses afternoon Arena', async () => {
+    const owner = await fighter();
+    // The Edge parser refuses these first (tests/backend/commands.test.ts); SQL refuses them on its own.
+    for (const day of [{ ...CREATED, afternoon: { kind: 'arena' } }, { ...CREATED, morning: { kind: 'arena' } },
+      { morning: { kind: 'arena' }, afternoon: { kind: 'arena' }, evening: { kind: 'arena' } }] as Schedule[]) {
+      const command = dayCommand(1, day);
+      expect(await dayRpc(owner.id, command), JSON.stringify(day)).toEqual({ ok: false, code: 'invalid' });
+    }
+    expect(await owner.state()).toMatchObject({ schedule: CREATED, scheduleVersion: 1 });
+    expect(await revisionsAfterCreation(owner.gid)).toEqual([]);
+    // The same day with Arena in the evening is saved.
+    expect(await dayRpc(owner.id, dayCommand(1, { ...CREATED, evening: { kind: 'arena' } }))).toMatchObject({ ok: true, value: { version: 2 } });
+  });
+
+  it('edit-schedule refuses morning Arena', async () => {
+    const owner = await fighter();
+    for (const phase of ['morning', 'afternoon'] as const) {
+      const command = { kind: 'edit-schedule', operationId: randomUUID(), expectedVersion: 1, phase, choice: { kind: 'arena' } };
+      expect(await scheduleRpc(owner.id, command), phase).toEqual({ ok: false, code: 'invalid' });
+    }
+    expect(await owner.state()).toMatchObject({ schedule: CREATED, scheduleVersion: 1 });
+    expect(await revisionsAfterCreation(owner.gid)).toEqual([]);
+    const evening = { kind: 'edit-schedule', operationId: randomUUID(), expectedVersion: 1, phase: 'evening', choice: { kind: 'arena' } };
+    expect(await scheduleRpc(owner.id, evening)).toMatchObject({ ok: true, value: { version: 2 } });
+    expect(await owner.state()).toMatchObject({ schedule: { ...CREATED, evening: { kind: 'arena' } }, scheduleVersion: 2 });
+  });
+
+  it('a day with no change is invalid', async () => {
+    const owner = await fighter();
+    expect(await send(owner.token, dayCommand(1, CREATED))).toEqual({ ok: false, code: 'invalid' });
+    // Values are compared, not their key order.
+    const reordered = { evening: { kind: 'rest' }, afternoon: { expeditionId: 'woodland', kind: 'expedition' }, morning: { kind: 'training' } } as Schedule;
+    expect(await send(owner.token, dayCommand(1, reordered))).toEqual({ ok: false, code: 'invalid' });
+    expect(await owner.state()).toMatchObject({ schedule: CREATED, scheduleVersion: 1 });
+    expect(await revisionsAfterCreation(owner.gid)).toEqual([]);
+  });
+
+  it('edit-day-schedule checks every part and the command shape like edit-schedule', async () => {
+    const owner = await fighter();
+    const base = dayCommand(1, { ...CREATED, evening: { kind: 'arena' } });
+    // Refused after the character lock (stored, as edit-schedule's refusals are): a locked expedition, a malformed part, a
+    // missing or extra part, and an extra command key.
+    for (const command of [
+      { ...base, day: { ...base.day, morning: { kind: 'expedition', expeditionId: 'mountain' } } },
+      { ...base, day: { ...base.day, afternoon: { kind: 'expedition', expeditionId: 'outpost' } } },
+      { ...base, day: { ...base.day, morning: { kind: 'expedition', expeditionId: 'nowhere' } } },
+      { ...base, day: { ...base.day, morning: { kind: 'rest', extra: 1 } } },
+      { ...base, day: { ...base.day, morning: { kind: 'sleep' } } },
+      { ...base, day: { ...base.day, morning: 'rest' } },
+      { ...base, day: { morning: base.day.morning, afternoon: base.day.afternoon } },
+      { ...base, day: { ...base.day, night: { kind: 'rest' } } },
+      { ...base, day: [base.day.morning, base.day.afternoon, base.day.evening] },
+      { ...base, phase: 'morning' },
+    ]) {
+      const sent = { ...command, operationId: randomUUID() };
+      expect(await dayRpc(owner.id, sent), JSON.stringify(command)).toEqual({ ok: false, code: 'invalid' });
+      expect(await receiptCount(sent.operationId)).toBe(1);
+    }
+    // Refused before the character lock, with no receipt: a wrong kind or a malformed expected version.
+    for (const command of [{ ...base, kind: 'edit-schedule' }, { ...base, expectedVersion: 1.5 }, { ...base, expectedVersion: '1' }, { ...base, expectedVersion: 0 }]) {
+      const sent = { ...command, operationId: randomUUID() };
+      expect(await dayRpc(owner.id, sent), JSON.stringify(command)).toEqual({ ok: false, code: 'invalid' });
+      expect(await receiptCount(sent.operationId)).toBe(0);
+    }
+    expect(await owner.state()).toMatchObject({ schedule: CREATED, scheduleVersion: 1 });
+    expect(await revisionsAfterCreation(owner.gid)).toEqual([]);
+    // A level-10 character may plan the mountain in any part.
+    await sql`update public.gladiators set level=10 where id=${owner.gid}`;
+    expect(await dayRpc(owner.id, { ...base, operationId: randomUUID(), day: { ...base.day, morning: { kind: 'expedition', expeditionId: 'mountain' } } }))
+      .toMatchObject({ ok: true, value: { version: 2, parts: { afternoon: null } } });
   });
 
   it('charges against active allocations, replaces held fees, and allocates newly earned points once', async () => {
@@ -207,7 +387,8 @@ describe('schedule revisions and pending reservations', () => {
     await sql.begin(async tx => {
       await tx`select pg_advisory_xact_lock(hashtextextended(${owner.id},0))`;
       await tx`select id from public.gladiators where id=${owner.gid} for update`;
-      const command: GameCommand = { kind: 'edit-schedule', operationId: randomUUID(), expectedVersion: 1, phase: 'morning', choice: { kind: 'arena' } };
+      // A valid edit (Arena only in the evening, launch feedback), so the post-wait processing gate is the only refusal.
+      const command: GameCommand = { kind: 'edit-schedule', operationId: randomUUID(), expectedVersion: 1, phase: 'evening', choice: { kind: 'arena' } };
       // Call SQL from a separate connection: this request must block behind the boundary's account lock.
       response = sql`select public.edit_schedule(${owner.id},${command.operationId},${sql.json({ command, prepared: null })}) as result`;
       const running = Promise.resolve(response); response = running;
@@ -295,7 +476,7 @@ describe('schedule revisions and pending reservations', () => {
       expect((await anonymous.from(table).select('*')).error).not.toBeNull();
       expect((await owner.client.from(table).delete().eq('gladiator_id', owner.gid)).error).not.toBeNull();
     }
-    for (const name of ['edit_schedule','queue_build','cancel_build']) {
+    for (const name of ['edit_schedule','edit_day_schedule','queue_build','cancel_build']) {
       expect((await owner.client.rpc(name, { actor_id: owner.id, operation_id: randomUUID(), input: {} })).error).not.toBeNull();
     }
     expect(await sql`select has_table_privilege('authenticated','private.pending_build_preparations','select') as allowed`).toEqual([{ allowed: false }]);

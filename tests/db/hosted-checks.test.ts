@@ -217,4 +217,44 @@ describe('the read-only hosted SQL kits', () => {
       for (const needle of forbidden) expect(`${row.section} ${row.item} ${row.value}`, `${row.section} ${row.item}`).not.toContain(needle);
     }
   });
+
+  // Launch feedback (M23): the fee became greatest(1, price*5/100). A sale is judged by the fee its purchase receipt stored, so
+  // a sale under the new minimum and an earlier sale under the floored 5 % both read right.
+  it('judges each sale by the fee stored in its receipt, before and after the 1-gold minimum', { timeout: 60_000 }, async () => {
+    const seller = await fighter(1000), buyer = await fighter(1000);
+    const entry = CATALOG_V1.items['sword:1:common'];
+    const sword = (owner: string, id: string = randomUUID()) => ({ id, ownerId: owner, catalogId: entry.id, catalogVersion: 'v1', tier: entry.tier,
+      rarity: entry.rarity, stats: entry.stats, quantity: 1, origin: 'shop', binding: 'tradable', reservation: null });
+    const itemId = randomUUID();
+    await sql`insert into public.item_instances(id,gladiator_id,item) values(${itemId},${seller.gid},${sql.json(sword(seller.gid, itemId) as never)})`;
+    const listed = await send(seller.token, { kind: 'create-listing', operationId: randomUUID(), itemId, price: 19 });
+    expect(listed.ok, JSON.stringify(listed)).toBe(true);
+    const listingId = listed.value.listingId as string;
+    const bought = await send(buyer.token, { kind: 'buy-listing', operationId: randomUUID(), listingId });
+    expect(bought, JSON.stringify(bought)).toMatchObject({ ok: true, value: { price: 19, fee: 1 } });
+
+    // An earlier sale at the same price under the floored 5 % (fee 0, the seller credited all 19), planted as M14 recorded it.
+    const old = randomUUID(), oldItem = randomUUID();
+    const rows = await rolledBack(async tx => {
+      await tx`insert into public.item_instances(id,gladiator_id,item) values(${oldItem},${buyer.gid},${tx.json(sword(buyer.gid, oldItem) as never)})`;
+      const purchaseRequest = { kind: 'buy-listing', operationId: randomUUID(), listingId: old };
+      const [{ receipt }] = await tx`insert into public.operation_receipts(owner_id,operation_id,gladiator_id,request,request_digest,result)
+        values(${buyer.id},${purchaseRequest.operationId},${buyer.gid},${tx.json(purchaseRequest as never)},'\\x00'::bytea,
+          ${tx.json({ ok: true, value: { listingId: old, itemId: oldItem, price: 19, fee: 0 } } as never)}) returning receipt_id::text as receipt`;
+      const [{ credit }] = await tx`insert into public.operation_receipts(owner_id,operation_id,gladiator_id,request,request_digest,result)
+        values(${seller.id},${randomUUID()},${seller.gid},${tx.json({ kind: 'market-sale', listingId: old } as never)},'\\x00'::bytea,
+          ${tx.json({ ok: true, value: { listingId: old, itemId: oldItem, price: 19, fee: 0, moneyCredit: 19 } } as never)}) returning receipt_id::text as credit`;
+      await tx`insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason)
+        values(${buyer.gid},${receipt},-19,0,'market-purchase'),(${seller.gid},${credit},19,0,'market-sale')`;
+      await tx`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status,terminal_receipt_id,buyer_gladiator_id)
+        values(${old},${seller.gid},${oldItem},19,1,604800001,'sold',${receipt},${buyer.gid})`;
+      return [...await tx.unsafe(CHECKS)] as unknown as Check[];
+    });
+    const SALE = /^price 19, fee (\d), buyer paid 19, seller received (\d+) in 1 credit, fee right true, owners 1, owner buyer, sold \S+Z$/;
+    expect(value(rows, 'trades', `sale ${hash(listingId)}`)).toMatch(SALE);
+    expect(SALE.exec(value(rows, 'trades', `sale ${hash(listingId)}`)!)!.slice(1)).toEqual(['1', '18']);
+    expect(value(rows, 'trades', `sale ${hash(old)}`)).toMatch(SALE);
+    expect(SALE.exec(value(rows, 'trades', `sale ${hash(old)}`)!)!.slice(1)).toEqual(['0', '19']);
+    expect(value(rows, 'trades', 'sales with a wrong or missing ledger row')).toBe('0');
+  });
 });

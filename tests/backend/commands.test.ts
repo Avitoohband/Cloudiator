@@ -320,6 +320,24 @@ it('routes create, cancel and buy listing commands to their RPCs with the buyer 
   expect(sent[2]).toEqual(rpc('buy_listing', purchase, null));
 });
 
+// Launch feedback (M23): the day command has its own RPC, edit_day_schedule; the other planning kinds keep theirs.
+it('routes edit-day-schedule to the edit_day_schedule RPC with the canonical command and no preparation', async () => {
+  const sent: Sent[] = [];
+  const answer = { ok: true, receiptId: 'r1', value: { version: 4, receivedAtMs: 1, parts: { morning: null, afternoon: null, evening: { effectiveSlotIndex: 2, effectiveAtMs: 9_600_000 } } } };
+  const database = createDatabase(backend(() => json(answer), sent));
+  const actor = { userId: ACTOR }, canonical = OPERATION.toLowerCase();
+  const day = { kind: 'edit-day-schedule' as const, operationId: OPERATION, expectedVersion: 3,
+    day: { morning: { kind: 'rest' as const }, afternoon: { kind: 'training' as const }, evening: { kind: 'arena' as const } } };
+  expect(await database.plan(actor, day)).toEqual(answer);
+  // No owner-state read: a day save needs no backend preparation.
+  expect(sent).toEqual([{ method: 'POST', path: '/rest/v1/rpc/edit_day_schedule', search: '',
+    body: { actor_id: ACTOR, operation_id: canonical, input: { command: { ...day, operationId: canonical }, prepared: null } } }]);
+  sent.length = 0;
+  await database.plan(actor, { kind: 'edit-schedule', operationId: OPERATION, expectedVersion: 1, phase: 'evening', choice: { kind: 'arena' } });
+  await database.plan(actor, { kind: 'cancel-build', operationId: OPERATION, expectedVersion: 1 });
+  expect(sent.map(r => [r.method, r.path])).toEqual([['POST', '/rest/v1/rpc/edit_schedule'], ['POST', '/rest/v1/rpc/cancel_build']]);
+});
+
 it('refuses a price above 1,000,000,000 before any RPC', async () => {
   const sent: Sent[] = [];
   const database = createDatabase(backend(() => json({ ok: true, receiptId: 'r1', value: { listingId: operationId, expiresAtMs: 1 } }), sent));

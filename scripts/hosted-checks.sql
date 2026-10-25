@@ -8,8 +8,8 @@
 -- Sections, in order:
 --   parity            migrations (count, first, last, versions), the server version, the schemas the search path resolves to,
 --                     pg_net.ttl, and object counts with a digest of every public/private function (name, body hash, ACL), to
---                     set beside the same file's output on the local M01-M22 replay (Task 24.4; scripts/schema-fingerprint.sql
---                     is the full comparison); and `bench marker`: `absent`, or `present (comment)`, `present (schema)` or
+--                     set beside the same file's output on the local replay of every migration (Task 24.4;
+--                     scripts/schema-fingerprint.sql is the full comparison); and `bench marker`: `absent`, or `present (comment)`, `present (schema)` or
 --                     `present (comment, schema)` when the database carries the bench's mark (the database comment
 --                     'cloudiator-bench', exactly, or the schema cloudiator_bench_marker; scripts/bench-seed.mjs). Production
 --                     must read `absent` (Task 24.2c). It never prints any other comment text.
@@ -27,9 +27,10 @@
 --   characters        accounts, characters, accounts with more than one character, identities per provider, and the 20
 --                     newest characters by hashed account (Task 24.8: one character per account)
 --   trades            listings by status; for every sale whether the buyer paid the price and the seller received the price
---                     less the 5 % fee floored in exactly one credit (every credit is summed and counted, so a sale credited
---                     twice is reported here and in duplicate-grants, never an error), and whether the item has exactly
---                     one owner, the buyer; the 10 newest sales
+--                     less the fee its purchase receipt stored (5 % floored; at least 1 gold since M23) in exactly one
+--                     credit (every credit is summed and counted, so a sale credited twice is reported here and in
+--                     duplicate-grants, never an error), and whether the item has exactly one owner, the buyer; the 10
+--                     newest sales
 --                     (Task 24.8). Cleanup folds ledger rows older than 90 days into wallet checkpoints, so an older sale
 --                     reads `missing` there; an item its buyer later sold or discarded reads `other` or `gone`.
 --
@@ -56,7 +57,10 @@ with
     from private.boundaries b, clock
     where b.status = 'complete' and b.completed_at_ms > clock.now_ms - 86400000),
   sales as (
-    select l.id, l.price, l.price * 5 / 100 as fee, l.seller_gladiator_id as seller, l.buyer_gladiator_id as buyer, l.item_id,
+    -- The fee the purchase receipt stored (receipts are never deleted, and only settlement receipts are compacted): M14's
+    -- floored 5 % before M23, at least 1 gold since (launch feedback), so a sale is judged by the rule it was made under.
+    select l.id, l.price, (select (r.result -> 'value' ->> 'fee')::bigint from public.operation_receipts r
+        where r.receipt_id = l.terminal_receipt_id) as fee, l.seller_gladiator_id as seller, l.buyer_gladiator_id as buyer, l.item_id,
       (select w.money_delta from public.wallet_ledger w where w.receipt_id = l.terminal_receipt_id and w.reason = 'market-purchase'
         and w.gladiator_id = l.buyer_gladiator_id) as buyer_delta,
       -- Every seller credit of the sale, summed and counted: market-sale receipts are not unique per listing, so a sale

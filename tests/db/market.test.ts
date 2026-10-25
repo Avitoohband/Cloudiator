@@ -237,20 +237,54 @@ describe('marketplace listings in the database', () => {
     expect(await listingRow(id)).toMatchObject({ status: 'sold', buyer: buyer.gid, receipt: results[0].receiptId });
   });
 
-  it('floors the 5% fee: prices 1, 19, 20, 101 pay 0, 0, 1, 5', async () => {
+  // Launch feedback (2026-10-25): the fee is 5 % floored but at least 1 gold, greatest(1, price*5/100), and the lowest price is
+  // 2, so a seller always receives something and no sale moves money for free.
+  /** Lists a sword at `price`, buys it, and returns the purchase with both wallets' changes. */
+  async function sale(seller: Fighter, buyer: Fighter, price: number) {
+    const sword = await seller.add('sword:1:common');
+    const id = listingId(await list(seller, sword.id, price));
+    const before = { seller: await seller.wallet(), buyer: await buyer.wallet() };
+    const bought = await purchase(buyer, id);
+    return { id, sword, bought, seller: (await seller.wallet()) - before.seller, buyer: (await buyer.wallet()) - before.buyer };
+  }
+  it('a price-2 sale pays fee 1 and credits 1', async () => {
     expect(RULES_V1.fees.marketRate).toBe(0.05);
     const seller = await fighter({ money: 0 }), buyer = await fighter({ money: 1000 });
-    for (const [price, fee] of [[1, 0], [19, 0], [20, 1], [101, 5]]) {
-      const sword = await seller.add('sword:1:common');
-      const id = listingId(await list(seller, sword.id, price));
-      const before = { seller: await seller.wallet(), buyer: await buyer.wallet() };
-      expect(await purchase(buyer, id), String(price)).toMatchObject({ ok: true, value: { listingId: id, itemId: sword.id, price, fee } });
-      expect(await seller.wallet(), String(price)).toBe(before.seller + price - fee);
-      expect(await buyer.wallet(), String(price)).toBe(before.buyer - price);
+    const result = await sale(seller, buyer, 2);
+    expect(result.bought).toMatchObject({ ok: true, value: { listingId: result.id, itemId: result.sword.id, price: 2, fee: 1 } });
+    expect([result.seller, result.buyer]).toEqual([1, -2]);
+    expect((await seller.ledger()).map(row => [row.money, row.reason])).toEqual([[1, 'market-sale']]);
+    expect((await buyer.ledger()).map(row => [row.money, row.reason])).toEqual([[-2, 'market-purchase']]);
+    // The seller's receipt records the same fee and credit.
+    expect((await sql`select result->'value' as value from public.operation_receipts where request->>'kind'='market-sale' and request->>'listingId'=${result.id}`)[0].value)
+      .toEqual({ listingId: result.id, itemId: result.sword.id, price: 2, fee: 1, moneyCredit: 1 });
+  });
+
+  it('a price-19 sale pays fee 1', async () => {
+    const seller = await fighter({ money: 0 }), buyer = await fighter({ money: 1000 });
+    // 19 and 20 pay the minimum of 1; from 40 the floored 5 % is above it (40 pays 2, 101 pays 5).
+    for (const [price, fee] of [[19, 1], [20, 1], [39, 1], [40, 2], [101, 5]]) {
+      const result = await sale(seller, buyer, price);
+      expect(result.bought, String(price)).toMatchObject({ ok: true, value: { listingId: result.id, itemId: result.sword.id, price, fee } });
+      expect([result.seller, result.buyer], String(price)).toEqual([price - fee, -price]);
     }
-    expect((await seller.ledger()).map(row => [row.money, row.reason])).toEqual([[1, 'market-sale'], [19, 'market-sale'], [19, 'market-sale'], [96, 'market-sale']]);
+    expect((await seller.ledger()).map(row => [row.money, row.reason]))
+      .toEqual([[18, 'market-sale'], [19, 'market-sale'], [38, 'market-sale'], [38, 'market-sale'], [96, 'market-sale']]);
     expect((await buyer.ledger()).map(row => [row.money, row.reason]))
-      .toEqual([[-1, 'market-purchase'], [-19, 'market-purchase'], [-20, 'market-purchase'], [-101, 'market-purchase']]);
+      .toEqual([[-19, 'market-purchase'], [-20, 'market-purchase'], [-39, 'market-purchase'], [-40, 'market-purchase'], [-101, 'market-purchase']]);
+  });
+
+  it('a listing at price 1 is refused', async () => {
+    const seller = await fighter({ money: 0 });
+    const sword = await seller.add('sword:1:common');
+    const command = listCommand(sword.id, 1);
+    // A price shape error: invalid, with no receipt, no listing, no offer, and the item still free.
+    expect(await list(seller, sword.id, 1, command)).toHaveCode('invalid');
+    expect(await receipts(command.operationId)).toBe(0);
+    expect(await sql`select count(*)::int as n from private.market_listings where item_id=${sword.id}`).toEqual([{ n: 0 }]);
+    expect(await itemRow(sword.id)).toMatchObject({ owner: seller.gid, item: { reservation: null } });
+    // Price 2 is the lowest that lists.
+    expect(await list(seller, sword.id, 2)).toMatchObject({ ok: true });
   });
 
   it('refuses self-purchase, bound and renown items, equipped and pending-build items, and a sixth active listing', async () => {
@@ -270,9 +304,9 @@ describe('marketplace listings in the database', () => {
     }
     expect(await list(seller, randomUUID(), 10)).toHaveCode('not-found');
     expect(await list(seller, (await other.items())[0].id, 10)).toHaveCode('not-found');
-    // Shape errors and prices outside 1..1,000,000,000 are refused without a receipt.
+    // Shape errors and prices outside 2..1,000,000,000 are refused without a receipt.
     const spare = await seller.add('bow:1:common');
-    for (const command of [listCommand(spare.id, 0), listCommand(spare.id, 1_000_000_001), listCommand(spare.id, 1.5), listCommand(spare.id, -1),
+    for (const command of [listCommand(spare.id, 0), listCommand(spare.id, 1), listCommand(spare.id, 1_000_000_001), listCommand(spare.id, 1.5), listCommand(spare.id, -1),
       { ...listCommand(spare.id, 10), extra: true }, { ...listCommand(spare.id, 10), itemId: 'not-a-uuid' }, { ...listCommand(spare.id, 10), price: '10' },
       { ...listCommand(spare.id, 10), kind: 'cancel-listing' }]) {
       expect(await list(seller, spare.id, 10, command), JSON.stringify(command)).toHaveCode('invalid');
@@ -280,7 +314,7 @@ describe('marketplace listings in the database', () => {
     }
     // Five active listings; the sixth is refused and recorded.
     const listed: string[] = [];
-    for (const price of [1, 2, 3, 4, 1_000_000_000]) listed.push(listingId(await list(seller, (await seller.add('sword:1:common')).id, price)));
+    for (const price of [2, 3, 4, 5, 1_000_000_000]) listed.push(listingId(await list(seller, (await seller.add('sword:1:common')).id, price)));
     const sixth = listCommand((await seller.add('sword:1:common')).id, 5);
     expect(await list(seller, sixth.itemId, 5, sixth)).toHaveCode('invalid');
     expect(await receipts(sixth.operationId)).toBe(1);

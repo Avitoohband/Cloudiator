@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GameCommand, CommandResult } from '../contracts/commands.ts';
+import type { GameCommand, CommandResult, DayScheduleValue } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
@@ -13,10 +13,13 @@ import type { TournamentGraph } from '../domain/tournament.ts';
 import type { CoordinatorReport, JobKind, JobLease } from '../domain/types.ts';
 
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
-export type PlanningCommand = Extract<GameCommand, { kind: 'queue-build' | 'cancel-build' | 'edit-schedule' }>;
+export type PlanningCommand = Extract<GameCommand, { kind: 'queue-build' | 'cancel-build' | 'edit-schedule' | 'edit-day-schedule' }>;
 export type BuildDraft = PendingBuildView;
 export type ScheduleEditValue = { version: number; receivedAtMs: number; effectiveSlotIndex: number; effectiveAtMs: number };
-export type PlanningValue = BuildDraft | ScheduleEditValue | { buildVersion: number };
+export type PlanningValue = BuildDraft | ScheduleEditValue | DayScheduleValue | { buildVersion: number };
+/** Each planning kind's RPC; every one is `private.planning_command` under that kind (SQL checks the kind matches). */
+const PLANNING_RPC: Record<PlanningCommand['kind'], string> = {
+  'queue-build': 'queue_build', 'cancel-build': 'cancel_build', 'edit-schedule': 'edit_schedule', 'edit-day-schedule': 'edit_day_schedule' };
 /** Canonical validation result with the exact server-read baseline SQL must lock and compare. */
 export function prepareBuild(command: Extract<PlanningCommand, { kind: 'queue-build' }>, state: OwnerState) {
   const validation = validateBuild(command, state.inventory, state.progression.earnedAttributePoints, state.progression.level);
@@ -138,8 +141,7 @@ export function createDatabase(client: SupabaseClient) {
         if (data) prepared = prepareBuild(command, data.state as OwnerState);
       }
       // Even invalid/stale preparation reaches SQL: a committed operation must replay first.
-      const rpc = command.kind === 'queue-build' ? 'queue_build' : command.kind === 'cancel-build' ? 'cancel_build' : 'edit_schedule';
-      const { data, error } = await client.rpc(rpc, { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
+      const { data, error } = await client.rpc(PLANNING_RPC[command.kind], { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
       if (error) throw new Error('planning-unavailable');
       return data as CommandResult<PlanningValue>;
     },

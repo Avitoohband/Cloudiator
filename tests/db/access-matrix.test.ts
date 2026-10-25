@@ -193,6 +193,8 @@ const SERVICE_ROLE = [
   'function public.create_gladiator(uuid, uuid, jsonb): EXECUTE',
   'function public.create_listing(uuid, uuid, jsonb): EXECUTE',
   'function public.discard_item(uuid, uuid, jsonb): EXECUTE',
+  // Launch feedback (M23): the whole day saved in one command, backend only like edit_schedule.
+  'function public.edit_day_schedule(uuid, uuid, jsonb): EXECUTE',
   'function public.edit_schedule(uuid, uuid, jsonb): EXECUTE',
   'function public.expedition_settlement_input(uuid, uuid): EXECUTE',
   'function public.fail_job(uuid, uuid, text): EXECUTE',

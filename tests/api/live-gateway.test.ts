@@ -74,6 +74,30 @@ test('sends the listing commands to the authenticated command endpoint and keeps
   expect(sent).toEqual(commands.map(body => ({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body })));
 });
 
+// Launch feedback (2026-10-25): the schedule panel saves the whole day in one command; the single-part command stays allowed (probes, the bench seed).
+test('sends the whole-day schedule command and the single-part one to the authenticated command endpoint', async () => {
+  api({ user: { id: 'first' }, access_token: 'first', expires_at: Math.floor(Date.now() / 1000) + 3600 } as Session);
+  const sent: unknown[] = [];
+  const day = { version: 2, receivedAtMs: 1_791_591_300_000, parts: { morning: { effectiveSlotIndex: 5, effectiveAtMs: 24_000_000 }, afternoon: null, evening: null } };
+  const answers = [{ status: 200, body: { ok: true, receiptId: 'r1', value: day } }, { status: 409, body: { ok: false, code: 'conflict' } },
+    { status: 200, body: { ok: true, receiptId: 'r2', value: { version: 3, receivedAtMs: 1, effectiveSlotIndex: 5, effectiveAtMs: 2 } } }];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    sent.push({ url: String(url), body: JSON.parse(String(init.body)) });
+    const { status, body } = answers.shift()!;
+    return new Response(JSON.stringify(body), { status });
+  });
+  const operationId = 'd43f7844-52e0-4302-b8e4-740035047765';
+  const schedule = { morning: { kind: 'rest' as const }, afternoon: { kind: 'training' as const }, evening: { kind: 'arena' as const } };
+  const commands = [{ kind: 'edit-day-schedule' as const, operationId, expectedVersion: 1, day: schedule }, { kind: 'edit-day-schedule' as const, operationId, expectedVersion: 1, day: schedule },
+    { kind: 'edit-schedule' as const, operationId, expectedVersion: 1, phase: 'evening' as const, choice: { kind: 'arena' as const } }];
+  const gateway = createLiveGateway();
+  const results = [];
+  for (const command of commands) results.push(await gateway.command(command));
+  expect(results).toEqual([{ ok: true, receiptId: 'r1', value: day }, { ok: false, code: 'conflict' },
+    { ok: true, receiptId: 'r2', value: { version: 3, receivedAtMs: 1, effectiveSlotIndex: 5, effectiveAtMs: 2 } }]);
+  expect(sent).toEqual(commands.map(body => ({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body })));
+});
+
 // Task 21.3: seasons are public reads too.
 const SEASON_MS = 2_419_200_000;
 const seasonRows = [{ season_index: 1, starts_at_ms: SEASON_MS, ends_at_ms: 2 * SEASON_MS, closed_at_ms: null },

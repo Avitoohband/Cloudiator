@@ -40,6 +40,20 @@ main[tabindex="-1"]:focus { outline: none; }
 .slot-2 { border-color: #61547b; background: #2c2a40; border-top-color: #bba1df; }
 .slot-2 .eyebrow { color: #c9b4e6; }
 .slot-duration { font-size: .65rem; color: #bbc2d0; }
+/* The schedule panel (launch feedback, 2026-10-25): the part running now, the unsaved and saved lines, the one Save. Text on dark fills: 7:1 or better. */
+.slot-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.schedule-slot .slot-head h3 { margin-right: auto; }
+.running-badge { flex-shrink: 0; padding: .15rem .65rem; font-size: .65rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: #d7e6ff; background: #1d3a66; border: 1px solid #5b7bb5; border-radius: 999px; }
+.schedule-slot[data-running] { box-shadow: inset 0 0 0 1px #5b7bb5; }
+.schedule-slot p.slot-note, .schedule-slot p.slot-hint { margin: .5rem 0 0; }
+.schedule-slot p.slot-note { color: var(--gold); }
+.schedule-slot p:last-child { margin-bottom: 0; }
+.schedule-running { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: var(--ink); background: #23304a; border: 1px solid #5b7bb5; border-left-width: 3px; }
+.schedule-unsaved { margin: 1rem 0 0; font-size: .85rem; color: var(--gold); }
+.schedule-saved { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: #c9f2dd; background: #1f4a3a; border: 1px solid #4fb58a; }
+.schedule-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+.schedule-actions .primary-button { flex: 1 1 10rem; width: auto; margin: 0; }
+.schedule-actions button:not(.primary-button) { flex: 0 1 auto; }
 .panel-notice { padding: .8rem 1rem; margin: 1.25rem 0 0; font-size: .8rem; color: var(--muted); background: #141c2c; border-left: 2px solid #667797; }
 .game-footer { max-width: 1280px; margin: 0 auto; padding: 0 1.5rem 2rem; color: #b2a178; font-size: .6rem; letter-spacing: .1em; display: flex; justify-content: space-between; gap: 1rem; }
 .game-footer span { color: var(--muted); letter-spacing: 0; }

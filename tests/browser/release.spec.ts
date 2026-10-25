@@ -301,13 +301,17 @@ test.describe('release accessibility in the fixture preview', () => {
     await strength.fill('2');
     await expect(mine.getByText(/^Review your build:/)).toHaveCount(0);
     await expect(strength).not.toHaveAttribute('aria-invalid', 'true');
-    // Schedule: the server refuses the morning's choice.
+    // Schedule: one Save for the day, disabled until a part is changed; the server refuses the day, and the changed morning is marked.
     const schedule = await openMenu(page, 'Schedule');
     await expectNamedControls(schedule, 'Schedule (player)');
-    await schedule.getByRole('button', { name: 'Save morning', exact: true }).click();
-    await expect(schedule.getByRole('alert')).toHaveText('Schedule change rejected: invalid.');
-    expect(commands.at(-1)).toMatchObject({ kind: 'edit-schedule', phase: 'morning' });
+    const saveDay = schedule.getByRole('button', { name: 'Save schedule', exact: true });
+    await expect(saveDay).toBeDisabled();
     const morning = schedule.getByRole('combobox', { name: 'morning activity' });
+    await morning.selectOption('rest');
+    await expect(saveDay).toBeEnabled();
+    await saveDay.click();
+    await expect(schedule.getByRole('alert')).toHaveText('Schedule change rejected: invalid.');
+    expect(commands.at(-1)).toMatchObject({ kind: 'edit-day-schedule', day: { morning: { kind: 'rest' } } });
     await expect(morning).toHaveAttribute('aria-invalid', 'true');
     await expect(morning).toHaveAccessibleDescription(/Schedule change rejected: invalid/);
     await expect(schedule.getByRole('combobox', { name: 'evening activity' })).not.toHaveAttribute('aria-invalid', 'true');

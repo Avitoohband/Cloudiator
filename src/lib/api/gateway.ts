@@ -157,7 +157,7 @@ export function createLiveGateway(): GameGateway {
     },
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       // A presence has no receipt: it goes through `sendPresence`.
-      if (!['create-character', 'edit-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
+      if (!['create-character', 'edit-schedule', 'edit-day-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
         'buy-listing', 'set-tournament-opt-in'].includes(input.kind)) {
         return { ok: false, code: 'unavailable' };
       }

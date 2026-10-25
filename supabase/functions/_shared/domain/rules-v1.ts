@@ -4,6 +4,9 @@ import { freezeDomain } from './types.ts';
 export const RULES_V1 = freezeDomain({
   version: 'v1',
   clock: { slotMs: 4_800_000, phases: ['morning', 'afternoon', 'evening'] as const },
+  // Launch feedback (2026-10-25): Arena may be scheduled only in these parts of the day. Edge parseCommand and SQL
+  // planning_command enforce it at command time; the boundary does not re-check it.
+  schedule: { arenaPhases: ['evening'] as const },
   attributes: { base: 5, creationPoints: 10, maximumPoints: 1_000_000_000, maximumLevel: 1_000_000_000 },
   classes: {
     berserker: { strength: 1.1, agility: 1, vitality: 1, endurance: 1, precision: 1 },

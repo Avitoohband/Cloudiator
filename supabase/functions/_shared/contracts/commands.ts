@@ -25,10 +25,16 @@ type Operation = { operationId: OperationId };
 export type PresenceCommand = Operation & { kind: 'presence' };
 /** The answer to a `PresenceCommand`: no receipt and no value. */
 export type PresenceResult = { ok: true } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
+/**
+ * The answer to an `edit-day-schedule` command: the one new schedule version, the server time the save was received, and for
+ * each part the slot its new choice takes effect in (`null` = that part's choice is unchanged and nothing was written).
+ */
+export type DayScheduleValue = { version: number; receivedAtMs: number; parts: Record<Phase, { effectiveSlotIndex: number; effectiveAtMs: number } | null> };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
   | { kind: 'create-character'; name: string; classId: ClassId; allocation: Attributes }
   | { kind: 'edit-schedule'; expectedVersion: number; phase: Phase; choice: ActivityChoice }
+  | { kind: 'edit-day-schedule'; expectedVersion: number; day: Schedule }
   | { kind: 'queue-build'; expectedVersion: number; classId: ClassId; stance: Stance; allocation: Attributes; equipment: Equipment }
   | { kind: 'cancel-build'; expectedVersion: number }
   | { kind: 'buy-shop'; catalogId: string; catalogVersion: string; quantity: number }

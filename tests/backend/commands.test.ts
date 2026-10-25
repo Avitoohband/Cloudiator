@@ -44,6 +44,7 @@ it('validates every discriminant and rejects invalid counts, prices, booleans an
     { kind: 'sell-item', itemId: operationId, quantity: 1 }, { kind: 'discard-item', itemId: operationId, quantity: 1 },
     { kind: 'create-listing', itemId: operationId, price: 1 }, { kind: 'cancel-listing', listingId: operationId },
     { kind: 'buy-listing', listingId: operationId }, { kind: 'set-tournament-opt-in', enabled: false },
+    { kind: 'edit-day-schedule', expectedVersion: 1, day: { morning: { kind: 'rest' }, afternoon: { kind: 'training' }, evening: { kind: 'arena' } } },
   ];
   for (const command of commands) {
     expect(parseCommand({ ...command, operationId })).not.toBeNull();
@@ -53,6 +54,79 @@ it('validates every discriminant and rejects invalid counts, prices, booleans an
     { ...commands[2], expectedVersion: 1.5 }, { ...commands[3], quantity: 0 }, { ...commands[3], catalogId: 'missing' },
     { ...commands[3], quantity: Infinity }, { ...commands[4], quantity: 1.5 }, { ...commands[6], price: Number.MAX_SAFE_INTEGER + 1 },
     { ...commands[9], enabled: 'false' }]) expect(parseCommand({ ...command, operationId })).toBeNull();
+});
+
+// Launch feedback (2026-10-25): Arena is scheduled only in the evening, for both schedule kinds; the day command carries all three parts.
+const arena = { kind: 'arena' };
+const dayOf = (day: Record<string, unknown> = {}): Record<string, unknown> => ({ morning: { kind: 'rest' }, afternoon: { kind: 'training' }, evening: { kind: 'arena' }, ...day });
+const editDay = (patch: Record<string, unknown> = {}) => ({ kind: 'edit-day-schedule', operationId, expectedVersion: 3, day: dayOf(), ...patch });
+const editPart = (phase: string, choice: unknown) => ({ kind: 'edit-schedule', operationId, expectedVersion: 1, phase, choice });
+
+it('refuses Arena in the morning and the afternoon for edit-schedule, and accepts it in the evening', () => {
+  expect(parseCommand(editPart('morning', arena))).toBeNull();
+  expect(parseCommand(editPart('afternoon', arena))).toBeNull();
+  expect(parseCommand(editPart('evening', arena))).toEqual(editPart('evening', arena));
+  // Every other choice stays open in every part.
+  for (const phase of ['morning', 'afternoon', 'evening']) {
+    for (const choice of [{ kind: 'training' }, { kind: 'rest' }, { kind: 'expedition', expeditionId: 'woodland' }]) {
+      expect(parseCommand(editPart(phase, choice)), `${phase} ${choice.kind}`).toEqual(editPart(phase, choice));
+    }
+  }
+});
+
+it('parses edit-day-schedule with exactly the three parts and refuses Arena outside the evening', () => {
+  expect(parseCommand(editDay())).toEqual(editDay());
+  // A day with Arena only in the evening, and a day with no Arena at all, are both fine.
+  expect(parseCommand(editDay({ day: dayOf({ evening: { kind: 'expedition', expeditionId: 'mountain' } }) }))).not.toBeNull();
+  expect(parseCommand(editDay({ day: dayOf({ morning: { kind: 'training' }, evening: { kind: 'rest' } }) }))).not.toBeNull();
+  // Arena in the morning or the afternoon refuses the whole day.
+  expect(parseCommand(editDay({ day: dayOf({ morning: arena }) }))).toBeNull();
+  expect(parseCommand(editDay({ day: dayOf({ afternoon: arena }) }))).toBeNull();
+  expect(parseCommand(editDay({ day: { morning: arena, afternoon: arena, evening: arena } }))).toBeNull();
+});
+
+it('refuses a day missing a part, with an extra key, or with a malformed part', () => {
+  expect(parseCommand(editDay())).not.toBeNull(); // the complete day is the control for every refusal below
+  for (const part of ['morning', 'afternoon', 'evening']) {
+    const { [part]: _omitted, ...without } = dayOf();
+    expect(parseCommand(editDay({ day: without })), `missing ${part}`).toBeNull();
+    expect(parseCommand(editDay({ day: dayOf({ [part]: undefined }) })), `undefined ${part}`).toBeNull();
+  }
+  for (const day of [{ ...dayOf(), night: { kind: 'rest' } }, { ...dayOf(), extra: undefined }, {}, null, [], 'rest', 7,
+    dayOf({ morning: { kind: 'sleep' } }), dayOf({ afternoon: { kind: 'expedition', expeditionId: 'missing' } }), dayOf({ afternoon: { kind: 'expedition' } }),
+    dayOf({ morning: { kind: 'rest', expeditionId: 'woodland' } }), dayOf({ morning: { kind: 'rest', extra: 1 } }), dayOf({ morning: 'rest' }),
+    dayOf({ morning: null }), dayOf({ morning: [] })]) expect(parseCommand(editDay({ day })), JSON.stringify(day)).toBeNull();
+  // The day itself must be present, and the command carries no other authority.
+  const { day: _day, ...withoutDay } = editDay();
+  for (const body of [withoutDay, editDay({ ownerId: operationId }), editDay({ phase: 'morning' }), editDay({ choice: { kind: 'rest' } }),
+    editDay({ gladiatorId: operationId }), editDay({ operationId: 'bad' }), editDay({ operationId: undefined })]) expect(parseCommand(body)).toBeNull();
+});
+
+it('checks the day command expected version like edit-schedule does', () => {
+  for (const expectedVersion of [1, 2, Number.MAX_SAFE_INTEGER]) expect(parseCommand(editDay({ expectedVersion }))).not.toBeNull();
+  for (const expectedVersion of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, '1', null, undefined]) {
+    expect(parseCommand(editDay({ expectedVersion })), String(expectedVersion)).toBeNull();
+  }
+  const { expectedVersion: _version, ...withoutVersion } = editDay();
+  expect(parseCommand(withoutVersion)).toBeNull();
+});
+
+it('answers Arena outside the evening as invalid before any transaction, and routes a valid day to the planning transaction', async () => {
+  const calls: unknown[] = [];
+  const routed = { ...deps, database: { ...deps.database,
+    plan: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return { ok: false as const, code: 'conflict' as const }; } } };
+  for (const body of [editPart('morning', arena), editPart('afternoon', arena), editDay({ day: dayOf({ morning: arena }) }), editDay({ day: dayOf({ afternoon: arena }) })]) {
+    const refused = await handleCommand(req(body), routed);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ ok: false, code: 'invalid' });
+  }
+  expect(calls).toEqual([]);
+  for (const body of [editPart('evening', arena), editDay()]) {
+    const answered = await handleCommand(req(body), routed);
+    expect(answered.status).toBe(409);
+    expect(await answered.json()).toEqual({ ok: false, code: 'conflict' });
+  }
+  expect(calls).toEqual([editPart('evening', arena), editDay()].map(command => ({ actor: { userId: operationId }, command })));
 });
 
 it('parses presence with its operation id and nothing else (Task 23.8)', () => {

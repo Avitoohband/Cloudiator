@@ -1,9 +1,10 @@
-import type { GameCommand, Attributes } from '../contracts/commands.ts';
+import type { ActivityChoice, GameCommand, Attributes, Phase } from '../contracts/commands.ts';
 import type { Actor } from './auth.ts';
 import type { CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
+import { choiceAllowedInPhase } from '../domain/schedule-choice.ts';
 import { jsonResponse, preflightResponse, readCommandBody, statusFor } from './http.ts';
 
 const uuid = (v: unknown) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -11,6 +12,10 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const exact = (v: unknown, keys: string[]): v is Record<string, unknown> => record(v) && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const integer = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
 const oneOf = (v: unknown, values: readonly string[]) => typeof v === 'string' && values.includes(v);
+/** One scheduled choice: its exact wire shape and an expedition that exists. Whether the part may hold it is `choiceAllowedInPhase`. */
+const choiceShape = (choice: unknown): choice is ActivityChoice => record(choice)
+  && ((exact(choice, ['kind']) && oneOf(choice.kind, ['training', 'rest', 'arena']))
+    || (exact(choice, ['kind', 'expeditionId']) && choice.kind === 'expedition' && oneOf(choice.expeditionId, Object.keys(CATALOG_V1.expeditions))));
 const attributeKeys = ['strength', 'agility', 'vitality', 'endurance', 'precision'];
 const allocation = (v: unknown) => exact(v, attributeKeys) && Object.values(v).every(n => integer(n, 0, RULES_V1.attributes.maximumPoints))
   && Object.values(v).reduce<number>((sum, n) => sum + (n as number), 0) <= RULES_V1.attributes.maximumPoints;
@@ -25,11 +30,17 @@ export function parseCommand(value: unknown): GameCommand | null {
       valid = shape('name', 'classId', 'allocation') && typeof value.name === 'string' && value.name === value.name.trim()
         && /^[A-Za-z0-9 _-]{3,20}$/.test(value.name)
         && oneOf(value.classId, Object.keys(RULES_V1.classes)) && validateCreationAllocation(value.allocation as Attributes); break;
+    // Arena only in the evening (launch feedback): the part's choice must pass `choiceAllowedInPhase`, else the command is invalid.
     case 'edit-schedule': {
       const choice = value.choice;
       valid = shape('expectedVersion', 'phase', 'choice') && integer(value.expectedVersion, 1) && oneOf(value.phase, RULES_V1.clock.phases)
-        && record(choice) && ((exact(choice, ['kind']) && oneOf(choice.kind, ['training', 'rest', 'arena']))
-          || (exact(choice, ['kind', 'expeditionId']) && choice.kind === 'expedition' && oneOf(choice.expeditionId, Object.keys(CATALOG_V1.expeditions)))); break;
+        && choiceShape(choice) && choiceAllowedInPhase(value.phase as Phase, choice); break;
+    }
+    // The whole day in one save: exactly the three parts, each a valid choice its part allows.
+    case 'edit-day-schedule': {
+      const day = value.day;
+      valid = shape('expectedVersion', 'day') && integer(value.expectedVersion, 1) && exact(day, [...RULES_V1.clock.phases])
+        && RULES_V1.clock.phases.every(phase => { const choice = day[phase]; return choiceShape(choice) && choiceAllowedInPhase(phase, choice); }); break;
     }
     case 'queue-build':
       valid = shape('expectedVersion', 'classId', 'stance', 'allocation', 'equipment') && integer(value.expectedVersion, 1)
@@ -50,7 +61,7 @@ export function parseCommand(value: unknown): GameCommand | null {
   return valid ? value as GameCommand : null;
 }
 
-const PLANNING_KINDS: readonly string[] = ['edit-schedule', 'queue-build', 'cancel-build'];
+const PLANNING_KINDS: readonly string[] = ['edit-schedule', 'edit-day-schedule', 'queue-build', 'cancel-build'];
 const INVENTORY_KINDS: readonly string[] = ['buy-shop', 'sell-item', 'discard-item'];
 const MARKET_KINDS: readonly string[] = ['create-listing', 'cancel-listing', 'buy-listing'];
 export type CommandDependencies = {

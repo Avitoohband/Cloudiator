@@ -81,7 +81,8 @@ describe('schedule revisions and pending reservations', () => {
   it('serializes schedule versions and checks expedition unlocks', async () => {
     const owner = await fighter();
     const command: Extract<GameCommand, { kind: 'edit-schedule' }> = { kind: 'edit-schedule', operationId: randomUUID(), expectedVersion: 1, phase: 'afternoon', choice: { kind: 'rest' } };
-    const results = await Promise.all([send(owner.token, command), send(owner.token, { ...command, operationId: randomUUID(), choice: { kind: 'arena' } })]);
+    // Arena is evening-only (launch feedback): the contending edit keeps its Arena choice in the evening, so both still race for version 1.
+    const results = await Promise.all([send(owner.token, command), send(owner.token, { ...command, operationId: randomUUID(), phase: 'evening', choice: { kind: 'arena' } })]);
     expect(results.filter(r => r.ok)).toHaveLength(1);
     expect(results.filter(r => r.code === 'conflict')).toHaveLength(1);
     expect(await send(owner.token, { ...command, operationId: randomUUID(), expectedVersion: 2, choice: { kind: 'expedition', expeditionId: 'mountain' } })).toMatchObject({ ok: false, code: 'invalid' });

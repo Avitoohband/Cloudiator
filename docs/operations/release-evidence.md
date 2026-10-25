@@ -1074,3 +1074,20 @@ once instead of answering `processing`; `tests/db/market.test.ts` accepts either
 | Client | `release` fast-forwarded to `1b4fdbf`; Pages build success; deployed checks 9 of 9 |
 | Activation | 2026-10-25: epoch 373525 (guard: no gladiator, next full slot), scheduler on (guard: both Vault names), cleanup tick ok |
 | First boundary | 373525 published in 40 ms (no members); health without alerts, `slotsBehind` 0, `duplicateGrants` 0, 15 MB |
+
+### Real journey (24.8, production, 2026-10-25)
+
+Avi on his own desktop and phone (Decision 8), Claude reading `scripts/hosted-checks.sql` through the Management API.
+
+| Check | Result |
+|---|---|
+| Desktop Google sign-in, create, reload `/game/` | the same gladiator, still signed in |
+| Schedule edit, reload | the change persists |
+| Phone, same account | the same gladiator, no second one |
+| Accounts | 2 accounts, 2 with a character, 0 with more than one, identities `google` only (`persistedCharactersForNewGoogleAccount` = 1 each) |
+| Two-account trade at P = 11 | 1 sale; buyer paid 11; seller received 11 in one credit; fee 0 (5 % of 11 floored), fee right; the item has one owner, the buyer (`twoAccountTrade {owners: 1, feeCorrect: true}`) |
+| First boundary with members | slot 373529, 2 members, published in 2.69 s (0 over 120 s); prepare jobs 2 completed, 0 failed |
+| Grants | `duplicateGrants` 0 (`completedRealBoundary.duplicateGrants` = 0); health without alerts, `slotsBehind` 0 |
+
+Avi's decisions from this run, for the next change (not yet built): Arena only in the evening for now, tournaments move to
+the evening slot, a minimum sale fee of 1 gold; and UI notes on character creation, the schedule and equipped gear.

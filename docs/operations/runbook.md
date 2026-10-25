@@ -152,6 +152,34 @@ To ship changed rules:
 4. Never delete a `rules_versions` row: boundaries, snapshots and jobs reference it. Remove `v1`'s executors only when
    `select count(*) from private.jobs where rules_version = 'v1' and status <> 'completed';` is `0` and no boundary is open.
 
+### Exception: the launch feedback rules changed in place (M23)
+
+The launch feedback (2026-10-25, [design](../superpowers/specs/2026-10-25-launch-feedback-design.md), "The change surface")
+changes four `v1` rules in place, with no `v2`: Arena only in the evening (`RULES_V1.schedule.arenaPhases`), the tournament
+at 18:40 UTC instead of 17:20 (`RULES_V1.tournament`), a market fee of at least 1 gold and a lowest listing price of 2. It is
+Claude's call, stated to Avi with the design. It is safe only because no executor of a job that can be in flight at deploy
+time reads any of them:
+- the Arena part is checked when a schedule is saved (Edge `parseCommand` and SQL `planning_command`), never at a boundary;
+- no tournament has ever formed (no schedule has used Arena), so no pairing, bout or settlement job holds the old hour;
+- the fee and the price are checked in SQL when a listing is bought or created (`market_command`, M23).
+
+Conditions, all required (plan Task 8):
+1. Deploy outside Wednesday and Saturday 17:20–20:00 UTC, with no open boundary (hosted checks, `scheduler` / `boundaries
+   open` = 0).
+2. Right before `db push`, run this read-only check as the database owner; every value must be 0. If any is not, stop and ask
+   Avi (his pre-approval covers the deploy as designed only):
+   ```sql
+   select (select count(*) from public.schedule_revisions where phase in ('morning','afternoon') and choice->>'kind'='arena') as arena_outside_evening,
+     (select count(*) from private.tournaments) as tournaments,
+     (select count(*) from private.market_listings where status='open' and price<2) as open_listings_below_2,
+     (select count(*) from private.boundaries where status<>'complete') as open_boundaries;
+   ```
+3. Deploy M23 before the Edge function ([migrations.md, M23](migrations.md#launch-feedback-evening-arena-the-day-save-and-the-1-gold-market-fee-m23),
+   "Release"), then run the check again: `arena_outside_evening` must still be 0.
+
+M23's backfill turns any morning or afternoon Arena a boundary could still pick into Rest, so a missed one cannot fail the
+deploy. This exception covers these four rules only; any other rule change follows the steps above.
+
 ## Pausing and resuming the scheduler
 
 pg_cron runs `cloudiator-coordinate` every minute and `cloudiator-cleanup` at minute 23. Both are inert while the scheduler is

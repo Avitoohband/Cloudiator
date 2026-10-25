@@ -1,5 +1,123 @@
 # Local identity backend and migrations
 
+## Launch feedback: evening Arena, the day save and the 1-gold market fee (M23)
+
+M23 is `supabase/migrations/20261025201936_launch_feedback.sql`, the SQL part of the
+[launch feedback design](../superpowers/specs/2026-10-25-launch-feedback-design.md) (Avi's notes and approval, 2026-10-25;
+plan Task 2). The design notes are in its source, `supabase/sql/16-launch-feedback.sql`.
+- **Generation.** CLI 2.120.0, `db pull launch_feedback --local --schema public,private --yes` (engine `migra`). The input was
+  the tested source, applied once (the whole file, through the psql fallback after the container label check) to a clean
+  M01–M22 reset.
+- **Completion.** The draft was completed from that source; M01–M22 are unchanged.
+
+**What M23 changes.**
+- **`private.planning_command`**, 02-build-schedule.sql's body plus:
+  - **Arena only in the evening** (`RULES_V1.schedule.arenaPhases`, restated). `edit-schedule` with Arena in the morning or
+    the afternoon is `invalid`, stored like its other refusals. It is checked at command time, like the expedition level; the
+    boundary does not re-check the phase, so schedules written directly (tests, fixtures) still run.
+  - **`edit-day-schedule`** `{kind, operationId, expectedVersion, day: {morning, afternoon, evening}}`: the whole day in one
+    save, every changed part or none. It keeps the planning order: account lock, receipt replay, command shape (`invalid`,
+    not stored), character lock, database time after the locks, processing gate (not stored), schedule version
+    (`conflict`, stored), then each part's choice exactly as `edit-schedule` checks one (`invalid`, stored).
+    - It bumps the schedule version once, `jsonb_set`s and writes one revision only for each part whose choice changes, each
+      at its own `schedule_effective_slot`.
+    - A day with no change is `invalid` (values are compared, not key order).
+    - The value is `DayScheduleValue` (`contracts/commands.ts`): `{version, receivedAtMs, parts: {morning|afternoon|evening:
+      {effectiveSlotIndex, effectiveAtMs} | null}}`, `null` for an unchanged part.
+- **`public.edit_day_schedule(actor_id uuid, operation_id uuid, input jsonb)`**: the wrapper, security invoker with an empty
+  search path; only `service_role` may EXECUTE it, as `edit_schedule`. The backend routes the day command to it
+  (`supabase/functions/_shared/backend/database.ts`).
+- **`private.market_command`**, 12-market.sql's body plus:
+  - the fee is 5 % floored but at least 1 gold, `greatest(1, price*5/100)`, so no sale moves money for free;
+  - a listing's price is whole from 2 to 1,000,000,000 (a price shape error: `invalid`, no receipt), so a seller always
+    receives at least 1.
+  The tables' price CHECKs stay `between 1 and 1000000000`: a price never changes, and no open listing below 2 existed. One
+  listed earlier would still sell, its seller receiving 0. Total currency changes only by the fee.
+- **The deploy-time backfill** (a `do` block between the marker comments `-- launch-feedback backfill: start` and `… end`):
+  for every character with a morning or afternoon Arena, under its account lock and then its gladiator and schedule rows,
+  with the database time sampled after them:
+  - when the revision its next boundary (processed slot + 1) picks for that part is Arena, a Rest revision at processed
+    slot + 1, all in one new version;
+  - for each later Arena revision of that part that no later version at its own effective slot overrides, a Rest revision at
+    that same slot, each in a further version (a part may hold both; the revision key allows one row per part and version).
+  The boundary picks the latest effective slot, then the latest version, so it sees Rest. The latest plan shows Rest for
+  those parts at the last new version. Activities already snapshotted keep their choice. None existed on production or the
+  bench on 2026-10-25, so it is expected to change nothing there. Applying it again changes nothing.
+- `scripts/hosted-checks.sql` judges a sale by the fee its purchase receipt stored (M14's floored 5 % before M23, at least 1
+  since), so earlier sales stay right.
+
+**The draft needed three completions** (checked against the source):
+1. The three function ACLs. `edit_day_schedule` is new; `planning_command` and `market_command` are restated as the source
+   does (CREATE OR REPLACE keeps their grants).
+2. The backfill: the source's marked span, byte for byte, after the function statements. A schema diff cannot carry it.
+3. A provenance header and `notify pgrst`.
+
+The rest is as generated. The three function statements are byte-identical to the source-applied `pg_get_functiondef`
+(259, 11,899 and 10,971 bytes, compared programmatically). M23 re-emits no unchanged function. The generated wrapper comes
+before `planning_command`, which is safe: the draft sets `check_function_bodies = off`, and `planning_command` exists since
+M02. `tests/db/launch-feedback-backfill.test.ts` ("ships the identical backfill span in M23") checks that M23's marked span
+is the source's, once, after `planning_command` (ruling R3). `tests/rule-retention.test.ts` needs no allowance: the backfill
+is a `do` block, not a top-level `update`.
+
+**Source iteration.** As for M17–M22: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/16-launch-feedback.sql`).
+The whole file is reapplicable (CREATE OR REPLACE, and the backfill finds nothing more the second time; tested). Apply it
+only from an LF working copy (Task 23.8 observation under M22).
+
+**Tests** (RED first, on the M22 database with the new tests; every case failed on the missing function, routing, rule or
+source file):
+- `tests/db/build-schedule.test.ts`:
+  - "edit-day-schedule saves three parts in one version": one version bump, one revision per changed part at its own next
+    occurrence, and a later save of the evening alone with the other parts `null`; also through the real Edge runtime.
+  - "edit-day-schedule refuses a stale version and writes nothing": two saves racing on version 1 (one wins, one
+    `conflict`) and a stale save afterwards leave the schedule, its version and its revisions as they were.
+  - "edit-day-schedule replays its receipt": a lost reply sent twice at once returns the stored result, with one receipt and
+    one version bump; a changed day under the same operation is `conflict`; the receipt replays while the character is
+    behind, and a new save answers `processing` without a receipt.
+  - "edit-day-schedule refuses afternoon Arena" and "edit-schedule refuses morning Arena", called past the Edge parser:
+    `invalid`, nothing written; evening Arena is saved.
+  - "a day with no change is invalid", in either key order.
+  - Every part and the command shape are checked like `edit-schedule`'s (expedition level, malformed or missing parts, extra
+    keys; shape errors before the character lock leave no receipt).
+  - The contending edit (Task 1) and the clock-after-wait case now use evening Arena; the RPC list and the client denial
+    cases include `edit_day_schedule`.
+- `tests/db/market.test.ts`: "a price-2 sale pays fee 1 and credits 1", "a price-19 sale pays fee 1" (with 20, 39, 40 and 101
+  paying 1, 1, 2 and 5), "a listing at price 1 is refused" (no receipt, listing or reservation), replacing the fee-0 cases;
+  price 1 joins the shape errors, and the five-listing case lists from 2.
+- `tests/db/launch-feedback-backfill.test.ts`: a current morning Arena, a future afternoon Arena, a part holding both, and
+  controls (a superseded past Arena, a future Arena overridden at its own slot, evening Arena now and later, no Arena). The
+  test runs the source's marked span as postgres, checks the boundary's pick for each affected slot is Rest and the controls
+  keep theirs, the versions and plans, and that a second run changes nothing. A day save afterwards takes the next version.
+- `tests/db/hosted-checks.test.ts`: a price-19 sale today (fee 1) and a planted earlier price-19 sale (fee 0) both read "fee
+  right true" (RED on the previous script: "fee 0" for the new sale).
+- `tests/db/access-matrix.test.ts` (`edit_day_schedule` for `service_role` only), `tests/db/restore-hosted.test.ts` (23
+  migrations), `tests/backend/commands.test.ts` (the day command's RPC).
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M22: fingerprint 1,160 lines (`scripts/schema-fingerprint.sql`).
+- The source applied once (1,161 lines) differs from it only in the new `edit_day_schedule` line and the two replaced body
+  hashes, with their ACLs, security, volatility and `search_path` unchanged.
+- A clean reset replayed M01–M23, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte (1,161 lines), and again after the full test run.
+- Inspection of the replay:
+  - `edit_day_schedule`, `planning_command` and `market_command` `{postgres=X/postgres,service_role=X/postgres}`; invoker,
+    volatile, `search_path=""`; `edit_schedule` unchanged;
+  - no function executable by anon or authenticated; 44/44 `public`/`private` triggers enabled; both cron jobs active;
+  - `owner_state` keeps `security_invoker=true`; both price CHECKs still `>= 1 and <= 1000000000`;
+  - 23 migrations recorded.
+- Lint is empty. Advisors on the fresh replay: 36 INFO `unused_index` notices (no statistics yet), no warnings or errors.
+- `npm run test:db`: 331/331 in 23 files on the M01–M23 replay (20:22–20:29 UTC), the Edge container's start time unchanged across the run.
+
+**Release (launch feedback, plan Task 8).** The rules change in place in v1; the conditions are in
+[runbook, "Retained-rule deployments"](runbook.md#retained-rule-deployments).
+- Deploy M23 before the Edge function (the usual order). With M23 alone, the previous Edge function's commands keep working
+  and SQL refuses Arena outside the evening and prices below 2; the previous Edge function answers the day command as
+  `invalid` (its parser does not know it). The new Edge function routes the day command to `edit_day_schedule`, which must
+  exist first.
+- The previous Edge function still accepts morning or afternoon Arena, so a save that reaches the old `planning_command`
+  body while the `db push` transaction is open could slip past the backfill. Run the runbook's check again after the
+  functions deploy; Arena outside the evening must still be 0.
+
 ## Task 23.8: idle characters rest at home (M22)
 
 M22 is `supabase/migrations/20261020075858_idle_rest.sql`, section C of the
@@ -907,6 +1025,7 @@ required by `guard_reserved_item` and the item CHECK.
 **Receipts and ledger.** A purchase writes the buyer's receipt and a seller receipt (`request {kind:'market-sale',
 listingId}`). It writes two ledger rows: `market-purchase` (−price) and `market-sale` (+price − fee). The fee is
 `price*5/100` in integer division. Prices are whole numbers from 1 to 1,000,000,000 (`RULES_V1.marketplace.maximumPrice`).
+Since M23 (launch feedback) the fee is at least 1 gold and prices start at 2; see that section.
 
 **Rule literals.** The SQL repeats the market rules as literals: the fee `5/100` (`RULES_V1.fees.marketRate`), the expiry
 `604800000` (`marketplace.expiryMs`), the price cap `1000000000` (`maximumPrice`) and the five-listing limit

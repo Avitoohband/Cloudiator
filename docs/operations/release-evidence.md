@@ -1026,3 +1026,51 @@ had one failure, `[desktop] retention.spec.ts:157` ("keeps offering a replay unt
 probable host fault (`net::ERR_NO_BUFFER_SPACE`), while another worktree's browser suite (Task 23.10's) ran at the same time.
 Run alone it passed 3/3. It is recorded as a probable host fault, not product evidence; the gate's no-rerun rule stands,
 and the run above, with no other browser suite active, is the gate of record.
+
+## Task 24: the hosted launch
+
+Sanitized evidence of the deployment checklist (`docs/operations/deployment.md`); names, counts, codes and origins only.
+The full step log is the Task 24 ledger. Remaining for 24.12: the real journey (24.8), the measured budgets (24.9), the
+hosted restore rehearsal (24.10, deferred: the export needs Avi's database password once), the phone frame rate (24.11)
+and closing the bench.
+
+### Gate of record (1b4fdbf, 2026-10-24)
+
+`node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs` at `1b4fdbf` (Next.js 16.4.3; the hosted
+restore tooling; six test-race fixes), on a quiet host, with the local stack on the linked project's service versions
+(PostgREST v14.18). **Exit 0, 12 of 12:** unit, typecheck, assets, build, static, Edge settled, `test:db` 317 passed with the
+Edge start time unchanged, development browser suite 547 passed / 57 skipped, the browser build and its scan, the
+production gate 34 passed, `git diff --check`.
+
+The nine runs before it used plain `npm run verify`, the repository config: 16 browser workers on this 32-core host and a
+30 s test budget. They failed on load and host faults (an Android emulator and a game sharing the GPU, `ERR_NO_BUFFER_SPACE`,
+native `0xC0000005` crashes). Each failing test passed alone; six that also showed real timing races were fixed
+(`8ca535f`, `ad1c10d`, `11235af`, `13d27e3`, `db99bf6`, `1b4fdbf`). The gate of record runs with the private two-worker
+config, as on 2026-10-20.
+
+**The local Data API version.** After `supabase link`, `supabase start` builds the local stack from the linked project's
+versions in `supabase/.temp` (PostgREST v14.18, as hosted) instead of the CLI's default v16.4. PostgREST 14.18 runs a
+deadlock victim's rolled-back transaction again, so the residual purchase-versus-boundary deadlock completes the purchase
+once instead of answering `processing`; `tests/db/market.test.ts` accepts either and proves exactly one sale (`13d27e3`).
+
+### Bench (`uukrqribdfqovahzjsrx`, `https://bench.cloudiator-arena.pages.dev`)
+
+- Seeded 2026-10-23 21:20 UTC: 50 accounts and characters, all on the Woodland expedition; epoch 373499; scheduler on.
+- First night: 6 boundaries with 50 members each, publication p50 62.5 s, p95 62.9 s, max 63.0 s, 0 over 120 s; at most 5
+  dispatches in any minute (0 over the budget); 2,550 job attempts, 0 failed, 0 expired; 155 worker responses, all 200;
+  `duplicateGrants` 0; health without alerts; database 29.5 MB of 500 MB.
+- Deployed checks on `1b4fdbf`: 9 of 9 (Google only, sign-up open).
+
+### Production (`djkblzbnritgbmctsvob`, `https://cloudiator-arena.pages.dev`)
+
+| Step | Result |
+|---|---|
+| Project | Free organization, Central EU (Frankfurt), Postgres 17.11.0.003, PostgREST v14.18; signing key ECC (P-256) (Decision 9) |
+| Data API, Auth | `public` only, max rows 50, auto-expose off; Google only (Email and Phone off), sign-ups on, CAPTCHA off, token expiry 3600 s; site URL and the one redirect `/auth/callback/` |
+| Migrations | `db push`: the 22 migrations M01–M22, `migration list` 22 local and remote |
+| Parity with the bench | schema fingerprint 1,157 rows each, 3 differing rows all bench activity data; access audit 583 rows, identical |
+| Edge | `GAME_ALLOWED_ORIGINS` the site; worker secret and both Vault names set together; both functions deployed (Docker bundler) |
+| Probes | site preflight 204 with `Max-Age 7200`, foreign preflight 403, worker without its secret 401, unauthenticated command 401 |
+| Client | `release` fast-forwarded to `1b4fdbf`; Pages build success; deployed checks 9 of 9 |
+| Activation | 2026-10-25: epoch 373525 (guard: no gladiator, next full slot), scheduler on (guard: both Vault names), cleanup tick ok |
+| First boundary | 373525 published in 40 ms (no members); health without alerts, `slotsBehind` 0, `duplicateGrants` 0, 15 MB |

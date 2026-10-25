@@ -51,8 +51,9 @@ export function parseCommand(value: unknown): GameCommand | null {
       && (Object.hasOwn(CATALOG_V1.items, value.catalogId) || Object.hasOwn(CATALOG_V1.cosmetics, value.catalogId))
       && value.catalogVersion === CATALOG_V1.version && integer(value.quantity, 1, 999); break;
     case 'sell-item': case 'discard-item': valid = shape('itemId', 'quantity') && uuid(value.itemId) && integer(value.quantity, 1, 999); break;
-    // Whole prices from 1 to 1,000,000,000 (Task 18 Decision 2); SQL enforces the same range.
-    case 'create-listing': valid = shape('itemId', 'price') && uuid(value.itemId) && integer(value.price, 1, RULES_V1.marketplace.maximumPrice); break;
+    // Whole prices from 2 (launch feedback: the lowest price, so a seller always receives something after the fee) to 1,000,000,000
+    // (Task 18 Decision 2); SQL enforces the same range.
+    case 'create-listing': valid = shape('itemId', 'price') && uuid(value.itemId) && integer(value.price, RULES_V1.marketplace.minimumPrice, RULES_V1.marketplace.maximumPrice); break;
     case 'cancel-listing': case 'buy-listing': valid = shape('listingId') && uuid(value.listingId); break;
     case 'set-tournament-opt-in': valid = shape('enabled') && typeof value.enabled === 'boolean'; break;
     // Task 23.8: the owner's activity signal; no payload.

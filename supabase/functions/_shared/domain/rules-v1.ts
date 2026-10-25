@@ -17,12 +17,14 @@ export const RULES_V1 = freezeDomain({
     capacityBase: 10, capacityPerEndurance: 2, overloadPenalty: 0.5, minimumEfficiency: 0.5 },
   activityStamina: { training: 20, expedition: 30, arena: 25, tournament: 25, rest: 0 },
   progression: { trainingPoints: 1, xpPerCurrentLevel: 100, levelAttributePoints: 0, levelStaminaRefill: 0 },
-  fees: { classChange: 100, respec: 100, marketRate: 0.05, listing: 0 },
+  // Launch feedback (2026-10-25): the market fee is the 5% rate floored but at least marketMinimum, and the lowest listing price is
+  // minimumPrice (2), so a seller always receives something. SQL market_command restates both: greatest(1, price*5/100), price from 2.
+  fees: { classChange: 100, respec: 100, marketRate: 0.05, marketMinimum: 1, listing: 0 },
   tiers: { 1: { stats: 1, moneyPrice: 1, renownPrice: 1 }, 5: { stats: 1.5, moneyPrice: 3, renownPrice: 2 }, 10: { stats: 2, moneyPrice: 6, renownPrice: 3 } },
   rarities: { common: { stats: 1, lootChance: 0.7 }, uncommon: { stats: 1.15, lootChance: 0.25 }, rare: { stats: 1.3, lootChance: 0.05 } },
   inventory: { capacity: 60, salvageStack: 999, salvageSellValue: 10 },
   shops: { npcSellRate: 0.25, minimumSellValue: 1, renownArenaMultiplier: 1.1, bannerRenownPrice: 50 },
-  marketplace: { maximumListings: 5, expiryMs: 604_800_000, maximumPrice: 1_000_000_000 },
+  marketplace: { maximumListings: 5, expiryMs: 604_800_000, minimumPrice: 2, maximumPrice: 1_000_000_000 },
   stances: { offensive: { outgoing: 1.15, incoming: 1.1 }, balanced: { outgoing: 1, incoming: 1 }, defensive: { outgoing: 0.9, incoming: 0.85 } },
   combat: { strengthDamage: 0.5, agilityRate: 0.01, minimumIntervalMs: 250,
     hitBase: 0.7, hitPrecision: 0.005, hitDefenderAgility: 0.003, minimumHit: 0.1, maximumHit: 0.95,

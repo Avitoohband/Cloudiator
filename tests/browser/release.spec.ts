@@ -334,8 +334,13 @@ test.describe('release accessibility in the fixture preview', () => {
     const price = sell.getByRole('spinbutton', { name: 'Price in money' });
     await price.fill('1.5');
     await expect(price).toHaveAttribute('aria-invalid', 'true');
-    await expect(price).toHaveAccessibleDescription(/A whole price from 1 to 1,000,000,000\..*Enter a whole price from 1 to 1,000,000,000\./);
+    await expect(price).toHaveAccessibleDescription(/A whole price from 2 to 1,000,000,000\..*Enter a whole price from 2 to 1,000,000,000\./);
     await expect(sell.getByRole('button', { name: 'List for sale' })).toHaveAccessibleDescription(/Enter a whole price/);
+    // A whole price under the lowest one is told why the lowest is 2 (launch feedback): the field and List for sale say so.
+    await price.fill('1');
+    await expect(price).toHaveAttribute('aria-invalid', 'true');
+    await expect(price).toHaveAccessibleDescription(/A whole price from 2 to 1,000,000,000\..*The lowest price is 2 money, so you always receive something after the fee\./);
+    await expect(sell.getByRole('button', { name: 'List for sale' })).toHaveAccessibleDescription(/The lowest price is 2 money/);
     await price.fill('100');
     await expect(price).not.toHaveAttribute('aria-invalid', 'true');
     await expectNamedControls(market, 'Marketplace (player)');

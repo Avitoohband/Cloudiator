@@ -11,24 +11,47 @@ import { RULES_V1 } from '@domain/rules-v1';
  * `fees.marketRate` (0.05). As a whole percent, the fee is exact integer math, as the database's bigint `price*5/100` is.
  */
 export const MARKET_FEE_PERCENT = Math.round(RULES_V1.fees.marketRate * 100);
-/** Whole prices from 1 to 1,000,000,000 (plan Decision 2). */
+/** The least a sale pays, from the rules' `fees.marketMinimum` (launch feedback: 1; a sale at 11 paid no fee, 5% floored to 0). */
+export const MARKET_MINIMUM_FEE = RULES_V1.fees.marketMinimum;
+/** The fee's rule in the words of its label: "5%, at least 1". */
+export const MARKET_FEE_TERMS = `${MARKET_FEE_PERCENT}%, at least ${MARKET_MINIMUM_FEE}`;
+/** Whole prices from 2 (launch feedback: the seller always receives something after the fee) to 1,000,000,000 (plan Decision 2). */
+export const MINIMUM_PRICE = RULES_V1.marketplace.minimumPrice;
 export const MAXIMUM_PRICE = RULES_V1.marketplace.maximumPrice;
 /** Active listings per seller (spec §9). */
 export const MAXIMUM_LISTINGS = RULES_V1.marketplace.maximumListings;
 
 export type MarketKind = Extract<GameCommand['kind'], 'create-listing' | 'cancel-listing' | 'buy-listing'>;
 
-/** The fee kept from a sale at `price`: 5% rounded down, as the database computes it (`price * 5 / 100` in bigint). */
-export const marketFee = (price: number): number => Math.floor((price * MARKET_FEE_PERCENT) / 100);
+/**
+ * The fee kept from a sale at `price`: 5% rounded down but at least the minimum fee, as the database computes it
+ * (`greatest(1, price * 5 / 100)` in bigint).
+ */
+export const marketFee = (price: number): number => Math.max(MARKET_MINIMUM_FEE, Math.floor((price * MARKET_FEE_PERCENT) / 100));
 /** What the seller is credited when a listing at `price` sells. */
 export const sellerReceives = (price: number): number => price - marketFee(price);
 /** Whether `price` is a whole price the market accepts. */
-export const validPrice = (price: number): boolean => Number.isSafeInteger(price) && price >= 1 && price <= MAXIMUM_PRICE;
+export const validPrice = (price: number): boolean => Number.isSafeInteger(price) && price >= MINIMUM_PRICE && price <= MAXIMUM_PRICE;
 
 /** An amount with thousands separators: "1,250". */
 export const amount = (value: number): string => value.toLocaleString('en-US');
 /** A money amount in words: "1,250 money". */
 export const money = (value: number): string => `${amount(value)} money`;
+
+/** The Sell form's hint under the price field: "A whole price from 2 to 1,000,000,000." */
+export const PRICE_HINT = `A whole price from ${amount(MINIMUM_PRICE)} to ${amount(MAXIMUM_PRICE)}.`;
+/** What the Sell form says to a whole price under the lowest one (launch feedback). */
+export const LOWEST_PRICE_TEXT = `The lowest price is ${money(MINIMUM_PRICE)}, so you always receive something after the fee.`;
+/**
+ * What is wrong with the price typed into the Sell form, or null while it is empty or valid: `low` for a whole price under
+ * the lowest one (it says why), `whole` for anything else the market refuses (fractional, too large).
+ */
+export function priceProblem(typed: string): 'low' | 'whole' | null {
+  if (typed.trim() === '') return null;
+  const value = Number(typed);
+  if (validPrice(value)) return null;
+  return Number.isSafeInteger(value) && value < MINIMUM_PRICE ? 'low' : 'whole';
+}
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 
@@ -132,7 +155,7 @@ export function marketErrorText(code: ApiErrorCode, kind: MarketKind): string {
       : 'This listing is no longer open. The listings have been refreshed.';
     case 'conflict': return 'Your inventory changed while this was sent. Review the refreshed state, then try again.';
     case 'invalid': return kind === 'create-listing'
-      ? `This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price, with at most ${MAXIMUM_LISTINGS} active listings.`
+      ? `This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least ${money(MINIMUM_PRICE)}, with at most ${MAXIMUM_LISTINGS} active listings.`
       : kind === 'buy-listing' ? 'You cannot buy this listing.' : 'This listing cannot be cancelled.';
   }
 }

@@ -18,6 +18,11 @@ import { forbidRemote } from './remote';
 // a trading control (Review Focus 5). Live reads come from `routeLiveReads`; this spec answers the commands itself.
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
+/** The database's fee (launch feedback): 5 % floored but at least 1, `greatest(1, price*5/100)`; its lowest listing price is 2. */
+const feeOf = (price: number) => Math.max(1, Math.floor(price * 5 / 100));
+const LOWEST_PRICE = 'The lowest price is 2 money, so you always receive something after the fee.';
+const WHOLE_PRICE = 'Enter a whole price from 2 to 1,000,000,000.';
+const escaped = (text: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 const world = (): WorldSnapshot => ({ ...worldFixture, revision: 'live-1' });
 const offer = (catalogId: string) => MARKET_ROWS.find(row => row.item.catalogId === catalogId)!;
 const SPEAR = offer('spear:10:rare'), SHIELD = offer('round-shield:1:common'), BOOTS = offer('heavy-boots:10:uncommon'), AXE = offer('axe:5:common');
@@ -89,11 +94,11 @@ async function marketFlow(context: BrowserContext): Promise<Flow> {
       const item: ItemInstance = { id: randomUUID(), ownerId: state.gladiatorId, ...structuredClone(listing.item), origin: 'shop', binding: 'tradable', reservation: null };
       state.inventory.push(item); bought.push(item);
       state.wallets.money -= listing.price;
-      return { ok: true, receiptId: randomUUID(), value: { listingId: listing.listingId, itemId: item.id, price: listing.price, fee: Math.floor(listing.price * 5 / 100) } };
+      return { ok: true, receiptId: randomUUID(), value: { listingId: listing.listingId, itemId: item.id, price: listing.price, fee: feeOf(listing.price) } };
     }
     if (command.kind === 'create-listing') {
       const item = state.inventory.find(i => i.id === command.itemId);
-      if (!item || item.reservation) return refused('invalid');
+      if (!item || item.reservation || command.price < 2) return refused('invalid');
       const listingId = randomUUID(), listedAtMs = live.serverNowMs(), expiresAtMs = listedAtMs + RULES_V1.marketplace.expiryMs;
       item.reservation = { kind: 'listing', referenceId: listingId };
       const { catalogId, catalogVersion, tier, rarity, stats, quantity } = item;
@@ -151,7 +156,7 @@ async function marketFlow(context: BrowserContext): Promise<Flow> {
     soldElsewhere: listing => {
       take(listing.listingId);
       state.inventory = state.inventory.filter(i => !(i.reservation?.kind === 'listing' && i.reservation.referenceId === listing.listingId));
-      state.wallets.money += listing.price - Math.floor(listing.price * 5 / 100);
+      state.wallets.money += listing.price - feeOf(listing.price);
       publish();
     },
   };
@@ -275,11 +280,32 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await sell.getByRole('radio', { name: /^Axe/ }).check();
   await expect(sell).toContainText('NPC sale value: 30 money');
   const price = sell.getByLabel('Price in money');
-  await price.fill('0');
-  await expect(sell.getByRole('button', { name: 'List for sale', exact: true })).toBeDisabled();
-  await expect(sell).toContainText('Enter a whole price from 1 to 1,000,000,000.');
+  const listButton = sell.getByRole('button', { name: 'List for sale', exact: true });
+  await expect(sell).toContainText('A whole price from 2 to 1,000,000,000.');
+  // Below 2 the lowest price is explained, nothing is offered to list, and no breakdown is shown.
+  for (const low of ['0', '1']) {
+    await price.fill(low);
+    await expect(listButton).toBeDisabled();
+    await expect(sell.getByRole('status').filter({ hasText: LOWEST_PRICE })).toBeVisible();
+    await expect(price).toHaveAttribute('aria-invalid', 'true');
+    await expect(sell).not.toContainText('Market fee');
+  }
+  // The lowest price pays the minimum fee of 1 and the seller receives 1; Avi's 11 pays 1 (5 % floored to 0 before), not nothing.
+  await price.fill('2');
+  await expect(listButton).toBeEnabled();
+  await expect(price).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(sell).not.toContainText(LOWEST_PRICE);
+  await expect(sell).toContainText('Buyer pays: 2 money');
+  await expect(sell).toContainText('Market fee (5%, at least 1): 1 money');
+  await expect(sell).toContainText('You receive: 1 money');
+  await price.fill('11');
+  await expect(sell).toContainText('Buyer pays: 11 money');
+  await expect(sell).toContainText('Market fee (5%, at least 1): 1 money');
+  await expect(sell).toContainText('You receive: 10 money');
+  // From 40 the floored 5 % is above the minimum.
   await price.fill('101');
-  await expect(sell).toContainText('Sale fee (5%): 5 money');
+  await expect(sell).toContainText('Buyer pays: 101 money');
+  await expect(sell).toContainText('Market fee (5%, at least 1): 5 money');
   await expect(sell).toContainText('You receive: 96 money');
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-sell-${info.project.name}.png`) });
@@ -293,7 +319,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await market.getByRole('tab', { name: 'My listings', exact: true }).click();
   const mine = market.getByRole('tabpanel', { name: 'My listings' });
   await expect(mine.getByRole('listitem')).toHaveCount(2);
-  await expect(mine.getByTestId(`listing-${listingId}`)).toContainText('You receive 96 money after the 5% fee');
+  await expect(mine.getByTestId(`listing-${listingId}`)).toContainText('You receive 96 money after the market fee (5%, at least 1)');
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-my-listings-${info.project.name}.png`) });
   expect(flow.live.requests.filter(r => r.table === 'market_offers').some(r => r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`)).toBe(true);
@@ -603,7 +629,7 @@ test('disables Buy with its reason when the money is short or the inventory full
   expect(flow.commands).toEqual([]);
 });
 
-test('refuses fractional and over-cap prices, and List for sale at the listing limit', async ({ page, context }) => {
+test('refuses fractional, over-cap and under-2 prices, and List for sale at the listing limit', async ({ page, context }) => {
   const flow = await marketFlow(context);
   // Four more open listings than the helmet: five, the most allowed.
   for (const [catalogId, price] of [['leather-hood:5:common', 200], ['sword:5:common', 300], ['bow:1:common', 400], ['light-boots:1:uncommon', 500]] as const) flow.listed(catalogId, price);
@@ -614,13 +640,18 @@ test('refuses fractional and over-cap prices, and List for sale at the listing l
   await sell.getByRole('radio', { name: /^Axe/ }).check();
   const price = sell.getByLabel('Price in money');
   const list = sell.getByRole('button', { name: 'List for sale', exact: true });
-  for (const value of ['1.5', '1000000001', '-3']) {
+  // A whole price under 2 is told why 2 is the lowest; a fractional or too large one is asked for a whole price from 2.
+  for (const [value, said] of [['1.5', WHOLE_PRICE], ['1000000001', WHOLE_PRICE], ['-3', LOWEST_PRICE], ['1', LOWEST_PRICE], ['0', LOWEST_PRICE]]) {
     await price.fill(value);
-    await expect(sell, value).toContainText('Enter a whole price from 1 to 1,000,000,000.');
+    await expect(sell, value).toContainText(said);
     await expect(price, value).toHaveAttribute('aria-invalid', 'true');
     await expect(list, value).toBeDisabled();
-    await expect(list, value).toHaveAccessibleDescription(/Enter a whole price/);
+    await expect(list, value).toHaveAccessibleDescription(escaped(said));
   }
+  // Two is the lowest price that is accepted (the listing limit still keeps List for sale disabled below).
+  await price.fill('2');
+  await expect(price).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(sell).toContainText('You receive: 1 money');
   await price.fill('1000000000');
   await expect(price).not.toHaveAttribute('aria-invalid', 'true');
   await expect(sell).toContainText('You receive: 950,000,000 money');

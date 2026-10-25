@@ -5,7 +5,10 @@ import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
 import { createDisplayClock } from '@/game/display-clock';
-import { MARKET_FEE_PERCENT, listableItems, marketErrorText, marketFee, sellerReceives, timeLeft } from '@/features/market/market-text';
+import {
+  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MINIMUM_PRICE, PRICE_HINT, listableItems, marketErrorText, marketFee, priceProblem, sellerReceives,
+  timeLeft, validPrice,
+} from '@/features/market/market-text';
 import { MarketOffers, MarketPanel, ownerReads, type OffersModel } from '@/features/market/MarketPanel';
 import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
@@ -16,35 +19,73 @@ const noop = () => {};
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 const item = (catalogId: string, id: string, extra: Partial<ItemInstance> = {}): ItemInstance => ({ ...itemFixture(CATALOG_V1.items[catalogId]), id, ...extra });
 
-describe('market fees (plan Decision 2)', () => {
-  it('keeps 5% of the price, rounded down, and pays the seller the rest', () => {
-    expect([1, 19, 20, 101].map(marketFee)).toEqual([0, 0, 1, 5]);
+describe('market fees (plan Decision 2; launch feedback: at least 1)', () => {
+  it('keeps 5% of the price, rounded down but at least 1, and pays the seller the rest', () => {
+    // Avi sold an item for 11 and paid no fee (5% floored to 0): now every sale pays at least 1, up to 39 (40 is the first 2).
+    expect([2, 11, 19, 20, 39, 40, 101].map(marketFee)).toEqual([1, 1, 1, 1, 1, 2, 5]);
+    expect(marketFee(2)).toBe(1);
+    expect(marketFee(19)).toBe(1);
+    expect(marketFee(40)).toBe(2);
+    expect(sellerReceives(2)).toBe(1);
+    expect(sellerReceives(11)).toBe(10);
     expect(sellerReceives(101)).toBe(96);
-    expect(sellerReceives(1)).toBe(1);
     expect(marketFee(999_999_999)).toBe(49_999_999);
     expect(marketFee(1_000_000_000)).toBe(50_000_000);
     expect(sellerReceives(1_000_000_000)).toBe(950_000_000);
   });
 
-  it('takes the rate from the rules as a whole percent, with exact integer floor math (final review M-b)', async () => {
+  it('accepts whole prices from 2 to 1,000,000,000 only, so the seller always receives something', () => {
+    expect([1, 2].map(validPrice)).toEqual([false, true]);
+    expect([2, 3, 11, 1_000_000_000].map(validPrice)).toEqual([true, true, true, true]);
+    for (const price of [0, 1, -3, 1.5, 1_000_000_001, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) expect(validPrice(price), String(price)).toBe(false);
+    // Every price the market accepts leaves the seller a positive credit.
+    for (const price of [2, 3, 19, 20, 21, 39, 40, 1_000_000_000]) expect(sellerReceives(price), String(price)).toBeGreaterThan(0);
+  });
+
+  it('takes the rate, the minimum fee and the lowest price from the rules, with exact integer floor math (final review M-b)', async () => {
     // The rules' rate is a whole percent, so `floor(price × percent / 100)` matches the database's bigint `price*5/100`.
     expect(MARKET_FEE_PERCENT / 100).toBe(RULES_V1.fees.marketRate);
-    const prices = [1, 19, 20, 101, 1_000_000_000];
-    expect(prices.map(marketFee)).toEqual([0, 0, 1, 5, 50_000_000]);
-    // Another rate in the rules changes the panel's fee with it: nothing is hard-coded.
+    expect(RULES_V1.fees.marketMinimum).toBe(1);
+    expect(RULES_V1.marketplace.minimumPrice).toBe(2);
+    expect(MINIMUM_PRICE).toBe(RULES_V1.marketplace.minimumPrice);
+    const prices = [2, 19, 20, 40, 101, 1_000_000_000];
+    expect(prices.map(marketFee)).toEqual([1, 1, 1, 2, 5, 50_000_000]);
+    // Other values in the rules change the panel's fee and lowest price with them: nothing is hard-coded.
     vi.resetModules();
     vi.doMock('@domain/rules-v1', async importOriginal => {
       const actual = await importOriginal<typeof import('@domain/rules-v1')>();
-      return { RULES_V1: { ...actual.RULES_V1, fees: { ...actual.RULES_V1.fees, marketRate: 0.1 } } };
+      return { RULES_V1: { ...actual.RULES_V1, fees: { ...actual.RULES_V1.fees, marketRate: 0.1, marketMinimum: 3 },
+        marketplace: { ...actual.RULES_V1.marketplace, minimumPrice: 7 } } };
     });
     try {
       const ruled = await import('@/features/market/market-text');
       expect(ruled.MARKET_FEE_PERCENT).toBe(10);
-      expect(prices.map(ruled.marketFee)).toEqual([0, 1, 2, 10, 100_000_000]);
+      expect(ruled.MINIMUM_PRICE).toBe(7);
+      expect(prices.map(ruled.marketFee)).toEqual([3, 3, 3, 4, 10, 100_000_000]);
+      expect([6, 7].map(ruled.validPrice)).toEqual([false, true]);
+      expect(ruled.MARKET_FEE_TERMS).toBe('10%, at least 3');
+      expect(ruled.LOWEST_PRICE_TEXT).toContain('lowest price is 7 money');
     } finally {
       vi.doUnmock('@domain/rules-v1');
       vi.resetModules();
     }
+  });
+});
+
+describe('what the Sell form says about a typed price', () => {
+  it('says the fee in the words of its label: "5%, at least 1"', () => {
+    expect(MARKET_FEE_TERMS).toBe('5%, at least 1');
+  });
+
+  it('hints the whole prices from 2, and says the lowest price when a whole price is under it', () => {
+    expect(PRICE_HINT).toBe('A whole price from 2 to 1,000,000,000.');
+    expect(LOWEST_PRICE_TEXT).toBe('The lowest price is 2 money, so you always receive something after the fee.');
+    for (const typed of ['0', '1', '-3']) expect(priceProblem(typed), typed).toBe('low');
+  });
+
+  it('asks for a whole price when the typed one is fractional, too large or not a number, and for nothing while empty or valid', () => {
+    for (const typed of ['1.5', '1000000001', '2.5', '1e30']) expect(priceProblem(typed), typed).toBe('whole');
+    for (const typed of ['', '  ', '2', '11', '1000000000']) expect(priceProblem(typed), typed).toBeNull();
   });
 });
 
@@ -205,7 +246,11 @@ describe('the Marketplace panel', () => {
     it('offers Cancel on the seller’s own listings, with what the sale would pay', () => {
       const html = offers({ model: { ...model, rows: [helmet] }, action: 'cancel', ownerId: helmet.seller.gladiatorId });
       expect(html).toContain(`aria-label="Cancel listing: Iron helmet for 95 money"`);
-      expect(text(html)).toContain(`You receive ${95 - 4} money after the 5% fee`);
+      expect(text(html)).toContain(`You receive ${95 - 4} money after the market fee (5%, at least 1)`);
+      // A low price pays the 1-money minimum, not the floored 0: an 11-money offer credits 10, a 2-money offer credits 1.
+      const low = (price: number) => text(offers({ model: { ...model, rows: [{ ...helmet, price }] }, action: 'cancel', ownerId: helmet.seller.gladiatorId }));
+      expect(low(11)).toContain('You receive 10 money after the market fee (5%, at least 1)');
+      expect(low(2)).toContain('You receive 1 money after the market fee (5%, at least 1)');
     });
 
     it('says an offer that ran out while the page was open has expired, without Buy', () => {

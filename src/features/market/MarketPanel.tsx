@@ -6,7 +6,8 @@
 //   seller, the price, the NPC sale value for comparison and the time left. Buy asks for confirmation first.
 // - My listings: the player's own open offers (the seller-filtered read), each with Cancel.
 // - Sell: the items that can be listed (equipment only: tradable, not renown, bound, equipped, held by a pending build or
-//   reserved), a whole price, and the 5% fee and the NPC sale value shown before listing.
+//   reserved), a whole price from 2, and what the buyer pays, the market fee (5%, at least 1), what the seller receives and
+//   the NPC sale value shown before listing (launch feedback: a sale always pays the fee at least 1, so the lowest price is 2).
 // A visitor sees Browse only, with "Sign in with Google to trade"; a signed-in account without a gladiator sees Browse only,
 // with "Create your gladiator to trade". Neither ever sees a wallet or a trading control, and neither can send a command:
 // the shell gives this panel the command gateway for a player only.
@@ -28,8 +29,9 @@ import type { Viewer } from '../character/useGameState';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import {
-  MARKET_FEE_PERCENT, MAXIMUM_LISTINGS, MAXIMUM_PRICE, RETRY_CODES, activeListings, amount, itemGrade, itemIcon, itemName, itemStats,
-  listableItems, marketErrorText, marketFee, money, npcValueText, offerName, sellerReceives, timeLeft, validPrice, type MarketKind,
+  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MARKET_MINIMUM_FEE, MAXIMUM_LISTINGS, MAXIMUM_PRICE, MINIMUM_PRICE, PRICE_HINT, RETRY_CODES,
+  activeListings, amount, itemGrade, itemIcon, itemName, itemStats, listableItems, marketErrorText, marketFee, money, npcValueText, offerName,
+  priceProblem, sellerReceives, timeLeft, validPrice, type MarketKind,
 } from './market-text';
 import styles from './MarketPanel.module.css';
 
@@ -142,7 +144,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
                 <p className={styles.detail}>{`${row.seller.name} · ${timeLeft(row.expiresAtMs, now)}`}</p>
                 <p className={styles.detail}>{`${itemGrade(row.item)} · ${itemStats(row.item)}`}</p>
                 <p className={styles.detail}>{npcValueText(row.item)}</p>
-                {action === 'cancel' && <p className={styles.detail}>{`You receive ${money(sellerReceives(row.price))} after the ${MARKET_FEE_PERCENT}% fee`}</p>}
+                {action === 'cancel' && <p className={styles.detail}>{`You receive ${money(sellerReceives(row.price))} after the market fee (${MARKET_FEE_TERMS})`}</p>}
                 {blocked && <p id={blockedId} className={styles.blocked}>{blocked}</p>}
               </div>
               <div className={styles.deal}>
@@ -223,12 +225,12 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
   const value = Number(price), valid = price.trim() !== '' && validPrice(value);
   const count = activeListings(owner), atLimit = count >= MAXIMUM_LISTINGS;
   // The price's message marks the field invalid and describes it, beside its hint; List for sale is described by what
-  // keeps it disabled (Task 23.5, C18).
-  const wrong = price.trim() !== '' && !valid;
+  // keeps it disabled (Task 23.5, C18). A whole price under the lowest one is told why the lowest is 2.
+  const problem = priceProblem(price), wrong = problem !== null;
   const listReasons = [wrong && errorId, atLimit && limitId].filter(Boolean).join(' ');
   return <div className={styles.sell}>
     <p className={styles.count}>{`Active listings: ${count} of ${MAXIMUM_LISTINGS}`}</p>
-    <p className="muted">{`No listing fee. When an item sells, a ${MARKET_FEE_PERCENT}% sale fee (rounded down) is kept from the price. A listing lasts ${LISTING_DAYS} days; cancel it any time to take the item back.`}</p>
+    <p className="muted">{`No listing fee. When an item sells, a ${MARKET_FEE_PERCENT}% market fee (rounded down, at least ${money(MARKET_MINIMUM_FEE)}) is kept from the price. A listing lasts ${LISTING_DAYS} days; cancel it any time to take the item back.`}</p>
     {items.length === 0
       ? <p className={styles.nothing}>Nothing to list right now. Only free, tradable equipment can be listed: not equipped or reserved items, account-bound or renown gear, or salvage.</p>
       : <>
@@ -241,14 +243,15 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
           </label>)}
         </fieldset>
         <label className={styles.priceLabel} htmlFor={priceId}>Price in money</label>
-        <input id={priceId} className={styles.priceInput} type="number" inputMode="numeric" min={1} max={MAXIMUM_PRICE} step={1} value={price}
+        <input id={priceId} className={styles.priceInput} type="number" inputMode="numeric" min={MINIMUM_PRICE} max={MAXIMUM_PRICE} step={1} value={price}
           aria-invalid={wrong ? true : undefined} aria-describedby={wrong ? `${hintId} ${errorId}` : hintId} onChange={event => setPrice(event.target.value)} />
-        <p id={hintId} className="muted">{`A whole price from 1 to ${amount(MAXIMUM_PRICE)}.`}</p>
-        {wrong && <p id={errorId} className={styles.blocked} role="status">{`Enter a whole price from 1 to ${amount(MAXIMUM_PRICE)}.`}</p>}
+        <p id={hintId} className="muted">{PRICE_HINT}</p>
+        {problem && <p id={errorId} className={styles.blocked} role="status">{problem === 'low' ? LOWEST_PRICE_TEXT : `Enter a whole price from ${amount(MINIMUM_PRICE)} to ${amount(MAXIMUM_PRICE)}.`}</p>}
         {item && <div className={styles.terms} aria-live="polite">
           <p>{npcValueText(item)}</p>
           {valid && <>
-            <p>{`Sale fee (${MARKET_FEE_PERCENT}%): ${money(marketFee(value))}`}</p>
+            <p>{`Buyer pays: ${money(value)}`}</p>
+            <p>{`Market fee (${MARKET_FEE_TERMS}): ${money(marketFee(value))}`}</p>
             <p className={styles.receive}>{`You receive: ${money(sellerReceives(value))}`}</p>
           </>}
         </div>}

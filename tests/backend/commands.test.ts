@@ -42,7 +42,7 @@ it('validates every discriminant and rejects invalid counts, prices, booleans an
       equipment: { weapon: null, offHand: null, head: null, body: null, feet: null } },
     { kind: 'cancel-build', expectedVersion: 1 }, { kind: 'buy-shop', catalogId: 'sword:1:common', catalogVersion: 'v1', quantity: 1 },
     { kind: 'sell-item', itemId: operationId, quantity: 1 }, { kind: 'discard-item', itemId: operationId, quantity: 1 },
-    { kind: 'create-listing', itemId: operationId, price: 1 }, { kind: 'cancel-listing', listingId: operationId },
+    { kind: 'create-listing', itemId: operationId, price: 2 }, { kind: 'cancel-listing', listingId: operationId },
     { kind: 'buy-listing', listingId: operationId }, { kind: 'set-tournament-opt-in', enabled: false },
     { kind: 'edit-day-schedule', expectedVersion: 1, day: { morning: { kind: 'rest' }, afternoon: { kind: 'training' }, evening: { kind: 'arena' } } },
   ];
@@ -53,6 +53,8 @@ it('validates every discriminant and rejects invalid counts, prices, booleans an
   for (const command of [{ ...commands[0], expectedVersion: -1 }, { ...commands[0], choice: { kind: 'rest', expeditionId: 'woodland' } },
     { ...commands[2], expectedVersion: 1.5 }, { ...commands[3], quantity: 0 }, { ...commands[3], catalogId: 'missing' },
     { ...commands[3], quantity: Infinity }, { ...commands[4], quantity: 1.5 }, { ...commands[6], price: Number.MAX_SAFE_INTEGER + 1 },
+    // Launch feedback: the lowest listing price is 2, so a price of 1 (or less) is invalid.
+    { ...commands[6], price: 1 }, { ...commands[6], price: 0 },
     { ...commands[9], enabled: 'false' }]) expect(parseCommand({ ...command, operationId })).toBeNull();
 });
 
@@ -338,22 +340,23 @@ it('routes edit-day-schedule to the edit_day_schedule RPC with the canonical com
   expect(sent.map(r => [r.method, r.path])).toEqual([['POST', '/rest/v1/rpc/edit_schedule'], ['POST', '/rest/v1/rpc/cancel_build']]);
 });
 
-it('refuses a price above 1,000,000,000 before any RPC', async () => {
+it('refuses a price below 2 or above 1,000,000,000 before any RPC', async () => {
   const sent: Sent[] = [];
   const database = createDatabase(backend(() => json({ ok: true, receiptId: 'r1', value: { listingId: operationId, expiresAtMs: 1 } }), sent));
   const routed = { ...deps, database: { ...deps.database, market: database.market } };
-  for (const price of [1_000_000_001, Number.MAX_SAFE_INTEGER, 0, -1, 1.5, '10', null]) {
+  // Launch feedback: 1 is refused (the lowest listing price is 2, so the seller always receives something after the fee).
+  for (const price of [1_000_000_001, Number.MAX_SAFE_INTEGER, 1, 0, -1, 1.5, '10', null]) {
     const response = await handleCommand(req({ kind: 'create-listing', operationId, itemId: operationId, price }), routed);
     expect(response.status, String(price)).toBe(400);
     expect(await response.json()).toEqual({ ok: false, code: 'invalid' });
   }
   expect(sent).toEqual([]);
-  for (const price of [1, 1_000_000_000]) {
+  for (const price of [2, 1_000_000_000]) {
     const response = await handleCommand(req({ kind: 'create-listing', operationId, itemId: operationId, price }), routed);
     expect(response.status, String(price)).toBe(200);
   }
   expect(sent.map(r => [r.path, (r.body as { input: { command: { price: number } } }).input.command.price]))
-    .toEqual([['/rest/v1/rpc/create_listing', 1], ['/rest/v1/rpc/create_listing', 1_000_000_000]]);
+    .toEqual([['/rest/v1/rpc/create_listing', 2], ['/rest/v1/rpc/create_listing', 1_000_000_000]]);
 });
 
 it('answers a deadlocked or serialization-failed market transaction as retryable processing', async () => {

@@ -84,7 +84,7 @@ test.describe('tournament registration and brackets', () => {
     const slots = VIEWS.opening.bracket!.slots;
     for (let p = 0; p < 4; p += 1) await expect(card(page).getByRole('tabpanel')).toContainText(`${named(slots[2 * p])} vs ${named(slots[2 * p + 1])}`);
     await expect(card(page)).not.toContainText('Pairings are revealed');
-    await expect(card(page)).toContainText('You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.');
+    await expect(card(page)).toContainText('You are entered. Your first bout is revealed at Wed 7 Oct, 19:00 UTC.');
     await expect(card(page).getByRole('button', { name: /Watch replay/ })).toHaveCount(0);
     // Even a view holding every result shows none before its round's reveal time.
     await tournamentFlow.openAt(page, 'completed', revealOf('completed', 1) - 1000);
@@ -102,7 +102,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(card(page)).toContainText('Your bout is being fought now.');
     await tournamentFlow.openAtMinute(page, 'completed', 30);
     expect((await tournamentFlow.visibleWinnerIds(page)).sort()).toEqual(VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.revealedResult!.winnerId).sort());
-    await expect(card(page)).toContainText('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sept, 18:40 UTC; this slot has no other activity for you.');
+    await expect(card(page)).toContainText('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sept, 20:00 UTC; this slot has no other activity for you.');
     const aster = card(page).getByRole('region', { name: 'Entrants' }).getByRole('listitem').filter({ hasText: 'Aster' });
     await expect(aster).toContainText('Eliminated in the Quarterfinals · spectating');
     // The semifinals are not revealed yet: their sides are the winners already shown, their results preparing.
@@ -117,7 +117,7 @@ test.describe('tournament registration and brackets', () => {
     // The replay's title sits under the card's h4 and the replay section's h5; the card has no h1.
     await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
     await expect(card(page).getByRole('heading', { level: 1 })).toHaveCount(0);
-    await page.waitForFunction(() => window.__cloudiatorReplay?.state().battleId === 'tournament:373009:bronze:3:0');
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().battleId === 'tournament:373010:bronze:3:0');
     await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(999_999); });
     await expect(replay.getByRole('region', { name: 'Result' })).toContainText('Varro wins');
     // Aster was eliminated in round 1 and only watches: the rewards line is a fighter's only (13.8 review).
@@ -184,8 +184,8 @@ test.describe('tournament registration and brackets', () => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openAtMinute(page, 'opening', 5);
     const registration = page.getByRole('region', { name: 'Registration' });
-    await expect(registration).toContainText('Entries for the tournament running now were fixed at its 17:20 UTC cutoff.');
-    await expect(registration).toContainText('A change now applies from the next tournament, Sat 10 Oct, 17:20 UTC.');
+    await expect(registration).toContainText('Entries for the tournament running now were fixed at its 18:40 UTC cutoff.');
+    await expect(registration).toContainText('A change now applies from the next tournament, Sat 10 Oct, 18:40 UTC.');
     const box = page.getByLabel('Automatically enter tournaments');
     await box.click();
     await expect(registration.getByRole('status')).toHaveText('Registration changes are unavailable in this preview. Your setting is unchanged.');
@@ -194,9 +194,9 @@ test.describe('tournament registration and brackets', () => {
     expect(await page.evaluate(() => window.__cloudiatorTournaments!.commands())).toEqual(['set-tournament-opt-in']);
     // Before a cutoff the change would apply to the coming tournament.
     await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('upcoming') - 60 * MIN);
-    await expect(registration).toContainText('A change now applies to the next tournament, Sat 10 Oct, 17:20 UTC, if it is saved before that cutoff.');
+    await expect(registration).toContainText('A change now applies to the next tournament, Sat 10 Oct, 18:40 UTC, if it is saved before that cutoff.');
     await expect(registration).not.toContainText('were fixed');
-    await expect(registration.getByRole('definition')).toHaveText(['Off', 'Expedition: Woodland Path (not Arena)', '104 (25 needed at the cutoff)']);
+    await expect(registration.getByRole('definition')).toHaveText(['Off', 'Rest (not Arena)', '104 (25 needed at the cutoff)']);
     expect(await page.evaluate(() => window.__cloudiatorTournaments!.commands())).toEqual(['set-tournament-opt-in']);
     expect(remote).toEqual([]);
   });
@@ -210,8 +210,8 @@ test.describe('tournament registration and brackets', () => {
     // A tournament that has not started shows neither entrants nor a bracket.
     await tournamentFlow.openAt(page, 'upcoming', startOf('upcoming') - 30 * MIN);
     await expect(card(page).getByRole('status')).toHaveText('Scheduled');
-    await expect(card(page)).toContainText('Entrants and the bracket are published at the start, Sat 10 Oct, 17:20 UTC.');
-    await expect(page.getByRole('region', { name: 'Tournament schedule' }).getByRole('definition')).toHaveText(['Sat 10 Oct, 17:20 UTC', '30 min 0 s']);
+    await expect(card(page)).toContainText('Entrants and the bracket are published at the start, Sat 10 Oct, 18:40 UTC.');
+    await expect(page.getByRole('region', { name: 'Tournament schedule' }).getByRole('definition')).toHaveText(['Sat 10 Oct, 18:40 UTC', '30 min 0 s']);
   });
 
   test('marks a due round as preparing while its results are unpublished, and asks again', { tag: '@render' }, async ({ page }, testInfo) => {
@@ -220,7 +220,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(card(page).getByRole('status')).toHaveText('Processing results');
     await expect(card(page).getByRole('tab', { selected: true })).toHaveText('Final');
     await expect(page.getByText('Result preparing')).toBeVisible();
-    await expect(card(page)).toContainText('These results were due at Sat 3 Oct, 18:20 UTC but are not published yet.');
+    await expect(card(page)).toContainText('These results were due at Sat 3 Oct, 19:40 UTC but are not published yet.');
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
     await expect(card(page).getByRole('tabpanel')).toContainText('Decimus vs Aurelia');
     await card(page).screenshot({ path: testInfo.outputPath('tournament-unavailable-round.png') });
@@ -242,13 +242,13 @@ test.describe('tournament registration and brackets', () => {
   test('holds each sample at the server time its view was projected at, so it shows what its label says', { tag: '@render' }, async ({ page }) => {
     await openTournaments(page);
     const shows: [TournamentKey, string, string][] = [
-      ['opening', 'In progress', 'You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.'],
-      ['midway', 'In progress', 'Next reveal: Final, Sat 3 Oct, 18:20 UTC.'],
-      ['late', 'In progress', 'Every round is revealed. Placements settle at minute 80, Wed 30 Sept, 18:40 UTC.'],
+      ['opening', 'In progress', 'You are entered. Your first bout is revealed at Wed 7 Oct, 19:00 UTC.'],
+      ['midway', 'In progress', 'Next reveal: Final, Sat 3 Oct, 19:40 UTC.'],
+      ['late', 'In progress', 'Every round is revealed. Placements settle at minute 80, Wed 30 Sept, 20:00 UTC.'],
       ['completed', 'Completed', 'Your placement: 5th. Credited: +7 renown.'],
       ['pair', 'Completed', 'You are the champion of this tournament!'],
       ['insufficient', 'Not held: too few entrants', 'that entrant fought regular Arena this slot'],
-      ['upcoming', 'Scheduled', 'Entrants and the bracket are published at the start, Sat 10 Oct, 17:20 UTC.'],
+      ['upcoming', 'Scheduled', 'Entrants and the bracket are published at the start, Sat 10 Oct, 18:40 UTC.'],
     ];
     for (const [key, status, detail] of shows) {
       await page.getByRole('button', { name: TOURNAMENTS[key].label, exact: true }).click();
@@ -430,18 +430,18 @@ test.describe('tournament times in the viewer’s time zone', () => {
   test('shows local times beside the fixed UTC time across a daylight-saving change', async ({ page }, testInfo) => {
     await openTournaments(page);
     const schedule = page.getByRole('region', { name: 'Tournament schedule' });
-    // After Saturday 24 October's tournament, New York is still on daylight time (UTC−4).
-    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), Date.UTC(2026, 9, 24, 18, 40));
-    await expect(schedule).toContainText('Wed 28 Oct, 13:20 GMT-4 (Wed 28 Oct, 17:20 UTC)');
+    // After Saturday 24 October's tournament (it ends at 20:00 UTC), New York is still on daylight time (UTC−4).
+    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), Date.UTC(2026, 9, 24, 20, 0));
+    await expect(schedule).toContainText('Wed 28 Oct, 14:40 GMT-4 (Wed 28 Oct, 18:40 UTC)');
     await expect(schedule).toContainText('3 d 22 h 40 min');
     // After Saturday 31 October's, it is on standard time (UTC−5); the UTC time is unchanged.
-    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), Date.UTC(2026, 9, 31, 18, 40));
-    await expect(schedule).toContainText('Wed 4 Nov, 12:20 GMT-5 (Wed 4 Nov, 17:20 UTC)');
+    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), Date.UTC(2026, 9, 31, 20, 0));
+    await expect(schedule).toContainText('Wed 4 Nov, 13:40 GMT-5 (Wed 4 Nov, 18:40 UTC)');
     await expect(schedule).toContainText('3 d 22 h 40 min');
     await schedule.screenshot({ path: testInfo.outputPath('tournament-local-time-new-york.png') });
     // Bracket times follow the same zone.
     await tournamentFlow.openAtMinute(page, 'opening', 5);
-    await expect(card(page)).toContainText('Your first bout is revealed at Wed 7 Oct, 13:40 GMT-4 (Wed 7 Oct, 17:40 UTC).');
+    await expect(card(page)).toContainText('Your first bout is revealed at Wed 7 Oct, 15:00 GMT-4 (Wed 7 Oct, 19:00 UTC).');
   });
 });
 
@@ -579,7 +579,7 @@ test.describe('the live Tournaments panel', () => {
     const panel = await tournamentsPanel(page);
     const schedule = panel.getByRole('region', { name: 'Tournament schedule' });
     await expect(schedule).toContainText('A tournament is running now');
-    await expect(schedule.getByRole('definition')).toHaveText(['Sat 10 Oct, 17:20 UTC', /^2 d 23 h 2\d min$/]);
+    await expect(schedule.getByRole('definition')).toHaveText(['Sat 10 Oct, 18:40 UTC', /^2 d 23 h 2\d min$/]);
     const leagues = panel.getByRole('group', { name: 'League' });
     await expect(leagues.getByRole('button')).toHaveText(['Bronze', 'Silver', 'Gold', 'Champion']);
     await expect(leagues.getByRole('button', { name: 'Bronze' })).toHaveAttribute('aria-pressed', 'true');

@@ -1,9 +1,9 @@
 {
-  "id": "tournament:373207:bronze",
+  "id": "tournament:373208:bronze",
   "league": "bronze",
-  "slotIndex": 373207,
-  "startsAtMs": 1791393600000,
-  "endsAtMs": 1791398400000,
+  "slotIndex": 373208,
+  "startsAtMs": 1791398400000,
+  "endsAtMs": 1791403200000,
   "status": "active",
   "bracket": {
     "size": 8,
@@ -63,60 +63,60 @@
   ],
   "bouts": [
     {
-      "id": "tournament:373207:bronze:1:0",
+      "id": "tournament:373208:bronze:1:0",
       "round": 1,
       "position": 0,
       "parentBoutIds": [],
       "revealedResult": null
     },
     {
-      "id": "tournament:373207:bronze:1:1",
+      "id": "tournament:373208:bronze:1:1",
       "round": 1,
       "position": 1,
       "parentBoutIds": [],
       "revealedResult": null
     },
     {
-      "id": "tournament:373207:bronze:1:2",
+      "id": "tournament:373208:bronze:1:2",
       "round": 1,
       "position": 2,
       "parentBoutIds": [],
       "revealedResult": null
     },
     {
-      "id": "tournament:373207:bronze:1:3",
+      "id": "tournament:373208:bronze:1:3",
       "round": 1,
       "position": 3,
       "parentBoutIds": [],
       "revealedResult": null
     },
     {
-      "id": "tournament:373207:bronze:2:0",
+      "id": "tournament:373208:bronze:2:0",
       "round": 2,
       "position": 0,
       "parentBoutIds": [
-        "tournament:373207:bronze:1:0",
-        "tournament:373207:bronze:1:1"
+        "tournament:373208:bronze:1:0",
+        "tournament:373208:bronze:1:1"
       ],
       "revealedResult": null
     },
     {
-      "id": "tournament:373207:bronze:2:1",
+      "id": "tournament:373208:bronze:2:1",
       "round": 2,
       "position": 1,
       "parentBoutIds": [
-        "tournament:373207:bronze:1:2",
-        "tournament:373207:bronze:1:3"
+        "tournament:373208:bronze:1:2",
+        "tournament:373208:bronze:1:3"
       ],
       "revealedResult": null
     },
     {
-      "id": "tournament:373207:bronze:3:0",
+      "id": "tournament:373208:bronze:3:0",
       "round": 3,
       "position": 0,
       "parentBoutIds": [
-        "tournament:373207:bronze:2:0",
-        "tournament:373207:bronze:2:1"
+        "tournament:373208:bronze:2:0",
+        "tournament:373208:bronze:2:1"
       ],
       "revealedResult": null
     }

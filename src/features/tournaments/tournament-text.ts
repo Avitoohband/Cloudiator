@@ -14,7 +14,7 @@ const FORMAT = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digi
 
 /**
  * A tournament time in the viewer's zone (or `timeZone`, for tests and captures) and in UTC, e.g.
- * `{ local: 'Wed 28 Oct, 18:20 GMT+1', utc: 'Wed 28 Oct, 17:20 UTC' }`. A zone at UTC+0 reads "UTC" (ICU writes "GMT" or "GMT+0").
+ * `{ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' }`. A zone at UTC+0 reads "UTC" (ICU writes "GMT" or "GMT+0").
  */
 export function tournamentTimeText(ms: number, timeZone?: string): { local: string; utc: string } {
   const local = new Intl.DateTimeFormat('en-GB', { ...FORMAT, timeZone, timeZoneName: 'shortOffset' }).format(ms).replace(/ GMT(?:[+-]0+(?::00)?)?$/, ' UTC');
@@ -40,7 +40,7 @@ export function countdownText(ms: number): string {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
-/** The fixed cutoff, the tournament's start (v1: 17:20 UTC). */
+/** The fixed cutoff, the tournament's start (v1: 18:40 UTC). */
 export const CUTOFF_UTC = `${pad(RULES_V1.tournament.hourUtc)}:${pad(RULES_V1.tournament.minuteUtc)} UTC`;
 /** Stamina needed at the cutoff: the Arena activity and the tournament must both be affordable (Task 19 partition). */
 export const ENTRY_STAMINA = Math.max(RULES_V1.activityStamina.arena, RULES_V1.activityStamina.tournament);
@@ -48,9 +48,9 @@ const DAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Frid
 
 /** Spec §8.2 entry rules, as the registration section states them. */
 export const ENTRY_RULES: readonly string[] = [
-  `Entry needs automatic entry switched on, Arena scheduled for the afternoon (the tournament phase) and at least ${ENTRY_STAMINA} stamina at the cutoff, the tournament’s ${CUTOFF_UTC} start.`,
-  `Tournaments run on ${RULES_V1.tournament.utcWeekdays.map(d => DAYS[d]).join(' and ')} at ${CUTOFF_UTC} for one 80-minute afternoon slot. Entry works without an open browser.`,
-  'With automatic entry off, an Arena afternoon stays a normal Arena bout.',
+  `Entry needs automatic entry switched on, Arena scheduled for the evening (the tournament phase) and at least ${ENTRY_STAMINA} stamina at the cutoff, the tournament’s ${CUTOFF_UTC} start.`,
+  `Tournaments run on ${RULES_V1.tournament.utcWeekdays.map(d => DAYS[d]).join(' and ')} at ${CUTOFF_UTC} for one 80-minute evening slot. Entry works without an open browser.`,
+  'With automatic entry off, an Arena evening stays a normal Arena bout.',
   'A change made after a tournament’s cutoff applies from the next tournament.',
   `Each league holds its own bracket when at least ${RULES_V1.tournament.minimumEntrants} gladiators qualify; otherwise they fight regular Arena that slot.`,
   'The whole tournament costs stamina once. Every bout starts at full health, and an eliminated gladiator stays to spectate until the tournament ends.',
@@ -64,8 +64,8 @@ export function registrationNote(displayNowMs: number, timeZone?: string): { fix
     : { fixed: null, applies: `A change now applies to the next tournament, ${next}, if it is saved before that cutoff.` };
 }
 
-/** The owner's afternoon choice, with a note when it is not Arena (no tournament entry). */
-export function afternoonText(choice: ActivityChoice): string {
+/** The owner's evening choice, with a note when it is not Arena (no tournament entry). */
+export function eveningText(choice: ActivityChoice): string {
   if (choice.kind === 'arena') return 'Arena';
   const name = choice.kind === 'expedition' ? `Expedition: ${CATALOG_V1.expeditions[choice.expeditionId]?.name ?? choice.expeditionId}`
     : choice.kind === 'training' ? 'Training' : 'Rest';

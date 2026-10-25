@@ -1,9 +1,9 @@
 {
-  "id": "tournament:372955:bronze",
+  "id": "tournament:372956:bronze",
   "league": "bronze",
-  "slotIndex": 372955,
-  "startsAtMs": 1790184000000,
-  "endsAtMs": 1790188800000,
+  "slotIndex": 372956,
+  "startsAtMs": 1790188800000,
+  "endsAtMs": 1790193600000,
   "status": "completed",
   "bracket": {
     "size": 2,
@@ -27,7 +27,7 @@
   ],
   "bouts": [
     {
-      "id": "tournament:372955:bronze:1:0",
+      "id": "tournament:372956:bronze:1:0",
       "round": 1,
       "position": 0,
       "parentBoutIds": [],
@@ -47,7 +47,7 @@
         "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
         "bye": false,
         "battleLog": {
-          "battleId": "tournament:372955:bronze:1:0",
+          "battleId": "tournament:372956:bronze:1:0",
           "rulesVersion": "v1",
           "participants": [
             {
@@ -111,12 +111,12 @@
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "hit": true,
-              "critical": true,
-              "damage": 13,
+              "critical": false,
+              "damage": 8,
               "defend": false,
               "evade": false,
               "healthBefore": 134,
-              "healthAfter": 121
+              "healthAfter": 126
             },
             {
               "kind": "attack",
@@ -124,13 +124,13 @@
               "elapsedMs": 935,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
+              "evade": true,
               "healthBefore": 134,
-              "healthAfter": 126
+              "healthAfter": 134
             },
             {
               "kind": "attack",
@@ -143,8 +143,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 121,
-              "healthAfter": 113
+              "healthBefore": 126,
+              "healthAfter": 118
             },
             {
               "kind": "attack",
@@ -157,8 +157,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 126,
-              "healthAfter": 118
+              "healthBefore": 134,
+              "healthAfter": 126
             },
             {
               "kind": "attack",
@@ -166,13 +166,13 @@
               "elapsedMs": 2805,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 113,
-              "healthAfter": 113
+              "evade": false,
+              "healthBefore": 118,
+              "healthAfter": 110
             },
             {
               "kind": "attack",
@@ -185,8 +185,8 @@
               "damage": 0,
               "defend": false,
               "evade": true,
-              "healthBefore": 118,
-              "healthAfter": 118
+              "healthBefore": 126,
+              "healthAfter": 126
             },
             {
               "kind": "attack",
@@ -194,13 +194,13 @@
               "elapsedMs": 3740,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 113,
-              "healthAfter": 105
+              "evade": true,
+              "healthBefore": 110,
+              "healthAfter": 110
             },
             {
               "kind": "attack",
@@ -213,8 +213,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 118,
-              "healthAfter": 110
+              "healthBefore": 126,
+              "healthAfter": 118
             },
             {
               "kind": "attack",
@@ -227,8 +227,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 105,
-              "healthAfter": 97
+              "healthBefore": 110,
+              "healthAfter": 102
             },
             {
               "kind": "attack",
@@ -236,13 +236,13 @@
               "elapsedMs": 4675,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 110,
-              "healthAfter": 102
+              "evade": true,
+              "healthBefore": 118,
+              "healthAfter": 118
             },
             {
               "kind": "attack",
@@ -250,20 +250,6 @@
               "elapsedMs": 5610,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": false,
-              "critical": false,
-              "damage": 0,
-              "defend": false,
-              "evade": true,
-              "healthBefore": 97,
-              "healthAfter": 97
-            },
-            {
-              "kind": "attack",
-              "sequence": 11,
-              "elapsedMs": 5610,
-              "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "hit": true,
               "critical": false,
               "damage": 8,
@@ -274,17 +260,31 @@
             },
             {
               "kind": "attack",
+              "sequence": 11,
+              "elapsedMs": 5610,
+              "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "hit": false,
+              "critical": false,
+              "damage": 0,
+              "defend": false,
+              "evade": true,
+              "healthBefore": 118,
+              "healthAfter": 118
+            },
+            {
+              "kind": "attack",
               "sequence": 12,
               "elapsedMs": 6545,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 97,
-              "healthAfter": 89
+              "evade": true,
+              "healthBefore": 94,
+              "healthAfter": 94
             },
             {
               "kind": "attack",
@@ -297,8 +297,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 94,
-              "healthAfter": 86
+              "healthBefore": 118,
+              "healthAfter": 110
             },
             {
               "kind": "attack",
@@ -311,8 +311,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 89,
-              "healthAfter": 81
+              "healthBefore": 94,
+              "healthAfter": 86
             },
             {
               "kind": "attack",
@@ -320,6 +320,20 @@
               "elapsedMs": 7480,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "hit": true,
+              "critical": false,
+              "damage": 8,
+              "defend": false,
+              "evade": false,
+              "healthBefore": 110,
+              "healthAfter": 102
+            },
+            {
+              "kind": "attack",
+              "sequence": 16,
+              "elapsedMs": 8415,
+              "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "hit": false,
               "critical": false,
               "damage": 0,
@@ -330,31 +344,17 @@
             },
             {
               "kind": "attack",
-              "sequence": 16,
-              "elapsedMs": 8415,
-              "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
-              "critical": false,
-              "damage": 8,
-              "defend": false,
-              "evade": false,
-              "healthBefore": 81,
-              "healthAfter": 73
-            },
-            {
-              "kind": "attack",
               "sequence": 17,
               "elapsedMs": 8415,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 86,
-              "healthAfter": 78
+              "evade": true,
+              "healthBefore": 102,
+              "healthAfter": 102
             },
             {
               "kind": "attack",
@@ -362,13 +362,13 @@
               "elapsedMs": 9350,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 73,
-              "healthAfter": 65
+              "evade": true,
+              "healthBefore": 86,
+              "healthAfter": 86
             },
             {
               "kind": "attack",
@@ -381,8 +381,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 78,
-              "healthAfter": 70
+              "healthBefore": 102,
+              "healthAfter": 94
             },
             {
               "kind": "attack",
@@ -390,13 +390,13 @@
               "elapsedMs": 10285,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 65,
-              "healthAfter": 57
+              "evade": true,
+              "healthBefore": 86,
+              "healthAfter": 86
             },
             {
               "kind": "attack",
@@ -409,8 +409,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 70,
-              "healthAfter": 62
+              "healthBefore": 94,
+              "healthAfter": 86
             },
             {
               "kind": "attack",
@@ -423,8 +423,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 57,
-              "healthAfter": 49
+              "healthBefore": 86,
+              "healthAfter": 78
             },
             {
               "kind": "attack",
@@ -432,13 +432,13 @@
               "elapsedMs": 11220,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 62,
-              "healthAfter": 54
+              "evade": true,
+              "healthBefore": 86,
+              "healthAfter": 86
             },
             {
               "kind": "attack",
@@ -451,8 +451,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 49,
-              "healthAfter": 41
+              "healthBefore": 78,
+              "healthAfter": 70
             },
             {
               "kind": "attack",
@@ -465,8 +465,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 54,
-              "healthAfter": 46
+              "healthBefore": 86,
+              "healthAfter": 78
             },
             {
               "kind": "attack",
@@ -474,13 +474,13 @@
               "elapsedMs": 13090,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 41,
-              "healthAfter": 41
+              "evade": false,
+              "healthBefore": 70,
+              "healthAfter": 62
             },
             {
               "kind": "attack",
@@ -493,8 +493,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 46,
-              "healthAfter": 38
+              "healthBefore": 78,
+              "healthAfter": 70
             },
             {
               "kind": "attack",
@@ -502,13 +502,13 @@
               "elapsedMs": 14025,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 41,
-              "healthAfter": 33
+              "evade": true,
+              "healthBefore": 62,
+              "healthAfter": 62
             },
             {
               "kind": "attack",
@@ -516,13 +516,13 @@
               "elapsedMs": 14025,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 38,
-              "healthAfter": 38
+              "evade": false,
+              "healthBefore": 70,
+              "healthAfter": 62
             },
             {
               "kind": "attack",
@@ -530,13 +530,13 @@
               "elapsedMs": 14960,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
-              "critical": true,
-              "damage": 13,
+              "hit": false,
+              "critical": false,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 33,
-              "healthAfter": 20
+              "evade": true,
+              "healthBefore": 62,
+              "healthAfter": 62
             },
             {
               "kind": "attack",
@@ -544,13 +544,13 @@
               "elapsedMs": 14960,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 38,
-              "healthAfter": 38
+              "evade": false,
+              "healthBefore": 62,
+              "healthAfter": 54
             },
             {
               "kind": "attack",
@@ -558,13 +558,13 @@
               "elapsedMs": 15895,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 20,
-              "healthAfter": 20
+              "evade": false,
+              "healthBefore": 62,
+              "healthAfter": 54
             },
             {
               "kind": "attack",
@@ -572,13 +572,13 @@
               "elapsedMs": 15895,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 38,
-              "healthAfter": 30
+              "evade": true,
+              "healthBefore": 54,
+              "healthAfter": 54
             },
             {
               "kind": "attack",
@@ -586,13 +586,13 @@
               "elapsedMs": 16830,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": true,
+              "hit": false,
               "critical": false,
-              "damage": 8,
+              "damage": 0,
               "defend": false,
-              "evade": false,
-              "healthBefore": 20,
-              "healthAfter": 12
+              "evade": true,
+              "healthBefore": 54,
+              "healthAfter": 54
             },
             {
               "kind": "attack",
@@ -605,8 +605,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 30,
-              "healthAfter": 22
+              "healthBefore": 54,
+              "healthAfter": 46
             },
             {
               "kind": "attack",
@@ -614,13 +614,13 @@
               "elapsedMs": 17765,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 12,
-              "healthAfter": 12
+              "evade": false,
+              "healthBefore": 54,
+              "healthAfter": 46
             },
             {
               "kind": "attack",
@@ -633,8 +633,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 22,
-              "healthAfter": 14
+              "healthBefore": 46,
+              "healthAfter": 38
             },
             {
               "kind": "attack",
@@ -642,13 +642,13 @@
               "elapsedMs": 18700,
               "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 12,
-              "healthAfter": 12
+              "evade": false,
+              "healthBefore": 46,
+              "healthAfter": 38
             },
             {
               "kind": "attack",
@@ -661,8 +661,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 14,
-              "healthAfter": 6
+              "healthBefore": 38,
+              "healthAfter": 30
             },
             {
               "kind": "attack",
@@ -675,8 +675,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 12,
-              "healthAfter": 4
+              "healthBefore": 38,
+              "healthAfter": 30
             },
             {
               "kind": "attack",
@@ -684,13 +684,13 @@
               "elapsedMs": 19635,
               "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
-              "hit": false,
+              "hit": true,
               "critical": false,
-              "damage": 0,
+              "damage": 8,
               "defend": false,
-              "evade": true,
-              "healthBefore": 6,
-              "healthAfter": 6
+              "evade": false,
+              "healthBefore": 30,
+              "healthAfter": 22
             },
             {
               "kind": "attack",
@@ -703,8 +703,8 @@
               "damage": 8,
               "defend": false,
               "evade": false,
-              "healthBefore": 4,
-              "healthAfter": 0
+              "healthBefore": 30,
+              "healthAfter": 22
             },
             {
               "kind": "attack",
@@ -717,19 +717,103 @@
               "damage": 8,
               "defend": false,
               "evade": false,
+              "healthBefore": 22,
+              "healthAfter": 14
+            },
+            {
+              "kind": "attack",
+              "sequence": 44,
+              "elapsedMs": 21505,
+              "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "hit": true,
+              "critical": false,
+              "damage": 8,
+              "defend": false,
+              "evade": false,
+              "healthBefore": 22,
+              "healthAfter": 14
+            },
+            {
+              "kind": "attack",
+              "sequence": 45,
+              "elapsedMs": 21505,
+              "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "hit": false,
+              "critical": false,
+              "damage": 0,
+              "defend": false,
+              "evade": true,
+              "healthBefore": 14,
+              "healthAfter": 14
+            },
+            {
+              "kind": "attack",
+              "sequence": 46,
+              "elapsedMs": 22440,
+              "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "hit": true,
+              "critical": false,
+              "damage": 8,
+              "defend": false,
+              "evade": false,
+              "healthBefore": 14,
+              "healthAfter": 6
+            },
+            {
+              "kind": "attack",
+              "sequence": 47,
+              "elapsedMs": 22440,
+              "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "hit": true,
+              "critical": false,
+              "damage": 8,
+              "defend": false,
+              "evade": false,
+              "healthBefore": 14,
+              "healthAfter": 6
+            },
+            {
+              "kind": "attack",
+              "sequence": 48,
+              "elapsedMs": 23375,
+              "attackerId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "defenderId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "hit": true,
+              "critical": false,
+              "damage": 8,
+              "defend": false,
+              "evade": false,
+              "healthBefore": 6,
+              "healthAfter": 0
+            },
+            {
+              "kind": "attack",
+              "sequence": 49,
+              "elapsedMs": 23375,
+              "attackerId": "0d5f8471-d919-428f-9ab7-058c95821757",
+              "defenderId": "077aba8f-067a-48fc-997a-bdb5087abc22",
+              "hit": true,
+              "critical": false,
+              "damage": 8,
+              "defend": false,
+              "evade": false,
               "healthBefore": 6,
               "healthAfter": 0
             },
             {
               "kind": "victory",
-              "sequence": 44,
-              "elapsedMs": 20570,
+              "sequence": 50,
+              "elapsedMs": 23375,
               "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
               "loserId": "077aba8f-067a-48fc-997a-bdb5087abc22",
               "reason": "tie-break"
             }
           ],
-          "durationMs": 20570,
+          "durationMs": 23375,
           "winnerId": "0d5f8471-d919-428f-9ab7-058c95821757",
           "victoryReason": "tie-break",
           "finalHp": [
@@ -750,10 +834,10 @@
         "resolvedKind": "tournament",
         "result": "victory",
         "success": true,
-        "settledAtMs": 1790188800000,
+        "settledAtMs": 1790193600000,
         "replayExpiry": {
           "state": "available",
-          "expiresAtMs": 1790793600000
+          "expiresAtMs": 1790798400000
         }
       }
     },
@@ -765,10 +849,10 @@
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "settledAtMs": 1790188800000,
+        "settledAtMs": 1790193600000,
         "replayExpiry": {
           "state": "available",
-          "expiresAtMs": 1790793600000
+          "expiresAtMs": 1790798400000
         }
       }
     }

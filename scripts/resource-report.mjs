@@ -14,7 +14,8 @@ import { describeFailure, Failure, isLoopback, parseDatabaseUrl } from './operat
 // JSON report on stdout:
 //   - tests/performance/simulation.test.ts (pure code): the worker's heaviest jobs against cpuMs less 25 %;
 //   - tests/db/capacity.test.ts (the local database, as `npm run test:db` runs it): a measurement world of --players
-//     characters through a warm-up and K (--slots) measured accelerated boundaries with pg_cron's tick and the real Edge
+//     characters through a warm-up and K (--slots, 4 to 12: the tournament is the third measured slot and settles in the fourth)
+//     measured accelerated boundaries with pg_cron's tick and the real Edge
 //     worker, a second world on the new-character schedule, the read sizes, the season close and the standings reads.
 //     That suite resets the world before each case and at its end, so no measurement row outlives the run.
 // --viewers sets the visitor count of the egress model only. The suites' own output goes to stderr. The capacity suite checks
@@ -27,7 +28,7 @@ import { describeFailure, Failure, isLoopback, parseDatabaseUrl } from './operat
 // Follow docs/operations/verification-gates.md: nothing else may build, browse or edit in the worktree that serves Edge while
 // this runs, and the Edge container's start time must be the same before and after.
 const root = fileURLToPath(new URL('..', import.meta.url));
-const LIMITS = { players: [3, 200], viewers: [0, 10_000], slots: [3, 12] };
+const LIMITS = { players: [3, 200], viewers: [0, 10_000], slots: [4, 12] };
 
 function parseArgs(argv) {
   const options = { players: 50, viewers: 50, slots: 4 };

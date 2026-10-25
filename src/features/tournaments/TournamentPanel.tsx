@@ -46,7 +46,7 @@ import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
 import {
-  ENTRY_RULES, ENTRY_STAMINA, afternoonText, countdownText, creditedText, leagueName, ordinal, registrationNote, roleText, roundNote,
+  ENTRY_RULES, ENTRY_STAMINA, countdownText, creditedText, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
   roundStatus, shapeText, statusDetail, statusText, timeWithUtc, victoryText, viewerText,
 } from './tournament-text';
 import styles from './TournamentPanel.module.css';
@@ -93,7 +93,7 @@ export function TournamentScheduleView({ now, timeZone }: { now: number; timeZon
         <div><dt>Next tournament</dt><dd>{timeWithUtc(next.startsAtMs, timeZone)}</dd></div>
         <div><dt>Starts in</dt><dd className={styles.countdown}>{countdownText(next.countdownMs)}</dd></div>
       </dl>
-      <p className="muted">Every Wednesday and Saturday at 17:20 UTC, for one 80-minute afternoon slot. Times show in your time zone; daylight saving never moves the UTC time.</p>
+      <p className="muted">Every Wednesday and Saturday at 18:40 UTC, for one 80-minute evening slot. Times show in your time zone; daylight saving never moves the UTC time.</p>
     </section>
   );
 }
@@ -105,7 +105,7 @@ export type RegistrationModel = {
   message: { kind: 'status' | 'alert'; text: string } | null;
   displayNowMs: number;
   timeZone?: string;
-  owner: { afternoon: OwnerState['schedule']['afternoon']; stamina: number } | null;
+  owner: { evening: OwnerState['schedule']['evening']; stamina: number } | null;
 };
 
 /** The automatic-entry checkbox, the rules and the owner's own checklist. The box always shows the saved setting. */
@@ -126,7 +126,7 @@ export function RegistrationView({ model, onToggle }: { model: RegistrationModel
       {model.owner && model.optIn !== null && (
         <dl className={styles.checklist} aria-label="Your entry checklist">
           <div><dt>Automatic entry</dt><dd>{model.optIn ? 'On' : 'Off'}</dd></div>
-          <div><dt>Afternoon schedule</dt><dd>{afternoonText(model.owner.afternoon)}</dd></div>
+          <div><dt>Evening schedule</dt><dd>{eveningText(model.owner.evening)}</dd></div>
           <div><dt>Stamina now</dt><dd>{model.owner.stamina} ({ENTRY_STAMINA} needed at the cutoff)</dd></div>
         </dl>
       )}
@@ -634,11 +634,11 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
     <section className={styles.tournaments} aria-labelledby={titleId}>
       <div className="section-title">
         <div><p className="eyebrow">TOURNAMENTS</p><h2 id={titleId}>Tournaments</h2></div>
-        <span className="tag">Wed &amp; Sat · 17:20 UTC</span>
+        <span className="tag">Wed &amp; Sat · 18:40 UTC</span>
       </div>
       <TournamentScheduleView now={now} />
       {viewer === 'player' && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now,
-        owner: owner ? { afternoon: owner.schedule.afternoon, stamina: owner.stamina.current } : null }} onToggle={() => void toggle()} />}
+        owner: owner ? { evening: owner.schedule.evening, stamina: owner.stamina.current } : null }} onToggle={() => void toggle()} />}
       <section className={styles.brackets} aria-labelledby={bracketsId}>
         <h3 id={bracketsId}>Brackets</h3>
         {fixture && samples.length > 0 && (

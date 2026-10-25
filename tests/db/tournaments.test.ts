@@ -17,12 +17,12 @@ import { readProfile, readTimeline, readTournament, readTournamentLog } from '..
 
 const SLOT = 4_800_000;
 const MINUTE = 60_000;
-/** Slot 301 starts on Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot. Its cutoff is 301 × 4 800 000 ms. */
-const T = 301;
+/** Slot 302 starts on Saturday 1970-01-17 at 18:40 UTC, an evening and a v1 tournament slot. Its cutoff is 302 × 4 800 000 ms. */
+const T = 302;
 const CUTOFF = T * SLOT;
 /**
  * Task 22.5: a tournament's bout logs are kept until seven days after it ends (with its slot); from then on
- * `readTournamentLog` answers `not-found` by the server time it samples. Slot 301 is long past, so its logs are read with
+ * `readTournamentLog` answers `not-found` by the server time it samples. Slot 302 is long past, so its logs are read with
  * the revision's server time stood in (`clockedClient`) at `LOG_KEPT`, the last millisecond they are kept.
  */
 const ENDS = CUTOFF + 80 * MINUTE;
@@ -456,7 +456,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
         ['swapped placement', variant(c => { fought(c).placed.reverse(); })],
         ['ranks out of order', variant(c => { const e = graphOfCopy(c).entries; [e[0].rank, e[1].rank] = [e[1].rank, e[0].rank]; })],
         ['an altered bout id', variant(c => { fought(c).id += 'x'; })],
-        ['an altered battle id', variant(c => { fought(c).battleId = 'arena:301:forged'; })],
+        ['an altered battle id', variant(c => { fought(c).battleId = 'arena:302:forged'; })],
         ['an altered parent', variant(c => { graphOfCopy(c).bouts.at(-1).parentBoutIds.reverse(); })],
         ['a floored reveal time', variant(c => { const g = graphOfCopy(c); g.revealAtMs[0] -= 1; for (const b of g.bouts) if (b.round === 1) b.revealAtMs -= 1; })],
         ['an extra bye', variant(c => { const b = fought(c); b.bye = true; b.result = { winnerId: b.placed[0], loserId: null, log: null }; })],
@@ -734,7 +734,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       (await other.client.from('world_actor_reads').select('*')).data, (await other.client.from('activity_stages').select('*')).data,
       (await other.client.from('recent_results').select('*')).data, await readTimeline(other.client, activity, { ownerSummary: true }), await readTimeline(owner.client, activity, { ownerSummary: true })]);
     for (const seed of [pairing.seed, pairing.bracket, ...boutSeeds]) expect(visible).not.toContain(seed);
-    expect(visible).not.toMatch(/"seed"|bracketSeed|"rank"|"fighter"|"placed"|"routes"|tournament:301/);
+    expect(visible).not.toMatch(/"seed"|bracketSeed|"rank"|"fighter"|"placed"|"routes"|tournament:302/);
   });
 
   describe('phase 2b: results, reveals, settlement and the public view', () => {
@@ -1516,7 +1516,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
     // exactly a minute after the previous one (a rolling 60 s window would have cleared); run 2 alternately 300 ms and
     // 250 ms in, so the tick after the cutoff tick comes 59 950 ms after it (a rolling window would still count it). The
     // dispatch budget is per scheduled minute (Decision 5), so both publish within 120 s. T is the next real Wednesday or
-    // Saturday 17:20 UTC slot, so database time stays near real time.
+    // Saturday 18:40 UTC slot, so database time stays near real time.
     let tournamentSlot = nowSlot() + 2;
     while (!isTournamentSlot(slotAt(tournamentSlot * SLOT))) tournamentSlot += 1;
     const P = tournamentSlot - 1;
@@ -1622,7 +1622,7 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       expect(await sql`select count(*)::int as n from public.activities where slot_index=${tournamentSlot} and resolved_kind='tournament'
         and status='completed' and debited and stamina_debit=25`).toEqual([{ n: 50 }]);
       // Its public rows are all written. (The test-only clock is ahead of real time, so RLS, which checks real database
-      // time, still hides this future slot's results from a signed-in read; the 50-entrant read is covered at slot 301.)
+      // time, still hides this future slot's results from a signed-in read; the 50-entrant read is covered at slot 302.)
       expect(await sql`select (select count(*) from public.tournament_bout_results where tournament_id=${measured[0].tournamentId})::int as results,
         (select count(*) from public.tournament_placements where tournament_id=${measured[0].tournamentId})::int as placements`)
         .toEqual([{ results: 63, placements: 50 }]);

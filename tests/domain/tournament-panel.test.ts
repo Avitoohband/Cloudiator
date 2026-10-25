@@ -30,7 +30,7 @@ function bracket(key: TournamentKey, minute: number, overrides: Partial<BracketM
 }
 function registration(now: number, overrides: Partial<RegistrationModel> = {}): string {
   const model: RegistrationModel = { optIn: ownerFixture.tournamentOptIn, busy: false, message: null, displayNowMs: now, timeZone: 'UTC',
-    owner: { afternoon: ownerFixture.schedule.afternoon, stamina: ownerFixture.stamina.current }, ...overrides };
+    owner: { evening: ownerFixture.schedule.evening, stamina: ownerFixture.stamina.current }, ...overrides };
   return renderToStaticMarkup(createElement(RegistrationView, { model, onToggle: noop }));
 }
 
@@ -41,14 +41,18 @@ describe('tournament registration', () => {
     expect(/<input[^>]*type="checkbox"[^>]*>/.exec(html)![0]).not.toContain('checked');
     const words = text(html);
     expect(words).toContain('Automatically enter tournaments');
-    for (const rule of ['automatic entry switched on', 'Arena scheduled for the afternoon', 'at least 25 stamina at the cutoff',
-      'With automatic entry off, an Arena afternoon stays a normal Arena bout', 'A change made after a tournament’s cutoff applies from the next tournament']) {
+    for (const rule of ['automatic entry switched on', 'Arena scheduled for the evening', 'at least 25 stamina at the cutoff',
+      'With automatic entry off, an Arena evening stays a normal Arena bout', 'A change made after a tournament’s cutoff applies from the next tournament']) {
       expect(words).toContain(rule);
     }
-    expect(words).toContain('A change now applies to the next tournament, Sat 10 Oct, 17:20 UTC, if it is saved before that cutoff.');
-    // The owner's own checklist: off, an Expedition afternoon, stamina now.
+    expect(words).toContain('A change now applies to the next tournament, Sat 10 Oct, 18:40 UTC, if it is saved before that cutoff.');
+    // The owner's own checklist: off, a Rest evening (the fixture's), stamina now; an Arena evening reads plain "Arena".
     expect(words).toContain('Automatic entry Off');
-    expect(words).toContain('Afternoon schedule Expedition: Woodland Path (not Arena)');
+    expect(words).toContain('Evening schedule Rest (not Arena)');
+    expect(text(registration(worldFixture.serverNowMs, { owner: { evening: { kind: 'arena' }, stamina: 104 } }))).toContain('Evening schedule Arena Stamina now');
+    expect(text(registration(worldFixture.serverNowMs, { owner: { evening: { kind: 'expedition', expeditionId: 'woodland' }, stamina: 104 } })))
+      .toContain('Evening schedule Expedition: Woodland Path (not Arena)');
+    expect(words).not.toContain('Afternoon');
     expect(words).toContain('Stamina now 104 (25 needed at the cutoff)');
     expect(/<input[^>]*checked/.test(registration(worldFixture.serverNowMs, { optIn: true }))).toBe(true);
   });
@@ -56,8 +60,8 @@ describe('tournament registration', () => {
   it('says a toggle during a running tournament applies only from the next one', () => {
     const running = TOURNAMENTS.opening.startsAtMs + 5 * MIN;
     const words = text(registration(running));
-    expect(words).toContain('Entries for the tournament running now were fixed at its 17:20 UTC cutoff.');
-    expect(words).toContain('A change now applies from the next tournament, Sat 10 Oct, 17:20 UTC.');
+    expect(words).toContain('Entries for the tournament running now were fixed at its 18:40 UTC cutoff.');
+    expect(words).toContain('A change now applies from the next tournament, Sat 10 Oct, 18:40 UTC.');
   });
 
   it('shows a result message and disables the box while a change is being sent or without a gladiator', () => {
@@ -74,10 +78,10 @@ describe('tournament registration', () => {
 describe('tournament schedule', () => {
   it('counts down to the next tournament in local time with the UTC time beside it', () => {
     const words = text(renderToStaticMarkup(createElement(TournamentScheduleView, { now: worldFixture.serverNowMs, timeZone: 'Europe/Berlin' })));
-    expect(words).toContain('Next tournament Sat 10 Oct, 19:20 GMT+2 (Sat 10 Oct, 17:20 UTC) Starts in 16 h 40 min');
+    expect(words).toContain('Next tournament Sat 10 Oct, 20:40 GMT+2 (Sat 10 Oct, 18:40 UTC) Starts in 18 h 0 min');
     const running = text(renderToStaticMarkup(createElement(TournamentScheduleView, { now: TOURNAMENTS.opening.startsAtMs + 5 * MIN, timeZone: 'Europe/Berlin' })));
-    expect(running).toContain('A tournament is running now: it started Wed 7 Oct, 19:20 GMT+2 (Wed 7 Oct, 17:20 UTC) and settles at minute 80.');
-    expect(running).toContain('Next tournament Sat 10 Oct, 19:20 GMT+2');
+    expect(running).toContain('A tournament is running now: it started Wed 7 Oct, 20:40 GMT+2 (Wed 7 Oct, 18:40 UTC) and settles at minute 80.');
+    expect(running).toContain('Next tournament Sat 10 Oct, 20:40 GMT+2');
   });
 });
 
@@ -95,7 +99,7 @@ describe('tournament bracket', () => {
     const slots = TOURNAMENT_VIEWS.opening.bracket!.slots;
     for (let p = 0; p < 4; p += 1) expect(words).toContain(`Bout ${p + 1} ${named(slots[2 * p])} vs ${named(slots[2 * p + 1])}`);
     expect(words).not.toMatch(/To be revealed|Pairings are revealed/);
-    expect(words).toContain('You are entered. Your first bout is revealed at Wed 7 Oct, 17:40 UTC.');
+    expect(words).toContain('You are entered. Your first bout is revealed at Wed 7 Oct, 19:00 UTC.');
     // Rounds are tabs; the round in play is selected.
     expect(html).toContain('role="tablist"');
     expect(count(html, 'role="tab"')).toBe(3);
@@ -107,7 +111,7 @@ describe('tournament bracket', () => {
     const words = text(bracket('midway', 65));
     expect(words).toContain('Processing results');
     expect(count(words, 'Result preparing')).toBe(1);
-    expect(words).toContain('These results were due at Sat 3 Oct, 18:20 UTC but are not published yet. They appear here as soon as they are revealed.');
+    expect(words).toContain('These results were due at Sat 3 Oct, 19:40 UTC but are not published yet. They appear here as soon as they are revealed.');
     expect(words).toContain('You are not entered in this tournament.');
   });
 
@@ -120,8 +124,8 @@ describe('tournament bracket', () => {
     const own = (key: TournamentKey, minute: number, name: keyof typeof ARENA_GLADIATORS) =>
       viewerText(renderTournament(TOURNAMENT_VIEWS[key], TOURNAMENTS[key].startsAtMs + minute * MIN, { viewerId: ARENA_GLADIATORS[name].id }), true, 'UTC');
     // A shown win or a bye in every due round: the viewer advances.
-    expect(own('completed', 30, 'varro')).toBe('You advance. Your next bout is revealed at Sat 26 Sept, 18:00 UTC.');
-    expect(own('midway', 30, 'gallus')).toBe('You advance. Your next bout is revealed at Sat 3 Oct, 18:00 UTC.');
+    expect(own('completed', 30, 'varro')).toBe('You advance. Your next bout is revealed at Sat 26 Sept, 19:20 UTC.');
+    expect(own('midway', 30, 'gallus')).toBe('You advance. Your next bout is revealed at Sat 3 Oct, 19:20 UTC.');
     // The mid-way final is due at minute 60 but unpublished: both finalists wait for it, and nobody advances.
     expect(own('midway', 65, 'decimus')).toBe('Your Final result is not published yet. It appears here as soon as it is revealed.');
     expect(own('midway', 65, 'aurelia')).toBe('Your Final result is not published yet. It appears here as soon as it is revealed.');
@@ -130,7 +134,7 @@ describe('tournament bracket', () => {
     // A bye receiver knows from the start that its first bout comes in round 2.
     const bye = TOURNAMENT_VIEWS.midway.bracket!.slots.find((id, i, all) => id !== null && all[i ^ 1] === null)!;
     expect(viewerText(renderTournament(TOURNAMENT_VIEWS.midway, TOURNAMENTS.midway.startsAtMs + 5 * MIN, { viewerId: bye }), true, 'UTC'))
-      .toBe('You are entered with a bye in the Quarterfinals. Your first bout is revealed at Sat 3 Oct, 18:00 UTC.');
+      .toBe('You are entered with a bye in the Quarterfinals. Your first bout is revealed at Sat 3 Oct, 19:20 UTC.');
   });
 
   it('shows byes, revealed winners by winnerId and the bouts in progress', () => {
@@ -154,7 +158,7 @@ describe('tournament bracket', () => {
   it('shows the owner’s loss and spectating, and replays only completed bouts inline, never through /replay/', () => {
     const html = bracket('completed', 30, { round: 1 });
     const words = text(html);
-    expect(words).toContain('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sept, 18:40 UTC; this slot has no other activity for you.');
+    expect(words).toContain('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sept, 20:00 UTC; this slot has no other activity for you.');
     expect(count(html, '>Watch replay<')).toBe(4);
     expect(html).not.toMatch(/href="[^"]*replay/);
     expect(words).toMatch(/Eliminated in the Quarterfinals · spectating/);

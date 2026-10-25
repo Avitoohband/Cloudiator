@@ -61,9 +61,13 @@ describe('the engine-free tournament slot rule (Tasks 19 M5, 20)', () => {
   it('is the very rule the backend uses: tournament.ts re-exports it', async () => {
     const { isTournamentSlot } = await import('@domain/tournament-slot');
     expect(reexported).toBe(isTournamentSlot);
-    const wednesday = Date.UTC(2026, 9, 14, 17, 20);
+    const wednesday = Date.UTC(2026, 9, 14, 18, 40);
     expect(isTournamentSlot(slotAt(wednesday))).toBe(true);
     expect(isTournamentSlot(slotAt(wednesday - 1))).toBe(false);
-    expect(isTournamentSlot(slotAt(Date.UTC(2026, 9, 17, 17, 20)), RULES_V1)).toBe(true);
+    expect(isTournamentSlot(slotAt(Date.UTC(2026, 9, 17, 18, 40)), RULES_V1)).toBe(true);
+    // The old afternoon slot, an hour and twenty minutes earlier, is an ordinary slot now.
+    expect(isTournamentSlot(slotAt(Date.UTC(2026, 9, 17, 17, 20)), RULES_V1)).toBe(false);
+    expect(isTournamentSlot(slotAt(Date.UTC(2026, 9, 14, 17, 20)))).toBe(false);
+    expect(slotAt(Date.UTC(2026, 9, 17, 18, 40)).phase).toBe('evening');
   });
 });

@@ -29,11 +29,11 @@ vi.mock('@domain/arena.ts', async importOriginal => {
 
 const MINUTE = 60_000;
 const SLOT_MS = RULES_V1.clock.slotMs;
-/** Wednesday 2026-10-14 17:20 UTC: slot 373333, an afternoon. */
-const WEDNESDAY = Date.UTC(2026, 9, 14, 17, 20);
+/** Wednesday 2026-10-14 18:40 UTC: slot 373334, an evening. */
+const WEDNESDAY = Date.UTC(2026, 9, 14, 18, 40);
 const SLOT = WEDNESDAY / SLOT_MS;
-/** Saturday 2026-10-17 17:20 UTC, the next tournament slot. */
-const SATURDAY = Date.UTC(2026, 9, 17, 17, 20);
+/** Saturday 2026-10-17 18:40 UTC, the next tournament slot. */
+const SATURDAY = Date.UTC(2026, 9, 17, 18, 40);
 const LEAGUES: LeagueId[] = ['bronze', 'silver', 'gold', 'champion'];
 
 const item = (id: string): ItemInstance => itemFixture(CATALOG_V1.items[id]);
@@ -108,10 +108,10 @@ describe('tournament slot detection', () => {
   const originalTz = process.env.TZ;
   afterEach(() => { process.env.TZ = originalTz; });
 
-  it('detects Wednesday and Saturday 17:20 UTC afternoon slots', () => {
-    expect(SLOT).toBe(373_333);
+  it('detects Wednesday and Saturday 18:40 UTC evening slots', () => {
+    expect(SLOT).toBe(373_334);
     expect(isTournamentSlot(slotAt(WEDNESDAY))).toBe(true);
-    expect(isTournamentSlot(slotAt(Date.UTC(2026, 9, 17, 17, 20)))).toBe(true);
+    expect(isTournamentSlot(slotAt(Date.UTC(2026, 9, 17, 18, 40)))).toBe(true);
     // The slot lasts 80 minutes: its final millisecond is still the same tournament slot.
     expect(isTournamentSlot(slotAt(WEDNESDAY + SLOT_MS - 1))).toBe(true);
   });
@@ -119,24 +119,30 @@ describe('tournament slot detection', () => {
     expect(isTournamentSlot(slotAt(WEDNESDAY - 1))).toBe(false);
     expect(isTournamentSlot(slotAt(WEDNESDAY + SLOT_MS))).toBe(false);
   });
-  it('finds exactly two tournament slots in a week, both afternoons', () => {
+  it('no longer treats the 17:20 UTC afternoon slot, the one before, as a tournament', () => {
+    expect(isTournamentSlot(slotAt(WEDNESDAY - SLOT_MS))).toBe(false);
+    expect(isTournamentSlot(slotAt(SATURDAY - SLOT_MS))).toBe(false);
+    expect(slotAt(WEDNESDAY - SLOT_MS).phase).toBe('afternoon');
+  });
+  it('finds exactly two tournament slots in a week, both evenings', () => {
     const found: number[] = [];
     // Monday 2026-10-12 00:00 UTC through the following Sunday: 7 × 18 slots.
     const monday = Date.UTC(2026, 9, 12) / SLOT_MS;
     for (let index = monday; index < monday + 7 * 18; index += 1) {
       const slot = slotAt(index * SLOT_MS);
-      if (isTournamentSlot(slot)) { found.push(slot.startMs); expect(slot.phase).toBe('afternoon'); }
+      if (isTournamentSlot(slot)) { found.push(slot.startMs); expect(slot.phase).toBe('evening'); }
     }
-    expect(found).toEqual([Date.UTC(2026, 9, 14, 17, 20), Date.UTC(2026, 9, 17, 17, 20)]);
+    expect(found).toEqual([Date.UTC(2026, 9, 14, 18, 40), Date.UTC(2026, 9, 17, 18, 40)]);
   });
   it.each([
     // EU summer time ends Sunday 2026-10-25 and starts Sunday 2027-03-28; US time ends Sunday 2026-11-01.
-    [Date.UTC(2026, 9, 24, 17, 20), true], [Date.UTC(2026, 9, 25, 17, 20), false], [Date.UTC(2026, 9, 28, 17, 20), true],
-    [Date.UTC(2026, 9, 31, 17, 20), true], [Date.UTC(2026, 10, 4, 17, 20), true],
-    [Date.UTC(2027, 2, 27, 17, 20), true], [Date.UTC(2027, 2, 28, 17, 20), false], [Date.UTC(2027, 2, 31, 17, 20), true],
-    // 17:20 local on those dates is a different UTC slot: London summer time, Jerusalem winter time, New York summer
-    // time (21:20 UTC is an afternoon slot start, but not 17:20).
-    [Date.UTC(2026, 9, 24, 16, 20), false], [Date.UTC(2026, 9, 28, 15, 20), false], [Date.UTC(2027, 2, 31, 21, 20), false],
+    [Date.UTC(2026, 9, 24, 18, 40), true], [Date.UTC(2026, 9, 25, 18, 40), false], [Date.UTC(2026, 9, 28, 18, 40), true],
+    [Date.UTC(2026, 9, 31, 18, 40), true], [Date.UTC(2026, 10, 4, 18, 40), true],
+    [Date.UTC(2027, 2, 27, 18, 40), true], [Date.UTC(2027, 2, 28, 18, 40), false], [Date.UTC(2027, 2, 31, 18, 40), true],
+    // 18:40 local on those dates is a different UTC time: London summer time (17:40 UTC, inside the afternoon slot),
+    // Jerusalem winter time (16:40 UTC, inside the 16:00 slot), New York summer time (22:40 UTC is an evening slot
+    // start, but not 18:40).
+    [Date.UTC(2026, 9, 24, 17, 40), false], [Date.UTC(2026, 9, 28, 16, 40), false], [Date.UTC(2027, 2, 31, 22, 40), false],
   ])('uses UTC slot math only across daylight-saving changes (%i ms → %s)', (ms, expected) => {
     for (const zone of ['UTC', 'Europe/London', 'Asia/Jerusalem', 'America/New_York', 'Pacific/Auckland']) {
       process.env.TZ = zone;
@@ -144,10 +150,10 @@ describe('tournament slot detection', () => {
     }
   });
   it.each([
-    { index: SLOT, phase: 'afternoon', startMs: WEDNESDAY + 1, endMs: WEDNESDAY + SLOT_MS + 1 },
+    { index: SLOT, phase: 'evening', startMs: WEDNESDAY + 1, endMs: WEDNESDAY + SLOT_MS + 1 },
     { index: SLOT, phase: 'morning', startMs: WEDNESDAY, endMs: WEDNESDAY + SLOT_MS },
-    { index: SLOT + 1, phase: 'afternoon', startMs: WEDNESDAY, endMs: WEDNESDAY + SLOT_MS },
-    { index: SLOT, phase: 'afternoon', startMs: WEDNESDAY, endMs: WEDNESDAY + 80 * MINUTE - 1 },
+    { index: SLOT + 1, phase: 'evening', startMs: WEDNESDAY, endMs: WEDNESDAY + SLOT_MS },
+    { index: SLOT, phase: 'evening', startMs: WEDNESDAY, endMs: WEDNESDAY + 80 * MINUTE - 1 },
     { index: -1, phase: 'evening', startMs: -SLOT_MS, endMs: 0 },
     null,
   ])('rejects a slot window that is not a canonical UTC slot: %j', (slot) => {

@@ -816,12 +816,12 @@ describe('closing each season at its slot boundary (phase 2)', () => {
   }, 60_000);
 
   it('closes a season whose final slot held a tournament only after every entrant settled', async () => {
-    const T = 301; // Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot
+    const T = 302; // Saturday 1970-01-17 at 18:40 UTC, an evening and a v1 tournament slot
     expect(isTournamentSlot(slotAt(T * SLOT))).toBe(true);
     const definition = await definitionOf('private.season_index(bigint)');
-    // Test-only stand-in, restored byte for byte below: season 0 ends with slot 301, so boundary 302 starts season 1.
+    // Test-only stand-in, restored byte for byte below: season 0 ends with slot 302, so boundary 303 starts season 1.
     await sql.unsafe(`create or replace function private.season_index(slot bigint) returns bigint language sql stable security invoker
-      set search_path='' as $stand$ select (slot-e.epoch_slot+202)/504 from private.season_epoch e where e.singleton and slot>=e.epoch_slot $stand$`);
+      set search_path='' as $stand$ select (slot-e.epoch_slot+201)/504 from private.season_epoch e where e.singleton and slot>=e.epoch_slot $stand$`);
     try {
       expect(await sql`select private.season_index(${T})::int as last, private.season_index(${T + 1})::int as next`).toEqual([{ last: 0, next: 1 }]);
       await resetBoundaries(T - 1);
@@ -831,7 +831,7 @@ describe('closing each season at its slot boundary (phase 2)', () => {
       const tournaments = (await sql`select id, season_index::int as season from private.tournaments`).map(r => ({ ...r }));
       expect(tournaments).toEqual([{ id: expect.any(String), season: 0 }]);
       await simulateAndReveal();
-      // Boundary 302 holds at phase 1 until every entrant's minute-80 settlement: season 0 stays open and unarchived.
+      // Boundary 303 holds at phase 1 until every entrant's minute-80 settlement: season 0 stays open and unarchived.
       expect(await advance(T + 1, token)).toMatchObject({ phase: 1, status: 'waiting', wait: 'settlement' });
       const [first] = await claim('settlement', 1);
       expect(await settle(first)).toMatchObject({ ok: true, newGrants: 1 });
@@ -848,7 +848,7 @@ describe('closing each season at its slot boundary (phase 2)', () => {
         expect(await ratingsOf(entrants.find(f => f.gid === o.gladiatorId)!))
           .toEqual([{ league: 'bronze', season: 0, rating: o.ratingAfter, wins: o.wins, losses: o.losses }]);
       }
-      // Then boundary 302 closes season 0 after the last settlement, archiving the tournament's results.
+      // Then boundary 303 closes season 0 after the last settlement, archiving the tournament's results.
       expect(await advance(T + 1, token)).toMatchObject({ phase: 4, status: 'waiting', wait: 'preparation' });
       const [seasonZero] = await seasonRows();
       const [{ settled }] = await sql`select max(settled_at_ms)::float8 as settled from public.activities where slot_index=${T}`;

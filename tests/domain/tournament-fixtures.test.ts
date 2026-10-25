@@ -81,8 +81,27 @@ const placementSeed = (key: TournamentKey) => `fixture-${key}-placement`;
 const boutSeed = (key: TournamentKey, boutId: string, n: number) => `fixture-${key}-${boutId}-${n}`;
 
 /**
- * Bout shapes the fixtures need: in `completed` the owner loses her first bout (and spectates); the `pair` final is a
- * simultaneous defeat at 0 HP that the logged seeded tie-break gives to the owner. Every other bout takes seed n = 0.
+ * Who wins each bout of each bracket (`round:position`), the fixture stories the panel, camp and browser tests name: Varro
+ * takes `completed` and `late`, Aster `opening`, Decimus `midway`, Lucilla `aged`. The bout seed carries its slot id, so a
+ * moved tournament slot re-rolls every bout: each seed below is the first n that keeps the winner (the story did not change
+ * when the tournaments moved to the 18:40 UTC evening slot, only the seeds).
+ */
+const WINNERS: Record<BracketKey, Record<string, ArenaGladiatorKey>> = {
+  opening: { '1:0': 'corvina', '1:1': 'aster', '1:2': 'titus', '1:3': 'varro', '2:0': 'aster', '2:1': 'titus', '3:0': 'aster' },
+  midway: { '1:1': 'decimus', '2:0': 'decimus', '2:1': 'aurelia', '3:0': 'decimus' },
+  late: { '1:0': 'varro', '1:1': 'cassia', '1:2': 'bellator', '1:3': 'corvina', '2:0': 'varro', '2:1': 'corvina', '3:0': 'varro' },
+  completed: { '1:0': 'cassia', '1:1': 'severus', '1:2': 'varro', '1:3': 'decimus', '2:0': 'severus', '2:1': 'varro', '3:0': 'varro' },
+  pair: { '1:0': 'aster' },
+  aged: { '1:0': 'marcellus', '1:1': 'lucilla', '2:0': 'lucilla' },
+};
+const winnerOf = (key: BracketKey, graph: TournamentGraph, boutId: string) => {
+  const bout = graph.bouts.find(b => b.id === boutId)!;
+  return ARENA_GLADIATORS[WINNERS[key][`${bout.round}:${bout.position}`]].id;
+};
+
+/**
+ * Bout shapes the fixtures need besides the winner: in `completed` the owner loses her first bout (and spectates), by a
+ * defeat; the `pair` final is a simultaneous defeat at 0 HP that the logged seeded tie-break gives to the owner.
  */
 const WANTED: Partial<Record<BracketKey, { owns(graph: TournamentGraph, boutId: string): boolean; wanted(log: BattleLog): boolean }>> = {
   completed: {
@@ -104,62 +123,67 @@ function play(key: BracketKey, seedFor: (graph: TournamentGraph, boutId: string)
   }
   return graph;
 }
-/** The first `boutSeed` n (0, 1, ...) giving each owned bout its wanted shape; n = 0 for the rest. */
+/** The first `boutSeed` n (0, 1, ...) giving each bout its story winner and, for an owned bout, its wanted shape. */
 function searchSeeds(key: BracketKey): Record<string, string> {
   const want = WANTED[key];
   const found: Record<string, string> = {};
   play(key, (graph, boutId) => {
-    if (!want?.owns(graph, boutId)) return (found[boutId] = boutSeed(key, boutId, 0));
+    const winner = winnerOf(key, graph, boutId), owned = want?.owns(graph, boutId) ?? false;
     const job = readyBouts(graph).find(j => j.boutId === boutId)!;
-    for (let n = 0; n < 3000; n += 1) if (want.wanted(runBout(job, boutSeed(key, boutId, n), NAMES))) return (found[boutId] = boutSeed(key, boutId, n));
+    for (let n = 0; n < 3000; n += 1) {
+      const log = runBout(job, boutSeed(key, boutId, n), NAMES);
+      if (log.winnerId === winner && (!owned || want!.wanted(log))) return (found[boutId] = boutSeed(key, boutId, n));
+    }
     throw new Error(`no ${key} seed for ${boutId}`);
   });
   return found;
 }
 
 // Recorded per-bout seeds, found by the deterministic searches below. They are private test inputs: the views (and the
-// browser bundle) never contain them.
+// browser bundle) never contain them. The tournaments moved to the 18:40 UTC evening slot (slot id + 1, which re-rolls every bout
+// seed): opening 1:2 and 2:1, midway 2:1, completed 1:2 and 2:1 and aged 1:1 needed a later n to keep their story winner, and
+// the owned bouts completed 1:3 (n = 1) and pair 1:0 (n = 25, was 16) are searched for their shape. Every other bout keeps n = 0.
 const SEEDS: Record<BracketKey, Record<string, string>> = {
   opening: {
-    'tournament:373207:bronze:1:0': 'fixture-opening-tournament:373207:bronze:1:0-0',
-    'tournament:373207:bronze:1:1': 'fixture-opening-tournament:373207:bronze:1:1-0',
-    'tournament:373207:bronze:1:2': 'fixture-opening-tournament:373207:bronze:1:2-0',
-    'tournament:373207:bronze:1:3': 'fixture-opening-tournament:373207:bronze:1:3-0',
-    'tournament:373207:bronze:2:0': 'fixture-opening-tournament:373207:bronze:2:0-0',
-    'tournament:373207:bronze:2:1': 'fixture-opening-tournament:373207:bronze:2:1-0',
-    'tournament:373207:bronze:3:0': 'fixture-opening-tournament:373207:bronze:3:0-0',
+    'tournament:373208:bronze:1:0': 'fixture-opening-tournament:373208:bronze:1:0-0',
+    'tournament:373208:bronze:1:1': 'fixture-opening-tournament:373208:bronze:1:1-0',
+    'tournament:373208:bronze:1:2': 'fixture-opening-tournament:373208:bronze:1:2-2',
+    'tournament:373208:bronze:1:3': 'fixture-opening-tournament:373208:bronze:1:3-0',
+    'tournament:373208:bronze:2:0': 'fixture-opening-tournament:373208:bronze:2:0-0',
+    'tournament:373208:bronze:2:1': 'fixture-opening-tournament:373208:bronze:2:1-2',
+    'tournament:373208:bronze:3:0': 'fixture-opening-tournament:373208:bronze:3:0-0',
   },
   midway: {
-    'tournament:373135:bronze:1:1': 'fixture-midway-tournament:373135:bronze:1:1-0',
-    'tournament:373135:bronze:2:0': 'fixture-midway-tournament:373135:bronze:2:0-0',
-    'tournament:373135:bronze:2:1': 'fixture-midway-tournament:373135:bronze:2:1-0',
-    'tournament:373135:bronze:3:0': 'fixture-midway-tournament:373135:bronze:3:0-0',
+    'tournament:373136:bronze:1:1': 'fixture-midway-tournament:373136:bronze:1:1-0',
+    'tournament:373136:bronze:2:0': 'fixture-midway-tournament:373136:bronze:2:0-0',
+    'tournament:373136:bronze:2:1': 'fixture-midway-tournament:373136:bronze:2:1-1',
+    'tournament:373136:bronze:3:0': 'fixture-midway-tournament:373136:bronze:3:0-0',
   },
   late: {
-    'tournament:373081:bronze:1:0': 'fixture-late-tournament:373081:bronze:1:0-0',
-    'tournament:373081:bronze:1:1': 'fixture-late-tournament:373081:bronze:1:1-0',
-    'tournament:373081:bronze:1:2': 'fixture-late-tournament:373081:bronze:1:2-0',
-    'tournament:373081:bronze:1:3': 'fixture-late-tournament:373081:bronze:1:3-0',
-    'tournament:373081:bronze:2:0': 'fixture-late-tournament:373081:bronze:2:0-0',
-    'tournament:373081:bronze:2:1': 'fixture-late-tournament:373081:bronze:2:1-0',
-    'tournament:373081:bronze:3:0': 'fixture-late-tournament:373081:bronze:3:0-0',
+    'tournament:373082:bronze:1:0': 'fixture-late-tournament:373082:bronze:1:0-0',
+    'tournament:373082:bronze:1:1': 'fixture-late-tournament:373082:bronze:1:1-0',
+    'tournament:373082:bronze:1:2': 'fixture-late-tournament:373082:bronze:1:2-0',
+    'tournament:373082:bronze:1:3': 'fixture-late-tournament:373082:bronze:1:3-0',
+    'tournament:373082:bronze:2:0': 'fixture-late-tournament:373082:bronze:2:0-0',
+    'tournament:373082:bronze:2:1': 'fixture-late-tournament:373082:bronze:2:1-0',
+    'tournament:373082:bronze:3:0': 'fixture-late-tournament:373082:bronze:3:0-0',
   },
   completed: {
-    'tournament:373009:bronze:1:0': 'fixture-completed-tournament:373009:bronze:1:0-0',
-    'tournament:373009:bronze:1:1': 'fixture-completed-tournament:373009:bronze:1:1-0',
-    'tournament:373009:bronze:1:2': 'fixture-completed-tournament:373009:bronze:1:2-0',
-    'tournament:373009:bronze:1:3': 'fixture-completed-tournament:373009:bronze:1:3-1',
-    'tournament:373009:bronze:2:0': 'fixture-completed-tournament:373009:bronze:2:0-0',
-    'tournament:373009:bronze:2:1': 'fixture-completed-tournament:373009:bronze:2:1-0',
-    'tournament:373009:bronze:3:0': 'fixture-completed-tournament:373009:bronze:3:0-0',
+    'tournament:373010:bronze:1:0': 'fixture-completed-tournament:373010:bronze:1:0-0',
+    'tournament:373010:bronze:1:1': 'fixture-completed-tournament:373010:bronze:1:1-0',
+    'tournament:373010:bronze:1:2': 'fixture-completed-tournament:373010:bronze:1:2-1',
+    'tournament:373010:bronze:1:3': 'fixture-completed-tournament:373010:bronze:1:3-1',
+    'tournament:373010:bronze:2:0': 'fixture-completed-tournament:373010:bronze:2:0-0',
+    'tournament:373010:bronze:2:1': 'fixture-completed-tournament:373010:bronze:2:1-1',
+    'tournament:373010:bronze:3:0': 'fixture-completed-tournament:373010:bronze:3:0-0',
   },
   pair: {
-    'tournament:372955:bronze:1:0': 'fixture-pair-tournament:372955:bronze:1:0-16',
+    'tournament:372956:bronze:1:0': 'fixture-pair-tournament:372956:bronze:1:0-25',
   },
   aged: {
-    'tournament:372829:silver:1:0': 'fixture-aged-tournament:372829:silver:1:0-0',
-    'tournament:372829:silver:1:1': 'fixture-aged-tournament:372829:silver:1:1-0',
-    'tournament:372829:silver:2:0': 'fixture-aged-tournament:372829:silver:2:0-0',
+    'tournament:372830:silver:1:0': 'fixture-aged-tournament:372830:silver:1:0-0',
+    'tournament:372830:silver:1:1': 'fixture-aged-tournament:372830:silver:1:1-1',
+    'tournament:372830:silver:2:0': 'fixture-aged-tournament:372830:silver:2:0-0',
   },
 };
 
@@ -182,18 +206,18 @@ function keysOutsideLogs(value: unknown, into = new Set<string>()): Set<string> 
 }
 
 describe('tournament fixture brackets', () => {
-  it('starts every case on a Wednesday or Saturday 17:20 UTC tournament slot', () => {
+  it('starts every case on a Wednesday or Saturday 18:40 UTC evening tournament slot', () => {
     for (const key of TOURNAMENT_KEYS) {
       const start = TOURNAMENTS[key].startsAtMs;
       expect(isTournamentSlot(slotAt(start)), key).toBe(true);
-      expect(slotAt(start).phase, key).toBe('afternoon');
+      expect(slotAt(start).phase, key).toBe('evening');
     }
     // The fixture world is Saturday 2026-10-10 00:40 UTC: the upcoming case is that day's tournament, the rest are past.
-    expect(TOURNAMENTS.upcoming.startsAtMs - worldFixture.serverNowMs).toBe((16 * 60 + 40) * 60_000);
+    expect(TOURNAMENTS.upcoming.startsAtMs - worldFixture.serverNowMs).toBe((18 * 60 + 0) * 60_000);
     for (const key of TOURNAMENT_KEYS.filter(k => k !== 'upcoming')) expect(TOURNAMENTS[key].startsAtMs + 4_800_000, key).toBeLessThan(worldFixture.serverNowMs);
   });
 
-  it('records the first seeds that give each wanted bout shape', () => {
+  it('records the first seeds that give each bout its story winner and each wanted bout shape', () => {
     expect(Object.fromEntries(BRACKET_KEYS.map(key => [key, searchSeeds(key)]))).toEqual(SEEDS);
   });
 
@@ -203,6 +227,11 @@ describe('tournament fixture brackets', () => {
       expect(graph.bouts.every(b => b.result !== null), key).toBe(true);
       expect(Object.keys(SEEDS[key]).sort(), key).toEqual(graph.bouts.filter(b => !b.bye).map(b => b.id).sort());
       expect(graph.id).toBe(tournamentId(key));
+    }
+    // Every fought bout ends as its story says (WINNERS), whichever slot the tournament is on.
+    for (const key of BRACKET_KEYS) {
+      expect(Object.fromEntries(graphs[key].bouts.filter(b => !b.bye).map(b => [`${b.round}:${b.position}`, b.result!.winnerId])), key)
+        .toEqual(Object.fromEntries(Object.entries(WINNERS[key]).map(([bout, g]) => [bout, ARENA_GLADIATORS[g].id])));
     }
     // Shapes: 8 entrants fill an 8-slot bracket; 5 get three byes; 2 meet in a one-round final.
     expect([graphs.opening.size, graphs.opening.rounds, graphs.opening.bouts.filter(b => b.bye).length]).toEqual([8, 3, 0]);

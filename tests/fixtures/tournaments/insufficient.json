@@ -1,9 +1,9 @@
 {
-  "id": "tournament:372883:gold",
+  "id": "tournament:372884:gold",
   "league": "gold",
-  "slotIndex": 372883,
-  "startsAtMs": 1789838400000,
-  "endsAtMs": 1789843200000,
+  "slotIndex": 372884,
+  "startsAtMs": 1789843200000,
+  "endsAtMs": 1789848000000,
   "status": "insufficient-entrants",
   "bracket": null,
   "entrants": [

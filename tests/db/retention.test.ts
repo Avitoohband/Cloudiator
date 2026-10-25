@@ -11,8 +11,8 @@ import type { JobLease, PreparationInput } from '../../supabase/functions/_share
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 
 // Task 22.1: retention in the database (plan 2026-10-18-task-22-retention-operations, Decisions 2-5 and the retention design).
-// One real history is built once: slots 300-302 (1970) through real boundaries, the canonical v1 executors and fenced jobs,
-// with an expedition, a trainee, regular Arena and, on the tournament slot 301, a three-entrant bracket. Every activity is
+// One real history is built once: slots 301-303 (1970) through real boundaries, the canonical v1 executors and fenced jobs,
+// with an expedition, a trainee, regular Arena and, on the tournament slot 302, a three-entrant bracket. Every activity is
 // settled at its own minute 80 under a session clock, so its replay is 'available' for seven days, as on a live server.
 // Each case then ages that history inside a rollback-only transaction: the operator moves the checkpoint (the coordinator's
 // published slot and every character's processed slot) and calls private.cleanup_history at a database time. Times in 1970
@@ -23,10 +23,10 @@ const MINUTE = 60_000;
 const DAY = 86_400_000;
 const REPLAY_MS = RULES_V1.retention.replayMs;
 const SUMMARY_MS = RULES_V1.retention.summaryMs;
-const FIRST = 300;
-/** Slot 301 starts on Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot. */
-const TOURNAMENT = 301;
-const LAST = 302;
+const FIRST = 301;
+/** Slot 302 starts on Saturday 1970-01-17 at 18:40 UTC, an evening and a v1 tournament slot. */
+const TOURNAMENT = 302;
+const LAST = 303;
 /** Database times seven and ninety days after the last history slot ended. */
 const SEVEN_DAYS_LATER = (LAST + 1) * SLOT + REPLAY_MS;
 const NINETY_DAYS_LATER = (LAST + 1) * SLOT + SUMMARY_MS;
@@ -350,8 +350,8 @@ describe('Task 22.1: retention in the database', () => {
     expect(first).toHaveLength(6);
     expect(available).toHaveLength(18);
     const [{ revision }] = await tx`select revision::int from public.world_revision_state`;
-    // One millisecond early nothing flips. The checkpoint is still 302, so the seven-day pass only moves its watermark across
-    // the empty slots up to 302 - 19 and deletes nothing.
+    // One millisecond early nothing flips. The checkpoint is still 303, so the seven-day pass only moves its watermark across
+    // the empty slots up to 303 - 19 and deletes nothing.
     const early = await cleanup(tx, (FIRST + 1) * SLOT + REPLAY_MS - 1);
     expect(early.replay.flipped).toBe(0);
     expect(early.detail).toMatchObject({ fromSlot: 0, throughSlot: LAST - 19, more: false, blockedSlot: null });
@@ -650,13 +650,14 @@ describe('Task 22.1: retention in the database', () => {
       expect((await cleanup(tx, at90)).summary).toMatchObject({ fromSlot: 0, throughSlot: LAST, more: true });
       expect((await cleanup(tx, at90)).summary).toMatchObject({ fromSlot: LAST + 1, throughSlot: LAST + 2, more: false });
     });
-    // 300 replay flips: 300 fabricated available replays of one character come first by slot, then the history's 18.
+    // 300 replay flips (one call's cap): 300 fabricated available replays of one character, in slots 0-299, come first by slot,
+    // then the history's 18. (The count was `FIRST` while the history began at slot 300; it is the cap, whatever FIRST is.)
     await rollback(async tx => {
       await tx`insert into public.activities(gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,resolved_kind,status,published_at_ms,summary,settled_at_ms)
         select ${world.trainee.gid},s,s*${SLOT}::bigint,(s+1)*${SLOT}::bigint,'{"kind":"arena"}','arena','completed',s*${SLOT}::bigint,
           jsonb_build_object('resolvedKind','arena','result','victory','success',true,'replayExpiry',
             jsonb_build_object('state','available','expiresAtMs',(s+1)*${SLOT}::bigint+${REPLAY_MS}::bigint)),(s+1)*${SLOT}::bigint
-        from generate_series(0,${FIRST - 1}) s`;
+        from generate_series(0,299) s`;
       const at = (LAST + 8) * SLOT + REPLAY_MS;
       expect((await cleanup(tx, at)).replay.flipped).toBe(300);
       expect((await cleanup(tx, at)).replay.flipped).toBe(18);

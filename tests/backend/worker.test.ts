@@ -215,8 +215,8 @@ describe('regular Arena simulation executor', () => {
   });
 });
 
-/** Task 19 fixtures: slot 301 starts Saturday 1970-01-17 at 17:20 UTC, a tournament slot under v1. */
-const TOURNAMENT_SLOT = 301;
+/** Task 19 fixtures: slot 302 starts Saturday 1970-01-17 at 18:40 UTC, an evening tournament slot under v1. */
+const TOURNAMENT_SLOT = 302;
 const tournamentFighter = (strength: number) => prepareActivityV1(preparation({ earnedPoints: 40,
   build: { ...preparation().build, allocations: { strength, agility: 2, vitality: 2, endurance: 0, precision: 2 } } })).arenaFighter;
 const tournamentEntrant = (id: string, strength: number, slotIndex = TOURNAMENT_SLOT) => ({ gladiatorId: id, activityId: `activity-${id}`,
@@ -347,7 +347,7 @@ describe('tournament bout executor (Task 19)', () => {
       ['a bye', boutLease(id(1, 0)), read()],
       ['an already resolved bout', boutLease(ready.boutId), read(recorded)],
       ['an unknown bout', boutLease(`${graph.id}:9:0`), read()],
-      ['another tournament', boutLease(ready.boutId), read({ ...graph, id: 'tournament:301:silver' } as TournamentGraph)],
+      ['another tournament', boutLease(ready.boutId), read({ ...graph, id: 'tournament:302:silver' } as TournamentGraph)],
       ['a refused read', boutLease(ready.boutId), { ok: false, code: 'conflict' }],
       ['a stub stored log', boutLease(id(2, 0)), read(stub as unknown as TournamentGraph)],
       ['a missing name', boutLease(ready.boutId), read(graph, { names: { [ready.sides[0].gladiatorId]: 'Only one' } })],

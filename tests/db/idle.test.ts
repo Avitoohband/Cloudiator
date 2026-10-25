@@ -25,8 +25,8 @@ const SLOT = 4_800_000;
 const IDLE = 1_209_600_000;
 /** A historical slot (1970-01-17 06:40 UTC, a morning). */
 const S = 300;
-/** Slot 301 starts on Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot (tests/db/tournaments.test.ts). */
-const T = 301;
+/** Slot 302 starts on Saturday 1970-01-17 at 18:40 UTC, an evening and a v1 tournament slot (tests/db/tournaments.test.ts). */
+const T = 302;
 type Outcome = { ok: boolean; code?: string; [key: string]: unknown };
 
 const commands = createDatabase(admin);

@@ -2,33 +2,33 @@
 // directly). The public views are engine-generated JSON in tests/fixtures/tournaments/ (see
 // tests/domain/tournament-fixtures.test.ts, which builds each bracket with the real Task 19 domain and projects it
 // to a public TournamentView through tests/fixtures/tournament-build.ts). Every case is its own tournament slot
-// (Wednesday or Saturday, 17:20 UTC), projected at the server time `asOfMinute` minutes after its start.
+// (Wednesday or Saturday, 18:40 UTC, the evening slot), projected at the server time `asOfMinute` minutes after its start.
 import type { ClassId, LeagueId } from '../../supabase/functions/_shared/contracts/commands.ts';
 import type { EquipmentSilhouette } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { ARENA_GLADIATORS, fixtureUuid, type ArenaGladiatorKey } from './arena-ids.ts';
 
 export const TOURNAMENT_MIN = 60_000;
 export const TOURNAMENT_SLOT_MS = 4_800_000;
-/** Spec §8.2: Wednesday or Saturday at 17:20 UTC (epoch ms). */
-const at1720 = (year: number, month: number, day: number) => Date.UTC(year, month - 1, day, 17, 20);
+/** Launch feedback (2026-10-25): Wednesday or Saturday at 18:40 UTC, the evening slot (epoch ms). */
+const at1840 = (year: number, month: number, day: number) => Date.UTC(year, month - 1, day, 18, 40);
 
 export type TournamentKey = keyof typeof TOURNAMENTS;
 /**
  * The cases (dispatch decision 3; `aged` is Task 22.5's). `entrants` are fixture gladiators (Aster is the fixture
  * owner); the projection is the view a server would return `asOfMinute` minutes after the start. The fixture world's
- * time is Saturday 2026-10-10 00:40 UTC, so `upcoming` (that day's 17:20 UTC tournament) is still scheduled and the
+ * time is Saturday 2026-10-10 00:40 UTC, so `upcoming` (that day's 18:40 UTC tournament) is still scheduled and the
  * others are past. `aged` is projected ten days after its start, after the cleanup that compacts its bout logs.
  */
 export const TOURNAMENTS = {
-  upcoming: { startsAtMs: at1720(2026, 10, 10), league: 'bronze', entrants: [], asOfMinute: -1000, label: 'Next tournament: scheduled, entries not yet fixed' },
-  opening: { startsAtMs: at1720(2026, 10, 7), league: 'bronze', entrants: ['aster', 'varro', 'cassia', 'severus', 'bellator', 'corvina', 'nerva', 'titus'], asOfMinute: 5, label: 'Bronze, 7 Oct: started, before round 1' },
-  midway: { startsAtMs: at1720(2026, 10, 3), league: 'bronze', entrants: ['faustina', 'gallus', 'aurelia', 'decimus', 'cato'], asOfMinute: 45, label: 'Bronze, 3 Oct: five entrants with byes, mid-way' },
-  late: { startsAtMs: at1720(2026, 9, 30), league: 'bronze', entrants: ['varro', 'cassia', 'bellator', 'corvina', 'faustina', 'gallus', 'nerva', 'titus'], asOfMinute: 75, label: 'Bronze, 30 Sep: final revealed, placements pending' },
-  completed: { startsAtMs: at1720(2026, 9, 26), league: 'bronze', entrants: ['aster', 'varro', 'cassia', 'severus', 'bellator', 'corvina', 'aurelia', 'decimus'], asOfMinute: 85, label: 'Bronze, 26 Sep: completed; you lost in the first round' },
-  pair: { startsAtMs: at1720(2026, 9, 23), league: 'bronze', entrants: ['aster', 'severus'], asOfMinute: 85, label: 'Bronze, 23 Sep: two entrants, a 0 HP tie-break final' },
-  insufficient: { startsAtMs: at1720(2026, 9, 19), league: 'gold', entrants: ['valeria'], asOfMinute: 85, label: 'Gold, 19 Sep: one qualifier, regular Arena instead' },
+  upcoming: { startsAtMs: at1840(2026, 10, 10), league: 'bronze', entrants: [], asOfMinute: -1000, label: 'Next tournament: scheduled, entries not yet fixed' },
+  opening: { startsAtMs: at1840(2026, 10, 7), league: 'bronze', entrants: ['aster', 'varro', 'cassia', 'severus', 'bellator', 'corvina', 'nerva', 'titus'], asOfMinute: 5, label: 'Bronze, 7 Oct: started, before round 1' },
+  midway: { startsAtMs: at1840(2026, 10, 3), league: 'bronze', entrants: ['faustina', 'gallus', 'aurelia', 'decimus', 'cato'], asOfMinute: 45, label: 'Bronze, 3 Oct: five entrants with byes, mid-way' },
+  late: { startsAtMs: at1840(2026, 9, 30), league: 'bronze', entrants: ['varro', 'cassia', 'bellator', 'corvina', 'faustina', 'gallus', 'nerva', 'titus'], asOfMinute: 75, label: 'Bronze, 30 Sep: final revealed, placements pending' },
+  completed: { startsAtMs: at1840(2026, 9, 26), league: 'bronze', entrants: ['aster', 'varro', 'cassia', 'severus', 'bellator', 'corvina', 'aurelia', 'decimus'], asOfMinute: 85, label: 'Bronze, 26 Sep: completed; you lost in the first round' },
+  pair: { startsAtMs: at1840(2026, 9, 23), league: 'bronze', entrants: ['aster', 'severus'], asOfMinute: 85, label: 'Bronze, 23 Sep: two entrants, a 0 HP tie-break final' },
+  insufficient: { startsAtMs: at1840(2026, 9, 19), league: 'gold', entrants: ['valeria'], asOfMinute: 85, label: 'Gold, 19 Sep: one qualifier, regular Arena instead' },
   // Task 22.5: projected ten days after its start, after the cleanup that compacts its bout logs to fight summaries.
-  aged: { startsAtMs: at1720(2026, 9, 16), league: 'silver', entrants: ['lucilla', 'marcellus', 'nerva', 'titus'], asOfMinute: 14_400, label: 'Silver, 16 Sep: over a week old, bout replays no longer kept' },
+  aged: { startsAtMs: at1840(2026, 9, 16), league: 'silver', entrants: ['lucilla', 'marcellus', 'nerva', 'titus'], asOfMinute: 14_400, label: 'Silver, 16 Sep: over a week old, bout replays no longer kept' },
 } as const satisfies Record<string, { startsAtMs: number; league: LeagueId; entrants: readonly ArenaGladiatorKey[]; asOfMinute: number; label: string }>;
 
 export const TOURNAMENT_KEYS = Object.keys(TOURNAMENTS) as TournamentKey[];

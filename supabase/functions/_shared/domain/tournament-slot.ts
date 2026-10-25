@@ -20,10 +20,11 @@ function canonicalSlot(slot: SlotWindow): SlotWindow {
 }
 
 /**
- * Spec §8.2 fixed times: a tournament slot is the 80-minute afternoon slot starting Wednesday or Saturday at 17:20 UTC.
- * Pure UTC epoch arithmetic on the slot start (no `Date`, local time zone or daylight saving), so local clock changes
- * never move a tournament. Every 17:20 UTC start is an afternoon, because a 24-hour day holds 18 slots. The days and time
- * come from `rules` (default v1); the partition and the bracket pass their entrants' retained rules.
+ * Fixed times (spec §8.2, moved to the evening by the launch feedback of 2026-10-25): a tournament slot is the 80-minute
+ * evening slot starting Wednesday or Saturday at 18:40 UTC. Pure UTC epoch arithmetic on the slot start (no `Date`, local
+ * time zone or daylight saving), so local clock changes never move a tournament. Every 18:40 UTC start is an evening,
+ * because a 24-hour day holds 18 slots. The days and time come from `rules` (default v1); the partition and the bracket
+ * pass their entrants' retained rules.
  */
 export function isTournamentSlot(slot: SlotWindow, rules: Rules = RULES_V1): boolean {
   const { startMs } = canonicalSlot(slot);

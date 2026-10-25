@@ -1,9 +1,9 @@
 {
-  "id": "tournament:372829:silver",
+  "id": "tournament:372830:silver",
   "league": "silver",
-  "slotIndex": 372829,
-  "startsAtMs": 1789579200000,
-  "endsAtMs": 1789584000000,
+  "slotIndex": 372830,
+  "startsAtMs": 1789584000000,
+  "endsAtMs": 1789588800000,
   "status": "completed",
   "bracket": {
     "size": 4,
@@ -39,7 +39,7 @@
   ],
   "bouts": [
     {
-      "id": "tournament:372829:silver:1:0",
+      "id": "tournament:372830:silver:1:0",
       "round": 1,
       "position": 0,
       "parentBoutIds": [],
@@ -59,14 +59,14 @@
         "winnerId": "205cb3d6-215c-4569-9e5c-b0b01f5cb243",
         "bye": false,
         "fight": {
-          "durationMs": 17004,
+          "durationMs": 14388,
           "victoryReason": "defeat",
           "tieBreakReason": null
         }
       }
     },
     {
-      "id": "tournament:372829:silver:1:1",
+      "id": "tournament:372830:silver:1:1",
       "round": 1,
       "position": 1,
       "parentBoutIds": [],
@@ -86,19 +86,19 @@
         "winnerId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
         "bye": false,
         "fight": {
-          "durationMs": 27168,
+          "durationMs": 21508,
           "victoryReason": "defeat",
           "tieBreakReason": null
         }
       }
     },
     {
-      "id": "tournament:372829:silver:2:0",
+      "id": "tournament:372830:silver:2:0",
       "round": 2,
       "position": 0,
       "parentBoutIds": [
-        "tournament:372829:silver:1:0",
-        "tournament:372829:silver:1:1"
+        "tournament:372830:silver:1:0",
+        "tournament:372830:silver:1:1"
       ],
       "revealedResult": {
         "participants": [
@@ -116,7 +116,7 @@
         "winnerId": "1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1",
         "bye": false,
         "fight": {
-          "durationMs": 19244,
+          "durationMs": 22640,
           "victoryReason": "defeat",
           "tieBreakReason": null
         }
@@ -132,7 +132,7 @@
         "resolvedKind": "tournament",
         "result": "victory",
         "success": true,
-        "settledAtMs": 1789584000000,
+        "settledAtMs": 1789588800000,
         "replayExpiry": {
           "state": "expired"
         }
@@ -146,7 +146,7 @@
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "settledAtMs": 1789584000000,
+        "settledAtMs": 1789588800000,
         "replayExpiry": {
           "state": "expired"
         }
@@ -160,7 +160,7 @@
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "settledAtMs": 1789584000000,
+        "settledAtMs": 1789588800000,
         "replayExpiry": {
           "state": "expired"
         }
@@ -174,7 +174,7 @@
         "resolvedKind": "tournament",
         "result": "defeat",
         "success": false,
-        "settledAtMs": 1789584000000,
+        "settledAtMs": 1789588800000,
         "replayExpiry": {
           "state": "expired"
         }

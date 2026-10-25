@@ -4,7 +4,8 @@
 // winner of every shown bout, each entrant's role (waiting, fighting, eliminated and spectating, or champion) and the
 // placements once the tournament is settled.
 //
-// Spec §8.2 timing: a tournament is the 80-minute afternoon slot starting Wednesday or Saturday at 17:20 UTC
+// Spec §8.2 timing, moved to the evening by the launch feedback (2026-10-25): a tournament is the 80-minute evening slot
+// starting Wednesday or Saturday at 18:40 UTC
 // (`isTournamentSlot`, pure UTC arithmetic). Round r of R reveals at 80 × r / (R + 1) minutes after the start, rounded
 // up to the millisecond as in Task 19, so a reveal is never early. A bout's result shows only when the view carries a
 // well-formed `revealedResult` AND the display clock has reached its round's reveal time; a fought bout then plays for

@@ -45,17 +45,18 @@ function bounded(name: string, fallback: number, minimum: number, maximum: numbe
 export const CAPACITY = Object.freeze({
   players: bounded('CAPACITY_PLAYERS', 50, 3, 200),
   viewers: bounded('CAPACITY_VIEWERS', 50, 0, 10_000),
-  slots: bounded('CAPACITY_SLOTS', 4, 3, 12),
+  slots: bounded('CAPACITY_SLOTS', 4, 4, 12),
   commandsPerPlayerPerDay: 10,
 });
 
 /**
  * Slots of the measurement world: 299 warms up (a cold boundary with nothing to settle), then 300, 301, … are measured. Slot
- * 301 starts on Saturday 1970-01-17 at 17:20 UTC, a v1 tournament slot; slot 373 is the next one, after any measured run.
+ * 302 starts on Saturday 1970-01-17 at 18:40 UTC, an evening and a v1 tournament slot; its settlements fall in slot 303, so a
+ * run measures at least four slots. Slot 374 is the next tournament slot, after any measured run.
  * Historical slots are fully in the past for row-level security and the views, which use the real clock, so every stage the
  * worker revealed is readable when the reads are measured.
  */
-const WARM_UP = 299, FIRST = 300, TOURNAMENT = 301;
+const WARM_UP = 299, FIRST = 300, TOURNAMENT = 302;
 
 type Report = WorkerReport;
 // Operator-only world controls for the isolated local test database (tests/db/restore-world.test.ts).
@@ -75,13 +76,15 @@ type Choices = { morning: Choice; afternoon: Choice; evening: Choice };
 const ARENA: Choice = { kind: 'arena' }, TRAINING: Choice = { kind: 'training' }, WOODLAND: Choice = { kind: 'expedition', expeditionId: 'woodland' };
 /**
  * Three schedules in rotation, so each regular slot mixes about a third Arena, a third Woodland expedition and a third
- * Training, and every character asks for Arena in the afternoon: on the tournament slot all of them enter one Bronze bracket.
+ * Training, and every character asks for Arena in the evening: on the tournament slot all of them enter one Bronze bracket.
+ * The schedules are written directly (the Arena-in-the-evening-only rule is a command-time check), so morning and afternoon Arena
+ * keep the mix the measurements always had.
  * No schedule rests, and every character starts rested with 40 earned points (20 in Endurance), so no slot of a run of up to
  * four falls back to Rest: an upper bound on activity (real schedules rest about one slot in three).
  */
 const SCHEDULES: Choices[] = [
-  { morning: ARENA, afternoon: ARENA, evening: WOODLAND },
-  { morning: WOODLAND, afternoon: ARENA, evening: TRAINING },
+  { morning: ARENA, afternoon: WOODLAND, evening: ARENA },
+  { morning: WOODLAND, afternoon: TRAINING, evening: ARENA },
   { morning: TRAINING, afternoon: ARENA, evening: ARENA },
 ];
 const CLASSES = ['berserker', 'guardian', 'duelist'] as const;
@@ -567,7 +570,7 @@ const perSlotRows = (tables: Record<string, Measured>) => Object.fromEntries(Obj
 export async function measureWorld(options: typeof CAPACITY) {
   const [{ ceiling }] = await sql`select max_dispatch_per_minute::int as ceiling from private.scheduler where singleton`;
   if (ceiling !== DISPATCH_PER_MINUTE) throw new Error(`the dispatch ceiling is ${ceiling}, the model assumes ${DISPATCH_PER_MINUTE}`);
-  if (!isTournamentSlot(slotAt(TOURNAMENT * SLOT)) || isTournamentSlot(slotAt(FIRST * SLOT))) throw new Error('slot 301 must be the only tournament slot');
+  if (!isTournamentSlot(slotAt(TOURNAMENT * SLOT)) || isTournamentSlot(slotAt(FIRST * SLOT))) throw new Error('slot 302 must be the only tournament slot');
   const run = await runWorld(options.players, options.slots, SCHEDULES, true);
   const { players, windows, flagged } = run;
   const measured = await tableMeasures(run);

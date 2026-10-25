@@ -17,7 +17,7 @@ import { TOURNAMENT_VIEWS, TOURNAMENTS, tournamentActivityId, tournamentId, type
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
-const utc = (y: number, m: number, d: number, h = 17, min = 20) => Date.UTC(y, m - 1, d, h, min);
+const utc = (y: number, m: number, d: number, h = 18, min = 40) => Date.UTC(y, m - 1, d, h, min);
 const view = (key: TournamentKey) => TOURNAMENT_VIEWS[key];
 const S = (key: TournamentKey) => TOURNAMENTS[key].startsAtMs;
 const at = (key: TournamentKey, minute: number, viewerId: string | null = null) => renderTournament(view(key), S(key) + minute * MIN, { viewerId });
@@ -29,10 +29,10 @@ const logOf = (key: TournamentKey, boutId: string) => view(key).bouts.find(b => 
 afterEach(() => vi.restoreAllMocks());
 
 describe('next tournament and countdown', () => {
-  it('counts down to the next Wednesday or Saturday 17:20 UTC slot from the display time', () => {
+  it('counts down to the next Wednesday or Saturday 18:40 UTC slot from the display time', () => {
     const now = worldFixture.serverNowMs; // Saturday 2026-10-10 00:40 UTC
     expect(tournamentWindowAt(now)).toBeNull();
-    expect(nextTournament(now)).toEqual({ slotIndex: utc(2026, 10, 10) / 4_800_000, startsAtMs: utc(2026, 10, 10), endsAtMs: utc(2026, 10, 10) + 80 * MIN, countdownMs: 16 * HOUR + 40 * MIN });
+    expect(nextTournament(now)).toEqual({ slotIndex: utc(2026, 10, 10) / 4_800_000, startsAtMs: utc(2026, 10, 10), endsAtMs: utc(2026, 10, 10) + 80 * MIN, countdownMs: 18 * HOUR });
     // At the start the tournament is running and the next one is Wednesday's; the slot end is exclusive.
     const start = utc(2026, 10, 10);
     expect(tournamentWindowAt(start)).toEqual({ slotIndex: start / 4_800_000, startsAtMs: start, endsAtMs: start + 80 * MIN });
@@ -40,11 +40,11 @@ describe('next tournament and countdown', () => {
     expect(tournamentWindowAt(start + 80 * MIN)).toBeNull();
     expect(nextTournament(start).startsAtMs).toBe(utc(2026, 10, 14));
     expect(nextTournament(start - 1)).toMatchObject({ startsAtMs: start, countdownMs: 1 });
-    // Over five weeks every next start is a Wednesday or Saturday at 17:20 UTC (checked with Date's UTC fields).
+    // Over five weeks every next start is a Wednesday or Saturday at 18:40 UTC (checked with Date's UTC fields).
     for (let t = utc(2026, 10, 1, 0, 0); t < utc(2026, 11, 5, 0, 0); t += 37 * MIN) {
       const next = new Date(nextTournament(t).startsAtMs);
       expect([3, 6], next.toISOString()).toContain(next.getUTCDay());
-      expect([next.getUTCHours(), next.getUTCMinutes()]).toEqual([17, 20]);
+      expect([next.getUTCHours(), next.getUTCMinutes()]).toEqual([18, 40]);
       expect(nextTournament(t).startsAtMs).toBeGreaterThan(t);
       expect(nextTournament(t).startsAtMs - t).toBeLessThanOrEqual(4 * DAY);
     }
@@ -58,24 +58,25 @@ describe('next tournament and countdown', () => {
   });
 
   it('keeps UTC times fixed across daylight-saving changes and shows the local time beside UTC', () => {
-    // Europe/Berlin leaves summer time on 2026-10-25: 19:20 local before, 18:20 after, always 17:20 UTC.
+    // Europe/Berlin leaves summer time on 2026-10-25: 20:40 local before, 19:40 after, always 18:40 UTC.
     const saturday = utc(2026, 10, 24);
     const afterSaturday = saturday + 80 * MIN;
     expect(nextTournament(afterSaturday)).toMatchObject({ startsAtMs: utc(2026, 10, 28), countdownMs: 3 * DAY + 22 * HOUR + 40 * MIN });
-    expect(tournamentTimeText(saturday, 'Europe/Berlin')).toEqual({ local: 'Sat 24 Oct, 19:20 GMT+2', utc: 'Sat 24 Oct, 17:20 UTC' });
-    expect(tournamentTimeText(utc(2026, 10, 28), 'Europe/Berlin')).toEqual({ local: 'Wed 28 Oct, 18:20 GMT+1', utc: 'Wed 28 Oct, 17:20 UTC' });
+    expect(tournamentTimeText(saturday, 'Europe/Berlin')).toEqual({ local: 'Sat 24 Oct, 20:40 GMT+2', utc: 'Sat 24 Oct, 18:40 UTC' });
+    expect(tournamentTimeText(utc(2026, 10, 28), 'Europe/Berlin')).toEqual({ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' });
     // New York leaves daylight time on 2026-11-01.
-    expect(tournamentTimeText(utc(2026, 10, 31), 'America/New_York').local).toBe('Sat 31 Oct, 13:20 GMT-4');
-    expect(tournamentTimeText(utc(2026, 11, 4), 'America/New_York').local).toBe('Wed 4 Nov, 12:20 GMT-5');
+    expect(tournamentTimeText(utc(2026, 10, 31), 'America/New_York').local).toBe('Sat 31 Oct, 14:40 GMT-4');
+    expect(tournamentTimeText(utc(2026, 11, 4), 'America/New_York').local).toBe('Wed 4 Nov, 13:40 GMT-5');
     // A viewer ahead of UTC can see the next calendar day.
-    expect(tournamentTimeText(utc(2026, 10, 28), 'Pacific/Kiritimati').local).toBe('Thu 29 Oct, 07:20 GMT+14');
-    expect(tournamentTimeText(utc(2026, 10, 28), 'UTC')).toEqual({ local: 'Wed 28 Oct, 17:20 UTC', utc: 'Wed 28 Oct, 17:20 UTC' });
-    expect(tournamentTimeText(utc(2026, 10, 28), 'Europe/London').local).toBe('Wed 28 Oct, 17:20 UTC');
+    expect(tournamentTimeText(utc(2026, 10, 28), 'Pacific/Kiritimati').local).toBe('Thu 29 Oct, 08:40 GMT+14');
+    expect(tournamentTimeText(utc(2026, 10, 28), 'UTC')).toEqual({ local: 'Wed 28 Oct, 18:40 UTC', utc: 'Wed 28 Oct, 18:40 UTC' });
+    expect(tournamentTimeText(utc(2026, 10, 28), 'Europe/London').local).toBe('Wed 28 Oct, 18:40 UTC');
   });
 
   it('writes the countdown in days, hours and minutes, with seconds in the last hour', () => {
     expect(countdownText(3 * DAY + 22 * HOUR + 40 * MIN)).toBe('3 d 22 h 40 min');
     expect(countdownText(16 * HOUR + 40 * MIN + 59_999)).toBe('16 h 40 min');
+    expect(countdownText(18 * HOUR)).toBe('18 h 0 min');
     expect(countdownText(59 * MIN + 5_000)).toBe('59 min 5 s');
     expect(countdownText(1)).toBe('0 min 1 s');
     expect(countdownText(0)).toBe('now');

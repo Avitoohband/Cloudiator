@@ -24,8 +24,8 @@ import { recordMeasurement } from '../fixtures/measurements.ts';
 export const BUDGET_MS = BUDGETS.workerMs;
 
 const SLOT_MS = RULES_V1.clock.slotMs;
-/** Slot 301 starts on Saturday 1970-01-17 at 17:20 UTC: a v1 tournament slot (as tests/db/tournaments.test.ts uses). */
-const TOURNAMENT_SLOT = 301;
+/** Slot 302 starts on Saturday 1970-01-17 at 18:40 UTC: an evening and a v1 tournament slot (as tests/db/tournaments.test.ts uses). */
+const TOURNAMENT_SLOT = 302;
 const UNEQUIPPED = { weapon: null, offHand: null, head: null, body: null, feet: null };
 const build = (classId: BuildSnapshot['classId'], stance: BuildSnapshot['stance'], allocations: BuildSnapshot['allocations'],
   equipment: Partial<Record<keyof typeof UNEQUIPPED, ItemInstance>> = {}): BuildSnapshot =>

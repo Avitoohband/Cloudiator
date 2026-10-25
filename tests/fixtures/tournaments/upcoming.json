@@ -1,9 +1,9 @@
 {
-  "id": "tournament:373261:bronze",
+  "id": "tournament:373262:bronze",
   "league": "bronze",
-  "slotIndex": 373261,
-  "startsAtMs": 1791652800000,
-  "endsAtMs": 1791657600000,
+  "slotIndex": 373262,
+  "startsAtMs": 1791657600000,
+  "endsAtMs": 1791662400000,
   "status": "scheduled",
   "bracket": null,
   "entrants": [],

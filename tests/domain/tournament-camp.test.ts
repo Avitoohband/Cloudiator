@@ -256,7 +256,7 @@ describe('battle logs in the camp load on demand (2b review I1)', () => {
 
 describe('a large tournament in the camp (Task 19 R4 and the live-camp gate)', () => {
   const TEMPLATES = Object.values(TOURNAMENT_VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
-  // A real tournament slot (Saturday 17:20 UTC) with 50 entrants: a 64-slot bracket of six rounds, 18 fought bouts in round 1.
+  // A real tournament slot (Saturday 18:40 UTC) with 50 entrants: a 64-slot bracket of six rounds, 18 fought bouts in round 1.
   const START = TOURNAMENTS.completed.startsAtMs;
   const { view, actors } = largeTournament(50, { startsAtMs: START, league: 'silver', templates: TEMPLATES });
   const polled = withoutTournamentLogs(view);

@@ -345,7 +345,10 @@ describe('words', () => {
     expect(gearRefusal('conflict')).toBe('Your build changed. The latest state has been loaded; review and try again.');
     expect(gearRefusal('unavailable')).toBe('This change could not be confirmed. Retry to confirm the same request.');
     expect(gearRefusal('insufficient-funds')).toBe('Not enough available money for this reservation.');
-    expect(gearRefusal('invalid')).toBe('Build change rejected: invalid.');
+    // Final review fix: the server answers `invalid` for any build that fails its checks (a piece listed or gone since the view
+    // was loaded); the panel reloads the gear, and the words say so instead of the raw code.
+    expect(gearRefusal('invalid')).toBe('That gear change is no longer possible. Your gear has been reloaded.');
+    expect(gearRefusal('invalid')).not.toContain('invalid');
   });
 
   it('knows which inventory items can be worn', () => {

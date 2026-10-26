@@ -84,7 +84,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
                     : result.code === 'expired' ? 'Its Marketplace listing has expired and the item is back. Review the refreshed inventory.'
                       : `Request rejected: ${result.code}.`);
         if (!transient) attempt.current = null;
-        if (['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code)) await refresh();
+        // A gear change the server finds `invalid` no longer fits the build or the bag (`gearRefusal`): reload them.
+        if (['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code) || (gear && result.code === 'invalid')) await refresh();
       }
     } catch {
       if (mounted.current) { setError('This request could not be confirmed. Retry the same request.'); setRetry(true); }

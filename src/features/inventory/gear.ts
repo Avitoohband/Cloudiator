@@ -102,12 +102,17 @@ export function pendingNote(time: string): string {
   return `Gear changes start at the next slot${time ? `, ${time}` : ''}. Anything already running keeps the gear it started with.`;
 }
 
-/** The words for a refused gear command: the Build panel's, since the same commands are refused for the same reasons. */
+/**
+ * The words for a refused gear command: the Build panel's, since the same commands are refused for the same reasons, except
+ * `invalid`. The server answers it for any build that fails its checks; from the gear view that is a piece listed, gone or
+ * out of reach since the view was loaded, so the panel reloads the gear and says so (final review fix).
+ */
 export function gearRefusal(code: string): string {
   return code === 'processing' ? 'The world is processing previous results. Retry shortly.'
     : code === 'conflict' ? 'Your build changed. The latest state has been loaded; review and try again.'
-      : code === 'unavailable' ? 'This change could not be confirmed. Retry to confirm the same request.'
-        : code === 'insufficient-funds' ? 'Not enough available money for this reservation.' : `Build change rejected: ${code}.`;
+      : code === 'invalid' ? 'That gear change is no longer possible. Your gear has been reloaded.'
+        : code === 'unavailable' ? 'This change could not be confirmed. Retry to confirm the same request.'
+          : code === 'insufficient-funds' ? 'Not enough available money for this reservation.' : `Build change rejected: ${code}.`;
 }
 
 const sameAttributes = (a: Attributes, b: Attributes) => ATTRIBUTES.every(key => a[key] === b[key]);

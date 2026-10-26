@@ -375,6 +375,24 @@ test('says why a piece cannot be worn: a level not reached, or a Marketplace lis
   expect(flow.commands).toHaveLength(0);
 });
 
+test('explains a gear change the server no longer allows in words, and reloads the gear', async ({ page, context }) => {
+  // Final review fix: the server answers `invalid` for any build that fails its checks, here a piece listed for sale in
+  // another session since the view was loaded. The card says so in words, offers no retry, and the reload shows why.
+  const flow = await inventoryFlow(context, { gear: true });
+  const { sword2 } = flow.pieces;
+  await page.goto('/game/');
+  await openMenu(page, 'Inventory and shops');
+  await expect(wear(page, sword2)).toBeEnabled();
+  sword2.reservation = { kind: 'listing', referenceId: randomUUID() };
+  flow.reject('invalid');
+  await wear(page, sword2).click();
+  await expect(card(page, sword2).getByRole('alert')).toHaveText('That gear change is no longer possible. Your gear has been reloaded.');
+  await expect(card(page, sword2).getByRole('button', { name: 'Retry request' })).toHaveCount(0);
+  await expect(wear(page, sword2)).toBeDisabled();
+  await expect(wear(page, sword2)).toHaveAccessibleDescription('Listed for sale');
+  expect(flow.commands).toHaveLength(1);
+});
+
 test('retries a gear change with the same operation after a refusal, and reloads on a conflict', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const { sword2 } = flow.pieces;

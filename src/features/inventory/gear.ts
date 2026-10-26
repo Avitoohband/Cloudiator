@@ -126,29 +126,42 @@ function buildCommand(owner: OwnerState, equipment: Equipment, operationId: stri
 }
 
 /**
- * Wear `itemId` from the next slot: its slot takes it, and a two-handed weapon frees the off-hand. The panel offers it only
- * for a piece that is not `needs-free-hand`, `needs-level` or `listed`; the server refuses what the rules do not allow.
+ * The off-hand once the weapon slot of `equipment` has changed from `before` (the weapon that was next until now): the
+ * off-hand follows the weapon's hands, as in the approved mockup.
+ * - A two-handed weapon uses both hands: the off-hand is freed.
+ * - A one-handed weapon that replaces a two-handed one brings the worn off-hand piece back, but only into an empty off-hand:
+ *   an off-hand the player emptied (through the Build panel) while the next weapon was one-handed stays empty.
+ */
+function settleOffHand(owner: OwnerState, equipment: Equipment, before: string | null): void {
+  if (twoHanded(owner, equipment.weapon)) equipment.offHand = null;
+  else if (twoHanded(owner, before) && equipment.offHand === null) equipment.offHand = owner.currentBuild.equipment.offHand;
+}
+
+/**
+ * Wear `itemId` from the next slot: its slot takes it; a two-handed weapon frees the off-hand, and a one-handed weapon chosen
+ * after a two-handed one (instead of Undo) brings the worn off-hand back (`settleOffHand`). The panel offers it only for a
+ * piece that is not `needs-free-hand`, `needs-level` or `listed`; the server refuses what the rules do not allow.
  * A new operation id unless one is given (a retry passes the first attempt's).
  */
 export function wearCommand(owner: OwnerState, itemId: string, operationId: string = newOperation()): GearCommand {
   const item = itemById(owner, itemId), slot = entryOf(item)?.slot;
   if (!item || slot === undefined) throw new RangeError('This item cannot be worn');
-  const equipment = nextEquipment(owner);
+  const equipment = nextEquipment(owner), before = equipment.weapon;
   equipment[slot] = itemId;
-  if (slot === 'weapon' && twoHanded(owner, itemId)) equipment.offHand = null;
+  if (slot === 'weapon') settleOffHand(owner, equipment, before);
   return buildCommand(owner, equipment, operationId);
 }
 
 /**
- * Undo the queued change in `slot`: the worn piece goes back. Undoing a queued two-handed weapon also restores the worn
- * off-hand piece it pushed off; a restored weapon that is itself two-handed keeps the off-hand free. The rest of the queue stays.
+ * Undo the queued change in `slot`: the worn piece goes back. The weapon's hands are settled as for `wearCommand`: undoing a
+ * queued two-handed weapon also restores the worn off-hand piece it pushed off; a restored weapon that is itself two-handed
+ * keeps the off-hand free. The rest of the queue stays.
  */
 export function undoCommand(owner: OwnerState, slot: EquipmentSlot, operationId: string = newOperation()): GearCommand {
   const worn = wornNow(owner), equipment = nextEquipment(owner);
   const undone = equipment[slot];
   equipment[slot] = worn[slot];
-  if (slot === 'weapon' && twoHanded(owner, undone)) equipment.offHand = worn.offHand;
-  if (twoHanded(owner, equipment.weapon)) equipment.offHand = null;
+  if (slot === 'weapon') settleOffHand(owner, equipment, undone);
   return buildCommand(owner, equipment, operationId);
 }
 

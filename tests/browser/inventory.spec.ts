@@ -327,6 +327,38 @@ test('frees the off-hand for a two-handed weapon, and undoing it brings the shie
   await expect(wearing(page, shield)).toBeDisabled();
 });
 
+test('brings the shield back when a one-handed weapon is worn after a two-handed one, without Undo', async ({ page, context }) => {
+  // The player presses Wear on the spear, changes their mind and presses Wear on a sword instead of Undo: the off-hand follows
+  // the weapon's hands, so the shield is not dropped (the approved mockup derives it the same way).
+  const flow = await inventoryFlow(context, { gear: true });
+  const { sword, sword2, spear, shield, armor } = flow.pieces;
+  await page.goto('/game/');
+  await openMenu(page, 'Inventory and shops');
+  const offHandCell = wearingNow(page).getByRole('listitem').nth(1);
+  await wear(page, spear).click();
+  await expect(badge(page, spear)).toBeVisible();
+  await expect(badge(page, shield)).toHaveText(/^Off at /);
+  await expect(offHandCell).toContainText('Next: Empty');
+  // The other sword: a queue-build with the shield still worn, only the weapon changed.
+  await wear(page, sword2).click();
+  await expect(badge(page, sword2)).toBeVisible();
+  expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', equipment: { weapon: sword2.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
+  await expect(badge(page, shield)).toHaveText('Wearing');
+  await expect(card(page, shield).getByText('Needs a free hand')).toHaveCount(0);
+  await expect(offHandCell).not.toContainText('Next:');
+  await expect(wearingNow(page).getByRole('listitem').nth(0)).toContainText('Next: Sword, level 1 · uncommon');
+  await expect(badge(page, spear)).toHaveCount(0);
+  // The spear again, then the sword that is worn now: back on the current build, so the pending build is canceled.
+  await wear(page, spear).click();
+  await expect(badge(page, shield)).toHaveText(/^Off at /);
+  await wear(page, sword).click();
+  expect(flow.commands[3]).toMatchObject({ kind: 'cancel-build' });
+  expect(flow.state.pendingBuild).toBeNull();
+  await expect(badge(page, shield)).toHaveText('Wearing');
+  await expect(badge(page, sword)).toHaveText('Wearing');
+  await expect(card(page, sword).getByRole('status')).toHaveText('Back to your current gear. No gear change is queued.');
+});
+
 test('says why a piece cannot be worn: a level not reached, or a Marketplace listing', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const high = { ...itemFixture(CATALOG_V1.items['axe:5:common']), id: randomUUID() };

@@ -20,10 +20,10 @@ const OPERATION = '5d0f6a52-8f3e-4a51-9a39-3c1f4e0f9d21';
 
 // The player's bag: two one-handed swords, a two-handed spear, a shield, a hood, a helmet, a tier 5 axe, a listed hood and salvage.
 const sword = item('sword:1:common'), sword2 = item('sword:1:uncommon'), spear = item('spear:1:common'), shield = item('round-shield:1:common');
-const hood = item('leather-hood:1:common'), helmet = item('iron-helmet:1:common'), axe5 = item('axe:5:common'), armor = item('light-armor:1:common');
+const bow = item('bow:1:common'), hood = item('leather-hood:1:common'), helmet = item('iron-helmet:1:common'), axe5 = item('axe:5:common'), armor = item('light-armor:1:common');
 const listedHood = item('leather-hood:1:uncommon', { reservation: { kind: 'listing', referenceId: nextId() } });
 const salvage: ItemInstance = { ...item('sword:1:common'), id: nextId(), catalogId: 'salvage', quantity: 4, origin: 'expedition' };
-const bag = [sword, sword2, spear, shield, hood, helmet, axe5, armor, listedHood, salvage];
+const bag = [sword, sword2, spear, bow, shield, hood, helmet, axe5, armor, listedHood, salvage];
 
 /** The player wears the sword, the shield and the hood; `pending` is a queued build (its equipment defaults to what is worn). */
 function owner(options: { worn?: Partial<Equipment>; pending?: { equipment?: Partial<Equipment>; classId?: ClassId } | null; level?: number } = {}): OwnerState {
@@ -116,6 +116,50 @@ describe('wearCommand', () => {
     expect(wearState(state, find(state, sword.id))).toBe('leaving');
   });
 
+  it('brings the shield back when a one-handed weapon is worn after a two-handed one, instead of undoing it', () => {
+    // The spear is queued (the off-hand cleared); wearing the sword again lands on the current build, wearing the other sword
+    // keeps the shield (the off-hand follows the weapon's hands, as in the approved mockup).
+    const spearQueued = owner({ pending: { equipment: { weapon: spear.id, offHand: null } } });
+    expect(wearCommand(spearQueued, sword.id, OPERATION)).toEqual({ kind: 'cancel-build', operationId: OPERATION, expectedVersion: 7 });
+    expect(wearCommand(spearQueued, sword2.id, OPERATION)).toEqual({
+      kind: 'queue-build', operationId: OPERATION, expectedVersion: 7, classId: 'guardian', stance: 'balanced',
+      allocation: { strength: 3, agility: 2, vitality: 2, endurance: 2, precision: 1 },
+      equipment: { weapon: sword2.id, offHand: shield.id, head: hood.id, body: null, feet: null },
+    });
+  });
+
+  it('brings the shield back after a two-handed weapon and keeps a queued class change and the other pieces', () => {
+    const state = owner({ pending: { classId: 'berserker', equipment: { weapon: spear.id, offHand: null, head: helmet.id } } });
+    expect(queued(wearCommand(state, sword.id, OPERATION))).toMatchObject({
+      classId: 'berserker', equipment: gear({ weapon: sword.id, offHand: shield.id, head: helmet.id }),
+    });
+  });
+
+  it('reads the shield as worn again once a one-handed weapon follows the two-handed one', () => {
+    const spearQueued = owner({ pending: { equipment: { weapon: spear.id, offHand: null } } });
+    const command = queued(wearCommand(spearQueued, sword2.id, OPERATION));
+    const state = owner({ pending: { equipment: command.equipment } });
+    expect(wearState(state, find(state, shield.id))).toBe('wearing');
+    expect(wearBadge(state, find(state, shield.id))).toBe('wearing');
+    expect(changedSlots(state)).toEqual(['weapon']);
+  });
+
+  it('leaves an off-hand the player emptied while the weapon was one-handed empty', () => {
+    // Emptied through the Build panel under a one-handed sword: no two-handed weapon was involved, so nothing brings it back.
+    const state = owner({ pending: { equipment: { weapon: sword2.id, offHand: null } } });
+    expect(queued(wearCommand(state, sword.id, OPERATION)).equipment).toEqual(gear({ weapon: sword.id, offHand: null, head: hood.id }));
+  });
+
+  it('brings back nothing when the worn weapon was two-handed and there was no worn off-hand', () => {
+    const state = owner({ worn: { weapon: spear.id, head: hood.id }, pending: { equipment: { weapon: bow.id } } });
+    expect(queued(wearCommand(state, sword2.id, OPERATION)).equipment).toEqual(gear({ weapon: sword2.id, offHand: null, head: hood.id }));
+  });
+
+  it('keeps the off-hand free from one two-handed weapon to another', () => {
+    const state = owner({ pending: { equipment: { weapon: spear.id, offHand: null } } });
+    expect(queued(wearCommand(state, bow.id, OPERATION)).equipment).toEqual(gear({ weapon: bow.id, offHand: null, head: hood.id }));
+  });
+
   it('becomes cancel-build when the swap lands back on the current build', () => {
     // The sword is queued out for the other sword; wearing the first sword again is the current build.
     const state = owner({ pending: { equipment: { weapon: sword2.id } } });
@@ -166,6 +210,11 @@ describe('undoCommand', () => {
     expect(undoCommand(state, 'weapon', OPERATION)).toEqual({ kind: 'cancel-build', operationId: OPERATION, expectedVersion: 7 });
     const withHelmet = owner({ worn: { weapon: spear.id, head: hood.id }, pending: { equipment: { weapon: sword.id, offHand: shield.id, head: helmet.id } } });
     expect(queued(undoCommand(withHelmet, 'weapon', OPERATION)).equipment).toEqual(gear({ weapon: spear.id, offHand: null, head: helmet.id }));
+  });
+
+  it('undoes a one-handed weapon chosen after a two-handed one back to the current build, the shield included', () => {
+    const afterSpear = owner({ pending: { equipment: { weapon: sword2.id, offHand: shield.id } } });
+    expect(undoCommand(afterSpear, 'weapon', OPERATION)).toEqual({ kind: 'cancel-build', operationId: OPERATION, expectedVersion: 7 });
   });
 
   it('empties a slot that was empty when worn', () => {

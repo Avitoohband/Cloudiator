@@ -399,6 +399,84 @@ test('keeps the keyboard focus on the page after Save and after Undo', async ({ 
   expect(await focusDrops(page)).toEqual([]);
 });
 
+// Chrome drops the focus of a control that has become disabled at its next frame, after the page's DOM-change checks have
+// run, so nothing put it back until the save settled: a keyboard player was on <body> for the whole save (the release
+// gate's flake, seen when a check landed in that window). Here the reply waits, and a long task holds the page as the
+// saved line appears, so a frame is drawn before any later work.
+test('keeps the keyboard focus on Save while the day is sent, and hands it straight to the saved line', async ({ page, context }) => {
+  await watchFocus(page);
+  const flow = await planningFlow(context);
+  let release!: () => void;
+  const reply = new Promise<void>(resolve => { release = resolve; });
+  await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+    if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== 'edit-day-schedule') return route.fallback();
+    await reply;
+    return route.fallback();
+  });
+  await page.goto('/game/');
+  await openMenu(page, 'Schedule');
+  const morning = page.getByLabel('morning activity');
+  await morning.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(morning).toHaveValue('rest');
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press('Tab');
+  await expect(saveDay(page)).toBeFocused();
+  // Every moment the focus falls to <body> from here, even one the page moves on from, and the long task.
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __toBody: string[] }).__toBody = seen;
+    document.addEventListener('focusout', event => {
+      if (!event.relatedTarget && document.hasFocus()) seen.push((event.target as Element).textContent?.trim().slice(0, 40) ?? '');
+    }, true);
+    new MutationObserver(records => {
+      if (!records.some(r => [...r.addedNodes].some(n => n instanceof Element && n.matches('[role="status"]') && !!n.closest('.planning-form')))) return;
+      const until = performance.now() + 150;
+      while (performance.now() < until) { /* a loaded host */ }
+    }).observe(document.body, { subtree: true, childList: true });
+  });
+  const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === 'edit-day-schedule');
+  await page.keyboard.press('Enter');
+  await sent;
+  try {
+    // Frames later, Save still has the focus, unavailable while it is sent; pressing it again sends nothing, and a change
+    // elsewhere on the page (a script added to <head>) finds the focus in place.
+    await frames();
+    await expect(saveDay(page)).toBeFocused();
+    await expect(saveDay(page)).toHaveAttribute('aria-disabled', 'true');
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => { document.head.append(document.createElement('script')); });
+    await frames();
+    await expect(saveDay(page)).toBeFocused();
+  } finally { release(); }
+  await expect(page.getByRole('status').filter({ hasText: /^Saved\./ })).toBeFocused();
+  await expect(saveDay(page)).toBeDisabled();
+  expect(flow.commands.filter(command => command.kind === 'edit-day-schedule')).toHaveLength(1);
+  expect(await page.evaluate(() => (window as unknown as { __toBody: string[] }).__toBody)).toEqual([]);
+  expect(await focusDrops(page)).toEqual([]);
+});
+
+test('keeps the keyboard focus on Save after a refused save, with the reason marked as where it goes next', async ({ page, context }) => {
+  await watchFocus(page);
+  const flow = await planningFlow(context);
+  await page.goto('/game/');
+  const schedule = await openMenu(page, 'Schedule');
+  const morning = page.getByLabel('morning activity');
+  await morning.focus();
+  await page.keyboard.press('ArrowDown');
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press('Tab');
+  await expect(saveDay(page)).toBeFocused();
+  flow.processing(true);
+  await page.keyboard.press('Enter');
+  const reason = schedule.getByRole('alert');
+  await expect(reason).toContainText('processing');
+  // The draft is still unsaved, so Save is usable again and keeps the focus; the reason is where a later loss would go.
+  await expect(saveDay(page)).toBeEnabled();
+  await expect(saveDay(page)).toBeFocused();
+  await expect(reason).toHaveAttribute('data-focus-target', '');
+  expect(await focusDrops(page)).toEqual([]);
+});
+
 test('does not move focus to the first changed select after pointer Undo', async ({ page, context }) => {
   await planningFlow(context);
   await page.goto('/game/');

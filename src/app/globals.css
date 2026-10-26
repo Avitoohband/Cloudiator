@@ -54,6 +54,8 @@ main[tabindex="-1"]:focus { outline: none; }
 .schedule-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
 .schedule-actions .primary-button { flex: 1 1 10rem; width: auto; margin: 0; }
 .schedule-actions button:not(.primary-button) { flex: 0 1 auto; }
+/* Save is aria-disabled while the day is sent: it keeps the focus, and looks unavailable. */
+.schedule-actions button[aria-disabled="true"] { cursor: not-allowed; opacity: .7; }
 .panel-notice { padding: .8rem 1rem; margin: 1.25rem 0 0; font-size: .8rem; color: var(--muted); background: #141c2c; border-left: 2px solid #667797; }
 .game-footer { max-width: 1280px; margin: 0 auto; padding: 0 1.5rem 2rem; color: #b2a178; font-size: .6rem; letter-spacing: .1em; display: flex; justify-content: space-between; gap: 1rem; }
 .game-footer span { color: var(--muted); letter-spacing: 0; }

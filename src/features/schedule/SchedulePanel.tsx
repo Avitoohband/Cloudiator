@@ -150,7 +150,11 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
     {message && <p ref={outcome} id={outcomeId} role="status" className="schedule-saved" tabIndex={-1} {...target}>{savedSummary(message.value, message.day, nowMs)}</p>}
     {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
     <div className="schedule-actions">
-      <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || !dirty}
+      {/* Save stays focusable while the day is sent (aria-disabled; save() ignores a press then): Chrome drops the focus of a
+          control that becomes disabled at its next frame, after the shell's focus rescue has looked, and a keyboard player
+          would be left on <body> for the whole save. A saved day then disables it and the saved line takes the focus
+          (`useOutcomeFocus`); after a refusal the focus stays on Save. */}
+      <button type="button" className="primary-button" onClick={() => void save()} disabled={!busy && !dirty} aria-disabled={busy || undefined}
         aria-describedby={[noteId, outcomeShown ?? ''].filter(Boolean).join(' ')}>Save schedule</button>
       <button type="button" ref={undoButton} onClick={undo} disabled={busy || !dirty}>Undo changes</button>
     </div>

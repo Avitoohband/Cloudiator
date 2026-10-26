@@ -81,7 +81,8 @@ export type LiveData = {
   googleUser?: TestUser;
 };
 
-export type LiveRequest = { table: string; reader: string | null; query: URLSearchParams };
+/** One Data API request: its table, reader and query, and `at`, the test runner's Date.now() when the route received it. */
+export type LiveRequest = { table: string; reader: string | null; query: URLSearchParams; at: number };
 /** One Auth API call of a stored session: its path (`/auth/v1/logout`), query (`scope=local`) and reader. */
 export type AuthRequest = { path: string; reader: string | null; query: URLSearchParams };
 /** One owner's presence (Task 23.9) the transport answered: its operation id and reader. */
@@ -194,7 +195,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
     if (!table || request.method() !== 'GET') throw new Error(`Unexpected live transport request ${request.method()} ${url.pathname}`);
     const reader = readerOf(request);
-    requests.push({ table, reader, query: url.searchParams });
+    requests.push({ table, reader, query: url.searchParams, at: Date.now() });
     const wait = delays.get(table);
     if (wait) await new Promise(resolve => setTimeout(resolve, wait));
     await holds.get(table);

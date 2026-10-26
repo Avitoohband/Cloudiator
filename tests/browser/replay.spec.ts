@@ -4,6 +4,7 @@ import type { BattleAction, BattleLog, RevealedTimeline } from '../../supabase/f
 import type { PublicActor } from '../../supabase/functions/_shared/contracts/reads';
 import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '../../supabase/functions/_shared/domain/appearance';
 import { tintFor } from '../../src/game/actors';
+import { LOOKS_TIMEOUT_MS } from '../../src/game/replay-looks';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { worldFixture } from '../fixtures/domain';
@@ -466,14 +467,19 @@ test.describe('battle-log replay', () => {
       const live = await liveReplay(context, [actor(aster, FEMALE), actor(cassia, BALD)]);
       const release = live.hold('world_actor_reads');
       await page.goto(livePage);
-      await expect.poll(() => lookReads(live).length, { timeout: 45_000 }).toBe(1);
+      // Polled every 25 ms: the default backoff can notice the read up to about 1 s late (final review item 2).
+      await expect.poll(() => lookReads(live).length, { timeout: 45_000, intervals: [25] }).toBe(1);
+      // Timed from the read's own arrival at the route, which the page's 1.5 s wait started just before.
+      const asked = lookReads(live)[0].at;
       // The page, its controls and its log are already there; only the scene waits for the looks (one batched read for both).
       await expect(page.getByRole('heading', { level: 1, name: 'Aster vs Cassia' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Skip to result' })).toBeVisible();
       await expect(page.getByText('Setting the stage…')).toBeVisible();
       // Well within the 1.5 s wait, long enough for a scene that was mounted at once to have started (it loads Phaser first).
-      await page.waitForTimeout(500);
-      expect(await page.evaluate(() => !!window.__cloudiatorBattle), 'the scene must not mount before the looks arrive').toBe(false);
+      await page.waitForTimeout(Math.max(0, asked + 500 - Date.now()));
+      const mounted = await page.evaluate(() => !!window.__cloudiatorBattle);
+      expect(Date.now() - asked, 'checked inside the 1.5 s wait').toBeLessThan(LOOKS_TIMEOUT_MS - 250);
+      expect(mounted, 'the scene must not mount before the looks arrive').toBe(false);
       expect(await page.locator('canvas').count()).toBe(0);
       await expect(page.getByText('Setting the stage…')).toBeVisible();
       const query = lookReads(live)[0].query;
@@ -501,10 +507,11 @@ test.describe('battle-log replay', () => {
       const live = await liveReplay(context, [actor(aster, FEMALE), actor(cassia, BALD)]);
       const release = live.hold('world_actor_reads');
       await page.goto(livePage);
-      await expect.poll(() => lookReads(live).length, { timeout: 45_000 }).toBe(1);
-      const asked = Date.now();
+      await expect.poll(() => lookReads(live).length, { timeout: 45_000, intervals: [25] }).toBe(1);
+      // Timed from the read's own arrival at the route (the page's wait started just before it), not from when the poll saw it.
+      const asked = lookReads(live)[0].at;
       await sceneReady(page);
-      // The read is held, so the scene could only mount once the wait ran out (1.5 s; the margin covers the poll interval).
+      // The read is held, so the scene could only mount once the wait ran out (1.5 s; the margin covers the request's travel).
       expect(Date.now() - asked, 'waited for the looks').toBeGreaterThanOrEqual(1_000);
       const [left, right] = await fighters(page);
       expectLegacy(left.layers, aster.gladiatorId!);

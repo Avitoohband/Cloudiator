@@ -4,7 +4,7 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, isPresence, routeLiveReads } from './live-routes';
-import { chipToggle, creationDialog, joinButton, openMenu, signOutFromChip } from './shell-helpers';
+import { chipToggle, creationDialog, joinButton, openMenu, signOutFromChip, spendSuggestedPoints } from './shell-helpers';
 
 /** A visitor's My gladiator panel (Task 13.6). */
 const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
@@ -158,6 +158,7 @@ test('retains creation draft through canceled OAuth, back and refresh', async ({
   const dialog = creationDialog(page);
   await dialog.getByLabel('Gladiator name').fill('Avi Fighter');
   await dialog.getByLabel('Duelist', { exact: true }).check();
+  await spendSuggestedPoints(page);
   await dismissAndSignOut(page);
   await flow.cancelGoogleAndReturn(page);
   // The canceled return replaced the callback in history (plan Decision 6): Back leaves the camp, never to the callback.
@@ -168,8 +169,13 @@ test('retains creation draft through canceled OAuth, back and refresh', async ({
   await flow.signIn(page);
   await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
   await expect(dialog.getByLabel('Duelist', { exact: true })).toBeChecked();
+  // A saved draft keeps its points too: the Duelist's suggested split, all 10 spent.
+  await expect(dialog.getByRole('status').filter({ hasText: 'All 10 spent' })).toBeVisible();
+  await expect(dialog.getByLabel('Agility points')).toHaveValue('4');
   await page.reload();
   await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Avi Fighter');
+  await expect(dialog.getByLabel('Agility points')).toHaveValue('4');
+  await expect(dialog.getByLabel('Precision points')).toHaveValue('4');
 });
 
 test('retries a lost response with the same operation ID and reloads online owner after refresh', async ({ page, context }) => {
@@ -177,6 +183,7 @@ test('retries a lost response with the same operation ID and reloads online owne
   await page.goto('/game/');
   await flow.signIn(page);
   await creationDialog(page).getByLabel('Gladiator name').fill('Avi Fighter');
+  await spendSuggestedPoints(page);
   flow.loseNextResponse();
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).dblclick();
   await expect(page.locator('p[role=alert]')).toContainText('could not be confirmed');
@@ -201,6 +208,7 @@ test('a command retry retains its ID and editing a conflicted draft obtains a fr
   await page.goto('/game/');
   await flow.signIn(page);
   await creationDialog(page).getByLabel('Gladiator name').fill('Name Taken');
+  await spendSuggestedPoints(page);
   flow.conflict(true);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
@@ -222,6 +230,7 @@ test('two signed-in tabs converge on one online character and sign-out clears bo
   await page.goto('/game/');
   await flow.signIn(page);
   await creationDialog(page).getByLabel('Gladiator name').fill('Twin Fighter');
+  await spendSuggestedPoints(page);
   const other = await context.newPage();
   await other.goto('/game/');
   // The second tab is signed in too, so its creation dialog opens over its camp, with the shared draft.
@@ -238,30 +247,145 @@ test('two signed-in tabs converge on one online character and sign-out clears bo
   await expect(page.getByRole('heading', { name: 'Twin Fighter', exact: true })).toHaveCount(0);
 });
 
-test('validates names and finite whole-point allocation, derives starters and permits keyboard creation without mobile overflow', async ({ page, context }, testInfo) => {
+test('validates names and the ten whole points, derives starters and permits keyboard creation without mobile overflow', async ({ page, context }, testInfo) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');
   await flow.signIn(page);
-  await expect(creationDialog(page)).toBeVisible();
-  await page.getByLabel('Gladiator name').fill('!bad');
-  await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const create = dialog.getByRole('button', { name: 'Create gladiator', exact: true });
+  const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left/ });
+  // The points start at 0, so Create is off until all 10 are spent, and nothing is sent before that.
+  await expect(counter).toHaveText('10 of 10 left');
+  await expect(create).toBeDisabled();
+  await spendSuggestedPoints(page);
+  await dialog.getByLabel('Gladiator name').fill('!bad');
+  await create.click();
   await expect(page.locator('p[role=alert]')).toContainText('3–20');
-  await page.getByLabel('Gladiator name').fill('  Keyboard Fighter  ');
-  await page.getByLabel('Strength points').fill('2.5');
-  await expect(page.getByText('Allocate exactly 10 whole points.')).toBeVisible();
-  await page.getByLabel('Strength points').fill('3');
-  await expect(page.getByText('Allocate exactly 10 whole points.')).toBeVisible();
-  await page.getByLabel('Strength points').fill('2');
-  await page.getByLabel('Guardian', { exact: true }).check();
-  await expect(page.getByTestId('preview-hp')).toHaveText('123');
+  expect(flow.commands).toHaveLength(0);
+  await dialog.getByLabel('Gladiator name').fill('  Keyboard Fighter  ');
+  // A typed number is a whole number: a fraction is floored, an empty field counts as 0, and more than is left is capped
+  // at what is left (Avi: with 7 left, typing 10 sets 7) with a short line saying so.
+  const strength = dialog.getByLabel('Strength points'), agility = dialog.getByLabel('Agility points');
+  await dialog.getByRole('button', { name: 'Reset points' }).click();
+  await strength.fill('2.5');
+  await expect(strength).toHaveValue('2');
+  await expect(counter).toHaveText('8 of 10 left');
+  await strength.fill('3');
+  await expect(counter).toHaveText('7 of 10 left');
+  await agility.fill('10');
+  await expect(agility).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Agility was set to 7.');
+  await expect(counter).toHaveText('All 10 spent');
+  await agility.fill('');
+  await expect(agility).toHaveValue('0');
+  await expect(counter).toHaveText('7 of 10 left');
+  await expect(capped).toHaveCount(0);
+  // The picked class's suggestion fills the split, and the starting build is derived from it (Guardian: vitality 5 + 5, x 1.05).
+  await dialog.getByLabel('Guardian', { exact: true }).check();
+  await dialog.getByRole('button', { name: 'Suggested for Guardian', exact: true }).click();
+  await expect(counter).toHaveText('All 10 spent');
+  await expect(page.getByTestId('preview-hp')).toHaveText('155');
   await expect(page.getByTestId('preview-stamina')).toHaveText('104');
   await expect(page.getByTestId('preview-load')).toHaveText('7 / 24.7');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('creation-preview.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Create gladiator', exact: true }).focus();
+  await create.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Keyboard Fighter', exact: true })).toBeVisible();
-  expect(flow.commands[0]).toMatchObject({ name: 'Keyboard Fighter', classId: 'guardian', allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } });
+  expect(flow.commands[0]).toMatchObject({ name: 'Keyboard Fighter', classId: 'guardian', allocation: { strength: 2, agility: 0, vitality: 5, endurance: 2, precision: 1 } });
+});
+
+test('spends the ten points with a counter, steppers, a cap and the class suggestion, and keeps them in the draft', async ({ page, context }) => {
+  // Launch feedback (2026-10-25), goal 1: "-10 points remaining" was confusing; the points start at 0 and say what they do.
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const create = dialog.getByRole('button', { name: 'Create gladiator', exact: true });
+  const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left/ });
+  const field = (name: string) => dialog.getByLabel(`${name} points`);
+  const add = (name: string) => dialog.getByRole('button', { name: `Add a point to ${name}`, exact: true });
+  const remove = (name: string) => dialog.getByRole('button', { name: `Remove a point from ${name}`, exact: true });
+  const total = (name: string) => field(name).locator('xpath=ancestor::div[1]').getByText(/^Total = \d+$/);
+  const pips = (state: string) => dialog.locator(`[aria-hidden="true"] > span[data-on="${state}"]`);
+  const names = ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision'];
+  const hints = ['More damage with every hit', 'Faster attacks, harder to hit', '+10 health per point', '+2 stamina per point, carries more', 'Hits more often, more critical hits'];
+  // A fresh draft: 0 points everywhere, "5 + 0 = 5" with the one-line effect, ten pips, and Create off with the reason why.
+  await expect(counter).toHaveText('10 of 10 left');
+  await expect(dialog.getByText('Every attribute starts at 5. Points add on top.')).toBeVisible();
+  for (const [index, name] of names.entries()) {
+    await expect(field(name)).toHaveValue('0');
+    await expect(total(name)).toHaveText('Total = 5');
+    await expect(dialog.getByText(hints[index], { exact: true })).toBeVisible();
+    await expect(field(name)).not.toHaveAttribute('aria-invalid', 'true');
+  }
+  await expect(pips('false')).toHaveCount(10);
+  await expect(pips('true')).toHaveCount(0);
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAccessibleDescription('Spend 10 more points to continue.');
+  // The steppers add and take back one point; − stops at 0 and does nothing there.
+  for (let i = 0; i < 3; i++) await add('Strength').click();
+  await expect(field('Strength')).toHaveValue('3');
+  await expect(total('Strength')).toHaveText('Total = 8');
+  await expect(counter).toHaveText('7 of 10 left');
+  await expect(create).toHaveAccessibleDescription('Spend 7 more points to continue.');
+  await expect(pips('true')).toHaveCount(3);
+  await remove('Strength').click();
+  await expect(field('Strength')).toHaveValue('2');
+  await expect(remove('Agility')).toHaveAttribute('aria-disabled', 'true');
+  await remove('Agility').click({ force: true });
+  await expect(field('Agility')).toHaveValue('0');
+  await expect(counter).toHaveText('8 of 10 left');
+  // Typing more than is left is capped at what is left, and says so; the next change clears the line.
+  await field('Strength').fill('3');
+  await field('Agility').fill('10');
+  await expect(field('Agility')).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Agility was set to 7.');
+  await expect(counter).toHaveText('All 10 spent');
+  await expect(create).toBeEnabled();
+  await expect(create).toHaveAccessibleDescription('Ready. You can change your build later.');
+  await expect(page.getByTestId('preview-hp')).toBeVisible();
+  // With nothing left every + stops (it stays focusable, and a click does nothing).
+  for (const name of names) await expect(add(name)).toHaveAttribute('aria-disabled', 'true');
+  await add('Vitality').click({ force: true });
+  await expect(field('Vitality')).toHaveValue('0');
+  await field('Strength').fill('99');
+  await expect(field('Strength')).toHaveValue('3');
+  await expect(capped).toHaveText('No points left to add, so Strength stays at 3.');
+  await field('Agility').fill('4');
+  await expect(capped).toHaveCount(0);
+  await expect(counter).toHaveText('3 of 10 left');
+  await expect(dialog).not.toContainText(/-\d/);
+  // Reset points takes everything back.
+  await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
+  await expect(counter).toHaveText('10 of 10 left');
+  for (const name of names) await expect(field(name)).toHaveValue('0');
+  await expect(create).toBeDisabled();
+  // "Suggested for {class}" follows the class picker and fills that class's split.
+  const splits = { Berserker: [5, 1, 2, 1, 1], Guardian: [2, 0, 5, 2, 1], Duelist: [2, 4, 0, 0, 4] };
+  for (const [className, split] of Object.entries(splits)) {
+    await dialog.getByLabel(className, { exact: true }).check();
+    await dialog.getByRole('button', { name: `Suggested for ${className}`, exact: true }).click();
+    await expect(counter).toHaveText('All 10 spent');
+    for (const [index, name] of names.entries()) await expect(field(name)).toHaveValue(String(split[index]));
+    await expect(create).toBeEnabled();
+  }
+  // A saved draft keeps its values across a reload.
+  await page.reload();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Duelist', { exact: true })).toBeChecked();
+  await expect(counter).toHaveText('All 10 spent');
+  for (const [index, name] of names.entries()) await expect(field(name)).toHaveValue(String(splits.Duelist[index]));
+  // An empty field counts as 0.
+  await field('Precision').fill('');
+  await expect(field('Precision')).toHaveValue('0');
+  await expect(counter).toHaveText('4 of 10 left');
+  await expect(dialog.getByText('Spend 4 more points to continue.')).toBeVisible();
+  expect(flow.commands).toHaveLength(0);
 });
 
 test('expiry removes private owner and requires sign-in when refresh fails', async ({ page, context }) => {
@@ -269,6 +393,7 @@ test('expiry removes private owner and requires sign-in when refresh fails', asy
   await page.goto('/game/');
   await flow.signIn(page);
   await creationDialog(page).getByLabel('Gladiator name').fill('Short Session');
+  await spendSuggestedPoints(page);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Short Session', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: VISITOR_PROMPT })).toBeVisible({ timeout: 15_000 });
@@ -304,6 +429,7 @@ test('account changes cannot reuse another account creation attempt', async ({ p
   await page.goto('/game/');
   await flow.signIn(page);
   await creationDialog(page).getByLabel('Gladiator name').fill('Account Draft');
+  await spendSuggestedPoints(page);
   flow.conflict(true);
   await page.getByRole('button', { name: 'Create gladiator', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toContainText('name may already be taken');
@@ -324,6 +450,7 @@ test('a slow no-character focus read cannot replace the confirmed creation owner
   await page.goto('/game/');
   await flow.signIn(page);
   await creationDialog(page).getByLabel('Gladiator name').fill('Confirmed Fighter');
+  await spendSuggestedPoints(page);
   await expect(page.getByRole('button', { name: 'Create gladiator', exact: true })).toBeEnabled();
   const held = flow.holdNextOwnerRead();
   // A tab return reads the owner only 2 s or more after the last read (final review Minor 5).

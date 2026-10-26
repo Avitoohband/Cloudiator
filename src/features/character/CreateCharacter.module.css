@@ -52,12 +52,25 @@
   position: sticky;
   bottom: 0;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
   gap: 8px;
   margin: 14px -18px 0;
   padding: 12px 18px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.13);
   background: rgb(24, 22, 31);
+}
+
+/* Why Create is off, or that it is ready; the button is described by it. */
+.createHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .later,
@@ -80,8 +93,187 @@
   font-weight: 700;
 }
 
+.confirm:disabled {
+  border-color: var(--line);
+  background: #2a3449;
+  color: var(--muted);
+  opacity: 1;
+}
+
 .later:focus-visible,
 .confirm:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
+}
+
+/*
+ * The ten starting points (launch feedback, 2026-10-25): a counter with ten pips, two shortcuts and one row per attribute
+ * ("5 +", minus, the points, plus, "= total"). Controls are 44 px; the longest row (about 240 px) fits a 360 px phone.
+ * Text on the dark fills is 4.5:1 or better.
+ */
+.points input.value[type='number'] {
+  flex: none;
+  width: 56px;
+  padding: 0;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.points input.value[type='number']::-webkit-inner-spin-button,
+.points input.value[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.counter {
+  display: inline-block;
+  margin: 0 0 0.5rem;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: #3a3020;
+  color: var(--gold);
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.counter[data-done='true'] {
+  border-color: #4fb58a;
+  background: #1f4a3a;
+  color: #9be3c0;
+}
+
+/* Decorative: the counter says the same in words. */
+.pips {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.pip {
+  height: 8px;
+  border-radius: 3px;
+  background: #2a3449;
+}
+
+.pip[data-on='true'] {
+  background: var(--gold);
+}
+
+.shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 0.5rem;
+}
+
+.suggest,
+.reset,
+.step {
+  min-height: 44px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.suggest,
+.reset {
+  padding: 6px 14px;
+}
+
+.suggest {
+  border: 1px solid var(--gold);
+  background: var(--gold);
+  color: #2a1d05;
+}
+
+.reset {
+  border: 1px solid var(--field-line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.row {
+  display: grid;
+  padding: 0.6rem 0 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.points .row label {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0.35rem;
+}
+
+.base {
+  min-width: 1.9rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.step {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--field-line);
+  background: #111b2d;
+  color: var(--ink);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+/* At its limit a stepper only looks unavailable: it stays focusable, and the text keeps its contrast. */
+.step[aria-disabled='true'] {
+  border-style: dashed;
+  color: #8d99b0;
+  cursor: not-allowed;
+}
+
+.total {
+  min-width: 3.4rem;
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.capped {
+  margin: 0.5rem 0 0;
+  color: var(--gold);
+  font-size: 0.8rem;
+}
+
+.capped:empty {
+  margin: 0;
+}
+
+.suggest:focus-visible,
+.reset:focus-visible,
+.step:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Read by a screen reader, not shown. */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

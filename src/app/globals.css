@@ -77,7 +77,6 @@ main[tabindex="-1"]:focus { outline: none; }
 .creation-form input:not([type="radio"]) { width: 100%; min-width: 0; color: var(--ink); background: #111b2d; border: 1px solid var(--field-line); padding: .6rem; font: inherit; min-height: 44px; }
 .creation-form input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .creation-form .class-options label { display: flex; align-items: center; min-height: 44px; gap: .5rem; }
-.creation-form .point-options label { display: grid; grid-template-columns: minmax(0, 1fr) 65px; align-items: center; gap: .5rem; margin-bottom: .5rem; }
 .creation-preview { background: #111b2d; padding: .8rem; }
 .creation-preview h4 { margin: 0 0 .5rem; }
 .creation-preview dl { margin: 0; }

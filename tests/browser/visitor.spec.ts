@@ -4,7 +4,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import {
-  cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, signOutFromChip, touchLayout,
+  cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, signOutFromChip, spendSuggestedPoints, touchLayout,
 } from './shell-helpers';
 
 // Task 13.6: a visitor watches the live camp and opens every public menu without an account or a command, and joins by
@@ -288,6 +288,7 @@ test.describe('the creation dialog with a keyboard', () => {
       : route.fulfill({ status: 409, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'conflict' }) })));
     const dialog = await signInToCreate(page);
     await dialog.getByLabel('Gladiator name').fill('Taken Name');
+    await spendSuggestedPoints(page);
     await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
     const reason = dialog.getByRole('alert');
     await expect(reason).toContainText('name may already be taken');
@@ -316,6 +317,19 @@ test('fits the creation dialog on a 360 px phone with its actions in view', asyn
     const at = await boxOf(button);
     expect(at.x >= 0 && at.x + at.width <= 360 && at.y >= 0 && at.y + at.height <= 740, `${name} ${JSON.stringify(at)}`).toBe(true);
   }
+  // The ten points (launch feedback): no row scrolls the dialog sideways, and every point control is a 44 px target in the dialog.
+  expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), 'the dialog does not scroll sideways').toBe(true);
+  const points = dialog.getByRole('group', { name: 'Spend 10 starting points' });
+  const controls = points.locator('button, input');
+  expect(await controls.count()).toBe(2 + 5 * 3);
+  for (const control of await controls.all()) {
+    const at = await boxOf(control);
+    const what = await control.evaluate(el => el.getAttribute('aria-label') ?? el.textContent ?? el.id);
+    expect(at.width >= 44 && at.height >= 44, `${what} is a 44 px target: ${JSON.stringify(at)}`).toBe(true);
+    expect(at.x >= 0 && at.x + at.width <= 360, `${what} fits the 360 px width: ${JSON.stringify(at)}`).toBe(true);
+  }
+  await points.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('join-phone-360x740-create-points.png') });
   await dialog.evaluate(el => el.scrollTo(0, 0));
   await nextFrames(page);
   await page.screenshot({ path: testInfo.outputPath('join-phone-360x740-create-dialog.png') });

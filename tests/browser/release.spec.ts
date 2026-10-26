@@ -352,14 +352,19 @@ test.describe('release accessibility in the fixture preview', () => {
   });
 
   test('links the creation form messages to their fields', async ({ page }, testInfo) => {
-    // Signed in without a gladiator: the creation dialog.
+    // Signed in without a gladiator: the creation dialog. The server refuses every creation as invalid input here, which is the
+    // only way the point fields can be marked invalid: Create is off until all 10 points are spent (launch feedback).
     await seedSession(page.context());
     await routeLiveReads(page.context(), { world: emptyWorld(), owner: null });
+    await page.context().route(`${SUPABASE_URL}/functions/v1/game-command`, route => {
+      if (route.request().method() !== 'POST' || isPresence(route.request())) return route.fallback();
+      return route.fulfill({ status: 409, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'invalid' }) });
+    });
     await page.goto('/game/');
     const dialog = creationDialog(page);
     await expect(dialog).toBeVisible({ timeout: 45_000 });
     await expectNamedControls(dialog, 'the creation dialog');
-    // Decision 8 (fix round 1, I3): the dialog's structure, by role and name.
+    // Decision 8 (fix round 1, I3): the dialog's structure, by role and name. The points start at 0 with Create off.
     await expect(dialog).toMatchAriaSnapshot(`
       - dialog "Create your gladiator":
         - heading "Create your gladiator" [level=2]
@@ -369,38 +374,106 @@ test.describe('release accessibility in the fixture preview', () => {
             - radio "Berserker" [checked]
             - radio "Guardian"
             - radio "Duelist"
-          - group "Allocate 10 starting points":
-            - spinbutton "Strength points"
-            - spinbutton "Agility points"
-            - spinbutton "Vitality points"
-            - spinbutton "Endurance points"
-            - spinbutton "Precision points"
-            - status: All 10 points allocated.
-        - region "Starting build preview"
+          - group "Spend 10 starting points":
+            - status: 10 of 10 left
+            - button "Suggested for Berserker"
+            - button "Reset points"
+            - button "Remove a point from Strength"
+            - spinbutton "Strength points": "0"
+            - button "Add a point to Strength"
+            - button "Remove a point from Agility"
+            - spinbutton "Agility points": "0"
+            - button "Add a point to Agility"
+            - button "Remove a point from Vitality"
+            - spinbutton "Vitality points": "0"
+            - button "Add a point to Vitality"
+            - button "Remove a point from Endurance"
+            - spinbutton "Endurance points": "0"
+            - button "Add a point to Endurance"
+            - button "Remove a point from Precision"
+            - spinbutton "Precision points": "0"
+            - button "Add a point to Precision"
+            - status
         - button "Not now"
-        - button "Create gladiator"
+        - button "Create gladiator" [disabled]
     `);
+    const create = dialog.getByRole('button', { name: 'Create gladiator' });
+    await expect(create).toBeDisabled();
+    await expect(create).toHaveAccessibleDescription('Spend 10 more points to continue.');
+    // Nothing is marked invalid before a create attempt, not even the empty points.
+    for (const key of ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision']) {
+      await expect(dialog.getByRole('spinbutton', { name: `${key} points` })).not.toHaveAttribute('aria-invalid', 'true');
+    }
+    await expect(dialog.getByRole('textbox', { name: 'Gladiator name' })).not.toHaveAttribute('aria-invalid', 'true');
+    expect(await contrastIssues(await settled(dialog)), 'the creation dialog with no points spent').toEqual([]);
+    await shot(page, testInfo, 'creation-dialog-empty');
+    // The name's refusal marks the name, described by it, and not the points.
     const name = dialog.getByRole('textbox', { name: 'Gladiator name' });
+    await dialog.getByRole('button', { name: 'Suggested for Berserker' }).click();
     await name.fill('x');
-    await dialog.getByRole('button', { name: 'Create gladiator' }).click();
+    await create.click();
     const error = dialog.getByRole('alert');
     await expect(error).toHaveText('Use 3–20 English letters, digits, spaces, underscores or hyphens.');
     await expect(name).toHaveAttribute('aria-invalid', 'true');
     await expect(name).toHaveAccessibleDescription(/3–20 letters, digits.*Use 3–20 English letters/);
-    // Points that do not add up to 10 mark every point field, described by the count.
     const strength = dialog.getByRole('spinbutton', { name: 'Strength points' });
-    await strength.fill('9');
+    await expect(strength).not.toHaveAttribute('aria-invalid', 'true');
+    // The server refusing the points (or the name) after an attempt marks every point field, described by the refusal.
+    await name.fill('Brutus');
+    await expect(name).not.toHaveAttribute('aria-invalid', 'true');
+    await create.click();
+    await expect(error).toHaveText('Check your name and allocate exactly 10 whole points.');
     for (const key of ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision']) {
       const field = dialog.getByRole('spinbutton', { name: `${key} points` });
       await expect(field).toHaveAttribute('aria-invalid', 'true');
-      await expect(field).toHaveAccessibleDescription(/Allocate exactly 10 whole points/);
+      await expect(field).toHaveAccessibleDescription(/allocate exactly 10 whole points/);
     }
+    // Spending the points differently starts over: nothing is marked invalid again.
     await strength.fill('2');
     await expect(strength).not.toHaveAttribute('aria-invalid', 'true');
-    await name.fill('Brutus');
     await expect(name).not.toHaveAttribute('aria-invalid', 'true');
-    expect(await contrastIssues(await settled(dialog)), 'the creation dialog').toEqual([]);
+    // Contrast in the other states of the form: a capped number (its status line) and all points spent (the preview).
+    await strength.fill('99');
+    await expect(dialog.getByRole('status').filter({ hasText: 'points left, so Strength was set to' })).toBeVisible();
+    expect(await contrastIssues(await settled(dialog)), 'the creation dialog with a capped number').toEqual([]);
+    await dialog.getByRole('button', { name: 'Suggested for Berserker' }).click();
+    await expect(dialog.getByRole('status').filter({ hasText: 'All 10 spent' })).toBeVisible();
+    await expect(dialog.getByRole('region', { name: 'Starting build preview' })).toBeVisible();
+    expect(await contrastIssues(await settled(dialog)), 'the creation dialog with all points spent').toEqual([]);
     await shot(page, testInfo, 'creation-dialog');
+  });
+
+  test('keeps the focus on a point stepper that reaches its limit, and names every point control', async ({ page }) => {
+    // Task 23.5 (focus never left on <body>), launch feedback goal 1: the last + and the last − stay focusable (aria-disabled)
+    // instead of being disabled, which would drop a keyboard user's focus.
+    await watchFocus(page);
+    await seedSession(page.context());
+    await routeLiveReads(page.context(), { world: emptyWorld(), owner: null });
+    await page.goto('/game/');
+    const dialog = creationDialog(page);
+    await expect(dialog).toBeVisible({ timeout: 45_000 });
+    const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+    const add = dialog.getByRole('button', { name: 'Add a point to Agility', exact: true });
+    const remove = dialog.getByRole('button', { name: 'Remove a point from Agility', exact: true });
+    await dialog.getByRole('spinbutton', { name: 'Strength points' }).fill('9');
+    await expect(counter).toHaveText('1 of 10 left');
+    await add.focus();
+    await page.keyboard.press('Enter');
+    await expect(counter).toHaveText('All 10 spent');
+    await expect(add).toHaveAttribute('aria-disabled', 'true');
+    await expect(add).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(counter).toHaveText('All 10 spent');
+    await remove.focus();
+    await page.keyboard.press('Enter');
+    await expect(counter).toHaveText('1 of 10 left');
+    await expect(remove).toHaveAttribute('aria-disabled', 'true');
+    await expect(remove).toBeFocused();
+    await dialog.getByRole('button', { name: 'Reset points' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(counter).toHaveText('10 of 10 left');
+    await expect(dialog.getByRole('button', { name: 'Reset points' })).toBeFocused();
+    expect(await focusDrops(page), 'the focus never fell to <body>').toEqual([]);
   });
 
   for (const how of ['Escape', 'Enter on Not now'] as const) {

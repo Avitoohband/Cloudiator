@@ -16,6 +16,11 @@ export const cornerChip = (page: Page) => page.getByTestId('corner-chip');
 export const joinButton = (page: Page) => cornerChip(page).getByRole('button', { name: /^Sign in (with Google )?to join$/ });
 /** The "Create your gladiator" dialog over the camp (signed in without a gladiator, Task 13.6). */
 export const creationDialog = (page: Page) => page.getByRole('dialog', { name: 'Create your gladiator', exact: true });
+/**
+ * Spends all ten points in the creation dialog with "Suggested for {class}" (the points start at 0, launch feedback), so
+ * Create is enabled. The suggestion follows the class picked now.
+ */
+export const spendSuggestedPoints = (page: Page) => creationDialog(page).getByRole('button', { name: /^Suggested for / }).click();
 
 /** Shows the rail: the pointer at the left edge on desktop, the ☰ button on touch (an open sheet hides it, so it closes). */
 export async function revealRail(page: Page) {

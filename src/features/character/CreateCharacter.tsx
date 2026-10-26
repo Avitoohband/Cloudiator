@@ -3,7 +3,8 @@
 // The "Create your gladiator" dialog (Task 13.6, spec "Joining"): signed in without a gladiator, the existing creation form
 // opens as a modal dialog over the running camp. "Not now" or Escape closes it (`onDismiss`); the chip and My gladiator
 // offer it again. The draft stays on this device (`cloudiator.creation-draft.v1`) across closing, reloads, sign-out and a
-// new sign-in, and a sent attempt keeps its operation ID for its own account only.
+// new sign-in, and a sent attempt keeps its operation ID for its own account only. The ten starting points (launch feedback,
+// 2026-10-25) start at 0 and are spent with a counter, steppers, a cap and two shortcuts (`creation-points.ts`).
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Attributes, ClassId, GameCommand } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
@@ -13,33 +14,42 @@ import { validateBuild, validateCreationAllocation } from '@domain/build';
 import { deriveStats } from '@domain/stats';
 import { GatewayReadError, type GameGateway } from '../../lib/api/gateway';
 import { useSession } from '../../lib/api/session';
+import {
+  ATTRIBUTE_HINTS, ATTRIBUTE_KEYS, CLASS_SUGGESTIONS, EMPTY_ALLOCATION, cappedNote, pointsLeft, pointsSpent, setPoints,
+} from './creation-points';
 import styles from './CreateCharacter.module.css';
 
-const keys = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
 const classes = ['berserker', 'guardian', 'duelist'] as const;
 const title = (value: string) => value[0].toUpperCase() + value.slice(1);
 const storageKey = 'cloudiator.creation-draft.v1';
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
 type Draft = { version: 1; name: string; classId: ClassId; allocation: Attributes;
   attempt?: { account: string; command: Creation } };
-const initialDraft: Draft = { version: 1, name: '', classId: 'berserker', allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } };
+const initialDraft: Draft = { version: 1, name: '', classId: 'berserker', allocation: { ...EMPTY_ALLOCATION } };
 /** The refusals that are about the name: the name field is marked invalid and described by them (Task 23.5). */
 const NAME_RULE = 'Use 3–20 English letters, digits, spaces, underscores or hyphens.';
 const NAME_TAKEN = 'This name may already be taken, or this account already has a gladiator. Choose another name and try again.';
 const NAME_OR_POINTS = 'Check your name and allocate exactly 10 whole points.';
 const NAME_ERRORS: readonly string[] = [NAME_RULE, NAME_TAKEN, NAME_OR_POINTS];
+/** The refusals that are about the points. Create is off until all are spent, so only a refusal by the server reaches this. */
+const POINTS_RULE = `Allocate exactly ${RULES_V1.attributes.creationPoints} whole points.`;
+const POINTS_ERRORS: readonly string[] = [POINTS_RULE, NAME_OR_POINTS];
 function readDraft(): Draft {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as Draft | null;
     if (!value || value.version !== 1 || typeof value.name !== 'string' || value.name.length > 100 || !classes.includes(value.classId)
-      || !value.allocation || Object.keys(value.allocation).length !== keys.length
-      || !keys.every(key => Number.isFinite(value.allocation[key]) && value.allocation[key] >= 0 && value.allocation[key] <= 10)) return structuredClone(initialDraft);
-    const clean: Draft = { version: 1, name: value.name, classId: value.classId, allocation: { ...value.allocation } };
+      || !value.allocation || Object.keys(value.allocation).length !== ATTRIBUTE_KEYS.length
+      || !ATTRIBUTE_KEYS.every(key => Number.isFinite(value.allocation[key]) && value.allocation[key] >= 0 && value.allocation[key] <= 10)) return structuredClone(initialDraft);
+    // A saved draft keeps its values. Only one the counter could not show (a fraction, or more points than there are, which
+    // the old form allowed) starts again from 0 points, keeping its name and class.
+    const kept = ATTRIBUTE_KEYS.every(key => Number.isInteger(value.allocation[key]))
+      && pointsSpent(value.allocation) <= RULES_V1.attributes.creationPoints;
+    const clean: Draft = { version: 1, name: value.name, classId: value.classId, allocation: kept ? { ...value.allocation } : { ...EMPTY_ALLOCATION } };
     const attempt = value.attempt;
     if (attempt && typeof attempt.account === 'string' && attempt.command?.kind === 'create-character'
       && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attempt.command.operationId)
       && attempt.command.name === clean.name.trim() && attempt.command.classId === clean.classId
-      && keys.every(key => attempt.command.allocation?.[key] === clean.allocation[key])) clean.attempt = {
+      && ATTRIBUTE_KEYS.every(key => attempt.command.allocation?.[key] === clean.allocation[key])) clean.attempt = {
         account: attempt.account, command: { kind: 'create-character', operationId: attempt.command.operationId,
           name: clean.name.trim(), classId: clean.classId, allocation: { ...clean.allocation } },
       };
@@ -78,13 +88,15 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The short status line after a typed number was capped; any other edit clears it. */
+  const [capped, setCapped] = useState('');
   const [busy, setBusy] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const sending = useRef(false);
   const mounted = useRef(true);
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  const titleId = useId(), errorId = useId(), pointsId = useId();
+  const titleId = useId(), errorId = useId(), pointsId = useId(), rowsId = useId(), readyId = useId();
   // Modal over the camp: the camp keeps running behind it, but takes no input until the dialog closes. The title takes
   // the focus, so a long form opens at its top.
   useEffect(() => {
@@ -102,20 +114,28 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
     return () => { mounted.current = false; };
   }, []);
   const preview = creationPreview(draft.classId, draft.allocation);
-  const remaining = RULES_V1.attributes.creationPoints - keys.reduce((sum, key) => sum + draft.allocation[key], 0);
-  // The name's refusal and the point count describe their fields, which are marked invalid while they apply (Task 23.5).
+  const { creationPoints, base } = RULES_V1.attributes;
+  const left = pointsLeft(draft.allocation), spent = pointsSpent(draft.allocation);
+  const allSpent = validateCreationAllocation(draft.allocation);
+  // The name's and the points' refusals describe their fields, which are marked invalid only after a create attempt (Task 23.5,
+  // launch feedback): Create is off until all the points are spent, so a points refusal is one the server still sent.
   const nameInvalid = error !== null && NAME_ERRORS.includes(error);
-  const pointsInvalid = !preview;
-  function update(next: Draft) {
+  const pointsInvalid = error !== null && POINTS_ERRORS.includes(error);
+  function update(next: Draft, note = '') {
     const clean = { ...next, attempt: undefined };
-    setDraft(clean); setError(null); setStorageAvailable(persist(clean));
+    setDraft(clean); setError(null); setCapped(note); setStorageAvailable(persist(clean));
+  }
+  /** A typed or stepped number for one attribute: capped at what is left, with a status line when it was. */
+  function changePoints(key: keyof Attributes, wanted: number) {
+    const result = setPoints(draft.allocation, key, wanted);
+    update({ ...draft, allocation: result.allocation }, result.capped ? cappedNote(title(key), left, result.allocation[key]) : '');
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending.current || !accountId || !ready) return;
     const name = draft.name.trim();
     if (!/^[A-Za-z0-9 _-]{3,20}$/.test(name)) { setError(NAME_RULE); return; }
-    if (!preview) { setError('Allocate exactly 10 whole points.'); return; }
+    if (!preview) { setError(POINTS_RULE); return; }
     const command: Creation = draft.attempt?.account === accountId ? draft.attempt.command : {
       kind: 'create-character', operationId: crypto.randomUUID(), name, classId: draft.classId, allocation: { ...draft.allocation },
     };
@@ -172,12 +192,41 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
         <fieldset className="class-options"><legend>Choose a class</legend>
           {classes.map(classId => <label key={classId}><input type="radio" name="class" value={classId} checked={draft.classId === classId} onChange={() => update({ ...draft, classId })} />{title(classId)}</label>)}
         </fieldset>
-        <p className="muted">{keys.filter(key => RULES_V1.classes[draft.classId][key] !== 1).map(key => `${title(key)} +${Math.round((RULES_V1.classes[draft.classId][key] - 1) * 100)}%`).join(' · ')}</p>
-        <fieldset className="point-options"><legend>Allocate 10 starting points</legend>
-          <p className="muted">Five base points in each attribute.</p>
-          {keys.map(key => <label key={key} htmlFor={`points-${key}`}><span>{title(key)} points</span><input id={`points-${key}`} type="number" min="0" max="10" step="1" inputMode="numeric" value={Number.isFinite(draft.allocation[key]) ? draft.allocation[key] : ''} onChange={event => update({ ...draft, allocation: { ...draft.allocation, [key]: event.target.value === '' ? NaN : Number(event.target.value) } })}
-            aria-invalid={pointsInvalid ? true : undefined} aria-describedby={pointsInvalid ? pointsId : undefined} /></label>)}
-          <p id={pointsId} role="status">{preview ? 'All 10 points allocated.' : 'Allocate exactly 10 whole points.'} {Number.isFinite(remaining) && remaining !== 0 ? `${remaining} points remaining.` : ''}</p>
+        <p className="muted">{ATTRIBUTE_KEYS.filter(key => RULES_V1.classes[draft.classId][key] !== 1).map(key => `${title(key)} +${Math.round((RULES_V1.classes[draft.classId][key] - 1) * 100)}%`).join(' · ')}</p>
+        <fieldset className={`point-options ${styles.points}`} aria-describedby={pointsId}>
+          <legend>Spend {creationPoints} starting points</legend>
+          <p className="muted">Every attribute starts at {base}. Points add on top.</p>
+          <p id={pointsId} role="status" className={styles.counter} data-done={allSpent}>{allSpent ? `All ${creationPoints} spent` : `${left} of ${creationPoints} left`}</p>
+          <div className={styles.pips} aria-hidden="true">
+            {Array.from({ length: creationPoints }, (_, index) => <span key={index} className={styles.pip} data-on={index < spent} />)}
+          </div>
+          <div className={styles.shortcuts}>
+            <button type="button" className={styles.suggest} onClick={() => update({ ...draft, allocation: { ...CLASS_SUGGESTIONS[draft.classId] } })}>Suggested for {title(draft.classId)}</button>
+            <button type="button" className={styles.reset} onClick={() => update({ ...draft, allocation: { ...EMPTY_ALLOCATION } })}>Reset points</button>
+          </div>
+          {ATTRIBUTE_KEYS.map(key => {
+            const value = draft.allocation[key], name = title(key);
+            // The steppers stay in the tab order at their limit (aria-disabled, not disabled), so a keyboard user who spends the
+            // last point keeps the focus instead of losing it to <body>.
+            const atZero = value <= 0, atCap = left === 0;
+            return <div key={key} className={styles.row}>
+              <label htmlFor={`points-${key}`}>{name}<span className={styles.sr}> points</span></label>
+              <span id={`${rowsId}-${key}`} className={styles.hint}>{ATTRIBUTE_HINTS[key]}</span>
+              <div className={styles.controls}>
+                <span className={styles.base} aria-hidden="true">{base} +</span>
+                <button type="button" className={styles.step} aria-label={`Remove a point from ${name}`} aria-disabled={atZero || undefined}
+                  onClick={() => { if (!atZero) changePoints(key, value - 1); }}>−</button>
+                <input id={`points-${key}`} className={styles.value} type="number" min="0" max={value + left} step="1" inputMode="numeric" value={value}
+                  onChange={event => changePoints(key, Number(event.target.value))}
+                  aria-invalid={pointsInvalid ? true : undefined}
+                  aria-describedby={`${rowsId}-${key} ${rowsId}-${key}-total${pointsInvalid ? ` ${errorId}` : ''}`} />
+                <button type="button" className={styles.step} aria-label={`Add a point to ${name}`} aria-disabled={atCap || undefined}
+                  onClick={() => { if (!atCap) changePoints(key, value + 1); }}>+</button>
+                <span id={`${rowsId}-${key}-total`} className={styles.total}><span className={styles.sr}>Total </span><span aria-hidden="true">= </span>{base + value}</span>
+              </div>
+            </div>;
+          })}
+          <p role="status" className={styles.capped}>{capped}</p>
         </fieldset>
       </fieldset>
       {preview && <section className="creation-preview" aria-label="Starting build preview"><h4>Starting build preview</h4>
@@ -188,8 +237,11 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
       {!storageAvailable && <p role="status">This browser cannot retain your draft after leaving the page.</p>}
       {!accountId && <p className="muted">Sign in with Google before confirming.</p>}
       <div className={styles.actions}>
-        <button className={styles.later} type="button" disabled={busy} onClick={close}>Not now</button>
-        <button className={styles.confirm} type="submit" disabled={!accountId || busy || !ready}>{busy ? 'Confirming creation…' : 'Create gladiator'}</button>
+        <p id={readyId} className={styles.createHint}>{allSpent ? 'Ready. You can change your build later.' : `Spend ${left} more point${left === 1 ? '' : 's'} to continue.`}</p>
+        <div className={styles.buttons}>
+          <button className={styles.later} type="button" disabled={busy} onClick={close}>Not now</button>
+          <button className={styles.confirm} type="submit" disabled={!accountId || busy || !ready || !allSpent} aria-describedby={readyId}>{busy ? 'Confirming creation…' : 'Create gladiator'}</button>
+        </div>
       </div>
     </form>
   </dialog>;

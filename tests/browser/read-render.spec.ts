@@ -14,7 +14,7 @@ import { TOURNAMENT_KEYS, TOURNAMENTS, type TournamentKey } from '../fixtures/to
 import { largeTournament } from '../fixtures/tournament-build';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { creationDialog, expectOwnerShown, openMenu } from './shell-helpers';
+import { creationDialog, expectOwnerShown, openMenu, spendSuggestedPoints } from './shell-helpers';
 
 // Task 23.4: read volume and render cost. The camp stops drawing under an opaque scene; "being prepared" re-reads back off;
 // a multi-league camp lays its rings out the same whatever order the views arrive in, and asks a failed ring log again
@@ -279,6 +279,7 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     const dialog = creationDialog(page);
     await expect(dialog).toBeVisible({ timeout: 45_000 });
     await dialog.getByLabel('Gladiator name').fill('Marcus');
+    await spendSuggestedPoints(page);
     const [owners, loads] = [live.count('owner_state'), live.count('world_actor_reads')];
     await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
     await expectOwnerShown(page, 'Marcus');

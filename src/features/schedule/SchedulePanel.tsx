@@ -87,7 +87,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
     attempt.current = null; setDraft(owner.schedule); setError(''); setMessage(null); setRefused(false);
     // Undo disables itself (nothing is left to undo), and Chrome then drops its focus to <body> without an event: a keyboard
     // player is put back on the first part that was changed, never left on the page's top (Task 23.5).
-    if (document.activeElement === undoButton.current) document.getElementById(`schedule-${changed[0]}`)?.focus({ preventScroll: true });
+    if (document.activeElement === undoButton.current && undoButton.current?.matches(':focus-visible')) document.getElementById(`schedule-${changed[0]}`)?.focus({ preventScroll: true });
   }
   async function save() {
     if (sending.current || !dirty) return;

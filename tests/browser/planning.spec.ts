@@ -399,6 +399,19 @@ test('keeps the keyboard focus on the page after Save and after Undo', async ({ 
   expect(await focusDrops(page)).toEqual([]);
 });
 
+test('does not move focus to the first changed select after pointer Undo', async ({ page, context }) => {
+  await planningFlow(context);
+  await page.goto('/game/');
+  await openMenu(page, 'Schedule');
+  const morning = page.getByLabel('morning activity');
+  await morning.selectOption('rest');
+  await undoDay(page).click();
+  await expect(morning).toHaveValue('training');
+  await expect(undoDay(page)).toBeDisabled();
+  await expect(saveDay(page)).toBeDisabled();
+  await expect(morning).not.toBeFocused();
+});
+
 test('re-estimates the next start after a boundary passes while the panel stays open', async ({ page, context }) => {
   await planningFlow(context);
   await page.goto('/game/');

@@ -568,6 +568,12 @@ browsers); the harness covers every credential-free check.
 
 ### Mobile frame rate (24.11)
 
+0. **[Claude, done 2026-10-26]** The bench seed's all-Woodland schedules (the 24.9 worst case) keep all 50 characters away,
+   so the camp shows none of them. Before 24.11 the 50 were moved to camp plans through the game's own `edit_schedule`, in
+   one bench-only, marker-guarded DO block run with `db query --linked --project-ref <bench-ref>`: three rotating day plans
+   (Training / Rest / Arena, Rest / Training / Training, Training / Training / Rest; Arena only in the evening, M23-ready),
+   schedule version 3 → 6, all in camp from the slot after the next boundary (2026-10-26 06:40 UTC). The 24.9 bench numbers
+   were recorded before this change.
 1. **[Avi]** On the phone (**Paste:** its model), open `<bench-origin>/game/?perf=1` (the 50-actor world), then
    `<pages-origin>/game/?perf=1`.
 2. **[Avi]** The fixed path on each: 30 s each of overview, pan and maximum zoom; a replay 5 times; an expedition 5 times;

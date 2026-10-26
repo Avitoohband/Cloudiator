@@ -279,7 +279,8 @@ Proposed rating is Elo-style, starting at 1,000, with K=24 and expectation `1 / 
 
 ### 8.2 Tournament scheduling and eligibility
 
-**Proposed fixed times:** Wednesday and Saturday, 17:20 UTC, lasting one 80-minute afternoon slot. Display the equivalent local time and a countdown. No local daylight-saving change alters UTC scheduling.
+**Fixed times:** Wednesday and Saturday, 18:40 UTC, lasting one 80-minute evening slot (17:20 UTC, an afternoon slot,
+until 2026-10-25, when Arena was limited to the evening: `2026-10-25-launch-feedback-design.md`). Display the equivalent local time and a countdown. No local daylight-saving change alters UTC scheduling.
 
 The character must have auto-registration enabled, Arena assigned to that phase, and sufficient stamina at the slot cutoff. Registration does not require an open browser. Toggles made after the cutoff affect future tournaments. Each league runs its own bracket if at least two entrants qualify. Otherwise those entrants run regular Arena, including NPC fallback where needed.
 
@@ -447,7 +448,7 @@ All agreed systems remain in the intended public release. Real-time manual comba
 
 ### Proposed defaults to review closely
 
-- UTC phase alignment and Wednesday/Saturday 17:20 UTC tournaments.
+- UTC phase alignment and Wednesday/Saturday 18:40 UTC tournaments (17:20 UTC until 2026-10-25).
 - Initial attribute budget, starter equipment, money, default schedule, and fees.
 - Class percentages, stamina/load formulas, combat formulas, and reward amounts.
 - Three expedition environments and their timed encounter presentation.

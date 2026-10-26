@@ -29,7 +29,7 @@ import type { Viewer } from '../character/useGameState';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import {
-  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MARKET_MINIMUM_FEE, MAXIMUM_LISTINGS, MAXIMUM_PRICE, MINIMUM_PRICE, PRICE_HINT, RETRY_CODES,
+  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MARKET_MINIMUM_FEE, MAXIMUM_LISTINGS, MAXIMUM_PRICE, MINIMUM_PRICE, PRICE_HINT, RETRY_CODES, WHOLE_PRICE_TEXT,
   activeListings, amount, itemGrade, itemIcon, itemName, itemStats, listableItems, marketErrorText, marketFee, money, npcValueText, offerName,
   priceProblem, sellerReceives, timeLeft, validPrice, type MarketKind,
 } from './market-text';
@@ -246,7 +246,7 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
         <input id={priceId} className={styles.priceInput} type="number" inputMode="numeric" min={MINIMUM_PRICE} max={MAXIMUM_PRICE} step={1} value={price}
           aria-invalid={wrong ? true : undefined} aria-describedby={wrong ? `${hintId} ${errorId}` : hintId} onChange={event => setPrice(event.target.value)} />
         <p id={hintId} className="muted">{PRICE_HINT}</p>
-        {problem && <p id={errorId} className={styles.blocked} role="status">{problem === 'low' ? LOWEST_PRICE_TEXT : `Enter a whole price from ${amount(MINIMUM_PRICE)} to ${amount(MAXIMUM_PRICE)}.`}</p>}
+        {problem && <p id={errorId} className={styles.blocked} role="status">{problem === 'low' ? LOWEST_PRICE_TEXT : WHOLE_PRICE_TEXT}</p>}
         {item && <div className={styles.terms} aria-live="polite">
           <p>{npcValueText(item)}</p>
           {valid && <>

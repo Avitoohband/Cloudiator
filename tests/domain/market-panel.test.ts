@@ -7,7 +7,7 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { createDisplayClock } from '@/game/display-clock';
 import {
   LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MINIMUM_PRICE, PRICE_HINT, listableItems, marketErrorText, marketFee, priceProblem, sellerReceives,
-  timeLeft, validPrice,
+  timeLeft, validPrice, WHOLE_PRICE_TEXT,
 } from '@/features/market/market-text';
 import { MarketOffers, MarketPanel, ownerReads, type OffersModel } from '@/features/market/MarketPanel';
 import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
@@ -65,6 +65,8 @@ describe('market fees (plan Decision 2; launch feedback: at least 1)', () => {
       expect([6, 7].map(ruled.validPrice)).toEqual([false, true]);
       expect(ruled.MARKET_FEE_TERMS).toBe('10%, at least 3');
       expect(ruled.LOWEST_PRICE_TEXT).toContain('lowest price is 7 money');
+      expect(ruled.WHOLE_PRICE_TEXT).toBe('Enter a whole price from 7 to 1,000,000,000.');
+      expect(ruled.marketErrorText('invalid', 'create-listing')).toBe('This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least 7 money, with at most 5 active listings.');
     } finally {
       vi.doUnmock('@domain/rules-v1');
       vi.resetModules();
@@ -84,8 +86,12 @@ describe('what the Sell form says about a typed price', () => {
   });
 
   it('asks for a whole price when the typed one is fractional, too large or not a number, and for nothing while empty or valid', () => {
-    for (const typed of ['1.5', '1000000001', '2.5', '1e30']) expect(priceProblem(typed), typed).toBe('whole');
+    for (const typed of ['abc', '0.5', '1.5', '1000000001', '2.5', '1e30']) expect(priceProblem(typed), typed).toBe('whole');
     for (const typed of ['', '  ', '2', '11', '1000000000']) expect(priceProblem(typed), typed).toBeNull();
+  });
+
+  it('asks for a whole price within the accepted range', () => {
+    expect(WHOLE_PRICE_TEXT).toBe('Enter a whole price from 2 to 1,000,000,000.');
   });
 });
 
@@ -148,6 +154,10 @@ describe('items a seller can list (controller ruling: equipment only)', () => {
 });
 
 describe('market refusals (plan Decision 9)', () => {
+  it('explains the equipment, whole-price minimum and listing limit for an invalid listing', () => {
+    expect(marketErrorText('invalid', 'create-listing')).toBe('This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least 2 money, with at most 5 active listings.');
+  });
+
   it('explains every code, and that a stale page was refreshed', () => {
     expect(marketErrorText('sold', 'buy-listing')).toMatch(/already (been )?sold.*refreshed/i);
     expect(marketErrorText('expired', 'buy-listing')).toMatch(/expired.*refreshed/i);

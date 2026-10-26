@@ -40,6 +40,8 @@ export const money = (value: number): string => `${amount(value)} money`;
 
 /** The Sell form's hint under the price field: "A whole price from 2 to 1,000,000,000." */
 export const PRICE_HINT = `A whole price from ${amount(MINIMUM_PRICE)} to ${amount(MAXIMUM_PRICE)}.`;
+/** What the Sell form asks for when a typed price is fractional, too large or not a number. */
+export const WHOLE_PRICE_TEXT = `Enter a whole price from ${amount(MINIMUM_PRICE)} to ${amount(MAXIMUM_PRICE)}.`;
 /** What the Sell form says to a whole price under the lowest one (launch feedback). */
 export const LOWEST_PRICE_TEXT = `The lowest price is ${money(MINIMUM_PRICE)}, so you always receive something after the fee.`;
 /**

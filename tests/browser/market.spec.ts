@@ -4,6 +4,7 @@ import type { ApiErrorCode, GameCommand } from '../../supabase/functions/_shared
 import type { ItemInstance, MarketListing, OwnerState, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
+import { WHOLE_PRICE_TEXT } from '../../src/features/market/market-text';
 import { ARENA_OWNER } from '../fixtures/arena-build';
 import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
@@ -19,9 +20,8 @@ import { forbidRemote } from './remote';
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
 /** The database's fee (launch feedback): 5 % floored but at least 1, `greatest(1, price*5/100)`; its lowest listing price is 2. */
-const feeOf = (price: number) => Math.max(1, Math.floor(price * 5 / 100));
+const feeOf = (price: number) => Math.max(RULES_V1.fees.marketMinimum, Math.floor(price * 5 / 100));
 const LOWEST_PRICE = 'The lowest price is 2 money, so you always receive something after the fee.';
-const WHOLE_PRICE = 'Enter a whole price from 2 to 1,000,000,000.';
 const escaped = (text: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 const world = (): WorldSnapshot => ({ ...worldFixture, revision: 'live-1' });
 const offer = (catalogId: string) => MARKET_ROWS.find(row => row.item.catalogId === catalogId)!;
@@ -98,7 +98,7 @@ async function marketFlow(context: BrowserContext): Promise<Flow> {
     }
     if (command.kind === 'create-listing') {
       const item = state.inventory.find(i => i.id === command.itemId);
-      if (!item || item.reservation || command.price < 2) return refused('invalid');
+      if (!item || item.reservation || command.price < RULES_V1.marketplace.minimumPrice) return refused('invalid');
       const listingId = randomUUID(), listedAtMs = live.serverNowMs(), expiresAtMs = listedAtMs + RULES_V1.marketplace.expiryMs;
       item.reservation = { kind: 'listing', referenceId: listingId };
       const { catalogId, catalogVersion, tier, rarity, stats, quantity } = item;
@@ -641,7 +641,7 @@ test('refuses fractional, over-cap and under-2 prices, and List for sale at the 
   const price = sell.getByLabel('Price in money');
   const list = sell.getByRole('button', { name: 'List for sale', exact: true });
   // A whole price under 2 is told why 2 is the lowest; a fractional or too large one is asked for a whole price from 2.
-  for (const [value, said] of [['1.5', WHOLE_PRICE], ['1000000001', WHOLE_PRICE], ['-3', LOWEST_PRICE], ['1', LOWEST_PRICE], ['0', LOWEST_PRICE]]) {
+  for (const [value, said] of [['1.5', WHOLE_PRICE_TEXT], ['1000000001', WHOLE_PRICE_TEXT], ['-3', LOWEST_PRICE], ['1', LOWEST_PRICE], ['0', LOWEST_PRICE]]) {
     await price.fill(value);
     await expect(sell, value).toContainText(said);
     await expect(price, value).toHaveAttribute('aria-invalid', 'true');

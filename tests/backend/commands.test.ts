@@ -35,6 +35,40 @@ it('strictly rejects extra authority, malformed discriminants, UUIDs and fractio
   expect(parseCommand({ ...create, name: '_Avi-' })).not.toBeNull();
 });
 
+it('accepts create-character with or without a valid appearance and refuses an invalid one', () => {
+  const appearance = { body: 'female', hair: 'ponytail', skin: 3, hairColor: 5, cloth: 11 };
+  expect(parseCommand(create)).toEqual(create);
+  expect(parseCommand({ ...create, appearance })).toEqual({ ...create, appearance });
+  for (const body of ['male', 'female']) for (const hair of ['short', 'long', 'ponytail', 'bald'])
+    expect(parseCommand({ ...create, appearance: { body, hair, skin: 0, hairColor: 0, cloth: 0 } })).not.toBeNull();
+  expect(parseCommand({ ...create, appearance: { ...appearance, skin: 4, hairColor: 0, cloth: 0 } })).not.toBeNull();
+  const { cloth: _cloth, ...missing } = appearance;
+  for (const bad of [null, undefined, 'female', 0, [], [appearance], {}, missing, { ...appearance, skin: 5 }, { ...appearance, skin: -1 },
+    { ...appearance, cloth: 12 }, { ...appearance, cloth: -1 }, { ...appearance, hairColor: 6 }, { ...appearance, hairColor: 1.5 },
+    { ...appearance, skin: '1' }, { ...appearance, hair: 'mohawk' }, { ...appearance, body: 'other' }, { ...appearance, extra: 1 }])
+    expect(parseCommand({ ...create, appearance: bad }), JSON.stringify(bad)).toBeNull();
+  // The optional key must still be exact: no other extra authority rides along with a valid look.
+  expect(parseCommand({ ...create, appearance, ownerId: operationId })).toBeNull();
+  // Other commands never accept a look.
+  expect(parseCommand({ kind: 'cancel-build', operationId, expectedVersion: 1, appearance })).toBeNull();
+});
+
+it('refuses an invalid appearance over HTTP and never reaches creation', async () => {
+  let created: unknown = null;
+  const spy: CommandDependencies = { ...deps, database: { ...deps.database, createGladiator: async (_actor, command) => { created = command; return { ok: true, receiptId: operationId, value: { gladiatorId: operationId } }; } } };
+  const bad = await handleCommand(req({ ...create, appearance: { body: 'female', hair: 'mohawk', skin: 1, hairColor: 1, cloth: 1 } }), spy);
+  expect(bad.status).toBe(400);
+  expect(await bad.json()).toEqual({ ok: false, code: 'invalid' });
+  expect(created).toBeNull();
+  const appearance = { body: 'male', hair: 'bald', skin: 2, hairColor: 4, cloth: 8 };
+  const good = await handleCommand(req({ ...create, appearance }), spy);
+  expect(good.status).toBe(200);
+  expect(created).toEqual({ ...create, appearance });
+  created = null;
+  expect((await handleCommand(req(create), spy)).status).toBe(200);
+  expect(created).toEqual(create);
+});
+
 it('validates every discriminant and rejects invalid counts, prices, booleans and catalog IDs', () => {
   const commands = [
     { kind: 'edit-schedule', expectedVersion: 1, phase: 'morning', choice: { kind: 'expedition', expeditionId: 'woodland' } },

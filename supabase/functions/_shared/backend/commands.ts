@@ -3,6 +3,7 @@ import type { Actor } from './auth.ts';
 import type { CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
+import { validAppearance } from '../domain/appearance.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
 import { choiceAllowedInPhase } from '../domain/schedule-choice.ts';
 import { jsonResponse, preflightResponse, readCommandBody, statusFor } from './http.ts';
@@ -26,8 +27,10 @@ export function parseCommand(value: unknown): GameCommand | null {
   const shape = (...keys: string[]) => exact(value, ['kind', 'operationId', ...keys]);
   let valid = false;
   switch (value.kind) {
+    // `appearance` is optional (an older open tab omits it); when present it must be exactly a valid look.
     case 'create-character':
-      valid = shape('name', 'classId', 'allocation') && typeof value.name === 'string' && value.name === value.name.trim()
+      valid = (shape('name', 'classId', 'allocation') || (shape('name', 'classId', 'allocation', 'appearance') && validAppearance(value.appearance)))
+        && typeof value.name === 'string' && value.name === value.name.trim()
         && /^[A-Za-z0-9 _-]{3,20}$/.test(value.name)
         && oneOf(value.classId, Object.keys(RULES_V1.classes)) && validateCreationAllocation(value.allocation as Attributes); break;
     // Arena only in the evening (launch feedback): the part's choice must pass `choiceAllowedInPhase`, else the command is invalid.

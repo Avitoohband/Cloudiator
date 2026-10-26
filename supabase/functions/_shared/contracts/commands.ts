@@ -1,3 +1,5 @@
+import type { Appearance } from '../domain/appearance.ts';
+
 /** Wire values are plain JSON. Boundary validators enforce safe integer ranges and UUIDs. */
 export type GladiatorId = string;
 export type ActivityId = string;
@@ -32,7 +34,9 @@ export type PresenceResult = { ok: true } | { ok: false; code: ApiErrorCode; ret
 export type DayScheduleValue = { version: number; receivedAtMs: number; parts: Record<Phase, { effectiveSlotIndex: number; effectiveAtMs: number } | null> };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
-  | { kind: 'create-character'; name: string; classId: ClassId; allocation: Attributes }
+  // `appearance` is the look chosen at creation (supabase/functions/_shared/domain/appearance.ts). Absent (an older open tab): the
+  // gladiator is stored with no appearance, the legacy look.
+  | { kind: 'create-character'; name: string; classId: ClassId; allocation: Attributes; appearance?: Appearance }
   | { kind: 'edit-schedule'; expectedVersion: number; phase: Phase; choice: ActivityChoice }
   | { kind: 'edit-day-schedule'; expectedVersion: number; day: Schedule }
   | { kind: 'queue-build'; expectedVersion: number; classId: ClassId; stance: Stance; allocation: Attributes; equipment: Equipment }

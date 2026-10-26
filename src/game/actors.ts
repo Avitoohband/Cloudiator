@@ -1,6 +1,7 @@
 // Turns public world actors into deterministic, locally animated camp routines.
 // Everything here derives from (gladiatorId, slotIndex); no rewards or private data are involved.
 import type { PublicActor } from '@contracts/reads';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES } from '@domain/appearance';
 import type { ActionId, Direction, MapData, MapStation } from './assets';
 
 export type RoutineKind = 'training' | 'rest' | 'arena' | 'tournament' | 'away' | 'orientation' | 'idle';
@@ -68,11 +69,11 @@ const ACTION_FOR: Record<Variant, ActionId> = {
   'arena-staging': 'idle', 'arena-ring': 'spar', browse: 'idle',
 };
 
-/** Player colours: tinted over the grey cloth and hair layers (multiply). */
-export const CLOTH_TINTS = [0x22a39d, 0xbd3429, 0xf2b43d, 0x6a4fb8, 0x3c7fd0, 0x4e8d3b, 0xe0702a, 0xf4e8cb, 0x4b4b55, 0xa8693a, 0xd9608c, 0x8edcf4];
-export const HAIR_TINTS = [0x5a3418, 0x2a2024, 0xb8742f, 0xe6c06a, 0x9a9a9a, 0x8a3324];
+/** Player colours: tinted over the grey cloth and hair layers (multiply). Derived from the shared appearance options. */
+export const CLOTH_TINTS: readonly number[] = CLOTH_COLOURS.map(({ tint }) => tint);
+export const HAIR_TINTS: readonly number[] = HAIR_COLOURS.map(({ tint }) => tint);
 /** Multiplied over the light base skin: light, tan, olive, brown, deep brown. */
-export const SKIN_TINTS = [0xffffff, 0xeac3a0, 0xcf9a74, 0x9f6e4c, 0x7a5038];
+export const SKIN_TINTS: readonly number[] = SKIN_TONES.map(({ tint }) => tint);
 
 /** Must equal manifest.equipmentLayers (tested). Catalog template id to layer id. */
 export const EQUIPMENT_LAYERS: Record<string, string | null> = {

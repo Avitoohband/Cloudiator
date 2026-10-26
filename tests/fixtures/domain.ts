@@ -4,7 +4,7 @@ import type { BuildInput, BuildSnapshot, CatalogItem } from '../../supabase/func
 
 /** Minimal serializable wire fixtures, supplemented by private domain fixtures below. */
 export const ownerFixture: OwnerState = {
-  gladiatorId: '0d5f8471-d919-428f-9ab7-058c95821757', name: 'Aster',
+  gladiatorId: '0d5f8471-d919-428f-9ab7-058c95821757', name: 'Aster', appearance: null,
   currentBuild: { version: 1, classId: 'guardian', stance: 'balanced',
     allocations: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 },
     equipment: { weapon: null, offHand: null, head: null, body: null, feet: null } },
@@ -23,7 +23,7 @@ export const ownerFixture: OwnerState = {
 export const worldFixture: WorldSnapshot = {
   revision: 'fixture-1', serverNowMs: 1791592800000, slotIndex: 373248,
   actors: [{ gladiatorId: ownerFixture.gladiatorId, name: 'Aster', classId: 'guardian',
-    equipmentSilhouettes: [], league: 'bronze', level: 1, phase: 'morning', location: 'training',
+    equipmentSilhouettes: [], appearance: null, league: 'bronze', level: 1, phase: 'morning', location: 'training',
     activityId: ownerFixture.currentActivity!.id, activityStatus: 'active',
     startsAtMs: 1791590400000, endsAtMs: 1791595200000, visibleStage: null, resting: false }],
 };

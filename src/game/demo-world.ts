@@ -38,6 +38,7 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
       name: NAMES[i % NAMES.length],
       classId: CLASSES[h % CLASSES.length],
       equipmentSilhouettes: LOADOUTS[(h >>> 3) % LOADOUTS.length],
+      appearance: null,
       league: LEAGUES[(h >>> 7) % LEAGUES.length],
       level: 1 + ((h >>> 11) % 12),
       phase: phaseOfSlot(slotIndex),

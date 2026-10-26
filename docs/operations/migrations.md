@@ -1,5 +1,126 @@
 # Local identity backend and migrations
 
+## Gladiator appearance at creation (M24)
+
+M24 is `supabase/migrations/20261026160844_appearance.sql`, the SQL part of the
+[gladiator appearance design](../superpowers/specs/2026-10-26-gladiator-appearance-design.md) (Avi approved the mockup,
+2026-10-26; plan Task 3). The design notes are in its source, `supabase/sql/17-appearance.sql`.
+- **Generation.** CLI 2.120.0, `db pull appearance --local --schema public,private --yes` (engine `migra`). The input was the
+  tested source, applied once (the whole file, through the psql fallback after the container label check) to a clean
+  M01–M23 reset.
+- **Completion.** The draft was completed from that source; M01–M23 are unchanged.
+
+**What M24 changes.**
+- **`private.valid_appearance(jsonb)`**, SQL's restatement of `validAppearance`
+  (`supabase/functions/_shared/domain/appearance.ts`): exactly `{body, hair, skin, hairColor, cloth}`, body `male|female`,
+  hair `short|long|ponytail|bald`, whole indices skin 0–4, hairColor 0–5, cloth 0–11. Immutable `language sql`, invoker,
+  `search_path=""`. It answers false, never null, for anything else (SQL null included), because a CHECK passes on null; a
+  CASE keeps every cast behind its type test. Besides its owner, only `service_role` may EXECUTE it (below).
+- **`public.gladiators.appearance jsonb`**, nullable with no default, `CHECK (appearance is null or
+  private.valid_appearance(appearance))` (`gladiators_appearance_check`, validated). Null is the legacy look. No backfill:
+  every existing gladiator stays null, so nobody's look changes.
+- **`public.create_gladiator`**, 04-inventory-shops.sql's body plus an optional sixth command key, `appearance`. Present, it
+  must be a valid look, checked with the command shape, so a bad look is `invalid` with no gladiator and no receipt, like
+  every other shape error; absent (an open tab from before the release), the gladiator is stored with null. The receipt
+  keeps the whole command, look included, and its replay still compares the whole command (a changed or dropped look under
+  the same operation is `conflict`).
+- **`private.project_character`**, 15-release.sql's projector plus the actor's `appearance` (null for the legacy look), so
+  `world_actors`, `world_actor_reads` and `public_profile_reads` carry it. `PublicActor.appearance: Appearance | null`.
+- **`public.owner_state`**, 15-release.sql's view plus `appearance`. `OwnerState.appearance: Appearance | null`.
+- **The projection refresh** (`select public.refresh_projections();`), so every existing actor carries `appearance: null`.
+
+**Who may write a gladiator.** PostgreSQL checks EXECUTE on a CHECK's function when a write prepares the constraint, on every
+insert or update of the table, even when the row's look is null and the update changes another column. Observed for an
+update in a rolled-back probe (a scratch table with the same CHECK and a role holding UPDATE but not EXECUTE): `permission
+denied for function valid_appearance`, then the same update succeeded once EXECUTE was granted. Only `service_role` (the RPCs) and
+`postgres` (the owner; both cron jobs run as postgres) hold INSERT or UPDATE on `public.gladiators`, and no function in
+`public` or `private` is security definer, so `service_role` is the one grant needed. A future role that writes gladiators
+needs EXECUTE on `private.valid_appearance` too.
+
+**The draft needed five completions** (checked against the source):
+1. **Order.** The draft added the CHECK before creating the function it calls. Observed: the as-generated draft, run in a
+   rolled-back transaction on an M23-shaped schema (the source's function, constraint and column dropped, M23's view
+   restored), stopped at the constraint with `function private.valid_appearance(jsonb) does not exist`
+   (`check_function_bodies = off` does not cover a CHECK). The function statement moved, unchanged, before the column.
+2. The view statement: the source's, as in M22. The draft's `create or replace view` named no options and would have dropped
+   `security_invoker`.
+3. The three function ACLs (the source's): `valid_appearance` is new and would otherwise keep PUBLIC's default EXECUTE;
+   `create_gladiator` and `project_character` are restated as CREATE OR REPLACE keeps their grants.
+4. The projection refresh, after the column and the projector.
+5. A provenance header and `notify pgrst`.
+
+The rest is as generated. The three function statements are byte-identical to the source-applied `pg_get_functiondef`
+(1,188, 8,031 and 6,100 bytes, compared programmatically). M24 re-emits no unchanged function: the source bodies of
+`create_gladiator` (04) and `project_character` (15) were first checked equal to the M23 replay's, and a diff of the two
+definitions against M23's shows only the appearance lines. `tests/db/appearance.test.ts` ("ships M24 with the projection
+refresh…") checks that the refresh follows the column and the projector, the function precedes the constraint, M24 is the
+last migration and nothing backfills `appearance`. `tests/rule-retention.test.ts` needs no allowance: the refresh is a
+`select`, and the column and constraint are additive.
+
+**Source iteration.** As for M17–M23: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/17-appearance.sql`).
+The whole file is reapplicable (`add column if not exists` skips the column and its CHECK with a notice; applied twice,
+tested). Apply it only from an LF working copy (Task 23.8 observation under M22).
+
+**Tests** (RED first, on a clean M01–M23 replay with the new tests: 12 cases failed, on the missing function, column or key,
+the M24 artifact case on the missing file, and the access matrix on the missing grant):
+- `tests/db/appearance.test.ts` (new):
+  - "restates validAppearance in SQL": the same answer as `validAppearance` for all 2,880 valid looks and 26 refused ones
+    (Task 1's: out of range, fractional, string and boolean indices, unknown body or hair, a missing, extra or renamed key,
+    non-objects, JSON null), false for SQL null; immutable `sql`, invoker, `search_path=""`, EXECUTE for postgres and
+    service_role only.
+  - "adds a nullable appearance column with no default", with the validated CHECK.
+  - "stores a chosen look and shows it in the owner read, the public actor and the visitor profile": two concurrent sends of
+    the same command make one gladiator and one receipt (whose request holds the look); a replay returns the stored
+    result; the same operation with another look or none is `conflict`.
+  - "stores no appearance for a creation without one": null in the column and every read.
+  - "refuses every invalid look past the parser as invalid, leaving no gladiator and no receipt", a sixth key other than
+    `appearance` and a seventh key too; the same operation then still creates with a valid look, and once its receipt
+    exists an invalid look under it is `conflict`, as today.
+  - "creates with a look through the real local Edge runtime, which refuses an invalid one" (400 `invalid`).
+  - "refuses an invalid direct write with the CHECK and re-projects a valid one": every refused look by UPDATE, one by
+    INSERT (23514, `gladiators_appearance_check`); a valid direct write is republished by the gladiators trigger.
+  - "gives an existing gladiator's actor appearance: null when the projections are refreshed, as M24 does".
+  - "ships M24 with the projection refresh…" (above).
+- `tests/db/identity.test.ts`: the owner state of a creation without a look has `appearance: null`; an invalid look and a
+  look with `ownerId` join the invalid SQL inputs.
+- `tests/db/projections.test.ts`: the actor and the profile actor have `appearance: null`.
+- `tests/db/access-matrix.test.ts` (`private.valid_appearance` for `service_role` only), `tests/db/restore-hosted.test.ts`
+  (24 migrations).
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M23: fingerprint 1,161 lines (`scripts/schema-fingerprint.sql`), the
+  line count M23 recorded, and identical on a second reset.
+- The source applied once to that reset (1,164 lines) differs from it only in the `create_gladiator` and
+  `project_character` body hashes, the new `valid_appearance` line, the `owner_state` view hash, and the new column and
+  constraint lines; ACLs, security, volatility and `search_path` unchanged.
+- A clean reset replayed M01–M24, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte (1,164 lines), and again on a second reset.
+- M24 alone (psql `--single-transaction`) over an M23 replay holding one gladiator projected by M23 (no `appearance` key):
+  afterwards its actor has `appearance: null`, its column is null and the revision moved from 2 to 3.
+- Inspection of the replay:
+  - `valid_appearance`, `create_gladiator`, `project_character` and `refresh_projections`
+    `{postgres=X/postgres,service_role=X/postgres}`, invoker, `search_path=""` (`valid_appearance` immutable, the others
+    volatile);
+  - no function executable by anon or authenticated; 44/44 `public`/`private` triggers enabled; both cron jobs active;
+  - `owner_state` keeps `security_invoker=true` and its grants; the column is `jsonb`, nullable, no default; the constraint
+    is validated;
+  - 24 migrations recorded.
+- Lint is empty. Advisors on the fresh replay: 36 INFO `unused_index` notices (no statistics yet), none on `gladiators`, no
+  warnings or errors.
+- `npm run test:db`: 343/343 in 24 files on the M01–M24 replay (16:12–16:19 UTC), the Edge container's start time unchanged
+  across the run; the fingerprint after the run matched the replay's byte for byte.
+
+**Release (plan Task 7).**
+- Deploy M24 before the Edge function (the usual order). With M24 alone, the previous Edge function's creations (five keys)
+  are stored with null, and its parser refuses an `appearance` key. The new parser accepts one, which only an M24 database
+  stores (an earlier `create_gladiator` answers a six-key creation `invalid`).
+- M24 takes an ACCESS EXCLUSIVE lock on `public.gladiators` at `add column` and holds it to the commit, and the refresh
+  reprojects every gladiator inside that transaction; at production's size that is a moment of waiting for concurrent
+  commands and boundaries.
+- An actor projected before M24 has no `appearance` key; once M24 commits every actor has it. A client that can meet an
+  older read (a cached world, a pre-M24 database) should treat a missing look as null, the legacy look (Task 4's concern).
+
 ## Launch feedback: evening Arena, the day save and the 1-gold market fee (M23)
 
 M23 is `supabase/migrations/20261025201936_launch_feedback.sql`, the SQL part of the

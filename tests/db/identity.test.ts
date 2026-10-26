@@ -32,7 +32,9 @@ describe('persistent identity', () => {
       currentBuild: { version: 1, classId: 'guardian', stance: 'balanced', allocations: command.allocation }, pendingBuild: null,
       schedule: { morning: { kind: 'training' }, afternoon: { kind: 'expedition', expeditionId: 'woodland' }, evening: { kind: 'rest' } },
       scheduleVersion: 1, progression: { level: 1, xp: 0, earnedAttributePoints: 10, unspentAttributePoints: 0, league: 'bronze', rating: 1000 },
-      stamina: { current: 104, maximum: 104 }, inventoryCapacity: 60, tournamentOptIn: false, currentActivity: { kind: 'orientation', status: 'active' } });
+      stamina: { current: 104, maximum: 104 }, inventoryCapacity: 60, tournamentOptIn: false, currentActivity: { kind: 'orientation', status: 'active' },
+      // M24: a creation without a look (an older open tab) has no appearance, the legacy look.
+      appearance: null });
     expect(state.inventory).toHaveLength(2);
     expect(state.inventory.map(item => item.catalogId).sort()).toEqual(['light-armor:1:common', 'sword:1:common']);
     const sword = state.inventory.find(item => item.catalogId === 'sword:1:common')!;
@@ -125,6 +127,9 @@ describe('persistent identity', () => {
       { ...prepared, command: { ...command, allocation: { ...command.allocation, strength: 2.5, agility: 1.5 } } },
       { ...prepared, command: { ...command, name: 'bad<>name' } },
       { ...prepared, command: { ...command, ownerId: owner.id } },
+      // M24: the optional sixth key is exactly a valid look (tests/db/appearance.test.ts has every refused one).
+      { ...prepared, command: { ...command, appearance: { body: 'female', hair: 'mohawk', skin: 1, hairColor: 1, cloth: 1 } } },
+      { ...prepared, command: { ...command, appearance: { body: 'female', hair: 'long', skin: 1, hairColor: 1, cloth: 1 }, ownerId: owner.id } },
       { ...prepared, staminaMaximum: null },
       { ...prepared, starterItems: [{}, {}] },
     ];

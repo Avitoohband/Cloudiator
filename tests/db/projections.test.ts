@@ -117,7 +117,9 @@ describe('safe projection authorization', () => {
     const f = await fighter();
     const world = await readWorld(f.other.client);
     expect(world.actors).toHaveLength(1);
-    expect(world.actors[0]).toMatchObject({ gladiatorId: f.gid, equipmentSilhouettes: ['armor-light','weapon-sword'], location: 'orientation' });
+    // M24: a gladiator created without a look publishes appearance null (the legacy look).
+    expect(world.actors[0]).toMatchObject({ gladiatorId: f.gid, equipmentSilhouettes: ['armor-light','weapon-sword'], location: 'orientation', appearance: null });
+    expect((await readProfile(f.other.client, f.gid)).actor).toHaveProperty('appearance', null);
     safe(world); safe(await readProfile(f.other.client, f.gid));
     expect((await readOwner(f.owner.client)).wallets.money).toBe(100);
     await expect(readOwner(f.other.client)).rejects.toMatchObject({code:'not-found'});

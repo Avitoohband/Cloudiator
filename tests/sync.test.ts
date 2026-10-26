@@ -85,7 +85,7 @@ describe('revision synchronization', () => {
   it('reports delayed authoritative work without manufacturing completion or rewards', async () => {
     const f = fixture();
     vi.mocked(f.gateway.world).mockResolvedValue({revision:'1',serverNowMs:Date.now(),slotIndex:1,actors:[{
-      gladiatorId:'g',name:'Delayed',classId:'guardian',equipmentSilhouettes:[],league:'bronze',level:1,phase:'morning',location:'rest',
+      gladiatorId:'g',name:'Delayed',classId:'guardian',equipmentSilhouettes:[],appearance:null,league:'bronze',level:1,phase:'morning',location:'rest',
       activityId:'a',activityStatus:'processing',startsAtMs:0,endsAtMs:1,visibleStage:null,resting:false,
     }]});
     await f.sync.start(); expect(f.states.at(-1)?.processing).toBe(true);

@@ -177,6 +177,9 @@ const SERVICE_ROLE = [
   'function private.tournament_graph(text): EXECUTE',
   'function private.tournament_rewards(uuid): EXECUTE',
   'function private.tournament_settlement_failure(uuid): EXECUTE',
+  // Gladiator appearance (M24): the CHECK on public.gladiators.appearance calls it, so every role that writes a gladiator
+  // (create_gladiator and the boundary functions, as service_role) needs EXECUTE; clients never do.
+  'function private.valid_appearance(jsonb): EXECUTE',
   'function private.valid_bracket(uuid, jsonb, jsonb): EXECUTE',
   'function private.valid_preparation(uuid, jsonb): EXECUTE',
   'function private.valid_tournament_outcomes(text, text, text, text, jsonb): EXECUTE',

@@ -135,7 +135,7 @@ export function tournamentCampActors(key: TournamentKey): PublicActor[] {
   const { startsAtMs, league, entrants } = TOURNAMENTS[key];
   return entrants.map(g => ({
     gladiatorId: ARENA_GLADIATORS[g].id, name: ARENA_GLADIATORS[g].name, classId: TOURNAMENT_LOOKS[g].classId,
-    equipmentSilhouettes: [...TOURNAMENT_LOOKS[g].silhouettes], league, level: TOURNAMENT_LOOKS[g].level,
+    equipmentSilhouettes: [...TOURNAMENT_LOOKS[g].silhouettes], appearance: null, league, level: TOURNAMENT_LOOKS[g].level,
     phase: 'evening', location: 'tournament', activityId: tournamentActivityId(key, g), activityStatus: 'active',
     startsAtMs, endsAtMs: startsAtMs + TOURNAMENT_SLOT_MS, visibleStage: null, resting: false,
   }));
@@ -186,7 +186,7 @@ export function largeTournament(count: number, options: { startsAtMs: number; le
     bracket: { size, rounds, slots: slots.map(s => s?.gladiatorId ?? null) }, entrants: [...seeded].sort(byName), bouts, placements: [] };
   const actors: PublicActor[] = seeded.map((e, i) => {
     const look = TOURNAMENT_LOOKS[keys[i % keys.length]];
-    return { gladiatorId: e.gladiatorId, name: e.name, classId: look.classId, equipmentSilhouettes: [...look.silhouettes], league, level: look.level,
+    return { gladiatorId: e.gladiatorId, name: e.name, classId: look.classId, equipmentSilhouettes: [...look.silhouettes], appearance: null, league, level: look.level,
       phase: 'evening', location: 'tournament', activityId: fixtureUuid(`large-activity-${id}-${i}`), activityStatus: 'active',
       startsAtMs, endsAtMs: startsAtMs + TOURNAMENT_SLOT_MS, visibleStage: null, resting: false };
   });

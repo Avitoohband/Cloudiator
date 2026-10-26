@@ -74,7 +74,7 @@ const signOutInAnotherTab = (page: Page) => page.evaluate(() => {
 /** Varro, away on the shifted Ruined Outpost expedition: the public actor a visitor's world shows. */
 function awayActor(timeline: RevealedTimeline): PublicActor {
   const start = timeline.stages[0].startedAtMs;
-  return { gladiatorId: EXPEDITION_GLADIATORS.varro.id, name: 'Varro', classId: 'duelist', equipmentSilhouettes: ['weapon-sword'], league: 'bronze', level: 6,
+  return { gladiatorId: EXPEDITION_GLADIATORS.varro.id, name: 'Varro', classId: 'duelist', equipmentSilhouettes: ['weapon-sword'], appearance: null, league: 'bronze', level: 6,
     phase: 'afternoon', location: 'expedition:outpost', activityId: timeline.activityId, activityStatus: 'active', startsAtMs: start, endsAtMs: start + SLOT_MS,
     visibleStage: null, resting: false };
 }

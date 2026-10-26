@@ -13,7 +13,7 @@ export function restingActor(actor: PublicActor): PublicActor {
 /** Otho, whose owner has sent no activity signal for 14 days: listed among the gladiators, not drawn in the camp. */
 export const RESTING_ACTOR: PublicActor = restingActor({
   gladiatorId: fixtureUuid('resting-gladiator-otho'), name: 'Otho', classId: 'berserker', equipmentSilhouettes: ['weapon-axe', 'offhand-shield', 'armor-light'],
-  league: 'bronze', level: 5, phase: worldFixture.actors[0].phase, location: 'camp', activityId: null, activityStatus: 'idle',
+  appearance: null, league: 'bronze', level: 5, phase: worldFixture.actors[0].phase, location: 'camp', activityId: null, activityStatus: 'idle',
   startsAtMs: null, endsAtMs: null, visibleStage: null, resting: true,
 });
 /** Otho's public profile (no standings row: a resting gladiator has not played this season). */

@@ -23,7 +23,7 @@ const timelines: ReadonlyMap<string, RevealedTimeline> = new Map(ARENA_WORLD_ACT
 const fightsAt = (t: number, actors: readonly PublicActor[] = ARENA_WORLD_ACTORS, known = timelines) => campArenaFights(actors, known, t);
 const inRing = (slot: RingSlot, t: number) => slot.enterAtMs <= t && t < slot.leaveAtMs;
 const arenaActor = (i: number): PublicActor => ({
-  gladiatorId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, name: `Gladiator ${i}`, classId: 'duelist', equipmentSilhouettes: ['weapon-sword'],
+  gladiatorId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, name: `Gladiator ${i}`, classId: 'duelist', equipmentSilhouettes: ['weapon-sword'], appearance: null,
   league: 'bronze', level: 1, phase: 'morning', location: 'arena', activityId: `activity-${i}`, activityStatus: 'active', startsAtMs: S, endsAtMs: S + ARENA_SLOT_MS, visibleStage: null, resting: false,
 });
 

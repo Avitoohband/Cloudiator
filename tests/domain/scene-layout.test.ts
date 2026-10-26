@@ -20,7 +20,7 @@ const SLOT = 373_248;
 function actor(i: number, location: CampLocation, overrides: Partial<PublicActor> = {}): PublicActor {
   return {
     gladiatorId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, name: `Gladiator ${i}`, classId: 'duelist',
-    equipmentSilhouettes: ['weapon-sword', 'offhand-shield'], league: 'bronze', level: 1, phase: 'morning', location,
+    equipmentSilhouettes: ['weapon-sword', 'offhand-shield'], appearance: null, league: 'bronze', level: 1, phase: 'morning', location,
     activityId: `activity-${i}`, activityStatus: 'active', startsAtMs: 1, endsAtMs: 2, visibleStage: null, resting: false, ...overrides,
   };
 }

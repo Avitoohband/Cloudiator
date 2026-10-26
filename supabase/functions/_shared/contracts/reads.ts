@@ -1,5 +1,6 @@
 import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
 import type { PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
+import type { Appearance } from '../domain/appearance.ts';
 
 export type BuildView = { version: number; classId: ClassId; stance: Stance; allocations: Attributes; equipment: Equipment };
 export type PendingBuildView = { build: BuildView; effectiveSlotIndex: number; reservedMoney: number; reservedItemIds: string[]; operationId: string };
@@ -18,6 +19,8 @@ export type CurrentActivity = {
 /** Authenticated owner-only management DTO. No private activity planning inputs. */
 export type OwnerState = {
   gladiatorId: GladiatorId; name: string;
+  /** The look chosen at creation (M24); null is the legacy look (male body, short hair, colours from the gladiator's id). */
+  appearance: Appearance | null;
   currentBuild: BuildView; pendingBuild: PendingBuildView | null;
   /** Monotonic queue/replace/cancel revision; currentBuild.version changes only on activation. */
   buildVersion: number;
@@ -46,6 +49,8 @@ export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena
 export type EquipmentSilhouette = 'weapon-sword' | 'weapon-axe' | 'weapon-spear' | 'weapon-bow' | 'offhand-shield' | 'armor-light' | 'armor-heavy' | 'head-hood' | 'head-helmet' | 'feet-light' | 'feet-heavy';
 export type PublicActor = {
   gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: EquipmentSilhouette[];
+  /** The look chosen at creation (M24), as OwnerState.appearance; null is the legacy look. Cosmetic only, public like the gear. */
+  appearance: Appearance | null;
   league: LeagueId; level: number; phase: Phase; location: CampLocation;
   activityId: ActivityId | null; activityStatus: CurrentActivity['status'] | 'idle';
   startsAtMs: number | null; endsAtMs: number | null; visibleStage: RevealedStage | null;

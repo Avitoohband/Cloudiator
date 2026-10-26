@@ -807,6 +807,18 @@ test.describe('followable expedition scenes', () => {
     const creatureIds = (environment: string) => MAPS[environment].expedition!.encounters.map(e => e.creature);
     const shown = (d: Scene) => d.waiting.map(w => w.visible);
     const idleFrame = (creatureId: string) => new RegExp(`^${creatureId}/idle/se/[0-3]$`);
+    const creaturesPng = decodePng(readFileSync('public/assets/actors/creatures.png'));
+    const creatureFrames: Record<string, { frame: { x: number; y: number; w: number; h: number }; anchorPx: { x: number; y: number } }> = readJson('public/assets/actors/creatures.json').frames;
+    const creatureArt = (id: string) => manifest.actors.creatures.find((c: { id: string }) => c.id === id);
+    /** How far above its feet the creature's idle art reaches: its highest opaque pixel over the loop, read from the atlas image. */
+    const reachOf = (id: string): number => Math.max(...(manifest.animations[creatureArt(id).animations.idle.se].frames as string[]).map(name => {
+      const f = creatureFrames[name];
+      for (let y = 0; y < f.frame.h; y += 1) for (let x = 0; x < f.frame.w; x += 1) if (creaturesPng.rgba[((f.frame.y + y) * creaturesPng.width + f.frame.x + x) * 4 + 3] > 0) return f.anchorPx.y - y;
+      return 0;
+    }));
+    type Box = { x: number; y: number; width: number; height: number };
+    /** Two name labels (x the centre, y the bottom edge) do not overlap. */
+    const apart = (a: Box, b: Box) => Math.abs(a.x - b.x) >= (a.width + b.width) / 2 || a.y - a.height >= b.y || b.y - b.height >= a.y;
 
     test("waits each encounter's creature at its spot from the start of the trip, in every environment, for the owner and a spectator", async ({ page }) => {
       for (const key of ['woodland', 'outpost', 'mountain', 'spectator'] as const) {
@@ -828,6 +840,10 @@ test.describe('followable expedition scenes', () => {
           // The same depth rule as the fight's creature (y + depth / 100).
           expect(w.depth, `${key} ${i + 1}`).toBeCloseTo(feet.y + 0.11, 6);
           expect(w.frame, `${key} ${i + 1}`).toMatch(idleFrame(w.creatureId));
+          // Its name over its head, at the height of its own art.
+          expect(w.label, `${key} ${i + 1}`).toMatchObject({ text: creatureArt(w.creatureId).name, visible: true, x: feet.x });
+          expect(w.label.y, `${key} ${i + 1}`).toBeCloseTo(feet.y - reachOf(w.creatureId) - 2, 6);
+          expect(w.label.width, `${key} ${i + 1}`).toBeGreaterThan(20);
         });
         // No fight is drawn before one is revealed.
         expect(d.creature, key).toBeNull();
@@ -868,6 +884,11 @@ test.describe('followable expedition scenes', () => {
       const spot = MAPS.woodland.expedition!.encounters[1];
       expect(d.gladiator).toMatchObject({ action: 'idle', x: spot.x + 0.5, y: spot.y + 0.5 });
       expect(d.waiting[1]).toMatchObject({ creatureId: 'timber-wolf', visible: true });
+      // Named like the gladiator, and clear of its name, which stands one tile to the left.
+      expect(d.waiting[1].label).toMatchObject({ text: 'Timber Wolf', visible: true });
+      expect(d.gladiator).toMatchObject({ labelVisible: true });
+      expect(apart(d.waiting[1].label, d.gladiator!.labelBox)).toBe(true);
+      expect(d.waiting[1].label.y).toBeLessThan(d.waiting[1].y - reachOf('timber-wolf'));
       // Inside the view the camera holds on the gladiator, so the player sees it.
       const { worldView } = d.camera;
       expect(d.waiting[1].x).toBeGreaterThan(worldView.x);
@@ -878,6 +899,22 @@ test.describe('followable expedition scenes', () => {
       await page.screenshot({ path: testInfo.outputPath('expedition-woodland-timber-wolf-waiting.png') });
     });
 
+    test("keeps every creature's name clear of the gladiator's name at each spot", async ({ page }) => {
+      for (const key of ['woodland', 'outpost', 'mountain'] as const) {
+        await expeditionFlow.open(page, key, 10);
+        await expeditionFlow.sceneReady(page);
+        for (const [i, fight] of encounterStages(key).entries()) {
+          // The gladiator waits at its spot well before the encounter is due.
+          await expeditionFlow.holdAt(page, fight.startedAtMs - 5_000);
+          const d = await expeditionFlow.scene(page);
+          const spot = MAPS[key].expedition!.encounters[i];
+          expect(d.gladiator, `${key} ${i + 1}`).toMatchObject({ action: 'idle', x: spot.x + 0.5, y: spot.y + 0.5, labelVisible: true });
+          for (const w of d.waiting.filter(v => v.visible)) expect(apart(w.label, d.gladiator!.labelBox), `${key} spot ${i + 1}, ${w.creatureId}`).toBe(true);
+          expect(d.waiting[i].label.visible, `${key} ${i + 1}`).toBe(true);
+        }
+      }
+    });
+
     test('opens mid-slot with the beaten creature gone and the next two waiting', async ({ page }) => {
       await expeditionFlow.open(page, 'woodland', 39);
       await expeditionFlow.sceneReady(page);
@@ -885,12 +922,16 @@ test.describe('followable expedition scenes', () => {
       let d = await expeditionFlow.scene(page);
       expect(shown(d)).toEqual([false, true, true]);
       expect(d.waiting.map(w => w.creatureId)).toEqual(['dire-wolf', 'timber-wolf', 'dire-wolf']);
+      // Its name goes with it.
+      expect(d.waiting.map(w => w.label.visible)).toEqual([false, true, true]);
+      expect(d.waiting.map(w => w.label.text)).toEqual(['Dire Wolf', 'Timber Wolf', 'Dire Wolf']);
       // Encounter 1's creature is drawn nowhere: not waiting, and its fight sprite has faded out.
       expect(d.creature === null || (d.creature.alpha === 0 && !d.creature.visible)).toBe(true);
       // Going back before the fight draws it waiting again, and no stale fight sprite with it.
       await expeditionFlow.hold(page, 'woodland', 10);
       d = await expeditionFlow.scene(page);
       expect(shown(d)).toEqual([true, true, true]);
+      expect(d.waiting.map(w => w.label.visible)).toEqual([true, true, true]);
       expect(d.creature).toBeNull();
       expect(d.battle).toBeNull();
     });
@@ -901,10 +942,13 @@ test.describe('followable expedition scenes', () => {
       const fight = encounterStages('woodland')[0];
       await expeditionFlow.holdAt(page, fight.startedAtMs - 100);
       expect(shown(await expeditionFlow.scene(page))).toEqual([true, true, true]);
+      expect((await expeditionFlow.scene(page)).waiting.map(w => w.label.visible)).toEqual([true, true, true]);
       for (const ms of [fight.startedAtMs, fight.startedAtMs + 3_000, fight.endsAtMs + OUTRO_MS - 100]) {
         await expeditionFlow.holdAt(page, ms);
         const d = await expeditionFlow.scene(page);
         expect(shown(d), `at ${ms - fight.startedAtMs} ms`).toEqual([false, true, true]);
+        // No name over the creature while it fights; the others keep theirs.
+        expect(d.waiting.map(w => w.label.visible), `at ${ms - fight.startedAtMs} ms`).toEqual([false, true, true]);
         expect(d.creature, `at ${ms - fight.startedAtMs} ms`).toMatchObject({ creatureId: 'dire-wolf', visible: true, alpha: 1 });
       }
       // The beaten creature fades as before, and its idle sprite never reappears.
@@ -913,9 +957,11 @@ test.describe('followable expedition scenes', () => {
       expect(shown(d)).toEqual([false, true, true]);
       expect(d.creature!.alpha).toBeGreaterThan(0.5);
       expect(d.creature!.alpha).toBeLessThan(1);
+      expect(d.waiting.map(w => w.label.visible)).toEqual([false, true, true]);
       await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS + 1_600);
       d = await expeditionFlow.scene(page);
       expect(shown(d)).toEqual([false, true, true]);
+      expect(d.waiting.map(w => w.label.visible)).toEqual([false, true, true]);
       expect(d.creature).toMatchObject({ alpha: 0, visible: false });
     });
 
@@ -932,6 +978,7 @@ test.describe('followable expedition scenes', () => {
           const d = await expeditionFlow.scene(page);
           expect(d.battle!.positionMs, `${key} ${i + 1}`).toBe(0);
           expect(d.waiting[i].visible, `${key} ${i + 1}`).toBe(false);
+          expect(d.waiting[i].label.visible, `${key} ${i + 1}`).toBe(false);
           expect(d.creature, `${key} ${i + 1}`).toMatchObject({ creatureId: waiting.creatureId, visible: true, alpha: 1 });
           expect([d.creature!.x, d.creature!.y], `${key} ${i + 1}`).toEqual([waiting.x, waiting.y]);
           expect(d.creature!.scaleX, `${key} ${i + 1}`).toBe(waiting.scaleX);
@@ -950,6 +997,7 @@ test.describe('followable expedition scenes', () => {
       await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS - 100);
       let d = await expeditionFlow.scene(page);
       expect(shown(d)).toEqual([false, false, true]);
+      expect(d.waiting.map(w => w.label.visible)).toEqual([false, false, true]);
       expect(d.creature).toMatchObject({ creatureId: 'raider-archer', visible: true, alpha: 1 });
       // Then it idles at its spot instead of fading, while the gladiator heads for the safe point.
       await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS + 200);
@@ -957,6 +1005,9 @@ test.describe('followable expedition scenes', () => {
       expect(shown(d)).toEqual([false, true, true]);
       expect([d.waiting[1].x, d.waiting[1].y]).toEqual([feet.x, feet.y]);
       expect(d.waiting[1].frame).toMatch(idleFrame('raider-archer'));
+      // Its name comes back with it, over its head.
+      expect(d.waiting[1].label).toMatchObject({ text: 'Raider Archer', visible: true, x: feet.x });
+      expect(d.waiting[1].label.y).toBeCloseTo(feet.y - reachOf('raider-archer') - 2, 6);
       expect(d.creature).toMatchObject({ alpha: 0, visible: false });
       expect(d.gladiator).toMatchObject({ action: 'walk', walking: true });
       for (const minute of [45, 65, 79, 80]) {
@@ -965,6 +1016,8 @@ test.describe('followable expedition scenes', () => {
         expect(shown(d), `minute ${minute}`).toEqual([false, true, true]);
         expect([d.waiting[1].x, d.waiting[1].y], `minute ${minute}`).toEqual([feet.x, feet.y]);
         expect(d.waiting[2].creatureId, `minute ${minute}`).toBe('raider');
+        expect(d.waiting.map(w => w.label.visible), `minute ${minute}`).toEqual([false, true, true]);
+        expect(d.waiting[1].label.text, `minute ${minute}`).toBe('Raider Archer');
         expect(d.creature, `minute ${minute}`).toMatchObject({ alpha: 0, visible: false });
         // The encounter that never happens stays out of the log; the gladiator rests at the safe point.
         await expect(page.getByText('Encounter 3')).toHaveCount(0);
@@ -982,11 +1035,14 @@ test.describe('followable expedition scenes', () => {
       await expeditionFlow.hold(page, 'spectator', 10);
       let d = await expeditionFlow.scene(page);
       expect(d.waiting.map(w => w.creatureId)).toEqual(['raider', 'raider-archer', 'raider']);
+      expect(d.waiting.map(w => w.label.text)).toEqual(['Outpost Raider', 'Raider Archer', 'Outpost Raider']);
       expect(shown(d)).toEqual([true, true, true]);
+      expect(d.waiting.map(w => w.label.visible)).toEqual([true, true, true]);
       // Defeated in encounter 1: its creature stays, the other two keep waiting.
       await expeditionFlow.hold(page, 'spectator', 45);
       d = await expeditionFlow.scene(page);
       expect(shown(d)).toEqual([true, true, true]);
+      expect(d.waiting.map(w => w.label.visible)).toEqual([true, true, true]);
       expect(d.creature).toMatchObject({ alpha: 0, visible: false });
     });
   });

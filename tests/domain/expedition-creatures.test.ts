@@ -3,7 +3,7 @@ import { loadAssetManifest, type MapData } from '@/game/assets';
 import { journeyMap } from '@/game/expedition-path';
 import { renderExpeditionStage, type ExpeditionSceneState } from '@/game/expedition-stage';
 import { REPLAY_OUTRO_MS } from '@/game/replay';
-import { CREATURE_FADE_MS, creatureMode, fightCreatureAlpha, waitingCreatures, type CreatureMode } from '@/game/expedition-creatures';
+import { CREATURE_FADE_MS, clearOfLabel, creatureMode, fightCreatureAlpha, waitingCreatures, type CreatureMode, type LabelBox } from '@/game/expedition-creatures';
 import { planExpedition } from '../../supabase/functions/_shared/domain/expedition.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { deriveStats } from '../../supabase/functions/_shared/domain/stats.ts';
@@ -199,6 +199,46 @@ describe('the encounter creatures of the map', () => {
         expect(spot.enemyFacing, id).toBe('sw');
         expect(spot.enemy, id).not.toEqual(spot.gladiator);
       }
+    }
+  });
+});
+
+describe("a creature's name beside the gladiator's name", () => {
+  // The fight puts the creature one tile to the right of the gladiator on screen: 64 px, at the same height.
+  const NEIGHBOUR = 64;
+  /** Text of `chars` characters at 10 px monospace, with its stroke, as the labels measure about. */
+  const box = (x: number, bottom: number, chars: number): LabelBox => ({ x, y: bottom, width: chars * 6 + 3, height: 13 });
+  const gladiatorName = (chars: number) => box(0, -46, chars);
+  const apart = (a: LabelBox, b: LabelBox) => Math.abs(a.x - b.x) >= (a.width + b.width) / 2 || a.y - a.height >= b.y || b.y - b.height >= a.y;
+
+  it("stays over the creature's head when the two names do not meet", () => {
+    // Short names side by side, and a long name beside a low creature, never touch.
+    expect(clearOfLabel(box(NEIGHBOUR, -54, 10), gladiatorName(5))).toBe(-54);
+    expect(clearOfLabel(box(NEIGHBOUR, -29, 11), gladiatorName(20))).toBe(-29);
+    // Far from the gladiator, whatever the height.
+    expect(clearOfLabel(box(900, -46, 11), gladiatorName(20))).toBe(-46);
+  });
+
+  it("moves above the gladiator's name when a long name would lie over a tall creature's", () => {
+    const label = box(NEIGHBOUR, -43, 14); // an Outpost Raider reaches 41 px up
+    const own = gladiatorName(20);
+    expect(apart(label, own)).toBe(false);
+    const y = clearOfLabel(label, own);
+    expect(y).toBe(own.y - own.height - 1);
+    expect(apart({ ...label, y }, own)).toBe(true);
+  });
+
+  it('never leaves the two names overlapping, for any name the game allows beside any creature', () => {
+    // Names are 3 to 20 characters; the creatures reach 27 (wolves), 41 (raiders) or 52 px (trolls) over their feet; the
+    // spot is one tile away on screen, and a long name drifts from the spot as the gladiator walks up to it.
+    for (const reach of [27, 41, 52]) for (const chars of [3, 5, 9, 12, 20]) for (const theirs of [9, 10, 11, 14]) for (let dx = 0; dx <= 160; dx += 8) {
+      const own = gladiatorName(chars);
+      const label = box(dx, -reach - 2, theirs);
+      const y = clearOfLabel(label, own);
+      expect(apart({ ...label, y }, own), `reach ${reach}, ${chars} chars, ${theirs} chars, ${dx} px`).toBe(true);
+      // It only ever moves up, and only as far as it must.
+      expect(y).toBeLessThanOrEqual(label.y);
+      if (y !== label.y) expect(y).toBe(own.y - own.height - 1);
     }
   });
 });

@@ -3,8 +3,9 @@
 // (src/game/expedition-stage.ts) and only draws it: the gladiator walks the map route, searches, waits,
 // fights a revealed encounter (its battle log, seeked with the replay controller and staged by
 // battle-stage) or rests at the safe point; once the expedition is back at camp it leaves the scene.
-// Each encounter's creature waits idling at its spot until its fight (src/game/expedition-creatures.ts):
-// a creature the gladiator beat fades after the fight, one that won stays idling at its spot.
+// Each encounter's creature waits idling at its spot, named like the gladiator, until its fight
+// (src/game/expedition-creatures.ts): a creature the gladiator beat fades after the fight, one that won stays
+// idling at its spot.
 // It never reveals a stage, simulates a fight or settles anything. The map follows the camp's
 // conventions: baked ground, depth-sliced props (src/game/depth.ts) and buildings that fade while their
 // opaque pixels hide the gladiator. A hidden tab draws nothing; on return the scene shows the current
@@ -16,7 +17,7 @@ import type { ExpeditionSceneState } from './expedition-stage';
 import { REPLAY_OUTRO_MS, createReplayController, type ReplayController } from './replay';
 import { frameIndex, planStage, stageAt, type LabelPose, type StageLayout, type StagePlan } from './battle-stage';
 import { gladiatorPose, journeyMap, type GladiatorPose } from './expedition-path';
-import { creatureMode, fightCreatureAlpha } from './expedition-creatures';
+import { clearOfLabel, creatureMode, fightCreatureAlpha, type LabelBox } from './expedition-creatures';
 import { ZOOM_STEP, clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
 import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
 import { drawSlices, hidesActor, type PlacedImage } from './depth';
@@ -61,10 +62,14 @@ export type ExpeditionDebugState = {
   returned: boolean;
   camera: { centerX: number; centerY: number; zoom: number; worldView: Rect; bounds: Rect };
   gladiator: { x: number; y: number; action: string; animation: string; frames: string[]; layers: string[]; tint: GladiatorLook['tint']; facing: Direction;
-    depth: number; screenX: number; screenY: number; scaleX: number; visible: boolean; alpha: number; labelVisible: boolean; walking: boolean } | null;
+    depth: number; screenX: number; screenY: number; scaleX: number; visible: boolean; alpha: number; labelVisible: boolean; walking: boolean;
+    /** The name over the gladiator: `x` its centre, `y` its bottom edge. */
+    labelBox: LabelBox } | null;
   creature: { id: string; creatureId: string; x: number; y: number; frame: string; depth: number; alpha: number; scaleX: number; visible: boolean } | null;
   /** The idle sprites of the encounters' creatures waiting (or staying) at their spots, one per encounter, in order. */
-  waiting: { encounter: number; creatureId: string; x: number; y: number; frame: string; visible: boolean; depth: number; scaleX: number }[];
+  waiting: { encounter: number; creatureId: string; x: number; y: number; frame: string; visible: boolean; depth: number; scaleX: number;
+    /** The creature's name over its head, shown and hidden with its idle sprite. */
+    label: { text: string; x: number; y: number; visible: boolean; width: number; height: number } }[];
   battle: { battleId: string; positionMs: number } | null;
   effects: { effect: string; frameName: string; target: 0 | 1; x: number; y: number; visible: boolean }[];
   labels: { text: string; x: number; y: number }[];
@@ -89,6 +94,11 @@ const FADED_ALPHA = 0.45;
 const WAITING_DEPTH = 0.11;
 /** Waiting creatures breathe out of step: each encounter's idle loop is offset by this much per encounter. */
 const WAITING_STAGGER_MS = 370;
+/** The name over an actor, the gladiator's or a waiting creature's: one style, so the two cannot drift apart. */
+const NAME_LABEL_STYLE: PhaserNS.Types.GameObjects.Text.TextStyle = { fontFamily: 'monospace', fontSize: '10px', color: '#f4e8cb', stroke: '#1a1423', strokeThickness: 3 };
+const NAME_LABEL_DEPTH = 2_000_002;
+/** A creature's name sits this far above the top of its art. */
+const NAME_LABEL_GAP = 2;
 /** Back at camp, the gladiator fades out of the scene over this long (at once with reduced motion). */
 const HERO_LEAVE_MS = 1500;
 const WHEEL_STEP = 100;
@@ -105,9 +115,18 @@ type PropGroup = Omit<PlacedImage, 'slices'> & {
 };
 type BattleView = { battleId: string; plan: StagePlan; controller: ReplayController };
 /** An encounter's creature idling at its spot; one sprite per encounter, built once and only shown or hidden. */
-type Waiter = { encounter: number; creatureId: string; sprite: Sprite; anim: AnimationDef; index: number };
+type Waiter = { encounter: number; creatureId: string; sprite: Sprite; anim: AnimationDef; index: number;
+  /** Its name, and where that sits over the creature's head (a fitted height, not the gladiator's 46 px). */
+  label: Text; labelY: number };
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** Fills `box` from a name label, with `y` as its bottom edge. */
+const boxOf = (box: LabelBox, label: Text, y: number) => { box.x = label.x; box.y = y; box.width = label.width; box.height = label.height; };
+/** True when a pixel in the row of RGBA bytes starting at `from` is not fully transparent. */
+const rowOpaque = (rgba: Uint8ClampedArray, from: number, width: number) => {
+  for (let x = 0; x < width; x += 1) if (rgba[from + x * 4 + 3] > 0) return true;
+  return false;
+};
 
 export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { scene: PhaserNS.Scene; handle: ExpeditionSceneHandle } {
   const { manifest } = deps;
@@ -137,6 +156,9 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text } | null = null;
   let creature: { container: Container; sprite: Sprite; creatureId: string } | null = null;
   const waiters: Waiter[] = [];
+  /** Two boxes reused every frame to compare a creature's name with the gladiator's. */
+  const mine: LabelBox = { x: 0, y: 0, width: 0, height: 0 };
+  const theirs: LabelBox = { x: 0, y: 0, width: 0, height: 0 };
   const effectPool: Sprite[] = [];
   const effectInfo: { effect: string; frameName: string; target: 0 | 1 }[] = [];
   const labelPool: Text[] = [];
@@ -286,14 +308,36 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         return { id, sprite };
       });
       const container = this.add.container(0, 0, layers.map(l => l.sprite));
-      const label = this.add.text(0, 0, look.name, { fontFamily: 'monospace', fontSize: '10px', color: '#f4e8cb', stroke: '#1a1423', strokeThickness: 3 })
-        .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2);
+      const label = this.nameLabel(look.name);
       if (hero) { hero.container.destroy(); hero.label.destroy(); }
       hero = { container, layers, label };
       last = { ...last, animation: '', frames: [] };
     }
 
-    /** One idle sprite per encounter, at the spot where its fight puts the creature (the right-hand fighter, mirrored). */
+    nameLabel(text: string) {
+      return this.add.text(0, 0, text, NAME_LABEL_STYLE).setOrigin(0.5, 1).setDepth(NAME_LABEL_DEPTH).setResolution(2);
+    }
+
+    /** How far above its feet the creature's idle art reaches (its highest opaque pixel over the loop), in art pixels. */
+    creatureReach(atlas: string, anim: AnimationDef) {
+      const frames = manifest.atlases[atlas].frames;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      let reach = 0;
+      for (const name of anim.frames) {
+        const frame = this.textures.getFrame(atlas, name);
+        canvas.width = frame.cutWidth;
+        canvas.height = frame.cutHeight;
+        ctx.drawImage(frame.source.image as CanvasImageSource, frame.cutX, frame.cutY, frame.cutWidth, frame.cutHeight, 0, 0, frame.cutWidth, frame.cutHeight);
+        const rgba = ctx.getImageData(0, 0, frame.cutWidth, frame.cutHeight).data;
+        let top = 0;
+        while (top < frame.cutHeight && !rowOpaque(rgba, top * frame.cutWidth * 4, frame.cutWidth)) top += 1;
+        if (top < frame.cutHeight) reach = Math.max(reach, frames[name].anchorY - top);
+      }
+      return reach;
+    }
+
+    /** One idle sprite and name per encounter, at the spot where its fight puts the creature (the right-hand fighter, mirrored). */
     buildWaiters() {
       journey.encounters.forEach((spot, i) => {
         const art = manifest.actors.creatures.find(c => c.id === spot.creature);
@@ -303,7 +347,9 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         const feet = worldToScreen(spot.enemy.x + 0.5, spot.enemy.y + 0.5);
         const left = spot.enemyFacing === 'sw' || spot.enemyFacing === 'nw';
         const sprite = this.add.sprite(feet.x, feet.y, art.atlas, anim.frames[0]).setScale(left ? -1 : 1, 1).setDepth(feet.y + WAITING_DEPTH).setVisible(false);
-        waiters.push({ encounter: i + 1, creatureId: art.id, sprite, anim, index: 0 });
+        const labelY = feet.y - this.creatureReach(art.atlas, anim) - NAME_LABEL_GAP;
+        const label = this.nameLabel(art.name).setPosition(feet.x, labelY).setVisible(false);
+        waiters.push({ encounter: i + 1, creatureId: art.id, sprite, anim, index: 0, label, labelY });
       });
     }
 
@@ -312,10 +358,28 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       for (const w of waiters) {
         const mode = state ? creatureMode(state, w.encounter) : 'gone';
         const show = mode === 'waiting' || mode === 'stays';
-        if (w.sprite.visible !== show) w.sprite.setVisible(show);
+        if (w.sprite.visible !== show) { w.sprite.setVisible(show); w.label.setVisible(show); }
         if (!show) continue;
         const index = reducedMotion ? 0 : frameIndex(w.anim, now + w.encounter * WAITING_STAGGER_MS);
         if (index !== w.index) { w.index = index; w.sprite.setFrame(w.anim.frames[index]); }
+      }
+    }
+
+    /**
+     * Keeps each shown creature's name over its head, and clear of the gladiator's name: where the two would overlap
+     * (a long name at a spot beside a tall creature) the creature's name moves up over the gladiator's.
+     */
+    placeWaiterLabels() {
+      const own = hero?.label;
+      for (const w of waiters) {
+        if (!w.label.visible) continue;
+        let y = w.labelY;
+        if (own?.visible) {
+          boxOf(mine, w.label, y);
+          boxOf(theirs, own, own.y);
+          y = clearOfLabel(mine, theirs);
+        }
+        if (w.label.y !== y) w.label.setY(y);
       }
     }
 
@@ -427,6 +491,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         hero.label.setText(look.name).setPosition(hero.container.x, feet.y - 46);
         if (following) this.follow(feet, snap);
       }
+      this.placeWaiterLabels();
       // Props fade only for a gladiator still in the scene.
       this.updateOccluders(pose && presence > 0 ? worldToScreen(pose.x, pose.y) : null);
     }
@@ -614,13 +679,15 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
           x: pose.x, y: pose.y, action: pose.action, animation: last.animation, frames: [...last.frames], layers: hero.layers.map(l => l.id), tint: { ...look.tint },
           facing: pose.facing, depth: hero.container.depth, screenX: hero.container.x, screenY: hero.container.y, scaleX: hero.container.scaleX,
           visible: hero.container.visible, alpha: hero.container.alpha, labelVisible: hero.label.visible, walking: pose.walking,
+          labelBox: { x: hero.label.x, y: hero.label.y, width: hero.label.width, height: hero.label.height },
         } : null,
         creature: creature && battleView ? {
           id: battleView.plan.log.participants[1].id, creatureId: creature.creatureId,
           x: creature.container.x, y: creature.container.y, frame: String(creature.sprite.frame.name), depth: creature.container.depth,
           alpha: creature.container.alpha, scaleX: creature.container.scaleX, visible: creature.container.visible,
         } : null,
-        waiting: waiters.map(w => ({ encounter: w.encounter, creatureId: w.creatureId, x: w.sprite.x, y: w.sprite.y, frame: String(w.sprite.frame.name), visible: w.sprite.visible, depth: w.sprite.depth, scaleX: w.sprite.scaleX })),
+        waiting: waiters.map(w => ({ encounter: w.encounter, creatureId: w.creatureId, x: w.sprite.x, y: w.sprite.y, frame: String(w.sprite.frame.name), visible: w.sprite.visible, depth: w.sprite.depth, scaleX: w.sprite.scaleX,
+          label: { text: w.label.text, x: w.label.x, y: w.label.y, visible: w.label.visible, width: w.label.width, height: w.label.height } })),
         battle: battleView && last.positionMs !== null ? { battleId: battleView.battleId, positionMs: last.positionMs } : null,
         effects: effectInfo.map((e, k) => ({ ...e, x: effectPool[k].x, y: effectPool[k].y, visible: effectPool[k].visible })),
         labels: labelInfo.map((l, k) => ({ ...l, x: labelPool[k].x, y: labelPool[k].y })),

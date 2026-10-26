@@ -61,3 +61,18 @@ export function fightCreatureAlpha(battle: ExpeditionBattle, reducedMotion: bool
   if (!gladiatorWon(battle) || reducedMotion) return 0;
   return Math.max(0, 1 - after / CREATURE_FADE_MS);
 }
+
+/** A name label's box in screen space (y down) for text drawn with origin (0.5, 1): `x` its centre, `y` its bottom edge. */
+export type LabelBox = { x: number; y: number; width: number; height: number };
+const LABEL_APART_X = 2;
+const LABEL_APART_Y = 1;
+
+/**
+ * Where a creature's name sits so it never lies over `other` (the gladiator's name, which stands at the neighbouring tile): the
+ * bottom edge it already has, unless the two boxes would overlap, in which case it rests just above `other`.
+ */
+export function clearOfLabel(label: LabelBox, other: LabelBox): number {
+  if (Math.abs(other.x - label.x) >= (other.width + label.width) / 2 + LABEL_APART_X) return label.y;
+  if (label.y <= other.y - other.height - LABEL_APART_Y || label.y - label.height >= other.y + LABEL_APART_Y) return label.y;
+  return other.y - other.height - LABEL_APART_Y;
+}

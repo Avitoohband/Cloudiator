@@ -1091,3 +1091,28 @@ Avi on his own desktop and phone (Decision 8), Claude reading `scripts/hosted-ch
 
 Avi's decisions from this run, for the next change (not yet built): Arena only in the evening for now, tournaments move to
 the evening slot, a minimum sale fee of 1 gold; and UI notes on character creation, the schedule and equipped gear.
+
+## Launch feedback (M23), 2026-10-26
+
+The change built from those decisions ([design](../superpowers/specs/2026-10-25-launch-feedback-design.md), plan
+`docs/superpowers/plans/2026-10-25-launch-feedback.md`): creation points, one save for the whole day with Arena only in the
+evening and the running-part notice, tournaments at 18:40 UTC, the gear view, and the 1-gold minimum market fee with a
+lowest price of 2. Seven tasks, each with a spec and quality review (three needed one fix round), a whole-branch review and
+one fix wave. Production was pre-approved by Avi ("approved for production once it passes"); the rules changed in place
+under the runbook's M23 exception.
+
+**Gate of record (1724a79).** `node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs` on a quiet host:
+**exit 0, 12 of 12**, `test:db` 334 passed with the capacity gate on and the Edge start time unchanged.
+
+| Step | Bench (`uukrqribdfqovahzjsrx`) | Production (`djkblzbnritgbmctsvob`) |
+|---|---|---|
+| Pre-check (`scripts/launch-feedback-check.sql`) | all 0, no open boundary | all 0, no open boundary |
+| `db push --dry-run` | only `20261025201936_launch_feedback` | only `20261025201936_launch_feedback` |
+| `db push` | applied | applied (Monday 08:05 UTC, outside Wed/Sat 17:20–20:00) |
+| Functions | `game-worker`, `game-command` deployed (Docker bundler; `--use-api` cannot bundle the import map) | both deployed, Edge source identical to `1724a79` |
+| Post-check | all 0 | all 0 |
+| Parity | 23 migrations, functions digest `6f6616377df7245d90060a410f7a23b4` = local | 23 migrations, digest `6f6616377df7245d90060a410f7a23b4` = local; bench marker absent |
+| Client | `bench` fast-forwarded to `1724a79`; deployed checks 9 of 9 | `release` fast-forwarded to `1724a79`; deployed checks 9 of 9 |
+| Health | boundary 373542 under M23: 50 members, prepare/simulation/reveal/settlement 0 failed, `boundaries open` 0, `duplicateGrants` 0 | 0 failed jobs, `boundaries open` 0, `duplicateGrants` 0 |
+
+Before 24.11 the bench's 50 characters moved from the all-Woodland seed plan to camp plans (deployment.md, 24.11 step 0).

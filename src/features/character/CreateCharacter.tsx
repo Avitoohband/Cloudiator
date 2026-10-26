@@ -5,8 +5,9 @@
 // offer it again. The draft stays on this device (`cloudiator.creation-draft.v1`) across closing, reloads, sign-out and a
 // new sign-in, and a sent attempt keeps its operation ID for its own account only. The ten starting points (launch feedback,
 // 2026-10-25) start at 0 and are spent with a counter, steppers, a cap and two shortcuts (`creation-points.ts`). The look
-// (gladiator appearance, 2026-10-26) is chosen after the name: the dialog opens with a random valid one, the draft keeps it
-// (version 2; a version-1 draft opens with a random look and keeps its name, class and points) and Create sends it.
+// (gladiator appearance, 2026-10-26) is chosen after the name: the dialog opens with a random valid one, which the draft keeps
+// at once, so reopening shows it again (version 2; a version-1 draft opens with a random look and keeps its name, class and
+// points) and Create sends it.
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Attributes, ClassId, GameCommand } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
@@ -43,20 +44,25 @@ const NAME_ERRORS: readonly string[] = [NAME_RULE, NAME_TAKEN, NAME_OR_POINTS];
 /** The refusals that are about the points. Create is off until all are spent, so only a refusal by the server reaches this. */
 const POINTS_RULE = `Allocate exactly ${RULES_V1.attributes.creationPoints} whole points.`;
 const POINTS_ERRORS: readonly string[] = [POINTS_RULE, NAME_OR_POINTS];
-function readDraft(): Draft {
+/**
+ * The saved draft, and whether its look was drawn at random just now (there was no saved valid look). Such a draft is saved at
+ * once: the dialog is mounted afresh each time it opens, so closing it unedited and opening it again shows the same look.
+ */
+function readDraft(): { draft: Draft; randomLook: boolean } {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as (Omit<Draft, 'version'> & { version: 1 | 2 }) | null;
     if (!value || (value.version !== 1 && value.version !== 2) || typeof value.name !== 'string' || value.name.length > 100 || !classes.includes(value.classId)
       || !value.allocation || Object.keys(value.allocation).length !== ATTRIBUTE_KEYS.length
-      || !ATTRIBUTE_KEYS.every(key => Number.isFinite(value.allocation[key]) && value.allocation[key] >= 0 && value.allocation[key] <= 10)) return freshDraft();
+      || !ATTRIBUTE_KEYS.every(key => Number.isFinite(value.allocation[key]) && value.allocation[key] >= 0 && value.allocation[key] <= 10)) return { draft: freshDraft(), randomLook: true };
     // A saved draft keeps its values. Only one the counter could not show (a fraction, or more points than there are, which
     // the old form allowed) starts again from 0 points, keeping its name and class.
     const kept = ATTRIBUTE_KEYS.every(key => Number.isInteger(value.allocation[key]))
       && pointsSpent(value.allocation) <= RULES_V1.attributes.creationPoints;
     // The look: a version-2 draft keeps its valid look; a version-1 draft (saved before the look could be chosen) or a damaged one
     // opens with a random look.
+    const savedLook = value.version === 2 && validAppearance(value.appearance);
     const clean: Draft = { version: 2, name: value.name, classId: value.classId, allocation: kept ? { ...value.allocation } : { ...EMPTY_ALLOCATION },
-      appearance: lookFromDraft(value.version === 2 ? value.appearance : null, lookRandom) };
+      appearance: lookFromDraft(savedLook ? value.appearance : null, lookRandom) };
     // A sent attempt (its immutable command) is kept only with the look it was sent with: the old build's attempts carry none, so
     // they start over with a new operation ID (an account that already has its gladiator is handled by the conflict path).
     const attempt = value.attempt;
@@ -68,8 +74,8 @@ function readDraft(): Draft {
         account: attempt.account, command: { kind: 'create-character', operationId: attempt.command.operationId,
           name: clean.name.trim(), classId: clean.classId, allocation: { ...clean.allocation }, appearance: { ...clean.appearance } },
       };
-    return clean;
-  } catch { return freshDraft(); }
+    return { draft: clean, randomLook: !savedLook };
+  } catch { return { draft: freshDraft(), randomLook: true }; }
 }
 function persist(draft: Draft) {
   try { localStorage.setItem(storageKey, JSON.stringify(draft)); return true; } catch { return false; }
@@ -127,7 +133,10 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   useEffect(() => { if (error && !busy) reason.current?.focus(); }, [error, busy]);
   useEffect(() => {
     mounted.current = true;
-    setDraft(readDraft()); setReady(true);
+    const saved = readDraft();
+    setDraft(saved.draft); setReady(true);
+    // A look drawn at random now is kept at once (final review item 4), so reopening the dialog does not draw another.
+    if (saved.randomLook) setStorageAvailable(persist(saved.draft));
     return () => { mounted.current = false; };
   }, []);
   const preview = creationPreview(draft.classId, draft.allocation);

@@ -5,7 +5,7 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, isPresence, routeLiveReads } from './live-routes';
-import { chipToggle, creationDialog, joinButton, openMenu, signOutFromChip, spendSuggestedPoints } from './shell-helpers';
+import { chipToggle, cornerChip, creationDialog, joinButton, openMenu, signOutFromChip, spendSuggestedPoints } from './shell-helpers';
 
 /** A visitor's My gladiator panel (Task 13.6). */
 const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
@@ -627,6 +627,39 @@ test('Random look rolls another valid look, and the choice is kept in the draft'
   await page.reload();
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId('look-summary')).toHaveText(text!);
+});
+
+test('opening the dialog again shows the look it first opened with, though nothing was edited', async ({ page, context }) => {
+  // Final review item 4: the dialog is mounted afresh each time it opens, so the random look it opens with is saved at once.
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  await expectOneLook(dialog);
+  const summary = dialog.getByTestId('look-summary');
+  const opened = (await summary.textContent())!;
+  const layers = await drawn(dialog);
+  const offer = cornerChip(page).getByRole('button', { name: 'Create your gladiator', exact: true });
+  // Not now, then the chip; Escape, then My gladiator; then a reload. The same look every time, and the draft holds it.
+  await dialog.getByRole('button', { name: 'Not now', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await offer.click();
+  await expect(dialog).toBeVisible();
+  await expect(summary).toHaveText(opened);
+  expect(await drawn(dialog)).toEqual(layers);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  const mine = await openMenu(page, 'My gladiator');
+  await mine.getByRole('button', { name: 'Create your gladiator', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(summary).toHaveText(opened);
+  await page.reload();
+  await expect(dialog).toBeVisible();
+  await expect(summary).toHaveText(opened);
+  expect(await drawn(dialog)).toEqual(layers);
+  expect(await readDraft(page)).toMatchObject({ version: 2, name: '', classId: 'berserker' });
+  expect(flow.commands).toHaveLength(0);
 });
 
 test('Create sends exactly the chosen look, and no other key changes', async ({ page, context }) => {

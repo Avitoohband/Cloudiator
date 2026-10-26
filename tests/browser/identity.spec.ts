@@ -601,6 +601,40 @@ test('every control changes the look and the preview follows it', async ({ page,
   await expectOneLook(dialog);
 });
 
+test('the Tab key never leaves the focus under the sticky Not now and Create bar', async ({ page, context }) => {
+  // Final review item 5: the dialog scrolls under its sticky action bar, so each control the Tab key reaches is scrolled clear of
+  // the bar, not left in its band at the foot of the dialog. A short screen makes the dialog scroll.
+  await page.setViewportSize({ width: 360, height: 640 });
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Gladiator name').focus();
+  const reached: string[] = [];
+  for (let step = 0; step < 80; step++) {
+    const at = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const box = el.closest('dialog')!;
+      let bar = [...box.querySelectorAll('button')].find(b => b.textContent === 'Not now') as HTMLElement | null;
+      while (bar && getComputedStyle(bar).position !== 'sticky') bar = bar.parentElement;
+      const rect = el.getBoundingClientRect();
+      return { name: el.getAttribute('aria-label') || el.textContent?.trim() || el.id, inBar: !!bar?.contains(el), bottom: rect.bottom, top: rect.top,
+        barTop: bar!.getBoundingClientRect().top, boxTop: box.getBoundingClientRect().top, scrolls: box.scrollHeight > box.clientHeight };
+    });
+    expect(at.scrolls, 'the dialog scrolls at 360 × 640').toBe(true);
+    if (at.inBar) break;
+    reached.push(at.name);
+    expect(at.bottom, `${at.name} is under the action bar`).toBeLessThanOrEqual(at.barTop + 0.5);
+    expect(at.top, `${at.name} is above the dialog`).toBeGreaterThanOrEqual(at.boxTop - 0.5);
+    await page.keyboard.press('Tab');
+  }
+  // Every look control, the class, the shortcuts and the points were reached before the bar.
+  expect(reached).toEqual(expect.arrayContaining(['Female', 'Bald', 'Random look', 'Skin tone Deep brown', 'Hair colour Red', 'Clothes colour Sky',
+    'Reset points', 'Add a point to Precision']));
+  expect(flow.commands).toHaveLength(0);
+});
+
 test('Random look rolls another valid look, and the choice is kept in the draft', async ({ page, context }) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');

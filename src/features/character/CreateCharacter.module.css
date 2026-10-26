@@ -9,6 +9,9 @@
   padding: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The sticky action bar (.actions, about 92px tall) covers the foot of the scrollport: a control the focus moves to is
+     scrolled clear of it (final review item 5). */
+  scroll-padding-bottom: 104px;
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 16px;
   background: rgba(21, 19, 28, 0.94);

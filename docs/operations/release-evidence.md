@@ -1116,3 +1116,16 @@ under the runbook's M23 exception.
 | Health | boundary 373542 under M23: 50 members, prepare/simulation/reveal/settlement 0 failed, `boundaries open` 0, `duplicateGrants` 0 | 0 failed jobs, `boundaries open` 0, `duplicateGrants` 0 |
 
 Before 24.11 the bench's 50 characters moved from the all-Woodland seed plan to camp plans (deployment.md, 24.11 step 0).
+
+## Waiting expedition monsters, 2026-10-26
+
+Avi on the bench: "in the wood expedition, I didn't see the monster or enemies they fight with". Encounter battles last
+5 s on average (2–12 s, bench data), three per 80-minute trip, so a creature was on screen under 1% of the time. Avi approved
+the mockup ("approved, build the monsters too"; [design](../superpowers/specs/2026-10-26-waiting-monsters-design.md)): each
+encounter's creature now waits idling at its spot, named over its head, until its fight; a beaten one fades, a winner stays.
+Client only (no migration, no Edge change: `supabase/` unchanged since `1724a79`). One task with a spec and quality review
+and one fix round (the mockup's name label).
+
+- Gate of record at `84f2d44`: **exit 0, 12 of 12**, `test:db` 334 passed with the Edge start time unchanged.
+- Bench: `bench` fast-forwarded to `84f2d44`; deployed checks 9 of 9.
+- Production (Avi's go in chat, 2026-10-26): `release` fast-forwarded to `84f2d44`; Pages build live; deployed checks 9 of 9.

@@ -297,7 +297,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         onCreate={joining.offer} resting={game.ownResting} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} />
         : <SchedulePreview owner={owner} />;
-      case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} preview={fixture}
+      case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture}
         initialMerchant={shop?.merchant} merchantRequest={shop?.request} /> : null;
       // Anyone browses; the command gateway is a player's only, so a visitor's or a new account's panel cannot send one.
       case 'market': return reads ? <MarketPanel key={ownerId ?? viewer} reads={reads} gateway={viewer === 'player' ? gateway : null} owner={owner} viewer={viewer}

@@ -6,7 +6,7 @@ import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, prepareCreation } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
 import { BODIES, CLOTH_COLOURS, HAIRS, HAIR_COLOURS, SKIN_TONES, validAppearance, type Appearance } from '../../supabase/functions/_shared/domain/appearance.ts';
-import { readOwner, readProfile, readWorld } from '../../src/lib/api/reads.ts';
+import { readLooks, readOwner, readProfile, readWorld } from '../../src/lib/api/reads.ts';
 
 // Gladiator appearance (2026-10-26, M24; spec "Decisions": Storage, Command, Reads). The look chosen at creation is stored in
 // public.gladiators.appearance (null = the legacy look), checked by private.valid_appearance (SQL's restatement of
@@ -91,6 +91,17 @@ describe('gladiator appearance', () => {
     expect(await readOwner(owner.client)).toHaveProperty('appearance', null);
     expect(await actorOf(other.client, gid)).toHaveProperty('appearance', null);
     expect((await readProfile(anonymous, gid)).actor).toHaveProperty('appearance', null);
+  });
+
+  // Final review item 3: the replay's batched look read (readLooks) against the real Data API, as a visitor.
+  it("reads a chosen look and a legacy gladiator's null in one visitor read, leaving out an unknown id", async () => {
+    const chosen = await account(), legacy = await account();
+    const [withLook, without] = [await send(chosen.token, { ...creation('Look Read'), appearance: LOOK }), await send(legacy.token, creation('Look Read Legacy'))];
+    expect([withLook.ok, without.ok]).toEqual([true, true]);
+    const gid: string = withLook.value.gladiatorId, legacyGid: string = without.value.gladiatorId;
+    // An id in upper case and a repeated one are the same gladiator; an id the projection does not know is absent.
+    const looks = await readLooks(anonymous, [gid, legacyGid.toUpperCase(), randomUUID(), gid]);
+    expect(looks).toEqual(new Map<string, Appearance | null>([[gid, LOOK], [legacyGid, null]]));
   });
 
   it('refuses every invalid look past the parser as invalid, leaving no gladiator and no receipt', async () => {

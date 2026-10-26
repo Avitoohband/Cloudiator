@@ -395,6 +395,24 @@ test('explains a gear change the server no longer allows in words, and reloads t
   expect(flow.commands).toHaveLength(1);
 });
 
+test('explains an invalid build change in words and reloads the latest inventory', async ({ page, context }) => {
+  const flow = await inventoryFlow(context, { gear: true });
+  const { sword2 } = flow.pieces;
+  await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
+  const weapon = page.getByRole('combobox', { name: 'weapon', exact: true });
+  await weapon.selectOption(sword2.id);
+  await expect(weapon.locator(`option[value="${sword2.id}"]`)).not.toHaveAttribute('disabled');
+  // Another session lists the selected piece after this build draft was opened.
+  sword2.reservation = { kind: 'listing', referenceId: randomUUID() };
+  flow.reject('invalid');
+  await page.getByRole('button', { name: 'Queue build', exact: true }).click();
+  await expect(page.locator('.planning-form').getByRole('alert')).toHaveText('That build change is no longer possible. Your build has been reloaded.');
+  await expect(weapon.locator(`option[value="${sword2.id}"]`)).toHaveAttribute('disabled', '');
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.state.pendingBuild).toBeNull();
+});
+
 test('retries a gear change with the same operation after a refusal, and reloads on a conflict', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const { sword2 } = flow.pieces;

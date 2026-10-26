@@ -13,6 +13,7 @@ import type { DisplayClock } from '../../game/display-clock';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
+import { buildRefusal } from './build-refusal';
 
 const attributes = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
 const slots: EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
@@ -77,12 +78,9 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
         await refresh();
         if (mounted.current) { attempt.current = null; setMessage(kind === 'queue-build' ? 'Build queued. Your current build continues until the boundary.' : 'Pending build canceled. Reservations released.'); }
       } else {
-        setError(result.code === 'processing' ? 'The world is processing previous results. Retry shortly.'
-          : result.code === 'conflict' ? 'Your build changed. The latest state has been loaded; review and try again.'
-            : result.code === 'unavailable' ? 'This change could not be confirmed. Retry to confirm the same request.'
-              : result.code === 'insufficient-funds' ? 'Not enough available money for this reservation.' : `Build change rejected: ${result.code}.`);
+        setError(buildRefusal(result.code));
         if (!['processing', 'unavailable', 'rate-limited'].includes(result.code)) attempt.current = null;
-        if (result.code === 'conflict') await refresh();
+        if (result.code === 'conflict' || result.code === 'invalid') await refresh();
       }
     } catch { if (mounted.current) setError('This change could not be confirmed. Retry to confirm the same request.'); }
     finally { sending.current = false; end(); if (mounted.current) setBusy(false); }

@@ -109,16 +109,33 @@ describe('setPoints', () => {
 });
 
 describe('cappedNote', () => {
-  it('says how many points were left and what the attribute was set to (Avi: with 7 left, typing 10)', () => {
+  // The line names the most the field can take now, as the approved mockup does: its own points plus the points left. That is
+  // also what the field is set to, however the number was typed (all at once, or one key at a time after the first digit).
+  it('says how many points the field can take and what it was set to (Avi: with 7 left, typing 10 sets 7)', () => {
     expect(cappedNote('Strength', 7, 7)).toBe('Only 7 points left, so Strength was set to 7.');
-    // The attribute already held 3 of the 7, so the 4 left take it to 7.
-    expect(cappedNote('Agility', 4, 7)).toBe('Only 4 points left, so Agility was set to 7.');
-    expect(cappedNote('Vitality', 1, 6)).toBe('Only 1 point left, so Vitality was set to 6.');
+    // Typed one key at a time: after "1" the field holds 1 and 6 are left, and "10" still says 7, as with 7 left at the start.
+    expect(cappedNote('Agility', 6, 7)).toBe('Only 7 points left, so Agility was set to 7.');
+    // The field already held 3 of the 7: 4 are left, and it can take 7.
+    expect(cappedNote('Agility', 4, 7)).toBe('Only 7 points left, so Agility was set to 7.');
+    expect(cappedNote('Vitality', 1, 1)).toBe('Only 1 point left, so Vitality was set to 1.');
+    expect(cappedNote('Vitality', 3, 6)).toBe('Only 6 points left, so Vitality was set to 6.');
   });
 
   it('says plainly that nothing is left to add, and never mentions a negative number', () => {
     expect(cappedNote('Strength', 0, 4)).toBe('No points left to add, so Strength stays at 4.');
+    expect(cappedNote('Strength', 0, 0)).toBe('No points left to add, so Strength stays at 0.');
     for (const note of [cappedNote('Strength', 0, 0), cappedNote('Strength', 3, 5)]) expect(note).not.toMatch(/-\d/);
+  });
+
+  it('agrees with setPoints for every way the cap is reached', () => {
+    let allocation: Attributes = alloc({ strength: 3 });
+    // One key at a time: "1" (fits), then "10" (capped at 1 + 6 left).
+    allocation = setPoints(allocation, 'agility', 1).allocation;
+    const left = pointsLeft(allocation);
+    const result = setPoints(allocation, 'agility', 10);
+    expect(result.capped).toBe(true);
+    expect(cappedNote('Agility', left, left + allocation.agility)).toBe(`Only ${result.allocation.agility} points left, so Agility was set to ${result.allocation.agility}.`);
+    expect(result.allocation.agility).toBe(7);
   });
 });
 

@@ -49,10 +49,11 @@ export const ATTRIBUTE_HINTS: Record<keyof Attributes, string> = {
 };
 
 /**
- * The short status line shown when a typed number was capped: how many points were left (before the change) and what the
- * attribute was set to. The attribute may already hold some, so "set to" can be more than "left".
+ * The short status line shown when a typed number was capped, as in the approved mockup: `cap` is the most the attribute can
+ * take now (the points it already holds plus the points left), which is also what it was set to; `left` is the points left
+ * before the change. Typing "10" one key at a time with 7 left says 7, not the 6 left after the first digit.
  */
-export function cappedNote(name: string, left: number, value: number): string {
-  if (left <= 0) return `No points left to add, so ${name} stays at ${value}.`;
-  return `Only ${left} point${left === 1 ? '' : 's'} left, so ${name} was set to ${value}.`;
+export function cappedNote(name: string, left: number, cap: number): string {
+  if (left <= 0) return `No points left to add, so ${name} stays at ${cap}.`;
+  return `Only ${cap} point${cap === 1 ? '' : 's'} left, so ${name} was set to ${cap}.`;
 }

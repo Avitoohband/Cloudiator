@@ -128,7 +128,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   /** A typed or stepped number for one attribute: capped at what is left, with a status line when it was. */
   function changePoints(key: keyof Attributes, wanted: number) {
     const result = setPoints(draft.allocation, key, wanted);
-    update({ ...draft, allocation: result.allocation }, result.capped ? cappedNote(title(key), left, result.allocation[key]) : '');
+    update({ ...draft, allocation: result.allocation }, result.capped ? cappedNote(title(key), left, left + draft.allocation[key]) : '');
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -388,6 +388,97 @@ test('spends the ten points with a counter, steppers, a cap and the class sugges
   expect(flow.commands).toHaveLength(0);
 });
 
+test('caps a number typed one key at a time at what the field can take, as the capped line says', async ({ page, context }) => {
+  // Fix round 1: with 7 left, "10" typed digit by digit passes through 1 (6 left) and still says 7, never "Only 6 points left".
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left/ });
+  const field = (name: string) => dialog.getByLabel(`${name} points`);
+  const typeOver = async (name: string, keys: string[]) => {
+    await field(name).focus();
+    await field(name).selectText();
+    for (const key of keys) await page.keyboard.press(key);
+  };
+  await field('Strength').fill('3');
+  await expect(counter).toHaveText('7 of 10 left');
+  // The first digit fits, the second passes the cap: 7 left at the start, so 7.
+  await typeOver('Endurance', ['1']);
+  await expect(field('Endurance')).toHaveValue('1');
+  await expect(counter).toHaveText('6 of 10 left');
+  await expect(capped).toHaveCount(0);
+  await page.keyboard.press('0');
+  await expect(field('Endurance')).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Endurance was set to 7.');
+  await expect(counter).toHaveText('All 10 spent');
+  // Typed over a field that already holds points: it can take its own points plus those left (2 + 5).
+  await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
+  await field('Strength').fill('3');
+  await field('Agility').fill('2');
+  await expect(counter).toHaveText('5 of 10 left');
+  await typeOver('Agility', ['9']);
+  await expect(field('Agility')).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Agility was set to 7.');
+  // Several digits at once, over a field of 0: the same line.
+  await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
+  await field('Strength').fill('3');
+  await field('Precision').focus();
+  await field('Precision').selectText();
+  await field('Precision').pressSequentially('10');
+  await expect(field('Precision')).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Precision was set to 7.');
+});
+
+test('a saved draft keeps its points, unless the counter could not show them', async ({ page, context }) => {
+  // Fix round 1: a draft saved by the old form could hold a fraction or more than 10 points. Its name and class are kept and its
+  // points start again at 0; a draft of 10 (the old 2-each) or fewer whole points keeps its values.
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const create = dialog.getByRole('button', { name: 'Create gladiator', exact: true });
+  const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+  const names = ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision'];
+  const keys = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
+  const seed = async (allocation: Record<string, number>) => {
+    await page.evaluate(draft => localStorage.setItem('cloudiator.creation-draft.v1', JSON.stringify(draft)),
+      { version: 1, name: 'Seeded Fighter', classId: 'guardian', allocation });
+    await page.reload();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Seeded Fighter');
+    await expect(dialog.getByLabel('Guardian', { exact: true })).toBeChecked();
+  };
+  const reset = [
+    { what: 'a fraction in one field', allocation: { strength: 2.5, agility: 2, vitality: 2, endurance: 2, precision: 1.5 } },
+    { what: 'a fraction with fewer than 10 in all', allocation: { strength: 2.5, agility: 0, vitality: 0, endurance: 0, precision: 0 } },
+    { what: '11 points in all', allocation: { strength: 3, agility: 2, vitality: 2, endurance: 2, precision: 2 } },
+    { what: '50 points in all', allocation: { strength: 10, agility: 10, vitality: 10, endurance: 10, precision: 10 } },
+  ];
+  for (const { what, allocation } of reset) {
+    await seed(allocation);
+    await expect(counter, what).toHaveText('10 of 10 left');
+    for (const name of names) await expect(dialog.getByLabel(`${name} points`), what).toHaveValue('0');
+    await expect(create, what).toBeDisabled();
+  }
+  const kept = [
+    { what: '2 each (the old default)', allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 }, text: 'All 10 spent' },
+    { what: 'all 10 on one attribute', allocation: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 10 }, text: 'All 10 spent' },
+    { what: 'one whole point', allocation: { strength: 1, agility: 0, vitality: 0, endurance: 0, precision: 0 }, text: '9 of 10 left' },
+  ];
+  for (const { what, allocation, text } of kept) {
+    await seed(allocation);
+    await expect(counter, what).toHaveText(text);
+    for (const [index, name] of names.entries()) await expect(dialog.getByLabel(`${name} points`), what).toHaveValue(String(allocation[keys[index]]));
+    if (text === 'All 10 spent') await expect(create, what).toBeEnabled();
+    else await expect(create, what).toBeDisabled();
+  }
+  expect(flow.commands).toHaveLength(0);
+});
+
 test('expiry removes private owner and requires sign-in when refresh fails', async ({ page, context }) => {
   const flow = await identityFlow(context, { expiresIn: 5 });
   await page.goto('/game/');

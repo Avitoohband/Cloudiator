@@ -151,10 +151,11 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         <div className="item-head"><h3>{itemName(item)}</h3>{badge && <span className="gear-badge" data-badge={badge}>{wearBadgeText(badge, effective)}</span>}</div>
         <p>Level {item.tier} · {item.rarity} · {item.binding === 'bound' ? 'Account-bound' : 'Tradable'}</p>
         <p>Damage {item.stats.damage} · Armor {item.stats.armor} · Weight {item.stats.weight}</p>
-        <p>{item.quantity} owned · {item.reservation?.kind === 'listing' ? 'Listed for sale' : reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
+        {/* A listed piece says so once, here: its Wear button is described by this line's words, not by a second note. */}
+        <p>{item.quantity} owned · {item.reservation?.kind === 'listing' ? <span id={state === 'listed' ? blockedId : undefined}>Listed for sale</span> : reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
         <p>{value === null ? 'Cannot sell to NPCs' : `NPC sell value: ${value} money each`}</p>
         {item.quantity > 1 && <label>Quantity for {itemName(item)}<input type="number" min="1" max={item.quantity} step="1" value={quantity || ''} onChange={e => setQuantities(values => ({ ...values, [item.id]: Number(e.target.value) }))} /></label>}
-        {blocked && <p id={blockedId} className="gear-note">{blocked}</p>}
+        {blocked && state !== 'listed' && <p id={blockedId} className="gear-note">{blocked}</p>}
         <div className="item-actions">
           {state === 'queued' && slot ? <button type="button" className="gear-undo" disabled={preview} {...busyProps} aria-label={`Undo wearing ${wearName}`} aria-describedby={preview ? previewNote : undefined} onClick={() => undoItem(item, slot)}>Undo</button>
             : state === 'wearing' ? <button type="button" disabled aria-label={`Wearing ${wearName}`}>Wearing</button>

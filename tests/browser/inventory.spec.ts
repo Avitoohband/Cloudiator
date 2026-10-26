@@ -371,7 +371,9 @@ test('says why a piece cannot be worn: a level not reached, or a Marketplace lis
   await expect(card(page, high).getByText('Needs level 5', { exact: true })).toBeVisible();
   await expect(wear(page, listed)).toBeDisabled();
   await expect(wear(page, listed)).toHaveAccessibleDescription('Listed for sale');
-  await expect(card(page, listed).getByText('Listed for sale', { exact: true }).first()).toBeVisible();
+  await expect(card(page, listed).getByText('Listed for sale', { exact: true })).toBeVisible();
+  // Said once (final review fix: the availability line and a note both said it, so a screen reader read it twice).
+  expect((await card(page, listed).innerText()).match(/Listed for sale/g)).toHaveLength(1);
   expect(flow.commands).toHaveLength(0);
 });
 

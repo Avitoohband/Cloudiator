@@ -25,7 +25,7 @@ async function planningFlow(context: BrowserContext) {
     localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test-only', token_type: 'bearer', expires_at: exp, expires_in: 3600, user }));
   }, { user });
   // The live camp's public reads; this spec's own handler (registered next, so it runs first) hands it everything else.
-  await routeLiveReads(context, { world: emptyWorld() });
+  const publicReads = await routeLiveReads(context, { world: emptyWorld() });
   await context.route('http://127.0.0.1:54321/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
@@ -77,7 +77,8 @@ async function planningFlow(context: BrowserContext) {
     return route.fallback();
   });
   return { commands, processedSlotIndex: state.processedSlotIndex, loseNext: () => { lose = true; }, processing: (value: boolean) => { processing = value; }, conflictNext: () => { conflict = true; },
-    scheduleConflictNext: () => { scheduleConflict = true; }, receivedAt: (ms: number | null) => { receivedAt = ms; }, state: () => state };
+    scheduleConflictNext: () => { scheduleConflict = true; }, receivedAt: (ms: number | null) => { receivedAt = ms; }, state: () => state,
+    publish: () => publicReads.setWorld({ ...emptyWorld(), revision: randomUUID() }) };
 }
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.'); });
@@ -259,6 +260,42 @@ test('retries an unknown outcome as the same request and gets the stored answer'
   expect(flow.commands[0]).toEqual(flow.commands[1]);
 });
 
+test('clears an unknown-outcome alert when the saved schedule arrives in the background', async ({ page, context }) => {
+  const flow = await planningFlow(context);
+  await page.goto('/game/');
+  const schedule = await openMenu(page, 'Schedule');
+  await page.getByLabel('evening activity').selectOption('arena');
+  flow.loseNext();
+  await saveDay(page).click();
+  await expect(schedule.getByRole('alert')).toContainText('could not be confirmed');
+  await expect(saveDay(page)).toBeEnabled();
+  // The accepted day is found by the background revision/owner read, not by resending the command.
+  flow.publish();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(saveDay(page)).toBeDisabled();
+  await expect(undoDay(page)).toBeDisabled();
+  await expect(page.getByLabel('evening activity')).toHaveValue('arena');
+  await expect(schedule.getByRole('alert')).toHaveCount(0);
+  expect(flow.commands).toHaveLength(1);
+});
+
+test('keeps a new success line but clears it when another schedule version arrives', async ({ page, context }) => {
+  const flow = await planningFlow(context);
+  await page.goto('/game/');
+  const schedule = await openMenu(page, 'Schedule');
+  await page.getByLabel('morning activity').selectOption('rest');
+  await saveDay(page).click();
+  await expect(schedule.getByRole('status').filter({ hasText: /^Saved\. Morning: Rest from / })).toBeVisible();
+  flow.state().scheduleVersion++;
+  flow.state().schedule.morning = { kind: 'training' };
+  flow.publish();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByLabel('morning activity')).toHaveValue('training');
+  await expect(saveDay(page)).toBeDisabled();
+  await expect(undoDay(page)).toBeDisabled();
+  await expect(schedule.locator('.schedule-saved')).toHaveCount(0);
+});
+
 test('loads the latest schedule after a conflict and saves nothing over it', async ({ page, context }) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');
@@ -271,12 +308,61 @@ test('loads the latest schedule after a conflict and saves nothing over it', asy
   await expect(page.getByLabel('morning activity')).toHaveValue('training');
   await expect(page.getByLabel('afternoon activity')).toHaveValue('rest');
   await expect(saveDay(page)).toBeDisabled();
+  await expect(schedule.getByRole('alert')).toContainText('Your schedule changed');
   await page.getByLabel('morning activity').selectOption('rest');
   await saveDay(page).click();
   await expect(page.getByRole('status').filter({ hasText: /^Saved\. Morning: Rest from / })).toBeVisible();
   expect(flow.commands).toHaveLength(2);
   expect(flow.commands[1]).toMatchObject({ kind: 'edit-day-schedule', expectedVersion: 2, day: { morning: { kind: 'rest' }, afternoon: { kind: 'rest' } } });
   expect(flow.commands[1].operationId).not.toBe(flow.commands[0].operationId);
+});
+
+test('clears a previous conflict explanation on a later background schedule refresh', async ({ page, context }) => {
+  const flow = await planningFlow(context);
+  await page.goto('/game/');
+  const schedule = await openMenu(page, 'Schedule');
+  await page.getByLabel('morning activity').selectOption('rest');
+  flow.scheduleConflictNext();
+  await saveDay(page).click();
+  await expect(saveDay(page)).toBeDisabled();
+  await expect(schedule.getByRole('alert')).toContainText('Your schedule changed');
+  flow.state().scheduleVersion++;
+  flow.publish();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(schedule.getByRole('alert')).toHaveCount(0);
+});
+
+test('clears a conflict after its reload returns a version already loaded in the background', async ({ page, context }) => {
+  const flow = await planningFlow(context);
+  let release!: () => void;
+  const reply = new Promise<void>(resolve => { release = resolve; });
+  await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+    if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== 'edit-day-schedule') return route.fallback();
+    await reply;
+    return route.fulfill({ status: 409, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'conflict' }) });
+  });
+  await page.goto('/game/');
+  const schedule = await openMenu(page, 'Schedule');
+  await page.getByLabel('morning activity').selectOption('rest');
+  const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === 'edit-day-schedule');
+  await saveDay(page).click();
+  await sent;
+  try {
+    // Another session's v2 arrives while the v1 command is still awaiting its conflict response.
+    flow.state().scheduleVersion++;
+    flow.state().schedule.afternoon = { kind: 'rest' };
+    flow.publish();
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.getByLabel('afternoon activity')).toHaveValue('rest');
+    await expect(page.getByLabel('morning activity')).toHaveValue('training');
+  } finally { release(); }
+  await expect(schedule.getByRole('alert')).toContainText('Your schedule changed');
+  await expect(saveDay(page)).toBeDisabled();
+  // The conflict refresh returned that same v2; v3 must still clear its old explanation.
+  flow.state().scheduleVersion++;
+  flow.publish();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(schedule.getByRole('alert')).toHaveCount(0);
 });
 
 test('keeps the keyboard focus on the page after Save and after Undo', async ({ page, context }) => {

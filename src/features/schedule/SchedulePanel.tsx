@@ -54,6 +54,8 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   const attempt = useRef<Edit | null>(null);
   const undoButton = useRef<HTMLButtonElement>(null);
   const draftVersion = useRef(owner.scheduleVersion);
+  /** Keep the conflict explanation through its own reload, then clear it on later background versions. */
+  const conflictRefresh = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     const update = () => setSlot(Math.floor(clock.now() / SLOT_MS));
@@ -66,6 +68,10 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   useEffect(() => {
     if (draftVersion.current !== owner.scheduleVersion) {
       draftVersion.current = owner.scheduleVersion; setDraft(owner.schedule); attempt.current = null;
+      if (!conflictRefresh.current) setError('');
+      conflictRefresh.current = false; setRefused(false);
+      // A save may set its success line in the same render as the refreshed owner. Keep only that version's outcome.
+      setMessage(current => current?.value.version === owner.scheduleVersion ? current : null);
     }
   }, [owner.scheduleVersion, owner.schedule]);
   /** The parts whose draft choice differs from the saved day. */
@@ -97,14 +103,15 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
         await refresh();
         if (mounted.current) { attempt.current = null; setMessage({ value: result.value, day: command.day }); }
       } else {
+        if (!['processing', 'unavailable', 'rate-limited'].includes(result.code)) attempt.current = null;
+        if (result.code === 'conflict') { conflictRefresh.current = draftVersion.current === command.expectedVersion; await refresh(); }
+        if (!mounted.current) return;
         setRefused(!NOT_THE_CHOICE.includes(result.code));
         setError(result.code === 'processing' ? 'The world is processing previous results. Retry shortly.'
           : result.code === 'conflict' ? 'Your schedule changed. The latest plan has been loaded; review and save again.'
             : result.code === 'unavailable' ? 'This change could not be confirmed. Retry to confirm the same request.' : `Schedule change rejected: ${result.code}.`);
-        if (!['processing', 'unavailable', 'rate-limited'].includes(result.code)) attempt.current = null;
-        if (result.code === 'conflict') await refresh();
       }
-    } catch { if (mounted.current) { setRefused(false); setError('This change could not be confirmed. Retry to confirm the same request.'); } }
+    } catch { conflictRefresh.current = false; if (mounted.current) { setRefused(false); setError('This change could not be confirmed. Retry to confirm the same request.'); } }
     finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
   /** The part the clock is in (none until mounted); a change to it starts with its next occurrence, three slots on. */

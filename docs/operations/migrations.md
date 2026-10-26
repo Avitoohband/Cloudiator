@@ -44,7 +44,9 @@ plan Task 2). The design notes are in its source, `supabase/sql/16-launch-feedba
   those parts at the last new version. Activities already snapshotted keep their choice. None existed on production or the
   bench on 2026-10-25, so it is expected to change nothing there. Applying it again changes nothing.
 - `scripts/hosted-checks.sql` judges a sale by the fee its purchase receipt stored (M14's floored 5 % before M23, at least 1
-  since), so earlier sales stay right.
+  since), so earlier sales stay right. That fee must also be one the fee rule allows, `price*5/100` or
+  `greatest(1, price*5/100)`, so a wrong rule cannot read right; a missing fee reads `missing` and is not right (final review
+  fix; `tests/db/hosted-checks.test.ts`, RED on "fee right true" for a planted fee of 3 at price 101).
 
 **The draft needed three completions** (checked against the source):
 1. The three function ACLs. `edit_day_schedule` is new; `planning_command` and `market_command` are restated as the source

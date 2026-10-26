@@ -27,10 +27,10 @@
 --   characters        accounts, characters, accounts with more than one character, identities per provider, and the 20
 --                     newest characters by hashed account (Task 24.8: one character per account)
 --   trades            listings by status; for every sale whether the buyer paid the price and the seller received the price
---                     less the fee its purchase receipt stored (5 % floored; at least 1 gold since M23) in exactly one
---                     credit (every credit is summed and counted, so a sale credited twice is reported here and in
---                     duplicate-grants, never an error), and whether the item has exactly one owner, the buyer; the 10
---                     newest sales
+--                     less the fee its purchase receipt stored in exactly one credit (every credit is summed and counted, so
+--                     a sale credited twice is reported here and in duplicate-grants, never an error), with that fee one the
+--                     fee rule allows (5 % floored before M23, at least 1 gold since; a missing fee reads `missing` and is
+--                     wrong), and whether the item has exactly one owner, the buyer; the 10 newest sales
 --                     (Task 24.8). Cleanup folds ledger rows older than 90 days into wallet checkpoints, so an older sale
 --                     reads `missing` there; an item its buyer later sold or discarded reads `other` or `gone`.
 --
@@ -56,7 +56,7 @@ with
     select b.slot_index, b.completed_at_ms - b.cutoff_ms as ms, b.member_count
     from private.boundaries b, clock
     where b.status = 'complete' and b.completed_at_ms > clock.now_ms - 86400000),
-  sales as (
+  sale_rows as (
     -- The fee the purchase receipt stored (receipts are never deleted, and only settlement receipts are compacted): M14's
     -- floored 5 % before M23, at least 1 gold since (launch feedback), so a sale is judged by the rule it was made under.
     select l.id, l.price, (select (r.result -> 'value' ->> 'fee')::bigint from public.operation_receipts r
@@ -75,6 +75,10 @@ with
       (select i.gladiator_id from public.item_instances i where i.id = l.item_id) as owner,
       (select r.created_at from public.operation_receipts r where r.receipt_id = l.terminal_receipt_id) as sold_at
     from private.market_listings l where l.status = 'sold'),
+  sales as (
+    -- The stored fee must also fit a fee rule, either one, so a wrong rule cannot read right because its own receipt agrees
+    -- with the ledger (final review fix). A missing fee fits neither.
+    select s.*, coalesce(s.fee in (s.price * 5 / 100, greatest(1, s.price * 5 / 100)), false) as fee_rule from sale_rows s),
   checks(section, o, item, value) as (
     -- parity
     select 'parity', 1, 'migrations count', count(*)::text from supabase_migrations.schema_migrations
@@ -196,16 +200,16 @@ with
     union all select 'trades', 1, 'listings ' || s.status, count(l.id)::text
       from (values ('open'), ('sold'), ('cancelled'), ('expired')) s(status) left join private.market_listings l on l.status = s.status group by s.status
     union all select 'trades', 2, 'sales with the price paid and the fee right', count(*) filter (where buyer_delta = -price
-        and seller_credits = 1 and seller_delta = price - fee)::text from sales
+        and seller_credits = 1 and seller_delta = price - fee and fee_rule)::text from sales
     union all select 'trades', 3, 'sales with a wrong or missing ledger row', count(*) filter (where buyer_delta is distinct from -price
-        or seller_credits <> 1 or seller_delta is distinct from price - fee)::text from sales
+        or seller_credits <> 1 or seller_delta is distinct from price - fee or not fee_rule)::text from sales
     union all select 'trades', 4, 'sales whose item has one owner, the buyer', count(*) filter (where owners = 1 and owner = buyer)::text from sales
     union all select 'trades', 5, 'sales whose item is elsewhere or gone', count(*) filter (where owners <> 1 or owner is distinct from buyer)::text from sales
-    union all select 'trades', 6, 'sale ' || left(md5(s.id::text), 12), 'price ' || s.price || ', fee ' || s.fee
+    union all select 'trades', 6, 'sale ' || left(md5(s.id::text), 12), 'price ' || s.price || ', fee ' || coalesce(s.fee::text, 'missing')
         || ', buyer paid ' || coalesce((-s.buyer_delta)::text, 'missing') || ', seller received ' || coalesce(s.seller_delta::text, 'missing')
         || ' in ' || s.seller_credits || case when s.seller_credits = 1 then ' credit' else ' credits' end
         || ', fee right ' || (s.buyer_delta is not distinct from -s.price and s.seller_credits = 1
-          and s.seller_delta is not distinct from s.price - s.fee)::text
+          and s.seller_delta is not distinct from s.price - s.fee and s.fee_rule)::text
         || ', owners ' || s.owners || ', owner ' || case when s.owner = s.buyer then 'buyer' when s.owner = s.seller then 'seller'
           when s.owner is null then 'gone' else 'other' end
         || ', sold ' || coalesce(to_char(s.sold_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), 'unknown')

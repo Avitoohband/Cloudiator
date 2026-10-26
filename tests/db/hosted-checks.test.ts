@@ -257,4 +257,50 @@ describe('the read-only hosted SQL kits', () => {
     expect(SALE.exec(value(rows, 'trades', `sale ${hash(old)}`)!)!.slice(1)).toEqual(['0', '19']);
     expect(value(rows, 'trades', 'sales with a wrong or missing ledger row')).toBe('0');
   });
+
+  // Final review fix: the ledger is checked against the receipt, and the receipt's fee against the fee rule (M14's floored 5 %,
+  // or at least 1 gold since M23), so a fee regression cannot read "fee right true". A missing fee reads as missing.
+  it('reads a sale whose stored fee breaks the fee rule, or is missing, as not right', { timeout: 60_000 }, async () => {
+    const seller = await fighter(1000), buyer = await fighter(1000);
+    const entry = CATALOG_V1.items['sword:1:common'];
+    const sword = (owner: string, id: string) => ({ id, ownerId: owner, catalogId: entry.id, catalogVersion: 'v1', tier: entry.tier,
+      rarity: entry.rarity, stats: entry.stats, quantity: 1, origin: 'shop', binding: 'tradable', reservation: null });
+    /** A sale as the market records it, with the purchase receipt's `fee` (left out when null) and the seller's `credit`. */
+    const plant = async (tx: postgres.TransactionSql, price: number, fee: number | null, credit: number) => {
+      const listing = randomUUID(), item = randomUUID();
+      await tx`insert into public.item_instances(id,gladiator_id,item) values(${item},${buyer.gid},${tx.json(sword(buyer.gid, item) as never)})`;
+      const purchase = { kind: 'buy-listing', operationId: randomUUID(), listingId: listing };
+      const bought = { listingId: listing, itemId: item, price, ...(fee === null ? {} : { fee }) };
+      const [{ receipt }] = await tx`insert into public.operation_receipts(owner_id,operation_id,gladiator_id,request,request_digest,result)
+        values(${buyer.id},${purchase.operationId},${buyer.gid},${tx.json(purchase as never)},'\\x00'::bytea,
+          ${tx.json({ ok: true, value: bought } as never)}) returning receipt_id::text as receipt`;
+      const [{ paid }] = await tx`insert into public.operation_receipts(owner_id,operation_id,gladiator_id,request,request_digest,result)
+        values(${seller.id},${randomUUID()},${seller.gid},${tx.json({ kind: 'market-sale', listingId: listing } as never)},'\\x00'::bytea,
+          ${tx.json({ ok: true, value: { ...bought, moneyCredit: credit } } as never)}) returning receipt_id::text as paid`;
+      await tx`insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason)
+        values(${buyer.gid},${receipt},${-price},0,'market-purchase'),(${seller.gid},${paid},${credit},0,'market-sale')`;
+      await tx`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status,terminal_receipt_id,buyer_gladiator_id)
+        values(${listing},${seller.gid},${item},${price},1,604800001,'sold',${receipt},${buyer.gid})`;
+      return listing;
+    };
+    const { before, after, wrong, missing, right } = await rolledBack(async tx => {
+      const before = [...await tx.unsafe(CHECKS)] as unknown as Check[];
+      // Price 101: the rule's fee is 5. A fee of 3, with the seller credited the 98 its receipt implies, is a wrong rule.
+      const wrong = await plant(tx, 101, 3, 98);
+      // A purchase receipt without its fee (the seller credited 96).
+      const missing = await plant(tx, 101, null, 96);
+      // Control: price 40 pays 2 under either rule.
+      const right = await plant(tx, 40, 2, 38);
+      return { before, after: [...await tx.unsafe(CHECKS)] as unknown as Check[], wrong, missing, right };
+    });
+    const count = (rows: Check[], item: string) => Number(value(rows, 'trades', item));
+    expect(value(after, 'trades', `sale ${hash(wrong)}`)).toMatch(
+      /^price 101, fee 3, buyer paid 101, seller received 98 in 1 credit, fee right false, owners 1, owner buyer, sold \S+Z$/);
+    expect(value(after, 'trades', `sale ${hash(missing)}`)).toMatch(
+      /^price 101, fee missing, buyer paid 101, seller received 96 in 1 credit, fee right false, owners 1, owner buyer, sold \S+Z$/);
+    expect(value(after, 'trades', `sale ${hash(right)}`)).toMatch(
+      /^price 40, fee 2, buyer paid 40, seller received 38 in 1 credit, fee right true, owners 1, owner buyer, sold \S+Z$/);
+    expect(count(after, 'sales with the price paid and the fee right')).toBe(count(before, 'sales with the price paid and the fee right') + 1);
+    expect(count(after, 'sales with a wrong or missing ledger row')).toBe(count(before, 'sales with a wrong or missing ledger row') + 2);
+  });
 });

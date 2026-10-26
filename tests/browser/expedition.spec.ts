@@ -812,7 +812,7 @@ test.describe('followable expedition scenes', () => {
     // At the end of the trail an oak hides the waiting gladiator, so it fades.
     const oak = map.props.find(p => p.id === 'tree-oak-1@44,12')!;
     const f = frames[oak.frame];
-    const png = decodePng(readFileSync('public/assets/expeditions/woodland.png'));
+    const png = decodePng(readFileSync(`public/assets/${manifest.atlases.woodland.image}`));
     const anchor = worldToScreen(oak.x, oak.y);
     const image = { left: anchor.x - f.anchorPx.x, top: anchor.y - f.anchorPx.y, width: f.frame.w, height: f.frame.h,
       slices: drawSlices(oak, { w: f.frame.w, anchorX: f.anchorPx.x }).map(s => ({ x0: anchor.x + s.left, x1: anchor.x + s.left + s.width, depth: anchor.y + s.depthOffset })) };
@@ -854,7 +854,7 @@ test.describe('followable expedition scenes', () => {
     const creatureIds = (environment: string) => MAPS[environment].expedition!.encounters.map(e => e.creature);
     const shown = (d: Scene) => d.waiting.map(w => w.visible);
     const idleFrame = (creatureId: string) => new RegExp(`^${creatureId}/idle/se/[0-3]$`);
-    const creaturesPng = decodePng(readFileSync('public/assets/actors/creatures.png'));
+    const creaturesPng = decodePng(readFileSync(`public/assets/${manifest.atlases.creatures.image}`));
     const creatureFrames: Record<string, { frame: { x: number; y: number; w: number; h: number }; anchorPx: { x: number; y: number } }> = readJson('public/assets/actors/creatures.json').frames;
     const creatureArt = (id: string) => manifest.actors.creatures.find((c: { id: string }) => c.id === id);
     /** How far above its feet the creature's idle art reaches: its highest opaque pixel over the loop, read from the atlas image. */

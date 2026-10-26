@@ -2,9 +2,11 @@
 // Regenerates every shipped art file under public/assets from the generators in this folder.
 //   node assets/source/build-assets.mjs          write files
 //   node assets/source/build-assets.mjs --check  verify committed files are byte-identical
+// Atlas images are named by their content (`actors/gladiators.<hash>.png`); the images in retained.mjs stay at their old paths
+// for the tabs a release leaves open (README "Atlas image names").
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packAtlas, phaserAtlasJson } from './tools/atlas.mjs';
 import { decodePng, encodePng } from './tools/png.mjs';
@@ -19,6 +21,8 @@ import { renderEffects, renderIcons } from './generators/effects.mjs';
 import { CLOSEUP, CLOSEUP_THEMES, renderCloseups } from './generators/closeups.mjs';
 import { ATTACK_VARIANTS, CREATURE_ACTIONS, REQUIRED_ACTIONS, WALK_TILES_PER_SECOND } from './generators/poses.mjs';
 import { ANCHOR } from './generators/rig.mjs';
+import { auditFiles, contentName, isVersionOf } from './tools/content-names.mjs';
+import { RETAINED_FOR_OPEN_TABS, RETAINED_RELEASE } from './retained.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..');
@@ -28,32 +32,55 @@ const LICENSE = 'Project-original artwork generated from repository source (asse
 
 const files = new Map(); // relative path -> { bytes, generator, inputs }
 const src = name => `assets/source/${name}`;
-const COMMON = [src('build-assets.mjs'), src('tools/canvas.mjs'), src('tools/palette.mjs'), src('tools/atlas.mjs'), src('tools/png.mjs'), src('tools/random.mjs')];
+const COMMON = [src('build-assets.mjs'), src('tools/canvas.mjs'), src('tools/palette.mjs'), src('tools/atlas.mjs'), src('tools/png.mjs'), src('tools/random.mjs'), src('tools/content-names.mjs')];
 const emitJson = (path, data, generator, inputs = []) => files.set(path, { bytes: Buffer.from(`${JSON.stringify(data)}\n`), generator, inputs });
-/** PNG bytes depend on the zlib build; keep the committed file when its pixels are unchanged so hashes stay stable. */
-function emitPng(path, sheet, generator, inputs = []) {
-  let bytes = encodePng(sheet.width, sheet.height, sheet.data);
+/** The committed bytes at `path` (under public/assets) when they decode to exactly these pixels, else null. */
+function samePixels(path, sheet) {
   const existing = join(OUT, path);
-  if (existsSync(existing)) {
-    try {
-      const old = readFileSync(existing);
-      const decoded = decodePng(old);
-      if (decoded.width === sheet.width && decoded.height === sheet.height && Buffer.from(decoded.rgba).equals(Buffer.from(sheet.data))) bytes = old;
-    } catch { /* regenerate */ }
-  }
-  files.set(path, { bytes, generator, inputs });
+  if (!existsSync(existing)) return null;
+  try {
+    const old = readFileSync(existing);
+    const decoded = decodePng(old);
+    return decoded.width === sheet.width && decoded.height === sheet.height && Buffer.from(decoded.rgba).equals(Buffer.from(sheet.data)) ? old : null;
+  } catch { return null; }
+}
+/** Content-addressed versions of atlas images that this build no longer writes; writing removes them. */
+const superseded = [];
+/**
+ * Emits an atlas image under its content-addressed name (`actors/gladiators.<hash>.png`) and returns that name. PNG bytes
+ * depend on the zlib build, so committed bytes are kept when their pixels are unchanged, and hashes and names stay stable
+ * across Node versions: a committed version of the image first, then the image's old unhashed path (the build that first
+ * named images by content kept their bytes this way).
+ */
+function emitAtlasImage(path, sheet, generator, inputs = []) {
+  const folder = posix.dirname(path);
+  const versions = existsSync(join(OUT, folder)) ? readdirSync(join(OUT, folder)).map(name => posix.join(folder, name)).filter(file => isVersionOf(path, file)).sort() : [];
+  let bytes = null;
+  for (const candidate of [...versions, path]) if ((bytes = samePixels(candidate, sheet))) break;
+  bytes ??= encodePng(sheet.width, sheet.height, sheet.data);
+  const image = contentName(path, bytes);
+  files.set(image, { bytes, generator, inputs });
+  superseded.push(...versions.filter(file => file !== image));
+  return image;
 }
 
 const atlases = {};
 const animations = {};
-function addAtlas(key, image, frames, kind, generator, opts, inputs = []) {
+/** The generator of each atlas, for the provenance of its retained image. */
+const atlasGenerators = {};
+/**
+ * Packs one atlas: its image under its content-addressed name (`path` is that name without the hash), and its frame table at
+ * `path` with `.json`, which names the image. The table is bundled into the client (src/game/assets.ts), so its name is fixed.
+ */
+function addAtlas(key, path, frames, kind, generator, opts, inputs = []) {
   const { sheet, frames: rects } = packAtlas(frames, opts);
-  const json = phaserAtlasJson(image.split('/').pop(), sheet, rects);
+  const image = emitAtlasImage(path, sheet, generator, inputs);
+  const json = phaserAtlasJson(posix.basename(image), sheet, rects);
   for (const f of frames) if (f.meta) json.frames[f.name].meta = f.meta;
-  const data = image.replace(/\.png$/, '.json');
-  emitPng(image, sheet, generator, inputs);
+  const data = path.replace(/\.png$/, '.json');
   emitJson(data, json, generator, inputs);
   atlases[key] = { image, data, width: sheet.width, height: sheet.height, kind };
+  atlasGenerators[key] = generator;
 }
 const actorFrames = list => list.map(f => ({ ...f, anchorX: ANCHOR.x, anchorY: ANCHOR.y }));
 const propFrames = list => list.map(({ name, canvas, anchorX, anchorY, ...meta }) => ({ name, canvas, anchorX, anchorY, meta }));
@@ -111,6 +138,10 @@ const actionMap = (prefix, actions, ne) => Object.fromEntries(actions.map(a => [
   se: `${prefix}/${a}/se`, ...(ne.includes(a) ? { ne: `${prefix}/${a}/ne` } : {}),
 }]));
 const HAND_WRITTEN = ['gallery.html'];
+for (const r of RETAINED_FOR_OPEN_TABS) {
+  if (!atlasGenerators[r.atlas]) throw new Error(`retained.mjs names an unknown atlas ${r.atlas}`);
+  if (files.has(r.file)) throw new Error(`retained.mjs names ${r.file}, which the generators write`);
+}
 const provenance = [
   ...[...files.entries()].map(([file, { bytes, generator, inputs }]) => ({
     file, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length,
@@ -120,6 +151,11 @@ const provenance = [
     const bytes = readFileSync(join(OUT, file));
     return { file, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, source: 'hand-written inspection tool', generator: 'assets/source/README.md', inputs: [], command: 'none (edit directly)', license: LICENSE };
   }),
+  // Never rewritten: the bytes the release had, as retained.mjs records them (`--check` compares the files with these hashes).
+  ...RETAINED_FOR_OPEN_TABS.map(r => ({
+    file: r.file, sha256: r.sha256, bytes: r.bytes, source: `retained for open tabs: the atlas image of release ${RETAINED_RELEASE}`,
+    generator: atlasGenerators[r.atlas], inputs: [src('retained.mjs')], command: 'none (kept in place for one release; see assets/source/README.md)', license: LICENSE,
+  })),
 ].sort((a, b) => a.file.localeCompare(b.file));
 
 const manifest = {
@@ -184,17 +220,38 @@ outputs.set(join(HERE, 'provenance.json'), Buffer.from(`${JSON.stringify(sourceP
 function listFiles(dir) {
   return readdirSync(dir).flatMap(name => { const p = join(dir, name); return statSync(p).isDirectory() ? listFiles(p) : [p]; });
 }
+/** Repository-relative paths with forward slashes: the audit's one key space. */
+const repo = path => relative(ROOT, path).split(sep).join('/');
+const assetFile = file => repo(join(OUT, file));
+const audit = () => auditFiles({
+  outputs: new Map([...outputs].map(([path, bytes]) => [repo(path), bytes])),
+  present: listFiles(OUT).map(repo),
+  allowed: [...HAND_WRITTEN, '.gitattributes'].map(assetFile),
+  retained: RETAINED_FOR_OPEN_TABS.map(r => ({ file: assetFile(r.file), sha256: r.sha256 })),
+  read: file => (existsSync(join(ROOT, file)) ? readFileSync(join(ROOT, file)) : null),
+});
+const RETAINED_HELP = `A retained image must hold the release's bytes: git show ${RETAINED_RELEASE}:public/assets/<file> > public/assets/<file>`;
+const explain = ({ file, problem }) => ({
+  missing: file, stale: file, orphan: `${file} (orphan: not produced by the generators)`,
+  'retained-missing': `${file} (retained for open tabs: missing)`,
+  'retained-changed': `${file} (retained for open tabs: not the bytes of release ${RETAINED_RELEASE})`,
+})[problem];
 if (CHECK) {
-  const stale = [];
-  for (const [path, bytes] of outputs) if (!existsSync(path) || !readFileSync(path).equals(bytes)) stale.push(relative(ROOT, path));
-  const expected = new Set([...outputs.keys(), ...HAND_WRITTEN.map(f => join(OUT, f)), join(OUT, '.gitattributes')]);
-  for (const path of listFiles(OUT)) if (!expected.has(path)) stale.push(`${relative(ROOT, path)} (orphan: not produced by the generators)`);
-  if (stale.length) {
-    console.error(`Generated assets are stale or missing:\n  ${stale.join('\n  ')}\nRun: node assets/source/build-assets.mjs`);
+  const problems = audit();
+  if (problems.length) {
+    console.error(`Generated assets are stale or missing:\n  ${problems.map(explain).join('\n  ')}\nRun: node assets/source/build-assets.mjs`
+      + (problems.some(p => p.problem.startsWith('retained')) ? `\n${RETAINED_HELP}` : ''));
     process.exit(1);
   }
-  console.log(`assets up to date (${outputs.size} files)`);
+  console.log(`assets up to date (${outputs.size} files, ${RETAINED_FOR_OPEN_TABS.length} retained for open tabs)`);
 } else {
   for (const [path, bytes] of outputs) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes); }
+  // An atlas image whose art changed leaves its previous content-addressed version behind, which is not shipped again.
+  for (const file of superseded) { rmSync(join(OUT, file)); console.log(`removed superseded ${file}`); }
   console.log(`wrote ${outputs.size} files`);
+  const retained = audit().filter(p => p.problem.startsWith('retained'));
+  if (retained.length) {
+    console.error(`Retained images are wrong:\n  ${retained.map(explain).join('\n  ')}\n${RETAINED_HELP}`);
+    process.exit(1);
+  }
 }

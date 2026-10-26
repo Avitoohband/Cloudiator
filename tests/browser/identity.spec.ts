@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
@@ -790,8 +791,12 @@ test('the preview draws pixel art: a cropped atlas frame, multiplied by its tint
   expect(style.rendering).toBe('pixelated');
   expect(style.blend).toBe('multiply');
   expect(style.width).toBe(192);
-  expect(style.image).toContain('/assets/actors/gladiators.png');
-  expect(style.mask).toContain('/assets/actors/gladiators.png');
+  // The atlas image the manifest names, by its content (final review F1), and it loads.
+  const image = (JSON.parse(readFileSync('public/assets/manifest.json', 'utf8')) as { atlases: { gladiators: { image: string } } }).atlases.gladiators.image;
+  expect(image).toMatch(/^actors\/gladiators\.[0-9a-f]{10}\.png$/);
+  expect(style.image).toContain(`/assets/${image}`);
+  expect(style.mask).toContain(`/assets/${image}`);
+  expect((await page.request.get(`/assets/${image}`)).status()).toBe(200);
   // The sash is tinted by the clothes colour, as in the camp (the manifest's tint key of the accent layer).
   await expect(dialog.locator('[data-layer="accent"]')).toHaveAttribute('data-tint', '#6a4fb8');
 });

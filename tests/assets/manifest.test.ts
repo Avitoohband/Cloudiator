@@ -23,6 +23,15 @@ import { worldToScreen } from '@/game/iso';
 
 const ROOT = join(__dirname, '..', '..');
 const PUBLIC = join(ROOT, 'public', 'assets');
+/**
+ * The release serving players when the atlas images were first named by their content (final review F1, 2026-10-26): its
+ * images stay at their old paths for one release, for the tabs it leaves open (assets/source/README.md).
+ */
+const RETAINED_RELEASE = '84f2d44';
+/** Whether this clone holds `commit` (a shallow checkout holds only its own). */
+function hasCommit(commit: string) {
+  try { execFileSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: ROOT, stdio: 'ignore' }); return true; } catch { return false; }
+}
 const manifest: AssetManifest = loadAssetManifest();
 
 const images = new Map<string, { width: number; height: number; rgba: Uint8Array }>();
@@ -115,6 +124,40 @@ describe('shipped files', () => {
     const out = execFileSync(process.execPath, [join(ROOT, 'assets', 'source', 'build-assets.mjs'), '--check'], { encoding: 'utf8' });
     expect(out).toMatch(/assets up to date/);
   }, 60_000);
+
+  // Final review F1 (2026-10-26): a page bundles each atlas's frame table into its JavaScript and fetches the image by name. A
+  // name that carries the image's own hash gives changed art a new address, so a tab left open across a release never pairs
+  // its old frame table with the new image.
+  it('names every atlas image by the hash of its bytes, in the manifest and in the atlas table', () => {
+    for (const atlas of Object.values(manifest.atlases)) {
+      const named = /^(.+)\.([0-9a-f]{10})\.png$/.exec(atlas.image);
+      expect(named, `${atlas.key}: ${atlas.image} is not content-addressed`).not.toBeNull();
+      const bytes = readFileSync(join(PUBLIC, atlas.image));
+      expect(named![2], atlas.image).toBe(createHash('sha256').update(bytes).digest('hex').slice(0, 10));
+      const table = JSON.parse(readFileSync(join(PUBLIC, atlas.data), 'utf8')) as { meta: { image: string } };
+      expect(table.meta.image, atlas.data).toBe(atlas.image.split('/').pop());
+    }
+  });
+
+  it('keeps each atlas image of the serving release at its old path, as its provenance records, for tabs left open', () => {
+    const retained = manifest.provenance.filter(r => r.source.startsWith('retained for open tabs'));
+    // One per atlas, at the atlas image's name without its hash: the path the open tab's frame table asks for.
+    expect(retained.map(r => r.file).sort()).toEqual(Object.values(manifest.atlases).map(a => a.image.replace(/\.[0-9a-f]{10}\.png$/, '.png')).sort());
+    for (const r of retained) {
+      expect(r.source, r.file).toBe(`retained for open tabs: the atlas image of release ${RETAINED_RELEASE}`);
+      expect(createHash('sha256').update(readFileSync(join(PUBLIC, r.file))).digest('hex'), r.file).toBe(r.sha256);
+    }
+  });
+
+  // The recorded hashes are checked against the release itself when the clone has it (a shallow CI checkout does not).
+  it.skipIf(!hasCommit(RETAINED_RELEASE))('keeps exactly the atlas images of the serving release, byte for byte', () => {
+    const show = (file: string) => execFileSync('git', ['show', `${RETAINED_RELEASE}:public/assets/${file}`], { cwd: ROOT, maxBuffer: 1 << 26 });
+    const released = JSON.parse(show('manifest.json').toString('utf8')) as { atlases: Record<string, { image: string }> };
+    const images = Object.values(released.atlases).map(a => a.image).sort();
+    const retained = manifest.provenance.filter(r => r.source.startsWith('retained for open tabs'));
+    expect(retained.map(r => r.file).sort()).toEqual(images);
+    for (const file of images) expect(readFileSync(join(PUBLIC, file)).equals(show(file)), `${file} differs from ${RETAINED_RELEASE}`).toBe(true);
+  });
 
   it('uses only hard-edged palette colors in every atlas', () => {
     const palette = new Set(Object.values(manifest.palette).map(hex => hex.toLowerCase()));

@@ -15,8 +15,8 @@ was replaced by this route on purpose. Task 11 records this as an approved devia
 
 | Command | Effect |
 | --- | --- |
-| `node assets/source/build-assets.mjs` | Rebuild every file in `public/assets` plus `provenance.json`. |
-| `node assets/source/build-assets.mjs --check` | Fail if any committed file differs from a fresh build, or if an orphan file sits in `public/assets`. `tests/assets` runs this check. |
+| `node assets/source/build-assets.mjs` | Rebuild every file in `public/assets` plus `provenance.json`, and remove an atlas image's superseded content-addressed versions. |
+| `node assets/source/build-assets.mjs --check` | Fail if any committed file differs from a fresh build, if a retained image is not its recorded bytes, or if an orphan file (a stale content-addressed image included) sits in `public/assets`. `tests/assets` runs this check. |
 | `node assets/source/tools/review-sheets.mjs` | Rewrite the review images in `docs/operations/art-review/`. |
 | `node assets/source/tools/review-sheets.mjs --appearance [dir]` | Write only the appearance sheets (male and female bodies with each hair style, idle and walk, 1× and 4×, three colour sets, armour alignment) to `dir`, by default `node_modules/.cache/appearance-sheets/` (not committed). |
 | `node assets/source/tools/render-map.mjs <map> <out.png> [scale] [--actors]` | Render one map offline. |
@@ -25,6 +25,29 @@ was replaced by this route on purpose. Task 11 records this as an approved devia
 Output is byte-identical between runs. Randomness comes only from seeded `tools/random.mjs`.
 PNG compression depends on the zlib build, so the builder keeps a committed PNG whenever its
 decoded pixels are unchanged. Hashes therefore stay stable across Node versions and machines.
+
+## Atlas image names
+
+Every atlas image is named by its content: `actors/gladiators.<hash>.png`, where `<hash>` is the first 10 hex digits of the
+sha256 of its bytes (`tools/content-names.mjs`). The manifest's `atlases.<key>.image` and the atlas table's `meta.image` carry
+that name, and every loader (the camp, expedition and battle scenes, the creation preview, the gallery and the offline tools)
+reads it from the manifest. Never write an atlas image's path in code or tests. The frame tables (`actors/gladiators.json`) keep
+fixed names, because `src/game/assets.ts` bundles them into the JavaScript.
+
+Why (final review F1, 2026-10-26): a tab keeps the frame tables of the release it loaded, but fetches an atlas image again
+for every new scene, and `/assets/*` is not cached as immutable (`scripts/build-headers.mjs`). If changed art kept its name,
+a tab left open across a release would draw every gladiator from the wrong atlas cells until reloaded. With content names,
+changed art has a new address. When art changes, the build writes the new image and removes the superseded version. An old
+tab then cannot find its image, and shows the scene's "art could not load" notice (as for any failed image load) instead of
+scrambled gladiators.
+
+**Retained for open tabs, for one release.** Release `84f2d44`, which was serving players when images were first named by
+content, fetches the old unhashed paths (`actors/gladiators.png`). Those files stay in `public/assets` with that release's bytes,
+as `retained.mjs` lists them with their sha256. The build never writes them and records their provenance as
+`retained for open tabs`. `--check` and `tests/assets/manifest.test.ts` accept only those bytes, and the test compares them
+with `git show 84f2d44:public/assets/<file>` when the clone holds that commit. **Delete the retained files, their
+`retained.mjs` entries and the two retained-image tests in the next release that changes art.** By then no open tab runs
+`84f2d44`.
 
 ## Layout
 

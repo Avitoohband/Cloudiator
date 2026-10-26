@@ -18,7 +18,8 @@ type Zone = { id: string; bounds: { x: number; y: number; w: number; h: number }
 type Prop = { id: string; frame: string; x: number; y: number; w: number; d: number; sortY: number; layer: 'floor' | 'object' | 'foreground'; occludes: boolean; slices?: { left: number; width: number; depthOffset: number }[] };
 const campMap: { zones: Zone[]; props: Prop[] } = readJson('public/assets/camp/map.json');
 const propFrames: Record<string, { frame: { x: number; y: number; w: number; h: number }; anchorPx: { x: number; y: number } }> = readJson('public/assets/camp/props.json').frames;
-const propsImage: { width: number; rgba: Uint8Array } = decodePng(readFileSync('public/assets/camp/props.png'));
+/** The camp props atlas image the manifest names (by its content: final review F1). */
+const propsImage: { width: number; rgba: Uint8Array } = decodePng(readFileSync(`public/assets/${readJson('public/assets/manifest.json').atlases['camp-props'].image}`));
 /** Where each kind of public location belongs (spec §3.3), written independently of the scene code. */
 const EXPECTED_ZONE: Record<string, string> = { training: 'training', rest: 'rest', arena: 'arena', tournament: 'arena', orientation: 'expedition-gate', idle: 'merchants' };
 

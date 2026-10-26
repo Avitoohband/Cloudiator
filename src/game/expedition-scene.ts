@@ -3,6 +3,8 @@
 // (src/game/expedition-stage.ts) and only draws it: the gladiator walks the map route, searches, waits,
 // fights a revealed encounter (its battle log, seeked with the replay controller and staged by
 // battle-stage) or rests at the safe point; once the expedition is back at camp it leaves the scene.
+// Each encounter's creature waits idling at its spot until its fight (src/game/expedition-creatures.ts):
+// a creature the gladiator beat fades after the fight, one that won stays idling at its spot.
 // It never reveals a stage, simulates a fight or settles anything. The map follows the camp's
 // conventions: baked ground, depth-sliced props (src/game/depth.ts) and buildings that fade while their
 // opaque pixels hide the gladiator. A hidden tab draws nothing; on return the scene shows the current
@@ -14,6 +16,7 @@ import type { ExpeditionSceneState } from './expedition-stage';
 import { REPLAY_OUTRO_MS, createReplayController, type ReplayController } from './replay';
 import { frameIndex, planStage, stageAt, type LabelPose, type StageLayout, type StagePlan } from './battle-stage';
 import { gladiatorPose, journeyMap, type GladiatorPose } from './expedition-path';
+import { creatureMode, fightCreatureAlpha } from './expedition-creatures';
 import { ZOOM_STEP, clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
 import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
 import { drawSlices, hidesActor, type PlacedImage } from './depth';
@@ -60,6 +63,8 @@ export type ExpeditionDebugState = {
   gladiator: { x: number; y: number; action: string; animation: string; frames: string[]; layers: string[]; tint: GladiatorLook['tint']; facing: Direction;
     depth: number; screenX: number; screenY: number; scaleX: number; visible: boolean; alpha: number; labelVisible: boolean; walking: boolean } | null;
   creature: { id: string; creatureId: string; x: number; y: number; frame: string; depth: number; alpha: number; scaleX: number; visible: boolean } | null;
+  /** The idle sprites of the encounters' creatures waiting (or staying) at their spots, one per encounter, in order. */
+  waiting: { encounter: number; creatureId: string; x: number; y: number; frame: string; visible: boolean; depth: number; scaleX: number }[];
   battle: { battleId: string; positionMs: number } | null;
   effects: { effect: string; frameName: string; target: 0 | 1; x: number; y: number; visible: boolean }[];
   labels: { text: string; x: number; y: number }[];
@@ -80,8 +85,10 @@ const BG = 0x1f3326;
 /** Opening and reset zoom: one actor fills more of the view than in the busy camp. */
 const DEFAULT_ZOOM = ZOOM_STEP ** 2;
 const FADED_ALPHA = 0.45;
-/** A defeated (or victorious) creature fades this long after the result poses. */
-const CREATURE_FADE_MS = 1500;
+/** A waiting creature's depth offset: the fight draws its right-hand fighter at rest at `y + (10 + 1) / 100` (battle-stage). */
+const WAITING_DEPTH = 0.11;
+/** Waiting creatures breathe out of step: each encounter's idle loop is offset by this much per encounter. */
+const WAITING_STAGGER_MS = 370;
 /** Back at camp, the gladiator fades out of the scene over this long (at once with reduced motion). */
 const HERO_LEAVE_MS = 1500;
 const WHEEL_STEP = 100;
@@ -97,6 +104,8 @@ type PropGroup = Omit<PlacedImage, 'slices'> & {
   slices: { x0: number; x1: number; depth: number; left: number; width: number }[];
 };
 type BattleView = { battleId: string; plan: StagePlan; controller: ReplayController };
+/** An encounter's creature idling at its spot; one sprite per encounter, built once and only shown or hidden. */
+type Waiter = { encounter: number; creatureId: string; sprite: Sprite; anim: AnimationDef; index: number };
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -127,6 +136,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   let overlay: PhaserNS.GameObjects.Rectangle | null = null;
   let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text } | null = null;
   let creature: { container: Container; sprite: Sprite; creatureId: string } | null = null;
+  const waiters: Waiter[] = [];
   const effectPool: Sprite[] = [];
   const effectInfo: { effect: string; frameName: string; target: 0 | 1 }[] = [];
   const labelPool: Text[] = [];
@@ -165,6 +175,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         this.buildLights();
         overlay = this.add.rectangle(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width + 8000, bounds.height + 8000, 0xffffff, 0).setDepth(2_000_000);
         this.buildHero();
+        this.buildWaiters();
         this.setupInput();
         this.scale.on(P.Scale.Events.RESIZE, () => this.syncCamera());
         const start = worldToScreen(journey.points.start.x + 0.5, journey.points.start.y + 0.5);
@@ -282,6 +293,32 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       last = { ...last, animation: '', frames: [] };
     }
 
+    /** One idle sprite per encounter, at the spot where its fight puts the creature (the right-hand fighter, mirrored). */
+    buildWaiters() {
+      journey.encounters.forEach((spot, i) => {
+        const art = manifest.actors.creatures.find(c => c.id === spot.creature);
+        const key = art?.animations.idle?.se;
+        const anim = key ? manifest.animations[key] : undefined;
+        if (!art || !anim) return;
+        const feet = worldToScreen(spot.enemy.x + 0.5, spot.enemy.y + 0.5);
+        const left = spot.enemyFacing === 'sw' || spot.enemyFacing === 'nw';
+        const sprite = this.add.sprite(feet.x, feet.y, art.atlas, anim.frames[0]).setScale(left ? -1 : 1, 1).setDepth(feet.y + WAITING_DEPTH).setVisible(false);
+        waiters.push({ encounter: i + 1, creatureId: art.id, sprite, anim, index: 0 });
+      });
+    }
+
+    /** Shows each creature that waits or stays at its spot, idling; the fight sprite draws every other one. */
+    updateWaiters(state: ExpeditionSceneState | null, now: number) {
+      for (const w of waiters) {
+        const mode = state ? creatureMode(state, w.encounter) : 'gone';
+        const show = mode === 'waiting' || mode === 'stays';
+        if (w.sprite.visible !== show) w.sprite.setVisible(show);
+        if (!show) continue;
+        const index = reducedMotion ? 0 : frameIndex(w.anim, now + w.encounter * WAITING_STAGGER_MS);
+        if (index !== w.index) { w.index = index; w.sprite.setFrame(w.anim.frames[index]); }
+      }
+    }
+
     setupInput() {
       this.input.addPointer(1);
       let pinch: { distance: number; zoom: number } | null = null;
@@ -356,6 +393,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         const index = reducedMotion ? 0 : frameIndex(a.anim, now);
         if (index !== a.index) { a.index = index; a.image.setFrame(a.anim.frames[index]); }
       }
+      this.updateWaiters(state, now);
       const route = state?.route ?? null;
       const pose = route ? gladiatorPose(journey, route, speed) : null;
       last.pose = pose;
@@ -368,7 +406,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       hero.label.setVisible(!!pose && presence > 0).setAlpha(presence);
       const battle = state?.battle ?? null;
       const fighting = !!pose && pose.action === 'fight' && !!battle && route?.from === `encounter-${battle.encounter}`;
-      const staged = battle ? this.stageBattle(battle, fighting) : null;
+      const staged = battle ? this.stageBattle(battle, fighting) : this.clearBattle();
       if (pose) {
         const feet = worldToScreen(pose.x, pose.y);
         if (staged && fighting) {
@@ -400,7 +438,22 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       last = { ...last, animation, frames, flip };
     }
 
-    /** Stages the latest revealed battle at its encounter spot; the creature fades once the result poses end. */
+    /** No battle is revealed (the display time went back before it): nothing of a fight stays drawn. */
+    clearBattle() {
+      if (!battleView) return null;
+      battleView = null;
+      creature?.container.destroy();
+      creature = null;
+      for (const sprite of effectPool) if (sprite.visible) sprite.setVisible(false);
+      for (const text of labelPool) if (text.visible) text.setVisible(false);
+      effectInfo.length = 0;
+      labelInfo.length = 0;
+      last.positionMs = null;
+      last.creatureAlpha = 0;
+      return null;
+    }
+
+    /** Stages the latest revealed battle at its encounter spot; after the result poses a beaten creature fades and a winner idles. */
     stageBattle(battle: NonNullable<ExpeditionSceneState['battle']>, fighting: boolean) {
       if (!battleView || battleView.battleId !== battle.log.battleId) {
         battleView = { battleId: battle.log.battleId, plan: planStage(battle.log, manifest), controller: createReplayController(battle.log) };
@@ -415,9 +468,10 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       const layout: StageLayout = { width: 0, height: 0, scale: 1, backdropX: 0, backdropY: 0, feet: [feet[0], feet[1]] };
       const frame = stageAt(plan, controller.positionMs, layout, { reducedMotion });
       const shake = reducedMotion ? { x: 0, y: 0 } : frame.shake;
-      // The creature: drawn while the fight and its result poses play, then faded out.
+      // The creature: drawn while the fight and its result poses play. Then a beaten one fades out, and one that won
+      // is handed to its idle sprite (updateWaiters), which stands where the fight sprite did.
       const after = battle.elapsedMs - battle.log.durationMs - REPLAY_OUTRO_MS;
-      const alpha = after <= 0 ? 1 : reducedMotion ? 0 : Math.max(0, 1 - after / CREATURE_FADE_MS);
+      const alpha = fightCreatureAlpha(battle, reducedMotion);
       const look1 = plan.looks[1];
       if (!creature && look1.kind === 'creature') {
         const sprite = this.add.sprite(0, 0, look1.atlas, frame.fighters[1].frames[0]);
@@ -566,6 +620,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
           x: creature.container.x, y: creature.container.y, frame: String(creature.sprite.frame.name), depth: creature.container.depth,
           alpha: creature.container.alpha, scaleX: creature.container.scaleX, visible: creature.container.visible,
         } : null,
+        waiting: waiters.map(w => ({ encounter: w.encounter, creatureId: w.creatureId, x: w.sprite.x, y: w.sprite.y, frame: String(w.sprite.frame.name), visible: w.sprite.visible, depth: w.sprite.depth, scaleX: w.sprite.scaleX })),
         battle: battleView && last.positionMs !== null ? { battleId: battleView.battleId, positionMs: last.positionMs } : null,
         effects: effectInfo.map((e, k) => ({ ...e, x: effectPool[k].x, y: effectPool[k].y, visible: effectPool[k].visible })),
         labels: labelInfo.map((l, k) => ({ ...l, x: labelPool[k].x, y: labelPool[k].y })),

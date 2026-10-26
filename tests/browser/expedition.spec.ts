@@ -796,6 +796,200 @@ test.describe('followable expedition scenes', () => {
       await page.screenshot({ path: testInfo.outputPath(`expedition-${key}-encounter-${n}.png`) });
     }
   });
+
+  test.describe('waiting creatures', () => {
+    type Scene = Awaited<ReturnType<typeof expeditionFlow.scene>>;
+    const environmentOf = (key: ExpeditionFixtureKey) => EXPEDITION_FIXTURES[key].expedition;
+    const enemyFeet = (environment: string, n: number) => {
+      const spot = MAPS[environment].expedition!.encounters[n - 1];
+      return worldToScreen(spot.enemyX + 0.5, spot.enemyY + 0.5);
+    };
+    const creatureIds = (environment: string) => MAPS[environment].expedition!.encounters.map(e => e.creature);
+    const shown = (d: Scene) => d.waiting.map(w => w.visible);
+    const idleFrame = (creatureId: string) => new RegExp(`^${creatureId}/idle/se/[0-3]$`);
+
+    test("waits each encounter's creature at its spot from the start of the trip, in every environment, for the owner and a spectator", async ({ page }) => {
+      for (const key of ['woodland', 'outpost', 'mountain', 'spectator'] as const) {
+        const environment = environmentOf(key);
+        await expeditionFlow.open(page, key, 10);
+        await expeditionFlow.sceneReady(page);
+        await expeditionFlow.hold(page, key, 10);
+        const d = await expeditionFlow.scene(page);
+        expect(d.environment, key).toBe(environment);
+        expect(d.waiting, key).toHaveLength(3);
+        d.waiting.forEach((w, i) => {
+          const feet = enemyFeet(environment, i + 1);
+          expect(w.encounter, `${key} ${i + 1}`).toBe(i + 1);
+          expect(w.creatureId, `${key} ${i + 1}`).toBe(creatureIds(environment)[i]);
+          expect(w.visible, `${key} ${i + 1}`).toBe(true);
+          expect([w.x, w.y], `${key} ${i + 1}`).toEqual([feet.x, feet.y]);
+          // Mirrored like the fight's right-hand fighter, so it faces the gladiator coming from the left.
+          expect(w.scaleX, `${key} ${i + 1}`).toBe(-1);
+          // The same depth rule as the fight's creature (y + depth / 100).
+          expect(w.depth, `${key} ${i + 1}`).toBeCloseTo(feet.y + 0.11, 6);
+          expect(w.frame, `${key} ${i + 1}`).toMatch(idleFrame(w.creatureId));
+        });
+        // No fight is drawn before one is revealed.
+        expect(d.creature, key).toBeNull();
+      }
+    });
+
+    test('idles its creatures, breathing out of step, and keeps one still frame with reduced motion', async ({ page }) => {
+      await expeditionFlow.open(page, 'woodland', 10);
+      await expeditionFlow.sceneReady(page);
+      const seen: Set<string>[] = [new Set(), new Set(), new Set()];
+      for (let ms = 0; ms < 1_300; ms += 130) {
+        await expeditionFlow.holdAt(page, startOf('woodland') + 10 * MIN + ms);
+        (await expeditionFlow.scene(page)).waiting.forEach((w, i) => seen[i].add(w.frame));
+      }
+      for (const frames of seen) expect(frames.size).toBeGreaterThan(1);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await expeditionFlow.open(page, 'woodland', 10);
+      await expeditionFlow.sceneReady(page);
+      expect((await expeditionFlow.scene(page)).reducedMotion).toBe(true);
+      for (let ms = 0; ms < 1_300; ms += 260) {
+        await expeditionFlow.holdAt(page, startOf('woodland') + 10 * MIN + ms);
+        for (const w of (await expeditionFlow.scene(page)).waiting) expect(w.frame, `at ${ms} ms`).toBe(`${w.creatureId}/idle/se/0`);
+      }
+      // A creature that stays after a defeat is as still.
+      await expeditionFlow.openFailedAtMinute(page, 65);
+      await expeditionFlow.sceneReady(page);
+      for (let ms = 0; ms < 1_300; ms += 260) {
+        await expeditionFlow.holdAt(page, startOf('outpost') + 65 * MIN + ms);
+        for (const w of (await expeditionFlow.scene(page)).waiting) expect(w.frame, `outpost at ${ms} ms`).toBe(`${w.creatureId}/idle/se/0`);
+      }
+    });
+
+    test('shows the Timber Wolf waiting at encounter 2 while the gladiator approaches it at minute 39', async ({ page }, testInfo) => {
+      await expeditionFlow.open(page, 'woodland', 39);
+      await expeditionFlow.sceneReady(page);
+      await expeditionFlow.hold(page, 'woodland', 39.9);
+      const d = await expeditionFlow.scene(page);
+      const spot = MAPS.woodland.expedition!.encounters[1];
+      expect(d.gladiator).toMatchObject({ action: 'idle', x: spot.x + 0.5, y: spot.y + 0.5 });
+      expect(d.waiting[1]).toMatchObject({ creatureId: 'timber-wolf', visible: true });
+      // Inside the view the camera holds on the gladiator, so the player sees it.
+      const { worldView } = d.camera;
+      expect(d.waiting[1].x).toBeGreaterThan(worldView.x);
+      expect(d.waiting[1].x).toBeLessThan(worldView.x + worldView.width);
+      expect(d.waiting[1].y).toBeGreaterThan(worldView.y);
+      expect(d.waiting[1].y).toBeLessThan(worldView.y + worldView.height);
+      await expeditionFlow.settle(page);
+      await page.screenshot({ path: testInfo.outputPath('expedition-woodland-timber-wolf-waiting.png') });
+    });
+
+    test('opens mid-slot with the beaten creature gone and the next two waiting', async ({ page }) => {
+      await expeditionFlow.open(page, 'woodland', 39);
+      await expeditionFlow.sceneReady(page);
+      await expeditionFlow.hold(page, 'woodland', 39);
+      let d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([false, true, true]);
+      expect(d.waiting.map(w => w.creatureId)).toEqual(['dire-wolf', 'timber-wolf', 'dire-wolf']);
+      // Encounter 1's creature is drawn nowhere: not waiting, and its fight sprite has faded out.
+      expect(d.creature === null || (d.creature.alpha === 0 && !d.creature.visible)).toBe(true);
+      // Going back before the fight draws it waiting again, and no stale fight sprite with it.
+      await expeditionFlow.hold(page, 'woodland', 10);
+      d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([true, true, true]);
+      expect(d.creature).toBeNull();
+      expect(d.battle).toBeNull();
+    });
+
+    test('hands a creature from waiting to its fight and, after a victory, from its fade to nothing, never drawing it twice', async ({ page }) => {
+      await expeditionFlow.open(page, 'woodland', 19);
+      await expeditionFlow.sceneReady(page);
+      const fight = encounterStages('woodland')[0];
+      await expeditionFlow.holdAt(page, fight.startedAtMs - 100);
+      expect(shown(await expeditionFlow.scene(page))).toEqual([true, true, true]);
+      for (const ms of [fight.startedAtMs, fight.startedAtMs + 3_000, fight.endsAtMs + OUTRO_MS - 100]) {
+        await expeditionFlow.holdAt(page, ms);
+        const d = await expeditionFlow.scene(page);
+        expect(shown(d), `at ${ms - fight.startedAtMs} ms`).toEqual([false, true, true]);
+        expect(d.creature, `at ${ms - fight.startedAtMs} ms`).toMatchObject({ creatureId: 'dire-wolf', visible: true, alpha: 1 });
+      }
+      // The beaten creature fades as before, and its idle sprite never reappears.
+      await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS + 200);
+      let d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([false, true, true]);
+      expect(d.creature!.alpha).toBeGreaterThan(0.5);
+      expect(d.creature!.alpha).toBeLessThan(1);
+      await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS + 1_600);
+      d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([false, true, true]);
+      expect(d.creature).toMatchObject({ alpha: 0, visible: false });
+    });
+
+    test('the fight starts where the creature waited', async ({ page }) => {
+      for (const key of ['woodland', 'outpost', 'mountain'] as const) {
+        await expeditionFlow.open(page, key, 10);
+        await expeditionFlow.sceneReady(page);
+        for (const [i, fight] of encounterStages(key).entries()) {
+          await expeditionFlow.holdAt(page, fight.startedAtMs - 200);
+          const waiting = (await expeditionFlow.scene(page)).waiting[i];
+          expect(waiting.visible, `${key} ${i + 1}`).toBe(true);
+          // The first frame of the battle.
+          await expeditionFlow.holdAt(page, fight.startedAtMs);
+          const d = await expeditionFlow.scene(page);
+          expect(d.battle!.positionMs, `${key} ${i + 1}`).toBe(0);
+          expect(d.waiting[i].visible, `${key} ${i + 1}`).toBe(false);
+          expect(d.creature, `${key} ${i + 1}`).toMatchObject({ creatureId: waiting.creatureId, visible: true, alpha: 1 });
+          expect([d.creature!.x, d.creature!.y], `${key} ${i + 1}`).toEqual([waiting.x, waiting.y]);
+          expect(d.creature!.scaleX, `${key} ${i + 1}`).toBe(waiting.scaleX);
+          expect(d.creature!.depth, `${key} ${i + 1}`).toBeCloseTo(waiting.depth, 6);
+        }
+      }
+    });
+
+    test('a creature that wins stays at its spot', async ({ page }) => {
+      await expeditionFlow.openFailedAtMinute(page, 30);
+      await expeditionFlow.sceneReady(page);
+      const fight = encounterStages('outpost')[1];
+      const safe = MAPS.outpost.expedition!.safePoint;
+      const feet = enemyFeet('outpost', 2);
+      // Through the result poses the fight sprite draws it, and its idle sprite waits out of sight.
+      await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS - 100);
+      let d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([false, false, true]);
+      expect(d.creature).toMatchObject({ creatureId: 'raider-archer', visible: true, alpha: 1 });
+      // Then it idles at its spot instead of fading, while the gladiator heads for the safe point.
+      await expeditionFlow.holdAt(page, fight.endsAtMs + OUTRO_MS + 200);
+      d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([false, true, true]);
+      expect([d.waiting[1].x, d.waiting[1].y]).toEqual([feet.x, feet.y]);
+      expect(d.waiting[1].frame).toMatch(idleFrame('raider-archer'));
+      expect(d.creature).toMatchObject({ alpha: 0, visible: false });
+      expect(d.gladiator).toMatchObject({ action: 'walk', walking: true });
+      for (const minute of [45, 65, 79, 80]) {
+        await expeditionFlow.hold(page, 'outpost', minute);
+        d = await expeditionFlow.scene(page);
+        expect(shown(d), `minute ${minute}`).toEqual([false, true, true]);
+        expect([d.waiting[1].x, d.waiting[1].y], `minute ${minute}`).toEqual([feet.x, feet.y]);
+        expect(d.waiting[2].creatureId, `minute ${minute}`).toBe('raider');
+        expect(d.creature, `minute ${minute}`).toMatchObject({ alpha: 0, visible: false });
+        // The encounter that never happens stays out of the log; the gladiator rests at the safe point.
+        await expect(page.getByText('Encounter 3')).toHaveCount(0);
+        if (minute < 80) expect(d.gladiator, `minute ${minute}`).toMatchObject({ x: safe.x + 0.5, y: safe.y + 0.5, visible: true });
+      }
+      await expeditionFlow.hold(page, 'outpost', 65);
+      expect((await expeditionFlow.scene(page)).gladiator!.action).toMatch(/^(sit|sleep)$/);
+      await expeditionFlow.settle(page);
+    });
+
+    test('shows a spectator the same creatures, with the one that won staying', async ({ page }) => {
+      await expeditionFlow.open(page, 'spectator', 10);
+      await expeditionFlow.sceneReady(page);
+      expect((await expeditionFlow.state(page)).owner).toBe(false);
+      await expeditionFlow.hold(page, 'spectator', 10);
+      let d = await expeditionFlow.scene(page);
+      expect(d.waiting.map(w => w.creatureId)).toEqual(['raider', 'raider-archer', 'raider']);
+      expect(shown(d)).toEqual([true, true, true]);
+      // Defeated in encounter 1: its creature stays, the other two keep waiting.
+      await expeditionFlow.hold(page, 'spectator', 45);
+      d = await expeditionFlow.scene(page);
+      expect(shown(d)).toEqual([true, true, true]);
+      expect(d.creature).toMatchObject({ alpha: 0, visible: false });
+    });
+  });
 });
 
 test.describe('exported expedition route', () => {

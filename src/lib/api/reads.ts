@@ -5,6 +5,7 @@ import type {
   MarketListing, MarketPage, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
+import { validAppearance, type Appearance } from '@domain/appearance';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
 
@@ -122,6 +123,24 @@ export function parseMarketRead(cursor?: string | null, seller?: string | null):
   if (seller === undefined || seller === null) return { after, seller: null };
   if (typeof seller !== 'string' || !GLADIATOR_ID.test(seller)) throw new GatewayReadError('unavailable');
   return { after, seller: seller.toLowerCase() };
+}
+/** The most gladiator ids one look read asks for (a battle has two participants; a tournament view may pass a few). */
+export const MAX_LOOK_READ = 16;
+/**
+ * The looks (the look chosen at creation, null for the legacy look) of up to `MAX_LOOK_READ` gladiators, in one public read
+ * of the actor projection (`world_actor_reads`, readable as `anon`); only the id and the `appearance` cross, never the whole
+ * actor. Ids are lowercased, deduped and checked before any query is built (the column is a uuid: a text value would fail the
+ * whole read), and a gladiator the projection does not know is absent from the map. A stored value that is not a valid look
+ * reads as the legacy look. The replay waits for this read (`loadLooks`) and treats a failure as the legacy look.
+ */
+export async function readLooks(client: SupabaseClient, ids: readonly string[]): Promise<Map<string, Appearance | null>> {
+  const wanted = [...new Set(ids.filter((id): id is string => typeof id === 'string' && GLADIATOR_ID.test(id)).map(id => id.toLowerCase()))].slice(0, MAX_LOOK_READ);
+  const looks = new Map<string, Appearance | null>();
+  if (wanted.length === 0) return looks;
+  const rows = checked(await client.from('world_actor_reads').select('gladiator_id,appearance:actor->appearance').in('gladiator_id', wanted)
+    .limit(wanted.length)) as unknown as { gladiator_id: string; appearance: unknown }[];
+  for (const row of rows) looks.set(row.gladiator_id, validAppearance(row.appearance) ? row.appearance : null);
+  return looks;
 }
 type OfferRow = { id: string; seller_gladiator_id: string; seller_name: string; item: MarketListing['item']; price: number; listed_at_ms: number; expires_at_ms: number };
 /**

@@ -1,3 +1,4 @@
+import { validAppearance } from '@domain/appearance';
 import type { GameGateway } from './gateway';
 import { GatewayReadError, parseMarketRead, parseResultsCursor, parseStandingOf, parseStandingsRead } from './reads';
 import { worldFixture } from '../../../tests/fixtures/domain';
@@ -59,6 +60,8 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Expedition and Arena
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
+    // A replay's fighters' looks, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
+    looks: async ids => new Map(world.actors.filter(a => ids.includes(a.gladiatorId)).map(a => [a.gladiatorId, validAppearance(a.appearance) ? a.appearance : null] as const)),
     profile: async id => (Object.hasOwn(profiles, id) ? structuredClone(profiles[id]) : unavailable()),
     // The seasons newest first: the current one (open) and the closed season before it, built with seasonAt.
     seasons: async () => structuredClone([...FIXTURE_SEASONS]),

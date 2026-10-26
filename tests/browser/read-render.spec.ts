@@ -314,8 +314,12 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     const main = page.locator('main#main');
     await expect(main.getByRole('heading', { level: 1, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
     await page.waitForTimeout(500);
-    // The page's display clock needs the server's time, which the revision gives: no world, and the owner once.
-    expect(live.count('world_actor_reads'), 'world reads').toBe(0);
+    // The page's display clock needs the server's time, which the revision gives: no world, and the owner once. The replay's
+    // two fighters' looks are one batched read of the actor projection (an `in` filter), made once, never the whole world.
+    const worldReads = () => live.requests.filter(r => r.table === 'world_actor_reads' && !r.query.get('gladiator_id')?.startsWith('in.')).length;
+    const lookReads = () => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('gladiator_id')?.startsWith('in.')).length;
+    expect(worldReads(), 'world reads').toBe(0);
+    expect(lookReads(), 'look reads').toBe(1);
     expect(live.count('owner_state'), 'owner reads').toBe(1);
     const revisions = live.count('world_revision');
     live.setWorld({ ...world, revision: 'live-2' });
@@ -325,7 +329,8 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     await page.clock.fastForward(2_500);
     await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); });
     await page.waitForTimeout(1_000);
-    expect(live.count('world_actor_reads'), 'world reads after a revision change and a tab return').toBe(0);
+    expect(worldReads(), 'world reads after a revision change and a tab return').toBe(0);
+    expect(lookReads(), 'look reads after a revision change and a tab return').toBe(1);
     expect(live.count('owner_state'), 'owner reads after a revision change and a tab return').toBe(1);
   });
 

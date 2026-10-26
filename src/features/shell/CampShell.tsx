@@ -24,7 +24,7 @@
 // (Task 23.4, C8), and goes on from the shared clock's time when the scene closes.
 //
 // Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
@@ -45,6 +45,7 @@ import { TournamentPanel, type TournamentSample } from '../tournaments/Tournamen
 import { ResultsPanel } from '../results/ResultsPanel';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
+import { appearancesOf } from '../../game/replay-looks';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
@@ -183,6 +184,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // One sync controller, display clock and owner state for the camp and every menu (the fixture gateway once loaded).
   const game = useGameState(reads, { fixture, previewAs });
   const { owner, world, clock, viewer } = game;
+  // The looks of the gladiators the camp holds as world actors: a tournament replay watched from here reads only the others.
+  const knownLooks = useMemo(() => appearancesOf(world?.actors), [world]);
   // The display time the owner's resting line shows its return against (Task 23.10): it follows the shared clock by the minute.
   const nowMs = useMinuteNow(clock);
   const menus = menusFor(viewer);
@@ -307,7 +310,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
         onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
-        refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex} />;
+        refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex}
+        knownLooks={knownLooks} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}

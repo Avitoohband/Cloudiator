@@ -5,6 +5,7 @@
 // missing, the host shows a note and the replay controls, result and log keep working.
 import { useEffect, useRef, useState } from 'react';
 import type { BattleLog } from '@contracts/events';
+import type { Appearance } from '@domain/appearance';
 import type { SceneBridge } from './bridge';
 import type { BattleDebugState, BattleSceneHandle } from './battle-scene';
 import { supportsWebGL } from './webgl';
@@ -19,8 +20,26 @@ declare global {
   interface Window { __cloudiatorBattle?: BattleTestHook }
 }
 
-export function BattleViewport({ log, position, reducedMotion, bridge, label }: {
+/**
+ * The stage while the replay waits for its fighters' looks: the same frame and status line as the loading scene, with no
+ * canvas (the scene mounts only once the looks have settled, `BattleViewport`).
+ */
+export function BattleViewportWaiting({ label }: { label: string }) {
+  return (
+    <div className={styles.stage}>
+      <div className={styles.canvas} role="img" aria-label={label} />
+      <p className={styles.status} role="status">Setting the stage…</p>
+    </div>
+  );
+}
+
+export function BattleViewport({ log, looks, position, reducedMotion, bridge, label }: {
   log: BattleLog;
+  /**
+   * The fighters' looks, settled before this mounts (`loadLooks`: at most 1.5 s, the legacy look for an unknown one). The scene
+   * draws them once and never swaps them mid-play, so a later value of this prop is not drawn.
+   */
+  looks: ReadonlyMap<string, Appearance | null>;
   /** Replay position in log milliseconds. */
   position: () => number;
   reducedMotion: boolean;
@@ -31,10 +50,13 @@ export function BattleViewport({ log, position, reducedMotion, bridge, label }: 
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<BattleSceneHandle | null>(null);
   const positionRef = useRef(position);
+  const looksRef = useRef(looks);
   const reduced = useRef(reducedMotion);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
 
   useEffect(() => { positionRef.current = position; }, [position]);
+  // Read once when the scene is built (a new log builds a new scene): the looks are not a dependency, so they never re-skin it.
+  useEffect(() => { looksRef.current = looks; }, [looks]);
   useEffect(() => {
     reduced.current = reducedMotion;
     handle.current?.setReducedMotion(reducedMotion);
@@ -67,6 +89,7 @@ export function BattleViewport({ log, position, reducedMotion, bridge, label }: 
         atlasData: assets.ATLAS_DATA,
         assetBase: '/assets/',
         log,
+        looks: looksRef.current,
         position: () => positionRef.current(),
         reducedMotion: reduced.current,
         onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },

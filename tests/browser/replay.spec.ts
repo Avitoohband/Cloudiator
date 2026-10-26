@@ -1,9 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from './fixtures';
-import type { BattleAction, BattleLog } from '../../supabase/functions/_shared/contracts/events';
+import type { BattleAction, BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { PublicActor } from '../../supabase/functions/_shared/contracts/reads';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '../../supabase/functions/_shared/domain/appearance';
+import { tintFor } from '../../src/game/actors';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
-import { emptyWorld, routeLiveReads } from './live-routes';
+import { worldFixture } from '../fixtures/domain';
+import { SUPABASE_URL, emptyWorld, routeLiveReads, type LiveTransport } from './live-routes';
 import { openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -415,5 +419,154 @@ test.describe('battle-log replay', () => {
       await expectStagedCorrectly(page, log, log.durationMs + 2000);
       await page.screenshot({ path: testInfo.outputPath(`replay-${c.name}-result.png`), fullPage: true });
     }
+  });
+
+  // Task 5: a replay draws each gladiator in its chosen look. The scene is built once, so it waits (at most 1.5 s) for the
+  // looks, never swaps them mid-play, and draws the legacy look when the read fails or is late. Live mode, as a visitor.
+  test.describe("fighters' looks", () => {
+    test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');
+    // The tie bout: nobody wears head gear, so every chosen hair style is drawn (a helmet or hood hides it).
+    const log = LOGS.tie;
+    const [aster, cassia] = log.participants;
+    const activityId = REPLAY_FIXTURES.tie.activityId;
+    const livePage = `/replay/?activity=${activityId}`;
+    const FEMALE: Appearance = { body: 'female', hair: 'ponytail', skin: 4, hairColor: 3, cloth: 11 };
+    const BALD: Appearance = { body: 'male', hair: 'bald', skin: 1, hairColor: 1, cloth: 1 };
+    const actor = (p: BattleLog['participants'][number], appearance: Appearance | null): PublicActor => ({ ...worldFixture.actors[0], gladiatorId: p.gladiatorId!, name: p.name, appearance });
+    async function liveReplay(context: Parameters<typeof routeLiveReads>[0], actors: PublicActor[]) {
+      const at = worldFixture.serverNowMs, fought = at - 30 * 60_000;
+      const timeline: RevealedTimeline = { activityId, serverNowMs: at, visibleThroughMs: at, stages: [
+        { id: `${activityId}:1`, kind: 'bout', revealedAtMs: fought, startedAtMs: fought, endsAtMs: fought + log.durationMs, label: 'Bout: tie', battleLog: log },
+      ] };
+      return routeLiveReads(context, { world: { ...worldFixture, revision: 'looks-1', actors }, timelines: { [activityId]: timeline } });
+    }
+    /** The batched look reads (an `in` filter on the actor projection); the camp's own world reads have none. */
+    const lookReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('gladiator_id')?.startsWith('in.'));
+    const fighters = async (page: Page) => (await page.evaluate(() => window.__cloudiatorBattle!.debug()))!.fighters;
+    const layersOf = async (page: Page) => (await fighters(page)).map(f => f.layers);
+    const tintOf = (layers: DebugFighter['layers'], id: string) => layers.find(l => l.id === id)?.tint;
+    /** The legacy look: the male body, its clothes and short hair, in the colours the id hashes to. */
+    function expectLegacy(layers: DebugFighter['layers'], gladiatorId: string) {
+      const t = tintFor(gladiatorId);
+      expect(layers.map(l => l.id)).toEqual(expect.arrayContaining(['body', 'cloth', 'hair']));
+      expect(layers.map(l => l.id).filter(id => /-(female|long|ponytail)$/.test(id))).toEqual([]);
+      expect([tintOf(layers, 'body'), tintOf(layers, 'cloth'), tintOf(layers, 'hair')]).toEqual([t.skin, t.cloth, t.hair]);
+    }
+    /** The looks never change while the replay plays: the same layers and colours at the start, mid-fight, at the end and after a seek back. */
+    async function expectLooksConstant(page: Page) {
+      const first = await layersOf(page);
+      for (const at of [0, 1_500, Math.floor(log.durationMs / 2), log.durationMs, 400]) {
+        await page.evaluate(ms => window.__cloudiatorReplay!.seek(ms), at);
+        await nextFrames(page);
+        expect(await layersOf(page), `looks at ${at} ms`).toEqual(first);
+      }
+    }
+
+    test("waits for the fighters' looks, then draws them and keeps them for the whole replay", async ({ page, context }, testInfo) => {
+      const live = await liveReplay(context, [actor(aster, FEMALE), actor(cassia, BALD)]);
+      const release = live.hold('world_actor_reads');
+      await page.goto(livePage);
+      await expect.poll(() => lookReads(live).length, { timeout: 45_000 }).toBe(1);
+      // The page, its controls and its log are already there; only the scene waits for the looks (one batched read for both).
+      await expect(page.getByRole('heading', { level: 1, name: 'Aster vs Cassia' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Skip to result' })).toBeVisible();
+      await expect(page.getByText('Setting the stage…')).toBeVisible();
+      // Well within the 1.5 s wait, long enough for a scene that was mounted at once to have started (it loads Phaser first).
+      await page.waitForTimeout(500);
+      expect(await page.evaluate(() => !!window.__cloudiatorBattle), 'the scene must not mount before the looks arrive').toBe(false);
+      expect(await page.locator('canvas').count()).toBe(0);
+      await expect(page.getByText('Setting the stage…')).toBeVisible();
+      const query = lookReads(live)[0].query;
+      expect(query.get('gladiator_id')).toBe(`in.(${aster.gladiatorId},${cassia.gladiatorId})`);
+      expect(query.get('select')).toBe('gladiator_id,appearance:actor->appearance');
+      release();
+      await sceneReady(page);
+      const [left, right] = await fighters(page);
+      // Aster: the chosen female body, clothes and ponytail, in the chosen colours; Cassia: bald, so no hair layer at all.
+      expect(left.layers.map(l => l.id)).toEqual(expect.arrayContaining(['body-female', 'cloth-female', 'hair-ponytail']));
+      expect(left.layers.map(l => l.id).filter(id => ['body', 'cloth', 'hair'].includes(id))).toEqual([]);
+      expect([tintOf(left.layers, 'body-female'), tintOf(left.layers, 'cloth-female'), tintOf(left.layers, 'hair-ponytail')])
+        .toEqual([SKIN_TONES[4].tint, CLOTH_COLOURS[11].tint, HAIR_COLOURS[3].tint]);
+      expect(right.layers.map(l => l.id)).toEqual(expect.arrayContaining(['body', 'cloth']));
+      expect(right.layers.some(l => l.id.startsWith('hair'))).toBe(false);
+      expect([tintOf(right.layers, 'body'), tintOf(right.layers, 'cloth')]).toEqual([SKIN_TONES[1].tint, CLOTH_COLOURS[1].tint]);
+      await expectLooksConstant(page);
+      expect(lookReads(live), 'one batched read for the whole replay').toHaveLength(1);
+      await page.evaluate(() => window.__cloudiatorReplay!.seek(900));
+      await nextFrames(page);
+      await page.screenshot({ path: testInfo.outputPath('replay-chosen-looks.png') });
+    });
+
+    test('mounts with the legacy look when the read is late, and ignores the late answer', async ({ page, context }) => {
+      const live = await liveReplay(context, [actor(aster, FEMALE), actor(cassia, BALD)]);
+      const release = live.hold('world_actor_reads');
+      await page.goto(livePage);
+      await expect.poll(() => lookReads(live).length, { timeout: 45_000 }).toBe(1);
+      const asked = Date.now();
+      await sceneReady(page);
+      // The read is held, so the scene could only mount once the wait ran out (1.5 s; the margin covers the poll interval).
+      expect(Date.now() - asked, 'waited for the looks').toBeGreaterThanOrEqual(1_000);
+      const [left, right] = await fighters(page);
+      expectLegacy(left.layers, aster.gladiatorId!);
+      expectLegacy(right.layers, cassia.gladiatorId!);
+      // The answer arrives mid-play: nothing is redrawn, not now and not at any later position.
+      release();
+      await page.waitForTimeout(1_000);
+      expect(await layersOf(page)).toEqual([left.layers, right.layers]);
+      await expectLooksConstant(page);
+      expect(lookReads(live)).toHaveLength(1);
+    });
+
+    test('mounts with the legacy look when the read fails, and the replay still plays', async ({ page, context }) => {
+      const live = await liveReplay(context, [actor(aster, FEMALE), actor(cassia, BALD)]);
+      live.fail('world_actor_reads');
+      await page.goto(livePage);
+      await sceneReady(page);
+      const [left, right] = await fighters(page);
+      expectLegacy(left.layers, aster.gladiatorId!);
+      expectLegacy(right.layers, cassia.gladiatorId!);
+      expect(lookReads(live).length).toBeGreaterThan(0);
+      await page.getByRole('button', { name: 'Skip to result' }).click();
+      expect(await replayState(page)).toMatchObject({ finished: true, hp: [...log.finalHp], winnerId: log.winnerId });
+    });
+
+    test('a replay over the camp reads only the looks the camp does not already hold', async ({ page, context }) => {
+      // The world's actors carry Aster's look and Cassia is not in the world: only she is read, and she is drawn as legacy.
+      const live = await liveReplay(context, [actor(aster, FEMALE)]);
+      await page.goto(`/game/?view=replay&activity=${activityId}`);
+      await sceneReady(page);
+      const [left, right] = await fighters(page);
+      expect(left.layers.map(l => l.id)).toEqual(expect.arrayContaining(['body-female', 'cloth-female', 'hair-ponytail']));
+      expect(tintOf(left.layers, 'body-female')).toBe(SKIN_TONES[4].tint);
+      expectLegacy(right.layers, cassia.gladiatorId!);
+      const reads = lookReads(live);
+      expect(reads, 'only the fighter the world does not hold is read').toHaveLength(1);
+      expect(reads[0].query.get('gladiator_id')).toBe(`in.(${cassia.gladiatorId})`);
+      await page.evaluate(() => window.__cloudiatorReplay!.seek(1_000));
+      await nextFrames(page);
+      expect(await layersOf(page)).toEqual([left.layers, right.layers]);
+    });
+
+    test('a replay over the camp reads nothing when the camp holds both fighters', async ({ page, context }) => {
+      const live = await liveReplay(context, [actor(aster, FEMALE), actor(cassia, null)]);
+      await page.goto(`/game/?view=replay&activity=${activityId}`);
+      await sceneReady(page);
+      const [left, right] = await fighters(page);
+      expect(left.layers.map(l => l.id)).toContain('body-female');
+      expectLegacy(right.layers, cassia.gladiatorId!);
+      expect(lookReads(live)).toHaveLength(0);
+    });
+
+    test('the fixture preview reads looks from its own world, with no network', async ({ page }) => {
+      const backend: string[] = [];
+      page.on('request', request => { if (request.url().startsWith(SUPABASE_URL)) backend.push(request.url()); });
+      await openReplay(page, REPLAY_FIXTURES.tie.activityId);
+      await sceneReady(page);
+      const [left, right] = await fighters(page);
+      // The fixture world's gladiators have the legacy look.
+      expectLegacy(left.layers, aster.gladiatorId!);
+      expectLegacy(right.layers, cassia.gladiatorId!);
+      expect(backend).toEqual([]);
+    });
   });
 });

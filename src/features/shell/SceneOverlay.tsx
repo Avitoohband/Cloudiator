@@ -15,6 +15,7 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
 import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
 import { ExpeditionUnavailable, ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
+import { appearancesOf } from '../../game/replay-looks';
 import type { SceneAddress, SceneView } from './scene-url';
 import styles from './shell.module.css';
 
@@ -66,11 +67,15 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   }, [sceneKey]);
 
   const player = state.viewer === 'player';
-  const reads = useMemo<ExpeditionReads | null>(() => {
+  const reads = useMemo<(ExpeditionReads & Partial<Pick<GameGateway, 'looks'>>) | null>(() => {
     if (!gateway) return null;
     if (player) return gateway;
-    return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; } };
+    // The fighters' looks are public, so a visitor's replay reads them too.
+    return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; }, looks: ids => gateway.looks(ids) };
   }, [gateway, player]);
+  // The camp's own world actors already hold their looks: a replay of those fighters reads nothing (the replay takes them once,
+  // when it mounts, so a world refresh never changes a replay in play).
+  const known = useMemo(() => appearancesOf(state.world?.actors), [state.world]);
 
   // The display clock has a server time once the shared sync has read the world (or it never will).
   const clock = state.world || state.syncError ? state.clock : null;
@@ -96,7 +101,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
           : view.kind === 'replay'
             ? loading ? <p role="status">Loading the replay…</p>
               : <ActivityReplay key={viewKey} reads={reads} activityId={activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2}
-                viewerId={player ? state.owner?.gladiatorId ?? null : null} />
+                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} />
             : loading ? <p role="status">Loading the expedition…</p>
               : <ExpeditionView key={viewKey} reads={reads} activityId={activityId} fixture={fixture} revision={state.revision} world={state.world}
                 worldFailed={!state.world && state.syncError !== null} owner={player ? state.owner : null}

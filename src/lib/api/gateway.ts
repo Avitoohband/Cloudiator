@@ -1,9 +1,10 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
+import type { Appearance } from '@domain/appearance';
 import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
+  GatewayReadError, readLooks, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
   readTournamentLog,
 } from './reads';
 export { GatewayReadError } from './reads';
@@ -57,6 +58,12 @@ export interface GameGateway {
    */
   tournamentLog(boutId: string): Promise<BattleLog>;
   recent(cursor?: string): Promise<ResultsPage>;
+  /**
+   * The looks chosen at creation (`Appearance`, or null for the legacy look) of up to 16 gladiators, in one public read; a
+   * gladiator it does not know is absent from the map. A replay waits for it (at most 1.5 s) before it draws its fighters and
+   * treats a failure as the legacy look; the fixture preview answers from its own world, with no network.
+   */
+  looks(ids: readonly GladiatorId[]): Promise<Map<string, Appearance | null>>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -186,6 +193,7 @@ export function createLiveGateway(): GameGateway {
     timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),
     profile: id => publicRead(client => readProfile(client, id)),
     recent: cursor => publicRead(client => readRecent(client, cursor)),
+    looks: ids => publicRead(client => readLooks(client, ids)),
     seasons: () => publicRead(readSeasons),
     standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),
     standingOf: (league, gladiatorId) => publicRead(client => readStandingOf(client, league, gladiatorId)),

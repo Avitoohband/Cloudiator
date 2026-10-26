@@ -14,7 +14,8 @@ import type { GameGateway } from '../../lib/api/gateway';
 import { replayKept } from '../../lib/replay-retention';
 import { creatureFor, type Creature } from '../../game/battle-stage';
 import { createSceneBridge, type SceneBridge } from '../../game/bridge';
-import { BattleViewport } from '../../game/BattleViewport';
+import { BattleViewport, BattleViewportWaiting } from '../../game/BattleViewport';
+import { loadLooks, lookIdsFor, type LookMap, type LookSource } from '../../game/replay-looks';
 import { prefersReducedMotion } from '../../game/webgl';
 import styles from './BattleReplay.module.css';
 
@@ -96,8 +97,14 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView)
  * `viewerId` is the viewer's own gladiator (null for a visitor): only a fighter in the bout is told its rewards are
  * credited when the activity settles; when it is left out, everyone is (Task 13.8 fix round 1).
  */
-export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, onRetry }: {
+export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, onRetry }: {
   view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
+  /**
+   * Where the fighters' looks come from: the looks the caller already holds (its world actors) and a reader for the rest. The
+   * scene waits for them (at most 1.5 s) and draws the legacy look for any it does not get; without a reader that is every
+   * fighter the caller does not know. They are settled once per replay, so a look never changes while it plays.
+   */
+  looks?: LookSource;
   /** Reads the replay again: a replay that could not be loaded offers Try again (Task 23.4). */
   onRetry?: () => void;
 }) {
@@ -111,8 +118,9 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   // was decided at its read's server time.
   const expiry = summary?.replayExpiry;
   const keptUntil = expiry?.state === 'available' && (!clock || replayKept(expiry, now)) ? expiry.expiresAtMs : null;
+  // The whole view's fighters (every encounter of an expedition), whichever battles are shown yet: read once for the replay.
   return <ReplayBattles battles={battles} initial={Math.min(view.selected, battles.length - 1)} summary={summary} keptUntil={keptUntil} bridge={bridge}
-    level={headingLevel} viewerId={viewerId} />;
+    level={headingLevel} viewerId={viewerId} looks={looks} lookIds={lookIdsFor(...view.battles.map(b => b.log))} />;
 }
 
 /**
@@ -120,14 +128,17 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
  * over the camp. It waits for `reads` (a fixture preview's load) and for `clock` (null until the shared clock has a
  * server time, so nothing is filtered by the device's own clock).
  */
-export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId }: {
-  reads: Pick<GameGateway, 'timeline'> | null;
+export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known }: {
+  /** `looks` (when the gateway has it) reads the fighters' looks the caller does not already hold. */
+  reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks'>>) | null;
   activityId: string;
   stageId?: string | null;
   clock: DisplayClock | null;
   headingLevel?: HeadingLevel;
   /** The viewer's own gladiator, or null for a visitor (`BattleReplay`). */
   viewerId?: string | null;
+  /** The looks of the fighters the caller already holds as world actors (`appearancesOf`): they are not read. */
+  known?: LookMap | null;
 }) {
   const [loaded, setLoaded] = useState<{ reads: object; attempt: number; view: ReplayView } | null>(null);
   /** Each Try again reads the replay once more (Task 23.4). */
@@ -139,13 +150,17 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
     return () => { active = false; };
   }, [activityId, reads, stageId, attempt]);
   const view = loaded && loaded.reads === reads && loaded.attempt === attempt ? loaded.view : null;
-  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} onRetry={() => setAttempt(n => n + 1)} />
+  return view && clock ? <BattleReplay view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} looks={{ known, read: reads?.looks?.bind(reads) ?? null }}
+    onRetry={() => setAttempt(n => n + 1)} />
     : <p role="status">Loading the replay…</p>;
 }
 
-function ReplayBattles({ battles, initial, summary, keptUntil, bridge, level, viewerId }: {
+function ReplayBattles({ battles, initial, summary, keptUntil, bridge, level, viewerId, looks, lookIds }: {
   battles: ReplayBattle[]; initial: number; summary: ActivitySummary | null; keptUntil: number | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
+  looks?: LookSource; lookIds: readonly string[];
 }) {
+  // One look read for the whole replay: choosing another encounter of the same view reuses it and never waits again.
+  const settledLooks = useSettledLooks(lookIds, looks);
   const [chosen, setSelected] = useState(initial);
   // A display clock held back by a test can offer fewer battles than were chosen from.
   const selected = Math.min(chosen, battles.length - 1);
@@ -154,7 +169,7 @@ function ReplayBattles({ battles, initial, summary, keptUntil, bridge, level, vi
     {battles.length > 1 && <div className={styles.encounters} role="group" aria-label="Encounters">
       {battles.map((b, i) => <button key={b.stage.id} type="button" aria-pressed={i === selected} onClick={() => setSelected(i)}>{b.stage.label}</button>)}
     </div>}
-    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} keptUntil={keptUntil} bridge={bridge} level={level} viewerId={viewerId} />
+    <BattlePlayer key={battle.log.battleId} battle={battle} summary={summary} keptUntil={keptUntil} bridge={bridge} level={level} viewerId={viewerId} looks={settledLooks} />
   </>;
 }
 
@@ -164,11 +179,30 @@ function useController(controller: ReplayController) {
   useEffect(() => controller.subscribe(force), [controller]);
 }
 
-function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId }: {
+/**
+ * The fighters' looks for one replay, settled once (`loadLooks`: the caller's known looks plus one batched read for the rest,
+ * at most 1.5 s, the legacy look on a failure or a timeout), or null while they are awaited. The scene mounts only when this is
+ * a map, so it is built with its final look and never re-skinned mid-play. The ids and the source are the ones the replay first
+ * rendered with: a world refresh later never changes a replay already in play. Unmounting drops a late answer.
+ */
+function useSettledLooks(ids: readonly string[], source: LookSource | undefined): LookMap | null {
+  const first = useRef({ ids, source });
+  const [looks, setLooks] = useState<LookMap | null>(null);
+  useEffect(() => {
+    const { ids, source } = first.current;
+    const load = loadLooks({ ids, known: source?.known, read: source?.read, onSettled: setLooks });
+    return () => load.cancel();
+  }, []);
+  return looks;
+}
+
+function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, looks: settledLooks }: {
   battle: ReplayBattle; summary: ActivitySummary | null;
   /** When the replay stops being kept, while it still is at the display time (else null: no note). */
   keptUntil: number | null;
   bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
+  /** The fighters' looks once settled (`useSettledLooks`); the scene is not mounted before. */
+  looks: LookMap | null;
 }) {
   const { log, stage } = battle;
   // Rewards to come are promised only to a fighter in the bout (or when the viewer is not known).
@@ -275,6 +309,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
     event.preventDefault();
   };
 
+  const closeUp = `Close-up of ${a.name} (left) fighting ${b.name} (right). The combat log below describes every action.`;
   const winner = frame.result ? log.participants.find(p => p.id === frame.result!.winnerId) : undefined;
   const loser = frame.result ? log.participants.find(p => p.id === frame.result!.loserId) : undefined;
   return (
@@ -283,8 +318,9 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
         <p className="eyebrow">{stage.kind === 'encounter' ? `Expedition · ${stage.label}` : stage.label}</p>
         <Heading level={level} id={`${resultId}-title`}>{a.name} vs {b.name}</Heading>
       </header>
-      <BattleViewport log={log} position={position} reducedMotion={reduced} bridge={bridge}
-        label={`Close-up of ${a.name} (left) fighting ${b.name} (right). The combat log below describes every action.`} />
+      {settledLooks
+        ? <BattleViewport log={log} looks={settledLooks} position={position} reducedMotion={reduced} bridge={bridge} label={closeUp} />
+        : <BattleViewportWaiting label={closeUp} />}
       <div className={styles.health}>
         {log.participants.map((p, i) => {
           const hp = frame.hp[i];

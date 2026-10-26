@@ -4,6 +4,7 @@
 // no clock of its own, so pausing, seeking and both speeds always match the textual log.
 import type * as PhaserNS from 'phaser';
 import type { BattleLog } from '@contracts/events';
+import type { Appearance } from '@domain/appearance';
 import type { AssetManifest, CloseupTheme } from './assets';
 import { backdropFor, planStage, stageAt, stageLayout, type FighterPose, type LabelPose, type StageLayout } from './battle-stage';
 
@@ -16,6 +17,11 @@ export type BattleSceneDeps = {
   atlasData: Record<string, unknown>;
   assetBase: string;
   log: BattleLog;
+  /**
+   * The looks the replay settled on (`loadLooks`), by gladiator id; one that is absent or null is the legacy look. The fighters
+   * are built once from them in `create()` and never re-skinned: the host mounts the scene only after they have settled.
+   */
+  looks?: ReadonlyMap<string, Appearance | null>;
   /** Replay position in log milliseconds (the replay controller's clock). */
   position: () => number;
   reducedMotion?: boolean;
@@ -57,7 +63,7 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 
 export function createBattleScene(P: Phaser, deps: BattleSceneDeps): { scene: PhaserNS.Scene; handle: BattleSceneHandle } {
   const { manifest, log } = deps;
-  const plan = planStage(log, manifest);
+  const plan = planStage(log, manifest, deps.looks);
   const theme = backdropFor(log, manifest);
   const closeups = manifest.closeups;
   let ready = false;

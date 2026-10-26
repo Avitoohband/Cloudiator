@@ -36,6 +36,7 @@ import type { ActivitySummary, BattleLog } from '@contracts/events';
 import type { OwnerState, TournamentView } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
+import type { LookMap, LookSource } from '../../game/replay-looks';
 import type { Viewer } from '../character/useGameState';
 import { RULES_V1 } from '@domain/rules-v1';
 import {
@@ -55,7 +56,7 @@ import styles from './TournamentPanel.module.css';
  * Reads and the one command the panel uses; `timeline` reads the viewer's own credited summary once it has a place, and
  * `tournamentLog` loads a bout's log when its replay is watched.
  */
-export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command' | 'timeline' | 'tournamentLog'>>;
+export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command' | 'timeline' | 'tournamentLog' | 'looks'>>;
 /** A fixture sample: its view was projected at the server time `asOfMs`, where the preview holds its bracket. */
 export type TournamentSample = { id: string; label: string; asOfMs?: number };
 type OptIn = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
@@ -147,6 +148,8 @@ export type BracketModel = {
   viewerId?: string | null;
   /** The viewer's own credited summary for its placement, from its own timeline (null until read). */
   credited?: ActivitySummary | null;
+  /** Where the watched bout's fighters' looks come from (the camp's known looks, and a reader for the rest). */
+  looks?: LookSource;
   timeZone?: string;
 };
 
@@ -257,7 +260,7 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, 
             <p className="muted">The replay is the recorded bout. Watching it never changes the result.</p>
             {/* Under the card's h4 and this section's h5: the replay title is an h6 (its sections stay at h6). Only a fighter
                 in the bout is told its rewards are credited when the activity settles (13.8 review). */}
-            <BattleReplay key={replay.id} headingLevel={6} viewerId={model.viewerId ?? null} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
+            <BattleReplay key={replay.id} headingLevel={6} viewerId={model.viewerId ?? null} looks={model.looks} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
               log: replay.log,
               stage: { id: replay.id, kind: 'bout', label: `Tournament · ${replayRound.label}`, revealedAtMs: replay.revealAtMs, startedAtMs: replay.revealAtMs, endsAtMs: replay.fightEndsAtMs! },
             }] }} />
@@ -350,8 +353,10 @@ export function TournamentCardNotice({ id, failure, now, processedSlotIndex, pub
  * prepared without a published slot on the revision, a re-read first awaits the owner refresh (R2); with one, a card read
  * before the publication reads again once the revision shows it (C5).
  */
-function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
+function TournamentCard({ id, reads, clock, now, viewerId, knownLooks, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
   id: string; reads: TournamentReads; clock: DisplayClock; now: number; viewerId: string | null;
+  /** The looks of the gladiators the camp already holds as world actors: a watched bout's fighters among them are not read. */
+  knownLooks?: LookMap | null;
   /** The viewer's own processed slot (owner state; null without an owner), published with the slot's tournaments. */
   processedSlotIndex: number | null;
   /** The revision's published slot (Task 23.2; null before the first coordination), from the shared sync. */
@@ -513,7 +518,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, p
   if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} processedSlotIndex={processedSlotIndex} publishedSlotIndex={failedPublished} />;
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
   return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, replayStatus, viewerId,
-    credited: credited && credited.activityId === placed ? credited.summary : null }}
+    credited: credited && credited.activityId === placed ? credited.summary : null, looks: { known: knownLooks, read: reads.looks?.bind(reads) ?? null } }}
     onRound={setRound} onWatch={setReplay} onCloseReplay={() => setReplay(null)}
     onRetryReplay={replayStatus === 'failed' && logFailed === replay ? () => { setLogFailed(null); setLogAttempt(n => n + 1); } : undefined} />;
 }
@@ -531,8 +536,10 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
  * else sees the countdown and the brackets (spec "Menus", the Visitor column).
  */
-export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null }: {
+export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, knownLooks }: {
   reads: TournamentReads | null;
+  /** The looks of the gladiators the camp holds as world actors (`appearancesOf`): a watched bout's replay does not read them again. */
+  knownLooks?: LookMap | null;
   owner: OwnerState | null;
   clock: DisplayClock;
   fixture: boolean;
@@ -662,7 +669,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
               // No server time yet: a failed revision read is said at once, never an endless "Loading" (review M1).
               : syncError ? <TournamentNotice failure="unavailable" preparing={false} />
                 : <p role="status" className={styles.detail}>Loading the tournament…</p>)
-              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null}
+              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null} knownLooks={knownLooks}
                 processedSlotIndex={owner?.processedSlotIndex ?? null} publishedSlotIndex={fixture ? null : publishedSlotIndex}
                 refreshOwner={refresh} onRead={onRead} onLogRead={onLogRead} hook={cardState} />}
       </section>

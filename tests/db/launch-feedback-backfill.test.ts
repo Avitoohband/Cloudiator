@@ -25,6 +25,22 @@ function backfillSpan(text: string): string {
   return lf.slice(from, to + END.length);
 }
 const source = () => backfillSpan(readFileSync(new URL('../../supabase/sql/16-launch-feedback.sql', import.meta.url), 'utf8'));
+// Final review fix (ruling R8): the deploy check the runbook runs before and after M23, scripts/launch-feedback-check.sql. One
+// read-only SELECT returning one row, so `supabase db query --linked` (a single statement) can run it. Its Arena counts are
+// what a boundary can still pick, by the backfill's own rules above, so they read 0 once the span has run; the all-time count
+// of Arena revisions never drops (the backfill adds Rest revisions and removes none) and is information only.
+const check = () => readFileSync(new URL('../../scripts/launch-feedback-check.sql', import.meta.url), 'utf8');
+const CHECK_COLUMNS = ['arena_pickable_outside_evening', 'arena_in_saved_schedule_outside_evening', 'arena_revisions_outside_evening_all_time',
+  'open_listings_below_2', 'tournaments_formed', 'open_boundary'];
+/** The check's one row, every column a whole number. */
+function counts(rows: readonly Record<string, unknown>[]) {
+  expect(rows).toHaveLength(1);
+  expect(Object.keys(rows[0])).toEqual(CHECK_COLUMNS);
+  return Object.fromEntries(Object.entries(rows[0]).map(([column, value]) => {
+    expect(Number.isSafeInteger(Number(value)), column).toBe(true);
+    return [column, Number(value)];
+  })) as Record<string, number>;
+}
 
 const SLOT = 4_800_000;
 const REST = { kind: 'rest' }, ARENA = { kind: 'arena' }, TRAINING = { kind: 'training' };
@@ -161,6 +177,72 @@ describe('launch feedback: the evening-only Arena backfill (M23)', () => {
       return saved;
     });
     expect(result).toMatchObject({ ok: true, value: { version: 6, parts: { morning: null, afternoon: { effectiveSlotIndex: expect.any(Number) } } } });
+  });
+
+  it('the deploy check is one read-only SELECT that returns one row of counts', async () => {
+    const text = check();
+    // A write would fail with SQLSTATE 25006 here.
+    const probe = postgres(process.env.LOCAL_DB_URL!, { max: 1, onnotice: () => {} });
+    try { counts([...await probe.begin('read only', tx => tx.unsafe(text))]); } finally { await probe.end(); }
+    // One statement, and nothing set for the session: comments aside, no semicolon but a final one and no `set`.
+    const code = text.replace(/--[^\n]*/g, '').trim().replace(/;$/, '');
+    expect(code).toMatch(/^select\s/i);
+    expect(code).not.toContain(';');
+    expect(code).not.toMatch(/\bset\b/i);
+  });
+
+  it('the deploy check counts only the Arena a boundary can still pick outside the evening, and reads 0 after the backfill', async () => {
+    const span = source(), text = check();
+    const [current, future, kept] = [await fighter(), await fighter(), await fighter()];
+    const outcome = await rolledBack(async tx => {
+      const read = async () => counts([...await tx.unsafe(text)]);
+      const baseline = await read();
+      const [{ p }] = await tx`select processed_slot_index::float8 as p from public.gladiators where id=${current.gid}`;
+      await tx`update public.gladiators set processed_slot_index=${p} where id in ${tx([current.gid, future.gid, kept.gid])}`;
+      const first = (part: number) => { let t = p + 1; while (t % 3 !== part) t++; return t; };
+      const M = first(0), A = first(1), E = first(2);
+      const revise = async (f: Fighter, version: number, phase: string, choice: object, effective: number) =>
+        tx`insert into public.schedule_revisions(gladiator_id,version,phase,choice,received_at_ms,effective_slot_index)
+          values(${f.gid},${version},${phase},${tx.json(choice as never)},${p * SLOT},${effective})`;
+      const plan = async (f: Fighter, version: number, day: Partial<Schedule>) =>
+        tx`update public.schedules set version=${version},schedule=schedule||${tx.json(day as never)} where gladiator_id=${f.gid}`;
+      // Pickable: a current morning Arena (processed slot + 1) and a later one of the same part, and a future afternoon Arena.
+      await revise(current, 2, 'morning', ARENA, p + 1);
+      await revise(current, 3, 'morning', ARENA, M + 6);
+      await plan(current, 3, { morning: ARENA } as Partial<Schedule>);
+      await revise(future, 2, 'afternoon', ARENA, A + 3);
+      await plan(future, 2, { afternoon: ARENA } as Partial<Schedule>);
+      // Not pickable: a past afternoon Arena superseded at processed slot + 1, a future morning Arena overridden by a higher
+      // version at its own slot, and Arena in the evening, now and later.
+      await revise(kept, 2, 'afternoon', ARENA, p - 2);
+      await revise(kept, 3, 'afternoon', TRAINING, p + 1);
+      await revise(kept, 4, 'morning', ARENA, M + 3);
+      await revise(kept, 5, 'morning', TRAINING, M + 3);
+      await revise(kept, 6, 'evening', ARENA, p + 1);
+      await revise(kept, 7, 'evening', ARENA, E + 3);
+      await plan(kept, 7, { morning: TRAINING, afternoon: TRAINING, evening: ARENA } as Partial<Schedule>);
+      // An open listing at price 1, written directly (M23's command gate refuses it), and an open boundary.
+      await tx`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status)
+        values(${randomUUID()},${kept.gid},${randomUUID()},1,${p * SLOT},${p * SLOT + 604_800_000},'open')`;
+      const [{ slot }] = await tx`select coalesce(max(slot_index),0)::float8+1000 as slot from private.boundaries`;
+      await tx`insert into private.boundaries(slot_index,cutoff_ms,rules_version,opened_at_ms,updated_at_ms) values(${slot},${slot * SLOT},'v1',0,0)`;
+      const seeded = await read();
+      const [facts] = await tx`select (select count(*) from private.tournaments)::int as tournaments,
+        (select count(*) from private.boundaries where status<>'complete')::int as open`;
+      await tx.unsafe(span);
+      return { baseline, seeded, facts, after: await read() };
+    });
+    const { baseline, seeded, facts, after } = outcome;
+
+    expect(baseline).toMatchObject({ arena_pickable_outside_evening: 0, arena_in_saved_schedule_outside_evening: 0,
+      arena_revisions_outside_evening_all_time: 0, open_listings_below_2: 0 });
+    // Three pickable revisions (two of them one part's), two saved parts, and five off-evening Arena revisions ever written.
+    expect(seeded).toEqual({ arena_pickable_outside_evening: 3, arena_in_saved_schedule_outside_evening: 2,
+      arena_revisions_outside_evening_all_time: 5, open_listings_below_2: 1, tournaments_formed: facts.tournaments, open_boundary: facts.open });
+    expect(seeded.open_boundary).toBe(baseline.open_boundary + 1);
+    // After the backfill nothing a boundary can pick, and no saved part, is Arena outside the evening; the all-time count stays.
+    expect(after).toEqual({ ...seeded, arena_pickable_outside_evening: 0, arena_in_saved_schedule_outside_evening: 0 });
+    expect(after.arena_revisions_outside_evening_all_time).toBeGreaterThan(0);
   });
 
   it('ships the identical backfill span in M23', () => {

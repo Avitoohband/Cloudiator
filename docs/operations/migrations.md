@@ -115,8 +115,13 @@ source file):
   `invalid` (its parser does not know it). The new Edge function routes the day command to `edit_day_schedule`, which must
   exist first.
 - The previous Edge function still accepts morning or afternoon Arena, so a save that reaches the old `planning_command`
-  body while the `db push` transaction is open could slip past the backfill. Run the runbook's check again after the
-  functions deploy; Arena outside the evening must still be 0.
+  body while the `db push` transaction is open could slip past the backfill. Run the runbook's check,
+  `scripts/launch-feedback-check.sql`, before `db push` and again after the functions deploy. Its Arena counts are what a
+  boundary can still pick by the backfill's own rules, and the latest plan's morning and afternoon Arena, so they read 0
+  once the backfill has run; a non-zero count after the deploy is remedied by rerunning the marked span (runbook). Its
+  all-time count of Arena revisions is information only. `tests/db/launch-feedback-backfill.test.ts` runs the check
+  read-only, and over seeded Arena before and after the span (final review fix; RED on the previous all-time definition,
+  which counted 5 instead of 3, including a superseded and an overridden Arena).
 
 ## Task 23.8: idle characters rest at home (M22)
 

@@ -166,16 +166,21 @@ time reads any of them:
 Conditions, all required (plan Task 8):
 1. Deploy outside Wednesday and Saturday 17:20–20:00 UTC, with no open boundary (hosted checks, `scheduler` / `boundaries
    open` = 0).
-2. Right before `db push`, run this read-only check as the database owner; every value must be 0. If any is not, stop and ask
-   Avi (his pre-approval covers the deploy as designed only):
-   ```sql
-   select (select count(*) from public.schedule_revisions where phase in ('morning','afternoon') and choice->>'kind'='arena') as arena_outside_evening,
-     (select count(*) from private.tournaments) as tournaments,
-     (select count(*) from private.market_listings where status='open' and price<2) as open_listings_below_2,
-     (select count(*) from private.boundaries where status<>'complete') as open_boundaries;
-   ```
+2. Right before `db push`, run the read-only check `scripts/launch-feedback-check.sql` as the database owner (one SELECT, one
+   row; its header explains each column), through the Management API or pasted into the SQL editor:
+   `npx supabase db query --linked --project-ref <ref> --file scripts/launch-feedback-check.sql`.
+   If `arena_pickable_outside_evening`, `arena_in_saved_schedule_outside_evening`, `open_listings_below_2`,
+   `tournaments_formed` or `open_boundary` is not 0, stop and ask Avi (his pre-approval covers the deploy as designed only).
+   An Arena count here is what M23's backfill turns into Rest, but the design expected none.
+   `arena_revisions_outside_evening_all_time` is information only: the backfill adds Rest revisions and removes none, so it
+   never drops.
 3. Deploy M23 before the Edge function ([migrations.md, M23](migrations.md#launch-feedback-evening-arena-the-day-save-and-the-1-gold-market-fee-m23),
-   "Release"), then run the check again: `arena_outside_evening` must still be 0.
+   "Release"), then run the check again after the functions deploy. The same five columns must be 0. If one is not, stop and
+   ask Avi. A non-zero Arena count then is a save that reached the previous Edge function and the previous `planning_command`
+   while M23 was being applied. The remedy, with Avi's go: run the marked backfill span as the database owner, with no open
+   boundary, then run the check again. The span is everything from `-- launch-feedback backfill: start` to
+   `-- launch-feedback backfill: end` in `supabase/sql/16-launch-feedback.sql`, identical to M23's, one `do` statement. It
+   is safe to rerun: it changes only what a boundary can still pick or the latest plan shows, and nothing the second time.
 
 M23's backfill turns any morning or afternoon Arena a boundary could still pick into Rest, so a missed one cannot fail the
 deploy. This exception covers these four rules only; any other rule change follows the steps above.

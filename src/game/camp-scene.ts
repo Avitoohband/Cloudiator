@@ -190,6 +190,7 @@ function frameIndex(anim: AnimationDef, t: number): number {
   return anim.frames.length - 1;
 }
 
+/** Everything that draws a player: layers (equipment, body, hair style) and colours, so a new chosen look restyles it (tested in camp.spec). */
 const lookKey = (p: Placement) => `${p.routine.layers.join('+')}|${p.routine.tint.skin}|${p.routine.tint.cloth}|${p.routine.tint.hair}`;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 

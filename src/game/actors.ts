@@ -1,7 +1,7 @@
 // Turns public world actors into deterministic, locally animated camp routines.
-// Everything here derives from (gladiatorId, slotIndex); no rewards or private data are involved.
+// Everything here derives from the public actor and (gladiatorId, slotIndex); no rewards or private data are involved.
 import type { PublicActor } from '@contracts/reads';
-import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES } from '@domain/appearance';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, validAppearance, type Appearance, type HairId } from '@domain/appearance';
 import type { ActionId, Direction, MapData, MapStation } from './assets';
 
 export type RoutineKind = 'training' | 'rest' | 'arena' | 'tournament' | 'away' | 'orientation' | 'idle';
@@ -82,7 +82,8 @@ export const EQUIPMENT_LAYERS: Record<string, string | null> = {
   'light-boots': null, 'heavy-boots': null,
 };
 
-const LAYER_ORDER = ['body', 'cloth', 'hair', 'armor-light', 'armor-heavy', 'accent', 'head-hood', 'head-helmet', 'head-helmet-crest', 'weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow', 'offhand-shield', 'held'];
+/** Must equal the manifest's gladiator layer order (tested): the male and female body, clothes and hair layers share their place. */
+export const LAYER_ORDER = ['body', 'body-female', 'cloth', 'cloth-female', 'hair', 'hair-long', 'hair-ponytail', 'armor-light', 'armor-heavy', 'accent', 'head-hood', 'head-helmet', 'head-helmet-crest', 'weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow', 'offhand-shield', 'held'];
 
 /**
  * Accepts public silhouettes (layer ids such as 'weapon-sword'), catalog variant ids ('sword:1:common')
@@ -93,15 +94,25 @@ export function equipmentLayer(silhouette: string): string | null {
   return EQUIPMENT_LAYERS[silhouette.split(':')[0]] ?? null;
 }
 
-export function layersFor(silhouettes: readonly string[]): string[] {
+/** The hair layer of each style; bald draws none. `hair` is the short hair. */
+const HAIR_LAYER: Record<HairId, string | null> = { short: 'hair', long: 'hair-long', ponytail: 'hair-ponytail', bald: null };
+
+/**
+ * The layers a gladiator draws, in manifest order. Without an `appearance` (the legacy look) that is the male body, its clothes
+ * and short hair; otherwise a female body swaps in `body-female` and `cloth-female`, and the hair style picks its own layer (or
+ * none when bald). Head gear hides any hair; every equipment layer is shared by both bodies.
+ */
+export function layersFor(silhouettes: readonly string[], appearance: Appearance | null = null): string[] {
   const mapped = new Set(silhouettes.map(equipmentLayer).filter((id): id is string => !!id));
   const has = (id: string) => mapped.has(id);
   const weapon = ['weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow'].find(has);
   const armor = has('armor-heavy') ? 'armor-heavy' : has('armor-light') ? 'armor-light' : null;
   const head = has('head-helmet') ? 'head-helmet' : has('head-hood') ? 'head-hood' : null;
   const twoHanded = weapon === 'weapon-spear' || weapon === 'weapon-bow';
-  const wanted = new Set(['body', 'cloth', 'accent', 'held']);
-  if (!head) wanted.add('hair');
+  const female = appearance?.body === 'female';
+  const hair = appearance ? HAIR_LAYER[appearance.hair] : 'hair';
+  const wanted = new Set([female ? 'body-female' : 'body', female ? 'cloth-female' : 'cloth', 'accent', 'held']);
+  if (!head && hair) wanted.add(hair);
   if (head === 'head-helmet') wanted.add('head-helmet-crest');
   for (const id of [weapon, armor, head]) if (id) wanted.add(id);
   if (has('offhand-shield') && !twoHanded) wanted.add('offhand-shield');
@@ -118,24 +129,38 @@ function pick<T>(options: [T, number][], roll: number): T {
   return options[options.length - 1][0];
 }
 
-/** A player's colours, from their gladiator id alone, so they look the same in camp and in replays. */
+/** A legacy gladiator's colours, from its id alone, so they look the same in camp and in replays. */
 export function tintFor(gladiatorId: string): ActorRoutine['tint'] {
   const look = hashString(gladiatorId);
   return { skin: SKIN_TINTS[(look >>> 11) % SKIN_TINTS.length], cloth: CLOTH_TINTS[look % CLOTH_TINTS.length], hair: HAIR_TINTS[(look >>> 5) % HAIR_TINTS.length] };
+}
+
+/**
+ * How a gladiator is drawn, in every scene (camp, expedition, replay). `null` is the legacy look, exactly as before the look could
+ * be chosen: `layersFor(silhouettes)` and the colours of `tintFor(gladiatorId)`. A chosen look uses its body, hair style and
+ * palette indices. A missing or invalid value (an actor projected before the look existed, a stale cached read) is the legacy look.
+ */
+export function lookFor(appearance: Appearance | null, gladiatorId: string, silhouettes: readonly string[]): Pick<ActorRoutine, 'layers' | 'tint'> {
+  if (!validAppearance(appearance)) return { layers: layersFor(silhouettes), tint: tintFor(gladiatorId) };
+  return {
+    layers: layersFor(silhouettes, appearance),
+    tint: { skin: SKIN_TINTS[appearance.skin], cloth: CLOTH_TINTS[appearance.cloth], hair: HAIR_TINTS[appearance.hairColor] },
+  };
 }
 
 export function planActorRoutine(actor: PublicActor, slotIndex: number): ActorRoutine {
   const kind = locationKind(actor.location);
   const seed = hashString(`${actor.gladiatorId}/${slotIndex}`);
   const variants = VARIANTS[kind];
+  const look = lookFor(actor.appearance ?? null, actor.gladiatorId, actor.equipmentSilhouettes);
   return {
     gladiatorId: actor.gladiatorId,
     kind,
     zone: ZONE_FOR[kind],
     variant: variants.length ? pick(variants, seed >>> 8) : null,
     offsetMs: seed % 12_007,
-    tint: tintFor(actor.gladiatorId),
-    layers: layersFor(actor.equipmentSilhouettes),
+    tint: look.tint,
+    layers: look.layers,
   };
 }
 

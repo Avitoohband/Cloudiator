@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page, type Request } from './fixtures';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { PublicActor } from '../../supabase/functions/_shared/contracts/reads';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '../../supabase/functions/_shared/domain/appearance';
+import { tintFor } from '../../src/game/actors';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { EXPEDITION_FIXTURES, type ExpeditionFixtureKey } from '../fixtures/expedition-ids';
 import { renderExpeditionStage } from '../../src/game/expedition-stage';
@@ -484,6 +487,50 @@ test.describe('followable expedition scenes', () => {
     await page.waitForTimeout(700);
     expect(await reads()).toBe(r0 + 1);
     expect(live.requests.every(r => r.reader === null)).toBe(true);
+  });
+
+  test('draws the gladiator in its chosen look, and redraws when a later read brings another', async ({ page, context }, testInfo) => {
+    // Live, as a visitor: the Woodland Path departed 45 minutes ago, and its gladiator is a public actor on this activity.
+    const now = Date.now();
+    const source = TIMELINES.woodland;
+    const delta = now - 45 * MIN - source.stages[0].startedAtMs;
+    const timeline: RevealedTimeline = { activityId: source.activityId, serverNowMs: now, visibleThroughMs: now,
+      stages: source.stages.map(s => ({ ...s, revealedAtMs: s.revealedAtMs + delta, startedAtMs: s.startedAtMs + delta, endsAtMs: s.endsAtMs + delta })) };
+    const GEAR: PublicActor['equipmentSilhouettes'] = ['weapon-sword', 'offhand-shield'];
+    const actor = (appearance: Appearance | null): PublicActor => ({
+      gladiatorId: '3f1e8c52-7d4b-4a96-b0c1-5e2d9a7f4c38', name: 'Livia', classId: 'duelist', equipmentSilhouettes: GEAR, appearance,
+      league: 'bronze', level: 1, phase: 'morning', location: 'expedition:woodland', activityId: timeline.activityId, activityStatus: 'active',
+      startsAtMs: timeline.stages[0].startedAtMs, endsAtMs: timeline.stages[0].startedAtMs + 80 * MIN, visibleStage: null, resting: false,
+    });
+    const first: Appearance = { body: 'female', hair: 'ponytail', skin: 4, hairColor: 3, cloth: 11 };
+    const world = { ...emptyWorld(now), revision: 'look-1', actors: [actor(first)] };
+    const live = await routeLiveReads(context, { world, timelines: { [timeline.activityId]: timeline } });
+    await page.goto(`/expedition/?activity=${timeline.activityId}`);
+    await page.waitForFunction(() => !!window.__cloudiatorExpedition?.state(), null, { timeout: 45_000 });
+    await expeditionFlow.sceneReady(page);
+    await expect(page.getByText('EXPEDITION · Livia')).toBeVisible();
+    const hero = async () => { const g = (await expeditionFlow.scene(page)).gladiator!; return { layers: g.layers, tint: g.tint, frames: g.frames }; };
+    await expect.poll(async () => (await hero()).layers, { timeout: 5_000 }).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'accent', ...GEAR, 'held']);
+    const female = await hero();
+    expect(female.tint).toEqual({ skin: SKIN_TONES[4].tint, hair: HAIR_COLOURS[3].tint, cloth: CLOTH_COLOURS[11].tint });
+    // The frames drawn are the chosen layers' own, one per layer.
+    const drawnLayers = async () => (await hero()).frames.map(f => f.split('/')[0]);
+    await expect.poll(drawnLayers, { timeout: 5_000 }).toEqual(female.layers);
+    await expeditionFlow.settle(page);
+    await page.screenshot({ path: testInfo.outputPath('expedition-chosen-look.png') });
+
+    // A later read of the shared world names another look: the scene rebuilds the hero in it (here a legacy look).
+    live.setWorld({ ...world, revision: 'look-2', actors: [actor(null)] });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect.poll(async () => (await hero()).layers, { timeout: 5_000 }).toEqual(['body', 'cloth', 'hair', 'accent', ...GEAR, 'held']);
+    expect((await hero()).tint).toEqual(tintFor('3f1e8c52-7d4b-4a96-b0c1-5e2d9a7f4c38'));
+    await expect.poll(drawnLayers, { timeout: 5_000 }).toEqual(['body', 'cloth', 'hair', 'accent', ...GEAR, 'held']);
+    // Only the colours change: same layers, new tints.
+    const next: Appearance = { body: 'male', hair: 'short', skin: 1, hairColor: 1, cloth: 1 };
+    live.setWorld({ ...world, revision: 'look-3', actors: [actor(next)] });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect.poll(async () => (await hero()).tint, { timeout: 5_000 }).toEqual({ skin: SKIN_TONES[1].tint, hair: HAIR_COLOURS[1].tint, cloth: CLOTH_COLOURS[1].tint });
+    expect((await hero()).layers).toEqual(['body', 'cloth', 'hair', 'accent', ...GEAR, 'held']);
   });
 
   test('follows the gladiator by default and pans freely after a drag', { tag: '@render' }, async ({ page }) => {

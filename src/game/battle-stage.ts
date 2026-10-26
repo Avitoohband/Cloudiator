@@ -6,7 +6,8 @@
 // speeds always agree, and the frame rate never changes the result.
 import type { BattleAction, BattleLog, RevealedCombatant } from '@contracts/events';
 import type { AnimationDef, AssetManifest, CloseupTheme, EffectId } from './assets';
-import { layersFor, tintFor } from './actors';
+import type { Appearance } from '@domain/appearance';
+import { layersFor, lookFor, tintFor } from './actors';
 
 export type FighterKind = 'gladiator' | 'npc' | 'creature';
 export type CombatAction = 'idle' | 'attack' | 'hit' | 'defend' | 'evade' | 'defeat' | 'victory';
@@ -62,15 +63,20 @@ export function creatureFor(p: RevealedCombatant, list: readonly Creature[]): Cr
   return creature;
 }
 
-export function fighterLook(p: RevealedCombatant, manifest: AssetManifest): FighterLook {
+/**
+ * How a participant is drawn. A gladiator uses the look `looks` holds for its id (`lookFor`, the camp's own function) or the
+ * legacy look when there is none; an NPC fallback keeps its neutral steel grey and a creature its own art, whatever `looks` holds.
+ */
+export function fighterLook(p: RevealedCombatant, manifest: AssetManifest, looks?: ReadonlyMap<string, Appearance | null>): FighterLook {
   const creature = creatureFor(p, manifest.actors.creatures);
   if (creature) {
     const animations = Object.fromEntries(COMBAT_ACTIONS.map(a => [a, creature.animations[a]!.se])) as Record<CombatAction, string>;
     return { kind: 'creature', atlas: creature.atlas, layers: [{ id: '', tint: null }], animations, creatureId: creature.id, home: creature.expedition, lyingHeadX: /wolf/.test(creature.id) ? 10 : -16 };
   }
   const g = manifest.actors.gladiator;
-  const ids = layersFor(p.equipmentSilhouettes);
-  const tint = p.gladiatorId ? tintFor(p.gladiatorId) : { ...tintFor(p.id), cloth: NPC_CLOTH };
+  const { layers: ids, tint } = p.gladiatorId
+    ? lookFor(looks?.get(p.gladiatorId) ?? null, p.gladiatorId, p.equipmentSilhouettes)
+    : { layers: layersFor(p.equipmentSilhouettes), tint: { ...tintFor(p.id), cloth: NPC_CLOTH } };
   const keyOf = new Map(g.layers.map(l => [l.id, l.tint]));
   const weapon = ids.find(id => id.startsWith('weapon-'))?.slice('weapon-'.length);
   const variant = weapon ? g.attackVariants[weapon] : undefined;
@@ -147,8 +153,8 @@ export function frameIndex(anim: AnimationDef, t: number): number {
   return anim.frames.length - 1;
 }
 
-export function planStage(log: BattleLog, manifest: AssetManifest): StagePlan {
-  const looks: [FighterLook, FighterLook] = [fighterLook(log.participants[0], manifest), fighterLook(log.participants[1], manifest)];
+export function planStage(log: BattleLog, manifest: AssetManifest, appearances?: ReadonlyMap<string, Appearance | null>): StagePlan {
+  const looks: [FighterLook, FighterLook] = [fighterLook(log.participants[0], manifest, appearances), fighterLook(log.participants[1], manifest, appearances)];
   const index = (id: string): 0 | 1 => (log.participants[0].id === id ? 0 : 1);
   const anim = (key: string) => manifest.animations[key];
   const windows: [Window[], Window[]] = [[], []];

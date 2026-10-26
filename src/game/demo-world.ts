@@ -2,6 +2,7 @@
 // Uses only public projection fields; no private schedules, wallets or seeds.
 import type { CampLocation, EquipmentSilhouette, PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { ClassId, LeagueId } from '@contracts/commands';
+import { randomAppearance, type Appearance } from '@domain/appearance';
 import { phaseOfSlot, SLOT_MS } from './lighting';
 import { hashString } from './actors';
 
@@ -24,6 +25,23 @@ function demoUuid(label: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
+/**
+ * A demo gladiator's look: one in three keeps the legacy look (as every gladiator created before the look could be chosen), the
+ * rest get a deterministic random one, so a fixture camp shows both bodies, every hair style and the whole palettes.
+ */
+function demoAppearance(label: string): Appearance | null {
+  let state = hashString(label);
+  if (state % 3 === 0) return null;
+  // mulberry32: a small seeded generator, so the same label always has the same look.
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+  return randomAppearance(random);
+}
+
 /** `inCamp` gladiators spread over the camp zones plus `away` gladiators on expeditions. */
 export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): WorldSnapshot {
   const count = inCamp + away;
@@ -38,7 +56,7 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
       name: NAMES[i % NAMES.length],
       classId: CLASSES[h % CLASSES.length],
       equipmentSilhouettes: LOADOUTS[(h >>> 3) % LOADOUTS.length],
-      appearance: null,
+      appearance: demoAppearance(`demo-look-${i}`),
       league: LEAGUES[(h >>> 7) % LEAGUES.length],
       level: 1 + ((h >>> 11) % 12),
       phase: phaseOfSlot(slotIndex),

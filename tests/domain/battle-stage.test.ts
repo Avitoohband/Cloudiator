@@ -5,7 +5,8 @@ import type { BattleAction, BattleLog, RevealedCombatant } from '@contracts/even
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { loadAssetManifest } from '@/game/assets';
-import { planActorRoutine } from '@/game/actors';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '@domain/appearance';
+import { lookFor, planActorRoutine } from '@/game/actors';
 import { NPC_CLOTH, backdropFor, creatureFor, fighterLook, planStage, stageAt, stageLayout, type StageFrame, type StageLayout } from '@/game/battle-stage';
 import { REPLAY_OUTRO_MS } from '@/game/replay';
 import { FIXTURE_BATTLE_LOGS } from '../fixtures/battles';
@@ -66,6 +67,58 @@ describe('fighter looks', () => {
     const tint = Object.fromEntries(look.layers.map(l => [l.id, l.tint]));
     expect(tint).toMatchObject({ body: camp.tint.skin, cloth: camp.tint.cloth, accent: camp.tint.cloth, 'head-helmet-crest': camp.tint.cloth, 'weapon-sword': null, 'armor-light': null });
     expect(look.animations.attack).toBe('gladiator/attack/se');
+  });
+
+  it('draws a gladiator in the look it is given, and in the legacy look otherwise', () => {
+    const silhouettes = ['sword:1:common', 'round-shield:1:common', 'light-armor:1:common'];
+    const p = combatant({ id: 'g1', gladiatorId: 'g1', equipmentSilhouettes: silhouettes });
+    const legacy = fighterLook(p, manifest);
+    const look: Appearance = { body: 'female', hair: 'ponytail', skin: 4, hairColor: 3, cloth: 11 };
+    const chosen = fighterLook(p, manifest, new Map([['g1', look]]));
+    expect(chosen.layers.map(l => l.id)).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'armor-light', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    expect(Object.fromEntries(chosen.layers.map(l => [l.id, l.tint]))).toMatchObject({
+      'body-female': SKIN_TONES[4].tint, 'cloth-female': CLOTH_COLOURS[11].tint, 'hair-ponytail': HAIR_COLOURS[3].tint, accent: CLOTH_COLOURS[11].tint,
+      'armor-light': null, 'weapon-sword': null, held: null,
+    });
+    // The replay draws exactly what the camp draws for the same actor.
+    const camp = lookFor(look, 'g1', silhouettes);
+    expect(chosen.layers.map(l => l.id)).toEqual(camp.layers);
+    expect(chosen.layers.find(l => l.id === 'cloth-female')!.tint).toBe(camp.tint.cloth);
+    // Nobody to look up, a legacy (null) entry, an entry for someone else, or an invalid one: the legacy look, unchanged.
+    expect(legacy.layers.map(l => l.id)).toEqual(['body', 'cloth', 'hair', 'armor-light', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    expect(fighterLook(p, manifest, new Map())).toEqual(legacy);
+    expect(fighterLook(p, manifest, new Map([['g1', null]]))).toEqual(legacy);
+    expect(fighterLook(p, manifest, new Map([['someone-else', look]]))).toEqual(legacy);
+    expect(fighterLook(p, manifest, new Map([['g1', { ...look, skin: 9 }]]))).toEqual(legacy);
+    // The animations do not depend on the look.
+    expect(chosen.animations).toEqual(legacy.animations);
+  });
+
+  it('keeps NPC fallbacks and creatures out of the looks', () => {
+    const look: Appearance = { body: 'female', hair: 'long', skin: 1, hairColor: 1, cloth: 1 };
+    const looks = new Map([['npc:fallback:1', look], ['x', look]]);
+    const npc = combatant({ id: 'npc:fallback:1', gladiatorId: null, classId: null, name: 'Iron Warden', equipmentSilhouettes: ['bow:1:common'] });
+    expect(fighterLook(npc, manifest, looks)).toEqual(fighterLook(npc, manifest));
+    expect(fighterLook(npc, manifest, looks).layers.map(l => l.id)).toContain('body');
+    const wolf = combatant({ id: 'creature:timber-wolf:2', gladiatorId: null, classId: null, name: 'Timber Wolf' });
+    expect(fighterLook(wolf, manifest, looks)).toEqual(fighterLook(wolf, manifest));
+  });
+
+  it('stages a replay with the looks it is given, frame by frame in the same layers', () => {
+    const log = FIXTURE_BATTLE_LOGS.pvp;
+    const first = log.participants[0];
+    expect(first.gladiatorId).not.toBeNull();
+    const look: Appearance = { body: 'female', hair: 'long', skin: 2, hairColor: 5, cloth: 7 };
+    const plan = planStage(log, manifest, new Map([[first.gladiatorId!, look]]));
+    expect(plan.looks[0].layers.map(l => l.id)).toEqual(expect.arrayContaining(['body-female', 'cloth-female']));
+    expect(plan.looks[0].layers.map(l => l.id)).not.toContain('body');
+    // The other fighter, and a plan without looks, stay legacy.
+    expect(plan.looks[1]).toEqual(planStage(log, manifest).looks[1]);
+    expect(planStage(log, manifest).looks[0].layers.map(l => l.id)).toContain('body');
+    // Every drawn frame of the chosen look exists in the atlas.
+    const frame = stageAt(plan, 0, stageLayout(manifest, 960, 372));
+    for (const name of frame.fighters[0].frames) expect(manifest.atlases[frame.fighters[0].atlas].frames[name], name).toBeDefined();
+    expect(frame.fighters[0].frames[0]).toMatch(/^body-female\//);
   });
 
   it('uses the thrust and shoot attacks for spears and bows', () => {

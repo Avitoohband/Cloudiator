@@ -3,7 +3,8 @@ import { expect, test, type Page } from './fixtures';
 import { drawSlices, hidesActor } from '../../src/game/depth';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { worldToScreen } from '../../src/game/iso';
-import { locationKind } from '../../src/game/actors';
+import { locationKind, tintFor } from '../../src/game/actors';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES } from '../../supabase/functions/_shared/domain/appearance';
 import { NPC_ROUTINES, npcPostTiles, planNpcPosition } from '../../src/game/npcs';
 import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
@@ -392,6 +393,52 @@ test.describe('living isometric camp', () => {
     const final = await campState(page);
     expect(final.players).toBe(43);
     expect(final.away).toBe(6);
+  });
+
+  test('draws a gladiator in its chosen look and redraws it when the look changes', async ({ page }, testInfo) => {
+    await openCamp(page);
+    const players = (await campState(page)).actors.filter(a => a.kind === 'player');
+    const subject = players[Math.floor(players.length / 2)];
+    const GEAR = ['weapon-sword', 'offhand-shield'];
+    const setLook = (appearance: unknown) => page.evaluate(({ id, appearance, gear }) => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, actors: world.actors.map(a => (a.gladiatorId === id ? { ...a, equipmentSilhouettes: gear, appearance } as typeof a : a)) });
+    }, { id: subject.id, appearance, gear: GEAR });
+    const drawn = async () => { const a = (await campState(page)).actors.find(x => x.id === subject.id)!; return { layers: a.layers, tint: a.tint, x: a.x, y: a.y }; };
+
+    // A female ponytail look: the female body and clothes replace the male ones, in the chosen colours.
+    await setLook({ body: 'female', hair: 'ponytail', skin: 4, hairColor: 3, cloth: 11 });
+    const female = await drawn();
+    expect(female.layers).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'accent', ...GEAR, 'held']);
+    expect(female.tint).toEqual({ skin: SKIN_TONES[4].tint, hair: HAIR_COLOURS[3].tint, cloth: CLOTH_COLOURS[11].tint });
+    await nextFrames(page);
+    await page.screenshot({ path: testInfo.outputPath('camp-chosen-look-female.png') });
+
+    // A new look redraws the same gladiator in place (a bald male: no hair layer at all).
+    await setLook({ body: 'male', hair: 'bald', skin: 0, hairColor: 0, cloth: 0 });
+    const bald = await drawn();
+    expect(bald.layers).toEqual(['body', 'cloth', 'accent', ...GEAR, 'held']);
+    expect(bald.tint).toEqual({ skin: SKIN_TONES[0].tint, hair: HAIR_COLOURS[0].tint, cloth: CLOTH_COLOURS[0].tint });
+    expect([bald.x, bald.y]).toEqual([female.x, female.y]);
+
+    // Long hair, then the legacy look (a null appearance): today's layers and the colours of its id.
+    await setLook({ body: 'male', hair: 'long', skin: 2, hairColor: 5, cloth: 7 });
+    expect((await drawn()).layers).toEqual(['body', 'cloth', 'hair-long', 'accent', ...GEAR, 'held']);
+    await setLook(null);
+    const legacy = await drawn();
+    expect(legacy.layers).toEqual(['body', 'cloth', 'hair', 'accent', ...GEAR, 'held']);
+    expect(legacy.tint).toEqual(tintFor(subject.id));
+    // An actor cached before the look existed has no key at all: the legacy look too.
+    await page.evaluate(id => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, actors: world.actors.map(a => { if (a.gladiatorId !== id) return a; const { appearance: _look, ...old } = a; return old as typeof a; }) });
+    }, subject.id);
+    expect((await drawn()).layers).toEqual(legacy.layers);
+    // Everyone else kept the look they had.
+    const others = (await campState(page)).actors.filter(a => a.kind === 'player' && a.id !== subject.id);
+    expect(others.map(a => [a.id, a.layers])).toEqual(players.filter(a => a.id !== subject.id).map(a => [a.id, a.layers]));
   });
 
   test('holds NPCs at their posts and torches steady with reduced motion', async ({ page }) => {

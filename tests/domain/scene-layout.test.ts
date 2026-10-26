@@ -5,7 +5,8 @@ import { mapScreenBounds, screenToWorld, worldToScreen } from '@/game/iso';
 import { readFileSync } from 'node:fs';
 import { CLICK_TRAVEL_PX, clampView, isClick, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
 import { findPath, gridFromMap } from '@/game/paths';
-import { EQUIPMENT_LAYERS, layersFor, layoutCamp, locationKind, planActorRoutine } from '@/game/actors';
+import { BODIES, CLOTH_COLOURS, HAIRS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '@domain/appearance';
+import { CLOTH_TINTS, EQUIPMENT_LAYERS, HAIR_TINTS, LAYER_ORDER, SKIN_TINTS, layersFor, layoutCamp, locationKind, lookFor, planActorRoutine, tintFor } from '@/game/actors';
 import { drawSlices, frontEdgeY, hidesActor, propSlices } from '@/game/depth';
 import { NPC_ROUTINES, NPC_WALK_TILES_PER_SECOND, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
 import { phaseLighting } from '@/game/lighting';
@@ -179,6 +180,91 @@ describe('actor routines', () => {
       if (id.startsWith('feet-')) expect(layers, id).toEqual(layersFor([]));
       else expect(layers, id).toContain(id);
     }
+  });
+
+  it('keeps the layer draw order equal to the manifest layer order, new layers included', () => {
+    expect(LAYER_ORDER).toEqual(manifest.actors.gladiator.layers.map(l => l.id));
+    for (const id of ['body-female', 'cloth-female', 'hair-long', 'hair-ponytail']) expect(LAYER_ORDER, id).toContain(id);
+  });
+
+  it('draws the legacy look, today\'s layers and hash colours, for a gladiator with no appearance', () => {
+    const sets: string[][] = [[], ['weapon-sword', 'offhand-shield'], ['weapon-spear', 'armor-heavy', 'head-helmet'], ['weapon-bow', 'armor-light', 'head-hood'],
+      ['sword:1:common', 'light-armor:1:common', 'round-shield:5:rare', 'light-boots:1:common'], ['feet-light', 'feet-heavy']];
+    for (let i = 0; i < 50; i += 1) {
+      const id = actor(i, 'rest').gladiatorId;
+      for (const set of sets) expect(lookFor(null, id, set), `${id} ${set.join()}`).toEqual({ layers: layersFor(set), tint: tintFor(id) });
+    }
+    // A cached read or an actor projected before the look existed lacks the key; one that is not a valid look is no look either.
+    const legacy = lookFor(null, actor(7, 'rest').gladiatorId, ['weapon-sword']);
+    expect(lookFor(undefined as never, actor(7, 'rest').gladiatorId, ['weapon-sword'])).toEqual(legacy);
+    expect(lookFor({ body: 'female', hair: 'mohawk', skin: 0, hairColor: 0, cloth: 0 } as never, actor(7, 'rest').gladiatorId, ['weapon-sword'])).toEqual(legacy);
+    expect(lookFor({ body: 'female', hair: 'long', skin: 5, hairColor: 0, cloth: 0 } as never, actor(7, 'rest').gladiatorId, ['weapon-sword'])).toEqual(legacy);
+    expect(legacy.layers).toEqual(['body', 'cloth', 'hair', 'accent', 'weapon-sword', 'held']);
+  });
+
+  it('draws a chosen body, hair style and colours', () => {
+    const id = actor(1, 'rest').gladiatorId;
+    const look = (patch: Partial<Appearance>, set: string[] = ['weapon-sword', 'offhand-shield']) =>
+      lookFor({ body: 'male', hair: 'short', skin: 0, hairColor: 0, cloth: 0, ...patch }, id, set);
+    // A female body and clothes replace the male ones; every other layer is shared.
+    const female = look({ body: 'female' }).layers;
+    expect(female).toEqual(['body-female', 'cloth-female', 'hair', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    expect(female).not.toContain('body');
+    expect(female).not.toContain('cloth');
+    expect(look({ body: 'male' }).layers).toEqual(['body', 'cloth', 'hair', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    expect(look({ hair: 'long' }).layers).toEqual(['body', 'cloth', 'hair-long', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    expect(look({ hair: 'ponytail', body: 'female' }).layers).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    // Bald draws no hair layer of any kind.
+    expect(look({ hair: 'bald' }).layers.filter(l => l.startsWith('hair'))).toEqual([]);
+    expect(look({ hair: 'bald', body: 'female' }).layers).toEqual(['body-female', 'cloth-female', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    // Head gear hides any hair, as it hides short hair today (a helmet keeps its crest).
+    for (const hair of HAIRS) for (const body of BODIES) {
+      expect(look({ hair, body }, ['head-hood']).layers.filter(l => l.startsWith('hair')), `${body} ${hair} hood`).toEqual([]);
+      const helmet = look({ hair, body }, ['head-helmet', 'armor-heavy']).layers;
+      expect(helmet.filter(l => l.startsWith('hair')), `${body} ${hair} helmet`).toEqual([]);
+      expect(helmet).toEqual(expect.arrayContaining(['head-helmet', 'head-helmet-crest', 'armor-heavy']));
+    }
+    // Colours come from the chosen palette indices, not from the id.
+    expect(look({ skin: 4, hairColor: 5, cloth: 11 }).tint).toEqual({ skin: SKIN_TONES[4].tint, hair: HAIR_COLOURS[5].tint, cloth: CLOTH_COLOURS[11].tint });
+    expect(look({ skin: 1, hairColor: 2, cloth: 3 }).tint).toEqual({ skin: SKIN_TINTS[1], hair: HAIR_TINTS[2], cloth: CLOTH_TINTS[3] });
+    expect(look({ skin: 0, hairColor: 0, cloth: 0 }).tint).toEqual(look({ skin: 0, hairColor: 0, cloth: 0 }, []).tint);
+  });
+
+  it('draws every layer a chosen look names from the manifest, in manifest order', () => {
+    const ids = new Set(manifest.actors.gladiator.layers.map(l => l.id));
+    const tinted = new Map(manifest.actors.gladiator.layers.map(l => [l.id, l.tint]));
+    const sets = [[], ['weapon-axe', 'armor-heavy', 'head-helmet', 'offhand-shield'], ['weapon-bow', 'armor-light', 'head-hood']];
+    for (const body of BODIES) for (const hair of HAIRS) for (const set of sets) {
+      const { layers } = lookFor({ body, hair, skin: 2, hairColor: 3, cloth: 4 }, 'g', set);
+      expect(layers.every(l => ids.has(l)), `${body} ${hair}`).toBe(true);
+      expect(layers, `${body} ${hair}`).toEqual(LAYER_ORDER.filter(l => layers.includes(l)));
+      // The layer a look swaps in is tinted exactly as the layer it replaces.
+      for (const l of layers.filter(l => /^(body|cloth|hair)/.test(l))) expect(tinted.get(l), l).toBe(l.startsWith('body') ? 'skin' : l.startsWith('cloth') ? 'cloth' : 'hair');
+    }
+  });
+
+  it('plans a camp routine from the actor\'s look, and the legacy one without it', () => {
+    const look: Appearance = { body: 'female', hair: 'ponytail', skin: 3, hairColor: 1, cloth: 10 };
+    const legacy = planActorRoutine(actor(2, 'rest'), SLOT);
+    const chosen = planActorRoutine(actor(2, 'rest', { appearance: look }), SLOT);
+    expect(chosen.layers).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    expect(chosen.tint).toEqual({ skin: SKIN_TONES[3].tint, hair: HAIR_COLOURS[1].tint, cloth: CLOTH_COLOURS[10].tint });
+    // Only the look differs: the day's plan for this gladiator is the same.
+    expect({ ...chosen, layers: legacy.layers, tint: legacy.tint }).toEqual(legacy);
+    // A world snapshot cached before the key existed is the legacy look.
+    const { appearance: _dropped, ...old } = actor(2, 'rest');
+    expect(planActorRoutine(old as PublicActor, SLOT)).toEqual(legacy);
+  });
+
+  it('gives the fixture crowd a mix of legacy and chosen looks, so a preview shows every body and hair style', () => {
+    const crowd = createDemoWorld(1_791_592_800_000, 50, 6).actors;
+    const looks = crowd.map(a => a.appearance);
+    expect(looks.filter(l => l === null).length).toBeGreaterThan(5);
+    const chosen = looks.filter((l): l is Appearance => l !== null);
+    expect(chosen.length).toBeGreaterThan(25);
+    expect(new Set(chosen.map(l => l.body))).toEqual(new Set(BODIES));
+    expect(new Set(chosen.map(l => l.hair))).toEqual(new Set(HAIRS));
+    expect(createDemoWorld(1_791_592_800_000, 50, 6).actors.map(a => a.appearance)).toEqual(looks);
   });
 
   it('gives 50 gladiators in one zone 50 unique walkable positions inside it', () => {

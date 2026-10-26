@@ -30,7 +30,7 @@ import {
 import type { ExpeditionEnvironment, GladiatorLook } from '../../game/expedition-scene';
 import { ExpeditionViewport } from '../../game/ExpeditionViewport';
 import { createSceneBridge } from '../../game/bridge';
-import { layersFor, tintFor } from '../../game/actors';
+import { lookFor } from '../../game/actors';
 import { prefersReducedMotion } from '../../game/webgl';
 import { slotTimeText } from '../schedule/slot-time';
 import styles from './ExpeditionView.module.css';
@@ -225,7 +225,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   /** The world could not be read, so no actor is known to be on this activity. */
   worldFailed?: boolean;
   /** The signed-in viewer's own gladiator, or null (a visitor, or an owner still loading). */
-  owner: Pick<OwnerState, 'gladiatorId' | 'name'> | null;
+  owner: (Pick<OwnerState, 'gladiatorId' | 'name'> & { appearance?: OwnerState['appearance'] }) | null;
   /** Over the camp: Watch replay opens the replay scene (at an encounter's stage), and there is no Camp link. */
   overCamp?: { onWatch(stageId: string): void };
 }) {
@@ -301,10 +301,13 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   const isOwner = !!state?.summary || (!!owner && owner.gladiatorId === gladiatorId);
   const name = byActivity?.name ?? byId?.name ?? (isOwner ? owner?.name ?? null : null);
   const silhouettes = (byActivity?.equipmentSilhouettes ?? state?.gladiator?.equipmentSilhouettes ?? []).join('|');
+  // The chosen look, from the same public actor the camp draws (the owner's own read when the world has not named them); a
+  // gladiator whose look is not known, or never chosen, is drawn in the legacy look.
+  const appearance = byActivity?.appearance ?? byId?.appearance ?? (isOwner ? owner?.appearance : null) ?? null;
   const look = useMemo<GladiatorLook>(() => ({
     key: gladiatorId ?? activityId, name: name ?? 'Gladiator',
-    layers: layersFor(silhouettes ? silhouettes.split('|') : []), tint: tintFor(gladiatorId ?? activityId),
-  }), [activityId, gladiatorId, name, silhouettes]);
+    ...lookFor(appearance, gladiatorId ?? activityId, silhouettes ? silhouettes.split('|') : []),
+  }), [activityId, appearance, gladiatorId, name, silhouettes]);
   const sceneState = useCallback(() => (timelineRef.current && clock.current ? renderExpeditionStage(timelineRef.current, now()) : null), [now]);
 
   useEffect(() => {

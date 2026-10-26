@@ -160,9 +160,31 @@ Observations from the review image and screenshots:
 - The expedition close-ups are simpler paintings than the arena. The mountain peaks carry diagonal strata.
 - The head position of a fallen fighter (for the stars) is a per-kind offset: humanoids fall backwards, wolves forwards. It is not measured from the art.
 
+## Appearance layers (2026-10-26)
+
+For the gladiator appearance chosen at creation (`docs/superpowers/specs/2026-10-26-gladiator-appearance-design.md`),
+the gladiator atlas gained four layers on the same skeleton, 71 frames each: `body-female`, `cloth-female`,
+`hair-long` and `hair-ponytail`. The atlas grew from 2048×2176 to 2048×2752; every existing frame is pixel-identical.
+
+| Layer | Art |
+| --- | --- |
+| `body-female` | The male silhouette, repainted inside: a lash beside the eye, coloured lips, an earring (seen when the hair leaves the ear bare), rounded shoulders and a shaded waist, a navel, no chest or abdominal lines. |
+| `cloth-female` | A chest wrap (strophium) whose lower edge shapes the bust, where the far arm allows a one-pixel bulge over it, plus the kilt. No wrist wraps, so the forearms stay bare. |
+| `hair-long` | The existing `long` style (shared with Livia the Armorer). |
+| `hair-ponytail` | Hair drawn back, with a tie at the back of the head. From the front the tail hangs behind the head and body (back slot), and from behind it falls over the nape. |
+
+Equipment is cut from the male masks, so the female layers paint only where `body` or `cloth` is opaque in the same
+frame. `tests/assets/appearance-art.test.ts` checks every frame. Under heavy armour and a helmet the female composite
+has exactly the male silhouette; only the face differs. Under light armour the top edge of the chest wrap shows above
+the leather chest piece. The checkpoint sheets are written by `node assets/source/tools/review-sheets.mjs --appearance`
+to `node_modules/.cache/appearance-sheets/` (not committed). They show male and female with each hair style, idle and
+walk, at 1× and 4×, in three colour sets, plus armour alignment.
+
 ## Known limitations
 
 - Skin variety comes from a multiply tint over one light base body (five tones at runtime).
+- The female body keeps the male silhouette, because the shared equipment is cut from it. With short hair or bald,
+  she reads as female through the face and chest wrap alone.
 - NE frames exist only for idle and walk. Activities and combat face SE or SW, matching how
   stations and fights are laid out (partners face each other horizontally on screen).
 - The 60 fps desktop and 30 fps mobile targets need real-device measurement (Task 23).

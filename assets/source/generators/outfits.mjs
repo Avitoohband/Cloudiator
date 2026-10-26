@@ -68,7 +68,12 @@ function frameTools(ctx) {
 const limbMask = (a, b, t0, t1) => m().limb(a[0], a[1], b[0], b[1], t0, t1);
 
 // ---------------------------------------------------------------- body
-export function body(skin = SKIN.light) {
+/**
+ * Bare body. figure 'female' paints only inside the male silhouette (so every equipment layer, cut from the male
+ * masks, still covers it) and reads as female through the face (lash, lips, earring), rounded shoulders and a
+ * shaded waist, with no chest or abdominal lines; the chest wrap is in the clothes layer (chestWrap).
+ */
+export function body(skin = SKIN.light, figure = 'male') {
   return ctx => {
     const { p, view, part, pose } = ctx;
     const T = frameTools(ctx);
@@ -88,7 +93,9 @@ export function body(skin = SKIN.light) {
       c.stamp(L.neck, lit(skin));
       const torso = L.torso;
       c.stamp(torso, view === 'front' ? lit(skin) : shade(skin.mid, skin.mid, skin.lo));
-      if (!pose.rotate) {
+      if (figure === 'female') {
+        femaleTorso(c, ctx, T, skin);
+      } else if (!pose.rotate) {
         if (view === 'front') {
           const chestY = Math.round(p.neck[1] + 5 * sc);
           const xs = [p.nearShoulder[0], p.farShoulder[0]].sort((a, b) => a - b);
@@ -111,27 +118,63 @@ export function body(skin = SKIN.light) {
     });
     part('head', c => {
       c.stamp(L.head, lit(skin));
-      if (view === 'front') face(c, T, skin, pose.face);
+      if (view === 'front') face(c, T, skin, pose.face, figure);
       else { c.set(...T.H(DIMS.headRx - 0.8, 0.6), skin.lo); c.set(...T.H(-DIMS.headRx + 0.8, 0.6), skin.lo); }
     });
   };
 }
 
-function face(c, T, skin, state) {
+/**
+ * Female torso detail inside the male torso mask: a narrower contour (shoulders and waist) whose margin is
+ * repainted, never cleared, so the opaque silhouette is unchanged; no chest or abdominal lines, a navel instead.
+ */
+function femaleTorso(c, ctx, T, skin) {
+  const { p, side, view, pose } = ctx;
+  const sc = T.sc;
+  const male = m().polygon(torsoPolygon(ctx));
+  const out = (pt, sign, ax, ay = 0) => [pt[0] + sign * ax * sc, pt[1] + ay * sc];
+  const inward = sign => mul(T.hv, sign * 1.1 * sc);
+  const nearWaist = add(lerp(out(p.nearShoulder, side, 1.7, -1.2), out(p.nearHip, side, 1.6, 1), 0.6), inward(1));
+  const farWaist = add(lerp(out(p.farShoulder, -side, 1.7, -1.2), out(p.farHip, -side, 1.6, 1), 0.6), inward(-1));
+  const contour = m().polygon([
+    out(p.nearShoulder, side, 0.8, -0.9), out(p.farShoulder, -side, 0.8, -0.9), farWaist,
+    out(p.farHip, -side, 1.6, 1), out(p.nearHip, side, 1.6, 1), nearWaist,
+  ]).intersect(male);
+  // Rounded shoulders take the outline colour (a narrower silhouette); the waist margin is shaded skin.
+  c.paint(male.clone().subtract(contour), (x, y) => (T.torsoT(x, y) < 3 * sc ? 'outline' : skin.lo));
+  c.paint(contour, view === 'front' ? lit(skin) : shade(skin.mid, skin.mid, skin.lo));
+  if (pose.rotate) return;
+  if (view === 'front') {
+    const mid = Math.round((p.nearShoulder[0] + p.farShoulder[0]) / 2);
+    const navel = Math.round(p.hip[1] - 3.6 * sc);
+    if (contour.has(mid, navel)) c.set(mid, navel, skin.lo);
+  } else {
+    const midX = Math.round((p.neck[0] + p.hip[0]) / 2);
+    for (let y = Math.round(p.neck[1] + 6 * sc); y < Math.round(p.hip[1] - 1); y += 1) if (contour.has(midX, y)) c.set(midX, y, skin.lo);
+  }
+}
+
+function face(c, T, skin, state, figure = 'male') {
   const P = (dx, dy) => T.H(dx, dy);
+  const female = figure === 'female';
   c.set(...P(-1.8, 0.4), skin.lo); // ear
   c.set(...P(-1.8, 1.4), skin.lo);
+  if (female) c.set(...P(-1.8, 2.4), 'gold1'); // earring
   c.set(...P(5.5, 0.8), skin.lo); // nose
   if (state === 'closed') {
     c.set(...P(2.4, 0), skin.deep); c.set(...P(3.4, 0), skin.deep);
+    if (female) c.set(...P(4.4, -0.6), skin.deep); // lash
   } else if (state === 'hurt' || state === 'strain') {
     c.set(...P(2.4, 0), 'outline'); c.set(...P(3.4, 0), 'outline'); c.set(...P(2.4, -2), skin.deep);
+  } else if (female) {
+    c.set(...P(2.8, -1), 'outline'); c.set(...P(2.8, 0), 'outline'); c.set(...P(3.8, -1), 'outline'); // eye with a lash
+    c.set(...P(3.8, -2.2), skin.lo); // fine brow
   } else {
     c.set(...P(2.8, -1), 'outline'); c.set(...P(2.8, 0), 'outline'); c.set(...P(2.8, -2.2), skin.deep); c.set(...P(3.8, -2.2), skin.deep);
   }
   if (state === 'shout' || state === 'hurt') { c.set(...P(3.4, 3), 'outline'); c.set(...P(3.4, 3.9), 'outline'); }
   else if (state === 'strain') { c.set(...P(2.6, 3.3), skin.deep); c.set(...P(3.6, 3.3), skin.deep); }
-  else c.set(...P(3.4, 3.3), skin.deep);
+  else c.set(...P(3.4, 3.3), female ? 'crimson2' : skin.deep);
 }
 
 // ---------------------------------------------------------------- cloth
@@ -156,6 +199,39 @@ export function kilt(r = RAMP.gray, length = 0.55) {
   });
 }
 
+/**
+ * Chest wrap (strophium) for the female clothes: a band round the upper torso, inside the male torso mask so armour
+ * covers it. From the front its lower edge shapes the bust, with a fold between the breasts.
+ */
+export function chestWrap(r = RAMP.gray) {
+  return ctx => ctx.part('torso', c => {
+    const { p, view } = ctx;
+    const T = frameTools(ctx);
+    const sc = T.sc;
+    const torso = m().polygon(torsoPolygon(ctx));
+    const mid = lerp(p.nearShoulder, p.farShoulder, 0.5);
+    const band = T.regionMask(torso, (x, y) => {
+      const t = T.torsoT(x, y);
+      if (view !== 'front' || ctx.pose.rotate) return t > 1.2 * sc && t < 5.8 * sc;
+      // From the front the lower edge dips under each breast and rises between them.
+      const u = Math.abs(dot(sub([x + 0.5, y + 0.5], mid), T.hv)) / sc;
+      return t > 1.2 * sc && t < (5.2 + Math.max(0, 1 - ((u - 1.9) / 1.7) ** 2)) * sc;
+    });
+    c.stamp(band, lit(r));
+    if (view === 'front') {
+      // The bust: where the far arm (behind the torso) shows beside the chest, the wrap bulges one pixel over it.
+      // Only the arm's own pixels are used, without a new outline, so the silhouette and armour cover are unchanged.
+      const arm = limbShapes(ctx).farArm;
+      const bust = T.regionMask(torso.dilate(), (x, y) => { const t = T.torsoT(x, y); return !torso.has(x, y) && arm.has(x, y) && t > 2.2 * sc && t < 5.2 * sc; });
+      c.paint(bust, r.lo);
+    }
+    if (view === 'front' && !ctx.pose.rotate) {
+      const [x, y] = add(mid, mul(T.up, -3.8 * sc));
+      if (band.has(Math.round(x), Math.round(y))) c.set(x, y, r.lo);
+    }
+  });
+}
+
 export function wristWraps(r = RAMP.gray) {
   return ctx => {
     const { p, part } = ctx;
@@ -168,30 +244,56 @@ export function wristWraps(r = RAMP.gray) {
 }
 
 // ---------------------------------------------------------------- hair
+/** Head-local centre line of a ponytail, from the tie at the back of the head down past the neck. */
+const PONYTAIL = {
+  front: [[-5.4, -1.2], [-7.6, 1.6], [-8.4, 5.4], [-8, 9]],
+  back: [[-0.6, 1.6], [-0.8, 5], [-0.7, 8.4], [-0.3, 11]],
+};
+
 export function hair(r = RAMP.gray, style = 'short') {
-  return ctx => ctx.part('head', c => {
+  const strands = (x, y, mk) => {
+    const base = lit(r)(x, y, mk);
+    if (base !== r.mid) return base;
+    return (x * 3 + y * 5) % 7 === 0 ? r.lo : r.mid;
+  };
+  return ctx => {
     const { view } = ctx;
     const T = frameTools(ctx);
-    const mask = T.regionMask(T.headBox(6, 6), (x, y) => {
-      const [lx, ly] = T.headLocal(x, y);
-      const ry = style === 'long' ? 6.7 : 6.4;
-      if ((lx / 6.1) ** 2 + (ly / ry) ** 2 > 1) {
-        if (style === 'long' && ly > 0 && ly < 8.5 && (view === 'back' ? Math.abs(lx) < 6 : lx < -1.5 && lx > -6.8)) return true;
-        if (style === 'bun' && (lx + 4.6) ** 2 + (ly + 5.2) ** 2 < 6) return true;
-        if (style === 'short' && lx < -4 && lx > -6.6 && ly > -2 && ly < 2.5) return true; // top tuft
-        return false;
+    const tail = c => {
+      const pts = PONYTAIL[view].map(([x, y]) => T.H(x, y));
+      const mask = m();
+      for (let i = 0; i < pts.length - 1; i += 1) mask.limb(...pts[i], ...pts[i + 1], (3.4 - i * 0.6) * T.sc, (2.8 - i * 0.6) * T.sc);
+      c.stamp(mask, strands);
+    };
+    // From the front the tail hangs behind the head and body (back slot: whatever is in front hides its root);
+    // from behind it falls from the tie over the nape and shoulders, in front of the head.
+    if (style === 'ponytail' && view === 'front') ctx.part('back', tail);
+    ctx.part('head', c => {
+      const mask = T.regionMask(T.headBox(6, 6), (x, y) => {
+        const [lx, ly] = T.headLocal(x, y);
+        const ry = style === 'long' ? 6.7 : style === 'ponytail' ? 6.2 : 6.4;
+        if ((lx / 6.1) ** 2 + (ly / ry) ** 2 > 1) {
+          if (style === 'long' && ly > 0 && ly < 8.5 && (view === 'back' ? Math.abs(lx) < 6 : lx < -1.5 && lx > -6.8)) return true;
+          if (style === 'bun' && (lx + 4.6) ** 2 + (ly + 5.2) ** 2 < 6) return true;
+          if (style === 'short' && lx < -4 && lx > -6.6 && ly > -2 && ly < 2.5) return true; // top tuft
+          if (style === 'ponytail' && view === 'front' && (lx + 5.6) ** 2 + (ly + 1.4) ** 2 < 3.2) return true; // tie
+          return false;
+        }
+        if (view === 'back') return ly < (style === 'long' ? 7 : style === 'ponytail' ? 2.4 : 3.2);
+        if (style === 'ponytail') return ly < -2.6 + Math.max(0, -lx - 2) * 0.5 || (lx < -2.6 && ly < 1.4);
+        if (ly < -2.4 + Math.max(0, -lx - 2) * 0.5) return true;
+        if (lx < -0.8 && ly < (style === 'long' ? 7 : 3)) return true;
+        return lx < 0.4 && lx > -0.8 && ly < 1;
+      });
+      c.stamp(mask, strands);
+      if (style === 'ponytail') {
+        if (view === 'back') tail(c);
+        // A tie where the hair gathers, in the deepest tone of the ramp.
+        const tie = view === 'front' ? [[-5.2, -1.6], [-5.6, -0.6]] : [[-1.6, 1.6], [-0.6, 1.6], [0.4, 1.6]];
+        for (const [x, y] of tie) c.set(...T.H(x, y), r.deep);
       }
-      if (view === 'back') return ly < (style === 'long' ? 7 : 3.2);
-      if (ly < -2.4 + Math.max(0, -lx - 2) * 0.5) return true;
-      if (lx < -0.8 && ly < (style === 'long' ? 7 : 3)) return true;
-      return lx < 0.4 && lx > -0.8 && ly < 1;
     });
-    c.stamp(mask, (x, y, mk) => {
-      const base = lit(r)(x, y, mk);
-      if (base !== r.mid) return base;
-      return (x * 3 + y * 5) % 7 === 0 ? r.lo : r.mid;
-    });
-  });
+  };
 }
 
 export function beard(r = RAMP.blackHair) {

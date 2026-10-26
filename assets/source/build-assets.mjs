@@ -141,7 +141,7 @@ const manifest = {
       animations: actionMap('gladiator', [...REQUIRED_ACTIONS, ...Object.values(ATTACK_VARIANTS)], ['idle', 'walk']),
       attackVariants: ATTACK_VARIANTS,
       walk: { tilesPerSecond: WALK_TILES_PER_SECOND },
-      notes: 'Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Multiply-tint layers by their tint key (skin, cloth, hair) per player. Two-handed weapons hide offhand-shield; head gear hides hair; head-helmet-crest only with head-helmet; accent is always drawn.',
+      notes: 'Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Draw one body (body, or body-female for a female body) with its clothes (cloth, or cloth-female) and at most one hair layer (hair is short; hair-long, hair-ponytail; none when bald). Multiply-tint layers by their tint key (skin, cloth, hair) per player. Two-handed weapons hide offhand-shield; head gear hides every hair layer; head-helmet-crest only with head-helmet; accent is always drawn.',
     },
     npcs: NPCS.map(n => ({ id: n.id, name: n.name, role: n.role, atlas: 'npcs', animations: actionMap(`npc-${n.id}`, ['idle', 'walk', 'talk', 'tend'], ['idle', 'walk']) })),
     creatures: CREATURES.map(c => ({ id: c.id, name: c.name, expedition: c.expedition, atlas: 'creatures', animations: actionMap(`creature-${c.id}`, CREATURE_ACTIONS, []) })),

@@ -3,9 +3,13 @@
 // one contact sheet per gladiator loadout (every frame of every animation, 2x), NPCs, creatures,
 // effects, icons, and full renders of all four maps with sample actors.
 //   node assets/source/tools/review-sheets.mjs
+// With --appearance it writes only the appearance checkpoint sheets (male and female bodies with each hair
+// style, idle and walk, 1x and 4x, in several colour sets, plus armour alignment) to <dir>, by default
+// node_modules/.cache/appearance-sheets (not committed):
+//   node assets/source/tools/review-sheets.mjs --appearance [dir]
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PixelCanvas } from './canvas.mjs';
 import { decodePng, encodePng } from './png.mjs';
@@ -26,7 +30,11 @@ function tinted(img, tint) {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..', '..');
 const ASSETS = join(ROOT, 'public', 'assets');
-const OUT = join(ROOT, 'docs', 'operations', 'art-review');
+const flag = process.argv.indexOf('--appearance');
+const APPEARANCE = flag >= 0;
+const OUT = APPEARANCE
+  ? resolve(process.argv[flag + 1] && !process.argv[flag + 1].startsWith('--') ? process.argv[flag + 1] : join(ROOT, 'node_modules', '.cache', 'appearance-sheets'))
+  : join(ROOT, 'docs', 'operations', 'art-review');
 mkdirSync(OUT, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(ASSETS, 'manifest.json'), 'utf8'));
 const sheets = {};
@@ -67,6 +75,46 @@ const loadouts = {
   'bow-light': [['body', 'cloth', 'hair', 'armor-light', 'accent', 'weapon-bow', 'held'], [0x7a5038, 0x6a4fb8, 0xe6c06a]],
 };
 const tintKey = new Map(g.layers.map(l => [l.id, l.tint]));
+
+// ----------------------------------------------------------------- appearance checkpoint (--appearance only)
+if (APPEARANCE) {
+  // A female body draws body-female and cloth-female instead of body and cloth; bald draws no hair layer.
+  const BODIES = { male: ['body', 'cloth'], female: ['body-female', 'cloth-female'] };
+  const HAIRS = { short: ['hair'], long: ['hair-long'], ponytail: ['hair-ponytail'], bald: [] };
+  // Tints of the creation options (supabase/functions/_shared/domain/appearance.ts), named skin-hair-clothes.
+  const COLOURS = {
+    'light-black-teal': { skin: 0xffffff, hair: 0x2a2024, cloth: 0x22a39d },
+    'brown-blond-red': { skin: 0x9f6e4c, hair: 0xe6c06a, cloth: 0xbd3429 },
+    'deepbrown-red-teal': { skin: 0x7a5038, hair: 0x8a3324, cloth: 0x22a39d },
+  };
+  const compose = (layers, tints, bodyFrame) => {
+    const c = new PixelCanvas(64, 64);
+    for (const l of layers) c.blit(tinted(frame(g.atlas, bodyFrame.replace(/^body\//, `${l}/`)), tints[tintKey.get(l)]), 0, 0);
+    return c;
+  };
+  // One row per look: idle SE, idle NE, walk SE, walk NE (20 frames).
+  const strip = (layers, tints) => ['idle', 'walk'].flatMap(action => Object.values(g.animations[action])
+    .flatMap(key => manifest.animations[key].frames.map(f => compose(layers, tints, f))));
+  const looks = Object.entries(BODIES).flatMap(([body, bodyLayers]) => Object.entries(HAIRS)
+    .map(([hair, hairLayers]) => [`${body} ${hair}`, [...bodyLayers, ...hairLayers, 'accent']]));
+  const both = (name, sheet) => { save(`${name}-1x.png`, sheet, 1); save(`${name}-4x.png`, sheet, 4); };
+  // Rows: male short, long, ponytail, bald, then female short, long, ponytail, bald.
+  for (const [name, tints] of Object.entries(COLOURS)) both(`appearance-${name}`, grid(looks.map(([, layers]) => strip(layers, tints)), [64, 64], ['sand1', 'sand2']));
+  // Lineup: the first idle frame of every look (columns as the rows above) in each colour set (rows).
+  const idle = manifest.animations[g.animations.idle.se].frames[0];
+  both('appearance-lineup', grid(Object.values(COLOURS).map(t => looks.map(([, layers]) => compose(layers, t, idle))), [64, 64], ['sand1', 'sand2']));
+  // Armour alignment: equipment is cut from the male masks and must cover the female body and clothes.
+  const ARMOUR = [
+    ['male heavy helmet', ['body', 'cloth', 'armor-heavy', 'accent', 'head-helmet', 'head-helmet-crest', 'weapon-sword', 'offhand-shield']],
+    ['female heavy helmet', ['body-female', 'cloth-female', 'armor-heavy', 'accent', 'head-helmet', 'head-helmet-crest', 'weapon-sword', 'offhand-shield']],
+    ['female heavy long', ['body-female', 'cloth-female', 'hair-long', 'armor-heavy', 'accent', 'weapon-axe', 'offhand-shield']],
+    ['female light ponytail', ['body-female', 'cloth-female', 'hair-ponytail', 'armor-light', 'accent', 'weapon-spear']],
+    ['female light hood', ['body-female', 'cloth-female', 'armor-light', 'accent', 'head-hood', 'weapon-bow']],
+  ];
+  both('appearance-armour', grid(ARMOUR.map(([, layers]) => strip(layers, COLOURS['brown-blond-red'])), [64, 64], ['sand1', 'sand2']));
+  process.exit(0);
+}
+
 for (const [id, [layers, [skin, cloth, hair]]] of Object.entries(loadouts)) {
   const tints = { skin, cloth, hair };
   const rows = [];

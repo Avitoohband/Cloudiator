@@ -18,6 +18,7 @@ was replaced by this route on purpose. Task 11 records this as an approved devia
 | `node assets/source/build-assets.mjs` | Rebuild every file in `public/assets` plus `provenance.json`. |
 | `node assets/source/build-assets.mjs --check` | Fail if any committed file differs from a fresh build, or if an orphan file sits in `public/assets`. `tests/assets` runs this check. |
 | `node assets/source/tools/review-sheets.mjs` | Rewrite the review images in `docs/operations/art-review/`. |
+| `node assets/source/tools/review-sheets.mjs --appearance [dir]` | Write only the appearance sheets (male and female bodies with each hair style, idle and walk, 1× and 4×, three colour sets, armour alignment) to `dir`, by default `node_modules/.cache/appearance-sheets/` (not committed). |
 | `node assets/source/tools/render-map.mjs <map> <out.png> [scale] [--actors]` | Render one map offline. |
 | Open `/assets/gallery.html` on any static server | Play every animation live, with layer toggles and tints. |
 
@@ -31,8 +32,8 @@ decoded pixels are unchanged. Hashes therefore stay stable across Node versions 
   the seeded random generator, and the review and map renderers.
 - `generators/rig.mjs`: the pose rig and the depth slots used to clip layers.
 - `generators/poses.mjs`: keyframes for all 17 gladiator animations plus the NPC `talk` and `tend` loops.
-- `generators/outfits.mjs`: layer painters for body, cloth, hair, armor, head gear, weapons,
-  shield, held props, NPC clothing and troll features.
+- `generators/outfits.mjs`: layer painters for body (male and female), cloth and the female chest wrap, hair
+  (short, long, ponytail, bun), armor, head gear, weapons, shield, held props, NPC clothing and troll features.
 - `generators/gladiator.mjs`, `npcs.mjs`, `creatures.mjs`: actor packages.
 - `generators/tiles.mjs`: corner-based 64×32 isometric autotiles. There are 16 masks per environment.
 - `generators/props.mjs`: camp and expedition props, and the 16 arena wall segments.
@@ -53,6 +54,10 @@ decoded pixels are unchanged. Hashes therefore stay stable across Node versions 
 - **Reusable body.** Every gladiator layer has a frame for every body frame
   (`<layer>/<action>/<dir>/<i>`). Draw the layers in manifest order. The rig clips each layer part
   by the body parts in front of it, so a fixed draw order always gives correct depth.
+- **One silhouette for every body.** Equipment is cut from the male body masks, so every opaque pixel of
+  `body-female` and `cloth-female` is opaque in `body` or `cloth` of the same frame
+  (`tests/assets/appearance-art.test.ts`). The female body reads as female through its face, shading and
+  the chest wrap, never through extra pixels.
 - **Pivots.** Atlas frames carry a normalized `pivot`, which Phaser uses as the sprite origin, and
   the pixel anchor in `anchorPx`. Never write pixel values under `anchor`: Phaser would read them
   as a normalized pivot.
@@ -72,12 +77,14 @@ decoded pixels are unchanged. Hashes therefore stay stable across Node versions 
 
 ## Runtime notes for Tasks 12, 14 and 15
 
+- Draw one body with its clothes: `body` and `cloth`, or `body-female` and `cloth-female` for a female
+  body. Draw at most one hair layer: `hair` (short), `hair-long` or `hair-ponytail`, and none when bald.
 - Multiply-tint every layer that has a `tint` key (`skin`, `cloth` or `hair`) with that player's
   colour. The `accent` sash, the front flap and the helmet crest share the cloth colour, so
   players stay recognisable under heavy armour.
 - Map equipment with `manifest.equipmentLayers`, keyed by the catalog template id (the part of
   `sword:1:common` before the first colon). When the gladiator holds a two-handed weapon (spear or
-  bow), hide `offhand-shield`. When it wears head gear, hide `hair`. Draw `head-helmet-crest`
+  bow), hide `offhand-shield`. When it wears head gear, hide every hair layer. Draw `head-helmet-crest`
   only with `head-helmet`.
 - Move walkers at `actors.gladiator.walk.tilesPerSecond`, which matches the walk stride.
 - Attack variants: `thrust` for the spear and `shoot` for the bow

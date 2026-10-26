@@ -170,11 +170,13 @@ describe('gladiator animation package', () => {
 
   it('layers four weapon silhouettes, a shield, two armors and head gear over one reusable body', () => {
     expect(gladiator.layers.map(l => l.id)).toEqual(expect.arrayContaining([
-      'body', 'cloth', 'hair', 'armor-light', 'armor-heavy', 'accent', 'head-hood', 'head-helmet', 'head-helmet-crest',
+      'body', 'body-female', 'cloth', 'cloth-female', 'hair', 'hair-long', 'hair-ponytail',
+      'armor-light', 'armor-heavy', 'accent', 'head-hood', 'head-helmet', 'head-helmet-crest',
       'weapon-sword', 'weapon-axe', 'weapon-spear', 'weapon-bow', 'offhand-shield',
     ]));
     expect(Object.fromEntries(gladiator.layers.filter(l => l.tint).map(l => [l.id, l.tint]))).toEqual({
-      body: 'skin', cloth: 'cloth', hair: 'hair', accent: 'cloth', 'head-helmet-crest': 'cloth',
+      body: 'skin', 'body-female': 'skin', cloth: 'cloth', 'cloth-female': 'cloth', hair: 'hair', 'hair-long': 'hair', 'hair-ponytail': 'hair',
+      accent: 'cloth', 'head-helmet-crest': 'cloth',
     });
     const bodyFrames = Object.keys(manifest.atlases[gladiator.atlas].frames).filter(k => k.startsWith('body/'));
     for (const layer of gladiator.layers) {

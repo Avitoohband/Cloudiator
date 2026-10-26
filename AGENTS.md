@@ -198,3 +198,17 @@ updates otherwise make the Edge watcher recreate the container mid-run. Never
 change the host's last-access setting. Separate
 worktrees each have their own `.next` and may run in parallel on their own
 Playwright ports.
+
+# React effects/state (async data) — persistent project override
+
+Avi approved this correctness supplement to `vercel:react-best-practices` on
+2026-10-26. Keep vendor caches unchanged.
+
+Scope reload-preservation flags to the record version that set them. Add a
+regression where a background update arrives before the conflict response.
+
+Observed 2026-10-26: an unscoped flag survived a same-version reload and kept a
+stale conflict alert on the next background version. Tested fix `6dc5047` scopes
+the guard to the command's expected version; the ordered
+[planning regression](tests/browser/planning.spec.ts) failed before the fix and
+passed afterward on desktop and mobile.

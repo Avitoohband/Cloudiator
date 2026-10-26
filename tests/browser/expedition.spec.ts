@@ -936,13 +936,17 @@ test.describe('followable expedition scenes', () => {
       expect(d.gladiator).toMatchObject({ labelVisible: true });
       expect(apart(d.waiting[1].label, d.gladiator!.labelBox)).toBe(true);
       expect(d.waiting[1].label.y).toBeLessThan(d.waiting[1].y - reachOf('timber-wolf'));
-      // Inside the view the camera holds on the gladiator, so the player sees it.
-      const { worldView } = d.camera;
+      // Inside the view the camera holds on the gladiator, so the player sees it. The hold moved the gladiator onto its
+      // spot, and a following camera glides there over a few dozen frames, so the view is read once it has arrived.
+      await expeditionFlow.settle(page);
+      const { camera } = await expeditionFlow.scene(page);
+      const feet = worldToScreen(spot.x + 0.5, spot.y + 0.5);
+      expect(Math.hypot(camera.centerX - feet.x, camera.centerY - (feet.y - 24))).toBeLessThan(2);
+      const { worldView } = camera;
       expect(d.waiting[1].x).toBeGreaterThan(worldView.x);
       expect(d.waiting[1].x).toBeLessThan(worldView.x + worldView.width);
       expect(d.waiting[1].y).toBeGreaterThan(worldView.y);
       expect(d.waiting[1].y).toBeLessThan(worldView.y + worldView.height);
-      await expeditionFlow.settle(page);
       await page.screenshot({ path: testInfo.outputPath('expedition-woodland-timber-wolf-waiting.png') });
     });
 

@@ -4,10 +4,13 @@
 // opens as a modal dialog over the running camp. "Not now" or Escape closes it (`onDismiss`); the chip and My gladiator
 // offer it again. The draft stays on this device (`cloudiator.creation-draft.v1`) across closing, reloads, sign-out and a
 // new sign-in, and a sent attempt keeps its operation ID for its own account only. The ten starting points (launch feedback,
-// 2026-10-25) start at 0 and are spent with a counter, steppers, a cap and two shortcuts (`creation-points.ts`).
+// 2026-10-25) start at 0 and are spent with a counter, steppers, a cap and two shortcuts (`creation-points.ts`). The look
+// (gladiator appearance, 2026-10-26) is chosen after the name: the dialog opens with a random valid one, the draft keeps it
+// (version 2; a version-1 draft opens with a random look and keeps its name, class and points) and Create sends it.
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Attributes, ClassId, GameCommand } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
+import { randomAppearance, validAppearance, type Appearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { validateBuild, validateCreationAllocation } from '@domain/build';
@@ -17,15 +20,21 @@ import { useSession } from '../../lib/api/session';
 import {
   ATTRIBUTE_HINTS, ATTRIBUTE_KEYS, CLASS_SUGGESTIONS, EMPTY_ALLOCATION, cappedNote, pointsLeft, pointsSpent, setPoints,
 } from './creation-points';
+import { LookPicker } from './LookPicker';
+import { lookFromDraft, lookRandom } from './look-picker';
 import styles from './CreateCharacter.module.css';
 
 const classes = ['berserker', 'guardian', 'duelist'] as const;
 const title = (value: string) => value[0].toUpperCase() + value.slice(1);
 const storageKey = 'cloudiator.creation-draft.v1';
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
-type Draft = { version: 1; name: string; classId: ClassId; allocation: Attributes;
+type Draft = { version: 2; name: string; classId: ClassId; allocation: Attributes; appearance: Appearance;
   attempt?: { account: string; command: Creation } };
-const initialDraft: Draft = { version: 1, name: '', classId: 'berserker', allocation: { ...EMPTY_ALLOCATION } };
+/** Shown for the one frame before the saved draft is read (the controls are off until then); never saved or sent. */
+const initialDraft: Draft = { version: 2, name: '', classId: 'berserker', allocation: { ...EMPTY_ALLOCATION }, appearance: { body: 'male', hair: 'short', skin: 0, hairColor: 0, cloth: 0 } };
+/** A new draft: nothing typed yet, and a random valid look, so new gladiators are not all alike. */
+const freshDraft = (): Draft => ({ ...structuredClone(initialDraft), appearance: randomAppearance(lookRandom) });
+const sameLook = (a: Appearance, b: Appearance) => a.body === b.body && a.hair === b.hair && a.skin === b.skin && a.hairColor === b.hairColor && a.cloth === b.cloth;
 /** The refusals that are about the name: the name field is marked invalid and described by them (Task 23.5). */
 const NAME_RULE = 'Use 3–20 English letters, digits, spaces, underscores or hyphens.';
 const NAME_TAKEN = 'This name may already be taken, or this account already has a gladiator. Choose another name and try again.';
@@ -36,25 +45,31 @@ const POINTS_RULE = `Allocate exactly ${RULES_V1.attributes.creationPoints} whol
 const POINTS_ERRORS: readonly string[] = [POINTS_RULE, NAME_OR_POINTS];
 function readDraft(): Draft {
   try {
-    const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as Draft | null;
-    if (!value || value.version !== 1 || typeof value.name !== 'string' || value.name.length > 100 || !classes.includes(value.classId)
+    const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as (Omit<Draft, 'version'> & { version: 1 | 2 }) | null;
+    if (!value || (value.version !== 1 && value.version !== 2) || typeof value.name !== 'string' || value.name.length > 100 || !classes.includes(value.classId)
       || !value.allocation || Object.keys(value.allocation).length !== ATTRIBUTE_KEYS.length
-      || !ATTRIBUTE_KEYS.every(key => Number.isFinite(value.allocation[key]) && value.allocation[key] >= 0 && value.allocation[key] <= 10)) return structuredClone(initialDraft);
+      || !ATTRIBUTE_KEYS.every(key => Number.isFinite(value.allocation[key]) && value.allocation[key] >= 0 && value.allocation[key] <= 10)) return freshDraft();
     // A saved draft keeps its values. Only one the counter could not show (a fraction, or more points than there are, which
     // the old form allowed) starts again from 0 points, keeping its name and class.
     const kept = ATTRIBUTE_KEYS.every(key => Number.isInteger(value.allocation[key]))
       && pointsSpent(value.allocation) <= RULES_V1.attributes.creationPoints;
-    const clean: Draft = { version: 1, name: value.name, classId: value.classId, allocation: kept ? { ...value.allocation } : { ...EMPTY_ALLOCATION } };
+    // The look: a version-2 draft keeps its valid look; a version-1 draft (saved before the look could be chosen) or a damaged one
+    // opens with a random look.
+    const clean: Draft = { version: 2, name: value.name, classId: value.classId, allocation: kept ? { ...value.allocation } : { ...EMPTY_ALLOCATION },
+      appearance: lookFromDraft(value.version === 2 ? value.appearance : null, lookRandom) };
+    // A sent attempt (its immutable command) is kept only with the look it was sent with: the old build's attempts carry none, so
+    // they start over with a new operation ID (an account that already has its gladiator is handled by the conflict path).
     const attempt = value.attempt;
-    if (attempt && typeof attempt.account === 'string' && attempt.command?.kind === 'create-character'
+    if (value.version === 2 && attempt && typeof attempt.account === 'string' && attempt.command?.kind === 'create-character'
       && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attempt.command.operationId)
       && attempt.command.name === clean.name.trim() && attempt.command.classId === clean.classId
-      && ATTRIBUTE_KEYS.every(key => attempt.command.allocation?.[key] === clean.allocation[key])) clean.attempt = {
+      && ATTRIBUTE_KEYS.every(key => attempt.command.allocation?.[key] === clean.allocation[key])
+      && validAppearance(attempt.command.appearance) && sameLook(attempt.command.appearance, clean.appearance)) clean.attempt = {
         account: attempt.account, command: { kind: 'create-character', operationId: attempt.command.operationId,
-          name: clean.name.trim(), classId: clean.classId, allocation: { ...clean.allocation } },
+          name: clean.name.trim(), classId: clean.classId, allocation: { ...clean.allocation }, appearance: { ...clean.appearance } },
       };
     return clean;
-  } catch { return structuredClone(initialDraft); }
+  } catch { return freshDraft(); }
 }
 function persist(draft: Draft) {
   try { localStorage.setItem(storageKey, JSON.stringify(draft)); return true; } catch { return false; }
@@ -144,6 +159,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
     if (!preview) { setError(POINTS_RULE); return; }
     const command: Creation = draft.attempt?.account === accountId ? draft.attempt.command : {
       kind: 'create-character', operationId: crypto.randomUUID(), name, classId: draft.classId, allocation: { ...draft.allocation },
+      appearance: { ...draft.appearance },
     };
     const attempted: Draft = { ...draft, attempt: { account: accountId, command } };
     // Save the immutable payload before sending, including the UUID needed after an unknown outcome.
@@ -195,6 +211,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
         <input id="gladiator-name" autoComplete="off" maxLength={100} value={draft.name} onChange={event => update({ ...draft, name: event.target.value })}
           aria-invalid={nameInvalid ? true : undefined} aria-describedby={nameInvalid ? `name-help ${errorId}` : 'name-help'} />
         <p id="name-help" className="muted">3–20 letters, digits, spaces, underscores or hyphens. Names are unique regardless of case.</p>
+        <LookPicker look={draft.appearance} name={draft.name} onChange={appearance => update({ ...draft, appearance })} />
         <fieldset className="class-options"><legend>Choose a class</legend>
           {classes.map(classId => <label key={classId}><input type="radio" name="class" value={classId} checked={draft.classId === classId} onChange={() => update({ ...draft, classId })} />{title(classId)}</label>)}
         </fieldset>

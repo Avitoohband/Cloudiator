@@ -370,6 +370,49 @@ test.describe('release accessibility in the fixture preview', () => {
         - heading "Create your gladiator" [level=2]
         - group:
           - textbox "Gladiator name"
+          - group "Choose a look":
+            - status: /.+ clothes$/
+            - button "Random look"
+            - group "Body":
+              - button "Male"
+              - button "Female"
+            - group "Hair":
+              - button "Short"
+              - button "Long"
+              - button "Ponytail"
+              - button "Bald"
+            - group /^Skin tone · .+/:
+              - /children: equal
+              - text: /Skin tone · .+/
+              - button "Skin tone Light"
+              - button "Skin tone Tan"
+              - button "Skin tone Olive"
+              - button "Skin tone Brown"
+              - button "Skin tone Deep brown"
+            - group /^Hair colour · .+/:
+              - /children: equal
+              - text: /Hair colour · .+/
+              - button "Hair colour Brown"
+              - button "Hair colour Black"
+              - button "Hair colour Auburn"
+              - button "Hair colour Blond"
+              - button "Hair colour Grey"
+              - button "Hair colour Red"
+            - group /^Clothes colour · .+/:
+              - /children: equal
+              - text: /Clothes colour · .+/
+              - button "Clothes colour Teal"
+              - button "Clothes colour Red"
+              - button "Clothes colour Gold"
+              - button "Clothes colour Purple"
+              - button "Clothes colour Blue"
+              - button "Clothes colour Green"
+              - button "Clothes colour Orange"
+              - button "Clothes colour Cream"
+              - button "Clothes colour Slate"
+              - button "Clothes colour Leather"
+              - button "Clothes colour Rose"
+              - button "Clothes colour Sky"
           - group "Choose a class":
             - radio "Berserker" [checked]
             - radio "Guardian"
@@ -442,6 +485,84 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(dialog.getByRole('region', { name: 'Starting build preview' })).toBeVisible();
     expect(await contrastIssues(await settled(dialog)), 'the creation dialog with all points spent').toEqual([]);
     await shot(page, testInfo, 'creation-dialog');
+  });
+
+  test('the look step: named 44 px choices, readable, a pressed ring, and a preview that stays in view on a 360 px phone', async ({ page }, testInfo) => {
+    // Gladiator appearance, Task 6: swatches are 32 px circles in 44 px hit areas named by colour ("Skin tone Olive"), the pills are
+    // 44 px high, the text is 4.5:1 and a swatch's edge 3:1; at 360 px nothing scrolls sideways, and the preview (sticky) never
+    // hides the choice the keyboard moves to.
+    await seedSession(page.context());
+    await routeLiveReads(page.context(), { world: emptyWorld(), owner: null });
+    await page.addInitScript(() => { (window as unknown as { __cloudiatorLookRandom: () => number }).__cloudiatorLookRandom = () => 0.3; });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto('/game/');
+    const dialog = creationDialog(page);
+    await expect(dialog).toBeVisible({ timeout: 45_000 });
+    await expect(dialog.locator('[data-layer]')).toHaveCount(4);
+    const picker = dialog.getByRole('group', { name: 'Choose a look', exact: true });
+    await expectNamedControls(picker, 'the look step');
+    // Every choice is a button 44 px or more in both directions; a swatch's circle is 32 px inside its 44 px area.
+    const sizes = await picker.getByRole('button').evaluateAll(buttons => buttons.map(button => {
+      const box = button.getBoundingClientRect(), chip = button.querySelector('span');
+      return { name: button.getAttribute('aria-label') ?? button.textContent, w: box.width, h: box.height, chip: chip ? [chip.getBoundingClientRect().width, chip.getBoundingClientRect().height] : null };
+    }));
+    expect(sizes).toHaveLength(1 + 2 + 4 + 5 + 6 + 12);
+    for (const size of sizes) {
+      expect(size.w, size.name!).toBeGreaterThanOrEqual(44);
+      expect(size.h, size.name!).toBeGreaterThanOrEqual(44);
+      if (size.chip) { expect([size.w, size.h], size.name!).toEqual([44, 44]); expect(size.chip, size.name!).toEqual([32, 32]); }
+    }
+    expect(sizes.filter(size => size.chip).map(size => size.name)).toContain('Skin tone Olive');
+    // The chosen swatch has a gold ring (a shape, not only a colour); the others have none. Each circle's edge is 3:1 against the dialog.
+    const rings = await picker.getByRole('button', { name: /^(Skin tone|Hair colour|Clothes colour) / }).evaluateAll(buttons => buttons.map(button => {
+      const chip = button.querySelector('span')!, style = getComputedStyle(chip);
+      return { pressed: button.getAttribute('aria-pressed'), ring: style.boxShadow, edge: style.borderTopColor, width: style.borderTopWidth };
+    }));
+    expect(rings.filter(ring => ring.pressed === 'true')).toHaveLength(3);
+    for (const ring of rings) {
+      if (ring.pressed === 'true') expect(ring.ring).toContain('rgb(242, 198, 107)');
+      else expect(ring.ring).toBe('none');
+      expect(ring.width).toBe('2px');
+    }
+    const edge = await dialog.evaluate(el => {
+      const lum = (rgb: number[]) => { const c = rgb.map(v => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+      const parse = (value: string) => value.match(/[\d.]+/g)!.map(Number);
+      const chip = el.querySelector('button[aria-label^="Skin tone"] span')!;
+      const edgeColour = parse(getComputedStyle(chip).borderTopColor);
+      const panel = parse(getComputedStyle(el).backgroundColor);
+      const camp = [28, 63, 36];
+      const under = [0, 1, 2].map(i => panel[i] * panel[3] + camp[i] * (1 - panel[3]));
+      const [hi, lo] = [lum(edgeColour), lum(under)].sort((a, b) => b - a);
+      return (hi + 0.05) / (lo + 0.05);
+    });
+    expect(edge).toBeGreaterThanOrEqual(3);
+    expect(await contrastIssues(await settled(dialog)), 'the creation dialog with its look step').toEqual([]);
+    // 360 px: nothing scrolls sideways, and every choice lies inside the dialog.
+    expect(await noHorizontalScroll(page)).toBe(true);
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const frame = (await dialog.boundingBox())!;
+    for (const box of await picker.getByRole('button').evaluateAll(buttons => buttons.map(b => { const r = b.getBoundingClientRect(); return { x: r.x, right: r.right }; }))) {
+      expect(box.x).toBeGreaterThanOrEqual(frame.x);
+      expect(box.right).toBeLessThanOrEqual(frame.x + frame.width);
+    }
+    // The preview is sticky: after the dialog scrolls to the last colours it is still at the top of the dialog, and the choice the
+    // keyboard moves to is below it, never under it.
+    const preview = dialog.getByTestId('look-preview');
+    await dialog.getByRole('button', { name: 'Clothes colour Sky' }).scrollIntoViewIfNeeded();
+    const stuck = (await preview.boundingBox())!;
+    expect(stuck.y).toBeGreaterThanOrEqual(frame.y);
+    expect(stuck.y).toBeLessThan(frame.y + 40);
+    expect(stuck.height).toBeGreaterThan(100);
+    expect(await dialog.evaluate(el => el.scrollTop), 'the dialog scrolled to the colours').toBeGreaterThan(100);
+    for (const name of ['Skin tone Light', 'Clothes colour Teal', 'Hair colour Red', 'Clothes colour Sky', 'Skin tone Deep brown']) {
+      await dialog.getByRole('button', { name, exact: true }).focus();
+      const choice = (await dialog.getByRole('button', { name, exact: true }).boundingBox())!;
+      const stage = (await preview.boundingBox())!;
+      expect(choice.y, `${name} under the preview`).toBeGreaterThanOrEqual(stage.y + stage.height - 1);
+    }
+    // A pressed choice keeps its contrast with its focus ring.
+    expect(await contrastIssues(await settled(dialog), { focusRing: true }), 'the creation dialog with a focused swatch').toEqual([]);
+    await shot(page, testInfo, 'creation-look-360');
   });
 
   test('keeps the focus on a point stepper that reaches its limit, and names every point control', async ({ page }) => {

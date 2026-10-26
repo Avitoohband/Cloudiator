@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type Page } from './fixtures';
+import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { ownerFixture } from '../fixtures/domain';
@@ -84,7 +84,7 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
     if (url.pathname === '/functions/v1/game-command') {
       const command = request.postDataJSON() as GameCommand;
       commands.push(command);
-      expect(Object.keys(command).sort()).toEqual(['allocation', 'classId', 'kind', 'name', 'operationId']);
+      expect(Object.keys(command).sort()).toEqual(['allocation', 'appearance', 'classId', 'kind', 'name', 'operationId']);
       expect(command.operationId).toMatch(/^[0-9a-f-]{36}$/);
       let result = receipts.get(command.operationId);
       if (!result && command.kind === 'create-character') {
@@ -105,7 +105,7 @@ async function identityFlow(context: BrowserContext, options: { expiresIn?: numb
     return route.fallback();
   });
   return {
-    commands, characterCount: () => creationCount,
+    commands, userId, characterCount: () => creationCount,
     loseNextResponse: () => { failResponse = true; },
     switchAccount: () => { user.id = randomUUID(); },
     holdNextOwnerRead() {
@@ -491,6 +491,309 @@ test('a saved draft keeps its points, unless the counter could not show them', a
     else await expect(create, what).toBeDisabled();
   }
   expect(flow.commands).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Choosing a look (gladiator appearance, Task 6): the "Choose a look" step after the name, with a live animated preview.
+const DRAFT_KEY = 'cloudiator.creation-draft.v1';
+const lookGroups = (dialog: Locator) => ({
+  body: dialog.getByRole('group', { name: 'Body', exact: true }),
+  hair: dialog.getByRole('group', { name: 'Hair', exact: true }),
+  skin: dialog.getByRole('group', { name: /^Skin tone · / }),
+  hairColour: dialog.getByRole('group', { name: /^Hair colour · / }),
+  cloth: dialog.getByRole('group', { name: /^Clothes colour · / }),
+});
+const pressedIn = (group: Locator) => group.getByRole('button', { pressed: true });
+/** The layers the preview draws, in order, with the tint of each (`null`: drawn as it is). */
+const drawn = (dialog: Locator) => dialog.locator('[data-layer]').evaluateAll(els => els.map(el => [el.getAttribute('data-layer'), el.getAttribute('data-tint')]));
+/** Every look control has exactly one choice pressed, so the dialog always shows one valid look. */
+async function expectOneLook(dialog: Locator) {
+  for (const group of Object.values(lookGroups(dialog))) await expect(pressedIn(group)).toHaveCount(1);
+}
+/**
+ * The dialog's random generator pinned at 0.3 (the fixture build's `__cloudiatorLookRandom` hook; pinning Math.random itself breaks
+ * Phaser): its random look is then male, long hair, Tan, Black hair, Purple clothes.
+ */
+const pinRandom = (page: Page) => page.addInitScript(() => { (window as unknown as { __cloudiatorLookRandom: () => number }).__cloudiatorLookRandom = () => 0.3; });
+const PINNED_SUMMARY = 'Male, long hair, tan skin, black hair, purple clothes';
+const readDraft = (page: Page) => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? 'null'), DRAFT_KEY);
+
+test('opens with a random valid look after the name and before the class, with a preview and a text summary', async ({ page, context }) => {
+  await pinRandom(page);
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const picker = dialog.getByRole('group', { name: 'Choose a look', exact: true });
+  await expect(picker).toBeVisible();
+  await expect(picker.getByText('Your look is set when you create your gladiator.', { exact: true })).toBeVisible();
+  // The step sits between the name and the class.
+  const top = async (locator: Locator) => (await locator.boundingBox())!.y;
+  const nameTop = await top(dialog.getByLabel('Gladiator name')), lookTop = await top(picker), classTop = await top(dialog.getByRole('group', { name: 'Choose a class' }));
+  expect(nameTop).toBeLessThan(lookTop);
+  expect(lookTop).toBeLessThan(classTop);
+  await expectOneLook(dialog);
+  const groups = lookGroups(dialog);
+  await expect(pressedIn(groups.body)).toHaveAccessibleName('Male');
+  await expect(pressedIn(groups.hair)).toHaveAccessibleName('Long');
+  await expect(pressedIn(groups.skin)).toHaveAccessibleName('Skin tone Tan');
+  await expect(pressedIn(groups.hairColour)).toHaveAccessibleName('Hair colour Black');
+  await expect(pressedIn(groups.cloth)).toHaveAccessibleName('Clothes colour Purple');
+  // The buttons of each group.
+  await expect(groups.body.getByRole('button')).toHaveText(['Male', 'Female']);
+  await expect(groups.hair.getByRole('button')).toHaveText(['Short', 'Long', 'Ponytail', 'Bald']);
+  await expect(groups.skin.getByRole('button')).toHaveCount(5);
+  await expect(groups.hairColour.getByRole('button')).toHaveCount(6);
+  await expect(groups.cloth.getByRole('button')).toHaveCount(12);
+  // The decorative preview shows the look, and a visually hidden line says it for a screen reader.
+  const preview = dialog.getByTestId('look-preview');
+  await expect(preview).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(() => drawn(dialog)).toEqual([['body', '#eac3a0'], ['cloth', '#6a4fb8'], ['hair-long', '#2a2024'], ['accent', '#6a4fb8']]);
+  await expect(dialog.getByTestId('look-summary')).toHaveText(PINNED_SUMMARY);
+  await expect(dialog.getByTestId('look-summary')).toHaveAttribute('role', 'status');
+  // The preview names the gladiator above it, as the game's name labels do.
+  await expect(preview).toContainText('Your gladiator');
+  await dialog.getByLabel('Gladiator name').fill('Preview Pat');
+  await expect(preview).toContainText('Preview Pat');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('every control changes the look and the preview follows it', async ({ page, context }) => {
+  await pinRandom(page);
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const groups = lookGroups(dialog);
+  const summary = dialog.getByTestId('look-summary');
+  const press = (group: Locator, name: string) => group.getByRole('button', { name, exact: true }).click();
+  // Female swaps in the female body and clothes; the labels name the current choice.
+  await press(groups.body, 'Female');
+  await expect(pressedIn(groups.body)).toHaveAccessibleName('Female');
+  await expect.poll(() => drawn(dialog)).toEqual([['body-female', '#eac3a0'], ['cloth-female', '#6a4fb8'], ['hair-long', '#2a2024'], ['accent', '#6a4fb8']]);
+  await press(groups.hair, 'Ponytail');
+  await expect.poll(() => drawn(dialog)).toEqual([['body-female', '#eac3a0'], ['cloth-female', '#6a4fb8'], ['hair-ponytail', '#2a2024'], ['accent', '#6a4fb8']]);
+  await press(groups.hair, 'Short');
+  await expect.poll(() => drawn(dialog)).toEqual([['body-female', '#eac3a0'], ['cloth-female', '#6a4fb8'], ['hair', '#2a2024'], ['accent', '#6a4fb8']]);
+  await press(groups.hair, 'Ponytail');
+  // Each colour group: its label names the choice, its swatch is pressed, and the layers it tints change.
+  await press(groups.skin, 'Skin tone Olive');
+  await expect(dialog.getByRole('group', { name: 'Skin tone · Olive', exact: true })).toBeVisible();
+  await press(groups.hairColour, 'Hair colour Red');
+  await expect(dialog.getByRole('group', { name: 'Hair colour · Red', exact: true })).toBeVisible();
+  await press(groups.cloth, 'Clothes colour Teal');
+  await expect(dialog.getByRole('group', { name: 'Clothes colour · Teal', exact: true })).toBeVisible();
+  await expect.poll(() => drawn(dialog)).toEqual([['body-female', '#cf9a74'], ['cloth-female', '#22a39d'], ['hair-ponytail', '#8a3324'], ['accent', '#22a39d']]);
+  await expect(summary).toHaveText('Female, ponytail, olive skin, red hair, teal clothes');
+  await expect(pressedIn(dialog.getByRole('group', { name: 'Skin tone · Olive', exact: true }))).toHaveCount(1);
+  // Bald draws no hair, and the hair colour stays selectable (it is kept).
+  await press(groups.hair, 'Bald');
+  await expect.poll(() => drawn(dialog)).toEqual([['body-female', '#cf9a74'], ['cloth-female', '#22a39d'], ['accent', '#22a39d']]);
+  await expect(summary).toHaveText('Female, bald, olive skin, teal clothes');
+  await expect(groups.hairColour.getByRole('button').first()).toBeEnabled();
+  await press(groups.hairColour, 'Hair colour Blond');
+  await expect(pressedIn(groups.hairColour)).toHaveAccessibleName('Hair colour Blond');
+  await press(groups.hair, 'Long');
+  await expect.poll(() => drawn(dialog)).toEqual([['body-female', '#cf9a74'], ['cloth-female', '#22a39d'], ['hair-long', '#e6c06a'], ['accent', '#22a39d']]);
+  await expectOneLook(dialog);
+});
+
+test('Random look rolls another valid look, and the choice is kept in the draft', async ({ page, context }) => {
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const summary = dialog.getByTestId('look-summary');
+  const roll = dialog.getByRole('button', { name: 'Random look', exact: true });
+  await expectOneLook(dialog);
+  const seen = new Set<string>();
+  for (let i = 0; i < 6; i++) {
+    const before = await summary.textContent();
+    await roll.click();
+    await expectOneLook(dialog);
+    await expect(summary).not.toHaveText(before!);
+    seen.add((await summary.textContent())!);
+  }
+  expect(seen.size).toBeGreaterThan(3);
+  // The rolled look is what the draft holds (version 2), and it comes back after a reload.
+  const draft = await readDraft(page);
+  expect(draft.version).toBe(2);
+  expect(Object.keys(draft.appearance).sort()).toEqual(['body', 'cloth', 'hair', 'hairColor', 'skin']);
+  const text = await summary.textContent();
+  await page.reload();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('look-summary')).toHaveText(text!);
+});
+
+test('Create sends exactly the chosen look, and no other key changes', async ({ page, context }) => {
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const groups = lookGroups(dialog);
+  const press = (group: Locator, name: string) => group.getByRole('button', { name, exact: true }).click();
+  await press(groups.body, 'Female');
+  await press(groups.hair, 'Long');
+  await press(groups.skin, 'Skin tone Brown');
+  await press(groups.hairColour, 'Hair colour Auburn');
+  await press(groups.cloth, 'Clothes colour Rose');
+  await dialog.getByLabel('Gladiator name').fill('Look Fighter');
+  await dialog.getByLabel('Duelist', { exact: true }).check();
+  await spendSuggestedPoints(page);
+  await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Look Fighter', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(1);
+  const command = flow.commands[0] as Extract<GameCommand, { kind: 'create-character' }>;
+  expect(command.appearance).toEqual({ body: 'female', hair: 'long', skin: 3, hairColor: 2, cloth: 10 });
+  expect(Object.keys(command.appearance!).sort()).toEqual(['body', 'cloth', 'hair', 'hairColor', 'skin']);
+  expect(command).toMatchObject({ kind: 'create-character', name: 'Look Fighter', classId: 'duelist' });
+  // The draft is gone once the gladiator exists.
+  expect(await readDraft(page)).toBeNull();
+});
+
+test('a lost response retries the same command with the same look', async ({ page, context }) => {
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await dialog.getByLabel('Gladiator name').fill('Retry Look');
+  await dialog.getByRole('group', { name: 'Body', exact: true }).getByRole('button', { name: 'Female', exact: true }).click();
+  await spendSuggestedPoints(page);
+  flow.loseNextResponse();
+  await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  await expect(page.locator('p[role=alert]')).toContainText('could not be confirmed');
+  // The look cannot change under the saved attempt: it is part of what was sent. Retrying replays it.
+  await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Retry Look', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(2);
+  expect(flow.commands[1]).toEqual(flow.commands[0]);
+  expect((flow.commands[0] as Extract<GameCommand, { kind: 'create-character' }>).appearance?.body).toBe('female');
+});
+
+test('a draft keeps its look: version 2 restores it, version 1 gets a random look and keeps name, class and points', async ({ page, context }) => {
+  await pinRandom(page);
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const groups = lookGroups(dialog);
+  const seed = async (draft: unknown) => {
+    await page.evaluate(([key, value]) => localStorage.setItem(key as string, JSON.stringify(value)), [DRAFT_KEY, draft]);
+    await page.reload();
+    await expect(dialog).toBeVisible();
+  };
+  const split = { strength: 2, agility: 4, vitality: 0, endurance: 0, precision: 4 };
+  // Version 1 (before the look could be chosen): name, class and points stay; the look is the (pinned) random one.
+  await seed({ version: 1, name: 'Old Draft', classId: 'duelist', allocation: split });
+  await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Old Draft');
+  await expect(dialog.getByLabel('Duelist', { exact: true })).toBeChecked();
+  await expect(dialog.getByLabel('Agility points')).toHaveValue('4');
+  await expect(dialog.getByRole('status').filter({ hasText: 'All 10 spent' })).toBeVisible();
+  await expectOneLook(dialog);
+  await expect(dialog.getByTestId('look-summary')).toHaveText(PINNED_SUMMARY);
+  // An edit saves it again as version 2, with the look that is shown.
+  await dialog.getByLabel('Gladiator name').fill('Old Draft 2');
+  const saved = await readDraft(page);
+  expect(saved).toMatchObject({ version: 2, name: 'Old Draft 2', classId: 'duelist', appearance: { body: 'male', hair: 'long', skin: 1, hairColor: 1, cloth: 3 } });
+  // Version 2 keeps the chosen look, whatever the random one would be.
+  const chosen = { body: 'female', hair: 'ponytail', skin: 4, hairColor: 5, cloth: 11 };
+  await seed({ version: 2, name: 'New Draft', classId: 'guardian', allocation: split, appearance: chosen });
+  await expect(dialog.getByLabel('Gladiator name')).toHaveValue('New Draft');
+  await expect(dialog.getByLabel('Guardian', { exact: true })).toBeChecked();
+  await expect(pressedIn(groups.body)).toHaveAccessibleName('Female');
+  await expect(pressedIn(groups.hair)).toHaveAccessibleName('Ponytail');
+  await expect(pressedIn(groups.skin)).toHaveAccessibleName('Skin tone Deep brown');
+  await expect(pressedIn(groups.hairColour)).toHaveAccessibleName('Hair colour Red');
+  await expect(pressedIn(groups.cloth)).toHaveAccessibleName('Clothes colour Sky');
+  // A damaged look in a version-2 draft is replaced by the random one; the rest of the draft stays.
+  for (const appearance of [{ ...chosen, skin: 9 }, { ...chosen, hair: 'mohawk' }, { ...chosen, extra: 1 }, 'female', null]) {
+    await seed({ version: 2, name: 'Damaged Look', classId: 'berserker', allocation: split, appearance });
+    await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Damaged Look');
+    await expect(dialog.getByTestId('look-summary')).toHaveText(PINNED_SUMMARY);
+  }
+  expect(flow.commands).toHaveLength(0);
+});
+
+test('a version-1 draft that was sent before the look existed starts a new attempt with the look shown', async ({ page, context }) => {
+  // The old build saved the command it sent (no look) so a retry could replay it. This build's retry carries the shown look, so the
+  // old attempt is dropped: a new operation id; if the first one had reached the server the account already has a gladiator, which
+  // the dialog already handles (it reads the owner).
+  await pinRandom(page);
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const allocation = { strength: 2, agility: 4, vitality: 0, endurance: 0, precision: 4 };
+  const old = { kind: 'create-character', operationId: randomUUID(), name: 'Sent Before', classId: 'duelist', allocation };
+  await page.evaluate(([key, draft]) => localStorage.setItem(key as string, JSON.stringify(draft)),
+    [DRAFT_KEY, { version: 1, name: 'Sent Before', classId: 'duelist', allocation, attempt: { account: flow.userId, command: old } }]);
+  await page.reload();
+  await expect(dialog.getByLabel('Gladiator name')).toHaveValue('Sent Before');
+  await dialog.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sent Before', exact: true })).toBeVisible();
+  const sent = flow.commands[0] as Extract<GameCommand, { kind: 'create-character' }>;
+  expect(sent.operationId).not.toBe(old.operationId);
+  expect(sent.appearance).toEqual({ body: 'male', hair: 'long', skin: 1, hairColor: 1, cloth: 3 });
+});
+
+test('the preview idles through four frames, and shows one still frame when motion is reduced', async ({ page, context }) => {
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const preview = creationDialog(page).getByTestId('look-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute('data-motion', 'animated');
+  const frames = new Set<string>();
+  await expect.poll(async () => { frames.add((await preview.getAttribute('data-frame'))!); return frames.size; }, { intervals: [60], timeout: 5_000 }).toBe(4);
+  expect([...frames].sort()).toEqual(['0', '1', '2', '3']);
+  // Reduced motion: the first frame stays.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(preview).toHaveAttribute('data-motion', 'still');
+  await expect(preview).toHaveAttribute('data-frame', '0');
+  await page.waitForTimeout(1200);
+  await expect(preview).toHaveAttribute('data-frame', '0');
+  // And it starts again when the preference is turned off.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(preview).toHaveAttribute('data-motion', 'animated');
+  await expect.poll(async () => preview.getAttribute('data-frame'), { intervals: [60], timeout: 3_000 }).not.toBe('0');
+});
+
+test('a reduced-motion visitor opens the dialog with the still frame from the start', async ({ page, context }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const preview = creationDialog(page).getByTestId('look-preview');
+  await expect(preview).toHaveAttribute('data-motion', 'still');
+  await page.waitForTimeout(1200);
+  await expect(preview).toHaveAttribute('data-frame', '0');
+});
+
+test('the preview draws pixel art: a cropped atlas frame, multiplied by its tint, kept to the art by a mask', async ({ page, context }) => {
+  await pinRandom(page);
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog.locator('[data-layer]')).toHaveCount(4);
+  const style = await dialog.locator('[data-layer="body"]').evaluate(el => {
+    const css = getComputedStyle(el);
+    return { rendering: css.imageRendering, blend: css.backgroundBlendMode, width: el.getBoundingClientRect().width, image: css.backgroundImage,
+      mask: css.maskImage || css.webkitMaskImage };
+  });
+  expect(style.rendering).toBe('pixelated');
+  expect(style.blend).toBe('multiply');
+  expect(style.width).toBe(192);
+  expect(style.image).toContain('/assets/actors/gladiators.png');
+  expect(style.mask).toContain('/assets/actors/gladiators.png');
+  // The sash is tinted by the clothes colour, as in the camp (the manifest's tint key of the accent layer).
+  await expect(dialog.locator('[data-layer="accent"]')).toHaveAttribute('data-tint', '#6a4fb8');
 });
 
 test('expiry removes private owner and requires sign-in when refresh fails', async ({ page, context }) => {

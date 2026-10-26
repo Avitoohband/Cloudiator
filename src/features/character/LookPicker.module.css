@@ -1,0 +1,187 @@
+/*
+ * The "Choose a look" step of the creation dialog (gladiator appearance, Task 6; the approved mockup): a live preview on a small
+ * green ground with the name above in the game's label style, a Random look button, Body and Hair as two-column pill buttons,
+ * and swatches (a 32 px circle in a 44 px hit area, the chosen one ringed in gold) for skin tone, hair colour and clothes colour.
+ * Controls are 44 px; text on the dark fills is 4.5:1 or better and a swatch's edge is 3:1 against the dialog; a 360 px phone
+ * fits (the longest swatch row wraps).
+ */
+.look {
+  margin: 0 0 1rem;
+}
+
+/*
+ * The preview stays at the top of the dialog while the choices below it scroll, so a colour is seen on the figure as it is picked
+ * (a phone shows only a few rows at a time). The dialog's other controls scroll as before. A choice scrolled to by the keyboard
+ * stops below it (`scroll-margin-top`), never under it. On a short window (a phone on its side) it scrolls with the rest.
+ */
+.preview {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  margin: 0 -18px;
+  padding: 6px 18px 8px;
+  background: rgb(24, 22, 31);
+}
+
+.random,
+.pill,
+.swatch {
+  scroll-margin-top: 190px;
+}
+
+@media (max-height: 560px) {
+  .preview {
+    position: static;
+  }
+
+  .random,
+  .pill,
+  .swatch {
+    scroll-margin-top: 0;
+  }
+}
+
+/* The ground. The figure is placed by `LookPreview` (feet at 150 px); the oval under it is a shadow. */
+.stage {
+  position: relative;
+  height: 168px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    radial-gradient(ellipse 30px 7px at 50% 150px, rgba(10, 20, 12, 0.5), transparent),
+    radial-gradient(ellipse 150px 55px at 50% 148px, #3f7d48, transparent),
+    #2c5d36;
+}
+
+/* The game's name labels: bold monospace, light fill, a dark outline. Decorative here (the field above holds the name). */
+.stageName {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  left: 10px;
+  overflow: hidden;
+  color: var(--ink);
+  font: 700 12px/1.3 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow:
+    -1px 0 #1a1423, 1px 0 #1a1423, 0 -1px #1a1423, 0 1px #1a1423, -1px -1px #1a1423, 1px -1px #1a1423, -1px 1px #1a1423, 1px 1px #1a1423,
+    0 2px #1a1423;
+  white-space: nowrap;
+}
+
+/* One 64 px frame at 3x; its layers are stacked on it. */
+.sprite {
+  position: absolute;
+  left: 50%;
+  width: 192px;
+  height: 192px;
+}
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  image-rendering: pixelated;
+}
+
+/* Read by a screen reader, not shown. */
+.summary {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.random {
+  min-height: 44px;
+  margin-top: 0.6rem;
+  padding: 6px 14px;
+  border: 1px solid var(--field-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.group {
+  margin-top: 0.85rem;
+}
+
+.groupLabel {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.pills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pill {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--field-line);
+  border-radius: 999px;
+  background: #111b2d;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.pill[aria-pressed='true'] {
+  border-color: var(--gold);
+  background: #e6b450;
+  color: #2a1d05;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.chip {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--field-line);
+  border-radius: 50%;
+}
+
+.swatch[aria-pressed='true'] .chip {
+  box-shadow: 0 0 0 2px #16141d, 0 0 0 4px var(--gold);
+}
+
+.random:focus-visible,
+.pill:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Inside the 44 px area, clear of the ring on the chip and of the next swatch. */
+.swatch:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+
+.note {
+  margin: 0.75rem 0 0;
+}

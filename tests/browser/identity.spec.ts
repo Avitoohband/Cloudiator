@@ -255,7 +255,7 @@ test('validates names and the ten whole points, derives starters and permits key
   await expect(dialog).toBeVisible();
   const create = dialog.getByRole('button', { name: 'Create gladiator', exact: true });
   const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
-  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left|can take at most/ });
   // The points start at 0, so Create is off until all 10 are spent, and nothing is sent before that.
   await expect(counter).toHaveText('10 of 10 left');
   await expect(create).toBeDisabled();
@@ -306,7 +306,7 @@ test('spends the ten points with a counter, steppers, a cap and the class sugges
   await expect(dialog).toBeVisible();
   const create = dialog.getByRole('button', { name: 'Create gladiator', exact: true });
   const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
-  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left|can take at most/ });
   const field = (name: string) => dialog.getByLabel(`${name} points`);
   const add = (name: string) => dialog.getByRole('button', { name: `Add a point to ${name}`, exact: true });
   const remove = (name: string) => dialog.getByRole('button', { name: `Remove a point from ${name}`, exact: true });
@@ -396,7 +396,7 @@ test('caps a number typed one key at a time at what the field can take, as the c
   const dialog = creationDialog(page);
   await expect(dialog).toBeVisible();
   const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
-  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left|can take at most/ });
   const field = (name: string) => dialog.getByLabel(`${name} points`);
   const typeOver = async (name: string, keys: string[]) => {
     await field(name).focus();
@@ -414,14 +414,28 @@ test('caps a number typed one key at a time at what the field can take, as the c
   await expect(field('Endurance')).toHaveValue('7');
   await expect(capped).toHaveText('Only 7 points left, so Endurance was set to 7.');
   await expect(counter).toHaveText('All 10 spent');
-  // Typed over a field that already holds points: it can take its own points plus those left (2 + 5).
+  // Final review fix (ruling R10): typed over a field that already holds points, it can take its own points plus those left
+  // (2 + 5), and the line names that cap: only 5 were left, so "Only 7 points left" would be wrong.
   await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
-  await field('Strength').fill('3');
-  await field('Agility').fill('2');
+  await field('Strength').fill('2');
+  await field('Agility').fill('3');
   await expect(counter).toHaveText('5 of 10 left');
-  await typeOver('Agility', ['9']);
+  await typeOver('Strength', ['9']);
+  await expect(field('Strength')).toHaveValue('7');
+  await expect(capped).toHaveText('Strength can take at most 7, so it was set to 7.');
+  await expect(counter).toHaveText('All 10 spent');
+  // The same, one key at a time over a field of 2 (it takes the focus holding 2): "1" fits (it holds 1, 6 left), "10" names
+  // the cap of 7.
+  await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
+  await field('Agility').fill('2');
+  await field('Vitality').fill('3');
+  await expect(counter).toHaveText('5 of 10 left');
+  await typeOver('Agility', ['1']);
+  await expect(field('Agility')).toHaveValue('1');
+  await expect(capped).toHaveCount(0);
+  await page.keyboard.press('0');
   await expect(field('Agility')).toHaveValue('7');
-  await expect(capped).toHaveText('Only 7 points left, so Agility was set to 7.');
+  await expect(capped).toHaveText('Agility can take at most 7, so it was set to 7.');
   // Several digits at once, over a field of 0: the same line.
   await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
   await field('Strength').fill('3');

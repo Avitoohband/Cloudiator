@@ -49,11 +49,17 @@ export const ATTRIBUTE_HINTS: Record<keyof Attributes, string> = {
 };
 
 /**
- * The short status line shown when a typed number was capped, as in the approved mockup: `cap` is the most the attribute can
- * take now (the points it already holds plus the points left), which is also what it was set to; `left` is the points left
- * before the change. Typing "10" one key at a time with 7 left says 7, not the 6 left after the first digit.
+ * The short status line shown when a typed number was capped. `cap` is the most the attribute can take now (the points it
+ * already holds plus the points left), which is also what it was set to; `left` is the points left before the change; `held`
+ * is what the field held when the player started editing it (its value when it took the focus, final review ruling R10).
+ * - Nothing left: the field stays where it is.
+ * - The field held 0: the counter showed `cap` left then, so the line says so, as in the approved mockup. Typing "10" one key
+ *   at a time with 7 left says 7, not the 6 left after the first digit.
+ * - The field already held points: fewer than `cap` were left, so the line names the field's cap instead (2 in Strength, 5
+ *   left, typing 9: "Strength can take at most 7, so it was set to 7.").
  */
-export function cappedNote(name: string, left: number, cap: number): string {
+export function cappedNote(name: string, left: number, cap: number, held: number): string {
   if (left <= 0) return `No points left to add, so ${name} stays at ${cap}.`;
-  return `Only ${cap} point${cap === 1 ? '' : 's'} left, so ${name} was set to ${cap}.`;
+  if (held <= 0) return `Only ${cap} point${cap === 1 ? '' : 's'} left, so ${name} was set to ${cap}.`;
+  return `${name} can take at most ${cap}, so it was set to ${cap}.`;
 }

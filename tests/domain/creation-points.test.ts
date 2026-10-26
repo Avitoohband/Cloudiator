@@ -109,33 +109,47 @@ describe('setPoints', () => {
 });
 
 describe('cappedNote', () => {
-  // The line names the most the field can take now, as the approved mockup does: its own points plus the points left. That is
-  // also what the field is set to, however the number was typed (all at once, or one key at a time after the first digit).
-  it('says how many points the field can take and what it was set to (Avi: with 7 left, typing 10 sets 7)', () => {
-    expect(cappedNote('Strength', 7, 7)).toBe('Only 7 points left, so Strength was set to 7.');
+  // The line names the most the field can take now, its own points plus the points left, which is also what it was set to.
+  // Its wording depends on what the field held when the player started editing it (its value when it took the focus, ruling
+  // R10): from 0, the counter showed that many left, so the line says so, as in the approved mockup; with points already in
+  // it, fewer were left, so the line names the field's cap.
+  it('says how many points were left when the field held none (Avi: with 7 left, typing 10 sets 7)', () => {
+    expect(cappedNote('Strength', 7, 7, 0)).toBe('Only 7 points left, so Strength was set to 7.');
     // Typed one key at a time: after "1" the field holds 1 and 6 are left, and "10" still says 7, as with 7 left at the start.
-    expect(cappedNote('Agility', 6, 7)).toBe('Only 7 points left, so Agility was set to 7.');
-    // The field already held 3 of the 7: 4 are left, and it can take 7.
-    expect(cappedNote('Agility', 4, 7)).toBe('Only 7 points left, so Agility was set to 7.');
-    expect(cappedNote('Vitality', 1, 1)).toBe('Only 1 point left, so Vitality was set to 1.');
-    expect(cappedNote('Vitality', 3, 6)).toBe('Only 6 points left, so Vitality was set to 6.');
+    expect(cappedNote('Agility', 6, 7, 0)).toBe('Only 7 points left, so Agility was set to 7.');
+    expect(cappedNote('Vitality', 1, 1, 0)).toBe('Only 1 point left, so Vitality was set to 1.');
+  });
+
+  it('names the cap of a field that already held points (2 in Strength, 5 left, typing 9 sets 7)', () => {
+    expect(cappedNote('Strength', 5, 7, 2)).toBe('Strength can take at most 7, so it was set to 7.');
+    expect(cappedNote('Agility', 4, 7, 3)).toBe('Agility can take at most 7, so it was set to 7.');
+    // Typed over a field of 2 one key at a time: after "1" it holds 1 and 5 are left, and "10" still names 6.
+    expect(cappedNote('Vitality', 5, 6, 2)).toBe('Vitality can take at most 6, so it was set to 6.');
+    for (const note of [cappedNote('Strength', 5, 7, 2), cappedNote('Strength', 1, 3, 2)]) expect(note).not.toMatch(/points? left/);
   });
 
   it('says plainly that nothing is left to add, and never mentions a negative number', () => {
-    expect(cappedNote('Strength', 0, 4)).toBe('No points left to add, so Strength stays at 4.');
-    expect(cappedNote('Strength', 0, 0)).toBe('No points left to add, so Strength stays at 0.');
-    for (const note of [cappedNote('Strength', 0, 0), cappedNote('Strength', 3, 5)]) expect(note).not.toMatch(/-\d/);
+    expect(cappedNote('Strength', 0, 4, 4)).toBe('No points left to add, so Strength stays at 4.');
+    expect(cappedNote('Strength', 0, 4, 0)).toBe('No points left to add, so Strength stays at 4.');
+    expect(cappedNote('Strength', 0, 0, 0)).toBe('No points left to add, so Strength stays at 0.');
+    for (const note of [cappedNote('Strength', 0, 0, 0), cappedNote('Strength', 3, 5, 0), cappedNote('Strength', 3, 5, 2)]) expect(note).not.toMatch(/-\d/);
   });
 
   it('agrees with setPoints for every way the cap is reached', () => {
     let allocation: Attributes = alloc({ strength: 3 });
-    // One key at a time: "1" (fits), then "10" (capped at 1 + 6 left).
+    // One key at a time into a field of 0: "1" (fits), then "10" (capped at 1 + 6 left).
     allocation = setPoints(allocation, 'agility', 1).allocation;
-    const left = pointsLeft(allocation);
-    const result = setPoints(allocation, 'agility', 10);
+    let left = pointsLeft(allocation);
+    let result = setPoints(allocation, 'agility', 10);
     expect(result.capped).toBe(true);
-    expect(cappedNote('Agility', left, left + allocation.agility)).toBe(`Only ${result.allocation.agility} points left, so Agility was set to ${result.allocation.agility}.`);
+    expect(cappedNote('Agility', left, left + allocation.agility, 0)).toBe(`Only ${result.allocation.agility} points left, so Agility was set to ${result.allocation.agility}.`);
     expect(result.allocation.agility).toBe(7);
+    // Over a field that already holds points: 2 in Strength and 5 left, typing 9 sets 2 + 5.
+    allocation = alloc({ strength: 2, agility: 3 });
+    left = pointsLeft(allocation);
+    result = setPoints(allocation, 'strength', 9);
+    expect(result).toMatchObject({ capped: true, allocation: { strength: 7 } });
+    expect(cappedNote('Strength', left, left + allocation.strength, allocation.strength)).toBe('Strength can take at most 7, so it was set to 7.');
   });
 });
 

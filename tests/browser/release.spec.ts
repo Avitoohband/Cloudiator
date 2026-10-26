@@ -433,8 +433,9 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(strength).not.toHaveAttribute('aria-invalid', 'true');
     await expect(name).not.toHaveAttribute('aria-invalid', 'true');
     // Contrast in the other states of the form: a capped number (its status line) and all points spent (the preview).
+    // Strength held 5 (the suggestion) when it took the focus, so the line names its cap: 2 + the 3 left.
     await strength.fill('99');
-    await expect(dialog.getByRole('status').filter({ hasText: 'points left, so Strength was set to' })).toBeVisible();
+    await expect(dialog.getByRole('status').filter({ hasText: 'Strength can take at most 5, so it was set to 5.' })).toBeVisible();
     expect(await contrastIssues(await settled(dialog)), 'the creation dialog with a capped number').toEqual([]);
     await dialog.getByRole('button', { name: 'Suggested for Berserker' }).click();
     await expect(dialog.getByRole('status').filter({ hasText: 'All 10 spent' })).toBeVisible();

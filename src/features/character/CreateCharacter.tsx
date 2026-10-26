@@ -90,6 +90,8 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   const [error, setError] = useState<string | null>(null);
   /** The short status line after a typed number was capped; any other edit clears it. */
   const [capped, setCapped] = useState('');
+  /** What each points field held when it took the focus: the capped line says it differently when that was 0 (ruling R10). */
+  const heldAtFocus = useRef<Partial<Record<keyof Attributes, number>>>({});
   const [busy, setBusy] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const sending = useRef(false);
@@ -125,10 +127,14 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
     const clean = { ...next, attempt: undefined };
     setDraft(clean); setError(null); setCapped(note); setStorageAvailable(persist(clean));
   }
-  /** A typed or stepped number for one attribute: capped at what is left, with a status line when it was. */
+  /**
+   * A typed or stepped number for one attribute: capped at what is left, with a status line when it was. Only typing can pass
+   * the cap (a stepper stops at it), so the field has the focus then and `heldAtFocus` holds what it started from.
+   */
   function changePoints(key: keyof Attributes, wanted: number) {
-    const result = setPoints(draft.allocation, key, wanted);
-    update({ ...draft, allocation: result.allocation }, result.capped ? cappedNote(title(key), left, left + draft.allocation[key]) : '');
+    const result = setPoints(draft.allocation, key, wanted), held = draft.allocation[key];
+    update({ ...draft, allocation: result.allocation },
+      result.capped ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -217,7 +223,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
                 <button type="button" className={styles.step} aria-label={`Remove a point from ${name}`} aria-disabled={atZero || undefined}
                   onClick={() => { if (!atZero) changePoints(key, value - 1); }}>−</button>
                 <input id={`points-${key}`} className={styles.value} type="number" min="0" max={value + left} step="1" inputMode="numeric" value={value}
-                  onChange={event => changePoints(key, Number(event.target.value))}
+                  onFocus={() => { heldAtFocus.current[key] = value; }} onChange={event => changePoints(key, Number(event.target.value))}
                   aria-invalid={pointsInvalid ? true : undefined}
                   aria-describedby={`${rowsId}-${key} ${rowsId}-${key}-total${pointsInvalid ? ` ${errorId}` : ''}`} />
                 <button type="button" className={styles.step} aria-label={`Add a point to ${name}`} aria-disabled={atCap || undefined}

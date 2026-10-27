@@ -1215,3 +1215,25 @@ was proven instead, on the bench, by Claude, with no credential unless stated:
 password, typing the new password in the box, and wait until the change shows as saved. If the bench is deleted first (24.12),
 the first production weekly export (`verify-full` through the session pooler, the same CA) becomes the hosted test of the
 export, and the restore check on that backup the hosted test of the restore.
+
+## Keyboard focus while commands are pending, 2026-10-27
+
+Release `1b57ba5`, client only (no migration, Edge function or art change), on top of `86af8c8`:
+- Codex `b3ba441`, `e07fdc5`, `b8aa588`: Build, Market, Inventory and Shop command buttons are `aria-disabled` while
+  their command is sent (the `86af8c8` Schedule pattern). They keep the keyboard focus and ignore repeated activation.
+- Claude `1b57ba5`, from the review of those three: busy Build buttons looked fully available (only the schedule actions
+  and the inventory panel styled `aria-disabled`). The rule now covers the whole planning form, and every busy button dims to
+  `.7`. The contrast helper skips `aria-disabled` buttons as it skips disabled ones (inactive controls, WCAG 1.4.3). The
+  busy-focus tests assert the `not-allowed` cursor and `.7` opacity; they failed before the fix on Build and List for sale,
+  desktop and mobile.
+
+Gate of record at `1b57ba5` (`node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs`), exit 0, 12/12:
+db 344 passed with the Edge container unchanged; dev browser 683 passed, 57 skipped; production gate 34 passed.
+`bench` and `release` fast-forwarded from `86af8c8` (production with Avi's go in chat); production served the new CSS from
+15:30:07 UTC. Deployed checks without `@attested`, run after the build was live: bench 9/9 and production 9/9.
+`fixedRoutesReload` desktop and mobile showed 5 of 5 routes, and the favicon 404 was recorded, not failed. `anonDenied` 14 of 14,
+`shippedAssetsClean` 44 assets (25 JavaScript), 0 problems. Production after the release: scheduler on, published slot = current slot
+373565, 0 open boundaries.
+
+Follow-up, not in this release: Enter in a Build attribute field submits the form, and the busy fieldset then drops that
+field's focus. This existed before; the review suggested a capturing `focusout` rescue in `useFocusRescue`.

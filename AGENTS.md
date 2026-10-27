@@ -88,6 +88,17 @@ advisors and clean reset/replay remain separate required checks.
 Keep status output, gateway configuration and credential-bearing files out of
 diagnostic output. Record commands and sanitized results, never key values.
 
+Avi approved on 2026-10-27 (Task 24.10 lesson): pass `--agent no` to any
+`db query --output-format json` whose output a script parses. Observed with CLI
+2.120.0: the CLI detects an agent session and then wraps the rows in an object
+(`boundary`, `rows`, `warning`). In Avi's own PowerShell window it prints the
+plain JSON array of rows. A script written against the agent-session shape
+stopped there with an `ArgumentException`. Tested fix: the script passed
+`--agent no` and parsed the plain array, and its read-only self-test then
+passed in a normal window. `scripts/set-worker-secret.mjs` matches its count
+with a pattern that reads both shapes, so it needs no change. The rule as a
+general practice is adopted, not separately tested.
+
 ## Windows Docker startup — approved local guidance
 
 Avi approved this extension on 2026-10-14 for **Supabase CLI**. Before retrying

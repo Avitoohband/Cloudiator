@@ -1150,3 +1150,34 @@ the 84f2d44 images kept at their old paths for open tabs), plus Codex's polish (
 - Production (Avi's go in chat, 2026-10-27): M24 pushed mid-slot (no open boundary) — 8 actors, all `appearance: null`;
   both functions deployed from `86af8c8`; `release` → `86af8c8`; deployed checks 9 of 9; 24 migrations, functions digest
   `a1d376a5235b0833f326b623cdfd1371` = local; 0 failed jobs, `duplicateGrants` 0; old-path atlas sha `9f4d3fdf…` = 84f2d44.
+
+## Hosted budgets (24.9), 2026-10-27
+
+Production, about two days after activation (2026-10-25), 9 accounts and 8 characters; read by Claude through the
+Management API (`scripts/hosted-checks.sql`) and from the organization's usage page and the worker's invocation list in the
+dashboard (Avi's signed-in Chrome, read only). The bench numbers are in the Task 24 bench section above.
+
+| Measure (last 24 h unless stated) | Result | Budget |
+|---|---|---|
+| Dispatches | 87; at most 2 in any minute; 0 minutes over | 5 per minute |
+| Boundaries | 18; latency p50 5.5 s, p95 61.5 s, max 61.8 s; 0 over 120 s | 120 s |
+| Job attempts since launch | prepare 142, simulation 49, reveal 390, settlement 140; 0 failed, 0 expired | 0 failed |
+| Job p95 | prepare 639 ms, simulation 561 ms, reveal 1,690 ms, settlement 2,623 ms | recorded |
+| Worker responses (pg_net, retained 23) | all 200; 0 timed out, 0 without a status | — |
+| `game-worker` invocations (dashboard) | 85 in 24 h; 0 with a 5xx status (so no CPU-limit 546) | 0 |
+| Commands | 61 receipts in 24 h, 108 since launch | — |
+| `duplicateGrants` | 0 | 0 |
+
+Usage page, billing cycle 15 Oct – 15 Nov 2026, the whole organization (production and bench), Free plan:
+
+| Resource | Used | Included | Month projection (production, from the peak day) |
+|---|---|---|---|
+| Egress | 0.048 GB (peak day about 16 MB) | 5 GB | about 0.5 GB (10 %) |
+| Edge Function invocations | 1,642 (peak day about 609) | 500,000 | about 18,000 (4 %) |
+| Database size | production 35.5 MB, bench 99.7 MB | 0.5 GB per project | production 7 % now; `pg_database_size` 21 MB, up from 15 MB at activation |
+| Monthly active users | 9 | 50,000 | — |
+
+No budget is near 80 %. The dashboard's Free-plan quotas (5 GB egress, 500,000 invocations) are higher than the 3 GB and
+300,000 the plan budgeted for (C6), so those budgets keep their margin. Egress per service and Edge-to-API billing were not
+separated (the totals are under 1 % of the quota, so the question does not change any decision). Re-read the database size
+at 14 days, after the cleanup job's retention has run for a full window.

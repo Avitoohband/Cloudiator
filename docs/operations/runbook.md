@@ -115,8 +115,10 @@ runs inside a Docker container, which often has no IPv6 route. If the direct str
 `schema-dump-failed` (export), use the dashboard's session-pooler connection string instead (session mode, port 5432; its
 user has the form `postgres.<project ref>`). The transaction pooler (port 6543) is not suitable for `pg_dump`.
 
-Not yet tested against a hosted project (none exists before Task 24); Task 24 verifies the TLS settings and the connection
-string choice.
+Checked on the bench (Task 24.10, 2026-10-27; release-evidence "Hosted recovery (24.10)"): the dashboard's CA is
+`Supabase Root 2021 CA`, and `verify-full` with it passes through the session pooler, which offers no channel binding
+(plain SCRAM-SHA-256). The direct host is IPv6 only and unreachable from the operator's PC and its Docker container, so use
+the session-pooler string there. A full hosted export with a working password has not run yet.
 
 ## Manual recovery after three failures
 

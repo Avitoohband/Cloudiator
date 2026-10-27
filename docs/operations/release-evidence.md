@@ -1031,7 +1031,7 @@ and the run above, with no other browser suite active, is the gate of record.
 
 Sanitized evidence of the deployment checklist (`docs/operations/deployment.md`); names, counts, codes and origins only.
 The full step log is the Task 24 ledger. Remaining for 24.12: the real journey (24.8), the measured budgets (24.9), the
-hosted restore rehearsal (24.10, deferred: the export needs Avi's database password once), the phone frame rate (24.11)
+hosted restore rehearsal (24.10: checks done, the hosted export still open; see "Hosted recovery (24.10)"), the phone frame rate (24.11)
 and closing the bench.
 
 ### Gate of record (1b4fdbf, 2026-10-24)
@@ -1181,3 +1181,37 @@ No budget is near 80 %. The dashboard's Free-plan quotas (5 GB egress, 500,000 i
 300,000 the plan budgeted for (C6), so those budgets keep their margin. Egress per service and Edge-to-API billing were not
 separated (the totals are under 1 % of the quota, so the question does not change any decision). Re-read the database size
 at 14 days, after the cleanup job's retention has run for a full window.
+
+## Hosted recovery (24.10), 2026-10-27: checks done, hosted export still open
+
+The hosted export and the bench disaster-restore rehearsal (deployment checklist 24.10 steps 3 to 5) did **not** run. What
+was proven instead, on the bench, by Claude, with no credential unless stated:
+
+- **Local rehearsal** (step 1, 2026-10-24, the Task 24 ledger): export through `host.docker.internal` with
+  `sslmode=disable`, exit 0 (56 tables, 1,059 rows, 22 migrations); its restore check exit 0 (`duplicateGrants` 0,
+  `lostItems` 0, resume `replayed`, 0 mismatches); the hosted-restore load into a reset local database exit 0, and a second
+  run refused with `target-not-fresh` (runbook "Hosted restore", "Tested locally").
+- **CA** (step 2): Database settings → SSL configuration gives `Supabase Root 2021 CA` (self-signed root, valid until
+  2031-04-26). Saved as `<private folder>\<bench-ref>-ca.crt` and copied to `/root/.postgresql/root.crt` in the local
+  container.
+- **Which host**: the direct host `db.<bench-ref>.supabase.co` resolves to IPv6 only; it is unreachable from this PC (TCP 5432)
+  and does not resolve inside the container. The session pooler (IPv4, port 5432, user `postgres.<bench-ref>`) is this
+  PC's export path.
+- **TLS**: through the session pooler with `sslmode=verify-full` and that CA, the handshake and the host-name check pass (a
+  probe with an unknown user reached the pooler's own `FATAL` after TLS). With `channel_binding=require` the pooler offers no
+  channel-binding method, so authentication is plain SCRAM-SHA-256.
+- **Dump preconditions**: the hosted `postgres` has `SELECT` on every relation outside the system schemas (0 without), and the
+  server is PostgreSQL 17.11, the same as the container's `pg_dump`.
+- **CLI**: `db query --linked` and `db push --linked --dry-run` connect without the database password (the CLI's temporary
+  login role), so the bench reset should not prompt for one (the reset itself did not run).
+- **The export**: four attempts with the passwords supplied, through a guarded one-run wrapper (not committed). Each stopped
+  at its connection probe, before anything was written, with `password authentication failed for user "postgres"`
+  (bench pooler log; the wrapper's message keeps no host, address or password). The bench's `pg_stat_statements` records
+  one `postgres` password change, by `supabase_admin` at project creation (2026-10-23 10:25 UTC), and none since. The
+  dashboard resets tried during the session never reached the database. Nothing changed on the bench: the scheduler stayed
+  on, and its data and Vault secrets were untouched.
+
+**Still to run:** steps 3 to 5 once the operator has a working database password. Reset it under Database settings → Reset
+password, typing the new password in the box, and wait until the change shows as saved. If the bench is deleted first (24.12),
+the first production weekly export (`verify-full` through the session pooler, the same CA) becomes the hosted test of the
+export, and the restore check on that backup the hosted test of the restore.

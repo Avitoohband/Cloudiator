@@ -507,6 +507,10 @@ browsers); the harness covers every credential-free check.
 
 ### Recovery (24.10)
 
+Status 2026-10-27: steps 1 and 2 done and the bench's TLS checked; steps 3 to 5 are open because no working bench database
+password was available (release-evidence "Hosted recovery (24.10)"). The bench now has 24 migrations: read the counts in
+step 5.3 as 24, not 22.
+
 1. **[Claude]** The local `-Remote` rehearsal through `host.docker.internal:54322` with `sslmode=disable` (local stack only).
 2. **[Claude]** Keeps the local stack running (the export's `pg_dump` runs in the local container) and copies the CA Avi saved
    into the container as [runbook, "Connections and TLS"](runbook.md#connections-and-tls) describes (a CA certificate is

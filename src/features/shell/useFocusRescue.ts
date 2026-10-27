@@ -1,10 +1,11 @@
 'use client';
 
-// Task 23.5 (C19): the focus never stays on <body>. When the focused control leaves the page (a bought listing's row, a
+// Task 23.5 (C19): recover focus left on <body> by a DOM change. When the focused control leaves the page (a bought listing's row, a
 // dismissed notice, a menu the viewer lost after a sign-out, an account menu replaced by the sign-in button) or becomes
-// unusable (disabled or hidden; Chrome keeps the focus on a disabled button, other browsers may not), the browser drops
-// the focus to <body>, and a keyboard or screen-reader player loses their place. This watches for that and puts the focus
-// back near where it was:
+// unusable (disabled or hidden), this observer can put focus left on <body> back near where it was. Chrome may blur a
+// natively disabled button at a later frame, after this observer has run; that blur produces no mutation to observe.
+// Busy command buttons must remain focusable with aria-disabled and guard activation in their handlers.
+// When the observer finds lost focus, it uses:
 // 0. the outcome of a command the player sent by keyboard from that control (`useOutcomeFocus` marks it), else
 // 1. the nearest container around it that takes the focus (a menu panel, a profile card), else
 // 2. the first control of the nearest part of the page that still has one (the corner chip's sign-in button), else
@@ -60,7 +61,7 @@ export function useFocusRescue(root: RefObject<HTMLElement | null>, fallback: ()
       if (target) target.focus({ preventScroll: true });
       else fallback();
     };
-    // Checked after each DOM change: a removed or disabled control drops the focus to <body> without a later event.
+    // Check body mutations; a later native blur alone cannot trigger another check.
     const observer = new MutationObserver(rescue);
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'hidden', 'inert', 'open'] });
     document.addEventListener('focusin', onFocusIn, true);

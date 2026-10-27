@@ -92,7 +92,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       {owner.pendingBuild && <section data-testid="pending-build"><h2>Pending build</h2><BuildSummary build={owner.pendingBuild.build} inventory={owner.inventory} />
         {effective && <p>Effective {effective}</p>}
         <p>Reserved: {owner.pendingBuild.reservedMoney} money · {owner.pendingBuild.reservedItemIds.length} equipment items</p>
-        <button disabled={busy} onClick={() => void send('cancel-build')}>Cancel pending build</button>
+        <button aria-disabled={busy || undefined} onClick={() => void send('cancel-build')}>Cancel pending build</button>
       </section>}
     </div>
     <form onSubmit={submit}>
@@ -117,7 +117,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       {stats && <div className="creation-preview"><p>Estimated reservation: {fee} money</p><p>Maximum stamina: {stats.maxStamina} · Stamina after change: {preserveStamina(owner.stamina.current, stats.maxStamina)}</p>
         <p>Load: {stats.load} / {stats.loadCapacity} · Combat efficiency: {Math.round(stats.efficiency * 100)}%</p><p>Raising Endurance increases capacity without restoring current stamina.</p></div>}
       {!valid.ok && <p id={reviewId} role="status">Review your build: {valid.reason}.</p>}
-      <button className="primary-button" disabled={busy || !valid.ok} type="submit" aria-describedby={!valid.ok ? reviewId : undefined}>Queue build</button>
+      <button className="primary-button" disabled={!valid.ok} aria-disabled={busy || undefined} type="submit" aria-describedby={!valid.ok ? reviewId : undefined}>Queue build</button>
     </form>
     <p className="muted">Available money: {owner.wallets.money - owner.reservedFees.money}. Reserved fees remain in your wallet until activation.</p>
     {message && <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>}

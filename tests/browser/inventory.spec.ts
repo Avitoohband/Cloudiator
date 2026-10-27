@@ -395,6 +395,72 @@ test('explains a gear change the server no longer allows in words, and reloads t
   expect(flow.commands).toHaveLength(1);
 });
 
+for (const kind of ['queue-build', 'cancel-build'] as const) {
+  test(`keeps keyboard focus on a busy build ${kind} button and ignores repeated activation`, async ({ page, context }) => {
+    await watchFocus(page);
+    const flow = await inventoryFlow(context, { gear: true });
+    if (kind === 'cancel-build') {
+      flow.state.buildVersion++;
+      flow.state.pendingBuild = {
+        build: { ...structuredClone(flow.state.currentBuild), version: flow.state.buildVersion, classId: 'berserker' },
+        effectiveSlotIndex: flow.state.processedSlotIndex + 1, reservedMoney: 100, reservedItemIds: [], operationId: randomUUID(),
+      };
+      flow.state.reservedFees.money = 100;
+    }
+    flow.reject('processing');
+    let release!: () => void;
+    const reply = new Promise<void>(resolve => { release = resolve; });
+    let requests = 0;
+    await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+      if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== kind) return route.fallback();
+      requests++;
+      await reply;
+      return route.fallback();
+    });
+    await page.goto('/game/');
+    const panel = await openMenu(page, 'My gladiator');
+    const button = panel.getByRole('button', { name: kind === 'queue-build' ? 'Queue build' : 'Cancel pending build', exact: true });
+    await button.focus();
+    const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === kind);
+    await page.keyboard.press('Enter');
+    await sent;
+    const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    try {
+      await frames();
+      // The shell observes body mutations before Chrome's later disabled-button blur. A head mutation lets the watcher
+      // sample that later frame without giving the shell another body mutation on which it could rescue the focus.
+      await page.evaluate(() => { document.head.append(document.createElement('script')); });
+      await frames();
+      expect(await focusDrops(page)).toEqual([]);
+      await expect(button).toBeFocused();
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).not.toHaveAttribute('disabled');
+      expect(await contrastIssues(button)).toEqual([]);
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Space');
+      await button.click({ force: true });
+      await frames();
+      expect(requests).toBe(1);
+    } finally { release(); }
+    const refused = panel.getByRole('alert');
+    await expect(refused).toContainText('processing');
+    await expect(button).toBeFocused();
+    await expect(refused).not.toBeFocused();
+    await expect(refused).toHaveAttribute('data-focus-target', '');
+    expect(flow.commands.map(command => command.kind)).toEqual([kind]);
+    // Retrying the same operation succeeds: a surviving Queue keeps its focus; the removed Cancel hands it to the result.
+    flow.reject('');
+    await page.keyboard.press('Enter');
+    const outcome = panel.getByRole('status').filter({ hasText: kind === 'queue-build' ? 'Build queued.' : 'Pending build canceled.' });
+    await expect(outcome).toBeVisible();
+    if (kind === 'cancel-build') await expect(outcome).toBeFocused();
+    else await expect(button).toBeFocused();
+    expect(flow.commands).toHaveLength(2);
+    expect(flow.commands[1]).toEqual(flow.commands[0]);
+    expect(await focusDrops(page)).toEqual([]);
+  });
+}
+
 test('explains an invalid build change in words and reloads the latest inventory', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const { sword2 } = flow.pieces;

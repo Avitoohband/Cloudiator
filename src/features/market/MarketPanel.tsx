@@ -149,10 +149,10 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
               </div>
               <div className={styles.deal}>
                 <p className={styles.price}><span aria-hidden="true">💰 </span>{amount(row.price)}<span className={styles.sr}> money</span></p>
-                {action === 'buy' && !own && <button type="button" className={styles.act} disabled={busy || expired || blocked !== null}
-                  aria-label={`Buy ${name} for ${money(row.price)}`} aria-describedby={blocked ? blockedId : undefined} onClick={() => onAction(row)}>Buy</button>}
-                {action === 'cancel' && <button type="button" className={styles.act} disabled={busy}
-                  aria-label={`Cancel listing: ${name} for ${money(row.price)}`} onClick={() => onAction(row)}>Cancel</button>}
+                {action === 'buy' && !own && <button type="button" className={styles.act} disabled={expired || blocked !== null} aria-disabled={busy || undefined}
+                  aria-label={`Buy ${name} for ${money(row.price)}`} aria-describedby={blocked ? blockedId : undefined} onClick={() => { if (!busy) onAction(row); }}>Buy</button>}
+                {action === 'cancel' && <button type="button" className={styles.act} aria-disabled={busy || undefined}
+                  aria-label={`Cancel listing: ${name} for ${money(row.price)}`} onClick={() => { if (!busy) onAction(row); }}>Cancel</button>}
               </div>
             </li>;
           })}</ul>}
@@ -256,8 +256,8 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
           </>}
         </div>}
         {atLimit && <p id={limitId} className={styles.blocked} role="status">{`You have ${MAXIMUM_LISTINGS} active listings, the most allowed. Cancel one to list another.`}</p>}
-        <button type="button" className={styles.primary} disabled={busy || !item || !valid || atLimit} aria-describedby={listReasons || undefined}
-          onClick={() => { if (item && valid) onList(item, value); }}>List for sale</button>
+        <button type="button" className={styles.primary} disabled={!item || !valid || atLimit} aria-disabled={busy || undefined} aria-describedby={listReasons || undefined}
+          onClick={() => { if (!busy && item && valid && !atLimit) onList(item, value); }}>List for sale</button>
       </>}
   </div>;
 }
@@ -362,8 +362,9 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${TABS[target].id}"]`)?.focus();
   };
 
-  const buy = (listing: MarketListing) => { if (fixture) setMessage(PREVIEW); else setConfirming(listing); };
+  const buy = (listing: MarketListing) => { if (sending.current) return; if (fixture) setMessage(PREVIEW); else setConfirming(listing); };
   const confirmed = () => {
+    if (sending.current) return;
     const listing = confirming;
     dialog.current?.close();
     setConfirming(null);
@@ -405,7 +406,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
       </>}
       <div className={styles.actions}>
         <button type="button" autoFocus onClick={() => { dialog.current?.close(); setConfirming(null); }}>Keep browsing</button>
-        <button type="button" className={styles.primary} disabled={busy} onClick={confirmed}>Confirm purchase</button>
+        <button type="button" className={styles.primary} aria-disabled={busy || undefined} onClick={confirmed}>Confirm purchase</button>
       </div>
     </dialog>}
   </div>;

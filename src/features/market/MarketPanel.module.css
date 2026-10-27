@@ -170,11 +170,11 @@
   font-size: 0.8rem;
 }
 
-.act:hover:not(:disabled),
+.act:hover:not(:disabled):not([aria-disabled='true']),
 .more:hover:not(:disabled),
 .refresh:hover:not(:disabled),
 .retry:hover:not(:disabled),
-.actions button:hover:not(:disabled) {
+.actions button:hover:not(:disabled):not([aria-disabled='true']) {
   background: rgba(255, 255, 255, 0.15);
 }
 
@@ -186,9 +186,21 @@
   font-weight: 600;
 }
 
-.primary:hover:not(:disabled),
-.actions .primary:hover:not(:disabled) {
+.primary:hover:not(:disabled):not([aria-disabled='true']),
+.actions .primary:hover:not(:disabled):not([aria-disabled='true']) {
   background: #f6d48c;
+}
+
+/* Busy commands keep their focus; their handlers reject activation until the reply arrives. */
+.act[aria-disabled='true'],
+.primary[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: .7;
+}
+
+/* Dark text on gold needs less dimming to retain at least 4.5:1 while busy. */
+.primary[aria-disabled='true'] {
+  opacity: .9;
 }
 
 .tabs button:focus-visible,

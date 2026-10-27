@@ -10,7 +10,7 @@ import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
-import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
+import { a11yShot, contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
 
 // Task 18.3: the 💰 Marketplace menu. Anyone browses the open offers (the public `market_offers` projection); a player
@@ -471,6 +471,67 @@ test('fits the Marketplace sheet at 360 px with no horizontal scroll', async ({ 
 });
 
 // Task 23.5 (C18, carried from the Task 18 review): the focus after a trade, and the coverage gaps.
+
+for (const kind of ['create-listing', 'buy-listing', 'cancel-listing'] as const) {
+  test(`keeps keyboard focus on a busy market ${kind} button and ignores repeated activation`, async ({ page, context }) => {
+    await watchFocus(page);
+    const flow = await marketFlow(context);
+    flow.answerNext('processing');
+    let release!: () => void;
+    const reply = new Promise<void>(resolve => { release = resolve; });
+    let requests = 0;
+    await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+      if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== kind) return route.fallback();
+      requests++;
+      await reply;
+      return route.fallback();
+    });
+    const market = await openMarket(page);
+    let button: Locator;
+    if (kind === 'create-listing') {
+      await market.getByRole('tab', { name: 'Sell', exact: true }).click();
+      await market.getByRole('radio', { name: /^Axe/ }).check();
+      await market.getByLabel('Price in money').fill('120');
+      button = market.getByRole('button', { name: 'List for sale', exact: true });
+    } else if (kind === 'cancel-listing') {
+      await market.getByRole('tab', { name: 'My listings', exact: true }).click();
+      button = row(market, HELMET).getByRole('button', { name: /^Cancel listing:/ });
+    } else button = row(market, SHIELD).getByRole('button', { name: /^Buy/ });
+    await button.focus();
+    if (kind === 'buy-listing') {
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('dialog', { name: 'Confirm purchase' }).getByRole('button', { name: 'Keep browsing' })).toBeFocused();
+      await page.keyboard.press('Tab');
+    }
+    const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === kind);
+    await page.keyboard.press('Enter');
+    await sent;
+    const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    try {
+      await frames();
+      await page.evaluate(() => { document.head.append(document.createElement('script')); });
+      await frames();
+      expect(await focusDrops(page)).toEqual([]);
+      await expect(button).toBeFocused();
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).not.toHaveAttribute('disabled');
+      expect(await contrastIssues(button)).toEqual([]);
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Space');
+      await button.click({ force: true });
+      await frames();
+      await expect(page.getByRole('dialog', { name: 'Confirm purchase' })).not.toBeVisible();
+      expect(requests).toBe(1);
+    } finally { release(); }
+    const refused = market.getByRole('alert');
+    await expect(refused).toContainText('processing');
+    await expect(button).toBeFocused();
+    await expect(refused).not.toBeFocused();
+    await expect(refused).toHaveAttribute('data-focus-target', '');
+    expect(flow.commands.map(command => command.kind)).toEqual([kind]);
+    expect(await focusDrops(page)).toEqual([]);
+  });
+}
 
 test('pins the purchase confirmation in an accessibility snapshot', async ({ page, context }) => {
   // Plan Decision 8 (Task 23.5 fix round 1, I3).

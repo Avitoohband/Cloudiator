@@ -1235,5 +1235,8 @@ db 344 passed with the Edge container unchanged; dev browser 683 passed, 57 skip
 `shippedAssetsClean` 44 assets (25 JavaScript), 0 problems. Production after the release: scheduler on, published slot = current slot
 373565, 0 open boundaries.
 
-Follow-up, not in this release: Enter in a Build attribute field submits the form, and the busy fieldset then drops that
-field's focus. This existed before; the review suggested a capturing `focusout` rescue in `useFocusRescue`.
+The review's follow-up said that Enter in a Build attribute field leaves the focus on `<body>` while the command runs. Checked
+afterwards, this was not reproduced. The busy fieldset disables the field, the shell's rescue moves the focus to the "My gladiator"
+panel at once, and the "Build queued." result takes it when the command settles. No focus drop is recorded. The browser test
+"keeps the focus in the panel when Enter in an attribute field sends the build, then gives it to the result" now pins this
+(passed 3 times each on desktop and mobile). No code change was needed.

@@ -537,6 +537,44 @@ for (const kind of ['queue-build', 'cancel-build'] as const) {
   });
 }
 
+// Enter in an attribute field submits the form, and the busy fieldsets disable that field. The shell's rescue puts the
+// focus on the menu panel at once (never on <body>), and the result takes it when the command settles (`useOutcomeFocus`).
+test('keeps the focus in the panel when Enter in an attribute field sends the build, then gives it to the result', async ({ page, context }) => {
+  await watchFocus(page);
+  const flow = await inventoryFlow(context, { gear: true });
+  let release!: () => void;
+  const reply = new Promise<void>(resolve => { release = resolve; });
+  await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+    if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== 'queue-build') return route.fallback();
+    await reply;
+    return route.fallback();
+  });
+  await page.goto('/game/');
+  const panel = await openMenu(page, 'My gladiator');
+  const field = panel.getByRole('spinbutton', { name: 'strength', exact: true });
+  const button = panel.getByRole('button', { name: 'Queue build', exact: true });
+  await field.focus();
+  const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === 'queue-build');
+  await page.keyboard.press('Enter');
+  await sent;
+  const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  try {
+    await frames();
+    // As in the busy-button tests: a head mutation samples Chrome's later blur of the field the busy fieldset disabled.
+    await page.evaluate(() => { document.head.append(document.createElement('script')); });
+    await frames();
+    expect(await focusDrops(page)).toEqual([]);
+    await expect(field).toBeDisabled();
+    await expect(panel).toBeFocused();
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+  } finally { release(); }
+  const outcome = panel.getByRole('status').filter({ hasText: 'Build queued.' });
+  await expect(outcome).toBeFocused();
+  await expect(field).toBeEnabled();
+  expect(flow.commands.map(command => command.kind)).toEqual(['queue-build']);
+  expect(await focusDrops(page)).toEqual([]);
+});
+
 test('explains an invalid build change in words and reloads the latest inventory', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const { sword2 } = flow.pieces;

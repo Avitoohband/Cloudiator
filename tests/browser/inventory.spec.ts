@@ -440,7 +440,9 @@ for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as 
       await expect(button).toBeFocused();
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).not.toHaveAttribute('disabled');
-      expect(await contrastIssues(button)).toEqual([]);
+      // A busy button looks unavailable, like a natively disabled one (an inactive control has no contrast requirement).
+      await expect(button).toHaveCSS('cursor', 'not-allowed');
+      await expect(button).toHaveCSS('opacity', '0.7');
       await page.keyboard.press('Enter');
       await page.keyboard.press('Space');
       await button.click({ force: true });
@@ -507,7 +509,9 @@ for (const kind of ['queue-build', 'cancel-build'] as const) {
       await expect(button).toBeFocused();
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).not.toHaveAttribute('disabled');
-      expect(await contrastIssues(button)).toEqual([]);
+      // A busy button looks unavailable, like a natively disabled one (an inactive control has no contrast requirement).
+      await expect(button).toHaveCSS('cursor', 'not-allowed');
+      await expect(button).toHaveCSS('opacity', '0.7');
       await page.keyboard.press('Enter');
       await page.keyboard.press('Space');
       await button.click({ force: true });

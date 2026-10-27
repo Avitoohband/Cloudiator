@@ -10,7 +10,7 @@ import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
-import { a11yShot, contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
+import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
 
 // Task 18.3: the 💰 Marketplace menu. Anyone browses the open offers (the public `market_offers` projection); a player
@@ -515,7 +515,9 @@ for (const kind of ['create-listing', 'buy-listing', 'cancel-listing'] as const)
       await expect(button).toBeFocused();
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).not.toHaveAttribute('disabled');
-      expect(await contrastIssues(button)).toEqual([]);
+      // A busy button looks unavailable, like a natively disabled one (an inactive control has no contrast requirement).
+      await expect(button).toHaveCSS('cursor', 'not-allowed');
+      await expect(button).toHaveCSS('opacity', '0.7');
       await page.keyboard.press('Enter');
       await page.keyboard.press('Space');
       await button.click({ force: true });

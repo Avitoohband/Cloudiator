@@ -144,7 +144,9 @@ export async function contrastIssues(scope: Locator, options: { focusRing?: bool
 
     // Text: every shown element with its own text.
     for (const el of [root, ...root.querySelectorAll('*')]) {
-      if (!shown(el) || el.closest('[aria-hidden="true"], button:disabled, input:disabled, select:disabled, fieldset:disabled')) continue;
+      // Inactive controls have no contrast requirement (WCAG 1.4.3): natively disabled ones, and buttons that are
+      // aria-disabled while their command is sent.
+      if (!shown(el) || el.closest('[aria-hidden="true"], button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, fieldset:disabled')) continue;
       const own = [...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && /[\p{L}\p{N}]/u.test(n.textContent ?? ''));
       if (!own) continue;
       const style = getComputedStyle(el);

@@ -4,8 +4,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
- * Whether the focus has lost its place: on <body> (its control left the page), on a disabled control (a button disabled
- * while its command was sent), or on the menu panel itself (where `useFocusRescue` put it when its control left).
+ * Whether the focus has lost its place: on <body> (its control left the page), on a disabled control (one that became
+ * unavailable after a refresh; a busy command button stays enabled with aria-disabled), or on the menu panel itself
+ * (where `useFocusRescue` put it when its control left).
  */
 export function focusLost(): boolean {
   const active = document.activeElement;

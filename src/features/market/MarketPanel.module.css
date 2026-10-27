@@ -198,11 +198,6 @@
   opacity: .7;
 }
 
-/* Dark text on gold needs less dimming to retain at least 4.5:1 while busy. */
-.primary[aria-disabled='true'] {
-  opacity: .9;
-}
-
 .tabs button:focus-visible,
 .act:focus-visible,
 .more:focus-visible,

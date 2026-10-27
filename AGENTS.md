@@ -124,8 +124,9 @@ version-specific observations, not a claim that every generated diff omits
 the same statements.
 
 Before committing a generated draft, compare it with the tested source for
-grants/revocations, RLS and invoker-view settings, function/trigger dependency
-order, required data backfills, and initialization statements. Complete
+grants/revocations, RLS and invoker-view settings, function/trigger/constraint
+dependency order (each trigger and CHECK constraint after the functions it
+calls), required data backfills, and initialization statements. Complete
 omissions in that draft. If the generator re-emits unchanged functions, confirm their bodies match the previous migration. Then clean-reset/replay the migrations alone and inspect the replayed database: function bodies/search_path, role ACLs, policies, triggers and invoker-view settings. Run
 the owning and affected access-denial tests, lint and advisors. Reapplying
 source after reset is not migration-artifact proof. Never edit an already
@@ -141,6 +142,15 @@ stand-in from the `pg_get_functiondef` text captured before it was installed,
 never by replaying a migration or source statement through a shell tool that
 may rewrite line endings, and verify byte equality afterwards; otherwise the
 next generated draft can re-emit an unchanged function.
+Avi approved on 2026-10-27 (M24 lesson): check that every CHECK constraint
+comes after the functions it calls. Observed with CLI 2.120.0: the generated M24
+draft added `gladiators_appearance_check` before creating
+`private.valid_appearance`, and on an M23-shaped schema it stopped with
+`function private.valid_appearance(jsonb) does not exist` (`check_function_bodies
+= off` does not cover a CHECK). Tested fix for M24: the function statement moved,
+unchanged, before the column, and `tests/db/appearance.test.ts` pins the order;
+see the M24 record in [the migration guide](docs/operations/migrations.md). The
+rule as a general practice is adopted, not separately tested.
 
 # Postgres concurrency — persistent project override
 

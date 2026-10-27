@@ -1031,7 +1031,7 @@ and the run above, with no other browser suite active, is the gate of record.
 
 Sanitized evidence of the deployment checklist (`docs/operations/deployment.md`); names, counts, codes and origins only.
 The full step log is the Task 24 ledger. Remaining for 24.12: the real journey (24.8), the measured budgets (24.9), the
-hosted restore rehearsal (24.10: checks done, the hosted export still open; see "Hosted recovery (24.10)"), the phone frame rate (24.11)
+hosted restore rehearsal (24.10: checks done, the hosted export still open; see "Hosted recovery (24.10)"), the phone frame rate (24.11, done: see "Mobile frame rate (24.11)")
 and closing the bench.
 
 ### Gate of record (1b4fdbf, 2026-10-24)
@@ -1240,3 +1240,19 @@ afterwards, this was not reproduced. The busy fieldset disables the field, the s
 panel at once, and the "Build queued." result takes it when the command settles. No focus drop is recorded. The browser test
 "keeps the focus in the panel when Enter in an attribute field sends the build, then gives it to the result" now pins this
 (passed 3 times each on desktop and mobile). No code change was needed.
+
+## Mobile frame rate (24.11), 2026-10-27
+
+Avi's phone: Android, GPU `ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)` (Snapdragon 8 Gen 2 class), opened from the
+Claude app's in-app browser (Chrome engine), at release `1b57ba5`. Bench first, with its 50 seeded gladiators on camp plans,
+the 24.9 worst case for actors on screen. The overlay (`?perf=1`) read from Avi's screenshots:
+
+| Phase (bench camp) | Age | fps | Mean | p5 | Frames | > 16.7 ms | > 33.3 ms | Last 10 s |
+|---|---|---|---|---|---|---|---|---|
+| Overview | 30 s | 60 | 63.2 | 60.0 | 1,908 | 0.4 % | 0.0 % | mean 60.9, p5 60.0, > 33.3 ms 0.0 % |
+| Maximum zoom | 40 s | 61 | 64.8 | 60.0 | 2,604 | 0.5 % | 0.0 % | mean 69.5, p5 60.0, > 33.3 ms 0.1 % |
+
+Production (`<pages-origin>/game/?perf=1`): "same result for both" (Avi). No production screenshot was kept, so its numbers are
+not recorded separately. Every measured phase holds 60 fps at p5, twice the 30 fps floor, with the bigger atlas of the
+appearance release (decoded about 22.5 MB). C24 (diagonal speed, atlas split) stays closed. Not measured on the phone:
+the pan phase, and the replay and expedition scenes (each has fewer actors than the 50-gladiator camp).

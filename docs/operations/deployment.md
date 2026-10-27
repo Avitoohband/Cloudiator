@@ -572,6 +572,10 @@ step 5.3 as 24, not 22.
 
 ### Mobile frame rate (24.11)
 
+Status 2026-10-27: done. The bench camp held 60 fps at p5, overview and maximum zoom, on an Adreno 740 phone; production was
+the same, by Avi's report. The pan, replay and expedition phases were not measured (release-evidence "Mobile frame rate
+(24.11)").
+
 0. **[Claude, done 2026-10-26]** The bench seed's all-Woodland schedules (the 24.9 worst case) keep all 50 characters away,
    so the camp shows none of them. Before 24.11 the 50 were moved to camp plans through the game's own `edit_schedule`, in
    one bench-only, marker-guarded DO block run with `db query --linked --project-ref <bench-ref>`: three rotating day plans

@@ -1129,3 +1129,24 @@ and one fix round (the mockup's name label).
 - Gate of record at `84f2d44`: **exit 0, 12 of 12**, `test:db` 334 passed with the Edge start time unchanged.
 - Bench: `bench` fast-forwarded to `84f2d44`; deployed checks 9 of 9.
 - Production (Avi's go in chat, 2026-10-26): `release` fast-forwarded to `84f2d44`; Pages build live; deployed checks 9 of 9.
+
+## Gladiator appearance at creation (M24), 2026-10-27
+
+Avi, 2026-10-26: "I want option to change the look of my gladiator, male, female, white, black, hair, long short".
+Approved mockup, then "approved, build it" ([design](../superpowers/specs/2026-10-26-gladiator-appearance-design.md),
+plan `docs/superpowers/plans/2026-10-26-gladiator-appearance.md`): a "Choose a look" step at creation (body male/female;
+hair short/long/ponytail/bald; 5 skin tones, 6 hair colours, 12 clothes colours; Random look; live preview), stored on
+the gladiator (`appearance`, `null` = the legacy look, no backfill) and drawn in the camp, expeditions and replays. New
+code-generated art (female body and clothes, long hair, ponytail) on the same skeleton; Avi kept the art as drawn. Six
+tasks with spec and quality reviews, a whole-branch review and one fix wave (content-addressed atlas image names, with
+the 84f2d44 images kept at their old paths for open tabs), plus Codex's polish (6b63209, 6dc5047, d86ec71, 4cf873a,
+754e78f). Two mobile gate failures were fixed at their cause first (189a702, 86af8c8).
+
+- Gate of record at `86af8c8`: **exit 0, 12 of 12**, `test:db` 344 passed with the Edge start time unchanged.
+- Bench: M24 pushed just after a boundary; both functions deployed; `bench` → `86af8c8`; deployed checks 9 of 9 (a first
+  run right after the build went live saw a mixed-version moment; a rerun two minutes later passed); 50 actors with
+  `appearance: null`; a visitor's replay read `world_actor_reads?select=gladiator_id,appearance:actor->appearance` → 200;
+  a bench gladiator set to female/ponytail drew that look in a hosted replay; the old-path atlas equals the 84f2d44 bytes.
+- Production (Avi's go in chat, 2026-10-27): M24 pushed mid-slot (no open boundary) — 8 actors, all `appearance: null`;
+  both functions deployed from `86af8c8`; `release` → `86af8c8`; deployed checks 9 of 9; 24 migrations, functions digest
+  `a1d376a5235b0833f326b623cdfd1371` = local; 0 failed jobs, `duplicateGrants` 0; old-path atlas sha `9f4d3fdf…` = 84f2d44.

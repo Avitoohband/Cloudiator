@@ -106,7 +106,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     void send(undoCommand(owner, slot), `Swap undone. ${back ? `${itemName(back)} stays worn` : `${SLOT_LABELS[slot]} stays empty`}.`, item.id);
   };
   const cancelGear = () => void send(cancelGearCommand(owner), keepsOtherChanges(owner) ? 'Gear changes canceled. Your other queued build changes are kept.' : 'Gear changes canceled.', 'gear');
-  // The gear buttons stay focusable while a command is sent (aria-disabled, ignored when pressed): a keyboard player keeps the
+  // Command buttons stay focusable while sending (aria-disabled, guarded against activation): a keyboard player keeps the
   // place in the list, and the button that becomes "Undo" or "Wear" is the one they pressed. Cancel changes leaves with its
   // section and gives the focus to the outcome (`useOutcomeFocus`), as do the trades.
   const busyProps = busy ? { 'aria-disabled': true as const } : {};
@@ -161,8 +161,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
             : state === 'wearing' ? <button type="button" disabled aria-label={`Wearing ${wearName}`}>Wearing</button>
               : state ? <button type="button" className="gear-wear" disabled={preview || blocked !== null} {...busyProps} aria-label={`Wear ${wearName}`}
                 aria-describedby={[blocked ? blockedId : '', preview ? previewNote : ''].filter(Boolean).join(' ') || undefined} onClick={() => wearItem(item)}>Wear</button> : null}
-          <button disabled={busy || reserved || value === null || !valid} onClick={() => void send({ kind: 'sell-item', itemId: item.id, quantity })}>Sell</button>
-          <button disabled={busy || reserved || !valid} onClick={() => preview ? setMessage('Actions are unavailable in this preview.') : setConfirmation({ item, quantity })}>Discard</button></div>
+          <button disabled={reserved || value === null || !valid} {...busyProps} onClick={() => void send({ kind: 'sell-item', itemId: item.id, quantity })}>Sell</button>
+          <button disabled={reserved || !valid} {...busyProps} onClick={() => { if (sending.current) return; if (preview) setMessage('Actions are unavailable in this preview.'); else setConfirmation({ item, quantity }); }}>Discard</button></div>
         {place === item.id && outcomes}
       </article>;
     })}</div>
@@ -171,7 +171,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => setConfirmation(null)}>
       <h2 id="discard-heading">Confirm discard</h2><p>Discard {confirmation?.quantity} × {confirmation ? itemName(confirmation.item) : ''}? This gives no money or renown.</p>
       <button autoFocus onClick={() => { dialog.current?.close(); setConfirmation(null); }}>Keep item</button>
-      <button disabled={busy} onClick={() => { dialog.current?.close(); setConfirmation(null); if (confirmation) void send({ kind: 'discard-item', itemId: confirmation.item.id, quantity: confirmation.quantity }); }}>Confirm discard</button>
+      <button {...busyProps} onClick={() => { if (sending.current) return; dialog.current?.close(); setConfirmation(null); if (confirmation) void send({ kind: 'discard-item', itemId: confirmation.item.id, quantity: confirmation.quantity }); }}>Confirm discard</button>
     </dialog>
   </div>;
 }

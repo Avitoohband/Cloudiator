@@ -53,12 +53,12 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
         <p>{offer.unitPrice} {currency} each{quantity > 1 && ` · ${total} total`}</p>
         <p>{entry.npcSellValue === null ? 'Account-bound · Cannot sell' : `NPC sell value: ${entry.npcSellValue} money`}</p>
         {levelLocked && <p id={levelId}>Requires level {entry.tier}</p>}{poor && <p id={moneyId}>Not enough available {currency}</p>}
-        <button disabled={busy || !validQuantity || (!preview && (levelLocked || full || poor))} aria-describedby={described || undefined} onClick={() => buy(offer.catalogId, quantity)}>Buy {entry.name}</button>
+        <button disabled={!validQuantity || (!preview && (levelLocked || full || poor))} aria-disabled={busy || undefined} aria-describedby={described || undefined} onClick={() => { if (!busy) buy(offer.catalogId, quantity); }}>Buy {entry.name}</button>
       </article>;
     })}</div>
     {merchant === 'armorer' && <article className="inventory-item cosmetic-offer">
       <h3>{banner.name}</h3><p>Cosmetic · Account-bound · No inventory slot or combat bonus</p><p>{banner.renownPrice} renown</p>
-      {ownsBanner ? <p>Arena banner · Owned · Account-bound</p> : <button disabled={busy || (!preview && owner.wallets.renown - owner.reservedFees.renown < banner.renownPrice)} onClick={() => buy(banner.id, 1)}>Buy Arena banner</button>}
+      {ownsBanner ? <p>Arena banner · Owned · Account-bound</p> : <button disabled={!preview && owner.wallets.renown - owner.reservedFees.renown < banner.renownPrice} aria-disabled={busy || undefined} onClick={() => { if (!busy) buy(banner.id, 1); }}>Buy Arena banner</button>}
     </article>}
   </section>;
 }

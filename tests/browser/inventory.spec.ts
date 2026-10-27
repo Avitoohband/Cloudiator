@@ -395,6 +395,78 @@ test('explains a gear change the server no longer allows in words, and reloads t
   expect(flow.commands).toHaveLength(1);
 });
 
+for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as const) {
+  test(`keeps keyboard focus on a busy inventory ${action} button and ignores repeated activation`, async ({ page, context }) => {
+    await watchFocus(page);
+    const flow = await inventoryFlow(context);
+    flow.reject('processing');
+    const kind = action === 'buy-banner' ? 'buy-shop' : action;
+    let release!: () => void;
+    const reply = new Promise<void>(resolve => { release = resolve; });
+    let requests = 0;
+    await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+      if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== kind) return route.fallback();
+      requests++;
+      await reply;
+      return route.fallback();
+    });
+    await page.goto('/game/');
+    const panel = await openMenu(page, 'Inventory and shops');
+    let button: Locator;
+    if (action === 'sell-item') button = panel.getByTestId(`item-${flow.state.inventory[0].id}`).getByRole('button', { name: 'Sell', exact: true });
+    else if (action === 'discard-item') button = panel.getByTestId(`item-${flow.state.inventory[1].id}`).getByRole('button', { name: 'Discard', exact: true });
+    else {
+      if (action === 'buy-banner') await panel.getByRole('button', { name: 'Armorer', exact: true }).click();
+      button = panel.getByRole('button', { name: action === 'buy-banner' ? 'Buy Arena banner' : 'Buy Sword', exact: true });
+    }
+    const activate = async () => {
+      await button.focus();
+      await page.keyboard.press('Enter');
+      if (action === 'discard-item') {
+        await expect(page.getByRole('dialog', { name: 'Confirm discard' }).getByRole('button', { name: 'Keep item' })).toBeFocused();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Enter');
+      }
+    };
+    const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === kind);
+    await activate();
+    await sent;
+    const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    try {
+      await frames();
+      await page.evaluate(() => { document.head.append(document.createElement('script')); });
+      await frames();
+      expect(await focusDrops(page)).toEqual([]);
+      await expect(button).toBeFocused();
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).not.toHaveAttribute('disabled');
+      expect(await contrastIssues(button)).toEqual([]);
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Space');
+      await button.click({ force: true });
+      await frames();
+      await expect(page.getByRole('dialog', { name: 'Confirm discard' })).not.toBeVisible();
+      expect(requests).toBe(1);
+    } finally { release(); }
+    const refused = panel.getByRole('alert');
+    await expect(refused).toContainText('processing');
+    await expect(button).toBeFocused();
+    await expect(refused).not.toBeFocused();
+    await expect(refused).toHaveAttribute('data-focus-target', '');
+    expect(flow.commands.map(command => command.kind)).toEqual([kind]);
+    // Success removes Sell, Discard and the owned cosmetic's Buy, but an equipment Buy survives. Focus follows that result.
+    flow.reject('');
+    await activate();
+    const outcome = panel.getByRole('status').filter({ hasText: action === 'sell-item' ? 'Sale confirmed.' : action === 'discard-item' ? 'Item discarded.' : 'Purchase confirmed.' });
+    await expect(outcome).toBeVisible();
+    if (action === 'buy-shop') await expect(button).toBeFocused();
+    else await expect(outcome).toBeFocused();
+    expect(flow.commands).toHaveLength(2);
+    expect(flow.commands[1]).toEqual(flow.commands[0]);
+    expect(await focusDrops(page)).toEqual([]);
+  });
+}
+
 for (const kind of ['queue-build', 'cancel-build'] as const) {
   test(`keeps keyboard focus on a busy build ${kind} button and ignores repeated activation`, async ({ page, context }) => {
     await watchFocus(page);

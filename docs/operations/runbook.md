@@ -118,7 +118,9 @@ user has the form `postgres.<project ref>`). The transaction pooler (port 6543) 
 Checked on the bench (Task 24.10, 2026-10-27; release-evidence "Hosted recovery (24.10)"): the dashboard's CA is
 `Supabase Root 2021 CA`, and `verify-full` with it passes through the session pooler, which offers no channel binding
 (plain SCRAM-SHA-256). The direct host is IPv6 only and unreachable from the operator's PC and its Docker container, so use
-the session-pooler string there. A full hosted export with a working password has not run yet.
+the session-pooler string there. A full hosted export with a working password has not run yet. The bench is deleted
+(24.12): for production, download its own CA from the production dashboard before the first weekly export and expect the
+same `Supabase Root 2021 CA` name; a different name is a reason to stop and check, not to switch to `require`.
 
 ## Manual recovery after three failures
 
@@ -459,12 +461,18 @@ The free tier can pause a project that looks inactive. pg_cron's own traffic run
 that the project counts as active; do not rely on the scheduler to keep it awake. A paused project serves nothing: the health
 check fails with `connection-failed` and players cannot load the game.
 - Check the project's status in the hosting dashboard during the weekly export and the daily health check. Which traffic
-  counts as activity is the host's rule, not ours; confirm the current policy in the hosting documentation at Task 24.
+  counts as activity is the host's rule, not ours. Checked at Task 24.12 (2026-10-27, Supabase
+  [Project Pausing](https://supabase.com/docs/guides/platform/free-project-pausing)): a free project pauses after about a
+  week without enough user database activity; real requests from the app and opening the project in the dashboard count,
+  and a warning e-mail comes first. Paid plans do not pause. Re-read that page if the warning e-mail arrives.
+- **Launch policy (Avi, plan question 11, 2026-10-20):** accept pausing and no automatic backups on the free tier, covered
+  by the daily health check and the weekly export, with no automatic upgrade. If the warning e-mail arrives, open the
+  project in the dashboard and tell Avi; moving to a paid plan is his decision.
 - After a restore from pause, run the health check. Catch-up processes the missed slots in order (tested in
   `tests/db/recovery.test.ts`), sweeps the listings that expired during the pause once and returns their items once; cleanup
   catches up hourly. Expect `boundary-behind` and possibly `cleanup-backlog` until it has caught up.
-- A long pause (weeks) means a long catch-up at 6 boundaries a minute; plan the paid tier before launch if that is not
-  acceptable.
+- A long pause (weeks) means a long catch-up at 6 boundaries a minute (a week is 126 slots, about 21 minutes); Avi
+  accepted that for launch.
 
 ## Budgets in the hosting dashboard
 

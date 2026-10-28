@@ -1030,9 +1030,9 @@ and the run above, with no other browser suite active, is the gate of record.
 ## Task 24: the hosted launch
 
 Sanitized evidence of the deployment checklist (`docs/operations/deployment.md`); names, counts, codes and origins only.
-The full step log is the Task 24 ledger. Remaining for 24.12: the real journey (24.8), the measured budgets (24.9), the
-hosted restore rehearsal (24.10: checks done, the hosted export still open; see "Hosted recovery (24.10)"), the phone frame rate (24.11, done: see "Mobile frame rate (24.11)")
-and closing the bench.
+The full step log is the Task 24 ledger. Task 24 closed on 2026-10-27 (see "Closing the bench and the public launch
+(24.12)"). One item stays open: the hosted export (24.10: checks done, the export not yet run; see "Hosted recovery
+(24.10)"); the first production weekly export is its first hosted test.
 
 ### Gate of record (1b4fdbf, 2026-10-24)
 
@@ -1256,3 +1256,46 @@ Production (`<pages-origin>/game/?perf=1`): "same result for both" (Avi). No pro
 not recorded separately. Every measured phase holds 60 fps at p5, twice the 30 fps floor, with the bigger atlas of the
 appearance release (decoded about 22.5 MB). C24 (diagonal speed, atlas split) stays closed. Not measured on the phone:
 the pan phase, and the replay and expedition scenes (each has fewer actors than the 50-gladiator camp).
+
+## Closing the bench and the public launch (24.12), 2026-10-27
+
+The public game: **https://cloudiator-arena.pages.dev** (production `djkblzbnritgbmctsvob`, release `1b57ba5`).
+
+### Closing the bench
+
+| Step | Result |
+|---|---|
+| Bench project `uukrqribdfqovahzjsrx` | Deleted (Avi). Its API host no longer answers (`/auth/v1/health`: no connection). |
+| Google | The "Cloudiator bench" client deleted and `uukrqribdfqovahzjsrx.supabase.co` removed from the authorized domains (Avi). The production authorize redirect still reaches Google's sign-in page with no client error, so the production client is intact. |
+| Pages | The 3 Preview variables deleted; preview branches **None**; production branch `release` with automatic deployments (Avi). |
+| Bench worktree | `Cloudiator-bench` removed (Claude). Its `node_modules/supabase` junction was removed first, alone, so the shared CLI it pointed to stayed intact. |
+| `bench` branch | Still on GitHub: deleting it needs Avi's yes. |
+| Bench alias | `https://bench.cloudiator-arena.pages.dev` still serves the last bench build (200) with no backend behind it. Removing it is a Cloudflare deployment deletion (Avi's). |
+
+### Production at close
+
+`scripts/hosted-checks.sql` through the Management API (`db query --linked`), 2026-10-27 about 18:35 UTC:
+
+| Check | Result |
+|---|---|
+| Parity | 24 migrations (`20261012050952` … `20261026160844`, M01–M24); bench marker absent |
+| Scheduler | on, 5 dispatches a minute at most, epoch 373525; slot 373567 current and published; 0 open boundaries; no coordinator error; every character processed to 373567 |
+| Boundaries, last 24 h | 18, publication p50 5.3 s, p95 61.8 s, max 62.0 s, 0 over 120 s |
+| Dispatch, last 24 h | 86 dispatches in 80 minutes, at most 2 in a minute, 0 minutes over the budget |
+| Jobs, last 24 h | prepare 144, simulation 49, reveal 392, settlement 144: all completed, 0 failed, 0 expired, 0 unfinished |
+| `duplicateGrants` | 0 (every way a grant could be recorded twice) |
+| Players | 9 accounts, 8 with a gladiator, 0 with more than one; identities Google only |
+
+### Limits that come with the URL
+
+- The Google sign-in screen names `djkblzbnritgbmctsvob.supabase.co`, not the game (a custom domain is paid; plan question 9).
+- The Google consent screen stayed in Testing at launch (2026-10-25; the launch notes, and the 24.8 trade's second account
+  had to be a listed test user), not "In production" as the checklist's consent-screen step asks: publishing needs a
+  privacy page (later work). Until then only accounts on its test-user list can sign in. Check the Audience page before
+  sharing the URL widely.
+- Free tier (plan question 11, accepted): no automatic backups, and the project can pause. Supabase's current documentation
+  ([Project Pausing](https://supabase.com/docs/guides/platform/free-project-pausing), read 2026-10-27) pauses a free project
+  after about a week without enough user database activity and sends a warning e-mail first. The daily health check and the
+  weekly export cover it ([runbook, "Free-tier pausing"](runbook.md#free-tier-pausing)).
+- The hosted export has not run yet (24.10); the first production weekly export is its first hosted test.
+- The frame rate was measured on one phone (Adreno 740, 60 fps); slower phones are not measured.

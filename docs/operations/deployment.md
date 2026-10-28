@@ -595,6 +595,10 @@ the same, by Avi's report. The pan, replay and expedition phases were not measur
 
 ### Closing the bench (24.12)
 
+Status 2026-10-27: step 1 done (Avi), step 3 done (this record); step 2 waits for Avi's yes, so the `bench` branch is still
+on GitHub. The bench alias still serves its last build with no backend (release-evidence "Closing the bench and the public
+launch (24.12)").
+
 1. **[Avi]** Deletes the `cloudiator-bench` project and the "Cloudiator bench" Google client, removes `<bench-ref>.supabase.co`
    from the authorized domains, clears the Pages Preview variables and sets preview branches to None.
 2. **[Claude after Avi's go]** `git push origin --delete bench`.

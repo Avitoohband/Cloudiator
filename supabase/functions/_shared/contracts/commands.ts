@@ -34,6 +34,14 @@ export type PresenceResult = { ok: true } | { ok: false; code: ApiErrorCode; ret
 export type DayScheduleValue = { version: number; receivedAtMs: number; parts: Record<Phase, { effectiveSlotIndex: number; effectiveAtMs: number } | null> };
 /** The answer to a `change-appearance` command: the look the gladiator now has and the server time the change was received. */
 export type ChangeAppearanceValue = { appearance: Appearance; receivedAtMs: number };
+/** The message a `read-message` command marked read. */
+export type ReadMessageValue = { messageId: number };
+/**
+ * The answer to a `read-message` command: the message now marked read for the caller's account, with no receipt (a read mark
+ * writes none, like `presence`: receipts are permanent, and one per opened message would pile up), or a refusal (`not-found` for
+ * a hidden or missing message).
+ */
+export type ReadMessageResult = { ok: true; value: ReadMessageValue } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
   // `appearance` is the look chosen at creation (supabase/functions/_shared/domain/appearance.ts). Absent (an older open tab): the
@@ -52,5 +60,7 @@ export type GameCommand = Operation & (
   | { kind: 'set-tournament-opt-in'; enabled: boolean }
   // Change look: free and unlimited for now. The look replaces the caller's own gladiator's (the command names no gladiator).
   | { kind: 'change-appearance'; appearance: Appearance }
+  // Mark a message read for the caller's own account (the command names no account); no receipt, a repeat is a no-op.
+  | { kind: 'read-message'; messageId: number }
   | { kind: 'presence' }
 );

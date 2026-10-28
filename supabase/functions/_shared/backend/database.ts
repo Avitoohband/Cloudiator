@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue } from '../contracts/commands.ts';
+import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, ReadMessageResult } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
@@ -105,6 +105,7 @@ export function prepareListingPurchase(state: OwnerState, listed: Pick<ItemInsta
 const RETRYABLE_ABORTS: readonly string[] = ['40P01', '40001'];
 export type OptInCommand = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
 export type AppearanceCommand = Extract<GameCommand, { kind: 'change-appearance' }>;
+export type ReadMessageCommand = Extract<GameCommand, { kind: 'read-message' }>;
 /** The saved automatic-entry setting and the database time it was received (Task 19). */
 export type OptInValue = { enabled: boolean; receivedAtMs: number };
 export type CreationValue = { gladiatorId: string };
@@ -207,6 +208,16 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc('change_appearance', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
       if (error) throw new Error('appearance-unavailable');
       return data as CommandResult<ChangeAppearanceValue>;
+    },
+    /**
+     * Messages: marks a visible message read for the caller's own account (the verified actor; the command names no other). It is
+     * an idempotent upsert with no receipt, so there is no operation to replay and none is sent: a repeat is a no-op, a hidden or
+     * missing message is `not-found`.
+     */
+    async readMessage(actor: Actor, command: ReadMessageCommand): Promise<ReadMessageResult> {
+      const { data, error } = await client.rpc('read_message', { actor_id: actor.userId, message_id: command.messageId });
+      if (error) throw new Error('message-unavailable');
+      return data as ReadMessageResult;
     },
     /** Future build commands must use this actor-scoped inventory, never a player-supplied owned list. */
     async loadOwnedInventory(actor: Actor): Promise<ItemInstance[]> {

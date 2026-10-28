@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
 import type { BattleLog, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  MarketListing, MarketPage, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  GameMessage, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
@@ -165,6 +165,45 @@ export async function readMarket(client: SupabaseClient, cursor?: string, seller
     }),
     nextCursor: last && rows.length === MARKET_PAGE ? `${last.listed_at_ms}:${last.id}` : null,
   };
+}
+const MESSAGES_PAGE = 50;
+type MessageRow = { id: number | string; kind: string; title: unknown; preview: unknown; body: unknown; action: string | null; published_at_ms: number | string };
+/**
+ * A message body as blocks: a non-empty list of objects with exactly one key, `p` or `li`, holding text. Anything else (which the
+ * database never stores today) is null: a message the client cannot show faithfully is left out, never rendered. The text stays
+ * exactly as stored; it is shown as plain text, never as markup.
+ */
+function messageBlocks(body: unknown): MessageBlock[] | null {
+  if (!Array.isArray(body) || body.length === 0) return null;
+  const blocks: MessageBlock[] = [];
+  for (const block of body as unknown[]) {
+    if (typeof block !== 'object' || block === null || Array.isArray(block)) return null;
+    const keys = Object.keys(block);
+    const text = (block as Record<string, unknown>)[keys[0]];
+    if (keys.length !== 1 || typeof text !== 'string') return null;
+    if (keys[0] === 'p') blocks.push({ p: text });
+    else if (keys[0] === 'li') blocks.push({ li: text });
+    else return null;
+  }
+  return blocks;
+}
+/**
+ * The newest 50 game messages from the public `game_messages` table (visitors read it as `anon`; its row security shows only the
+ * visible ones), newest posting time first and then the larger id. A row of a kind or action this client does not know, or with a
+ * body it cannot show, is left out rather than failing the list, so an older client keeps working when a newer kind is posted.
+ * Unread counts come from the owner read's `inbox`, never from this list.
+ */
+export async function readMessages(client: SupabaseClient): Promise<GameMessage[]> {
+  const rows = checked(await client.from('game_messages').select('id,kind,title,preview,body,action,published_at_ms')
+    .order('published_at_ms', { ascending: false }).order('id', { ascending: false }).limit(MESSAGES_PAGE)) as unknown as MessageRow[];
+  const messages: GameMessage[] = [];
+  for (const row of rows.slice(0, MESSAGES_PAGE)) {
+    const body = messageBlocks(row.body), id = Number(row.id), publishedAtMs = Number(row.published_at_ms);
+    if ((row.kind !== 'patch-notes' && row.kind !== 'admin') || (row.action !== null && row.action !== 'change-look') || typeof row.title !== 'string'
+      || typeof row.preview !== 'string' || body === null || !Number.isSafeInteger(id) || !Number.isSafeInteger(publishedAtMs)) continue;
+    messages.push({ id, kind: row.kind, title: row.title, preview: row.preview, body, action: row.action, publishedAtMs });
+  }
+  return messages;
 }
 const STANDINGS_PAGE = 50;
 const SEASONS_PAGE = 50;

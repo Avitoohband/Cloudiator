@@ -18,6 +18,8 @@ export const ownerFixture: OwnerState = {
   currentActivity: { id: '9fce3cd5-e831-4a66-8ca1-16b4576b1499', kind: 'training', status: 'active',
     startsAtMs: 1791590400000, endsAtMs: 1791595200000, label: 'Training at the practice yard' },
   restingUntilSlot: null,
+  // No messages in the shared fixture world: no badge. The fixture preview's own inbox is tests/fixtures/messages.ts.
+  inbox: { unread: 0, readIds: [], sinceMs: 0 },
 };
 
 export const worldFixture: WorldSnapshot = {

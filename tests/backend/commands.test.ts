@@ -13,7 +13,7 @@ const create = { kind: 'create-character', operationId, name: 'Avi Fighter', cla
 const deps: CommandDependencies = { allowedOrigins: ['http://127.0.0.1:3000'], verifyActor: async () => ({ userId: operationId }),
   database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }),
     market: async () => ({ ok: false, code: 'unavailable' }), setTournamentOptIn: async () => ({ ok: false, code: 'unavailable' }),
-    changeAppearance: async () => ({ ok: false, code: 'unavailable' }) } };
+    changeAppearance: async () => ({ ok: false, code: 'unavailable' }), readMessage: async () => ({ ok: false, code: 'unavailable' }) } };
 function req(body: unknown, origin = 'http://127.0.0.1:3000') { return new Request('http://local', { method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) }); }
 
@@ -23,7 +23,7 @@ it('rejects missing identity before any command executes', async () => {
     verifyActor: async () => { throw new Error('unauthenticated'); },
     database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); },
       market: async () => { throw new Error('must not execute'); }, setTournamentOptIn: async () => { throw new Error('must not execute'); },
-      changeAppearance: async () => { throw new Error('must not execute'); } },
+      changeAppearance: async () => { throw new Error('must not execute'); }, readMessage: async () => { throw new Error('must not execute'); } },
   });
   expect(response.status).toBe(401);
   expect(await response.json()).toEqual({ ok: false, code: 'unauthenticated' });
@@ -130,6 +130,60 @@ it('charges the command rate limit for a look change like any command, and answe
   const limited = { ...deps, database: { ...deps.database, consumeRateLimit: async () => 900,
     changeAppearance: async () => { reached = true; return { ok: false as const, code: 'unavailable' as const }; } } };
   const answer = await handleCommand(req(change), limited);
+  expect(answer.status).toBe(429);
+  expect(await answer.json()).toEqual({ ok: false, code: 'rate-limited', retryAfterMs: 900 });
+  expect(reached).toBe(false);
+});
+
+// Messages (2026-10-28): marking a message read. It writes no receipt (as presence), so its answer carries none.
+const readCommand = { kind: 'read-message' as const, operationId, messageId: 1 };
+
+it('accepts read-message only with a positive safe integer message id and no other key', () => {
+  expect(parseCommand(readCommand)).toEqual(readCommand);
+  expect(parseCommand({ ...readCommand, messageId: 4242 })).not.toBeNull();
+  expect(parseCommand({ ...readCommand, messageId: Number.MAX_SAFE_INTEGER })).not.toBeNull();
+  for (const messageId of [0, -1, 1.5, 0.5, '1', '', null, undefined, true, [], [1], {}, NaN, Infinity, -Infinity, 2 ** 53, 1e100, 1e21])
+    expect(parseCommand({ ...readCommand, messageId }), String(messageId)).toBeNull();
+  const { messageId: _id, ...withoutId } = readCommand;
+  expect(parseCommand(withoutId)).toBeNull();
+  // The command names no account or other authority: the actor is the verified session's, and a read mark is that account's only.
+  for (const extra of [{ ownerId: operationId }, { actorId: operationId }, { gladiatorId: operationId }, { userId: operationId }, { expectedVersion: 1 },
+    { extra: 1 }, { readAtMs: 1 }, { read: true }]) expect(parseCommand({ ...readCommand, ...extra }), JSON.stringify(extra)).toBeNull();
+  expect(parseCommand({ ...readCommand, operationId: 'bad' })).toBeNull();
+  expect(parseCommand({ ...readCommand, operationId: undefined })).toBeNull();
+  // A message id rides only on the command that owns it.
+  expect(parseCommand({ kind: 'cancel-build', operationId, expectedVersion: 1, messageId: 1 })).toBeNull();
+  expect(parseCommand({ kind: 'presence', operationId, messageId: 1 })).toBeNull();
+});
+
+it('routes read-message to its own database call with the verified actor and the parsed command, and answers without a receipt', async () => {
+  const calls: unknown[] = [];
+  const results = [{ ok: true as const, value: { messageId: 1 } }, { ok: false as const, code: 'not-found' as const }];
+  const never = (what: string) => async () => { throw new Error(`reading a message must not reach ${what}`); };
+  const routed = { ...deps, database: { ...deps.database, plan: never('planning'), inventory: never('the inventory'), market: never('the market'),
+    createGladiator: never('creation'), setTournamentOptIn: never('the opt-in'), changeAppearance: never('a look change'),
+    readMessage: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return results.shift()!; } } };
+  const read = await handleCommand(req(readCommand), routed);
+  expect(read.status).toBe(200);
+  expect(await read.json()).toEqual({ ok: true, value: { messageId: 1 } });
+  const missing = await handleCommand(req(readCommand), routed);
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ ok: false, code: 'not-found' });
+  expect(calls).toEqual(Array(2).fill({ actor: { userId: operationId }, command: readCommand }));
+  // An invalid id (or a command with extra authority) is refused at the boundary and never reaches the database.
+  for (const bad of [{ ...readCommand, messageId: 0 }, { ...readCommand, ownerId: operationId }, { kind: 'read-message', operationId }]) {
+    const refused = await handleCommand(req(bad), routed);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ ok: false, code: 'invalid' });
+  }
+  expect(calls).toHaveLength(2);
+});
+
+it('charges the command rate limit for a read mark like any command, and answers a limit before any parsing', async () => {
+  let reached = false;
+  const limited = { ...deps, database: { ...deps.database, consumeRateLimit: async () => 900,
+    readMessage: async () => { reached = true; return { ok: false as const, code: 'unavailable' as const }; } } };
+  const answer = await handleCommand(req(readCommand), limited);
   expect(answer.status).toBe(429);
   expect(await answer.json()).toEqual({ ok: false, code: 'rate-limited', retryAfterMs: 900 });
   expect(reached).toBe(false);
@@ -242,7 +296,7 @@ it('answers presence with ok after the rate check, writing nothing else (Task 23
   const refuse = (name: string) => async () => { calls.push(name); throw new Error('must not execute'); };
   const database = { consumeRateLimit: async (_: unknown, creation: boolean) => { calls.push(`rate:${creation}`); return null; },
     plan: refuse('plan'), inventory: refuse('inventory'), createGladiator: refuse('createGladiator'), market: refuse('market'),
-    setTournamentOptIn: refuse('setTournamentOptIn'), changeAppearance: refuse('changeAppearance') } as unknown as CommandDependencies['database'];
+    setTournamentOptIn: refuse('setTournamentOptIn'), changeAppearance: refuse('changeAppearance'), readMessage: refuse('readMessage') } as unknown as CommandDependencies['database'];
   const answer = await handleCommand(req({ kind: 'presence', operationId }), { ...deps, database });
   expect(answer.status).toBe(200);
   expect(answer.headers.get('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:3000');
@@ -493,6 +547,21 @@ it('sends a look change to the change_appearance RPC with the actor, the operati
   const failing = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
   await expect(failing.changeAppearance({ userId: ACTOR }, change)).rejects.toThrow('appearance-unavailable');
   const response = await handleCommand(req(change), { ...deps, database: { ...deps.database, changeAppearance: failing.changeAppearance } });
+  expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
+});
+
+it('sends a read mark to the read_message RPC with the actor and the message id only, and no operation id', async () => {
+  const sent: Sent[] = [];
+  const stored = { ok: true, value: { messageId: 7 } };
+  const database = createDatabase(backend(() => json(stored), sent));
+  expect(await database.readMessage({ userId: ACTOR }, { kind: 'read-message', operationId: OPERATION, messageId: 7 })).toEqual(stored);
+  // No receipt exists to replay, so nothing but the account and the message goes to the database.
+  expect(sent).toEqual([{ method: 'POST', path: '/rest/v1/rpc/read_message', search: '', body: { actor_id: ACTOR, message_id: 7 } }]);
+  // A database error stays unavailable and never forwards the driver's message.
+  const failing = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
+  const command = { kind: 'read-message' as const, operationId: OPERATION, messageId: 7 };
+  await expect(failing.readMessage({ userId: ACTOR }, command)).rejects.toThrow('message-unavailable');
+  const response = await handleCommand(req(command), { ...deps, database: { ...deps.database, readMessage: failing.readMessage } });
   expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
 });
 

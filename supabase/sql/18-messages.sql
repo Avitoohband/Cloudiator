@@ -18,6 +18,11 @@
 --    Section 1 changes the rules in place in v1 (docs/operations/runbook.md, "Retained-rule deployments"): no executor of a job in
 --    flight reads the fee or the class.
 -- 2. public.change_appearance: the free, unlimited look change of the caller's own gladiator (Task 2; described at its function).
+-- 3. Game messages and read marks (Task 3; spec "Settled from the code map" and "Decisions": Storage, Posting, Unread; the owner
+--    read's inbox). Messages are public text in an OPEN table, read marks are the owner's; described at each statement below:
+--    private.valid_message_body, public.game_messages (RLS: visible rows only; the deferred projection_changed trigger), public.message_reads
+--    (owner-only), public.read_message (service_role only, no receipt), the operator-only private.post_message and
+--    private.hide_message, and public.owner_state restated from 17-appearance.sql with `inbox`.
 --
 -- Every statement is reapplicable.
 begin;
@@ -199,6 +204,158 @@ end $$;
 
 revoke all on function public.change_appearance(uuid,uuid,jsonb) from public,anon,authenticated;
 grant execute on function public.change_appearance(uuid,uuid,jsonb) to service_role;
+
+-- 3. Game messages and read marks.
+--
+-- Messages are broadcast text, public on purpose: patch notes and notes from the admin are not secret, and a broadcast row carries no
+-- owner id. The table therefore joins the access matrix's OPEN list (tests/fixtures/access.ts): anon and authenticated may SELECT the
+-- visible rows only (the policy `not hidden`); nobody writes through the Data API. The operator posts and hides as postgres through
+-- private.post_message and private.hide_message (no client role and not service_role may execute them; run with the linked CLI after
+-- Avi's go, like cleanup_history and health_report). `kind` is patch-notes or admin; the only action is change-look. The title is
+-- 1-80 characters, the preview 1-140, the body 1-20 blocks, each exactly {"p": text} or {"li": text} with non-blank text, at most 2,000
+-- characters in all. The text is stored as data and rendered as plain text; nothing here builds markup from it.
+-- Any change to the table (a post, a hide) raises the world revision through the deferred projection_changed trigger, so badges update
+-- within one poll. Read marks do not: a mark changes nothing public, and the client re-reads its own owner state at once.
+--
+-- The body rules are SQL's alone (messages are written only by the operator, never by the Edge parser). The function comes before the
+-- table whose CHECK calls it (AGENTS.md, M24 lesson). It answers false, never null, for anything else; the CASE keeps each test behind
+-- the one before it, because SQL does not promise the order of OR terms (jsonb_object_keys fails on a scalar).
+create or replace function private.valid_message_body(body jsonb) returns boolean
+language sql immutable security invoker set search_path='' as $$
+  select coalesce(case
+    when jsonb_typeof(body) is distinct from 'array' then false
+    when jsonb_array_length(body) not between 1 and 20 then false
+    else not exists(select 1 from jsonb_array_elements(body) b(block) where not case
+        when jsonb_typeof(b.block) is distinct from 'object' then false
+        when (select count(*) from jsonb_object_keys(b.block))<>1 then false
+        when not (b.block ?| array['p','li']) then false
+        when jsonb_typeof(coalesce(b.block->'p',b.block->'li')) is distinct from 'string' then false
+        else coalesce(b.block->>'p',b.block->>'li') ~ '[^[:space:]]' end)
+      and (select coalesce(sum(char_length(coalesce(b.block->>'p',b.block->>'li'))),0) from jsonb_array_elements(body) b(block))<=2000
+  end,false)
+$$;
+
+create table if not exists public.game_messages (
+  id bigint generated always as identity primary key,
+  kind text not null check (kind in ('patch-notes','admin')),
+  title text not null check (char_length(title) between 1 and 80 and title ~ '[^[:space:]]'),
+  preview text not null check (char_length(preview) between 1 and 140 and preview ~ '[^[:space:]]'),
+  body jsonb not null check (private.valid_message_body(body)),
+  action text check (action is null or action='change-look'),
+  published_at_ms bigint not null check (published_at_ms>=0),
+  hidden boolean not null default false
+);
+alter table public.game_messages enable row level security;
+revoke all on public.game_messages from public,anon,authenticated,service_role;
+-- service_role only reads it: public.read_message looks a message up, and the owner read (owner_state, an invoker view the backend
+-- also reads) counts them. It bypasses row security, so both restate `not hidden` themselves.
+grant select on public.game_messages to anon,authenticated,service_role;
+drop policy if exists player_read on public.game_messages;
+create policy player_read on public.game_messages for select to anon,authenticated using (not hidden);
+-- The identity sequence is the owner's alone: an insert by the operator needs no grant on it, and service_role has no use for it
+-- (the platform's default would give it UPDATE).
+revoke all on sequence public.game_messages_id_seq from public,anon,authenticated,service_role;
+drop trigger if exists projection_changed on public.game_messages;
+create constraint trigger projection_changed after insert or update or delete on public.game_messages
+  deferrable initially deferred for each row execute function private.projection_changed();
+
+-- One row per account and message read: the owner's own, like every owner-only relation (01-identity.sql's recipe). The account's
+-- marks go with the account; they go with the message too (the operator hides a message, it never deletes one). Only service_role
+-- writes them, through public.read_message (no UPDATE or DELETE: a mark is never changed). The first read time is kept.
+create table if not exists public.message_reads (
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  message_id bigint not null references public.game_messages(id) on delete cascade,
+  read_at_ms bigint not null check (read_at_ms>=0),
+  primary key (owner_id,message_id)
+);
+alter table public.message_reads enable row level security;
+revoke all on public.message_reads from public,anon,authenticated,service_role;
+grant select on public.message_reads to authenticated;
+grant select,insert on public.message_reads to service_role;
+drop policy if exists owner_read on public.message_reads;
+create policy owner_read on public.message_reads for select to authenticated using (owner_id=(select auth.uid()));
+
+-- public.read_message(actor_id, message_id): marks a visible message read for the caller's own account (the Edge function passes the
+-- verified account; the command names no other). A repeat is a no-op that keeps the first read time. A hidden or missing message is
+-- `not-found` (service_role bypasses row security, so `not hidden` is checked here). It writes no receipt: receipts are permanent
+-- (private.guard_receipt), and one per opened message would pile up; `presence` is the precedent for a command with no receipt. An
+-- account with no gladiator may hold a mark (it only changes that account's own reads).
+-- Result: {ok:true, value:{messageId}} | {ok:false, code:'not-found'|'unauthenticated'}. Backend only (EXECUTE for service_role).
+create or replace function public.read_message(actor_id uuid, message_id bigint) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if message_id is null or not exists(select 1 from public.game_messages m where m.id=read_message.message_id and not m.hidden) then
+    return jsonb_build_object('ok',false,'code','not-found');
+  end if;
+  insert into public.message_reads(owner_id,message_id,read_at_ms)
+    values(actor_id,read_message.message_id,floor(extract(epoch from clock_timestamp())*1000)::bigint) on conflict do nothing;
+  return jsonb_build_object('ok',true,'value',jsonb_build_object('messageId',read_message.message_id));
+end $$;
+
+-- Operator-only: post a message (the id of the new row), stamped with the time of posting (never back-dated), and hide one that was a
+-- mistake (true when it was visible, false when it was already hidden or does not exist). A hidden message stays stored; its read
+-- marks stay too and no longer count. The table's constraints refuse a bad kind, title, preview, action or body (23514).
+create or replace function private.post_message(kind text, title text, preview text, body jsonb, action text default null) returns bigint
+language plpgsql security invoker set search_path='' as $$
+declare posted bigint;
+begin
+  insert into public.game_messages(kind,title,preview,body,action,published_at_ms)
+    values(post_message.kind,post_message.title,post_message.preview,post_message.body,post_message.action,floor(extract(epoch from clock_timestamp())*1000)::bigint)
+    returning id into posted;
+  return posted;
+end $$;
+create or replace function private.hide_message(message_id bigint) returns boolean
+language plpgsql security invoker set search_path='' as $$
+declare changed integer;
+begin
+  update public.game_messages set hidden=true where id=hide_message.message_id and not hidden;
+  get diagnostics changed=row_count;
+  return changed>0;
+end $$;
+
+-- A new function is executable by PUBLIC by default. The three private ones are operator-only (the owner always keeps EXECUTE): not
+-- even service_role, which never writes this table, needs the body function for its CHECK. read_message is the backend's.
+revoke all on function private.valid_message_body(jsonb), private.post_message(text,text,text,jsonb,text), private.hide_message(bigint)
+  from public,anon,authenticated,service_role;
+revoke all on function public.read_message(uuid,bigint) from public,anon,authenticated;
+grant execute on function public.read_message(uuid,bigint) to service_role;
+
+-- public.owner_state: 17-appearance.sql's owner view plus `inbox`: how many visible messages were published after the gladiator was
+-- created and are unread by the account (`unread`), the ids of the visible messages it has read (`readIds`, ascending) and the
+-- gladiator's creation time (`sinceMs`, which the client lists older messages as already read by). Older messages stay listed but
+-- never count, so a new player starts at no badge. The view is an invoker view and the backend (service_role) reads it too, past row
+-- security, so it filters by the account and by `not hidden` itself rather than rely on the policies. create or replace keeps the
+-- grants; the WITH clause restates security_invoker (it replaces a view's options with the ones it names).
+create or replace view public.owner_state with (security_invoker=true) as
+select g.owner_id,jsonb_build_object(
+  'gladiatorId',g.id,'name',g.name,'appearance',g.appearance,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,
+  'schedule',s.schedule,'scheduleVersion',s.version,'wallets',jsonb_build_object('money',w.money,'renown',w.renown),
+  'reservedFees',jsonb_build_object('money',coalesce((select sum(r.money) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0),
+    'renown',coalesce((select sum(r.renown) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0)),
+  'inventory',coalesce((select jsonb_agg(i.item order by i.id) from public.item_instances i where i.gladiator_id=g.id),'[]'::jsonb),'inventoryCapacity',60,
+  'ownedCosmetics',coalesce((select jsonb_agg(jsonb_build_object('catalogId',c.catalog_id,'catalogVersion',c.catalog_version,'binding',c.binding) order by c.catalog_id) from public.owned_cosmetics c where c.gladiator_id=g.id),'[]'::jsonb),
+  'progression',jsonb_build_object('level',g.level,'xp',g.xp,'earnedAttributePoints',g.earned_points,'unspentAttributePoints',g.unspent_points,'league',g.league,'peakStrength',g.peak_strength,'rating',g.rating),
+  'stamina',jsonb_build_object('current',g.stamina_current,'maximum',g.stamina_maximum),'tournamentOptIn',g.tournament_opt_in,'processedSlotIndex',g.processed_slot_index,
+  'currentActivity',case when rest.gladiator_id is null then coalesce((select jsonb_build_object('id',a.id,'kind',coalesce(a.resolved_kind,a.requested->>'kind'),
+      'status',case when a.status='completed' then 'completed' when a.status='preparing' then 'queued'
+        when extract(epoch from statement_timestamp())*1000<a.ends_at_ms then 'active' else 'processing' end,
+      'startsAtMs',a.starts_at_ms,'endsAtMs',a.ends_at_ms,
+      'label',case coalesce(a.resolved_kind,a.requested->>'kind') when 'training' then 'Training'
+        when 'rest' then case when a.fallback then 'Resting (not enough stamina)' else 'Resting' end
+        when 'expedition' then 'Expedition' when 'arena' then 'Arena' else 'Tournament' end)
+    from public.activities a where a.gladiator_id=g.id order by a.slot_index desc limit 1),
+    jsonb_build_object('id',g.id,'kind','orientation','status',case when extract(epoch from statement_timestamp())*1000<g.orientation_end_ms then 'active' else 'processing' end,
+      'startsAtMs',g.created_at_ms,'endsAtMs',g.orientation_end_ms,'label','Orientation')) end,
+  'restingUntilSlot',case when rest.signalled_at_ms is not null then rest.through_slot+1 end,
+  'inbox',jsonb_build_object(
+    'unread',(select count(*) from public.game_messages m where not m.hidden and m.published_at_ms>g.created_at_ms
+      and not exists(select 1 from public.message_reads r where r.owner_id=g.owner_id and r.message_id=m.id)),
+    'readIds',coalesce((select jsonb_agg(r.message_id order by r.message_id) from public.message_reads r
+      join public.game_messages m on m.id=r.message_id and not m.hidden where r.owner_id=g.owner_id),'[]'::jsonb),
+    'sinceMs',g.created_at_ms)) as state
+from public.gladiators g join public.builds b on b.gladiator_id=g.id join public.schedules s on s.gladiator_id=g.id join public.wallets w on w.gladiator_id=g.id
+  left join public.character_rests rest on rest.gladiator_id=g.id and rest.since_slot<=g.processed_slot_index and g.processed_slot_index<=rest.through_slot;
 
 notify pgrst,'reload schema';
 commit;

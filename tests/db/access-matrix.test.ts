@@ -204,6 +204,9 @@ const SERVICE_ROLE = [
   'function public.expedition_settlement_input(uuid, uuid): EXECUTE',
   'function public.fail_job(uuid, uuid, text): EXECUTE',
   'function public.queue_build(uuid, uuid, jsonb): EXECUTE',
+  // Game messages (M25): marking a message read, backend only and without a receipt. post_message, hide_message and
+  // valid_message_body (the table's CHECK, run as the owner) are operator-only: no client role and not service_role.
+  'function public.read_message(uuid, bigint): EXECUTE',
   'function public.refresh_projections(): EXECUTE',
   'function public.renew_job(uuid, uuid): EXECUTE',
   'function public.sell_item(uuid, uuid, jsonb): EXECUTE',
@@ -249,9 +252,13 @@ const SERVICE_ROLE = [
   'relation public.builds: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   // Task 23.8 (M22): a character's rest at home, written by boundary phase 3 and consume_command_rate.
   'relation public.character_rests: INSERT,SELECT,UPDATE',
+  // Game messages (M25): the backend only reads them (the owner read's inbox, read_message); the operator writes as postgres.
+  'relation public.game_messages: SELECT',
   'relation public.gladiators: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.item_instances: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.market_offers: DELETE,INSERT,SELECT',
+  // Game messages (M25): each account's read marks, written by read_message and read by the owner read (owner_state).
+  'relation public.message_reads: INSERT,SELECT',
   'relation public.operation_receipts: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.owned_cosmetics: INSERT,SELECT',
   'relation public.owner_state: MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE',
@@ -466,9 +473,12 @@ describe('release access matrix', () => {
     // pg_relation_is_updatable: the bit mask of the commands a relation can take at all (UPDATE 4, INSERT 8, DELETE 16). The
     // probe column is the first updatable one when the relation has any, so an update of a column that cannot be updated
     // (0A000, before the privilege check) never stands in for the privilege check: since Task 23.2 world_revision has one,
-    // published_slot_index, beside its three computed columns.
+    // published_slot_index, beside its three computed columns. Likewise a GENERATED ALWAYS identity column reports itself updatable
+    // but refuses an update to anything but DEFAULT (428C9) before the privilege check, so one is the probe only when it is the
+    // relation's only column (M25: public.game_messages.id; observed 2026-10-28, the first such public table).
     const relations = await sql`select n.nspname as schema, c.relname as name, (select a.attname from pg_attribute a
-      where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped order by pg_column_is_updatable(c.oid, a.attnum, true) desc, a.attnum
+      where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped
+      order by a.attidentity = 'a', pg_column_is_updatable(c.oid, a.attnum, true) desc, a.attnum
       limit 1) as col,
       pg_relation_is_updatable(c.oid, true) as updatable
       from pg_class c join pg_namespace n on n.oid=c.relnamespace
@@ -559,8 +569,12 @@ describe('release access matrix', () => {
     // published activity, a queued build (its held fee and its reserved starter item, under one operation) and a bought
     // banner would write them. resetIdentity's truncate removes them before the next case.
     const slot = Math.floor(Date.now() / 4_800_000) - 1;
-    const seed = async (gid: string) => {
+    // Game messages (M25): one public message, and a read mark for each fighter (message_reads is owner-only, so each account's read of it
+    // must hold its own account id and never the other's).
+    const [{ message }] = await sql`select private.post_message('admin','Matrix note','Matrix note','[{"p":"Matrix note"}]'::jsonb,null) as message`;
+    const seed = async (gid: string, ownerId: string) => {
       const activityId = randomUUID(), operationId = randomUUID();
+      await sql`insert into public.message_reads(owner_id,message_id,read_at_ms) values(${ownerId},${message},0)`;
       await sql`insert into public.activities(id,gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,resolved_kind,status,published_at_ms)
         values(${activityId},${gid},${slot},${slot * 4_800_000},${(slot + 1) * 4_800_000},'{"kind":"rest"}','rest','active',${slot * 4_800_000})`;
       await sql`insert into public.reservations(gladiator_id,operation_id,money,renown,status) values(${gid},${operationId},10,0,'held')`;
@@ -571,7 +585,7 @@ describe('release access matrix', () => {
       await sql`insert into public.character_rests(gladiator_id,since_slot,through_slot) values(${gid},${slot},${slot})`;
       return [activityId];
     };
-    const [ownerActivities, otherActivities] = [await seed(owner.gid), await seed(other.gid)];
+    const [ownerActivities, otherActivities] = [await seed(owner.gid, owner.owner.id), await seed(other.gid, other.owner.id)];
     // Every relation a signed-in player may read that is not an open projection: the owner-filtered state.
     const owned = (await signedInReadable()).filter(r => !OPEN.includes(r.name));
     expect(owned.length).toBeGreaterThan(0);

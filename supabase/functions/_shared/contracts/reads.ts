@@ -43,6 +43,24 @@ export type OwnerState = {
    * a `presence` command, then a fresh read, gives the slot).
    */
   restingUntilSlot: number | null;
+  /** The account's messages summary (M25): how many are unread, which are read, and the cutoff older ones are already read by. */
+  inbox: Inbox;
+};
+/**
+ * The owner read's inbox. `unread`: the visible messages published after the gladiator was created (`sinceMs`) that the account
+ * has not read (a new player starts at no badge). `readIds`: the ids of the visible messages the account has read, ascending,
+ * whichever device read them. `sinceMs`: the gladiator's creation time; the client lists a message published at or before it as
+ * already read.
+ */
+export type Inbox = { unread: number; readIds: number[]; sinceMs: number };
+/** One block of a message body: a paragraph or a bullet item, plain text only (never markup). */
+export type MessageBlock = { p: string } | { li: string };
+/**
+ * One game message from the public `game_messages` table (visible rows only), shown as plain text. `action` names a button the
+ * message offers: `change-look` opens the look picker. `publishedAtMs` is the database time of posting (never back-dated).
+ */
+export type GameMessage = {
+  id: number; kind: 'patch-notes' | 'admin'; title: string; preview: string; body: MessageBlock[]; action: 'change-look' | null; publishedAtMs: number;
 };
 /** Whitelisted public projection: never spread an OwnerState into this shape. */
 export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena' | 'tournament' | 'expedition:woodland' | 'expedition:outpost' | 'expedition:mountain';

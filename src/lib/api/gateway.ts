@@ -1,10 +1,10 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { GameMessage, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readLooks, readMarket, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
+  GatewayReadError, readLooks, readMarket, readMessages, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
   readTournamentLog,
 } from './reads';
 export { GatewayReadError } from './reads';
@@ -64,6 +64,12 @@ export interface GameGateway {
    * treats a failure as the legacy look; the fixture preview answers from its own world, with no network.
    */
   looks(ids: readonly GladiatorId[]): Promise<Map<string, Appearance | null>>;
+  /**
+   * The newest 50 game messages (patch notes and admin notes), newest first, as plain text. They are public: a visitor reads
+   * the same list, and a hidden message is not in it. Whether each is unread is the owner read's `inbox`, not this list. A row
+   * this client cannot show is left out. Load it when the panel opens and at a slow interval; the world revision does not carry it.
+   */
+  messages(): Promise<GameMessage[]>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -165,7 +171,7 @@ export function createLiveGateway(): GameGateway {
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       // A presence has no receipt: it goes through `sendPresence`.
       if (!['create-character', 'edit-schedule', 'edit-day-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
-        'buy-listing', 'set-tournament-opt-in', 'change-appearance'].includes(input.kind)) {
+        'buy-listing', 'set-tournament-opt-in', 'change-appearance', 'read-message'].includes(input.kind)) {
         return { ok: false, code: 'unavailable' };
       }
       const answer = await post(input);
@@ -173,6 +179,13 @@ export function createLiveGateway(): GameGateway {
       const { result, httpOk } = answer;
       if (result && typeof result === 'object' && 'ok' in result) {
         if (result.ok === true && httpOk && 'receiptId' in result && typeof result.receiptId === 'string' && 'value' in result) return result as CommandResult<T>;
+        // A read mark writes no receipt (like a presence, but it answers a value): its success is `{ ok: true, value: { messageId } }`
+        // for the message that was asked. It is reported with an empty receipt id, because it has none and every other command's
+        // success keeps one; no caller shows it. Any other command's success still needs its receipt.
+        if (input.kind === 'read-message' && result.ok === true && httpOk && !('receiptId' in result) && 'value' in result
+          && typeof result.value === 'object' && result.value !== null && 'messageId' in result.value && result.value.messageId === input.messageId) {
+          return { ok: true, receiptId: '', value: result.value as T };
+        }
         if (isRefusal(result)) return result;
       }
       return { ok: false, code: 'unavailable' };
@@ -194,6 +207,7 @@ export function createLiveGateway(): GameGateway {
     profile: id => publicRead(client => readProfile(client, id)),
     recent: cursor => publicRead(client => readRecent(client, cursor)),
     looks: ids => publicRead(client => readLooks(client, ids)),
+    messages: () => publicRead(readMessages),
     seasons: () => publicRead(readSeasons),
     standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),
     standingOf: (league, gladiatorId) => publicRead(client => readStandingOf(client, league, gladiatorId)),

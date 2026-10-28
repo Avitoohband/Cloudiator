@@ -2,15 +2,17 @@ import { test, expect, type BrowserContext, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import { ownerFixture } from '../fixtures/domain';
 import type { GameCommand, Phase } from '../../supabase/functions/_shared/contracts/commands';
+import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
 import { expectTimeOnOneLine, slotTime } from './slot-time';
 import { contrastIssues, focusDrops, focusedElement, watchFocus } from './a11y-helpers';
 
-async function planningFlow(context: BrowserContext) {
+async function planningFlow(context: BrowserContext, setup?: (state: OwnerState) => void) {
   let state = structuredClone(ownerFixture);
   state.wallets.money = 300;
+  setup?.(state);
   state.processedSlotIndex = Math.floor(Date.now() / 4_800_000);
   const commands: GameCommand[] = [];
   let lose = false, processing = false, conflict = false, scheduleConflict = false;
@@ -47,13 +49,18 @@ async function planningFlow(context: BrowserContext) {
       let result = receipts.get(command.operationId);
       if (!result) {
         if (command.kind === 'queue-build') {
+          // As the server does since the fixed class and points release: the class and every attribute are fixed at the current
+          // build's (a pending build may be revised down to it, not below), and every allowed change is free.
+          const current = state.currentBuild;
+          if (command.classId !== current.classId || (Object.keys(current.allocations) as (keyof typeof current.allocations)[]).some(key => command.allocation[key] < current.allocations[key])) {
+            return json({ ok: false, code: 'invalid' }, 409);
+          }
           state.buildVersion++;
           state.pendingBuild = { build: { version: state.buildVersion, classId: command.classId, stance: command.stance, allocations: command.allocation, equipment: command.equipment },
-            effectiveSlotIndex: state.processedSlotIndex + 1, reservedMoney: 100, reservedItemIds: [], operationId: command.operationId };
-          state.reservedFees.money = 100;
+            effectiveSlotIndex: state.processedSlotIndex + 1, reservedMoney: 0, reservedItemIds: [], operationId: command.operationId };
           result = { ok: true, receiptId: randomUUID(), value: state.pendingBuild };
         } else if (command.kind === 'cancel-build') {
-          state.buildVersion++; state.pendingBuild = null; state.reservedFees.money = 0;
+          state.buildVersion++; state.pendingBuild = null;
           result = { ok: true, receiptId: randomUUID(), value: { buildVersion: state.buildVersion } };
         } else if (command.kind === 'edit-day-schedule') {
           if (command.expectedVersion !== state.scheduleVersion) return json({ ok: false, code: 'conflict' }, 409);
@@ -91,12 +98,14 @@ test('queues, confirms and cancels pending builds without optimistic current rep
   await page.goto('/game/');
   await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'Current build', exact: true })).toBeVisible();
-  await page.getByLabel('Class', { exact: true }).selectOption('berserker');
-  await expect(page.getByText('Estimated reservation: 100 money')).toBeVisible();
+  // The class is fixed, so the change to queue is the stance, and every build change is free: no reservation is estimated.
+  await page.getByLabel('Stance', { exact: true }).selectOption('offensive');
+  await expect(page.getByText(/^Estimated reservation/)).toHaveCount(0);
   await page.getByRole('button', { name: 'Queue build' }).click();
   await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
-  await expect(page.getByTestId('current-build')).toContainText('guardian');
-  await expect(page.getByTestId('pending-build')).toContainText('berserker');
+  await expect(page.getByTestId('current-build')).toContainText('balanced');
+  await expect(page.getByTestId('pending-build')).toContainText('offensive');
+  await expect(page.getByTestId('pending-build')).toContainText('Reserved: 0 money');
   // The effective time is the next boundary, as a short local time (Task 23.10), shown against the display clock.
   const effective = page.getByTestId('pending-build').getByText(/^Effective /);
   await expect(effective).toHaveText(`Effective ${await slotTime(page, (flow.processedSlotIndex + 1) * SLOT_MS, await clockNow(page))}`);
@@ -115,7 +124,7 @@ test('reuses immutable operation after unknown outcome and reloads a version con
   const flow = await planningFlow(context);
   await page.goto('/game/');
   await openMenu(page, 'My gladiator');
-  await page.getByLabel('Class', { exact: true }).selectOption('berserker');
+  await page.getByLabel('Stance', { exact: true }).selectOption('offensive');
   flow.loseNext();
   await page.getByRole('button', { name: 'Queue build' }).click();
   await expect(page.locator('.planning-form [role="alert"]')).toContainText('could not be confirmed');
@@ -128,6 +137,140 @@ test('reuses immutable operation after unknown outcome and reloads a version con
   await page.getByRole('button', { name: 'Cancel pending build' }).click();
   expect(flow.commands.at(-1)).toHaveProperty('expectedVersion', 3);
   expect(flow.commands.at(-1)?.operationId).not.toBe(flow.commands.at(-2)?.operationId);
+});
+
+// ---- The build step: points left, capped, class fixed (Avi, 2026-10-28) -------------------------------------------------------
+
+/** A Berserker who levelled up: 12 points earned, 9 spent (strength 4, agility 2, and 1 in each of the others), so 3 are left. */
+const levelled = (state: OwnerState) => {
+  state.currentBuild = { ...state.currentBuild, classId: 'berserker', allocations: { strength: 4, agility: 2, vitality: 1, endurance: 1, precision: 1 } };
+  state.progression = { ...state.progression, level: 2, earnedAttributePoints: 12, unspentAttributePoints: 3 };
+};
+const points = (page: Page, name: string) => page.getByRole('spinbutton', { name, exact: true });
+const spentNote = "Adding points is free. Points can't be taken back once this build takes effect, and your class is fixed. Respec and class changes will come later as paid options.";
+
+test('shows the points left, caps a typed number and never goes below the saved build', async ({ page, context }, testInfo) => {
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const strength = points(page, 'strength'), agility = points(page, 'agility');
+  // The class is shown, not chosen, and the old fee lines are gone: every build change is free.
+  await expect(build.getByText('Class: Berserker', { exact: true })).toBeVisible();
+  await expect(mine.getByLabel('Class', { exact: true })).toHaveCount(0);
+  await expect(mine.getByRole('combobox', { name: /class/i })).toHaveCount(0);
+  await expect(mine.getByText(/^Estimated reservation/)).toHaveCount(0);
+  await expect(mine.getByText(/Decreasing any current allocation/)).toHaveCount(0);
+  await expect(build.getByText(spentNote, { exact: true })).toBeVisible();
+  // 12 earned, 9 spent: 3 left. Each field stops at its own value plus what is left, and at the saved build's value below.
+  await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
+  await expect(strength).toHaveAttribute('min', '4');
+  await expect(strength).toHaveAttribute('max', '7');
+  await expect(agility).toHaveAttribute('min', '2');
+  await expect(agility).toHaveAttribute('max', '5');
+  // Typing below the saved value raises it back, with the line that says why.
+  await strength.fill('0');
+  await expect(strength).toHaveValue('4');
+  await expect(build.getByText("Strength can't go below 4: added points are permanent.", { exact: true })).toBeVisible();
+  await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
+  // Typing more than is left is capped at the field's value plus what is left, with the creation dialog's line.
+  await strength.fill('99');
+  await expect(strength).toHaveValue('7');
+  await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
+  await expect(build.getByText("Strength can't go below 4", { exact: false })).toHaveCount(0);
+  await expect(build.getByText('All 12 spent', { exact: true })).toBeVisible();
+  await expect(build.getByText(/of 12 left/)).toHaveCount(0);
+  await expect(strength).toHaveAttribute('max', '7');
+  await expect(agility).toHaveAttribute('max', '2');
+  // Nothing is left to add.
+  await agility.fill('9');
+  await expect(agility).toHaveValue('2');
+  await expect(build.getByText('No points left to add, so Agility stays at 2.', { exact: true })).toBeVisible();
+  // For Avi's visual review (the panel scrolls, so viewport shots): the class, the counter and the points; then the status line and the note.
+  await build.getByText('Class: Berserker', { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('build-points-top.png') });
+  await build.getByText(spentNote, { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('build-points-note.png') });
+  // Giving back points added in this draft is free, down to the saved value; the points come back to the counter.
+  await strength.fill('5');
+  await expect(build.getByText('2 of 12 left', { exact: true })).toBeVisible();
+  await expect(build.getByText(/can take at most|can't go below|No points left/)).toHaveCount(0);
+  await strength.fill('7');
+  await mine.getByLabel('Stance', { exact: true }).selectOption('defensive');
+  // Queue build sends the current class, the typed points and the stance, and the server (as faked) takes it.
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'berserker', stance: 'defensive',
+    allocation: { strength: 7, agility: 2, vitality: 1, endurance: 1, precision: 1 } });
+  await expect(build.getByText('All 12 spent', { exact: true })).toBeVisible();
+  // The floor is the CURRENT build's: the pending build can be revised down to it, and no lower.
+  await strength.fill('1');
+  await expect(strength).toHaveValue('4');
+  await expect(build.getByText("Strength can't go below 4: added points are permanent.", { exact: true })).toBeVisible();
+  await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('counts the pending build against the points earned, and can still cancel it', async ({ page, context }) => {
+  const flow = await planningFlow(context, state => {
+    levelled(state);
+    state.buildVersion = 2;
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, allocations: { strength: 6, agility: 2, vitality: 1, endurance: 1, precision: 1 } },
+      effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
+  });
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  // The form opens on the pending build (11 spent, 1 left), but its floor is the current build (strength 4).
+  await expect(build.getByRole('heading', { name: 'Revise pending build', exact: true })).toBeVisible();
+  await expect(build.getByText('1 of 12 left', { exact: true })).toBeVisible();
+  await expect(points(page, 'strength')).toHaveValue('6');
+  await expect(points(page, 'strength')).toHaveAttribute('min', '4');
+  await expect(points(page, 'strength')).toHaveAttribute('max', '7');
+  await points(page, 'strength').fill('4');
+  await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.getByTestId('pending-build')).toContainText('4');
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', expectedVersion: 2, classId: 'berserker', allocation: { strength: 4 } });
+  await page.getByRole('button', { name: 'Cancel pending build' }).click();
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).not.toBeVisible();
+  expect(flow.commands.map(command => command.kind)).toEqual(['queue-build', 'cancel-build']);
+});
+
+test('keeps the current class when a build queued before the release holds another one', async ({ page, context }) => {
+  // A class change queued before the release stays pending with its fee, but the form never offers or sends a class change.
+  const flow = await planningFlow(context, state => {
+    state.buildVersion = 2;
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, classId: 'berserker' },
+      effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 100, reservedItemIds: [], operationId: randomUUID() };
+    state.reservedFees.money = 100;
+  });
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  await expect(mine.getByTestId('pending-build')).toContainText('berserker');
+  await expect(mine.locator('.planning-form').getByText('Class: Guardian', { exact: true })).toBeVisible();
+  await expect(mine.getByLabel('Class', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.locator('.planning-form [role="status"]').filter({ hasText: 'Build queued.' })).toBeVisible();
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'guardian' });
+  expect(flow.state().pendingBuild?.build.classId).toBe('guardian');
+});
+
+test('clears a points line when the build is reloaded after a conflict', async ({ page, context }) => {
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  await points(page, 'strength').fill('99');
+  await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
+  // Another session changed the build: the refusal reloads it, and the line about the old draft goes with the draft.
+  flow.conflictNext();
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.locator('.planning-form [role="alert"]')).toContainText('changed');
+  await expect(points(page, 'strength')).toHaveValue('4');
+  await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
+  await expect(build.getByText(/can take at most/)).toHaveCount(0);
 });
 
 /** The select values a part offers (read from the page, apart from the panel's own lists). */

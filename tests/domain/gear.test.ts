@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ClassId, Equipment, GameCommand } from '@contracts/commands';
+import type { Attributes, ClassId, Equipment, GameCommand, Stance } from '@contracts/commands';
 import type { ItemInstance, OwnerState, PendingBuildView } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { ownerFixture, itemFixture } from '../fixtures/domain.ts';
@@ -9,7 +9,7 @@ import {
 } from '../../src/features/inventory/gear';
 
 // Launch feedback, note 9: the gear view. A swap is a whole `queue-build` based on the pending build (or the current one) with
-// only the equipment changed, so a queued class change survives; a swap that lands back on the current build is a
+// only the equipment changed, so a queued stance or points change survives; a swap that lands back on the current build is a
 // `cancel-build`. Written apart from the code: the expected builds are spelled out, never derived by the helpers.
 let serial = 0;
 const nextId = () => `00000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -26,7 +26,7 @@ const salvage: ItemInstance = { ...item('sword:1:common'), id: nextId(), catalog
 const bag = [sword, sword2, spear, bow, shield, hood, helmet, axe5, armor, listedHood, salvage];
 
 /** The player wears the sword, the shield and the hood; `pending` is a queued build (its equipment defaults to what is worn). */
-function owner(options: { worn?: Partial<Equipment>; pending?: { equipment?: Partial<Equipment>; classId?: ClassId } | null; level?: number } = {}): OwnerState {
+function owner(options: { worn?: Partial<Equipment>; pending?: { equipment?: Partial<Equipment>; classId?: ClassId; stance?: Stance; allocations?: Attributes } | null; level?: number } = {}): OwnerState {
   const worn = gear(options.worn ?? { weapon: sword.id, offHand: shield.id, head: hood.id });
   const state = structuredClone(ownerFixture);
   state.currentBuild = { ...state.currentBuild, version: 4, classId: 'guardian', stance: 'balanced', equipment: worn,
@@ -36,7 +36,8 @@ function owner(options: { worn?: Partial<Equipment>; pending?: { equipment?: Par
   state.inventory = structuredClone(bag).map(entry => ({ ...entry, reservation: Object.values(worn).includes(entry.id) ? { kind: 'equipment' as const, referenceId: state.gladiatorId } : entry.reservation }));
   if (options.pending) {
     const equipment = { ...worn, ...options.pending.equipment };
-    const build = { ...state.currentBuild, version: 8, classId: options.pending.classId ?? state.currentBuild.classId, equipment };
+    const build = { ...state.currentBuild, version: 8, classId: options.pending.classId ?? state.currentBuild.classId, equipment,
+      stance: options.pending.stance ?? state.currentBuild.stance, allocations: options.pending.allocations ?? state.currentBuild.allocations };
     state.pendingBuild = { build, effectiveSlotIndex: 373_250, reservedMoney: 0, reservedItemIds: Object.values(equipment).filter((id): id is string => id !== null), operationId: OPERATION } satisfies PendingBuildView;
   }
   return state;
@@ -90,18 +91,17 @@ describe('wearCommand', () => {
     expect(queued(wearCommand(owner(), helmet.id, OPERATION)).equipment).toEqual(gear({ weapon: sword.id, offHand: shield.id, head: helmet.id }));
   });
 
-  it('is based on the pending build: a queued class change and the other queued pieces survive', () => {
-    const state = owner({ pending: { classId: 'berserker', equipment: { head: helmet.id } } });
+  it('is based on the pending build: a queued stance change and the other queued pieces survive', () => {
+    const state = owner({ pending: { stance: 'offensive', equipment: { head: helmet.id } } });
     expect(queued(wearCommand(state, sword2.id, OPERATION))).toMatchObject({
-      classId: 'berserker', expectedVersion: 7, equipment: gear({ weapon: sword2.id, offHand: shield.id, head: helmet.id }),
+      classId: 'guardian', stance: 'offensive', expectedVersion: 7, equipment: gear({ weapon: sword2.id, offHand: shield.id, head: helmet.id }),
     });
   });
 
-  it('takes the stance and the attribute points of the pending build, not the current one', () => {
-    const state = owner({ pending: { classId: 'duelist' } });
-    state.pendingBuild!.build = { ...state.pendingBuild!.build, stance: 'offensive', allocations: { strength: 5, agility: 5, vitality: 0, endurance: 0, precision: 0 } };
+  it('takes the stance and the added attribute points of the pending build, not the current one', () => {
+    const state = owner({ pending: { stance: 'offensive', allocations: { strength: 5, agility: 5, vitality: 2, endurance: 2, precision: 1 } } });
     expect(queued(wearCommand(state, sword2.id, OPERATION))).toMatchObject({
-      classId: 'duelist', stance: 'offensive', allocation: { strength: 5, agility: 5, vitality: 0, endurance: 0, precision: 0 },
+      classId: 'guardian', stance: 'offensive', allocation: { strength: 5, agility: 5, vitality: 2, endurance: 2, precision: 1 },
     });
   });
 
@@ -128,10 +128,10 @@ describe('wearCommand', () => {
     });
   });
 
-  it('brings the shield back after a two-handed weapon and keeps a queued class change and the other pieces', () => {
-    const state = owner({ pending: { classId: 'berserker', equipment: { weapon: spear.id, offHand: null, head: helmet.id } } });
+  it('brings the shield back after a two-handed weapon and keeps a queued stance change and the other pieces', () => {
+    const state = owner({ pending: { stance: 'offensive', equipment: { weapon: spear.id, offHand: null, head: helmet.id } } });
     expect(queued(wearCommand(state, sword.id, OPERATION))).toMatchObject({
-      classId: 'berserker', equipment: gear({ weapon: sword.id, offHand: shield.id, head: helmet.id }),
+      stance: 'offensive', equipment: gear({ weapon: sword.id, offHand: shield.id, head: helmet.id }),
     });
   });
 
@@ -167,8 +167,8 @@ describe('wearCommand', () => {
   });
 
   it('stays a queue-build when the pending build still holds another change', () => {
-    const state = owner({ pending: { classId: 'berserker', equipment: { weapon: sword2.id } } });
-    expect(queued(wearCommand(state, sword.id, OPERATION))).toMatchObject({ classId: 'berserker', equipment: gear({ weapon: sword.id, offHand: shield.id, head: hood.id }) });
+    const state = owner({ pending: { stance: 'offensive', equipment: { weapon: sword2.id } } });
+    expect(queued(wearCommand(state, sword.id, OPERATION))).toMatchObject({ stance: 'offensive', equipment: gear({ weapon: sword.id, offHand: shield.id, head: hood.id }) });
   });
 
   it('refuses an item that has no slot, such as salvage, and an unknown item', () => {
@@ -185,10 +185,10 @@ describe('undoCommand', () => {
   });
 
   it('restores the worn off-hand when the queued weapon was two-handed', () => {
-    // A two-handed spear is queued over the sword and shield (the off-hand is cleared), with a class change queued too.
-    const state = owner({ pending: { classId: 'berserker', equipment: { weapon: spear.id, offHand: null } } });
+    // A two-handed spear is queued over the sword and shield (the off-hand is cleared), with a stance change queued too.
+    const state = owner({ pending: { stance: 'offensive', equipment: { weapon: spear.id, offHand: null } } });
     expect(queued(undoCommand(state, 'weapon', OPERATION))).toMatchObject({
-      classId: 'berserker', equipment: gear({ weapon: sword.id, offHand: shield.id, head: hood.id }),
+      stance: 'offensive', equipment: gear({ weapon: sword.id, offHand: shield.id, head: hood.id }),
     });
   });
 
@@ -218,16 +218,16 @@ describe('undoCommand', () => {
   });
 
   it('empties a slot that was empty when worn', () => {
-    const state = owner({ pending: { classId: 'berserker', equipment: { body: armor.id } } });
+    const state = owner({ pending: { stance: 'offensive', equipment: { body: armor.id } } });
     expect(queued(undoCommand(state, 'body', OPERATION)).equipment).toEqual(gear({ weapon: sword.id, offHand: shield.id, head: hood.id }));
   });
 });
 
 describe('cancelGearCommand', () => {
-  it('cancelling gear changes keeps a queued class change', () => {
-    const state = owner({ pending: { classId: 'berserker', equipment: { weapon: spear.id, offHand: null, head: helmet.id } } });
+  it('cancelling gear changes keeps a queued stance change', () => {
+    const state = owner({ pending: { stance: 'offensive', equipment: { weapon: spear.id, offHand: null, head: helmet.id } } });
     expect(cancelGearCommand(state, OPERATION)).toEqual({
-      kind: 'queue-build', operationId: OPERATION, expectedVersion: 7, classId: 'berserker', stance: 'balanced',
+      kind: 'queue-build', operationId: OPERATION, expectedVersion: 7, classId: 'guardian', stance: 'offensive',
       allocation: { strength: 3, agility: 2, vitality: 2, endurance: 2, precision: 1 },
       equipment: { weapon: sword.id, offHand: shield.id, head: hood.id, body: null, feet: null },
     });
@@ -249,6 +249,61 @@ describe('cancelGearCommand', () => {
     points.pendingBuild!.build.allocations = { ...points.pendingBuild!.build.allocations, strength: 4, precision: 0 };
     expect(keepsOtherChanges(points)).toBe(true);
     expect(keepsOtherChanges(owner())).toBe(false);
+  });
+});
+
+// Fixed class and points (Avi, 2026-10-28): the server refuses a class change and any attribute below the CURRENT build's value
+// as `invalid`. A build queued BEFORE that release may hold either, so a gear command starts from the current class and from no
+// attribute below the current build's, never sending what would be refused; that player's old class change or respec is dropped
+// when they change gear (the Build panel's form starts the same way).
+describe('a pending build queued before the class and points were fixed', () => {
+  const earlier = { strength: 1, agility: 4, vitality: 2, endurance: 2, precision: 1 };
+
+  it('sends the current class, not the queued one, when a piece is worn', () => {
+    const state = owner({ pending: { classId: 'berserker', stance: 'offensive', equipment: { head: helmet.id } } });
+    expect(queued(wearCommand(state, sword2.id, OPERATION))).toMatchObject({
+      classId: 'guardian', stance: 'offensive', equipment: gear({ weapon: sword2.id, offHand: shield.id, head: helmet.id }),
+    });
+  });
+
+  it('sends no attribute below the current build\'s, and keeps the points that were added', () => {
+    // Current: strength 3, agility 2, vitality 2, endurance 2, precision 1. The queued build respecced strength down and added agility.
+    const state = owner({ pending: { allocations: earlier, equipment: { head: helmet.id } } });
+    expect(queued(wearCommand(state, sword2.id, OPERATION)).allocation).toEqual({ strength: 3, agility: 4, vitality: 2, endurance: 2, precision: 1 });
+    expect(state.pendingBuild!.build.allocations).toEqual(earlier);
+  });
+
+  it('is the same for Undo and Cancel changes', () => {
+    const state = owner({ pending: { classId: 'duelist', allocations: earlier, equipment: { weapon: spear.id, offHand: null, head: helmet.id } } });
+    const expected = { classId: 'guardian', stance: 'balanced', allocation: { strength: 3, agility: 4, vitality: 2, endurance: 2, precision: 1 } };
+    expect(queued(undoCommand(state, 'head', OPERATION))).toMatchObject({ ...expected, equipment: gear({ weapon: spear.id, offHand: null, head: hood.id }) });
+    expect(queued(cancelGearCommand(state, OPERATION))).toMatchObject({ ...expected, equipment: gear({ weapon: sword.id, offHand: shield.id, head: hood.id }) });
+  });
+
+  it('is cancel-build when the gear lands back on the current build and only the dropped class change was left', () => {
+    const state = owner({ pending: { classId: 'berserker', equipment: { weapon: sword2.id } } });
+    expect(wearCommand(state, sword.id, OPERATION)).toEqual({ kind: 'cancel-build', operationId: OPERATION, expectedVersion: 7 });
+    expect(cancelGearCommand(state, OPERATION)).toEqual({ kind: 'cancel-build', operationId: OPERATION, expectedVersion: 7 });
+    // The panel's note about "other queued build changes" agrees: the dropped class change is not one that is kept.
+    expect(keepsOtherChanges(state)).toBe(false);
+  });
+
+  it('counts only a stance or an added-points change as another change to keep, not the dropped class change or respec', () => {
+    expect(keepsOtherChanges(owner({ pending: { classId: 'duelist', equipment: { head: helmet.id } } }))).toBe(false);
+    expect(keepsOtherChanges(owner({ pending: { allocations: earlier, equipment: { head: helmet.id } } }))).toBe(true);
+    expect(keepsOtherChanges(owner({ pending: { allocations: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 1 }, equipment: { head: helmet.id } } }))).toBe(false);
+    expect(keepsOtherChanges(owner({ pending: { classId: 'duelist', stance: 'defensive', equipment: { head: helmet.id } } }))).toBe(true);
+  });
+
+  it('never sends a class or attribute the lock would refuse, whatever the pending build holds', () => {
+    const current = owner().currentBuild;
+    for (const classId of ['guardian', 'berserker', 'duelist'] as const) {
+      for (const allocations of [current.allocations, earlier, { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 }, { strength: 9, agility: 0, vitality: 9, endurance: 0, precision: 9 }]) {
+        const command = queued(wearCommand(owner({ pending: { classId, allocations, equipment: { head: helmet.id } } }), sword2.id, OPERATION));
+        expect(command.classId, `${classId} ${JSON.stringify(allocations)}`).toBe(current.classId);
+        for (const key of Object.keys(current.allocations) as (keyof Attributes)[]) expect(command.allocation[key]).toBeGreaterThanOrEqual(current.allocations[key]);
+      }
+    }
   });
 });
 

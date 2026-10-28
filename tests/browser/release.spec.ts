@@ -280,22 +280,24 @@ test.describe('release accessibility in the fixture preview', () => {
     const { commands } = await livePlayer(page, poorPlayer());
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
-    // Build: more attribute points than earned.
+    // Build: a typed number never passes the points left (none here) or goes below the saved build, so it can no longer make a
+    // review message; the status line says what was done instead (Avi, 2026-10-28).
     const mine = await openMenu(page, 'My gladiator');
     await expectNamedControls(mine, 'My gladiator (player)');
     const strength = mine.getByRole('spinbutton', { name: 'strength', exact: true });
     await strength.fill('9');
-    await expect(mine.getByText(/^Review your build:/)).toBeVisible();
-    await expect(strength).toHaveAttribute('aria-invalid', 'true');
-    await expect(strength).toHaveAccessibleDescription(/Review your build/);
-    await expect(mine.getByRole('button', { name: 'Queue build' })).toHaveAccessibleDescription(/Review your build/);
-    // Not a whole number (fix round 1, I1): "invalid-input" marks and describes that field alone.
+    await expect(strength).toHaveValue('2');
+    await expect(mine.getByText('No points left to add, so Strength stays at 2.', { exact: true })).toBeVisible();
+    await expect(mine.getByText(/^Review your build:/)).toHaveCount(0);
+    await expect(strength).not.toHaveAttribute('aria-invalid', 'true');
+    // Not a whole number, or below zero: raised to the saved value, with its line, never an invalid-input review.
     const agility = mine.getByRole('spinbutton', { name: 'agility', exact: true });
     for (const value of ['1.5', '-1']) {
       await strength.fill(value);
-      await expect(mine.getByText('Review your build: invalid-input.'), value).toBeVisible();
-      await expect(strength, value).toHaveAttribute('aria-invalid', 'true');
-      await expect(strength, value).toHaveAccessibleDescription('Review your build: invalid-input.');
+      await expect(strength, value).toHaveValue('2');
+      await expect(mine.getByText("Strength can't go below 2: added points are permanent.", { exact: true }), value).toBeVisible();
+      await expect(mine.getByText(/^Review your build:/), value).toHaveCount(0);
+      await expect(strength, value).not.toHaveAttribute('aria-invalid', 'true');
       await expect(agility, value).not.toHaveAttribute('aria-invalid', 'true');
     }
     await strength.fill('2');

@@ -1,11 +1,14 @@
 // The gear view of the Inventory panel (launch feedback, 2026-10-25, note 9): what is worn now, what a swap queues, and the
 // commands that queue, undo and cancel it. Pure, so the panel only lays it out. Gear changes go through the existing
 // `queue-build` and `cancel-build` (no new command): a swap is the WHOLE build based on the pending build (or the current one
-// when none is queued) with only the equipment changed, so a queued class, stance or attribute change survives it. A swap that
-// lands back on the current build entirely is a `cancel-build` instead: there is then nothing left to queue.
+// when none is queued) with only the equipment changed, so a queued stance or added-points change survives it. A swap that
+// lands back on the current build entirely is a `cancel-build` instead: there is then nothing left to queue. The class and the
+// attribute points are fixed (2026-10-28), so a swap starts from the current class and no attribute below the current build's:
+// a class change or respec queued before that release is dropped, never sent for the server to refuse (`fixed-build.ts`).
 import type { Attributes, Equipment, EquipmentSlot, GameCommand } from '@contracts/commands';
 import type { BuildView, ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
+import { fixedClassAndPoints } from '../build/fixed-build';
 
 /** The five slots, in the order the "Wearing now" row shows them. */
 export const GEAR_SLOTS: readonly EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
@@ -54,11 +57,15 @@ export function changedSlots(owner: OwnerState): EquipmentSlot[] {
   return GEAR_SLOTS.filter(slot => worn[slot] !== next[slot]);
 }
 
-/** Whether the queued build holds more than gear: a class, stance or attribute change that "Cancel changes" keeps. */
+/**
+ * Whether the queued build holds more than gear: a stance or added-points change that "Cancel changes" keeps. A class change or
+ * respec queued before the class and points were fixed is not one: the next gear command drops it (`fixedClassAndPoints`).
+ */
 export function keepsOtherChanges(owner: OwnerState): boolean {
   const pending = owner.pendingBuild?.build, current = owner.currentBuild;
-  return !!pending && (pending.classId !== current.classId || pending.stance !== current.stance
-    || ATTRIBUTES.some(key => pending.allocations[key] !== current.allocations[key]));
+  if (!pending) return false;
+  const { allocations } = fixedClassAndPoints(pending, current);
+  return pending.stance !== current.stance || ATTRIBUTES.some(key => allocations[key] !== current.allocations[key]);
 }
 
 export function wearState(owner: OwnerState, item: ItemInstance): WearState {
@@ -119,15 +126,18 @@ const sameAttributes = (a: Attributes, b: Attributes) => ATTRIBUTES.every(key =>
 
 /**
  * The command that makes `equipment` the next slot's gear: the whole build of `pendingBuild ?? currentBuild` with that
- * equipment, or `cancel-build` when the result equals the current build entirely.
+ * equipment, or `cancel-build` when the result equals the current build entirely. The class and points are the current
+ * build's when the pending build holds another class or fewer points (a build queued before they were fixed): that change is
+ * dropped here, so the command is never one the server refuses as `invalid`.
  */
 function buildCommand(owner: OwnerState, equipment: Equipment, operationId: string): GearCommand {
   const base = baseBuild(owner), current = owner.currentBuild;
-  const unchanged = base.classId === current.classId && base.stance === current.stance && sameAttributes(base.allocations, current.allocations)
+  const { classId, allocations } = fixedClassAndPoints(base, current);
+  const unchanged = classId === current.classId && base.stance === current.stance && sameAttributes(allocations, current.allocations)
     && GEAR_SLOTS.every(slot => equipment[slot] === current.equipment[slot]);
   if (unchanged) return { kind: 'cancel-build', operationId, expectedVersion: owner.buildVersion };
-  return { kind: 'queue-build', operationId, expectedVersion: owner.buildVersion, classId: base.classId, stance: base.stance,
-    allocation: { ...base.allocations }, equipment: { ...equipment } };
+  return { kind: 'queue-build', operationId, expectedVersion: owner.buildVersion, classId, stance: base.stance,
+    allocation: { ...allocations }, equipment: { ...equipment } };
 }
 
 /**

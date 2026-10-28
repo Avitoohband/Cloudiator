@@ -68,11 +68,15 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean 
         } else if (command.kind === 'queue-build' || command.kind === 'cancel-build') {
           // As the server does: a stale version is a conflict, a queue replaces the pending build, a cancel clears it.
           if (command.expectedVersion !== state.buildVersion) return json({ ok: false, code: 'conflict' }, 409);
+          const current = state.currentBuild;
+          // The class and every attribute are fixed at the current build's (a class change or a lower attribute is invalid).
+          if (command.kind === 'queue-build' && (command.classId !== current.classId
+            || (Object.keys(current.allocations) as (keyof typeof current.allocations)[]).some(key => command.allocation[key] < current.allocations[key]))) return json({ ok: false, code: 'invalid' }, 409);
           state.buildVersion++;
           if (command.kind === 'queue-build') {
             const reservedItemIds = Object.values(command.equipment).filter((id): id is string => id !== null);
             state.pendingBuild = { build: { version: state.buildVersion, classId: command.classId, stance: command.stance, allocations: command.allocation, equipment: command.equipment },
-              effectiveSlotIndex: state.processedSlotIndex + 1, reservedMoney: command.classId === state.currentBuild.classId ? 0 : 100, reservedItemIds, operationId: command.operationId };
+              effectiveSlotIndex: state.processedSlotIndex + 1, reservedMoney: 0, reservedItemIds, operationId: command.operationId };
             result = { ok: true, receiptId: randomUUID(), value: state.pendingBuild };
           } else { state.pendingBuild = null; result = { ok: true, receiptId: randomUUID(), value: { buildVersion: state.buildVersion } }; }
         } else throw new Error('Unexpected inventory command');
@@ -186,12 +190,12 @@ const wearingNow = (page: Page) => page.getByRole('region', { name: 'Wearing now
 const cancelChanges = (page: Page) => page.getByRole('button', { name: 'Cancel changes', exact: true });
 /** The queued build's effective time as the page shows it (the next slot), worked out in the page apart from the panel. */
 const effectiveTime = async (page: Page, processedSlotIndex: number) => slotTime(page, (processedSlotIndex + 1) * SLOT_MS, await clockNow(page));
-/** A class change another session (the build panel) queued: the pending build holds the current gear and a Berserker class. */
-function queueClassChange(flow: Awaited<ReturnType<typeof inventoryFlow>>) {
+/** A stance change another session (the build panel) queued: the pending build holds the current gear and an offensive stance. */
+function queueStanceChange(flow: Awaited<ReturnType<typeof inventoryFlow>>) {
   const { state, pieces } = flow;
   state.buildVersion = 2;
-  state.pendingBuild = { build: { ...state.currentBuild, version: 2, classId: 'berserker' }, effectiveSlotIndex: state.processedSlotIndex + 1,
-    reservedMoney: 100, reservedItemIds: [pieces.sword.id, pieces.shield.id, pieces.armor.id], operationId: randomUUID() };
+  state.pendingBuild = { build: { ...state.currentBuild, version: 2, stance: 'offensive' }, effectiveSlotIndex: state.processedSlotIndex + 1,
+    reservedMoney: 0, reservedItemIds: [pieces.sword.id, pieces.shield.id, pieces.armor.id], operationId: randomUUID() };
 }
 
 test('shows what is worn and swaps a second sword with its badges, Undo and Cancel changes', async ({ page, context }, info) => {
@@ -264,50 +268,68 @@ test('shows what is worn and swaps a second sword with its badges, Undo and Canc
   await expect(badge(page, sword2)).toHaveCount(0);
 });
 
-test('keeps a queued class change when gear is swapped, undone or canceled', async ({ page, context }) => {
+test('keeps a queued stance change when gear is swapped, undone or canceled', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const { sword, sword2, shield, armor } = flow.pieces;
-  queueClassChange(flow);
+  queueStanceChange(flow);
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
-  // A class change alone queues no gear: no gear note, no Cancel changes.
+  // A stance change alone queues no gear: no gear note, no Cancel changes.
   await expect(badge(page, sword)).toHaveText('Wearing');
   await expect(wearingNow(page).getByText(/^Gear changes start/)).toHaveCount(0);
   await expect(cancelChanges(page)).toHaveCount(0);
-  // Wear sends the whole queued build, Berserker included, on the pending build's version.
+  // Wear sends the whole queued build, the offensive stance included, on the pending build's version.
   await wear(page, sword2).click();
   await expect(badge(page, sword2)).toBeVisible();
-  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', expectedVersion: 2, classId: 'berserker',
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', expectedVersion: 2, classId: 'guardian', stance: 'offensive',
     equipment: { weapon: sword2.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
-  // Undo restores the sword and keeps the class change, so it is a queue-build, not a cancel-build.
+  // Undo restores the sword and keeps the stance change, so it is a queue-build, not a cancel-build.
   await undo(page, sword2).click();
   await expect(card(page, sword2).getByRole('status')).toHaveText('Swap undone. Sword stays worn.');
-  expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', expectedVersion: 3, classId: 'berserker',
+  expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', expectedVersion: 3, classId: 'guardian', stance: 'offensive',
     equipment: { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
-  expect(flow.state.pendingBuild?.build.classId).toBe('berserker');
+  expect(flow.state.pendingBuild?.build.stance).toBe('offensive');
   // Cancel changes puts the gear back and says the other queued changes stay.
   await wear(page, sword2).click();
   await expect(wearingNow(page).getByText(/^Gear changes start/)).toContainText('Cancel changes puts the gear back; your other queued build changes stay.');
   await cancelChanges(page).click();
   await expect(wearingNow(page).getByRole('status')).toHaveText('Gear changes canceled. Your other queued build changes are kept.');
-  expect(flow.commands[3]).toMatchObject({ kind: 'queue-build', expectedVersion: 5, classId: 'berserker',
+  expect(flow.commands[3]).toMatchObject({ kind: 'queue-build', expectedVersion: 5, classId: 'guardian', stance: 'offensive',
     equipment: { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
-  expect(flow.state.pendingBuild?.build.classId).toBe('berserker');
+  expect(flow.state.pendingBuild?.build.stance).toBe('offensive');
   await expect(badge(page, sword2)).toHaveCount(0);
   await expect(cancelChanges(page)).toHaveCount(0);
+});
+
+test('drops a class change queued before the release when gear is swapped, so the server never refuses it', async ({ page, context }) => {
+  const flow = await inventoryFlow(context, { gear: true });
+  const { sword2, shield, armor } = flow.pieces;
+  // A pending build from before the class was fixed: it holds a Berserker class and keeps its old fee.
+  flow.state.buildVersion = 2;
+  flow.state.pendingBuild = { build: { ...flow.state.currentBuild, version: 2, classId: 'berserker' }, effectiveSlotIndex: flow.state.processedSlotIndex + 1,
+    reservedMoney: 100, reservedItemIds: [flow.pieces.sword.id, shield.id, armor.id], operationId: randomUUID() };
+  await page.goto('/game/');
+  await openMenu(page, 'Inventory and shops');
+  await wear(page, sword2).click();
+  await expect(badge(page, sword2)).toBeVisible();
+  // The whole build is sent with the CURRENT class (the server refuses a class change), and the gear change is accepted.
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', expectedVersion: 2, classId: 'guardian',
+    equipment: { weapon: sword2.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
+  expect(flow.state.pendingBuild?.build.classId).toBe('guardian');
+  await expect(card(page, sword2).getByRole('alert')).toHaveCount(0);
 });
 
 test('frees the off-hand for a two-handed weapon, and undoing it brings the shield back', async ({ page, context }) => {
   const flow = await inventoryFlow(context, { gear: true });
   const { sword, spear, shield, armor } = flow.pieces;
-  queueClassChange(flow);
+  queueStanceChange(flow);
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
   await expect(wear(page, shield)).toHaveCount(0);
   await expect(wearing(page, shield)).toBeDisabled();
   await wear(page, spear).click();
   await expect(badge(page, spear)).toBeVisible();
-  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'berserker', equipment: { weapon: spear.id, offHand: null, head: null, body: armor.id, feet: null } });
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'guardian', stance: 'offensive', equipment: { weapon: spear.id, offHand: null, head: null, body: armor.id, feet: null } });
   // The shield is going off and cannot be worn while the spear is next: its button says why, in words.
   const time = await effectiveTime(page, flow.state.processedSlotIndex);
   await expect(badge(page, shield)).toHaveText(`Off at ${time}`);
@@ -317,10 +339,10 @@ test('frees the off-hand for a two-handed weapon, and undoing it brings the shie
   await expect(wear(page, shield)).toHaveAccessibleDescription('Needs a free hand');
   await expect(wearingNow(page).getByRole('listitem').nth(1)).toContainText('Next: Empty');
   await expect(wear(page, sword)).toBeEnabled();
-  // Undo brings the sword and the shield back together; the class change stays queued.
+  // Undo brings the sword and the shield back together; the stance change stays queued.
   await undo(page, spear).click();
   await expect(card(page, spear).getByRole('status')).toHaveText('Swap undone. Sword stays worn.');
-  expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', classId: 'berserker', equipment: { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
+  expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', classId: 'guardian', stance: 'offensive', equipment: { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
   await expect(badge(page, shield)).toHaveText('Wearing');
   await expect(card(page, shield).getByText('Needs a free hand')).toHaveCount(0);
   await expect(badge(page, sword)).toHaveText('Wearing');
@@ -476,10 +498,9 @@ for (const kind of ['queue-build', 'cancel-build'] as const) {
     if (kind === 'cancel-build') {
       flow.state.buildVersion++;
       flow.state.pendingBuild = {
-        build: { ...structuredClone(flow.state.currentBuild), version: flow.state.buildVersion, classId: 'berserker' },
-        effectiveSlotIndex: flow.state.processedSlotIndex + 1, reservedMoney: 100, reservedItemIds: [], operationId: randomUUID(),
+        build: { ...structuredClone(flow.state.currentBuild), version: flow.state.buildVersion, stance: 'offensive' },
+        effectiveSlotIndex: flow.state.processedSlotIndex + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID(),
       };
-      flow.state.reservedFees.money = 100;
     }
     flow.reject('processing');
     let release!: () => void;

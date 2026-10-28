@@ -95,6 +95,11 @@ main[tabindex="-1"]:focus { outline: none; }
 .build-comparison section { background: #111b2d; padding: 1rem; }
 .build-comparison dl div { display: flex; justify-content: space-between; text-transform: capitalize; }
 .build-points { display: grid; grid-template-columns: repeat(auto-fit,minmax(115px,1fr)); gap: .8rem; }
+/* The build step's points counter and status line (2026-10-28), as the creation dialog's (CreateCharacter.module.css .counter, .capped). */
+.build-counter { display: inline-block; margin: 0 0 .5rem; padding: .3rem .8rem; border: 1px solid var(--gold); border-radius: 999px; background: #3a3020; color: var(--gold); font-size: .9rem; font-weight: 800; white-space: nowrap; }
+.build-counter[data-done="true"] { border-color: #4fb58a; background: #1f4a3a; color: #9be3c0; }
+.build-points-note { margin: .5rem 0 0; color: var(--gold); font-size: .8rem; }
+.build-points-note:empty { margin: 0; }
 .back-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .9rem; color: var(--gold); border: 1px solid #6b5a3a; font-size: .85rem; font-weight: 700; }
 .replay-page { max-width: 1008px; margin: auto; padding: 1.5rem 1.5rem 2rem; }
 .sample-replays { border-top: 1px solid var(--line); margin-top: 1.25rem; padding-top: 1rem; }

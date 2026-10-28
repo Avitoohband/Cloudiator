@@ -141,7 +141,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   }, []);
   const preview = creationPreview(draft.classId, draft.allocation);
   const { creationPoints, base } = RULES_V1.attributes;
-  const left = pointsLeft(draft.allocation), spent = pointsSpent(draft.allocation);
+  const left = pointsLeft(draft.allocation, creationPoints), spent = pointsSpent(draft.allocation);
   const allSpent = validateCreationAllocation(draft.allocation);
   // The name's and the points' refusals describe their fields, which are marked invalid only after a create attempt (Task 23.5,
   // launch feedback): Create is off until all the points are spent, so a points refusal is one the server still sent.
@@ -156,7 +156,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
    * the cap (a stepper stops at it), so the field has the focus then and `heldAtFocus` holds what it started from.
    */
   function changePoints(key: keyof Attributes, wanted: number) {
-    const result = setPoints(draft.allocation, key, wanted), held = draft.allocation[key];
+    const result = setPoints(draft.allocation, key, wanted, creationPoints), held = draft.allocation[key];
     update({ ...draft, allocation: result.allocation },
       result.capped ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
   }

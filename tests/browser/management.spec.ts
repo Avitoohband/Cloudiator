@@ -289,8 +289,7 @@ test.describe('live results and a signed-in player through a slot end', () => {
       if (command.kind !== 'queue-build') throw new Error(`Unexpected command ${command.kind}`);
       owner.buildVersion += 1;
       owner.pendingBuild = { build: { version: owner.buildVersion, classId: command.classId, stance: command.stance, allocations: command.allocation, equipment: command.equipment },
-        effectiveSlotIndex: slot + 1, reservedMoney: 100, reservedItemIds: [], operationId: command.operationId };
-      owner.reservedFees = { money: 100, renown: 0 };
+        effectiveSlotIndex: slot + 1, reservedMoney: 0, reservedItemIds: [], operationId: command.operationId };
       live.setOwner(structuredClone(owner));
       return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json',
         body: JSON.stringify({ ok: true, receiptId: randomUUID(), value: owner.pendingBuild }) });
@@ -300,7 +299,8 @@ test.describe('live results and a signed-in player through a slot end', () => {
     const mine = await openMenu(page, 'My gladiator');
     const status = mine.locator('p[role="status"]').filter({ hasText: /^(Scheduled|In progress|Processing results|Preparing|Completed)/ });
     await expect(status).toHaveText(/^In progress/);
-    await mine.getByLabel('Class', { exact: true }).selectOption('berserker');
+    // The class is fixed (Avi, 2026-10-28) and every build change is free: a stance change reserves nothing.
+    await mine.getByLabel('Stance', { exact: true }).selectOption('offensive');
     await mine.getByRole('button', { name: 'Queue build' }).click();
     await expect(mine.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
     expect(commands.map(c => c.kind)).toEqual(['queue-build']);

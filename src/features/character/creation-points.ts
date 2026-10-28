@@ -1,6 +1,7 @@
 // The creation points (launch feedback, 2026-10-25, goal 1): a new gladiator spends exactly `creationPoints` whole points on
 // top of the base of every attribute. The server's rule is unchanged (`validateCreationAllocation`); this module is only what
-// the "Create your gladiator" dialog needs to make spending them self-explanatory. The totals come from RULES_V1.
+// the "Create your gladiator" dialog needs to make spending them self-explanatory. The totals come from RULES_V1. The build
+// step (level-up points, 2026-10-28) uses the same counter and cap with the points earned as the total, and a floor.
 import type { Attributes, ClassId } from '@contracts/commands';
 import { RULES_V1 } from '@domain/rules-v1';
 
@@ -15,21 +16,29 @@ export function pointsSpent(allocation: Attributes): number {
   return ATTRIBUTE_KEYS.reduce((sum, key) => sum + allocation[key], 0);
 }
 
-/** The points still to spend. Never negative: an over-spent allocation (an old saved draft) has none left. */
-export function pointsLeft(allocation: Attributes): number {
-  return Math.max(0, RULES_V1.attributes.creationPoints - pointsSpent(allocation));
+/**
+ * The points still to spend of `total`: the creation points in the creation dialog, the points earned in the build step. Never
+ * negative: an over-spent allocation (an old saved draft) has none left.
+ */
+export function pointsLeft(allocation: Attributes, total: number): number {
+  return Math.max(0, total - pointsSpent(allocation));
 }
 
 /**
- * Sets one attribute to the number the player typed or stepped to. The result is a whole number from 0 to what the field
- * already holds plus the points left, so the total can never pass the points there are (Avi: with 7 left, typing 10 sets 7);
- * `capped` says the wanted number was above that. A fraction is floored, and an empty field or anything that is not a
- * finite number (NaN) counts as 0, never NaN. The allocation passed in is not changed.
+ * Sets one attribute to the number the player typed or stepped to. The result is a whole number from `floor` to what the field
+ * already holds plus the points left of `total`, so the total can never pass the points there are (Avi: with 7 left, typing 10
+ * sets 7); `capped` says the wanted number was above that. `floor` is 0 when creating; the build step passes the current
+ * build's value, because added points are permanent (Avi, 2026-10-28): `raised` says the wanted number was below it and was
+ * lifted to it (never with the default floor of 0: a number below 0 is simply 0). A fraction is floored, and an empty field or anything that is not a finite number (NaN) counts as 0, never NaN
+ * (so with a floor it is raised). A field already below its floor (a stale draft) is lifted to the floor, which then wins over
+ * the cap. The allocation passed in is not changed.
  */
-export function setPoints(allocation: Attributes, key: keyof Attributes, wanted: number): { allocation: Attributes; capped: boolean } {
-  const most = allocation[key] + pointsLeft(allocation);
-  const points = Number.isFinite(wanted) ? Math.max(0, Math.min(most, Math.floor(wanted))) : 0;
-  return { allocation: { ...allocation, [key]: points }, capped: Number.isFinite(wanted) && wanted > most };
+export function setPoints(allocation: Attributes, key: keyof Attributes, wanted: number, total: number, floor = 0):
+  { allocation: Attributes; capped: boolean; raised: boolean } {
+  const most = Math.max(floor, allocation[key] + pointsLeft(allocation, total));
+  const count = Number.isFinite(wanted) ? Math.floor(wanted) : 0;
+  return { allocation: { ...allocation, [key]: Math.max(floor, Math.min(most, count)) }, capped: Number.isFinite(wanted) && wanted > most,
+    raised: floor > 0 && count < floor };
 }
 
 /** "Suggested for {class}": a split of exactly 10 points that suits the class's own bonus. */
@@ -62,4 +71,9 @@ export function cappedNote(name: string, left: number, cap: number, held: number
   if (left <= 0) return `No points left to add, so ${name} stays at ${cap}.`;
   if (held <= 0) return `Only ${cap} point${cap === 1 ? '' : 's'} left, so ${name} was set to ${cap}.`;
   return `${name} can take at most ${cap}, so it was set to ${cap}.`;
+}
+
+/** The status line when a typed number was below the current build's value and was raised to it (`setPoints` `raised`). */
+export function raisedNote(name: string, floor: number): string {
+  return `${name} can't go below ${floor}: added points are permanent.`;
 }

@@ -206,6 +206,53 @@ catch-up processes the missed slots in order (at most 6 boundaries per tick), sw
 their items once; cleanup catches up hourly. Run the health check until `slotsBehind` is `0`. Do not unschedule the cron
 jobs to pause: re-registration is a migration step.
 
+## Posting a game message
+
+Game messages (M25, [migrations.md](migrations.md#game-messages-notifications-the-look-change-and-fixed-builds-m25)) are
+posted and hidden only by the database owner: `private.post_message` and `private.hide_message` may be executed by no client
+role and not by `service_role`. On production they run through the linked CLI (`db query --linked`, the Management API, as the
+read-only kits do), by Claude, **only after Avi's go in chat for that message**, like any production write
+([deployment.md](deployment.md), ground rules). Each player-visible release adds posting its patch note to its release steps.
+
+**Never before the client that shows messages is live** (the release's `game-command` Edge function and its Pages deploy, after
+M25). A message counts as unread for every account whose gladiator is older than it, so one posted earlier would wait unseen,
+and its **Change look** action needs the new Edge function. A gladiator created after a message sees it as read.
+
+1. Write the one statement to a file outside the repository, for example `$env:TEMP\cloudiator-post.sql` (one statement per
+   file: CLI 2.120.0's `db query --file` refuses several, AGENTS.md). Save it as UTF-8 without a byte-order mark (Windows
+   PowerShell 5.1's `Set-Content -Encoding utf8` adds one), for example with
+   `[IO.File]::WriteAllText($file, $statement, [Text.UTF8Encoding]::new($false))`. Dollar quotes keep apostrophes in the text
+   as they are:
+   ```sql
+   select private.post_message(
+     'patch-notes',                                      -- kind: patch-notes or admin
+     $t$The title, 1 to 80 characters$t$,
+     $t$The preview, 1 to 140 characters$t$,
+     $b$[{"p": "A paragraph."}, {"li": "A bullet item."}]$b$::jsonb,  -- 1 to 20 blocks, {"p": text} or {"li": text}, at most 2,000 characters in all
+     'change-look'                                       -- the action, or null for none
+   ) as id;
+   ```
+   The text is shown to players word for word, as plain text: compare it with what Avi approved before posting.
+2. After the linked-project check ([deployment.md](deployment.md), Part 2: `Get-Content -LiteralPath supabase\.temp\project-ref`
+   prints production's ref) and Avi's go:
+   `npx supabase db query --linked --project-ref <ref> --file $env:TEMP\cloudiator-post.sql`
+   It answers the new message's id. The time is the database's at posting (`published_at_ms`, never back-dated). A bad kind,
+   title, preview, action or body is refused by the table's constraints (SQLSTATE 23514) and stores nothing. The post raises
+   the world revision, so open clients show the badge within one poll.
+3. Several notes of one release are posted one after the other, oldest first, so the newest is on top (this patch: the launch
+   note, then the look note, then the release note; spec "Settled after the builder check").
+4. Read back, read-only:
+   `npx supabase db query --linked --project-ref <ref> "select id, kind, title, action, hidden, published_at_ms from public.game_messages order by id desc limit 5"`.
+
+**Hiding a mistake** (after Avi's go):
+`npx supabase db query --linked --project-ref <ref> "select private.hide_message(<id>) as hidden"` answers `true` when the
+message was visible, `false` when it was already hidden or there is no such id. A hidden message stays stored and leaves every
+list and count; its read marks stay and no longer count. Nothing deletes a message. To correct one, hide it and post the
+corrected text as a new message.
+
+Locally (a preview with representative messages), the same statements run as the owner through the psql fallback after the
+container label check (ground rules above).
+
 ## Secret rotation
 
 Names only; never print the values.

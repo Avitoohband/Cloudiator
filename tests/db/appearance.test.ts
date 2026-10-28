@@ -174,9 +174,10 @@ describe('gladiator appearance', () => {
 
   it('ships M24 with the projection refresh after the column and the restated projector, and no appearance backfill', () => {
     const dir = new URL('../../supabase/migrations/', import.meta.url);
+    // M24 is this file, the only one of its name and the 24th migration (M25 and later come after it).
     const files = readdirSync(dir).filter(name => name.endsWith('_appearance.sql'));
-    expect(files).toHaveLength(1);
-    expect(readdirSync(dir).filter(name => name.endsWith('.sql')).sort().at(-1)).toBe(files[0]);
+    expect(files).toEqual(['20261026160844_appearance.sql']);
+    expect(readdirSync(dir).filter(name => name.endsWith('.sql')).sort().indexOf(files[0])).toBe(23);
     const m24 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');
     const refresh = m24.lastIndexOf('\nselect public.refresh_projections();\n');
     expect(refresh).toBeGreaterThan(m24.search(/create or replace function "?private"?\."?project_character"?/i));

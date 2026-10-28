@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { sql, account, admin, anonymous, resetIdentity, creation, request, directEdge, tokenFor, recordingClient } from '../fixtures/db.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
@@ -397,5 +397,59 @@ describe('game messages', () => {
     expect(reads).toBeLessThan(view);
     // The CHECK that calls the function is in the table, after the function; the view reads both tables, after both.
     expect(source.indexOf('private.valid_message_body(body)', messages)).toBeGreaterThan(messages);
+  });
+
+  it('ships M25 completed from 18-messages.sql: the CHECK function first, revokes before grants, the source bodies, ACLs and invoker view, the reload last', () => {
+    const dir = new URL('../../supabase/migrations/', import.meta.url);
+    const files = readdirSync(dir).filter(name => name.endsWith('_messages.sql'));
+    expect(files).toHaveLength(1);
+    expect(readdirSync(dir).filter(name => name.endsWith('.sql')).sort().at(-1)).toBe(files[0]);
+    const m25 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');
+    const source = readFileSync(new URL('../../supabase/sql/18-messages.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    const at = (needle: string, from = 0) => { const i = m25.indexOf(needle, from); expect(i, needle).toBeGreaterThan(-1); return i; };
+    // The function the CHECK calls exists before the constraint is added (AGENTS.md, M24 lesson; the generated draft had it after).
+    expect(at('CREATE OR REPLACE FUNCTION private.valid_message_body(')).toBeLessThan(at('add constraint "game_messages_body_check"'));
+    // Every function body is the source's, character for character (pg_get_functiondef prints prosrc between its own delimiters),
+    // and each function is created once: M25 carries the fixed class and points, the look change and the message functions.
+    const sourceBody = (name: string) => {
+      const open = source.indexOf('as $$', source.indexOf(`create or replace function ${name}(`)) + 'as $$'.length;
+      return source.slice(open, source.indexOf('$$', open));
+    };
+    const migrationBody = (name: string) => {
+      const start = at(`CREATE OR REPLACE FUNCTION ${name}(`);
+      expect(m25.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`, start + 1), name).toBe(-1);
+      const open = at('AS $function$', start) + 'AS $function$'.length;
+      return m25.slice(open, m25.indexOf('$function$', open));
+    };
+    const functions = ['private.planning_command', 'public.change_appearance', 'private.valid_message_body', 'public.read_message',
+      'private.post_message', 'private.hide_message', 'public.see_notifications'];
+    for (const name of functions) expect(migrationBody(name), name).toBe(sourceBody(name));
+    expect(m25.match(/^create or replace function /gim)).toHaveLength(functions.length);
+    expect(migrationBody('private.planning_command')).toContain("jsonb_typeof(c->'allocation'->a.key) is distinct from 'number'");
+    expect(migrationBody('private.planning_command')).toContain('elsif fee is distinct from 0 then');
+    // Every function ACL and every table and sequence revoke of the source, each table's revoke before its first grant.
+    const acls = source.match(/^(?:revoke all on function|grant execute on function)[^;]*;/gm)!;
+    expect(acls).toHaveLength(9);
+    for (const statement of acls) expect(m25, statement).toContain(statement);
+    for (const table of ['game_messages', 'message_reads', 'notification_marks']) {
+      const revoke = `revoke all on public.${table} from public,anon,authenticated,service_role;`;
+      expect(source).toContain(revoke);
+      expect(at(revoke), table).toBeLessThan(at(`on table "public"."${table}" to`));
+      expect(at(`alter table "public"."${table}" enable row level security;`)).toBeLessThan(at(revoke));
+    }
+    expect(m25).toContain('revoke all on sequence public.game_messages_id_seq from public,anon,authenticated,service_role;');
+    // One view statement, the source's last (section 4's) with security_invoker, after the marks table it reads.
+    const last = source.lastIndexOf('create or replace view public.owner_state with (security_invoker=true) as');
+    const end = 'left join public.notification_marks nm on nm.owner_id=g.owner_id;\n';
+    const view = source.slice(last, source.indexOf(end, last) + end.length);
+    expect(m25.match(/^create or replace view/gim)).toHaveLength(1);
+    expect(at(view)).toBeGreaterThan(at('create table "public"."notification_marks"'));
+    // The policies, the deferred revision trigger and the schema reload, last.
+    expect(m25).toMatch(/create policy "player_read"\s+on "public"\."game_messages"\s+as permissive\s+for select\s+to anon, authenticated\s+using \(\(NOT hidden\)\);/);
+    for (const table of ['message_reads', 'notification_marks']) {
+      expect(m25).toMatch(new RegExp(`create policy "owner_read"\\s+on "public"\\."${table}"\\s+as permissive\\s+for select\\s+to authenticated\\s+using \\(\\(owner_id = \\( SELECT auth\\.uid\\(\\) AS uid\\)\\)\\);`));
+    }
+    expect(m25).toContain('CREATE CONSTRAINT TRIGGER projection_changed AFTER INSERT OR DELETE OR UPDATE ON public.game_messages DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION private.projection_changed();');
+    expect(m25.trimEnd().endsWith("notify pgrst, 'reload schema';")).toBe(true);
   });
 });

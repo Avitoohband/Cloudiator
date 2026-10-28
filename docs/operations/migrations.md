@@ -1,5 +1,140 @@
 # Local identity backend and migrations
 
+## Game messages, notifications, the look change and fixed builds (M25)
+
+M25 is `supabase/migrations/20261028165017_messages.sql`, the SQL part of the next patch
+([game messages design](../superpowers/specs/2026-10-27-game-messages-design.md), with its "Added 2026-10-28" sections; plan
+`docs/superpowers/plans/2026-10-28-game-messages.md`, Tasks 1–4). The design notes are in its source, `supabase/sql/18-messages.sql`.
+- **Generation.** CLI 2.120.0, `db pull messages --local --schema public,private --yes` (engine `migra`). The input was the
+  tested source, applied once (the whole file, through the psql fallback after the container label check) to a clean
+  M01–M24 reset.
+- **Completion.** The draft was completed from that source; M01–M24 are unchanged.
+- **Folded in before generation** (Task 1's review, controller ruling; commit `08d1936`), so M25 carries them: the attribute
+  floor refuses a value that is not a number (`jsonb_typeof(...) is distinct from 'number' or ... < a.value`; in jsonb order a
+  boolean, an array or an object sorts above every number, and `true`, `false`, `[9]`, `{}` and `{"n":9}` were accepted), and
+  the fee rule is `fee is distinct from 0` (a null or absent fee is `invalid`, stored, where `fee<>0` let it reach the
+  reservation insert and fail with 23502). Both are reachable only by `service_role` calling `queue_build` directly.
+  `tests/db/build-locks.test.ts` pins both (RED first: the five values accepted, the two fees failing with 23502).
+
+**What M25 changes.**
+- **`private.planning_command`**, 16-launch-feedback.sql's (M23's) body with, in `queue-build`: a class change is `invalid`
+  (`classId` must equal the CURRENT build's); every attribute of the current build must be in the command as a number no lower
+  than its current value (the floor is the current build, not the pending one, so a pending build may be revised down to the
+  current values and cancelled); the fee rule `fee is distinct from 0` (it was `fee not in (0,100,200)`). Builds already
+  pending at deploy keep their fee and class and apply as queued (`private.apply_pending_build` is unchanged).
+- **`public.change_appearance(actor_id, operation_id, input)`**: the free, unlimited look change of the caller's own
+  gladiator, shaped like `set_tournament_opt_in` (account lock, receipt replay, exact keys, `private.valid_appearance`, own
+  gladiator `for update`, the update only when the look differs, the receipt). Backend only.
+- **`private.valid_message_body(jsonb)`** (immutable `sql`), then **`public.game_messages`** (identity `id`, `kind`
+  patch-notes|admin, `title` 1–80, `preview` 1–140, `body` checked by the function, `action` null|change-look,
+  `published_at_ms`, `hidden`; RLS on; SELECT for anon, authenticated and service_role; policy `player_read using (not
+  hidden)` for anon and authenticated; the identity sequence the owner's alone; the deferred `projection_changed` constraint
+  trigger, so a post or a hide raises the world revision).
+- **`public.message_reads`** (owner-only read marks, cascading with the account and the message; SELECT for authenticated
+  through `owner_read`, SELECT and INSERT for service_role) and **`public.read_message(actor_id, message_id)`** (no receipt;
+  backend only).
+- **`private.post_message`** and **`private.hide_message`**: operator-only (no client role and not service_role may execute
+  them, nor `valid_message_body`); see [runbook, "Posting a game message"](runbook.md#posting-a-game-message).
+- **`public.notification_marks`** (one "seen up to" time per account, owner-only; SELECT for authenticated, SELECT, INSERT and
+  UPDATE for service_role) and **`public.see_notifications(actor_id, up_to_ms)`** (no receipt; backend only).
+- **`public.owner_state`**, 17-appearance.sql's view plus `inbox`: `unread`, `readIds`, `sinceMs`, `newNotifications`,
+  `notificationsSeenMs` (source sections 3 and 4; the last view statement stands). `security_invoker=true` is kept.
+
+**The draft needed six completions** (checked against the source):
+1. **Order.** The draft added `game_messages_body_check` before creating `private.valid_message_body`. Observed: the
+   as-generated draft, run in a rolled-back transaction on an M01–M24 replay, stopped with `function
+   private.valid_message_body(jsonb) does not exist`. The function statement moved, unchanged, before the tables.
+2. **The title and preview CHECK expressions**, the source's text. Observed on the first replay (completions 1 and 3–6
+   only): the fingerprint matched the source-applied one except `game_messages_title_check` and `game_messages_preview_check`.
+   The generated text re-parses as one flat AND, the source's `between` keeps its own AND inside the outer one: the same test,
+   a different stored expression. With the source's expressions the second replay matched byte for byte.
+3. The view statement: the source's last one (section 4's), after `notification_marks`. The draft's named no options and
+   would have dropped `security_invoker`.
+4. The three tables' and the identity sequence's revokes, before the generated grants. Checked in a rolled-back probe: a new
+   table here gets `service_role=Dxtm` (TRUNCATE, REFERENCES, TRIGGER, MAINTAIN) by default, and a new sequence
+   `service_role=w` (UPDATE).
+5. The seven function ACLs (the source's). A new function here gets only the owner's EXECUTE by default (same probe), so
+   without them the backend could not call `change_appearance`, `read_message` or `see_notifications`; `planning_command` is
+   restated as CREATE OR REPLACE keeps its grants.
+6. A provenance header and `notify pgrst`.
+
+The rest is as generated: the three tables with RLS enabled, their keys, the other CHECKs and the foreign keys, the table
+grants (equal to the source's), the three policies and the constraint trigger. The seven function statements are
+byte-identical to the source-applied `pg_get_functiondef` (11,616, 2,001, 923, 774, 540, 337 and 782 bytes for
+`planning_command`, `change_appearance`, `valid_message_body`, `read_message`, `post_message`, `hide_message`,
+`see_notifications`, compared programmatically). M25 re-emits no unchanged function: a diff of its `planning_command`
+statement against M23's shows only M23's one fee line replaced by the class, floor and fee lines; the other six are new.
+`tests/rule-retention.test.ts` needs no allowance (no top-level update, delete or rewrite).
+
+**Source iteration.** As for M17–M24: the psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/18-messages.sql`).
+The whole file is reapplicable (`create table if not exists`, `drop ... if exists` before each policy and the trigger, CREATE
+OR REPLACE; Tasks 1–3b applied it twice). Apply it only from an LF working copy (Task 23.8 observation under M22).
+
+**Tests** (each RED first in its task; reports in `.superpowers/sdd/2026-10-28-game-messages/`):
+- `tests/db/build-locks.test.ts` (Task 1 and the fold-in: class and points fixed, every allowed change free, the current
+  build the floor, non-number points and a null or absent fee refused), `tests/db/change-appearance.test.ts` (Task 2),
+  `tests/db/messages.test.ts` (Task 3) and `tests/db/notifications.test.ts` (Task 3b); the earlier build, market, shops,
+  arena, idle, activities and retention cases changed by Task 1.
+- `tests/db/messages.test.ts` "ships M25 completed from 18-messages.sql…" (this task): exactly one `_messages.sql`, the last
+  migration; `valid_message_body` before `game_messages_body_check`; every function body equal to the source's, each created
+  once, with the fold-in lines; all nine function ACL statements of the source; each table's revoke after its RLS and before
+  its first grant, and the sequence revoke; one view statement, the source's last, after `notification_marks`; the policies,
+  the deferred trigger, and the reload last. Checked by mutation: the as-generated draft, M25 without the table revokes,
+  without `security_invoker`, without `read_message`'s grant, and with the old fee rule each failed it; the file was then
+  restored byte for byte (sha-256).
+- `tests/db/appearance.test.ts`: M24 is `20261026160844_appearance.sql`, the only `_appearance.sql`, the 24th migration
+  (it was "the last"). `tests/db/restore-hosted.test.ts`: 25 migrations. `tests/db/access-matrix.test.ts` pins the new
+  grants (Tasks 2–3b).
+
+**Replay evidence.**
+- A clean `db reset --local --no-seed --yes` to M01–M24: fingerprint 1,164 lines (`scripts/schema-fingerprint.sql`), the
+  count M24 recorded, and identical after a second reset to M24 (`--version 20261026160844`).
+- The source applied once to that reset (1,210 lines) differs from it only in 46 added lines (the six new functions, the three
+  tables and the sequence, their 13 columns, 3 policies, the trigger, 15 constraints, 3 indexes, the trigger's enabled line) and
+  two changed ones (`planning_command`'s body hash, `owner_state`'s view hash, its ACL and options unchanged).
+- A clean reset replayed M01–M25, with no source applied afterwards. Its fingerprint matched the source-applied one byte for
+  byte (1,210 lines), and again after the full test run.
+- Inspection of the replay:
+  - `planning_command`, `change_appearance`, `read_message`, `see_notifications` `{postgres=X/postgres,service_role=X/postgres}`;
+    `valid_message_body`, `post_message`, `hide_message` `{postgres=X/postgres}`; all invoker, `search_path=""`
+    (`valid_message_body` immutable, the others volatile); no function in `public` or `private` executable by anon or
+    authenticated, none security definer;
+  - `game_messages` `{postgres=arwdDxtm/postgres,anon=r/postgres,authenticated=r/postgres,service_role=r/postgres}`,
+    `message_reads` `{…,authenticated=r/postgres,service_role=ar/postgres}`, `notification_marks`
+    `{…,authenticated=r/postgres,service_role=arw/postgres}`, `game_messages_id_seq` `{postgres=rwU/postgres}`; RLS on all
+    three; `player_read` (anon, authenticated) `(NOT hidden)`, both `owner_read` (authenticated)
+    `(owner_id = ( SELECT auth.uid() AS uid))`;
+  - `projection_changed` on `game_messages`: a constraint trigger, deferrable, initially deferred, enabled; 45/45
+    `public`/`private` triggers enabled; both cron jobs active;
+  - every constraint validated, `game_messages_body_check` depending on `private.valid_message_body(jsonb)`; the foreign keys
+    cascade; `owner_state` keeps `{security_invoker=true}` and its grants; no carriage return in any new body or the view;
+  - 25 migrations recorded.
+- Access audit (`scripts/access-audit.sql`): 638 rows, 0 finding rows, the same rows (sorted) as Task 3b's audit of the
+  source-applied database, and unchanged after the full run. `tests/db/access-matrix.test.ts` 12/12 on the replay.
+- Lint is empty. Advisors on the fresh replay: 37 INFO notices, no warnings or errors: the 36 `unused_index` notices (no
+  statistics yet) and one new `unindexed_foreign_keys`, `message_reads_message_id_fkey` (its column is the second of the
+  primary key; only a message delete would scan for it, and a message is hidden, never deleted).
+- `npm run test:db`: 390/390 in 28 files on the M01–M25 replay (17:03–17:09 UTC), after one access-time refresh and a settled
+  runtime, the Edge container's start time unchanged across the run.
+
+**Release (plan Task 8).**
+- Order: M25 first, then the `game-command` Edge function, then the client; the messages last, only once the client that
+  shows them is live ([runbook, "Posting a game message"](runbook.md#posting-a-game-message)).
+- With M25 alone, the previous Edge function's commands keep working: a build change it prepares free (stance, equipment,
+  added points) is accepted, and a class change or a decrease (which it prepared with fee 100 or 200) is `invalid`. Its parser
+  refuses the three new commands. The previous client ignores the owner read's new `inbox` key. The new Edge function calls
+  `change_appearance`, `read_message` and `see_notifications`, which only an M25 database has, hence the order.
+- Section 1 changes the `v1` build rules in place ([runbook, "Retained-rule deployments"](runbook.md#retained-rule-deployments)):
+  they are checked when a build is queued, never at a boundary, and pending builds apply as queued. Plan Task 8 counts, before
+  `db push`, the pending builds that change class or lower an attribute (expected 0).
+- Locks (checked in a rolled-back probe of the same statements): adding the foreign keys to `auth.users` takes a SHARE ROW
+  EXCLUSIVE lock on it, and replacing `owner_state` an ACCESS EXCLUSIVE lock on the view, both held to the commit, so writes to
+  `auth.users` (sign-ins, sign-ups) and owner reads wait for that moment. No existing table is rewritten and no row is
+  backfilled.
+- After `db push`, the hosted fingerprint and access audit are compared with this replay's (1,210 and 638 lines), as in the
+  runbook's "Schema fingerprint and hosted checks" and "Release access audit".
+
 ## Gladiator appearance at creation (M24)
 
 M24 is `supabase/migrations/20261026160844_appearance.sql`, the SQL part of the

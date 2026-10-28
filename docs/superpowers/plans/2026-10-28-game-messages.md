@@ -1,4 +1,4 @@
-# Next Patch: Game Messages, Notifications, Free Look Change, Fixed Builds, Gold and Fuller Expedition Replays
+# Next Patch: Game Messages, Notifications, Free Look Change, Fixed Builds, Gold, Bigger Beds and Fuller Expedition Replays
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -30,7 +30,8 @@ points"); code map `docs/superpowers/specs/2026-10-27-game-messages-code-map.md`
   short, the colours `tintFor` shows).
 - Builds: class fixed; no attribute below the current build's value; every allowed change costs 0; points become fixed when
   the build takes effect. Copy exactly as in the spec's "Added 2026-10-28" section.
-- The two first patch notes are word for word as in the spec ("Settled after the builder check"), posted launch note first.
+- The three first patch notes are word for word as in the spec ("Settled after the builder check"), posted launch note
+  first, then the look note, then this release's note (bigger beds, crediting Punchy).
 - Committed migrations are never edited (new M25, completed and replayed per AGENTS.md, every CHECK after the function it
   calls, access audit after the migration); TDD; DB-test rule; no package downloads; gate of record
   `node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs` 12/12 with the local Edge serve running.
@@ -309,6 +310,30 @@ gold, and the Task 3b/6 notification lines say gold from the start.
   private Playwright config: pass.
 - [ ] **Step 4:** Commit `feat: call the currency gold`.
 
+### Task 7c: Bigger beds in the camp (Punchy's request)
+
+Avi, 2026-10-28: "about the beds, make those look better next patch, it is too tiny for the gladiators. In the patch
+message for the beds, say that this is for Punchy request." Today the camp's 12 bedrolls (`bedroll-teal` and
+`bedroll-crimson`) are one floor tile each, at x 15-19, y 35-41 on every second tile, beside gladiators who stand taller
+than a tile. The credit line is in the spec's third patch note.
+
+**Files:** `assets/source/generators/props.mjs` (the bed frames), `assets/source/generators/maps.mjs` (placement),
+the regenerated camp atlas under `public/assets/camp/`, and `tests/assets` (station counts and footprints).
+
+- [ ] **Step 1:** Design first, Avi's mockup rule: draw the new bed next to a gladiator at the camp's zoom, and show Avi
+  a before-and-after over a real camp screenshot. The bed is sized for a gladiator lying on it (a footprint of at least
+  1 × 2 tiles, a pillow end and a blanket; the generator's own palette), and the beds still give 12 rest spots. Build
+  only after Avi approves the look.
+- [ ] **Step 2:** Test first in `tests/assets`: 12 beds, each footprint as approved, no two overlapping, none on a path
+  tile, and every bed reachable (the existing station-count and walkability tests extended). Run: FAIL on the old 1 × 1
+  footprint.
+- [ ] **Step 3:** Change the generators, rebuild with `node assets/source/build-assets.mjs` (then `--check`, which covers
+  provenance), refresh the review sheets with `node assets/source/tools/review-sheets.mjs`, and check the camp's
+  50-gladiator layout test still places everyone. As this is the next art release, also delete the old atlas files kept
+  from the last one (`assets/source/retained.mjs`, the runbook's open item).
+- [ ] **Step 4:** Look at it in the fixture preview at desktop and phone size next to the mockup Avi approved; commit
+  `feat: bigger camp beds`.
+
 ### Task 8: Gate, review and release
 
 - [ ] **Step 1:** Start the local Edge serve; run the gate of record; expect 12/12 (DB-test rule; no build during the
@@ -317,11 +342,11 @@ gold, and the Task 3b/6 notification lines say gold from the start.
   the gate.
 - [ ] **Step 3:** Hosted pre-checks (read-only, `db query --linked --agent no`): no open boundary; the count of pending
   builds that change class or lower an attribute (expect 0; any found apply as queued, note them).
-- [ ] **Step 4:** Avi's go in chat, with the two notes' text. Then `db push --dry-run` (exactly M25), `db push`, the access
+- [ ] **Step 4:** Avi's go in chat, with the three notes' text. Then `db push --dry-run` (exactly M25), `db push`, the access
   audit and fingerprint; `functions deploy game-command --project-ref djkblzbnritgbmctsvob`; the `release` fast-forward;
   the deployed checks about 2 minutes after Pages is live.
-- [ ] **Step 5:** Post the launch note, then the look note, with `private.post_message`; read back 2 visible messages and the
-  inbox of one account (unread 2).
+- [ ] **Step 5:** Post the launch note, then the look note, then the release note, with `private.post_message`; read back
+  3 visible messages and the inbox of one account (unread 3).
 - [ ] **Step 6:** Record the evidence in `release-evidence.md` and `deployment.md`, update HANDOFF; commit
   `deploy: ship game messages and fixed builds`.
 

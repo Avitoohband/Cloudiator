@@ -114,9 +114,10 @@ gladiator's look, free for now.
 ## Settled after the builder check (Claude's calls)
 
 - **Dates are posting dates.** Messages are never back-dated: the posting function stamps the time of posting, and the
-  panel shows that date. The two first notes are posted one after the other with this release, the launch note first, so
-  the look note is newest and on top. Every live account predates both, so each starts with a badge of 2.
-- **The first two patch notes, word for word** (the mockup's text; the 26 Oct note covers both releases of that day,
+  panel shows that date. The three first notes are posted one after the other with this release: the launch note, then
+  the look note, then this release's note, so the release note is newest and on top. Every live account predates all
+  three, so each starts with a badge of 3. (Two notes until 2026-10-28, when Avi's bed request added the third.)
+- **The first patch notes, word for word** (notes 1 and 2 are the mockup's text; the 26 Oct note covers both releases of that day,
   launch feedback and the waiting monsters; the keyboard-focus fix of 27 Oct is too small to announce):
 
   1. Posted first. Title: **Evening Arena, waiting monsters, clearer menus**. Preview line: "Arena and tournaments move to
@@ -131,6 +132,17 @@ gladiator's look, free for now.
        skin, hair and clothes colours."
      - "New gladiators choose a look when they are created. Yours keeps the original look until you change it."
      then the Change look button and the disclaimer quoted in Goal 4.
+  3. Posted third (added 2026-10-28; Claude's draft, Avi may change the wording). Title: **Messages, gold, fixed builds
+     and bigger beds**. Preview line: "Game news arrives here, money is now called gold, and saved points stay put."
+     Body: the paragraph "What changed:" and the bullets
+     - "Messages: patch notes and news from the game arrive here, with a count on the button."
+     - "Notifications: what your training and expeditions earned, including XP, level-ups, gear and gold."
+     - "Money is now called gold. Your amount is unchanged."
+     - "When you level up, the build shows how many points are left. Saved points and your class are fixed; your stance
+       can still change."
+     - "The beds in the camp are bigger, so a gladiator fits on one. This one is for Punchy, who asked for it."
+     Avi, 2026-10-28: "in the patch message for the beds, say that this is for Punchy request." Punchy is the player who
+     asked; the credit stays in the note's text.
 
   The preview line is the first sentence-sized summary stored with the message (or derived from the body; the builder's
   call), so the list never cuts words mid-way.

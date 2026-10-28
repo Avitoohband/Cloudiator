@@ -257,8 +257,14 @@
   max-width: calc(100% - 24px);
 }
 
+/* A popover open under the chip (the account menu, the messages panel) stays above the notices below it. */
+.chip[data-popover] {
+  z-index: 10;
+}
+
 .chipRow {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 6px;
 }

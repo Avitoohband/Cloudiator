@@ -43,6 +43,7 @@ import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
 import { ResultsPanel } from '../results/ResultsPanel';
+import type { MessagingActions } from '../messages/messages';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
@@ -285,6 +286,26 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     if (view) openScene(view);
   }, [openScene]);
 
+  // The messages button's reads and marks (Task 6). The lists are read through the gateway the shell reads with (the fixture preview's, once
+  // loaded); a mark is a command with no receipt and is followed by an owner read, so the badge drops at once. Both reject when the
+  // command is refused (the fixture preview takes none) or the read fails; the panel never shows that, and asks again when the player
+  // opens the same message or tab again.
+  const { refreshOwner } = game;
+  const messaging = useMemo<MessagingActions | undefined>(() => reads ? {
+    load: () => reads.messages(),
+    loadNotifications: () => reads.notifications(),
+    read: async messageId => {
+      const result = await reads.command({ kind: 'read-message', operationId: crypto.randomUUID(), messageId });
+      if (!result.ok) throw new Error(result.code);
+      await refreshOwner();
+    },
+    seeNotifications: async upToMs => {
+      const result = await reads.command({ kind: 'see-notifications', operationId: crypto.randomUUID(), upToMs });
+      if (!result.ok) throw new Error(result.code);
+      await refreshOwner();
+    },
+  } : undefined, [reads, refreshOwner]);
+
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
   // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
@@ -325,7 +346,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
-      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock}
+      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging}
         onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}

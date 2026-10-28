@@ -17,8 +17,10 @@ export const FIXTURE_MESSAGES: readonly GameMessage[] = [
 
 /**
  * Sample notifications for the fixture preview, newest first, as `GameGateway.notifications()` lists them: an Arena victory, an
- * expedition that raised the level (with a Rare item and extra items sold), a training and an expedition lost. Sample data for the
- * preview, not any player's results.
+ * expedition (with a Rare item and extra items sold), a training and an expedition lost. Sample data for the preview, not any player's
+ * results. The preview's gladiator is level 1 (`ownerFixture`, through ARENA_OWNER), and a result can claim a level-up only to a level
+ * the gladiator has reached, so none does here (`levelAfter` is null throughout; the live Notifications tab's "Level up!" line is
+ * tested with an owner whose level and XP prove it, tests/browser/messages.spec.ts).
  */
 const sample = (n: number, resolvedKind: ActivitySummary['resolvedKind'], result: ActivitySummary['result'], settledAtMs: number,
   rewards: Partial<ActivitySummary['rewards']>, extra: Partial<ActivitySummary> = {}): ActivitySummary => ({
@@ -32,7 +34,7 @@ const note = (summary: ActivitySummary, destination: string | null, levelAfter: 
 export const FIXTURE_NOTIFICATIONS: readonly GameNotification[] = [
   note(sample(4, 'arena', 'victory', 1_791_589_000_000, { renown: 30 }, { ratingDelta: 12 }), null, null),
   note(sample(3, 'expedition', 'victory', 1_791_588_000_000, { money: 120, xp: 250, overflowMoney: 35,
-    items: [{ catalogId: 'sword:5:rare', catalogVersion: 'v1', tier: 5, rarity: 'rare', quantity: 1 }] }), 'Ruined Outpost', 4),
+    items: [{ catalogId: 'sword:5:rare', catalogVersion: 'v1', tier: 5, rarity: 'rare', quantity: 1 }] }), 'Ruined Outpost', null),
   note(sample(2, 'training', 'completed', 1_791_587_000_000, { attributePoints: 1 }), null, null),
   note(sample(1, 'expedition', 'defeat', 1_791_586_000_000, {}), 'Woodland Path', null),
 ];

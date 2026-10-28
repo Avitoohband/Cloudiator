@@ -6,7 +6,7 @@
 // Google), and its PKCE exchange signs in `LiveTransport.googleUser`.
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
-import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { ActivitySummary, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { GameMessage, MarketListing, OwnerState, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 
@@ -48,6 +48,8 @@ export function emptyWorld(serverNowMs = Date.now()): WorldSnapshot {
   return { revision: 'empty-1', serverNowMs, slotIndex: Math.floor(serverNowMs / SLOT_MS), actors: [] };
 }
 
+/** One settled result of the owner's: its credited summary and, for an expedition, the id of the destination it went to. */
+export type LiveNotification = { summary: ActivitySummary; expeditionId?: string };
 export type LiveData = {
   /** The public world: its revision, its actors and (by default) the server's time, which then runs in real time. */
   world: WorldSnapshot;
@@ -70,6 +72,12 @@ export type LiveData = {
   market?: readonly MarketListing[];
   /** The visible game messages (the public `game_messages` table), in any order; none by default. */
   messages?: readonly GameMessage[];
+  /**
+   * The owner's settled results the Notifications tab lists (the owner-only `activities` rows `readNotifications` reads), in any order.
+   * The level each reached comes from the owner state's level and XP, as the real read derives it, and an expedition's destination
+   * from `expeditionId`. Only a signed-in reader sees them; none by default.
+   */
+  notifications?: readonly LiveNotification[];
   /** The signed-in reader's owner state; null or absent is an account with no gladiator. */
   owner?: OwnerState | null;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
@@ -109,6 +117,8 @@ export type LiveTransport = {
   setMarket(offers: readonly MarketListing[]): void;
   /** Replaces the visible game messages (the operator posted or hid one). */
   setMessages(messages: readonly GameMessage[]): void;
+  /** Replaces the owner's settled results the Notifications tab lists (a result was credited). */
+  setNotifications(notifications: readonly LiveNotification[]): void;
   /** Replaces the revision's published slot (a slot's publication), or restores the default with undefined. */
   setPublishedSlotIndex(published: ((serverNowMs: number) => number | null) | undefined): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
@@ -229,6 +239,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setTimelines: timelines => { data.timelines = timelines; },
     setMarket: offers => { data.market = offers; },
     setMessages: messages => { data.messages = messages; },
+    setNotifications: notifications => { data.notifications = notifications; },
     setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {
@@ -377,7 +388,16 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
       published_at_ms: m.publishedAtMs })) },
     // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all.
     owner_state: { private: true, rows: reader !== null && owner ? [{ state: owner }] : [] },
-    activities: { private: true, rows: timelines.filter(t => t.summary).map(t => ({ id: t.activityId, status: 'completed', settled_at_ms: t.summary!.settledAtMs, summary: t.summary })) },
+    // The timelines' owner summaries, and the owner's settled results as `readNotifications` selects them: the kind, the slot, the
+    // expedition asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the
+    // server's now (none here: every result a spec lists has been revealed).
+    activities: { private: true, rows: [
+      ...timelines.filter(t => t.summary).map(t => ({ id: t.activityId, status: 'completed', settled_at_ms: t.summary!.settledAtMs, summary: t.summary })),
+      ...(owner ? (data.notifications ?? []).map(n => ({ id: n.summary.activityId, slot_index: Math.floor(n.summary.settledAtMs / SLOT_MS), status: 'completed',
+        resolved_kind: n.summary.resolvedKind, settled_at_ms: n.summary.settledAtMs, summary: n.summary,
+        requested: n.expeditionId ? { expeditionId: n.expeditionId } : {},
+        gladiators: { level: owner.progression.level, xp: owner.progression.xp, newer: [{ count: 0 }] } })) : []),
+    ] },
   };
 }
 
@@ -394,7 +414,8 @@ type Test = (row: Row) => boolean;
 function query(rows: Row[], params: URLSearchParams): Row[] {
   const tests: Test[] = [];
   for (const [key, value] of params) {
-    if (RESERVED.has(key)) continue;
+    // A filter on an embedded resource (`gladiators.newer.status`) narrows that resource, not these rows: the rows carry it ready-made.
+    if (RESERVED.has(key) || key.includes('.')) continue;
     if (key === 'or' || key === 'and') tests.push(group(key, value));
     else tests.push(condition(key, value));
   }
@@ -455,6 +476,7 @@ function condition(column: string, filter: string): Test {
       return row => values.some(v => compare(row[column], v) === 0);
     }
     case 'is': return row => (value === 'null' ? row[column] == null : String(row[column]) === value);
+    case 'not': { const inner = condition(column, value); return row => !inner(row); }
     default: throw new Error(`Unsupported PostgREST filter ${column}=${filter}`);
   }
 }
@@ -469,7 +491,10 @@ function compare(left: unknown, right: string): number {
 /** `select=a,alias:col->key->>text` as PostgREST names and shapes it (a JSON path names its column by its last key). */
 function projection(select: string | null): (row: Row) => Row {
   if (!select || select === '*') return row => ({ ...row });
-  const fields = select.split(',').map(item => {
+  const fields = splitTopLevel(select).map(item => {
+    // An embedded resource (`gladiators(level,xp,newer:activities(count))`) is a field the row already carries under its name.
+    const embedded = /^(?:[a-z_]+:)?([a-z_]+)\(/.exec(item);
+    if (embedded) return { name: embedded[1], column: embedded[1], path: [] as { key: string; text: boolean }[] };
     const colon = item.indexOf(':');
     const alias = colon < 0 ? null : item.slice(0, colon), expression = colon < 0 ? item : item.slice(colon + 1);
     const [column, ...steps] = expression.split(/(->>?)/).reduce<string[][]>((acc, token) => {

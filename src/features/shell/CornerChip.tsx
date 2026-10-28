@@ -3,7 +3,8 @@
 // The corner chip, top right. A player sees their name, stamina, money, renown and the time to the next slot boundary
 // (on touch only the name and the countdown), and the chip opens a small menu with "Sign out". A visitor's chip starts
 // Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
-// gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text.
+// gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text. A player also has the
+// messages button left of the pill (Task 6): the chip shows one popover at a time, the account menu or the messages panel.
 import { useEffect, useId, useRef, useState } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
@@ -11,6 +12,8 @@ import { signOut, type SessionState } from '../../lib/api/session';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
+import { MessagesButton } from '../messages/MessagesButton';
+import { noLookDialog, type MessagingActions } from '../messages/messages';
 import type { MenuId } from './menus';
 import styles from './shell.module.css';
 
@@ -40,42 +43,55 @@ function Countdown({ clock }: { clock: DisplayClock }) {
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, onOpenMenu, onCreate }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, onChangeLook = noLookDialog, onOpenMenu, onCreate }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   clock: DisplayClock;
+  /** The messages button's lists and marks (the shell's); a player without it, or a visitor, has no messages button. */
+  messaging?: MessagingActions;
+  /** Opens the look dialog from the look note's Change look button; until the shell connects it, the button opens nothing. */
+  onChangeLook?(): void;
   onOpenMenu(id: MenuId): void;
   /** Opens the "Create your gladiator" dialog (signed in without a gladiator). */
   onCreate(): void;
 }) {
-  const [open, setOpen] = useState(false);
+  // One popover at a time: the account menu or the messages panel.
+  const [popover, setPopover] = useState<'account' | 'messages' | null>(null);
+  const open = popover === 'account';
   const [signOutError, setSignOutError] = useState(false);
   const google = useGoogleSignIn();
   const chip = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
+  const messagesButton = useRef<HTMLButtonElement>(null);
   const menuId = useId();
+  const messagesId = useId();
   const signedIn = !fixture && session.status === 'signed-in';
   const account = viewer === 'player' || signedIn;
 
   // Escape (before the shell's own handler, which then leaves an open panel alone) and a press elsewhere close it. While
-  // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1).
+  // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1). Escape and
+  // the panel's own Close give the focus back to the button that opened it; a press elsewhere takes it where it went.
+  const closeMessages = () => { setPopover(null); messagesButton.current?.focus(); };
   useEffect(() => {
-    if (!open) return;
+    if (popover === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || document.querySelector('dialog:modal')) return;
       event.preventDefault();
-      setOpen(false);
-      toggle.current?.focus();
+      setPopover(null);
+      (popover === 'messages' ? messagesButton : toggle).current?.focus();
     };
-    const onPress = (event: PointerEvent) => { if (!chip.current?.contains(event.target as Node)) setOpen(false); };
+    const onPress = (event: PointerEvent) => { if (!chip.current?.contains(event.target as Node)) setPopover(null); };
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPress, true);
     return () => { document.removeEventListener('keydown', onKey, true); document.removeEventListener('pointerdown', onPress, true); };
-  }, [open]);
-  useEffect(() => { if (!account) setOpen(false); }, [account]);
+  }, [popover]);
+  // The messages button belongs to a player with a gladiator whose owner read carries an inbox.
+  const inbox = owner?.inbox;
+  const showMessages = !!(messaging && inbox);
+  useEffect(() => { if (!account || (popover === 'messages' && !showMessages)) setPopover(null); }, [account, popover, showMessages]);
 
   if (!account) {
     const note = fixture ? (previewAs === 'visitor' ? null : viewer === 'unavailable' ? 'The fixture preview could not be loaded.' : 'Loading local preview…')
@@ -93,10 +109,12 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
     </div>;
   }
   return (
-    <div ref={chip} className={styles.chip} data-testid="corner-chip">
+    <div ref={chip} className={styles.chip} data-testid="corner-chip" data-popover={popover ?? undefined}>
       <div className={styles.chipRow}>
-        {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { setOpen(false); onCreate(); }}>Create your gladiator</button>}
-        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)}>
+        {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { setPopover(null); onCreate(); }}>Create your gladiator</button>}
+        {messaging && inbox && <MessagesButton inbox={inbox} {...messaging} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
+          onToggle={() => setPopover(value => (value === 'messages' ? null : 'messages'))} onClose={closeMessages} buttonRef={messagesButton} />}
+        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setPopover(value => (value === 'account' ? null : 'account'))}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>
             <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
@@ -112,7 +130,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
         <div id={menuId} className={styles.chipMenu} role="group" aria-label="Account">
           {signedIn ? <button type="button" onClick={() => {
             setSignOutError(false);
-            void signOut().then(() => setOpen(false), () => setSignOutError(true));
+            void signOut().then(() => setPopover(null), () => setSignOutError(true));
           }}>Sign out</button> : <p>Local preview: no account is signed in.</p>}
           {signOutError && <p role="alert">Sign-out could not be completed. Please try again.</p>}
         </div>

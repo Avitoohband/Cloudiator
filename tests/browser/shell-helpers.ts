@@ -57,7 +57,7 @@ export async function closeMenu(page: Page) {
 }
 
 /** The signed-in corner chip's account button, which opens its small menu (a viewer without a gladiator also has "Create your gladiator"). */
-export const chipToggle = (page: Page) => cornerChip(page).locator('button[aria-expanded]');
+export const chipToggle = (page: Page) => cornerChip(page).locator('button[aria-expanded]:not([data-messages-button])');
 
 /** Opens the corner chip's small menu (Sign out) and returns it. */
 export async function openChipMenu(page: Page): Promise<Locator> {

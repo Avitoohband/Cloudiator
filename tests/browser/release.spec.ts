@@ -14,7 +14,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { chipToggle, cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -143,13 +143,22 @@ test.describe('release accessibility in the fixture preview', () => {
       if (i < LABELS.length - 1) await press('Tab');
     }
 
-    // The camera buttons, then the corner chip: Enter opens its small menu, Escape closes it back to the chip.
+    // The camera buttons, then the corner chip: the messages button first (Enter opens its panel, Escape closes it back to the button),
+    // then the account button: Enter opens its small menu, Escape closes it back to the chip.
     for (const name of ['Zoom in', 'Zoom out', 'Reset zoom']) {
       await press('Tab');
       await expect(page.getByRole('button', { name, exact: true })).toBeFocused();
     }
     await press('Tab');
-    const chip = cornerChip(page).locator('button[aria-expanded]');
+    const messages = cornerChip(page).getByRole('button', { name: /^Messages(, \d+ new)?$/ });
+    await expect(messages).toBeFocused();
+    await press('Enter');
+    await expect(page.getByRole('region', { name: 'Messages', exact: true })).toBeVisible();
+    await press('Escape');
+    await expect(page.getByRole('region', { name: 'Messages', exact: true })).toBeHidden();
+    await expect(messages).toBeFocused();
+    await press('Tab');
+    const chip = chipToggle(page);
     await expect(chip).toBeFocused();
     await press('Enter');
     await expect(cornerChip(page).getByRole('group', { name: 'Account' })).toBeVisible();

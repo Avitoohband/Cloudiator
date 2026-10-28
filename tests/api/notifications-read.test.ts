@@ -203,7 +203,10 @@ test('the fixture preview lists sample notifications, newest first, and agrees w
   expect(list.length).toBeGreaterThan(2);
   expect(list.map(n => n.settledAtMs)).toEqual([...list.map(n => n.settledAtMs)].sort((a, b) => b - a));
   expect(new Set(list.map(n => n.activityId)).size).toBe(list.length);
-  expect(list.some(n => n.levelAfter !== null)).toBe(true);
+  // The preview's gladiator is level 1 (the owner fixture): no sample claims a level above the one it has reached.
+  const owner = await gateway.owner();
+  expect(owner.progression.level).toBe(1);
+  expect(list.every(n => n.levelAfter === null || n.levelAfter <= owner.progression.level)).toBe(true);
   for (const n of list) {
     expect(['training', 'expedition', 'arena', 'tournament']).toContain(n.kind);
     expect(n.summary.resolvedKind).toBe(n.kind);
@@ -211,7 +214,7 @@ test('the fixture preview lists sample notifications, newest first, and agrees w
     expect(n.settledAtMs).toBe(n.summary.settledAtMs);
   }
   // The owner's inbox is what these results make of it: new = settled after the mark.
-  const { inbox } = await gateway.owner();
+  const { inbox } = owner;
   expect(inbox.newNotifications).toBe(list.filter(n => n.settledAtMs > inbox.notificationsSeenMs).length);
   expect(inbox.newNotifications).toBeGreaterThan(0);
   // A copy each time: a caller that edits it changes nothing for the next.

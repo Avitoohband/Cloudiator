@@ -1,0 +1,125 @@
+/*
+ * The "Change your look" dialog (Task 7, spec Goal 4): the creation dialog's box (a modal over the running camp, scrolling inside itself, its
+ * action bar kept in view at the foot) around the same look picker. Its buttons are 44 px (the creation dialog's are 40). Text on the dark
+ * fills is 4.5:1 or better. A 360 px phone fits; the preview stays at the top of the dialog while the choices scroll (LookPicker.module.css).
+ */
+.dialog {
+  width: min(380px, calc(100% - 28px));
+  max-width: none;
+  max-height: calc(100% - 28px);
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The sticky action bar (about 72px, more with an error) covers the foot of the scrollport: a control the focus moves to is scrolled clear of it. */
+  scroll-padding-bottom: 130px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 16px;
+  background: rgba(21, 19, 28, 0.94);
+  color: var(--ink);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dialog[open] {
+  animation: appear 0.16s ease;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog[open] {
+    animation: none;
+  }
+}
+
+.dialog .form {
+  padding: 18px 18px 0;
+  border-top: 0;
+}
+
+.title {
+  margin: 0 0 6px;
+  font: 600 1.25rem/1.2 Georgia, 'Palatino Linotype', serif;
+  letter-spacing: 0.02em;
+}
+
+.title:focus {
+  outline: none;
+}
+
+/* Avi's disclaimer, said before the choices (the look patch note says it too). */
+.free {
+  margin: 0 0 6px;
+  color: #f8e3b0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px -18px 0;
+  padding: 12px 18px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgb(24, 22, 31);
+}
+
+/* Why the look was not saved, in view beside the buttons that sent it. */
+.error {
+  margin: 0;
+  color: #ffb4a8;
+  font-size: 0.85rem;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancel,
+.save {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 16px;
+  border-radius: 9px;
+}
+
+.cancel {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+}
+
+.save {
+  border: 1px solid transparent;
+  background: #e6b450;
+  color: #2a1d05;
+  font-weight: 700;
+}
+
+.save:disabled {
+  border-color: var(--line);
+  background: #2a3449;
+  color: var(--muted);
+  opacity: 1;
+}
+
+.cancel:focus-visible,
+.save:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}

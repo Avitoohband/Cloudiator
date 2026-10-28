@@ -11,7 +11,11 @@ import {
 } from './look-picker';
 import styles from './LookPicker.module.css';
 
-export function LookPicker({ look, name, onChange }: { look: Appearance; name: string; onChange(next: Appearance): void }) {
+export function LookPicker({ look, name, onChange, creation = true }: {
+  look: Appearance; name: string; onChange(next: Appearance): void;
+  /** The creation dialog's picker (the default) has the Random look button and says the look is set at creation; changing a look has neither. */
+  creation?: boolean;
+}) {
   const ids = { body: useId(), hair: useId(), skin: useId(), hairColor: useId(), cloth: useId() };
   const labels = groupLabels(look);
   const body = (id: BodyId) => <button key={id} type="button" className={styles.pill} aria-pressed={look.body === id} onClick={() => onChange(choose(look, 'body', id))}>{BODY_NAMES[id]}</button>;
@@ -24,7 +28,7 @@ export function LookPicker({ look, name, onChange }: { look: Appearance; name: s
     <legend>Choose a look</legend>
     <div className={styles.preview}><LookPreview look={look} name={name} /></div>
     <p role="status" className={styles.summary} data-testid="look-summary">{lookSummary(look)}</p>
-    <button type="button" className={styles.random} onClick={() => onChange(rerollLook(look, lookRandom))}>Random look</button>
+    {creation && <button type="button" className={styles.random} onClick={() => onChange(rerollLook(look, lookRandom))}>Random look</button>}
     <div role="group" aria-labelledby={ids.body} className={styles.group}>
       <span id={ids.body} className={styles.groupLabel}>Body</span>
       <div className={styles.pills}>{BODY_OPTIONS.map(body)}</div>
@@ -45,6 +49,6 @@ export function LookPicker({ look, name, onChange }: { look: Appearance; name: s
       <span id={ids.cloth} className={styles.groupLabel}>{labels.cloth}</span>
       {swatches('cloth')}
     </div>
-    <p className={`muted ${styles.note}`}>Your look is set when you create your gladiator.</p>
+    {creation && <p className={`muted ${styles.note}`}>Your look is set when you create your gladiator.</p>}
   </fieldset>;
 }

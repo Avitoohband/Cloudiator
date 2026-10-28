@@ -33,6 +33,8 @@ import { useGameState } from '../character/useGameState';
 import { CharacterPanel } from '../character/CharacterPanel';
 import { ownRestingText } from '../character/activity-status';
 import { CreateCharacter } from '../character/CreateCharacter';
+import { ChangeLookDialog } from '../character/ChangeLookDialog';
+import { lookSavedLine } from '../character/look-change';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
 import { ProfileLayer } from '../character/ProfileCard';
 import { SchedulePanel } from '../schedule/SchedulePanel';
@@ -93,6 +95,13 @@ const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [r
 const focusOffer = () => {
   const offer = document.querySelector<HTMLElement>('[data-create-offer]');
   if (shown(offer)) offer.focus({ preventScroll: true });
+  else focusCamp();
+};
+
+/** Where the focus goes when the change-look dialog closes: the Messages button that led to it (the native dialog gives it back there too), else the camp. */
+const focusMessages = () => {
+  const button = document.querySelector<HTMLElement>('[data-messages-button]');
+  if (shown(button)) button.focus({ preventScroll: true });
   else focusCamp();
 };
 
@@ -306,6 +315,31 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     },
   } : undefined, [reads, refreshOwner]);
 
+  // The change-look dialog (Task 7), opened by the look note's Change look button: the messages panel has closed by then, and the focus
+  // goes back to the Messages button when the dialog does. A saved look is said by a status line that stays until it is dismissed, the
+  // next dialog opens or another gladiator is shown. The save reads the camp's world again at once (the new look is drawn now, not at the
+  // next poll) as well as the owner.
+  const { refreshWorld } = game;
+  const [lookOpen, setLookOpen] = useState(false);
+  const [lookSaved, setLookSaved] = useState<{ gladiatorId: string; text: string } | null>(null);
+  const ownerRef = useRef(owner);
+  useEffect(() => { ownerRef.current = owner; });
+  const openLook = useCallback(() => { setLookSaved(null); setLookOpen(true); }, []);
+  const closeLook = useCallback((saved: boolean) => {
+    setLookOpen(false);
+    const current = ownerRef.current;
+    if (saved && current) setLookSaved({ gladiatorId: current.gladiatorId, text: lookSavedLine(current.name) });
+    focusMessages();
+  }, []);
+  const refreshLook = useCallback(async () => {
+    void refreshWorld();
+    await refreshOwner();
+  }, [refreshWorld, refreshOwner]);
+  // The dialog belongs to one gladiator: when none is shown (sign-out) or another is, it is closed and does not come back on its own.
+  const lookOwner = owner?.gladiatorId ?? null;
+  useEffect(() => { setLookOpen(false); }, [lookOwner]);
+  const savedLook = lookSaved && lookSaved.gladiatorId === lookOwner ? lookSaved.text : null;
+
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
   // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
@@ -347,7 +381,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging}
-        onOpenMenu={show} onCreate={joining.offer} />
+        onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices}>
@@ -355,6 +389,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
             signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
         {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))
           && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
+        {/* The saved look's status line. The live region is always there (hidden while empty), so the text, when it arrives, is announced. */}
+        <div className={savedLook ? styles.signInNotice : styles.sr}>
+          <p role="status" data-testid="look-saved">{savedLook ?? ''}</p>
+          {savedLook && <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setLookSaved(null)}>×</button>}
+        </div>
         {signInNotice && <div className={styles.signInNotice} role="status">
           <p>{SIGN_IN_MESSAGES[signInNotice]}</p>
           <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setSignInNotice(null)}>×</button>
@@ -382,6 +421,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
+      )}
+      {lookOpen && owner && reads && (
+        <ChangeLookDialog key={owner.gladiatorId} owner={owner} gateway={reads} refresh={refreshLook} preview={fixture} onClose={closeLook} />
       )}
       {perf && <PerfOverlay phase={perfPhase.label} phaseKey={perfPhase.key} />}
     </div>

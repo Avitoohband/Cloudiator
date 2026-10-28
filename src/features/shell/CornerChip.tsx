@@ -13,7 +13,7 @@ import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
 import { MessagesButton } from '../messages/MessagesButton';
-import { noLookDialog, type MessagingActions } from '../messages/messages';
+import type { MessagingActions } from '../messages/messages';
 import type { MenuId } from './menus';
 import styles from './shell.module.css';
 
@@ -43,7 +43,7 @@ function Countdown({ clock }: { clock: DisplayClock }) {
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, onChangeLook = noLookDialog, onOpenMenu, onCreate }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, onChangeLook, onOpenMenu, onCreate }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -52,8 +52,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   clock: DisplayClock;
   /** The messages button's lists and marks (the shell's); a player without it, or a visitor, has no messages button. */
   messaging?: MessagingActions;
-  /** Opens the look dialog from the look note's Change look button; until the shell connects it, the button opens nothing. */
-  onChangeLook?(): void;
+  /** Opens the change-look dialog from the look note's Change look button (the messages panel closes first; the shell owns the dialog). */
+  onChangeLook(): void;
   onOpenMenu(id: MenuId): void;
   /** Opens the "Create your gladiator" dialog (signed in without a gladiator). */
   onCreate(): void;

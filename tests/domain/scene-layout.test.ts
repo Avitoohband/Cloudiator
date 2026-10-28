@@ -217,6 +217,17 @@ describe('actor routines', () => {
     expect(new Set(Array.from({ length: 50 }, (_, i) => JSON.stringify(legacyAppearance(actor(i, 'rest').gladiatorId)))).size).toBeGreaterThan(10);
   });
 
+  // The expedition view draws a gladiator it cannot name yet (no actor, no revealed battle) with the activity id as the seed
+  // (`ExpeditionView`: `lookFor(appearance, gladiatorId ?? activityId, …)`). A saved legacy look must not shift when the id arrives.
+  it('draws a saved legacy look the same whatever seed the expedition view passes while the gladiator is unknown', () => {
+    for (let i = 0; i < 50; i += 1) {
+      const id = actor(i, 'rest').gladiatorId, saved = legacyAppearance(id);
+      for (const set of [[], ['weapon-sword', 'offhand-shield'], ['weapon-spear', 'armor-heavy', 'head-helmet']]) {
+        for (const seed of [id, `activity-${i}`, '']) expect(lookFor(saved, seed, set), `${id} seed ${seed} ${set.join()}`).toEqual(lookFor(null, id, set));
+      }
+    }
+  });
+
   it('draws a chosen body, hair style and colours', () => {
     const id = actor(1, 'rest').gladiatorId;
     const look = (patch: Partial<Appearance>, set: string[] = ['weapon-sword', 'offhand-shield']) =>

@@ -24,6 +24,11 @@ export type GameUiState = {
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
   /**
+   * Reads the world's revision (and a changed world) now, after any refresh in flight, for a command that changed what the camp draws (a
+   * saved look, Task 7): the camp then shows it at once, not at the next poll, and a new revision reads the owner once more. Never rejects.
+   */
+  refreshWorld(): Promise<void>;
+  /**
    * The gladiator the creation dialog has just created, with the owner state it read to confirm it: shown at once, with
    * no read of its own, and the world (which the creation changed) read now; that new revision reads the owner once more.
    */
@@ -182,6 +187,8 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
     void controllerRef.current?.refresh({ fresh: true });
   }, [account]);
 
+  const refreshWorld = useCallback((): Promise<void> => controllerRef.current?.refresh({ fresh: true }) ?? Promise.resolve(), []);
+
   const syncError = sync?.error ?? null;
   // A rejected stored session: one refresh first; then one local sign-out attempt per completed sync publish that still
   // reports it, so a sign-out that failed and kept the session is tried again at the next poll (never two at once, never
@@ -258,6 +265,6 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   return {
     viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, ownResting, clock,
-    sceneStatus, refreshOwner, setSceneStatus, ownerCreated,
+    sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld,
   };
 }

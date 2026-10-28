@@ -69,9 +69,3 @@ export const isNewNotification = (notification: GameNotification, seenMs: number
 export function notificationsStale(held: readonly GameNotification[], inbox: Inbox): boolean {
   return held.filter(notification => isNewNotification(notification, inbox.notificationsSeenMs)).length < inbox.newNotifications;
 }
-
-/**
- * Stands in for the look dialog's opener until the shell connects it: the "Change look" button calls it and nothing opens. The
- * shell passes its own `onChangeLook` to the corner chip when the dialog exists.
- */
-export const noLookDialog = (): void => {};

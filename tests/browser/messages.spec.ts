@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from './fixtures';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { ActivitySummary } from '../../supabase/functions/_shared/contracts/events';
 import type { GameMessage, Inbox, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
+import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '../../supabase/functions/_shared/domain/appearance';
+import { legacyAppearance, tintFor } from '../../src/game/actors';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveNotification } from './live-routes';
@@ -53,27 +56,39 @@ const RESULTS = [
 ];
 const newest = (list: readonly LiveNotification[]) => Math.max(...list.map(n => n.summary.settledAtMs));
 
-type Server = { messages: GameMessage[]; notifications: LiveNotification[]; readIds: number[]; seenMs: number; sinceMs: number; level: { level: number; xp: number } };
+type Server = { messages: GameMessage[]; notifications: LiveNotification[]; readIds: number[]; seenMs: number; sinceMs: number; level: { level: number; xp: number };
+  /** The look the database holds for the owner's gladiator: null is the legacy look. */
+  appearance: Appearance | null };
 /** The inbox as the database computes it for this account: what `owner_state.inbox` carries. */
 const inboxOf = (s: Server): Inbox => ({
   unread: s.messages.filter(m => m.publishedAtMs > s.sinceMs && !s.readIds.includes(m.id)).length,
   readIds: s.messages.map(m => m.id).filter(id => s.readIds.includes(id)).sort((a, b) => a - b), sinceMs: s.sinceMs,
   newNotifications: s.notifications.filter(n => n.summary.settledAtMs > s.seenMs).length, notificationsSeenMs: s.seenMs,
 });
-const ownerOf = (s: Server): OwnerState => ({ ...structuredClone(ownerFixture), progression: { ...ownerFixture.progression, ...s.level }, inbox: inboxOf(s) });
+const ownerOf = (s: Server): OwnerState => ({ ...structuredClone(ownerFixture), progression: { ...ownerFixture.progression, ...s.level }, appearance: s.appearance, inbox: inboxOf(s) });
 
 type Setup = { messages?: GameMessage[]; notifications?: LiveNotification[]; readIds?: number[]; seenMs?: number; sinceMs?: number; level?: Server['level'];
   /** Answers a read mark with this refusal instead of marking it (the message text must still show). */
-  refuseRead?: 'rate-limited' | 'not-found' };
+  refuseRead?: 'rate-limited' | 'not-found';
+  /** The look the owner's gladiator has (null, the default, is the legacy look). */
+  appearance?: Appearance | null;
+  /**
+   * How the Edge function answers each `change-appearance`, in order ('ok' once they run out): `drop` loses the response, as a network failure does,
+   * and `applied-drop` loses it after the look was stored (the outcome is unknown to the page, and a later owner read shows the look).
+   */
+  changeReplies?: ('ok' | 'invalid' | 'unavailable' | 'rate-limited' | 'drop' | 'applied-drop')[];
+  /** Holds the first `change-appearance`'s answer (after it was applied) until this resolves (the command is being sent). */
+  holdChange?: Promise<void> };
 /** A signed-in player in live mode whose server (the transport and the command handler) keeps messages, read marks and the notifications mark. */
 async function player(page: Page, setup: Setup = {}) {
   const context = page.context();
   await seedSession(context);
   const server: Server = { messages: [...(setup.messages ?? MESSAGES)], notifications: [...(setup.notifications ?? [])], readIds: [...(setup.readIds ?? [EVENING.id])],
-    seenMs: setup.seenMs ?? 0, sinceMs: setup.sinceMs ?? SINCE, level: setup.level ?? { level: 2, xp: 150 } };
-  const world = { ...worldFixture, revision: 'live-1' };
+    seenMs: setup.seenMs ?? 0, sinceMs: setup.sinceMs ?? SINCE, level: setup.level ?? { level: 2, xp: 150 }, appearance: setup.appearance ?? null };
+  const world = { ...worldFixture, revision: 'live-1', actors: worldFixture.actors.map(actor => ({ ...actor, appearance: server.appearance })) };
   const live = await routeLiveReads(context, { world, owner: ownerOf(server), messages: server.messages, notifications: server.notifications });
   const commands: GameCommand[] = [];
+  let changeCount = 0;
   /** Tells the transport what the database now says (after a command, or an operator's post). */
   const sync = () => { live.setMessages(server.messages); live.setNotifications(server.notifications); live.setOwner(ownerOf(server)); };
   await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
@@ -93,6 +108,20 @@ async function player(page: Page, setup: Setup = {}) {
       server.seenMs = Math.max(server.seenMs, Math.min(command.upToMs, live.serverNowMs()));
       sync();
       return answer(200, { ok: true, value: { seenMs: server.seenMs } });
+    }
+    if (command.kind === 'change-appearance') {
+      const index = changeCount++;
+      const reply = setup.changeReplies?.[index] ?? 'ok';
+      if (reply === 'ok' || reply === 'applied-drop') {
+        // The database stores the look and re-projects the public actor, which moves the world revision.
+        server.appearance = command.appearance;
+        live.setWorld({ ...world, revision: `live-look-${index + 1}`, actors: world.actors.map(actor => ({ ...actor, appearance: command.appearance })) });
+        sync();
+      }
+      if (index === 0 && setup.holdChange) await setup.holdChange;
+      if (reply === 'drop' || reply === 'applied-drop') return route.abort('failed');
+      if (reply !== 'ok') return answer(reply === 'unavailable' ? 503 : reply === 'rate-limited' ? 429 : 400, { ok: false, code: reply });
+      return answer(200, { ok: true, receiptId: randomUUID(), value: { appearance: command.appearance, receivedAtMs: live.serverNowMs() } });
     }
     return answer(409, { ok: false, code: 'invalid' });
   });
@@ -114,6 +143,36 @@ async function openPanel(page: Page) {
   await expect(panel).toBeVisible();
   return panel;
 }
+/** The change-look dialog (Task 7): a modal over the camp, opened by the look note's Change look button. */
+const lookDialog = (page: Page) => page.getByRole('dialog', { name: 'Change your look', exact: true });
+/** The look the owner's gladiator shows with no stored look: male, short hair and the colours of its id. */
+const LEGACY = legacyAppearance(ownerFixture.gladiatorId);
+const lookGroups = (dialog: Locator) => ({
+  body: dialog.getByRole('group', { name: 'Body', exact: true }),
+  hair: dialog.getByRole('group', { name: 'Hair', exact: true }),
+  skin: dialog.getByRole('group', { name: /^Skin tone · / }),
+  hairColour: dialog.getByRole('group', { name: /^Hair colour · / }),
+  cloth: dialog.getByRole('group', { name: /^Clothes colour · / }),
+});
+const pressedName = (group: Locator) => group.getByRole('button', { pressed: true });
+/** Opens the look note and presses Change look: the panel closes and the dialog opens. */
+async function openLookDialog(page: Page) {
+  const panel = await openPanel(page);
+  await row(panel, /New: choose your gladiator/).click();
+  await panel.getByRole('button', { name: 'Change look', exact: true }).click();
+  const dialog = lookDialog(page);
+  await expect(dialog).toBeVisible();
+  await expect(panel).toBeHidden();
+  return dialog;
+}
+const saveButton = (dialog: Locator) => dialog.getByRole('button', { name: /^Save look$|^Saving/ });
+/** What the camp draws for the owner's gladiator, read from the running scene (null until it is placed). */
+const campLook = (page: Page) => page.evaluate(id => {
+  const actor = window.__cloudiatorCamp?.state()?.actors.find(a => a.id === id);
+  return actor ? { layers: actor.layers, tint: actor.tint } : null;
+}, ownerFixture.gladiatorId);
+const tintsOf = (look: Appearance) => ({ skin: SKIN_TONES[look.skin].tint, hair: HAIR_COLOURS[look.hairColor].tint, cloth: CLOTH_COLOURS[look.cloth].tint });
+const changes = (commands: readonly GameCommand[]) => sent(commands, 'change-appearance') as Extract<GameCommand, { kind: 'change-appearance' }>[];
 async function openLive(page: Page, url = '/game/') {
   await page.goto(url);
   await expectOwnerShown(page, 'Aster');
@@ -254,9 +313,12 @@ test.describe('in live mode', () => {
     await expect(panel.getByRole('button', { name: 'Change look', exact: true })).toBeVisible();
     await expect(panel.getByText('Free for now, as often as you like. This is temporary: changing your look will cost something in the future.')).toBeVisible();
     await a11yShot(page, testInfo, 'messages-look-note');
-    // Pressing it closes the panel and leaves the focus on the Messages button (the look dialog, when it opens, returns to it).
+    // Pressing it closes the panel and opens the look dialog (Task 7); closing that returns the focus to the Messages button.
     await panel.getByRole('button', { name: 'Change look', exact: true }).click();
     await expect(panel).toBeHidden();
+    await expect(lookDialog(page)).toBeVisible();
+    await lookDialog(page).getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(lookDialog(page)).toBeHidden();
     await expect(messagesButton(page)).toBeFocused();
   });
 
@@ -608,6 +670,399 @@ test.describe('in live mode', () => {
     expect(await contrastIssues(panel, { focusRing: true }), 'the focused row').toEqual([]);
     expect(await focusDrops(page)).toEqual([]);
   });
+
+  // Task 7: the change-look dialog (spec Goal 4 and Decisions). Change look is free and unlimited, for the caller's own gladiator, and the picker
+  // is the creation dialog's, opened on the current look: a legacy gladiator (no stored look) opens on male, short hair and the colours it shows.
+  test.describe('the change-look dialog', () => {
+    test('Change look closes the panel and opens a modal dialog on the legacy look, with Save off and nothing sent', async ({ page }, testInfo) => {
+      await watchFocus(page);
+      const { commands } = await player(page);
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      expect(await dialog.evaluate(el => (el as HTMLDialogElement).matches(':modal'))).toBe(true);
+      await expect(dialog.getByRole('heading', { name: 'Change your look', exact: true })).toBeFocused();
+      // The disclaimer, word for word (Avi's), with "Free for now" in bold.
+      await expect(dialog.getByText('Free for now, as often as you like. This is temporary: changing your look will cost something in the future.', { exact: true })).toBeVisible();
+      await expect(dialog.locator('strong')).toHaveText('Free for now');
+      // The current look: male, short hair and the colours the camp draws for this id.
+      const groups = lookGroups(dialog);
+      await expect(pressedName(groups.body)).toHaveAccessibleName('Male');
+      await expect(pressedName(groups.hair)).toHaveAccessibleName('Short');
+      await expect(pressedName(groups.skin)).toHaveAccessibleName(`Skin tone ${SKIN_TONES[LEGACY.skin].name}`);
+      await expect(pressedName(groups.hairColour)).toHaveAccessibleName(`Hair colour ${HAIR_COLOURS[LEGACY.hairColor].name}`);
+      await expect(pressedName(groups.cloth)).toHaveAccessibleName(`Clothes colour ${CLOTH_COLOURS[LEGACY.cloth].name}`);
+      // The preview draws the same colours as the camp, and names the gladiator.
+      await expect(dialog.getByTestId('look-preview')).toContainText('Aster');
+      const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
+      const tint = tintFor(ownerFixture.gladiatorId);
+      await expect.poll(() => dialog.locator('[data-layer]').evaluateAll(els => els.map(el => [el.getAttribute('data-layer'), el.getAttribute('data-tint')])))
+        .toEqual([['body', hex(tint.skin)], ['cloth', hex(tint.cloth)], ['hair', hex(tint.hair)], ['accent', hex(tint.cloth)]]);
+      // No creation aids: no Random look, and not the creation dialog's note.
+      await expect(dialog.getByRole('button', { name: 'Random look' })).toHaveCount(0);
+      await expect(dialog.getByText('Your look is set when you create your gladiator.')).toHaveCount(0);
+      // Save is off until a choice changes; Cancel is there.
+      await expect(saveButton(dialog)).toBeDisabled();
+      await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
+      expect(changes(commands)).toEqual([]);
+      await a11yShot(page, testInfo, 'look-dialog-legacy');
+    });
+
+    test('choosing Female and Ponytail turns Save on and sends exactly that look; the dialog closes, the saved line is announced and the camp wears it', async ({ page }, testInfo) => {
+      await watchFocus(page);
+      const { commands, server } = await player(page);
+      await openLive(page);
+      await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+      await expect.poll(() => campLook(page)).toEqual({ layers: ['body', 'cloth', 'hair', 'accent', 'held'], tint: tintFor(ownerFixture.gladiatorId) });
+      const dialog = await openLookDialog(page);
+      const groups = lookGroups(dialog);
+      await groups.body.getByRole('button', { name: 'Female', exact: true }).click();
+      await expect(saveButton(dialog)).toBeEnabled();
+      await groups.hair.getByRole('button', { name: 'Ponytail', exact: true }).click();
+      await expect(dialog.getByTestId('look-summary')).toContainText('Female, ponytail');
+      await expect.poll(() => dialog.locator('[data-layer]').evaluateAll(els => els.map(el => el.getAttribute('data-layer')))).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'accent']);
+      await a11yShot(page, testInfo, 'look-dialog-changed');
+      // Nothing is sent until Save look.
+      expect(changes(commands)).toEqual([]);
+      await saveButton(dialog).click();
+      await expect(dialog).toBeHidden();
+      const look: Appearance = { body: 'female', hair: 'ponytail', skin: LEGACY.skin, hairColor: LEGACY.hairColor, cloth: LEGACY.cloth };
+      expect(changes(commands)).toEqual([{ kind: 'change-appearance', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/), appearance: look }]);
+      expect(server.appearance).toEqual(look);
+      // The saved line is a status message naming the gladiator; the focus is back on the Messages button.
+      const saved = page.getByTestId('look-saved');
+      await expect(saved).toHaveAttribute('role', 'status');
+      await expect(saved).toHaveText('Look saved. Aster wears it in camp now.');
+      await expect(messagesButton(page)).toBeFocused();
+      // The camp redraws the same gladiator at once (the world is read again, not at the next poll): the female body in the chosen colours.
+      await expect.poll(() => campLook(page), { timeout: 5_000 }).toEqual({ layers: ['body-female', 'cloth-female', 'hair-ponytail', 'accent', 'held'], tint: tintsOf(look) });
+      await a11yShot(page, testInfo, 'look-saved');
+      // It can be dismissed.
+      await saved.locator('xpath=..').getByRole('button', { name: 'Dismiss' }).click();
+      await expect(saved).toHaveText('');
+      expect(await focusDrops(page)).toEqual([]);
+    });
+
+    test('putting the choices back turns Save off again, and the dialog reopens on the saved look', async ({ page }) => {
+      const { commands } = await player(page);
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      const groups = lookGroups(dialog);
+      await groups.hair.getByRole('button', { name: 'Bald', exact: true }).click();
+      await expect(saveButton(dialog)).toBeEnabled();
+      await groups.hair.getByRole('button', { name: 'Short', exact: true }).click();
+      await expect(saveButton(dialog)).toBeDisabled();
+      // A colour changes it too, and only that colour is sent.
+      const other = (LEGACY.cloth + 1) % CLOTH_COLOURS.length;
+      await dialog.getByRole('button', { name: `Clothes colour ${CLOTH_COLOURS[other].name}`, exact: true }).click();
+      await expect(saveButton(dialog)).toBeEnabled();
+      await saveButton(dialog).click();
+      await expect(dialog).toBeHidden();
+      expect(changes(commands).map(c => c.appearance)).toEqual([{ ...LEGACY, cloth: other }]);
+      // Opened again (the gladiator now has a stored look), it opens on that look with Save off.
+      const again = await openLookDialog(page);
+      await expect(pressedName(lookGroups(again).cloth)).toHaveAccessibleName(`Clothes colour ${CLOTH_COLOURS[other].name}`);
+      await expect(saveButton(again)).toBeDisabled();
+      // Free and unlimited: a second change is sent the same way, under its own operation id.
+      await lookGroups(again).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await saveButton(again).click();
+      await expect(again).toBeHidden();
+      expect(changes(commands)).toHaveLength(2);
+      const [first, second] = changes(commands);
+      expect(second.appearance).toEqual({ ...LEGACY, cloth: other, body: 'female' });
+      expect(second.operationId).not.toBe(first.operationId);
+      await expect(page.getByTestId('look-saved')).toHaveText('Look saved. Aster wears it in camp now.');
+    });
+
+    test('Cancel and Escape send nothing, keep the legacy look in camp and return the focus to the Messages button', async ({ page }) => {
+      await watchFocus(page);
+      const { commands } = await player(page);
+      await openLive(page);
+      await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+      const before = { layers: ['body', 'cloth', 'hair', 'accent', 'held'], tint: tintFor(ownerFixture.gladiatorId) };
+      await expect.poll(() => campLook(page)).toEqual(before);
+      // Cancel, after a change.
+      let dialog = await openLookDialog(page);
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(messagesButton(page)).toBeFocused();
+      // Escape, after a change.
+      dialog = await openLookDialog(page);
+      await lookGroups(dialog).hair.getByRole('button', { name: 'Bald', exact: true }).click();
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(messagesButton(page)).toBeFocused();
+      // Escape with nothing changed: a legacy gladiator that opens the dialog and saves nothing keeps exactly its look.
+      dialog = await openLookDialog(page);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(messagesButton(page)).toBeFocused();
+      expect(changes(commands)).toEqual([]);
+      await expect(page.getByTestId('look-saved')).toHaveText('');
+      expect(await campLook(page)).toEqual(before);
+      // Opened again, the unsaved choices are gone: it opens on the look the gladiator has.
+      dialog = await openLookDialog(page);
+      await expect(pressedName(lookGroups(dialog).body)).toHaveAccessibleName('Male');
+      await expect(pressedName(lookGroups(dialog).hair)).toHaveAccessibleName('Short');
+      expect(await focusDrops(page)).toEqual([]);
+    });
+
+    test('a refusal keeps the dialog open with the error, sends a new operation id on the next try and then saves', async ({ page }) => {
+      await watchFocus(page);
+      const { commands, server } = await player(page, { changeReplies: ['invalid'] });
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await saveButton(dialog).click();
+      await expect(dialog.getByRole('alert')).toHaveText('Your look could not be saved. Try again.');
+      await expect(dialog).toBeVisible();
+      expect(server.appearance).toBeNull();
+      await expect(page.getByTestId('look-saved')).toHaveText('');
+      // The choice is still there and Save is on, with the focus on it.
+      await expect(pressedName(lookGroups(dialog).body)).toHaveAccessibleName('Female');
+      await expect(saveButton(dialog)).toBeEnabled();
+      await expect(saveButton(dialog)).toBeFocused();
+      // An answer that decided the matter (invalid) ends the attempt: the next one is a new command.
+      await saveButton(dialog).click();
+      await expect(dialog).toBeHidden();
+      expect(changes(commands)).toHaveLength(2);
+      const [refused, accepted] = changes(commands);
+      expect(accepted.appearance).toEqual(refused.appearance);
+      expect(accepted.operationId).not.toBe(refused.operationId);
+      expect(server.appearance).toEqual({ ...LEGACY, body: 'female' });
+      expect(await focusDrops(page)).toEqual([]);
+    });
+
+    test('a lost response is retried with the same operation id, and an edit under it gets a new one', async ({ page }) => {
+      const { commands, server } = await player(page, { changeReplies: ['drop', 'unavailable', 'ok'] });
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await saveButton(dialog).click();
+      await expect(dialog.getByRole('alert')).toHaveText('Your look could not be saved. Try again.');
+      // The outcome was unknown (nothing came back), then the service was unavailable: the same command is sent again each time.
+      await saveButton(dialog).click();
+      await expect.poll(() => changes(commands).length).toBe(2);
+      await expect(dialog.getByRole('alert')).toHaveText('Your look could not be saved. Try again.');
+      // Another choice is another look: a new operation id (the server would refuse a second look under the first id).
+      await lookGroups(dialog).hair.getByRole('button', { name: 'Ponytail', exact: true }).click();
+      await expect(dialog.getByRole('alert')).toHaveCount(0);
+      await saveButton(dialog).click();
+      await expect(dialog).toBeHidden();
+      expect(changes(commands)).toHaveLength(3);
+      const [one, two, three] = changes(commands);
+      expect(two.operationId).toBe(one.operationId);
+      expect(two.appearance).toEqual(one.appearance);
+      expect(three.operationId).not.toBe(one.operationId);
+      expect(three.appearance).toEqual({ ...LEGACY, body: 'female', hair: 'ponytail' });
+      expect(server.appearance).toEqual(three.appearance);
+    });
+
+    /** A tab coming back to focus reads the owner (not within 2 s of the last owner read): what a background update is, for a page that is open. */
+    const backgroundRead = async (page: Page) => {
+      await page.waitForTimeout(2_500);
+      await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); });
+    };
+
+    test('an answer lost after the look was stored is settled by the next owner read: the dialog closes as saved, with no second command', async ({ page }) => {
+      const { commands, server } = await player(page, { changeReplies: ['applied-drop'] });
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await saveButton(dialog).click();
+      await expect(dialog.getByRole('alert')).toHaveText('Your look could not be saved. Try again.');
+      expect(server.appearance).toEqual({ ...LEGACY, body: 'female' });
+      // The page did not hear; the owner it reads next carries the look it sent, which says it was saved.
+      await backgroundRead(page);
+      await expect(dialog).toBeHidden();
+      await expect(page.getByTestId('look-saved')).toHaveText('Look saved. Aster wears it in camp now.');
+      await expect(messagesButton(page)).toBeFocused();
+      expect(changes(commands)).toHaveLength(1);
+    });
+
+    test('an owner read that arrives before the failed answer does not leave a "could not be saved" over a saved look', async ({ page }) => {
+      let release = () => {};
+      const held = new Promise<void>(resolve => { release = resolve; });
+      const { live, commands } = await player(page, { changeReplies: ['applied-drop'], holdChange: held });
+      try {
+        await openLive(page);
+        const dialog = await openLookDialog(page);
+        await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+        const owners = live.count('owner_state');
+        await saveButton(dialog).click();
+        await expect.poll(() => changes(commands).length).toBe(1);
+        // The look is stored and a background read shows it while the answer is still on its way: the dialog is still sending.
+        await backgroundRead(page);
+        await expect.poll(() => live.count('owner_state')).toBeGreaterThan(owners);
+        await expect(dialog.getByRole('button', { name: 'Saving…', exact: true })).toBeVisible();
+        // Then the answer fails: the look on screen is the one the owner has, so it is saved, not refused.
+        release();
+        await expect(dialog).toBeHidden();
+        await expect(page.getByTestId('look-saved')).toHaveText('Look saved. Aster wears it in camp now.');
+        expect(changes(commands)).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
+
+    test('a look stored by a lost answer does not close the dialog under a player who has already chosen another look', async ({ page }) => {
+      const { live, commands, server } = await player(page, { changeReplies: ['applied-drop'] });
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await saveButton(dialog).click();
+      await expect(dialog.getByRole('alert')).toBeVisible();
+      await lookGroups(dialog).hair.getByRole('button', { name: 'Ponytail', exact: true }).click();
+      const owners = live.count('owner_state');
+      await backgroundRead(page);
+      await expect.poll(() => live.count('owner_state')).toBeGreaterThan(owners);
+      // The owner now has Female/Short, the draft is Female/Ponytail: Save is on for the new choice, and the dialog stays.
+      await page.waitForTimeout(500);
+      await expect(dialog).toBeVisible();
+      await expect(saveButton(dialog)).toBeEnabled();
+      await saveButton(dialog).click();
+      await expect(dialog).toBeHidden();
+      expect(changes(commands)).toHaveLength(2);
+      expect(changes(commands)[1].appearance).toEqual({ ...LEGACY, body: 'female', hair: 'ponytail' });
+      expect(changes(commands)[1].operationId).not.toBe(changes(commands)[0].operationId);
+      expect(server.appearance).toEqual(changes(commands)[1].appearance);
+    });
+
+    test('while the look is being sent a second press sends nothing, Cancel is off and Escape does not close it', async ({ page }) => {
+      let release = () => {};
+      const held = new Promise<void>(resolve => { release = resolve; });
+      const { commands } = await player(page, { holdChange: held });
+      try {
+        await openLive(page);
+        const dialog = await openLookDialog(page);
+        await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+        await saveButton(dialog).click();
+        await expect.poll(() => changes(commands).length).toBe(1);
+        const saving = dialog.getByRole('button', { name: 'Saving…', exact: true });
+        await expect(saving).toHaveAttribute('aria-disabled', 'true');
+        await expect(dialog.locator('form')).toHaveAttribute('aria-busy', 'true');
+        // Save look stays focusable while the look is sent (aria-disabled, not disabled), so a keyboard player keeps the focus on it.
+        await expect(saving).toBeFocused();
+        await saving.click({ force: true });
+        await page.keyboard.press('Enter');
+        await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeVisible();
+        // A choice made now is not taken: the look being sent is the one on screen.
+        await lookGroups(dialog).hair.getByRole('button', { name: 'Bald', exact: true }).click();
+        await expect(pressedName(lookGroups(dialog).hair)).toHaveAccessibleName('Short');
+        release();
+        await expect(dialog).toBeHidden();
+        expect(changes(commands)).toHaveLength(1);
+      } finally {
+        // A held answer must always be let go, or the page cannot close.
+        release();
+      }
+    });
+
+    test('is a modal dialog: the page behind it takes no input', async ({ page }) => {
+      await player(page);
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      expect(await page.evaluate(() => document.querySelector('dialog:modal') !== null)).toBe(true);
+      // The Messages button behind it cannot be pressed, and Tab never lands on a control of the page behind.
+      for (let step = 0; step < 24; step++) {
+        await page.keyboard.press('Tab');
+        expect(await page.evaluate(() => {
+          const el = document.activeElement;
+          return !el || el === document.body || !!el.closest('dialog');
+        }), `Tab ${step + 1} left the dialog for the page behind it`).toBe(true);
+      }
+      await expect(dialog).toBeVisible();
+    });
+
+    test('fits a 360 × 740 phone: the dialog is on screen, nothing scrolls sideways, every target is 44 px and Save look stays in view', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 360, height: 740 });
+      await player(page);
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      const box = (await dialog.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(360);
+      expect(box.y + box.height).toBeLessThanOrEqual(740);
+      expect(await noHorizontalScroll(page)).toBe(true);
+      expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      // Every control is at least 44 × 44 px (the pills, the swatches, Cancel and Save look).
+      const small = await dialog.evaluate(root => [...root.querySelectorAll('button')].filter(b => b.getClientRects().length > 0).map(b => {
+        const r = b.getBoundingClientRect();
+        return { name: b.getAttribute('aria-label') || b.textContent?.trim(), w: Math.round(r.width), h: Math.round(r.height) };
+      }).filter(b => b.w < 44 || b.h < 44));
+      expect(small).toEqual([]);
+      // The action bar is in view without scrolling.
+      for (const name of ['Cancel', 'Save look']) {
+        const target = (await dialog.getByRole('button', { name, exact: true }).boundingBox())!;
+        expect(target.y + target.height, name).toBeLessThanOrEqual(740);
+        expect(target.y, name).toBeGreaterThanOrEqual(box.y);
+        expect(target.x + target.width, name).toBeLessThanOrEqual(360);
+      }
+      await a11yShot(page, testInfo, 'look-dialog-360');
+      // Scrolled to the last colour, the dialog still fits and nothing scrolls sideways.
+      await dialog.getByRole('button', { name: /^Clothes colour /, pressed: false }).last().scrollIntoViewIfNeeded();
+      expect(await noHorizontalScroll(page)).toBe(true);
+      await a11yShot(page, testInfo, 'look-dialog-360-scrolled');
+    });
+
+    test('shows a still preview when motion is reduced, and an idling one otherwise', async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await player(page);
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      const preview = dialog.getByTestId('look-preview');
+      await expect(preview).toHaveAttribute('data-motion', 'still');
+      await expect(preview).toHaveAttribute('data-frame', '0');
+      await page.waitForTimeout(1_000);
+      await expect(preview).toHaveAttribute('data-frame', '0');
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await expect(preview).toHaveAttribute('data-motion', 'animated');
+    });
+
+    test('the controls are named, the text meets contrast (also with the focus ring and the error shown) and no focus is lost', async ({ page }) => {
+      await watchFocus(page);
+      await player(page, { changeReplies: ['invalid'] });
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      await expectNamedControls(dialog, 'the change-look dialog');
+      expect(await contrastIssues(dialog), 'the change-look dialog').toEqual([]);
+      // The focus ring on a pill, a swatch and the buttons of the action bar, reached by the keyboard (a Tab first, so the page is in keyboard
+      // modality and a focus set by the test shows its ring as a keyboard player's does).
+      await page.keyboard.press('Tab');
+      await expect(dialog.getByRole('button', { name: 'Male', exact: true })).toBeFocused();
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).focus();
+      expect(await contrastIssues(dialog, { focusRing: true }), 'a focused pill').toEqual([]);
+      await page.keyboard.press('Enter');
+      await dialog.getByRole('button', { name: /^Skin tone /, pressed: false }).first().focus();
+      expect(await contrastIssues(dialog, { focusRing: true }), 'a focused swatch').toEqual([]);
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).focus();
+      expect(await contrastIssues(dialog, { focusRing: true }), 'the focused Cancel button').toEqual([]);
+      await saveButton(dialog).focus();
+      expect(await contrastIssues(dialog, { focusRing: true }), 'the focused Save button').toEqual([]);
+      // With the error shown.
+      await page.keyboard.press('Enter');
+      await expect(dialog.getByRole('alert')).toBeVisible();
+      expect(await contrastIssues(dialog), 'the dialog with the error').toEqual([]);
+      await expect(saveButton(dialog)).toBeFocused();
+      expect(await focusDrops(page)).toEqual([]);
+    });
+
+    test('the saved line on the camp meets contrast and its button is named', async ({ page }) => {
+      await player(page);
+      await openLive(page);
+      const dialog = await openLookDialog(page);
+      await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+      await saveButton(dialog).click();
+      const saved = page.getByTestId('look-saved');
+      await expect(saved).toHaveText('Look saved. Aster wears it in camp now.');
+      const host = saved.locator('xpath=..');
+      expect(await contrastIssues(host), 'the saved line').toEqual([]);
+      await expectNamedControls(host, 'the saved line');
+    });
+  });
 });
 
 test.describe('in the fixture preview', () => {
@@ -637,5 +1092,24 @@ test.describe('in the fixture preview', () => {
     await row(panel, /New: choose your gladiator/).click();
     await expect(panel.getByRole('button', { name: 'Change look', exact: true })).toBeVisible();
     await expect(panel.getByRole('alert')).toHaveCount(0);
+  });
+
+  test('the look dialog opens in the preview, which takes no commands: it says so and keeps the look', async ({ page }) => {
+    await page.goto('/game/?mode=fixture');
+    await expectOwnerShown(page, 'Aster');
+    const panel = await openPanel(page);
+    await row(panel, /New: choose your gladiator/).click();
+    await panel.getByRole('button', { name: 'Change look', exact: true }).click();
+    const dialog = lookDialog(page);
+    await expect(dialog).toBeVisible();
+    await expect(saveButton(dialog)).toBeDisabled();
+    await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+    await saveButton(dialog).click();
+    await expect(dialog.getByRole('alert')).toHaveText('Look changes are unavailable in this preview. Your look is unchanged.');
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId('look-saved')).toHaveText('');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(messagesButton(page)).toBeFocused();
   });
 });

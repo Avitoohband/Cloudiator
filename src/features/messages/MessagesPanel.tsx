@@ -12,6 +12,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { GameMessage, GameNotification, Inbox, MessageBlock } from '@contracts/reads';
 import { isNewNotification, isUnread, messageDate, messagesStale, notificationsStale, tagName, badgeText, type MessagingActions } from './messages';
+import { LookDisclaimer } from './LookDisclaimer';
 import { levelUpLine, notificationLines } from './notifications';
 import { useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
@@ -162,7 +163,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
             <Body blocks={detail.body} />
             {detail.action === 'change-look' && <div className={styles.action}>
               <button type="button" className={styles.actionButton} onClick={() => { onClose(); changeLook(); }}>Change look</button>
-              <p><strong>Free for now</strong>, as often as you like. This is temporary: changing your look will cost something in the future.</p>
+              <LookDisclaimer />
             </div>}
           </article>
         ) : tab === 'messages' ? (

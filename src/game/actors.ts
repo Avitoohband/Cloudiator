@@ -136,6 +136,16 @@ export function tintFor(gladiatorId: string): ActorRoutine['tint'] {
 }
 
 /**
+ * The legacy look written as a look: the male body, short hair and the palette indices `tintFor` picks from the id. The look picker
+ * opens a gladiator with no stored appearance on this, so opening it and saving without a change keeps what it wears (and
+ * `lookFor(legacyAppearance(id), id, s)` equals `lookFor(null, id, s)`).
+ */
+export function legacyAppearance(gladiatorId: string): Appearance {
+  const look = hashString(gladiatorId);
+  return { body: 'male', hair: 'short', skin: (look >>> 11) % SKIN_TINTS.length, hairColor: (look >>> 5) % HAIR_TINTS.length, cloth: look % CLOTH_TINTS.length };
+}
+
+/**
  * How a gladiator is drawn, in every scene (camp, expedition, replay). `null` is the legacy look, exactly as before the look could
  * be chosen: `layersFor(silhouettes)` and the colours of `tintFor(gladiatorId)`. A chosen look uses its body, hair style and
  * palette indices. A missing or invalid value (an actor projected before the look existed, a stale cached read) is the legacy look.

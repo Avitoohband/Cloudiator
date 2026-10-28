@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GameCommand, CommandResult, DayScheduleValue } from '../contracts/commands.ts';
+import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
@@ -104,6 +104,7 @@ export function prepareListingPurchase(state: OwnerState, listed: Pick<ItemInsta
  */
 const RETRYABLE_ABORTS: readonly string[] = ['40P01', '40001'];
 export type OptInCommand = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
+export type AppearanceCommand = Extract<GameCommand, { kind: 'change-appearance' }>;
 /** The saved automatic-entry setting and the database time it was received (Task 19). */
 export type OptInValue = { enabled: boolean; receivedAtMs: number };
 export type CreationValue = { gladiatorId: string };
@@ -195,6 +196,17 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc('set_tournament_opt_in', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
       if (error) throw new Error('opt-in-unavailable');
       return data as CommandResult<OptInValue>;
+    },
+    /**
+     * Change look: the caller's own gladiator takes the look (free, no limit). SQL replays a committed receipt first, refuses an
+     * invalid look and answers `not-found` for an account without a gladiator; it is not tied to the world clock, so it never
+     * answers `processing`.
+     */
+    async changeAppearance(actor: Actor, original: AppearanceCommand): Promise<CommandResult<ChangeAppearanceValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase() };
+      const { data, error } = await client.rpc('change_appearance', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
+      if (error) throw new Error('appearance-unavailable');
+      return data as CommandResult<ChangeAppearanceValue>;
     },
     /** Future build commands must use this actor-scoped inventory, never a player-supplied owned list. */
     async loadOwnedInventory(actor: Actor): Promise<ItemInstance[]> {

@@ -32,6 +32,8 @@ export type PresenceResult = { ok: true } | { ok: false; code: ApiErrorCode; ret
  * each part the slot its new choice takes effect in (`null` = that part's choice is unchanged and nothing was written).
  */
 export type DayScheduleValue = { version: number; receivedAtMs: number; parts: Record<Phase, { effectiveSlotIndex: number; effectiveAtMs: number } | null> };
+/** The answer to a `change-appearance` command: the look the gladiator now has and the server time the change was received. */
+export type ChangeAppearanceValue = { appearance: Appearance; receivedAtMs: number };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
   // `appearance` is the look chosen at creation (supabase/functions/_shared/domain/appearance.ts). Absent (an older open tab): the
@@ -48,5 +50,7 @@ export type GameCommand = Operation & (
   | { kind: 'cancel-listing'; listingId: string }
   | { kind: 'buy-listing'; listingId: string }
   | { kind: 'set-tournament-opt-in'; enabled: boolean }
+  // Change look: free and unlimited for now. The look replaces the caller's own gladiator's (the command names no gladiator).
+  | { kind: 'change-appearance'; appearance: Appearance }
   | { kind: 'presence' }
 );

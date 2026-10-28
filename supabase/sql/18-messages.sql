@@ -15,8 +15,11 @@
 --      and apply as queued (private.apply_pending_build is unchanged and reads the held reservation); a replay of a committed
 --      operation is answered from its receipt before any of this, so it is unchanged.
 --
--- The rules change in place in v1 (docs/operations/runbook.md, "Retained-rule deployments"): no executor of a job in flight
--- reads the fee or the class. Every statement is reapplicable.
+--    Section 1 changes the rules in place in v1 (docs/operations/runbook.md, "Retained-rule deployments"): no executor of a job in
+--    flight reads the fee or the class.
+-- 2. public.change_appearance: the free, unlimited look change of the caller's own gladiator (Task 2; described at its function).
+--
+-- Every statement is reapplicable.
 begin;
 
 -- Lock order and clock as 02-build-schedule.sql: account lock, receipt, character row, then builds, schedules, wallet and
@@ -156,6 +159,46 @@ end $$;
 
 revoke all on function private.planning_command(uuid,uuid,jsonb,text) from public,anon,authenticated;
 grant execute on function private.planning_command(uuid,uuid,jsonb,text) to service_role;
+
+-- 2. public.change_appearance(actor_id, operation_id, input): the free, unlimited look change of the caller's own gladiator
+--    (spec Goal 4, "Change look command"). Shaped like public.set_tournament_opt_in (09-tournaments.sql): the account lock, the
+--    receipt replay (a replay returns the stored result, the same operation with another body is `conflict`, both before any shape
+--    check), the command's exact keys (`appearance`, `kind`, `operationId`), `private.valid_appearance` (17-appearance.sql: the same
+--    look rules as creation; an invalid look is `invalid` and writes no receipt), the caller's own gladiator `for update`
+--    (`not-found` for an account without one: the command names no gladiator, so no other can change), the update only when the
+--    look differs, then the receipt. A legacy gladiator (appearance null) is changed like any other. The update fires the deferred
+--    project_changed_character trigger (06-projections.sql), which republishes the world actor and raises the world revision; an
+--    unchanged look updates nothing, so it publishes nothing. There is no count or cooldown: the Edge command rate limit is the
+--    only limit. Unlike the opt-in it never answers `processing`: a look does not depend on the world clock.
+--    Result: {ok:true, receiptId, value:{appearance, receivedAtMs}}. Backend only (EXECUTE for service_role).
+create or replace function public.change_appearance(actor_id uuid, operation_id uuid, input jsonb) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare c jsonb:=input->'command'; prior public.operation_receipts%rowtype; g public.gladiators%rowtype; now_ms bigint;
+  receipt uuid:=gen_random_uuid(); result jsonb;
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if operation_id is null or jsonb_typeof(c) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));
+  select * into prior from public.operation_receipts r where r.owner_id=actor_id and r.operation_id=change_appearance.operation_id;
+  if found then
+    if prior.request<>c then return jsonb_build_object('ok',false,'code','conflict'); end if;
+    return prior.result;
+  end if;
+  if (select array_agg(k order by k collate "C") from jsonb_object_keys(c) k) is distinct from array['appearance','kind','operationId']
+    or c->>'kind' is distinct from 'change-appearance' or c->>'operationId' is distinct from operation_id::text
+    or not private.valid_appearance(c->'appearance') then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  select * into g from public.gladiators where owner_id=actor_id for update;
+  if not found then return jsonb_build_object('ok',false,'code','not-found'); end if;
+  now_ms:=private.planning_now_ms();
+  update public.gladiators set appearance=c->'appearance' where id=g.id and appearance is distinct from c->'appearance';
+  result:=jsonb_build_object('ok',true,'receiptId',receipt,'value',jsonb_build_object('appearance',c->'appearance','receivedAtMs',now_ms));
+  insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(actor_id,operation_id,receipt,g.id,c,sha256(convert_to(c::text,'UTF8')),result);
+  return result;
+end $$;
+
+revoke all on function public.change_appearance(uuid,uuid,jsonb) from public,anon,authenticated;
+grant execute on function public.change_appearance(uuid,uuid,jsonb) to service_role;
 
 notify pgrst,'reload schema';
 commit;

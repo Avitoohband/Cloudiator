@@ -188,6 +188,8 @@ const SERVICE_ROLE = [
   'function public.buy_shop(uuid, uuid, jsonb): EXECUTE',
   'function public.cancel_build(uuid, uuid, jsonb): EXECUTE',
   'function public.cancel_listing(uuid, uuid, jsonb): EXECUTE',
+  // Change look (M25): the free look change of the caller's own gladiator, backend only like set_tournament_opt_in.
+  'function public.change_appearance(uuid, uuid, jsonb): EXECUTE',
   'function public.claim_jobs(uuid, text, integer): EXECUTE',
   'function public.commit_expedition_plan(uuid, uuid, jsonb): EXECUTE',
   'function public.complete_job(uuid, uuid, jsonb): EXECUTE',

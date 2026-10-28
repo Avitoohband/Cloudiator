@@ -98,6 +98,29 @@ test('sends the whole-day schedule command and the single-part one to the authen
   expect(sent).toEqual(commands.map(body => ({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body })));
 });
 
+// Change look (2026-10-28): the look change goes to the authenticated command endpoint and keeps its business codes.
+test('sends the look change to the authenticated command endpoint and keeps its answers', async () => {
+  api({ user: { id: 'first' }, access_token: 'first', expires_at: Math.floor(Date.now() / 1000) + 3600 } as Session);
+  const sent: unknown[] = [];
+  const appearance = { body: 'female' as const, hair: 'ponytail' as const, skin: 3, hairColor: 5, cloth: 11 };
+  const answers = [{ status: 200, body: { ok: true, receiptId: 'r1', value: { appearance, receivedAtMs: 1_791_591_300_000 } } },
+    { status: 404, body: { ok: false, code: 'not-found' } }, { status: 409, body: { ok: false, code: 'conflict' } },
+    { status: 400, body: { ok: false, code: 'invalid' } }];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    sent.push({ url: String(url), body: JSON.parse(String(init.body)) });
+    const { status, body } = answers.shift()!;
+    return new Response(JSON.stringify(body), { status });
+  });
+  const operationId = 'd43f7844-52e0-4302-b8e4-740035047765';
+  const command = { kind: 'change-appearance' as const, operationId, appearance };
+  const gateway = createLiveGateway();
+  const results = [];
+  for (let i = 0; i < 4; i++) results.push(await gateway.command(command));
+  expect(results).toEqual([{ ok: true, receiptId: 'r1', value: { appearance, receivedAtMs: 1_791_591_300_000 } }, { ok: false, code: 'not-found' },
+    { ok: false, code: 'conflict' }, { ok: false, code: 'invalid' }]);
+  expect(sent).toEqual(Array(4).fill({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body: command }));
+});
+
 // Task 21.3: seasons are public reads too.
 const SEASON_MS = 2_419_200_000;
 const seasonRows = [{ season_index: 1, starts_at_ms: SEASON_MS, ends_at_ms: 2 * SEASON_MS, closed_at_ms: null },

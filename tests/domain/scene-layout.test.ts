@@ -5,8 +5,8 @@ import { mapScreenBounds, screenToWorld, worldToScreen } from '@/game/iso';
 import { readFileSync } from 'node:fs';
 import { CLICK_TRAVEL_PX, clampView, isClick, stepZoom, zoomAround, ZOOM_LIMITS, ZOOM_STEP } from '@/game/camera';
 import { findPath, gridFromMap } from '@/game/paths';
-import { BODIES, CLOTH_COLOURS, HAIRS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '@domain/appearance';
-import { CLOTH_TINTS, EQUIPMENT_LAYERS, HAIR_TINTS, LAYER_ORDER, SKIN_TINTS, layersFor, layoutCamp, locationKind, lookFor, planActorRoutine, tintFor } from '@/game/actors';
+import { BODIES, CLOTH_COLOURS, HAIRS, HAIR_COLOURS, SKIN_TONES, validAppearance, type Appearance } from '@domain/appearance';
+import { CLOTH_TINTS, EQUIPMENT_LAYERS, HAIR_TINTS, LAYER_ORDER, SKIN_TINTS, hashString, layersFor, layoutCamp, legacyAppearance, locationKind, lookFor, planActorRoutine, tintFor } from '@/game/actors';
 import { drawSlices, frontEdgeY, hidesActor, propSlices } from '@/game/depth';
 import { NPC_ROUTINES, NPC_WALK_TILES_PER_SECOND, npcPostTiles, planNpcPosition, routineSlack, type NpcPosition } from '@/game/npcs';
 import { phaseLighting } from '@/game/lighting';
@@ -200,6 +200,21 @@ describe('actor routines', () => {
     expect(lookFor({ body: 'female', hair: 'mohawk', skin: 0, hairColor: 0, cloth: 0 } as never, actor(7, 'rest').gladiatorId, ['weapon-sword'])).toEqual(legacy);
     expect(lookFor({ body: 'female', hair: 'long', skin: 5, hairColor: 0, cloth: 0 } as never, actor(7, 'rest').gladiatorId, ['weapon-sword'])).toEqual(legacy);
     expect(legacy.layers).toEqual(['body', 'cloth', 'hair', 'accent', 'weapon-sword', 'held']);
+  });
+
+  // Change look (2026-10-28): the picker opens a legacy gladiator on the look it already shows, so opening and saving changes nothing.
+  it('names the legacy look as a valid look drawn exactly as a gladiator with no appearance is drawn', () => {
+    const sets: string[][] = [[], ['weapon-sword', 'offhand-shield'], ['weapon-spear', 'armor-heavy', 'head-helmet'], ['weapon-bow', 'armor-light', 'head-hood'],
+      ['sword:1:common', 'light-armor:1:common', 'round-shield:5:rare', 'light-boots:1:common'], ['feet-light', 'feet-heavy']];
+    for (let i = 0; i < 50; i += 1) {
+      const id = actor(i, 'rest').gladiatorId, look = legacyAppearance(id), h = hashString(id);
+      expect(look, id).toEqual({ body: 'male', hair: 'short', skin: (h >>> 11) % 5, hairColor: (h >>> 5) % 6, cloth: h % 12 });
+      expect(validAppearance(look), id).toBe(true);
+      for (const set of sets) expect(lookFor(look, id, set), `${id} ${set.join()}`).toEqual(lookFor(null, id, set));
+    }
+    // It depends on the id alone, and the ids differ in their colours (not one look for everybody).
+    expect(legacyAppearance(actor(3, 'rest').gladiatorId)).toEqual(legacyAppearance(actor(3, 'training').gladiatorId));
+    expect(new Set(Array.from({ length: 50 }, (_, i) => JSON.stringify(legacyAppearance(actor(i, 'rest').gladiatorId)))).size).toBeGreaterThan(10);
   });
 
   it('draws a chosen body, hair style and colours', () => {

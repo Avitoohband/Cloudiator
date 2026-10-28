@@ -4,6 +4,7 @@ import { handleCommand, parseCommand, type CommandDependencies } from '../../sup
 import { createDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
 import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
+import type { Appearance } from '../../supabase/functions/_shared/domain/appearance.ts';
 import { ownerFixture } from '../fixtures/domain.ts';
 
 const operationId = '8d2f0216-c41a-4056-89aa-8f0c1da612e0';
@@ -11,7 +12,8 @@ const create = { kind: 'create-character', operationId, name: 'Avi Fighter', cla
   allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } };
 const deps: CommandDependencies = { allowedOrigins: ['http://127.0.0.1:3000'], verifyActor: async () => ({ userId: operationId }),
   database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }),
-    market: async () => ({ ok: false, code: 'unavailable' }), setTournamentOptIn: async () => ({ ok: false, code: 'unavailable' }) } };
+    market: async () => ({ ok: false, code: 'unavailable' }), setTournamentOptIn: async () => ({ ok: false, code: 'unavailable' }),
+    changeAppearance: async () => ({ ok: false, code: 'unavailable' }) } };
 function req(body: unknown, origin = 'http://127.0.0.1:3000') { return new Request('http://local', { method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) }); }
 
@@ -20,7 +22,8 @@ it('rejects missing identity before any command executes', async () => {
     allowedOrigins: ['http://127.0.0.1:3000'],
     verifyActor: async () => { throw new Error('unauthenticated'); },
     database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); },
-      market: async () => { throw new Error('must not execute'); }, setTournamentOptIn: async () => { throw new Error('must not execute'); } },
+      market: async () => { throw new Error('must not execute'); }, setTournamentOptIn: async () => { throw new Error('must not execute'); },
+      changeAppearance: async () => { throw new Error('must not execute'); } },
   });
   expect(response.status).toBe(401);
   expect(await response.json()).toEqual({ ok: false, code: 'unauthenticated' });
@@ -67,6 +70,69 @@ it('refuses an invalid appearance over HTTP and never reaches creation', async (
   created = null;
   expect((await handleCommand(req(create), spy)).status).toBe(200);
   expect(created).toEqual(create);
+});
+
+// Change look (2026-10-28): the free, unlimited look change of the player's own gladiator.
+const look: Appearance = { body: 'female', hair: 'ponytail', skin: 3, hairColor: 5, cloth: 11 };
+const change = { kind: 'change-appearance' as const, operationId, appearance: look };
+
+it('accepts change-appearance only with exactly a valid look and no other key', () => {
+  expect(parseCommand(change)).toEqual(change);
+  for (const body of ['male', 'female']) for (const hair of ['short', 'long', 'ponytail', 'bald'])
+    expect(parseCommand({ ...change, appearance: { body, hair, skin: 0, hairColor: 0, cloth: 0 } })).not.toBeNull();
+  expect(parseCommand({ ...change, appearance: { ...look, skin: 4, hairColor: 0, cloth: 0 } })).not.toBeNull();
+  const { cloth: _cloth, ...missing } = look;
+  // Every refused look of the creation command, plus the ones only a change can send: no look at all.
+  for (const bad of [null, undefined, 'female', 0, true, [], [look], {}, missing, { ...look, skin: 5 }, { ...look, skin: -1 },
+    { ...look, cloth: 12 }, { ...look, cloth: -1 }, { ...look, hairColor: 6 }, { ...look, hairColor: 1.5 }, { ...look, skin: 1e100 },
+    { ...look, skin: '1' }, { ...look, cloth: null }, { ...look, hair: 'mohawk' }, { ...look, body: 'other' }, { ...look, body: 'Male' },
+    { ...look, extra: 1 }, { ...look, ownerId: operationId }])
+    expect(parseCommand({ ...change, appearance: bad }), JSON.stringify(bad)).toBeNull();
+  const { appearance: _appearance, ...withoutLook } = change;
+  expect(parseCommand(withoutLook)).toBeNull();
+  // The command names no gladiator and carries no other authority: the actor is the verified session's.
+  for (const extra of [{ ownerId: operationId }, { gladiatorId: operationId }, { name: 'Avi Fighter' }, { expectedVersion: 1 }, { price: 0 }])
+    expect(parseCommand({ ...change, ...extra }), JSON.stringify(extra)).toBeNull();
+  expect(parseCommand({ ...change, operationId: 'bad' })).toBeNull();
+  expect(parseCommand({ ...change, operationId: undefined })).toBeNull();
+  // A look rides only on the commands that own it.
+  expect(parseCommand({ kind: 'set-tournament-opt-in', operationId, enabled: true, appearance: look })).toBeNull();
+});
+
+it('routes change-appearance to its own transaction with the verified actor and the parsed command only', async () => {
+  const calls: unknown[] = [];
+  const results = [{ ok: true as const, receiptId: operationId, value: { appearance: look, receivedAtMs: 7 } },
+    { ok: false as const, code: 'not-found' as const }, { ok: false as const, code: 'conflict' as const }];
+  const never = (what: string) => async () => { throw new Error(`a look change must not reach ${what}`); };
+  const routed = { ...deps, database: { ...deps.database, plan: never('planning'), inventory: never('the inventory'), market: never('the market'),
+    createGladiator: never('creation'), setTournamentOptIn: never('the opt-in'),
+    changeAppearance: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return results.shift()!; } } };
+  const saved = await handleCommand(req(change), routed);
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toEqual({ ok: true, receiptId: operationId, value: { appearance: look, receivedAtMs: 7 } });
+  // An account with no gladiator has nothing to change; a reused operation id with another look is a conflict.
+  const none = await handleCommand(req(change), routed);
+  expect(none.status).toBe(404);
+  expect(await none.json()).toEqual({ ok: false, code: 'not-found' });
+  expect((await handleCommand(req(change), routed)).status).toBe(409);
+  expect(calls).toEqual(Array(3).fill({ actor: { userId: operationId }, command: change }));
+  // An invalid look (or a command with extra authority) is refused at the boundary and never reaches the transaction.
+  for (const bad of [{ ...change, appearance: { ...look, hair: 'mohawk' } }, { ...change, gladiatorId: operationId }, { kind: 'change-appearance', operationId }]) {
+    const refused = await handleCommand(req(bad), routed);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ ok: false, code: 'invalid' });
+  }
+  expect(calls).toHaveLength(3);
+});
+
+it('charges the command rate limit for a look change like any command, and answers a limit before any parsing', async () => {
+  let reached = false;
+  const limited = { ...deps, database: { ...deps.database, consumeRateLimit: async () => 900,
+    changeAppearance: async () => { reached = true; return { ok: false as const, code: 'unavailable' as const }; } } };
+  const answer = await handleCommand(req(change), limited);
+  expect(answer.status).toBe(429);
+  expect(await answer.json()).toEqual({ ok: false, code: 'rate-limited', retryAfterMs: 900 });
+  expect(reached).toBe(false);
 });
 
 it('validates every discriminant and rejects invalid counts, prices, booleans and catalog IDs', () => {
@@ -176,7 +242,7 @@ it('answers presence with ok after the rate check, writing nothing else (Task 23
   const refuse = (name: string) => async () => { calls.push(name); throw new Error('must not execute'); };
   const database = { consumeRateLimit: async (_: unknown, creation: boolean) => { calls.push(`rate:${creation}`); return null; },
     plan: refuse('plan'), inventory: refuse('inventory'), createGladiator: refuse('createGladiator'), market: refuse('market'),
-    setTournamentOptIn: refuse('setTournamentOptIn') } as unknown as CommandDependencies['database'];
+    setTournamentOptIn: refuse('setTournamentOptIn'), changeAppearance: refuse('changeAppearance') } as unknown as CommandDependencies['database'];
   const answer = await handleCommand(req({ kind: 'presence', operationId }), { ...deps, database });
   expect(answer.status).toBe(200);
   expect(answer.headers.get('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:3000');
@@ -411,6 +477,22 @@ it('answers a deadlocked or serialization-failed market transaction as retryable
   const database = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
   await expect(database.market({ userId: ACTOR }, { kind: 'cancel-listing', operationId, listingId: operationId })).rejects.toThrow('market-unavailable');
   const response = await handleCommand(req({ kind: 'cancel-listing', operationId, listingId: operationId }), { ...deps, database: { ...deps.database, market: database.market } });
+  expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
+});
+
+it('sends a look change to the change_appearance RPC with the actor, the operation id and the command only', async () => {
+  const sent: Sent[] = [];
+  const stored = { ok: true, receiptId: 'r1', value: { appearance: look, receivedAtMs: 5 } };
+  const database = createDatabase(backend(() => json(stored), sent));
+  const id = OPERATION.toLowerCase();
+  expect(await database.changeAppearance({ userId: ACTOR }, { kind: 'change-appearance', operationId: OPERATION, appearance: look })).toEqual(stored);
+  // The operation id is the lower-case identity PostgreSQL stores, in the command as well as the argument (the receipt compares the command).
+  expect(sent).toEqual([{ method: 'POST', path: '/rest/v1/rpc/change_appearance', search: '',
+    body: { actor_id: ACTOR, operation_id: id, input: { command: { kind: 'change-appearance', operationId: id, appearance: look } } } }]);
+  // A database error stays unavailable and never forwards the driver's message.
+  const failing = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
+  await expect(failing.changeAppearance({ userId: ACTOR }, change)).rejects.toThrow('appearance-unavailable');
+  const response = await handleCommand(req(change), { ...deps, database: { ...deps.database, changeAppearance: failing.changeAppearance } });
   expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
 });
 

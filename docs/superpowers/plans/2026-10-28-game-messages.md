@@ -1,4 +1,4 @@
-# Next Patch: Game Messages, Notifications, Free Look Change, Fixed Builds and Fuller Expedition Replays
+# Next Patch: Game Messages, Notifications, Free Look Change, Fixed Builds, Gold and Fuller Expedition Replays
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -281,6 +281,34 @@ Spec "Added 2026-10-28: notifications".
 - [ ] **Step 4: Run** the browser spec; expect PASS.
 - [ ] **Step 5: Commit** `feat: change a gladiator's look from the patch note`.
 
+### Task 7b: The currency is called gold
+
+Avi, 2026-10-28: "about the money, next patch change it to gold." Every word a player reads says gold. My call: internal
+names stay (the `money` columns, JSON fields such as `money` and `overflowMoney`, the command and event contracts, the
+`money` icon id), so no schema or contract change rides on a change of wording. The patch note in the spec already says
+gold, and the Task 3b/6 notification lines say gold from the start.
+
+**Files:**
+- Modify (player text only): `src/features/market/market-text.ts`, `src/features/market/MarketPanel.tsx`,
+  `src/features/inventory/InventoryPanel.tsx`, `src/features/inventory/gear.ts`, `src/features/build/build-refusal.ts`,
+  `src/features/build/BuildPanel.tsx`, `src/features/schedule/schedule-text.ts`, `src/features/tournaments/tournament-text.ts`,
+  `src/features/arena/BattleReplay.tsx`, `src/features/arena/StandingsPanel.tsx`, `src/features/character/ExpeditionView.tsx`,
+  `src/features/character/CharacterPanel.tsx`, `src/features/character/CreateCharacter.tsx`, `src/features/shops/ShopPanel.tsx`,
+  `src/features/shell/CornerChip.tsx` (labels and aria text).
+- Test: `tests/domain/currency-word.test.ts` (new); the browser specs that expect the old word (`market`, `inventory`,
+  `management`, `planning`, `expedition`, `full-screen`).
+
+- [ ] **Step 1:** Write `tests/domain/currency-word.test.ts`: the amount formatter gives `'1,250 gold'` for 1250, and every
+  text builder in `market-text`, `schedule-text`, `tournament-text`, `build-refusal` and `gear` (sample values) gives
+  text that does `not.toMatch(/\bmoney\b/i)`. Run `npx vitest run tests/domain/currency-word.test.ts`: FAIL on
+  "1,250 money".
+- [ ] **Step 2:** Change the words in the files above ("money" → "gold", "Available money" → "Available gold"). Afterwards
+  `git grep -n -i -w money -- src/features` lists only identifiers, never text. The test passes.
+- [ ] **Step 3:** In `full-screen.spec.ts` (fixture preview) open every menu and assert
+  `expect(page.locator('body')).not.toContainText(/\bmoney\b/i)`; change the specs that expected "money" to "gold". Run the
+  private Playwright config: pass.
+- [ ] **Step 4:** Commit `feat: call the currency gold`.
+
 ### Task 8: Gate, review and release
 
 - [ ] **Step 1:** Start the local Edge serve; run the gate of record; expect 12/12 (DB-test rule; no build during the
@@ -306,10 +334,12 @@ Made after the release, from the real game (HyperFrames skill; `npx hyperframes 
   corner chip, the panel and a patch note, the Notifications tab, the look picker before and after, the build step's
   counter and the fixed class.
 - [ ] **Step 2:** A clip of about 20–30 s, 1920 × 1080 at 30 fps (the skill's default; Avi skipped questions): one scene per
-  feature with short on-screen captions in plain words, music and a sound on each visible action, no voice; the closing
-  card names the game's URL. `npx hyperframes check --json` clean, snapshot review, then render.
-- [ ] **Step 3:** Send Avi the file (under the 30 MiB send cap) and keep the project in `C:\Avi\Studies\Projects\Cloudiator-concept-video`'s
-  sibling folder, not in the game repository.
+  feature with short on-screen captions in plain words, a sound on each visible action, narration in the concept film's
+  voice (local Kokoro bm_george) and the music low under it (about 0.1; Avi asked for it lower three times on the
+  2026-10-28 clip); the closing card names the game and the update, with no "Coming soon" and no URL.
+  `npx hyperframes check --json` clean, snapshot review, then render.
+- [ ] **Step 3:** Send Avi the file (under the 30 MiB send cap) and keep the project in its own folder under
+  `D:\Avi\Projects\Animation\Cloudiator`, named after what the clip shows, not in the game repository.
 
 ### Task 10: Expedition replays show the whole trip (needs its own design first)
 

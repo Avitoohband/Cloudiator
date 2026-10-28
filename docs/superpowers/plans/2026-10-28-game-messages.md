@@ -153,6 +153,39 @@ points"); code map `docs/superpowers/specs/2026-10-27-game-messages-code-map.md`
 - [ ] **Step 4: Run** the step 2 commands, `npm run typecheck` and `npx vitest run`; expect PASS.
 - [ ] **Step 5: Commit** `feat: store game messages and each player's read marks`.
 
+### Task 3b: Notifications (server and reads)
+
+Spec "Added 2026-10-28: notifications".
+
+**Files:**
+- Modify: `supabase/sql/18-messages.sql` section 4: `public.notification_marks(owner_id uuid primary key references
+  auth.users(id) on delete cascade, seen_ms bigint not null)` owner-only like `message_reads`;
+  `public.see_notifications(actor_id uuid, up_to_ms bigint) returns jsonb` (stores `greatest(old, least(up_to_ms, now))`,
+  no receipt, `service_role` EXECUTE only); `owner_state.inbox` gains `newNotifications` (the owner's completed, revealed,
+  non-rest activities settled after the mark, or after the gladiator's creation without one) and `notificationsSeenMs`
+- Modify: contracts (`{ kind: 'see-notifications'; upToMs: number }`, `Inbox` gains `newNotifications: number;
+  notificationsSeenMs: number`, `GameNotification`), `backend/commands.ts` and `database.ts` (as `read-message`),
+  `src/lib/api/reads.ts` (`readNotifications`: the owner's completed activities with `settled_at_ms` at or before the
+  server's now, newest 20, `id, summary, settled_at_ms` plus whatever names the destination), `gateway.ts`
+  (`notifications()`, the command allow-list), `fixture-gateway.ts`, `src/features/messages/notifications.ts`
+  (`notificationLines(n: GameNotification): { title: string; lines: string[]; levelUp: number | null }`)
+- Test: `tests/db/notifications.test.ts`, `tests/features/notifications.test.ts`, `tests/backend/commands.test.ts`
+
+**Interfaces:**
+- Produces: `type GameNotification = { activityId: string; kind: 'training' | 'expedition' | 'arena' | 'tournament';
+  settledAtMs: number; summary: ActivitySummary; destination: string | null; levelAfter: number | null }`;
+  `GameGateway.notifications(): Promise<GameNotification[]>`.
+
+- [ ] **Step 1: Failing tests**: DB: a settled training after the gladiator's creation counts 1 new; `see_notifications`
+  sets the mark, a lower `up_to_ms` never moves it back, a future one is cut to now, another account's mark is untouched;
+  an unrevealed Arena result is not counted; a rest is not counted. Units: `notificationLines` for training ("+40 XP",
+  "+1 attribute point"), an expedition with money, XP, a Rare Iron sword (tier 5) and an overflow sale, an Arena victory
+  with renown and rating change, and "Level up! Now level 4" only when `levelAfter` is set.
+- [ ] **Step 2: Run** `npm run test:db -- tests/db/notifications.test.ts` and `npx vitest run tests/features tests/backend`; expect FAIL.
+- [ ] **Step 3: Implement**; decide `levelAfter` from stored settlement data and ledger the ruling.
+- [ ] **Step 4: Run** the step 2 commands and `npm run typecheck`; expect PASS.
+- [ ] **Step 5: Commit** `feat: notify players of their own results`.
+
 ### Task 4: M25
 
 **Files:**
@@ -204,15 +237,19 @@ points"); code map `docs/superpowers/specs/2026-10-27-game-messages-code-map.md`
 
 **Interfaces:**
 - Consumes: Task 3's `Inbox`, `GameMessage`, `GameGateway.messages()`, the `read-message` command.
-- Produces: `MessagesButton({ inbox, load, read, changeLook }: { inbox: Inbox; load(): Promise<GameMessage[]>; read(id:
-  number): Promise<void>; changeLook(): void })`.
+- Produces: `MessagesButton({ inbox, load, loadNotifications, read, seeNotifications, changeLook }: { inbox: Inbox; load():
+  Promise<GameMessage[]>; loadNotifications(): Promise<GameNotification[]>; read(id: number): Promise<void>;
+  seeNotifications(upToMs: number): Promise<void>; changeLook(): void })`.
 
 - [ ] **Step 1: Failing tests**: units for `badgeText` (0 → null, 2 → "2", 10 → "9+") and `isUnread`; browser: a visitor
   sees no button; a player with 2 unread sees "Messages, 2 new" and a "2" badge; the panel lists newest first with tags,
   dates and previews; opening the look note sends `read-message` with its id and the badge drops after the owner re-read;
   Back and Close work, Escape closes and the focus returns to the button; a message text with `<b>x</b>` shows literally;
   bullets render as a list; a message posted while the panel is open appears after the next owner read; 12 unread show
-  "9+"; at 360 × 740 the panel fits with no sideways scroll; the a11y helpers find no contrast or name issue.
+  "9+"; at 360 × 740 the panel fits with no sideways scroll; the a11y helpers find no contrast or name issue. With Task 3b:
+  the panel has two tabs, "Messages" and "Notifications", each with its count; the badge is their sum; opening
+  Notifications sends `see-notifications` with the newest shown time and its count clears after the owner re-read; a
+  notification lists its lines (items by name, tier and rarity) and a "Level up!" line when there is one.
 - [ ] **Step 2: Run** `npx vitest run tests/features/messages.test.ts` and
   `npx playwright test --config node_modules/.cache/pw-claude.config.mjs tests/browser/messages.spec.ts`; expect FAIL.
 - [ ] **Step 3: Implement** as the spec's Layout and Accessibility decisions say.
@@ -266,7 +303,8 @@ Avi, 2026-10-28: "also make a little clip for the new changes, so I can send to 
 Made after the release, from the real game (HyperFrames skill; `npx hyperframes usage --json` first).
 
 - [ ] **Step 1:** Capture the real screens locally with representative data (the concept-capture setup): the badge on the
-  corner chip, the panel and a patch note, the look picker before and after, the build step's counter and the fixed class.
+  corner chip, the panel and a patch note, the Notifications tab, the look picker before and after, the build step's
+  counter and the fixed class.
 - [ ] **Step 2:** A clip of about 20–30 s, 1920 × 1080 at 30 fps (the skill's default; Avi skipped questions): one scene per
   feature with short on-screen captions in plain words, music and a sound on each visible action, no voice; the closing
   card names the game's URL. `npx hyperframes check --json` clean, snapshot review, then render.

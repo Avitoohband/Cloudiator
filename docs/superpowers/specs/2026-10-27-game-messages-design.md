@@ -160,6 +160,26 @@ points become fixed, he said "skip questions".
   later as paid options." A number typed below the current build's value is raised to it with the line "{Attribute} can't
   go below {n}: added points are permanent."
 
+## Added 2026-10-28: notifications (same release)
+
+Avi: "in the messages, add section for notification: what I received in training, how much exp/points, if I levelled; what
+I received in expedition, which gear dropped, how much money earned." This replaces the non-goal "Game messages" for the
+player's own results.
+
+- **Two sections in the panel:** **Messages** (patch notes and Admin, as above) and **Notifications**, each with its own
+  count; the button's badge is the sum.
+- **A notification per settled activity**, newest first, built from the owner's own settled activity summaries (already
+  owner-only under RLS, the same data the result screens use), so nothing new is stored per result: Training (XP, attribute
+  points), Expedition (destination, result, money, XP, each item found with its tier and rarity, extra items sold for
+  gold), Arena (victory or defeat, renown, rating change) and Tournament (result, money, renown). Rest gives nothing and is
+  left out (**Claude's call**). "Level up! Now level {n}" shows on the activity that raised the level; how the level change
+  is known is the builder's (stored settlement data first; never a guess shown as fact).
+- **New since last seen:** one "seen up to" time per account, server-side, so every device agrees. Opening the
+  Notifications section marks everything shown as seen (a `see-notifications` command, no receipt, never moves backwards).
+- **Only revealed results:** a notification appears once its result is visible to the owner (the timeline's own rule),
+  never before an Arena or tournament reveal.
+- **At most the newest 20** are listed; older results stay in the existing result screens.
+
 ## Constraints
 
 - Production is live with 8 gladiators and 9 accounts; M25 must replay cleanly on the live schema and change no

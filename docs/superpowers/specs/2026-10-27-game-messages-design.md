@@ -57,10 +57,10 @@ gladiator's look, free for now.
   account has not read it. Older messages are listed but already read, so a new player starts at no badge. All 9 live
   accounts predate this release, so they see the new messages as unread.
 - **Badge:** the number, "9+" above 9, hidden at 0. The button's name says the count ("Messages, 2 new").
-- **Storage:** broadcast messages (one row per message: kind, title, body, optional action, published time, a hidden
-  flag) and per-account read marks (account, message, read time). `kind` allows `patch-notes`, `admin` and, for later,
-  `game`; the only `action` now is `change-look`. Clients read through the owner read path and never write directly; a
-  read mark is written by a game command (`read-message`), only for the caller's own account, and a repeat is a no-op.
+- **Storage:** broadcast messages (one row per message: kind, title, preview, body, optional action, published time, a
+  hidden flag) and per-account read marks (account, message, read time). `kind` is `patch-notes` or `admin` (see "Settled
+  from the code map" for Game messages); the only `action` now is `change-look`. Clients never write either table; a read
+  mark is written by a game command (`read-message`), only for the caller's own account, and a repeat is a no-op.
 - **Message text:** a title (at most 80 characters) and a body of paragraphs and bullet items (plain text, at most 2,000
   characters in all), stored as data, not markup, and rendered as text.
 - **Posting:** Claude posts messages through an operator-only database function (post, and hide for a mistake) run with
@@ -89,11 +89,17 @@ gladiator's look, free for now.
 
 ## Settled from the code map (Claude's calls)
 
-- **Messages reach the client inside the owner read.** The access matrix requires every `authenticated` read to be
-  scoped to the reader's own id (`tests/db/access-matrix.test.ts`), and its open (`OPEN`) list also opens a relation to
-  visitors. So the message tables get no client grant at all, and the owner read (`owner_state`, already re-read on
-  revision change, slot change and focus) carries the account's messages (newest first, each with its read flag) and the
-  unread count. No new client-readable relation, no test exception, nothing for visitors.
+- **Messages are public text; read marks are the owner's.** The access matrix allows a non-owner `authenticated` read
+  only through its open (`OPEN`) list, which also opens to visitors, and a broadcast row carries no owner id. Patch notes
+  and messages to all players are not secret, so the messages table joins `OPEN` (visible rows only; the client still
+  shows the button only to players), and the read marks are an owner-only table. The owner read (`owner_state`, re-read
+  on revision change, slot change and focus) carries only a small `inbox` (unread count and the ids read); the message
+  list loads when the panel opens. Posting or hiding a message bumps the world revision (the projection trigger), so
+  badges update within one poll. Per-player Game messages, later, need their own owner-scoped storage: this table holds
+  only `patch-notes` and `admin`.
+- **Unread uses the gladiator's creation time** (`gladiators.created_at_ms`), which the owner read already has; the
+  account's own creation time is not readable there. Only players with a gladiator see messages, so the two agree in
+  practice.
 - **A read mark writes no receipt.** Receipts are permanent (`private.guard_receipt` blocks deletes), and one per opened
   message would pile up. `read-message` follows the `presence` precedent: an idempotent upsert of the account's own mark,
   no receipt, then an owner re-read.
@@ -128,6 +134,31 @@ gladiator's look, free for now.
 
   The preview line is the first sentence-sized summary stored with the message (or derived from the body; the builder's
   call), so the list never cuts words mid-way.
+
+## Added 2026-10-28: fixed class and points (same release)
+
+Avi, while the plan was written: "for the spending attributes points in my gladiator menu, it is not obvious how many points
+left for me to spend, and also I shouldn't be able to enter higher number than my max spare points." Then: "I shouldn't be
+able to take points back as well. After saving it's fixed. In the future, for real money, people would be able to respec."
+And: "class shouldn't be able to be changed as well, only stance, and the class change will cost real money." Asked when
+points become fixed, he said "skip questions".
+
+- **Points left:** the build's attribute step shows "{left} of {earned} left" ("All {earned} spent" at 0), as the creation
+  dialog does, and a typed number above what is left is capped with the creation dialog's status line.
+- **No respec, no class change:** a queued build keeps the current build's class, and no attribute may go below the
+  current build's value. Today both cost game money (`RULES_V1.fees.classChange` and `fees.respec`, 100 gold each); from
+  this release they are refused, so every allowed build change is free. Stance and equipment still change freely. Both
+  will come back later as paid (real-money) options; nothing about that is built now.
+- **When points become fixed (Claude's call, after "skip questions"):** when the build takes effect at the next boundary.
+  Until then a pending build can still be revised down to the current build or cancelled, so a typo can be fixed. This is
+  the floor the server enforces; a stricter "fixed at Queue build" would make a typo permanent and complicate cancelling.
+- **Server first:** the Edge build preparation and the SQL build command both refuse a class change or a lower attribute
+  (`invalid`); the client only stops a player from asking. Pending builds queued before the release keep their fee and
+  apply as queued.
+- **Copy:** the class is shown, not chosen ("Class: Berserker"); the note under the points reads "Adding points is free.
+  Points can't be taken back once this build takes effect, and your class is fixed. Respec and class changes will come
+  later as paid options." A number typed below the current build's value is raised to it with the line "{Attribute} can't
+  go below {n}: added points are permanent."
 
 ## Constraints
 

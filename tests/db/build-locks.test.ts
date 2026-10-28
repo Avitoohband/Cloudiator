@@ -112,6 +112,49 @@ describe('fixed class and points', () => {
     expect(await rpc(allowed, { command: allowed, prepared })).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
   });
 
+  // Task 1 review, folded into M25: both are reachable only by service_role calling queue_build directly (the Edge parser takes
+  // whole numbers and always prepares a fee).
+  const direct = (owner: Fighter) => async (command: Queue, prepared: unknown) => {
+    const { data, error } = await admin.rpc('queue_build', { actor_id: owner.id, operation_id: command.operationId, input: { command, prepared } });
+    // A database error is an answer too (it must not be one): returned so the comparison shows it.
+    return error ? { rpcError: error.code, message: error.message } : data;
+  };
+
+  it('refuses a point that is not a number in SQL, even with a preparation for an allowed build', async () => {
+    // In jsonb order a boolean, an array or an object sorts above every number, so a floor check by `<` alone lets them through.
+    const owner = await fighter({ earned: 12 });
+    const before = await footprint(owner);
+    const rpc = direct(owner);
+    const values: unknown[] = [true, false, [], [9], {}, { n: 9 }, '9', null];
+    for (const value of values) {
+      const state = await owner.state();
+      const prepared = prepareBuild(queue(state, { stance: 'offensive' }), state)!;
+      const allocation = { ...state.currentBuild.allocations, strength: value } as unknown as Queue['allocation'];
+      expect.soft(await rpc(queue(state, { stance: 'offensive', allocation }), prepared), `strength ${JSON.stringify(value)}`).toEqual({ ok: false, code: 'invalid' });
+    }
+    // A missing attribute is refused the same.
+    const state = await owner.state();
+    const prepared = prepareBuild(queue(state, { stance: 'offensive' }), state)!;
+    const { strength: _, ...rest } = state.currentBuild.allocations;
+    expect.soft(await rpc(queue(state, { stance: 'offensive', allocation: rest as Queue['allocation'] }), prepared), 'no strength').toEqual({ ok: false, code: 'invalid' });
+    expect(await footprint(owner)).toEqual(before);
+  });
+
+  it('refuses a preparation whose fee is null or absent in SQL: stored as invalid, not charged and not failed on', async () => {
+    // A null fee fails `fee<>0` and `available<fee` alike.
+    const owner = await fighter({ earned: 12 });
+    const before = await footprint(owner);
+    const rpc = direct(owner);
+    for (const shape of ['null', 'absent'] as const) {
+      const state = await owner.state();
+      const { fee: _, ...rest } = prepareBuild(queue(state, { stance: 'offensive' }), state)!;
+      const command = queue(state, { stance: 'offensive' });
+      expect.soft(await rpc(command, shape === 'null' ? { ...rest, fee: null } : rest), `fee ${shape}`).toEqual({ ok: false, code: 'invalid' });
+      expect.soft(await receiptCount(command.operationId), `fee ${shape} receipt`).toBe(1);
+    }
+    expect(await footprint(owner)).toEqual(before);
+  });
+
   it('accepts a stance change plus one point as free, reserving nothing', async () => {
     const owner = await fighter({ earned: 11 });
     const state = await owner.state();

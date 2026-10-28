@@ -5,10 +5,13 @@
 --
 -- 1. private.planning_command: 16-launch-feedback.sql's body, plus in the queue-build branch
 --    - a class change is `invalid`: the command's classId must equal the CURRENT build's (b.current_build->>'classId');
---    - taking a point back is `invalid`: no attribute of the command's allocation may be below the CURRENT build's value.
+--    - taking a point back is `invalid`: no attribute of the command's allocation may be below the CURRENT build's value, and each
+--      must be a number (a missing one or another JSON type is `invalid`: in jsonb order a boolean, an array or an object sorts
+--      above every number, so `<` alone would let it through; Task 1 review, folded in before M25).
 --      The floor is the current build, not the pending one: points become fixed when a build takes effect, so a pending build
 --      can still be revised down to the current values (not below) and cancelled. Stance, equipment and more points stay free;
---    - the fee rule is `fee<>0` -> `invalid` (it was `fee not in (0,100,200)`): no build change costs gold any more, because
+--    - the fee rule is `fee is distinct from 0` -> `invalid` (it was `fee not in (0,100,200)`; a null fee is refused too, where
+--      `fee<>0` would have let it reach the reservation): no build change costs gold any more, because
 --      respec and class changes are gone until they return as paid, real-money options (nothing of that is built here).
 --    The Edge preparation refuses the same two changes first (lockedChange in supabase/functions/_shared/domain/build.ts, used by
 --      prepareBuild), so SQL's check is the database's own guarantee. Builds already pending at deploy keep their fee and class
@@ -127,9 +130,9 @@ begin
         -- Fixed class and points: the class and every attribute are compared to the CURRENT build (b.current_build), never to the
         -- pending one, so a pending build may still be revised down to the current values (not below) and cancelled.
         if c->>'classId' is distinct from b.current_build->>'classId'
-          or exists(select 1 from jsonb_each(b.current_build->'allocations') a where coalesce((c->'allocation'->a.key)<a.value,true)) then err:='invalid';
-        -- No build change costs gold any more (it was fee not in (0,100,200)).
-        elsif fee<>0 then err:='invalid';
+          or exists(select 1 from jsonb_each(b.current_build->'allocations') a where jsonb_typeof(c->'allocation'->a.key) is distinct from 'number' or (c->'allocation'->a.key) < a.value) then err:='invalid';
+        -- No build change costs gold any more (it was fee not in (0,100,200)); a null fee is refused too.
+        elsif fee is distinct from 0 then err:='invalid';
         elsif available<fee then err:='insufficient-funds'; end if;
       end if;
     end if;

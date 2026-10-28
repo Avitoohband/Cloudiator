@@ -209,6 +209,8 @@ const SERVICE_ROLE = [
   'function public.read_message(uuid, bigint): EXECUTE',
   'function public.refresh_projections(): EXECUTE',
   'function public.renew_job(uuid, uuid): EXECUTE',
+  // Notifications (M25): marking the player's own results seen, backend only and without a receipt, like read_message.
+  'function public.see_notifications(uuid, bigint): EXECUTE',
   'function public.sell_item(uuid, uuid, jsonb): EXECUTE',
   'function public.set_tournament_opt_in(uuid, uuid, jsonb): EXECUTE',
   'function public.settle_activity(uuid, uuid): EXECUTE',
@@ -259,6 +261,8 @@ const SERVICE_ROLE = [
   'relation public.market_offers: DELETE,INSERT,SELECT',
   // Game messages (M25): each account's read marks, written by read_message and read by the owner read (owner_state).
   'relation public.message_reads: INSERT,SELECT',
+  // Notifications (M25): each account's "seen up to" time, written by see_notifications (insert, then only moved on) and read by the owner read.
+  'relation public.notification_marks: INSERT,SELECT,UPDATE',
   'relation public.operation_receipts: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.owned_cosmetics: INSERT,SELECT',
   'relation public.owner_state: MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE',
@@ -575,6 +579,8 @@ describe('release access matrix', () => {
     const seed = async (gid: string, ownerId: string) => {
       const activityId = randomUUID(), operationId = randomUUID();
       await sql`insert into public.message_reads(owner_id,message_id,read_at_ms) values(${ownerId},${message},0)`;
+      // Notifications (M25): and a "seen up to" mark for each, owner-only like the read marks (so its read by its owner holds the account id).
+      await sql`insert into public.notification_marks(owner_id,seen_ms) values(${ownerId},0)`;
       await sql`insert into public.activities(id,gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,resolved_kind,status,published_at_ms)
         values(${activityId},${gid},${slot},${slot * 4_800_000},${(slot + 1) * 4_800_000},'{"kind":"rest"}','rest','active',${slot * 4_800_000})`;
       await sql`insert into public.reservations(gladiator_id,operation_id,money,renown,status) values(${gid},${operationId},10,0,'held')`;

@@ -108,6 +108,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   // M25: the operator's game messages (a handful of rows, posted by hand and kept) and each account's read marks (at most one per
   // account and message, so bounded by the players and the few messages: tiny, kept).
   'public.game_messages': { retention: 'singleton' }, 'public.message_reads': { retention: 'player' },
+  // M25: one "notifications seen up to" time per account that has asked, never more.
+  'public.notification_marks': { retention: 'player' },
   'private.arena_ratings': { retention: 'season' }, 'public.arena_standings': { retention: 'season' }, 'public.season_standings': { retention: 'season' },
   'private.season_awards': { retention: 'season' }, 'public.seasons': { retention: 'season' },
   'private.command_attempts': { retention: 'operational', windowSlots: 1 }, 'private.dispatch_log': { retention: 'operational', windowSlots: RETENTION.dispatchLogSlots },

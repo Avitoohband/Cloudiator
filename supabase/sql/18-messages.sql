@@ -23,6 +23,10 @@
 --    private.valid_message_body, public.game_messages (RLS: visible rows only; the deferred projection_changed trigger), public.message_reads
 --    (owner-only), public.read_message (service_role only, no receipt), the operator-only private.post_message and
 --    private.hide_message, and public.owner_state restated from 17-appearance.sql with `inbox`.
+-- 4. Notifications (Task 3b; spec "Added 2026-10-28: notifications"). What a player's own settled activities earned is read from the
+--    activities the owner already reads, so nothing is stored per result; the one new thing is each account's "seen up to" time:
+--    public.notification_marks (owner-only), public.see_notifications (service_role only, no receipt), and public.owner_state
+--    restated once more (the last statement stands) with `inbox.newNotifications` and `inbox.notificationsSeenMs`.
 --
 -- Every statement is reapplicable.
 begin;
@@ -326,7 +330,8 @@ grant execute on function public.read_message(uuid,bigint) to service_role;
 -- gladiator's creation time (`sinceMs`, which the client lists older messages as already read by). Older messages stay listed but
 -- never count, so a new player starts at no badge. The view is an invoker view and the backend (service_role) reads it too, past row
 -- security, so it filters by the account and by `not hidden` itself rather than rely on the policies. create or replace keeps the
--- grants; the WITH clause restates security_invoker (it replaces a view's options with the ones it names).
+-- grants; the WITH clause restates security_invoker (it replaces a view's options with the ones it names). Section 4 restates this
+-- view once more, with the notification keys (it needs the marks table, which comes after the messages tables): the last stands.
 create or replace view public.owner_state with (security_invoker=true) as
 select g.owner_id,jsonb_build_object(
   'gladiatorId',g.id,'name',g.name,'appearance',g.appearance,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,
@@ -356,6 +361,91 @@ select g.owner_id,jsonb_build_object(
     'sinceMs',g.created_at_ms)) as state
 from public.gladiators g join public.builds b on b.gladiator_id=g.id join public.schedules s on s.gladiator_id=g.id join public.wallets w on w.gladiator_id=g.id
   left join public.character_rests rest on rest.gladiator_id=g.id and rest.since_slot<=g.processed_slot_index and g.processed_slot_index<=rest.through_slot;
+
+-- 4. Notifications.
+--
+-- A notification is one of the owner's own settled activities (training, expedition, Arena or tournament; a rest earns nothing and is
+-- left out): its credited summary is already owner-only under row security on public.activities and is what the result screens show,
+-- so nothing is stored per result. "New" is relative to one "seen up to" time per account, held here so every device agrees. It is
+-- the owner's own, like the read marks (01-identity.sql's recipe): RLS on, SELECT for authenticated through the auth.uid() policy, and
+-- only service_role writes it, through public.see_notifications (INSERT and UPDATE: unlike a read mark, a mark moves on; never DELETE,
+-- the account's removal cascades). The account's mark goes with the account.
+create table if not exists public.notification_marks (
+  owner_id uuid primary key references auth.users(id) on delete cascade,
+  seen_ms bigint not null check (seen_ms>=0)
+);
+alter table public.notification_marks enable row level security;
+revoke all on public.notification_marks from public,anon,authenticated,service_role;
+grant select on public.notification_marks to authenticated;
+grant select,insert,update on public.notification_marks to service_role;
+drop policy if exists owner_read on public.notification_marks;
+create policy owner_read on public.notification_marks for select to authenticated using (owner_id=(select auth.uid()));
+
+-- public.see_notifications(actor_id, up_to_ms): the caller's own account has seen its results up to a time (the Edge function passes
+-- the verified account; the command names no other). The stored mark is greatest(old, least(up_to_ms, now)): a lower time never moves
+-- it back, and a future one is cut to the database's now, so a result that settles later is never seen in advance. The answer is the
+-- mark as it stands (`seenMs`). A bad time (null or negative) is `invalid`, a missing account `unauthenticated`. It writes no receipt
+-- (receipts are permanent, and one per opening would pile up; `presence` and read_message are the precedent) and changes nothing
+-- public, so the world revision does not move: the client re-reads its own owner state at once. An account with no gladiator may hold
+-- a mark (it only changes that account's own reads). Backend only (EXECUTE for service_role).
+-- Result: {ok:true, value:{seenMs}} | {ok:false, code:'invalid'|'unauthenticated'}.
+create or replace function public.see_notifications(actor_id uuid, up_to_ms bigint) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare now_ms bigint:=floor(extract(epoch from clock_timestamp())*1000)::bigint; stored bigint;
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if up_to_ms is null or up_to_ms<0 then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  insert into public.notification_marks as m(owner_id,seen_ms) values(actor_id,least(up_to_ms,now_ms))
+    on conflict (owner_id) do update set seen_ms=greatest(m.seen_ms,excluded.seen_ms) returning m.seen_ms into stored;
+  return jsonb_build_object('ok',true,'value',jsonb_build_object('seenMs',stored));
+end $$;
+
+revoke all on function public.see_notifications(uuid,bigint) from public,anon,authenticated;
+grant execute on function public.see_notifications(uuid,bigint) to service_role;
+
+-- public.owner_state: section 3's view plus two keys of `inbox`, and nothing else changed:
+--   notificationsSeenMs  the later of the account's mark and the gladiator's creation (a new gladiator has no results before it, and a
+--                        mark below it counts the same as none);
+--   newNotifications     how many of the gladiator's results are new: completed, with a summary, of a kind that earns something (not a
+--                        rest), revealed (settled at or before the database's now, the timeline's own rule: an Arena or tournament
+--                        result is not counted before it is due) and settled strictly after notificationsSeenMs.
+-- It is the same rule readNotifications (src/lib/api/reads.ts) lists by. Like the rest of the view it filters by the account itself
+-- (the join on the marks and the owner's own gladiator), because the backend (service_role) reads it past row security.
+create or replace view public.owner_state with (security_invoker=true) as
+select g.owner_id,jsonb_build_object(
+  'gladiatorId',g.id,'name',g.name,'appearance',g.appearance,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,
+  'schedule',s.schedule,'scheduleVersion',s.version,'wallets',jsonb_build_object('money',w.money,'renown',w.renown),
+  'reservedFees',jsonb_build_object('money',coalesce((select sum(r.money) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0),
+    'renown',coalesce((select sum(r.renown) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0)),
+  'inventory',coalesce((select jsonb_agg(i.item order by i.id) from public.item_instances i where i.gladiator_id=g.id),'[]'::jsonb),'inventoryCapacity',60,
+  'ownedCosmetics',coalesce((select jsonb_agg(jsonb_build_object('catalogId',c.catalog_id,'catalogVersion',c.catalog_version,'binding',c.binding) order by c.catalog_id) from public.owned_cosmetics c where c.gladiator_id=g.id),'[]'::jsonb),
+  'progression',jsonb_build_object('level',g.level,'xp',g.xp,'earnedAttributePoints',g.earned_points,'unspentAttributePoints',g.unspent_points,'league',g.league,'peakStrength',g.peak_strength,'rating',g.rating),
+  'stamina',jsonb_build_object('current',g.stamina_current,'maximum',g.stamina_maximum),'tournamentOptIn',g.tournament_opt_in,'processedSlotIndex',g.processed_slot_index,
+  'currentActivity',case when rest.gladiator_id is null then coalesce((select jsonb_build_object('id',a.id,'kind',coalesce(a.resolved_kind,a.requested->>'kind'),
+      'status',case when a.status='completed' then 'completed' when a.status='preparing' then 'queued'
+        when extract(epoch from statement_timestamp())*1000<a.ends_at_ms then 'active' else 'processing' end,
+      'startsAtMs',a.starts_at_ms,'endsAtMs',a.ends_at_ms,
+      'label',case coalesce(a.resolved_kind,a.requested->>'kind') when 'training' then 'Training'
+        when 'rest' then case when a.fallback then 'Resting (not enough stamina)' else 'Resting' end
+        when 'expedition' then 'Expedition' when 'arena' then 'Arena' else 'Tournament' end)
+    from public.activities a where a.gladiator_id=g.id order by a.slot_index desc limit 1),
+    jsonb_build_object('id',g.id,'kind','orientation','status',case when extract(epoch from statement_timestamp())*1000<g.orientation_end_ms then 'active' else 'processing' end,
+      'startsAtMs',g.created_at_ms,'endsAtMs',g.orientation_end_ms,'label','Orientation')) end,
+  'restingUntilSlot',case when rest.signalled_at_ms is not null then rest.through_slot+1 end,
+  'inbox',jsonb_build_object(
+    'unread',(select count(*) from public.game_messages m where not m.hidden and m.published_at_ms>g.created_at_ms
+      and not exists(select 1 from public.message_reads r where r.owner_id=g.owner_id and r.message_id=m.id)),
+    'readIds',coalesce((select jsonb_agg(r.message_id order by r.message_id) from public.message_reads r
+      join public.game_messages m on m.id=r.message_id and not m.hidden where r.owner_id=g.owner_id),'[]'::jsonb),
+    'sinceMs',g.created_at_ms,
+    'newNotifications',(select count(*) from public.activities a where a.gladiator_id=g.id and a.status='completed'
+      and a.resolved_kind in ('training','expedition','arena','tournament') and a.summary is not null and a.settled_at_ms is not null
+      and a.settled_at_ms<=floor(extract(epoch from statement_timestamp())*1000)::bigint
+      and a.settled_at_ms>greatest(coalesce(nm.seen_ms,0),g.created_at_ms)),
+    'notificationsSeenMs',greatest(coalesce(nm.seen_ms,0),g.created_at_ms))) as state
+from public.gladiators g join public.builds b on b.gladiator_id=g.id join public.schedules s on s.gladiator_id=g.id join public.wallets w on w.gladiator_id=g.id
+  left join public.character_rests rest on rest.gladiator_id=g.id and rest.since_slot<=g.processed_slot_index and g.processed_slot_index<=rest.through_slot
+  left join public.notification_marks nm on nm.owner_id=g.owner_id;
 
 notify pgrst,'reload schema';
 commit;

@@ -81,8 +81,8 @@ export async function resetIdentity() {
   // Season rows and the standings archive have no foreign key to characters (Task 21), so the cascade does not reach them.
   await sql`truncate public.seasons, public.season_standings, private.season_awards`;
   // Game messages (M25) and each account's read marks (keyed by the account, outside the gladiators cascade): both emptied together,
-  // restarting the identity, so the first message of a test is 1.
-  await sql`truncate public.game_messages, public.message_reads restart identity`;
+  // restarting the identity, so the first message of a test is 1. Likewise each account's notifications mark (M25, also keyed by the account).
+  await sql`truncate public.game_messages, public.message_reads, public.notification_marks restart identity`;
   // Retention state (Task 22): the operations log and wallet checkpoints start empty, and the singleton is reseeded (recreated
   // if it was ever deleted) with every watermark at its seed (-1), Task 23.7's job-payload watermark included.
   await sql`truncate private.operations_events, private.wallet_checkpoints`;

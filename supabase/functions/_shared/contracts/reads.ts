@@ -1,5 +1,5 @@
 import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
-import type { PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
+import type { ActivitySummary, PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
 import type { Appearance } from '../domain/appearance.ts';
 
 export type BuildView = { version: number; classId: ClassId; stance: Stance; allocations: Attributes; equipment: Equipment };
@@ -43,16 +43,31 @@ export type OwnerState = {
    * a `presence` command, then a fresh read, gives the slot).
    */
   restingUntilSlot: number | null;
-  /** The account's messages summary (M25): how many are unread, which are read, and the cutoff older ones are already read by. */
+  /**
+   * The account's messages and notifications summary (M25): how many messages are unread, which are read, the cutoff older ones are
+   * already read by, and how many of the gladiator's own results are new since the account last saw them.
+   */
   inbox: Inbox;
 };
 /**
  * The owner read's inbox. `unread`: the visible messages published after the gladiator was created (`sinceMs`) that the account
  * has not read (a new player starts at no badge). `readIds`: the ids of the visible messages the account has read, ascending,
  * whichever device read them. `sinceMs`: the gladiator's creation time; the client lists a message published at or before it as
- * already read.
+ * already read. `newNotifications`: how many of the gladiator's own results (a completed, revealed activity other than a rest) settled
+ * after `notificationsSeenMs`, the later of the account's "seen up to" mark and the gladiator's creation (a `see-notifications`
+ * command moves it, on every device).
  */
-export type Inbox = { unread: number; readIds: number[]; sinceMs: number };
+export type Inbox = { unread: number; readIds: number[]; sinceMs: number; newNotifications: number; notificationsSeenMs: number };
+/**
+ * One of the owner's own settled results, as a notification (owner-only: read from the owner's `activities`, never public). `summary`
+ * is the credited summary the result screens show; `destination` names an expedition's destination (null for any other kind);
+ * `levelAfter` is the level the gladiator reached with this result, set only when the result raised its level and when that can be
+ * proved from stored data (the XP credited by this and later results and the level now); otherwise null, never a guess.
+ */
+export type GameNotification = {
+  activityId: string; kind: 'training' | 'expedition' | 'arena' | 'tournament'; settledAtMs: number; summary: ActivitySummary;
+  destination: string | null; levelAfter: number | null;
+};
 /** One block of a message body: a paragraph or a bullet item, plain text only (never markup). */
 export type MessageBlock = { p: string } | { li: string };
 /**

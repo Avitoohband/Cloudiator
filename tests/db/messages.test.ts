@@ -268,34 +268,36 @@ describe('game messages', () => {
     await sleep(8);
     const [{ created }] = await sql`select created_at_ms::bigint as created from public.gladiators where id=${owner.gid}`;
     const since = Number(created);
+    // The inbox also carries the notification keys (Task 3b); this player has no settled results, so none are new and the mark is the creation.
+    const noResults = { newNotifications: 0, notificationsSeenMs: since };
     // A message posted before the gladiator existed is listed (public) but not counted: a new player starts at no badge.
-    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 0, readIds: [], sinceMs: since });
+    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 0, readIds: [], sinceMs: since, ...noResults });
     const fresh = await post({ title: 'After' });
-    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 1, readIds: [], sinceMs: since });
+    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 1, readIds: [], sinceMs: since, ...noResults });
     // A second session of the same account (another token) reads the same.
     const second = recordingClient(tokenFor(owner.id)).client;
-    expect((await readOwner(second)).inbox).toEqual({ unread: 1, readIds: [], sinceMs: since });
+    expect((await readOwner(second)).inbox).toEqual({ unread: 1, readIds: [], sinceMs: since, ...noResults });
     // Reading the new message lowers the count and adds its id; the other session sees the same at once.
     expect(await readMessage(owner.id, fresh)).toEqual({ ok: true, value: { messageId: fresh } });
-    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 0, readIds: [fresh], sinceMs: since });
-    expect((await readOwner(second)).inbox).toEqual({ unread: 0, readIds: [fresh], sinceMs: since });
+    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 0, readIds: [fresh], sinceMs: since, ...noResults });
+    expect((await readOwner(second)).inbox).toEqual({ unread: 0, readIds: [fresh], sinceMs: since, ...noResults });
     // Reading an old message adds its id too, and never takes the count below what is unread.
     const third = await post({ title: 'Third' });
     expect((await readOwner(owner.client)).inbox.unread).toBe(1);
     expect(await readMessage(owner.id, early)).toEqual({ ok: true, value: { messageId: early } });
-    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 1, readIds: [early, fresh].sort((x, y) => x - y), sinceMs: since });
+    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 1, readIds: [early, fresh].sort((x, y) => x - y), sinceMs: since, ...noResults });
     // A message hidden by the operator drops out of the count and of the ids read.
     expect(await hide(third)).toBe(true);
     expect(await hide(fresh)).toBe(true);
-    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 0, readIds: [early], sinceMs: since });
+    expect((await readOwner(owner.client)).inbox).toEqual({ unread: 0, readIds: [early], sinceMs: since, ...noResults });
     // Also for a reader that row security does not filter (the database owner, the backend's service role): the view hides it itself.
-    expect(await inboxOf(owner.id)).toEqual({ unread: 0, readIds: [early], sinceMs: since });
+    expect(await inboxOf(owner.id)).toEqual({ unread: 0, readIds: [early], sinceMs: since, ...noResults });
     const bypassing = await admin.from('owner_state').select('state').eq('owner_id', owner.id).single();
-    expect((bypassing.data!.state as { inbox: unknown }).inbox).toEqual({ unread: 0, readIds: [early], sinceMs: since });
+    expect((bypassing.data!.state as { inbox: unknown }).inbox).toEqual({ unread: 0, readIds: [early], sinceMs: since, ...noResults });
     // It is the same rows through the view the Data API serves.
     const { data, error } = await owner.client.from('owner_state').select('state').single();
     expect(error).toBeNull();
-    expect((data!.state as { inbox: unknown }).inbox).toEqual({ unread: 0, readIds: [early], sinceMs: since });
+    expect((data!.state as { inbox: unknown }).inbox).toEqual({ unread: 0, readIds: [early], sinceMs: since, ...noResults });
   });
 
   it('counts per account: a player created after a message sees it as read, and nobody sees another account\'s marks, even bypassing row security', async () => {

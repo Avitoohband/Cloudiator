@@ -10,7 +10,7 @@ import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
 import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
 import { FIXTURE_SEASONS } from '../../../tests/fixtures/seasons';
 import { RESTING_ACTOR, RESTING_OWNER, RESTING_PROFILE, restingActor } from '../../../tests/fixtures/resting';
-import { FIXTURE_INBOX, FIXTURE_MESSAGES } from '../../../tests/fixtures/messages';
+import { FIXTURE_INBOX, FIXTURE_MESSAGES, FIXTURE_NOTIFICATIONS } from '../../../tests/fixtures/messages';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
@@ -58,6 +58,8 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
       : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX) }),
     // The sample messages, newest first (a copy each time); no network.
     messages: async () => structuredClone([...FIXTURE_MESSAGES]),
+    // The sample notifications, newest first (a copy each time); no network.
+    notifications: async () => structuredClone([...FIXTURE_NOTIFICATIONS]),
     // The fixture world's slot is published (Task 23.2's published slot, C5).
     world: async () => ({ ...structuredClone(world), publishedSlotIndex: worldFixture.slotIndex }),
     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex, publishedSlotIndex: worldFixture.slotIndex }),

@@ -1,11 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
-import type { BattleLog, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type { ActivitySummary, BattleLog, CreditedRewards, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  GameMessage, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  GameMessage, GameNotification, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import { applyXp } from '@domain/inventory';
+import { RULES_V1 } from '@domain/rules-v1';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
 
@@ -204,6 +207,89 @@ export async function readMessages(client: SupabaseClient): Promise<GameMessage[
     messages.push({ id, kind: row.kind, title: row.title, preview: row.preview, body, action: row.action, publishedAtMs });
   }
   return messages;
+}
+const NOTIFICATIONS_PAGE = 20;
+type NotificationRow = { id: unknown; settled_at_ms: unknown; summary: unknown; destination: unknown; gladiators?: unknown };
+const NOTIFICATION_KINDS: readonly string[] = ['training', 'expedition', 'arena', 'tournament'];
+const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+/**
+ * The owner's own credited summary as the notification text needs it, or null for one it cannot show faithfully: a kind that earns
+ * nothing (or an unknown one), a result word it does not know, rewards that are not whole numbers and a list of items, or a rating
+ * change that is not a whole number. The object itself is kept as stored.
+ */
+function notifiableSummary(value: unknown): ActivitySummary | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const summary = value as Partial<ActivitySummary>, rewards = summary.rewards as Partial<CreditedRewards> | null | undefined;
+  if (typeof summary.resolvedKind !== 'string' || !NOTIFICATION_KINDS.includes(summary.resolvedKind) || !['completed', 'victory', 'defeat'].includes(summary.result as string)
+    || typeof rewards !== 'object' || rewards === null || !whole(rewards.money) || !whole(rewards.renown) || !whole(rewards.xp) || !whole(rewards.attributePoints)
+    || !whole(rewards.overflowMoney) || !Array.isArray(rewards.items) || (summary.ratingDelta !== undefined && !Number.isSafeInteger(summary.ratingDelta))) return null;
+  const itemsFit = rewards.items.every(item => typeof item === 'object' && item !== null && typeof item.catalogId === 'string' && typeof item.rarity === 'string'
+    && Number.isSafeInteger(item.tier) && whole(item.quantity));
+  return itemsFit ? summary as ActivitySummary : null;
+}
+/**
+ * The XP a gladiator has earned in all at `level` with `xp` into it. `applyXp` spends 100 × the current level per level-up, so the
+ * levels below `level` cost 100 × (1 + 2 + … + (level − 1)); null where that is not a safe integer.
+ */
+function xpEarned(level: number, xp: number): number | null {
+  const earned = xp + RULES_V1.progression.xpPerCurrentLevel * (level * (level - 1) / 2);
+  return Number.isSafeInteger(earned) ? earned : null;
+}
+/**
+ * The level each of a gladiator's results reached, newest result first (`awards` are their credited XP, null where unknown), from
+ * its level and XP now: XP only ever changes by a result's award, so the total before a result is the total after it less its award,
+ * and the level is what that total makes of `applyXp`'s rule. A result gets the level it reached only when it raised the level; it
+ * gets null when its award is unknown or when the numbers cannot be true (more XP in the results than the gladiator has earned, or no
+ * usable level now), and every older result then gets null too. Nothing is guessed. `now` is null when the gladiator's numbers are not
+ * a trustworthy snapshot of the results listed (see readNotifications).
+ */
+function levelsReached(awards: readonly (number | null)[], now: { level: number; xp: number } | null): (number | null)[] {
+  let after = now && Number.isSafeInteger(now.level) && now.level >= 1 && whole(now.xp) ? xpEarned(now.level, now.xp) : null;
+  return awards.map(award => {
+    if (after === null || award === null || award > after) { after = null; return null; }
+    const before = after - award;
+    const reached = award > 0 ? applyXp(1, 0, after).level : null;
+    const raised = reached !== null && reached > applyXp(1, 0, before).level;
+    after = before;
+    return raised ? reached : null;
+  });
+}
+/**
+ * The owner's newest 20 settled results as notifications, newest first: completed activities (never a rest) with a summary that
+ * settled at or before the server's now (the timeline's own reveal rule, so an Arena or tournament result is not listed before it
+ * is due), from the owner-only `activities` table (row security shows a signed-in reader its own; a visitor has no access). One
+ * request also names the gladiator's level and XP now, so the level each result reached (`levelAfter`) comes from one snapshot, and
+ * the expedition id the destination is named from (`destination`). The gladiator's numbers include the XP of every result settled, so
+ * they are used only when no result settled after the server's now: the same request counts those (`gladiators.newer`, with the same
+ * bound), because one committed between the clock read and this read is not in the list but its XP is in the level. A count that is not
+ * zero (or not there) leaves every `levelAfter` null. Only those columns cross: never a seed, snapshot or receipt. A row this client
+ * cannot show (an unknown kind, a summary it cannot read) is left out rather than failing the list, and the levels of the older
+ * results are then unknown (null), never guessed.
+ */
+export async function readNotifications(client: SupabaseClient): Promise<GameNotification[]> {
+  const clock = await readRevision(client);
+  const rows = checked(await client.from('activities').select('id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))')
+    .eq('status', 'completed').in('resolved_kind', NOTIFICATION_KINDS).not('summary', 'is', null).lte('settled_at_ms', clock.serverNowMs)
+    .eq('gladiators.newer.status', 'completed').gt('gladiators.newer.settled_at_ms', clock.serverNowMs)
+    .order('settled_at_ms', { ascending: false }).order('slot_index', { ascending: false }).limit(NOTIFICATIONS_PAGE)) as unknown as NotificationRow[];
+  const page = rows.slice(0, NOTIFICATIONS_PAGE);
+  const shown = page.map(row => {
+    const summary = notifiableSummary(row.summary), settledAtMs = Number(row.settled_at_ms);
+    return typeof row.id === 'string' && summary !== null && Number.isSafeInteger(settledAtMs) ? { id: row.id, summary, settledAtMs, destination: row.destination } : null;
+  });
+  const gladiator = page.map(row => row.gladiators).find(value => value !== null && value !== undefined) as { level?: unknown; xp?: unknown; newer?: unknown } | undefined;
+  const later = gladiator?.newer, noneLater = Array.isArray(later) && later.length === 1 && (later[0] as { count?: unknown } | null)?.count === 0;
+  const now = typeof gladiator === 'object' && gladiator !== null && noneLater ? { level: Number(gladiator.level), xp: Number(gladiator.xp) } : null;
+  const levels = levelsReached(shown.map(row => (row ? row.summary.rewards.xp : null)), now);
+  const list: GameNotification[] = [];
+  shown.forEach((row, i) => {
+    if (!row) return;
+    const kind = row.summary.resolvedKind as GameNotification['kind'];
+    const destination = kind === 'expedition' && typeof row.destination === 'string' && Object.hasOwn(CATALOG_V1.expeditions, row.destination)
+      ? CATALOG_V1.expeditions[row.destination as keyof typeof CATALOG_V1.expeditions].name : null;
+    list.push({ activityId: row.id, kind, settledAtMs: row.settledAtMs, summary: row.summary, destination, levelAfter: levels[i] });
+  });
+  return list;
 }
 const STANDINGS_PAGE = 50;
 const SEASONS_PAGE = 50;

@@ -42,6 +42,13 @@ export type ReadMessageValue = { messageId: number };
  * a hidden or missing message).
  */
 export type ReadMessageResult = { ok: true; value: ReadMessageValue } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
+/** Where a `see-notifications` command left the account's "seen up to" mark (it never moves back, and a future time is cut to now). */
+export type SeeNotificationsValue = { seenMs: number };
+/**
+ * The answer to a `see-notifications` command: the mark as it now stands, with no receipt (like a read mark: receipts are permanent,
+ * and one per opening would pile up), or a refusal.
+ */
+export type SeeNotificationsResult = { ok: true; value: SeeNotificationsValue } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
   // `appearance` is the look chosen at creation (supabase/functions/_shared/domain/appearance.ts). Absent (an older open tab): the
@@ -62,5 +69,7 @@ export type GameCommand = Operation & (
   | { kind: 'change-appearance'; appearance: Appearance }
   // Mark a message read for the caller's own account (the command names no account); no receipt, a repeat is a no-op.
   | { kind: 'read-message'; messageId: number }
+  // Mark the account's own settled results seen up to a time (`upToMs`, server time in ms); no receipt, it never moves the mark back.
+  | { kind: 'see-notifications'; upToMs: number }
   | { kind: 'presence' }
 );

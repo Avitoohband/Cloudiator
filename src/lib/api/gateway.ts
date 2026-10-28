@@ -1,18 +1,18 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { GameMessage, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { GameMessage, GameNotification, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readLooks, readMarket, readMessages, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
+  GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
   readTournamentLog,
 } from './reads';
 export { GatewayReadError } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
- * tournament, tournament log, recent results) can be read without a session. `owner()`, `command()` and `sendPresence()` require a
- * signed-in account.
+ * tournament, tournament log, recent results) can be read without a session. `owner()`, `notifications()`, `command()` and
+ * `sendPresence()` require a signed-in account.
  */
 export interface GameGateway {
   /** Session identity changes invalidate pending reads and synchronized caches. */
@@ -70,6 +70,13 @@ export interface GameGateway {
    * this client cannot show is left out. Load it when the panel opens and at a slow interval; the world revision does not carry it.
    */
   messages(): Promise<GameMessage[]>;
+  /**
+   * The owner's newest 20 settled results (training, expedition, Arena, tournament; never a rest) as notifications, newest first,
+   * each with its credited summary, an expedition's destination and the level it reached when it raised the level. Owner-only: it needs
+   * a signed-in account, and a result appears only once it is revealed (settled at or before the server's now). Whether each is new is
+   * the owner read's `inbox` (`notificationsSeenMs`); a `see-notifications` command moves that mark. Load it when the Notifications tab opens.
+   */
+  notifications(): Promise<GameNotification[]>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -171,7 +178,7 @@ export function createLiveGateway(): GameGateway {
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       // A presence has no receipt: it goes through `sendPresence`.
       if (!['create-character', 'edit-schedule', 'edit-day-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
-        'buy-listing', 'set-tournament-opt-in', 'change-appearance', 'read-message'].includes(input.kind)) {
+        'buy-listing', 'set-tournament-opt-in', 'change-appearance', 'read-message', 'see-notifications'].includes(input.kind)) {
         return { ok: false, code: 'unavailable' };
       }
       const answer = await post(input);
@@ -184,6 +191,13 @@ export function createLiveGateway(): GameGateway {
         // success keeps one; no caller shows it. Any other command's success still needs its receipt.
         if (input.kind === 'read-message' && result.ok === true && httpOk && !('receiptId' in result) && 'value' in result
           && typeof result.value === 'object' && result.value !== null && 'messageId' in result.value && result.value.messageId === input.messageId) {
+          return { ok: true, receiptId: '', value: result.value as T };
+        }
+        // Likewise a notifications mark: `{ ok: true, value: { seenMs } }`, where `seenMs` is where the mark stands (it may differ from
+        // the time asked: it never moves back and a future time is cut to now), so any whole non-negative time is taken.
+        if (input.kind === 'see-notifications' && result.ok === true && httpOk && !('receiptId' in result) && 'value' in result
+          && typeof result.value === 'object' && result.value !== null && 'seenMs' in result.value
+          && typeof result.value.seenMs === 'number' && Number.isSafeInteger(result.value.seenMs) && result.value.seenMs >= 0) {
           return { ok: true, receiptId: '', value: result.value as T };
         }
         if (isRefusal(result)) return result;
@@ -202,6 +216,7 @@ export function createLiveGateway(): GameGateway {
       return { ok: false, code: 'unavailable' };
     },
     owner: () => read(readOwner),
+    notifications: () => read(readNotifications),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),
     timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),
     profile: id => publicRead(client => readProfile(client, id)),

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, ReadMessageResult } from '../contracts/commands.ts';
+import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, ReadMessageResult, SeeNotificationsResult } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
@@ -106,6 +106,7 @@ const RETRYABLE_ABORTS: readonly string[] = ['40P01', '40001'];
 export type OptInCommand = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
 export type AppearanceCommand = Extract<GameCommand, { kind: 'change-appearance' }>;
 export type ReadMessageCommand = Extract<GameCommand, { kind: 'read-message' }>;
+export type SeeNotificationsCommand = Extract<GameCommand, { kind: 'see-notifications' }>;
 /** The saved automatic-entry setting and the database time it was received (Task 19). */
 export type OptInValue = { enabled: boolean; receivedAtMs: number };
 export type CreationValue = { gladiatorId: string };
@@ -218,6 +219,16 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc('read_message', { actor_id: actor.userId, message_id: command.messageId });
       if (error) throw new Error('message-unavailable');
       return data as ReadMessageResult;
+    },
+    /**
+     * Notifications: moves the caller's own account's "seen up to" mark on to a time (the verified actor; the command names no other).
+     * The mark never moves back and a future time is cut to the database's now; the answer is the mark as it stands. Like a read mark
+     * it writes no receipt, so there is no operation to replay and none is sent.
+     */
+    async seeNotifications(actor: Actor, command: SeeNotificationsCommand): Promise<SeeNotificationsResult> {
+      const { data, error } = await client.rpc('see_notifications', { actor_id: actor.userId, up_to_ms: command.upToMs });
+      if (error) throw new Error('notifications-unavailable');
+      return data as SeeNotificationsResult;
     },
     /** Future build commands must use this actor-scoped inventory, never a player-supplied owned list. */
     async loadOwnedInventory(actor: Actor): Promise<ItemInstance[]> {

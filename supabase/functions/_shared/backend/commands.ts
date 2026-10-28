@@ -1,6 +1,6 @@
 import type { ActivityChoice, GameCommand, Attributes, Phase } from '../contracts/commands.ts';
 import type { Actor } from './auth.ts';
-import type { AppearanceCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand } from './database.ts';
+import type { AppearanceCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand, SeeNotificationsCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validAppearance } from '../domain/appearance.ts';
@@ -63,6 +63,8 @@ export function parseCommand(value: unknown): GameCommand | null {
     case 'change-appearance': valid = shape('appearance') && validAppearance(value.appearance); break;
     // A message id and nothing else: the account is the verified session's, so a read mark is always the caller's own.
     case 'read-message': valid = shape('messageId') && integer(value.messageId, 1); break;
+    // A time (server milliseconds, from 0) and nothing else; the account is the verified session's, so a mark is always the caller's own.
+    case 'see-notifications': valid = shape('upToMs') && integer(value.upToMs, 0); break;
     // Task 23.8: the owner's activity signal; no payload.
     case 'presence': valid = shape(); break;
   }
@@ -74,7 +76,7 @@ const INVENTORY_KINDS: readonly string[] = ['buy-shop', 'sell-item', 'discard-it
 const MARKET_KINDS: readonly string[] = ['create-listing', 'cancel-listing', 'buy-listing'];
 export type CommandDependencies = {
   verifyActor(request: Request): Promise<Actor>;
-  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn' | 'changeAppearance' | 'readMessage'>;
+  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn' | 'changeAppearance' | 'readMessage' | 'seeNotifications'>;
   allowedOrigins: readonly string[];
 };
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
@@ -98,18 +100,19 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'change-appearance', 'read-message', 'presence'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'change-appearance', 'read-message', 'see-notifications', 'presence'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
     // Task 23.8: the rate check above recorded the owner's activity signal (consume_command_rate). Presence writes nothing
     // else: no operation receipt, which would be permanent.
     if (command.kind === 'presence') return jsonResponse({ ok: true }, 200, origin);
     const result = command.kind === 'create-character' ? await deps.database.createGladiator(actor, command)
       : command.kind === 'set-tournament-opt-in' ? await deps.database.setTournamentOptIn(actor, command as OptInCommand)
         : command.kind === 'change-appearance' ? await deps.database.changeAppearance(actor, command as AppearanceCommand)
-          // A read mark writes no receipt (like presence), so its answer carries none.
+          // A read mark and a notifications mark write no receipt (like presence), so their answers carry none.
           : command.kind === 'read-message' ? await deps.database.readMessage(actor, command as ReadMessageCommand)
-            : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)
-              : MARKET_KINDS.includes(command.kind) ? await deps.database.market(actor, command as MarketCommand)
-                : await deps.database.plan(actor, command as PlanningCommand);
+            : command.kind === 'see-notifications' ? await deps.database.seeNotifications(actor, command as SeeNotificationsCommand)
+              : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)
+                : MARKET_KINDS.includes(command.kind) ? await deps.database.market(actor, command as MarketCommand)
+                  : await deps.database.plan(actor, command as PlanningCommand);
     return jsonResponse(result, result.ok ? 200 : statusFor(result.code), origin);
   } catch { return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin); }
 }

@@ -1,4 +1,4 @@
-# Game Messages, Free Look Change and Fixed Builds Implementation Plan
+# Next Patch: Game Messages, Notifications, Free Look Change, Fixed Builds and Fuller Expedition Replays
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -310,3 +310,14 @@ Made after the release, from the real game (HyperFrames skill; `npx hyperframes 
   card names the game's URL. `npx hyperframes check --json` clean, snapshot review, then render.
 - [ ] **Step 3:** Send Avi the file (under the 30 MiB send cap) and keep the project in `C:\Avi\Studies\Projects\Cloudiator-concept-video`'s
   sibling folder, not in the game repository.
+
+### Task 10: Expedition replays show the whole trip (needs its own design first)
+
+Avi, 2026-10-28: "for the expedition replay, make more to see, not only the battle: how the gladiator leaves the camp, how
+he arrives back, and when he rests, so the player can watch it all." Not designed yet: before building, a short design and
+a clickable mockup over the real expedition scene (Avi's mockup rule), then its own tasks in this plan.
+
+## Status (2026-10-28)
+
+Avi: "all I say insert to a plan for next patch." This plan is the **next patch**: nothing in it is built yet (Task 1 had
+not started). It waits for Avi's go; the video of the changes already live is separate work.

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge, makeLegacyPending } from '../fixtures/db.ts';
 import { readMarket } from '../../src/lib/api/reads';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
@@ -417,8 +417,11 @@ describe('marketplace listings in the database', () => {
     const axe = await seller.add('axe:1:common');
     const id = listingId(await list(seller, axe.id, 101));
     const heldState = await held.state();
-    expect(await send(held.token, { ...equip(heldState, heldState.currentBuild.equipment.weapon!), classId: 'berserker' }))
-      .toMatchObject({ ok: true, value: { reservedMoney: 100 } });
+    const hold = equip(heldState, heldState.currentBuild.equipment.weapon!);
+    expect(await send(held.token, hold)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+    // The server queues no fee any more; a build queued before the release holds one (100 here), as it was left.
+    await makeLegacyPending(sql, held.gid, hold.operationId, { fee: 100 });
+    expect(await held.state()).toMatchObject({ reservedFees: { money: 100 } });
     const snapshot = async () => ({ listing: await listingRow(id), offer: await offerRow(id), item: await itemRow(axe.id),
       wallets: await Promise.all([seller, full, poor, held].map(f => f.wallet())), counts: await Promise.all([full, poor, held].map(async f => (await f.items()).length)) });
     const before = await snapshot();

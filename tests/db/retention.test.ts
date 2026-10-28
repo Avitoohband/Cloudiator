@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
-import { sql, account, resetIdentity, admin, anonymous, creation } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, makeLegacyPending } from '../fixtures/db.ts';
 import { OPEN, PUBLIC_TOURNAMENT_COLUMNS } from '../fixtures/access.ts';
 import { createDatabase, createWorkerDatabase, prepareGrant } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
@@ -879,10 +879,13 @@ describe('Task 22.1: retention in the database', () => {
     await sql`insert into private.arena_ratings(gladiator_id,league,season_index,rating,human_wins,human_losses) values(${seller.gid},'bronze',9,1100,5,0)`;
     expect(await sql`select private.close_season(9,${await dbNow()}) as awards`).toEqual([{ awards: 1 }]);
     const before = await seller.state();
-    const build = { kind: 'queue-build' as const, operationId: randomUUID(), expectedVersion: before.buildVersion, classId: 'berserker' as const,
-      stance: before.currentBuild.stance, allocation: before.currentBuild.allocations, equipment: before.currentBuild.equipment };
+    const build = { kind: 'queue-build' as const, operationId: randomUUID(), expectedVersion: before.buildVersion, classId: before.currentBuild.classId,
+      stance: 'offensive' as const, allocation: before.currentBuild.allocations, equipment: before.currentBuild.equipment };
     const queued = await commands.plan({ userId: seller.id }, build);
-    expect(queued).toMatchObject({ ok: true, value: { reservedMoney: 100 } });
+    expect(queued).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+    // The server queues no fee any more, but production's ledgers hold real build fees for good and must still fold and reconcile:
+    // the build is rewritten to hold a fee of 100, as a build queued before the release left it.
+    await makeLegacyPending(sql, seller.gid, build.operationId, { fee: 100 });
     const effective = (queued as { value: { effectiveSlotIndex: number } }).value.effectiveSlotIndex;
     expect(await sql`select private.apply_pending_build(${seller.gid},${effective}) as applied`).toEqual([{ applied: true }]);
     const shop = async (catalogId: string) => {

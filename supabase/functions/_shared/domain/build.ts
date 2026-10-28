@@ -72,6 +72,18 @@ export function validateCreationAllocation(allocation: Attributes): boolean {
   return allocationTotal(allocation) === RULES_V1.attributes.creationPoints;
 }
 
+/**
+ * A saved build's class and added points are fixed (Avi, 2026-10-28; respec and class changes come back later as paid options).
+ * Compared against the ACTIVE build, never a pending one, so a pending build may be revised down to the active build's values
+ * (not below) and still be cancelled. 'class' wins when both changed. Stance, equipment and more points are free to change.
+ * `buildChangeFee` is unchanged and returns 0 for every change this allows.
+ */
+export function lockedChange(current: BuildInput, next: BuildInput): 'class' | 'points' | null {
+  if (!validInput(current) || !validInput(next)) throw new RangeError('Invalid build lock input');
+  if (current.classId !== next.classId) return 'class';
+  return attributes.some(key => next.allocation[key] < current.allocation[key]) ? 'points' : null;
+}
+
 /** Compare against the active build, not a previously queued request. Reservation/refund is transactional backend work. */
 export function buildChangeFee(current: BuildInput, next: BuildInput): number {
   if (!validInput(current) || !validInput(next)) throw new RangeError('Invalid build fee input');

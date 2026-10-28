@@ -1,4 +1,5 @@
 import postgres from 'postgres';
+import type { Sql } from 'postgres';
 import { createClient } from '@supabase/supabase-js';
 import { createHmac, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -93,6 +94,22 @@ export async function resetIdentity() {
 }
 export const creation = (name = 'Avi Fighter', operationId: string = randomUUID()) => ({ kind: 'create-character' as const, operationId, name, classId: 'guardian' as const,
   allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 } });
+/**
+ * A pending build as one queued BEFORE the fixed class and points release (2026-10-28) held it. The server no longer queues a fee,
+ * a class change or a lower attribute (every allowed build change is free), but a build already pending at deploy keeps its fee
+ * and applies as queued. So a test of that rewrites a free pending build to what the earlier `queue_build` wrote: the held
+ * reservation, `reservedMoney`, the build it will apply and the stamina maximum prepared for it. `q` is `sql` or a transaction.
+ */
+export async function makeLegacyPending(q: Sql, gladiatorId: string, operationId: string,
+  legacy: { fee: number; classId?: string; allocations?: Record<string, number>; staminaMaximum?: number }) {
+  const { fee, classId, allocations, staminaMaximum } = legacy;
+  await q`update public.reservations set money=${fee} where gladiator_id=${gladiatorId} and operation_id=${operationId} and status='held'`;
+  await q`update public.builds set pending_build=jsonb_set(jsonb_set(pending_build,'{reservedMoney}',to_jsonb(${fee}::bigint)),'{build}',
+    (pending_build->'build')||${q.json({ ...(classId ? { classId } : {}), ...(allocations ? { allocations } : {}) })})
+    where gladiator_id=${gladiatorId} and pending_build->>'operationId'=${operationId}`;
+  if (staminaMaximum !== undefined) await q`update private.pending_build_preparations set stamina_maximum=${staminaMaximum}
+    where gladiator_id=${gladiatorId} and operation_id=${operationId}`;
+}
 export const request = (token: string, body: unknown) => new Request('http://local/game-command', {
   method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:3000' }, body: JSON.stringify(body),
 });

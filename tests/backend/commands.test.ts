@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { handleCommand, parseCommand, type CommandDependencies } from '../../supabase/functions/_shared/backend/commands.ts';
-import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { createDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
 import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { ownerFixture } from '../fixtures/domain.ts';
@@ -412,4 +412,46 @@ it('answers a deadlocked or serialization-failed market transaction as retryable
   await expect(database.market({ userId: ACTOR }, { kind: 'cancel-listing', operationId, listingId: operationId })).rejects.toThrow('market-unavailable');
   const response = await handleCommand(req({ kind: 'cancel-listing', operationId, listingId: operationId }), { ...deps, database: { ...deps.database, market: database.market } });
   expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
+});
+
+// Fixed class and points (spec "Added 2026-10-28"): the build preparation refuses a class change or a lower attribute, so SQL
+// receives no preparation and answers `invalid`. The floor is the CURRENT build, never a pending one.
+const queueBuild = (patch: Record<string, unknown> = {}) => ({ kind: 'queue-build' as const, operationId, expectedVersion: 1, classId: 'guardian' as const, stance: 'balanced' as const,
+  allocation: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 }, equipment: { weapon: null, offHand: null, head: null, body: null, feet: null }, ...patch });
+const withPoints = (patch: Record<string, number>) => ({ strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2, ...patch });
+
+it('prepares no build for a class change or a lower attribute, and a free one for everything else', () => {
+  const earned12: OwnerState = { ...ownerFixture, progression: { ...ownerFixture.progression, earnedAttributePoints: 12 } };
+  expect(prepareBuild(queueBuild({ classId: 'duelist' }), earned12)).toBeNull();
+  expect(prepareBuild(queueBuild({ classId: 'berserker', allocation: withPoints({ strength: 3 }) }), earned12)).toBeNull();
+  for (const key of ['strength', 'agility', 'vitality', 'endurance', 'precision']) {
+    expect(prepareBuild(queueBuild({ allocation: withPoints({ [key]: 1 }) }), earned12), `${key} one lower`).toBeNull();
+    expect(prepareBuild(queueBuild({ allocation: withPoints({ [key]: 3 }) }), earned12), `${key} one higher`).toMatchObject({ fee: 0 });
+  }
+  expect(prepareBuild(queueBuild({ stance: 'defensive' }), earned12)).toMatchObject({ fee: 0, snapshot: { classId: 'guardian', stance: 'defensive' } });
+  expect(prepareBuild(queueBuild(), earned12)).toMatchObject({ fee: 0 });
+});
+
+it('keeps the current build as the floor while a pending build is queued', () => {
+  // The pending build is a duelist with strength 5; the current build is still the guardian with 2 in every attribute.
+  const pending = { build: { ...ownerFixture.currentBuild, version: 2, classId: 'duelist' as const, allocations: withPoints({ strength: 5 }) },
+    effectiveSlotIndex: 373_250, reservedMoney: 0, reservedItemIds: [], operationId };
+  const state: OwnerState = { ...ownerFixture, buildVersion: 2, pendingBuild: pending, progression: { ...ownerFixture.progression, earnedAttributePoints: 15 } };
+  // Revised down to the current build's class and values (not below): allowed, so the pending build can still be corrected.
+  expect(prepareBuild(queueBuild({ expectedVersion: 2 }), state)).toMatchObject({ fee: 0 });
+  expect(prepareBuild(queueBuild({ expectedVersion: 2, allocation: withPoints({ strength: 4 }) }), state)).toMatchObject({ fee: 0 });
+  // Repeating the pending build's own class is still a class change, and below the current values is still a decrease.
+  expect(prepareBuild(queueBuild({ expectedVersion: 2, classId: 'duelist' }), state)).toBeNull();
+  expect(prepareBuild(queueBuild({ expectedVersion: 2, allocation: withPoints({ agility: 1 }) }), state)).toBeNull();
+});
+
+it('sends no preparation to the build command when the change is locked', async () => {
+  const sent: Sent[] = [];
+  const database = createDatabase(backend(name => name === 'owner_state' ? json([{ state: ownerFixture }])
+    : json({ ok: false, code: 'invalid' }), sent));
+  const actor = { userId: ACTOR };
+  expect(await database.plan(actor, queueBuild({ classId: 'duelist' }))).toEqual({ ok: false, code: 'invalid' });
+  expect(await database.plan(actor, queueBuild({ allocation: withPoints({ strength: 1, agility: 3 }) }))).toEqual({ ok: false, code: 'invalid' });
+  const queued = sent.filter(request => request.path === '/rest/v1/rpc/queue_build').map(request => (request.body as { input: { prepared: unknown } }).input.prepared);
+  expect(queued).toEqual([null, null]);
 });

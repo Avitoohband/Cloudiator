@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge, makeLegacyPending } from '../fixtures/db.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
@@ -49,9 +49,13 @@ async function fighter() {
   await sql`update public.wallets set money=300 where gladiator_id=${result.value.gladiatorId}`;
   return { ...owner, state, gid: result.value.gladiatorId as string };
 }
+/**
+ * A build change the server allows: the current class and points (fixed since the release of 2026-10-28; tests/db/build-locks.test.ts
+ * covers the refusals) with another stance, so it is free. A fee is only reachable through `makeLegacyPending`.
+ */
 function build(state: OwnerState): Extract<GameCommand, { kind: 'queue-build' }> {
   return { kind: 'queue-build', operationId: randomUUID(), expectedVersion: state.buildVersion,
-    classId: 'berserker', stance: 'balanced', allocation: { strength: 3, agility: 1, vitality: 2, endurance: 2, precision: 2 },
+    classId: state.currentBuild.classId, stance: 'offensive', allocation: state.currentBuild.allocations,
     equipment: state.currentBuild.equipment };
 }
 
@@ -63,17 +67,23 @@ describe('schedule revisions and pending reservations', () => {
       where n.nspname='public' and proname in ('edit_schedule','edit_day_schedule','queue_build','cancel_build')`;
     expect(rows.map(row => row.proname).sort()).toEqual(['cancel_build', 'edit_day_schedule', 'edit_schedule', 'queue_build']);
   });
-  it('reserves combined 200 from 300 without replacing the active build and refunds cancellation once', async () => {
+  it('reserves nothing for a free build without replacing the active build, and refunds a fee held from before the release once on cancellation', async () => {
     const owner = await fighter();
     const initial = await owner.state();
     const command = build(initial);
     const result = await send(owner.token, command);
-    expect(result).toMatchObject({ ok: true, value: { reservedMoney: 200 } });
+    expect(result).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
     expect(await send(owner.token, command)).toEqual(result);
+    const free = await owner.state();
+    expect(free.currentBuild.classId).toBe('guardian');
+    expect(free.currentBuild).toEqual(initial.currentBuild);
+    expect(free.pendingBuild).toMatchObject({ reservedMoney: 0, build: { classId: 'guardian', stance: 'offensive' } });
+    expect(free.wallets.money).toBe(300);
+    expect(free.reservedFees.money).toBe(0);
+    // A build queued before the release holds a fee (200 here); it is still refunded exactly once when the build is cancelled.
+    await makeLegacyPending(sql, owner.gid, command.operationId, { fee: 200 });
     const pending = await owner.state();
-    expect(pending.currentBuild.classId).toBe('guardian');
-    expect(pending.currentBuild).toEqual(initial.currentBuild);
-    expect(pending.pendingBuild).toMatchObject({ reservedMoney: 200, build: { classId: 'berserker' } });
+    expect(pending.pendingBuild).toMatchObject({ reservedMoney: 200 });
     expect(pending.wallets.money).toBe(300);
     expect(pending.reservedFees.money).toBe(200);
     const cancel: GameCommand = { kind: 'cancel-build', operationId: randomUUID(), expectedVersion: pending.buildVersion };
@@ -269,15 +279,21 @@ describe('schedule revisions and pending reservations', () => {
       .toMatchObject({ ok: true, value: { version: 2, parts: { afternoon: null } } });
   });
 
-  it('charges against active allocations, replaces held fees, and allocates newly earned points once', async () => {
+  it('queues against the active build, replaces a held fee, and allocates newly earned points once', async () => {
     const owner = await fighter();
     let state = await owner.state();
     const original = build(state);
-    expect(await send(owner.token, original)).toMatchObject({ ok: true, value: { reservedMoney: 200 } });
+    expect(await send(owner.token, original)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+    // A build queued before the release holds a fee; the next build replaces it and the hold is refunded.
+    await makeLegacyPending(sql, owner.gid, original.operationId, { fee: 200 });
     state = await owner.state();
-    const classOnly = { ...build(state), allocation: state.currentBuild.allocations };
-    expect(await send(owner.token, classOnly)).toMatchObject({ ok: true, value: { reservedMoney: 100 } });
+    expect(state.reservedFees.money).toBe(200);
+    const replacement = { ...build(state), stance: 'defensive' as const };
+    expect(await send(owner.token, replacement)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
     state = await owner.state();
+    expect(state.reservedFees.money).toBe(0);
+    expect(await sql`select status, money::int from public.reservations where gladiator_id=${owner.gid} and operation_id=${original.operationId}`)
+      .toEqual([{ status: 'refunded', money: 200 }]);
     await sql`update public.gladiators set earned_points=11,unspent_points=1,stamina_current=20 where id=${owner.gid}`;
     const free = { ...build(state), classId: state.currentBuild.classId, allocation: { ...state.currentBuild.allocations, endurance: 3 } };
     const result = await send(owner.token, free);
@@ -293,25 +309,36 @@ describe('schedule revisions and pending reservations', () => {
     state = await owner.state();
     expect(state).toMatchObject({ wallets: { money: 300 }, reservedFees: { money: 0 }, progression: { earnedAttributePoints: 11, unspentAttributePoints: 0 }, stamina: { current: 20, maximum: 106 } });
     expect(Object.values(state.currentBuild.allocations).reduce((a, b) => a + b, 0)).toBe(11);
-    expect(await send(owner.token, original)).toMatchObject({ ok: true, value: { reservedMoney: 200 } });
+    // The replaced build's receipt still answers its own operation, whatever has happened since.
+    expect(await send(owner.token, original)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
     expect((await owner.state()).pendingBuild).toBeNull();
   });
 
-  it('consumes a combined fee exactly once and clamps reduced stamina without minting resources', async () => {
+  it('consumes the fee of a build queued before the release exactly once and clamps reduced stamina without minting resources', async () => {
     const owner = await fighter();
     const initial = await owner.state();
-    expect(await send(owner.token, build(initial))).toMatchObject({ ok: true });
+    // The server queues no fee, class change or decrease any more, but a build already pending at deploy keeps them and applies as
+    // queued: a class change plus a respec (200), then a respec (100). makeLegacyPending rewrites a free build to what the earlier
+    // queue_build wrote, with the stamina maximum prepared for it.
+    const first = build(initial);
+    expect(await send(owner.token, first)).toMatchObject({ ok: true });
+    await makeLegacyPending(sql, owner.gid, first.operationId, { fee: 200, classId: 'berserker',
+      allocations: { strength: 3, agility: 1, vitality: 2, endurance: 2, precision: 2 }, staminaMaximum: 104 });
     const queued = await owner.state();
+    expect(queued).toMatchObject({ reservedFees: { money: 200 }, pendingBuild: { reservedMoney: 200, build: { classId: 'berserker' } } });
     await expect(sql`select private.apply_pending_build(${owner.gid},null)`).rejects.toMatchObject({ message: 'invalid boundary' });
     await sql`select private.apply_pending_build(${owner.gid},${queued.pendingBuild!.effectiveSlotIndex})`;
     await sql`select private.apply_pending_build(${owner.gid},${queued.pendingBuild!.effectiveSlotIndex})`;
     const state = await owner.state();
     expect(state).toMatchObject({ currentBuild: { classId: 'berserker' }, pendingBuild: null, wallets: { money: 100 }, reservedFees: { money: 0 }, stamina: { current: 104, maximum: 104 } });
-    const lower = { ...build(state), classId: 'berserker' as const, allocation: { strength: 5, agility: 1, vitality: 2, endurance: 0, precision: 2 } };
-    expect(await send(owner.token, lower)).toMatchObject({ ok: true, value: { reservedMoney: 100 } });
+    const lower = build(state);
+    expect(await send(owner.token, lower)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+    await makeLegacyPending(sql, owner.gid, lower.operationId, { fee: 100,
+      allocations: { strength: 5, agility: 1, vitality: 2, endurance: 0, precision: 2 }, staminaMaximum: 100 });
     await sql`select private.apply_pending_build(${owner.gid},${(await owner.state()).pendingBuild!.effectiveSlotIndex})`;
     expect(await owner.state()).toMatchObject({ wallets: { money: 0 }, stamina: { current: 100, maximum: 100 } });
     expect(await sql`select count(*)::int as n from public.wallet_ledger where gladiator_id=${owner.gid} and reason='build'`).toEqual([{ n: 2 }]);
+    expect(await sql`select money_delta::int as delta from public.wallet_ledger where gladiator_id=${owner.gid} and reason='build' order by money_delta`).toEqual([{ delta: -200 }, { delta: -100 }]);
   });
 
   it('reserves new pending equipment against sale or deletion and frees replaced equipment', async () => {
@@ -376,7 +403,7 @@ describe('schedule revisions and pending reservations', () => {
     // copies of the first operation share its single receipt (two conflicts when the other operation won first).
     expect([results[0].ok, results[2].ok].sort()).toEqual([false, true]);
     expect(results.filter(r => r.code === 'conflict').length).toBe(results[0].ok ? 1 : 2);
-    expect((await owner.state()).reservedFees.money).toBe(200);
+    expect((await owner.state()).reservedFees.money).toBe(0);
     expect(await send(owner.token, { ...command, stance: 'defensive' })).toMatchObject({ ok: false, code: 'conflict' });
     expect(await sql`select count(*)::int as n from public.reservations where gladiator_id=${owner.gid} and status='held'`).toEqual([{ n: 1 }]);
   });
@@ -407,7 +434,7 @@ describe('schedule revisions and pending reservations', () => {
     expect((await owner.state()).scheduleVersion).toBe(1);
   });
 
-  it('rejects foreign, listed, level-ineligible, wrong-slot and overspent build requests', async () => {
+  it('rejects foreign, listed, level-ineligible, wrong-slot and overspent build requests, and needs no funds for a valid one', async () => {
     const owner = await fighter();
     const state = await owner.state();
     const command = build(state);
@@ -428,9 +455,11 @@ describe('schedule revisions and pending reservations', () => {
       }
       expect(await send(owner.token, { ...command, operationId: randomUUID(), equipment: { ...command.equipment, weapon: id, offHand } })).toMatchObject({ ok: false, code: 'invalid' });
     }
-    await sql`update public.wallets set money=199 where gladiator_id=${owner.gid}`;
-    expect(await send(owner.token, command)).toMatchObject({ ok: false, code: 'insufficient-funds' });
     expect(await owner.state()).toMatchObject({ pendingBuild: null, reservedFees: { money: 0 } });
+    // No build costs gold any more, so an empty wallet still queues one (the fee rule used to answer insufficient-funds here).
+    await sql`update public.wallets set money=0 where gladiator_id=${owner.gid}`;
+    expect(await send(owner.token, command)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+    expect(await owner.state()).toMatchObject({ pendingBuild: { reservedMoney: 0 }, reservedFees: { money: 0 }, wallets: { money: 0 } });
   });
 
   it('rejects an ownership race and rolls back an injected late reservation failure atomically', async () => {
@@ -463,7 +492,7 @@ describe('schedule revisions and pending reservations', () => {
     const response = directEdge(owner.token, command);
     expect(response.status).toBe(200);
     expect(response.origin).toBe('http://127.0.0.1:3000');
-    expect(response.body).toMatchObject({ ok: true, value: { reservedMoney: 200 } });
+    expect(response.body).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
     expect(directEdge(owner.token, { kind: 'cancel-build', operationId: randomUUID(), expectedVersion: 2 }, 'https://evil.example').status).toBe(403);
     expect((await owner.state()).pendingBuild).not.toBeNull();
   });

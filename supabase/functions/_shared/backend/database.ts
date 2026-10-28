@@ -4,7 +4,7 @@ import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/re
 import type { Actor } from './auth.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
-import { buildChangeFee, validateBuild, validateCreationAllocation } from '../domain/build.ts';
+import { buildChangeFee, lockedChange, validateBuild, validateCreationAllocation } from '../domain/build.ts';
 import { deriveStats } from '../domain/stats.ts';
 import { applyXp, historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer } from '../domain/inventory.ts';
 import type { ExpeditionRewards } from '../domain/expedition.ts';
@@ -24,10 +24,13 @@ const PLANNING_RPC: Record<PlanningCommand['kind'], string> = {
 export function prepareBuild(command: Extract<PlanningCommand, { kind: 'queue-build' }>, state: OwnerState) {
   const validation = validateBuild(command, state.inventory, state.progression.earnedAttributePoints, state.progression.level);
   if (!validation.ok) return null;
+  // A class change or a lower attribute than the CURRENT build is refused (SQL answers `invalid` for no preparation).
+  const current = { ...state.currentBuild, allocation: state.currentBuild.allocations };
+  if (lockedChange(current, command) !== null) return null;
   return { baseline: { currentBuild: state.currentBuild, pendingBuild: state.pendingBuild, buildVersion: state.buildVersion,
     earnedPoints: state.progression.earnedAttributePoints, level: state.progression.level,
     inventory: [...state.inventory].sort((a, b) => a.id.localeCompare(b.id)) },
-    fee: buildChangeFee({ ...state.currentBuild, allocation: state.currentBuild.allocations }, command),
+    fee: buildChangeFee(current, command),
     staminaMaximum: deriveStats(validation.snapshot, RULES_V1).maxStamina,
     snapshot: validation.snapshot };
 }

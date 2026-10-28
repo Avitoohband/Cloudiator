@@ -1203,7 +1203,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
         { league: 'silver', season: 0, rating: 1000, wins: 0, losses: 0 }]);
     });
 
-    it('promotes from real Task 8 acquisitions only at a boundary: sold, unequipped and bound renown gear count, and a respec never lowers it', async () => {
+    it('promotes from real Task 8 acquisitions only at a boundary: sold, unequipped and bound renown gear count, and a refused respec changes nothing', async () => {
       const current = await stableRealSlot(120_000), next = current + 1;
       await resetWorld(current);
       // Level 10 and the ten starting points: 20 + 2 + floor(gear history / 10). The starter history 28 stays Bronze (24);
@@ -1227,12 +1227,13 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(await sell(bound, sword.value!.itemIds[0])).toMatchObject({ ok: false, code: 'invalid' });
       // A second common sword adds nothing to the best legal loadout: 24 + 4 = 28.
       expect(await buy(control, 'sword:1:common')).toMatchObject({ ok: true, value: { peakStrength: 28 } });
-      // A paid respec lowers allocated points, never earned ones.
+      // A respec is refused (fixed points, 2026-10-28): the allocation stays, and earned points place the fighter either way
+      // (the pure rule that a respec never lowers placement is tests/domain/arena.test.ts).
       const state = await respec.state();
       const lowered: Extract<GameCommand, { kind: 'queue-build' }> = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: state.buildVersion,
         classId: state.currentBuild.classId, stance: state.currentBuild.stance, allocation: { ...state.currentBuild.allocations, strength: 0 },
         equipment: state.currentBuild.equipment };
-      expect(await commands.plan({ userId: respec.id }, lowered)).toMatchObject({ ok: true, value: { reservedMoney: 100 } });
+      expect(await commands.plan({ userId: respec.id }, lowered)).toMatchObject({ ok: false, code: 'invalid' });
       const peaks = Object.fromEntries((await sql`select id, peak_strength::float8 as peak from public.gladiators`).map(r => [r.id, r.peak]));
       expect(peaks).toEqual({ [seller.gid]: 30, [bound.gid]: 30.4, [control.gid]: 28, [respec.gid]: 28 });
       // Promotion applies only at a boundary: every placement is still Bronze, whatever the history says now.
@@ -1257,7 +1258,7 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
           from public.gladiators g join public.builds b on b.gladiator_id=g.id join private.jobs j on j.dedupe_key=('prepare:'||${String(next)}||':'||g.id::text)`)
           .map(r => [r.id, [r.league, r.computed, r.earned, r.strength]]));
         expect(placed).toEqual({ [seller.gid]: ['silver', 'silver', 10, 2], [bound.gid]: ['silver', 'silver', 10, 2],
-          [control.gid]: ['bronze', 'bronze', 10, 2], [respec.gid]: ['silver', 'silver', 105, 0] });
+          [control.gid]: ['bronze', 'bronze', 10, 2], [respec.gid]: ['silver', 'silver', 105, 2] });
         throw rollback;
       })).rejects.toBe(rollback);
       // The longest stableRealSlot sleep (121 s, a run that starts in the slot's last two minutes) plus this test's own minute

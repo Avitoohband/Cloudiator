@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { TransactionSql } from 'postgres';
-import { sql, account, resetIdentity, admin, anonymous, creation, request } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, request, makeLegacyPending } from '../fixtures/db.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, createWorkerDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
 import type { WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
@@ -625,16 +625,18 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
 
   it('applies an eligible pending build once at the boundary before snapshotting and keeps buildVersion monotonic', async () => {
     const owner = await fighter();
+    // One earned point to add: the class and the points already spent are fixed, so the build adds a point and changes the stance.
     await sql`update public.wallets set money=300 where gladiator_id=${owner.gid}`;
+    await sql`update public.gladiators set earned_points=11,unspent_points=1 where id=${owner.gid}`;
     const before = await owner.state();
     await sql.begin(async tx => {
       // Rollback-only operator clock inside slot 299, never a player time input.
       await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker set search_path='' as 'select ${299 * SLOT + 10}::bigint'`);
-      const command = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: before.buildVersion, classId: 'berserker', stance: 'offensive',
-        allocation: { strength: 3, agility: 1, vitality: 2, endurance: 2, precision: 2 }, equipment: before.currentBuild.equipment } as const;
+      const command = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: before.buildVersion, classId: 'guardian', stance: 'offensive',
+        allocation: { strength: 3, agility: 2, vitality: 2, endurance: 2, precision: 2 }, equipment: before.currentBuild.equipment } as const;
       const prepared = prepareBuild(command, before);
       const [{ queued }] = await tx`select public.queue_build(${owner.id},${command.operationId},${tx.json({ command, prepared } as never)}) as queued`;
-      expect(queued).toMatchObject({ ok: true, value: { effectiveSlotIndex: 300, reservedMoney: 200 } });
+      expect(queued).toMatchObject({ ok: true, value: { effectiveSlotIndex: 300, reservedMoney: 0 } });
       await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker set search_path='' as 'select ${300 * SLOT + 10}::bigint'`);
       const token = randomUUID();
       await tx`update private.coordinator set lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
@@ -642,24 +644,24 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
       expect(first).toMatchObject({ phase: 4, wait: 'preparation' });
       const [{ jobs }] = await tx`select public.claim_jobs(${randomUUID()},'prepare',20) as jobs`;
       const job = (jobs as JobLease[])[0];
-      expect((job.snapshot as PreparationInput).build).toMatchObject({ classId: 'berserker', stance: 'offensive', version: 2 });
+      expect((job.snapshot as PreparationInput).build).toMatchObject({ classId: 'guardian', stance: 'offensive', version: 2 });
       const [{ completed }] = await tx`select public.complete_job(${job.id},${job.token},${tx.json(prepareActivityV1(job.snapshot as PreparationInput) as never)}) as completed`;
       expect(completed).toMatchObject({ ok: true });
       const [{ done }] = await tx`select public.advance_boundary(300,${token}) as done`;
       expect(done).toMatchObject({ status: 'complete' });
       const [snapshot] = await tx`select snapshot from private.activity_snapshots`;
-      expect(snapshot.snapshot.build).toMatchObject({ classId: 'berserker', stance: 'offensive' });
+      expect(snapshot.snapshot.build).toMatchObject({ classId: 'guardian', stance: 'offensive' });
       const [state] = await tx`select b.version::int as edit, b.current_build->>'version' as active, b.pending_build, w.money::int as money,
         (select count(*)::int from public.wallet_ledger l where l.gladiator_id=b.gladiator_id and reason='build') as fees
         from public.builds b join public.wallets w using (gladiator_id) where b.gladiator_id=${owner.gid}`;
-      expect(state).toEqual({ edit: 2, active: '2', pending_build: null, money: 100, fees: 1 });
+      expect(state).toEqual({ edit: 2, active: '2', pending_build: null, money: 300, fees: 1 });
       await tx`rollback`;
     });
     const [{ now }] = await sql`select private.planning_now_ms()::float8 as now`;
     expect(Math.abs(now - Date.now())).toBeLessThan(5000);
   });
 
-  it('clamps stamina for a pending lower-Endurance build before the snapshot and the debit', async () => {
+  it('clamps stamina for a pending lower-Endurance build queued before the release before the snapshot and the debit', async () => {
     const owner = await fighter();
     await sql`update public.wallets set money=300 where gladiator_id=${owner.gid}`;
     const before = await owner.state();
@@ -667,10 +669,13 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     await sql.begin(async tx => {
       // Rollback-only operator clock inside slot 299, never a player time input.
       await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker set search_path='' as 'select ${299 * SLOT + 10}::bigint'`);
+      // The server no longer queues a decrease (a respec costing 100): this is a build as one queued before the release left it.
       const command = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: before.buildVersion, classId: 'guardian', stance: 'balanced',
-        allocation: { strength: 4, agility: 2, vitality: 2, endurance: 0, precision: 2 }, equipment: before.currentBuild.equipment } as const;
+        allocation: before.currentBuild.allocations, equipment: before.currentBuild.equipment } as const;
       const [{ queued }] = await tx`select public.queue_build(${owner.id},${command.operationId},${tx.json({ command, prepared: prepareBuild(command, before) } as never)}) as queued`;
-      expect(queued).toMatchObject({ ok: true, value: { effectiveSlotIndex: 300, reservedMoney: 100 } });
+      expect(queued).toMatchObject({ ok: true, value: { effectiveSlotIndex: 300, reservedMoney: 0 } });
+      await makeLegacyPending(tx, owner.gid, command.operationId, { fee: 100,
+        allocations: { strength: 4, agility: 2, vitality: 2, endurance: 0, precision: 2 }, staminaMaximum: 100 });
       await tx.unsafe(`create or replace function private.planning_now_ms() returns bigint language sql volatile security invoker set search_path='' as 'select ${300 * SLOT + 10}::bigint'`);
       const token = randomUUID();
       await tx`update private.coordinator set lease_token=${token},lease_until_ms=9007199254740991 where singleton`;

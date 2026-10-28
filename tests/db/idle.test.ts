@@ -341,8 +341,8 @@ describe('Task 23.8: idle characters rest at home', () => {
     // transaction whose clock stand-in is restored before it commits).
     const state = await f.state();
     const definition = await definitionOf('private.planning_now_ms()');
-    const build = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: state.buildVersion, classId: 'berserker', stance: 'offensive',
-      allocation: { strength: 3, agility: 1, vitality: 2, endurance: 2, precision: 2 }, equipment: state.currentBuild.equipment } as const;
+    const build = { kind: 'queue-build', operationId: randomUUID(), expectedVersion: state.buildVersion, classId: state.currentBuild.classId, stance: 'offensive',
+      allocation: state.currentBuild.allocations, equipment: state.currentBuild.equipment } as const;
     await sql.begin(async tx => {
       await tx.unsafe(clock(S * SLOT + 10));
       expect((await tx`select public.consume_command_rate(${f.id},false) as r`)[0].r).toBeNull();
@@ -350,7 +350,7 @@ describe('Task 23.8: idle characters rest at home', () => {
       expect((await tx`select public.edit_schedule(${f.id},${schedule.operationId},${tx.json({ command: schedule, prepared: null })}) as r`)[0].r)
         .toMatchObject({ ok: true, value: { effectiveSlotIndex: S + 1 } });
       expect((await tx`select public.queue_build(${f.id},${build.operationId},${tx.json({ command: build, prepared: prepareBuild(build, state) } as never)}) as r`)[0].r)
-        .toMatchObject({ ok: true, value: { effectiveSlotIndex: S + 1, reservedMoney: 200 } });
+        .toMatchObject({ ok: true, value: { effectiveSlotIndex: S + 1, reservedMoney: 0 } });
       await tx.unsafe(definition);
     });
     expect(await definitionOf('private.planning_now_ms()')).toBe(definition);
@@ -358,16 +358,16 @@ describe('Task 23.8: idle characters rest at home', () => {
       pendingBuild: { effectiveSlotIndex: S + 1 } });
     // The first boundary back applies both: the new build before the snapshot, and the afternoon choice.
     expect(await runBoundary(S + 1, token)).toMatchObject({ status: 'complete' });
-    const [activity] = await sql`select a.slot_index::int as slot, a.requested, a.schedule_version::int as version, s.snapshot->'build'->>'classId' as "classId"
+    const [activity] = await sql`select a.slot_index::int as slot, a.requested, a.schedule_version::int as version, s.snapshot->'build'->>'stance' as stance
       from public.activities a join private.activity_snapshots s on s.activity_id=a.id where a.gladiator_id=${f.gid}`;
-    expect({ ...activity }).toEqual({ slot: S + 1, requested: { kind: 'rest' }, version: 2, classId: 'berserker' });
-    expect(await sql`select current_build->>'classId' as "classId", pending_build from public.builds where gladiator_id=${f.gid}`)
-      .toEqual([{ classId: 'berserker', pending_build: null }]);
-    // Only the build fee moved money; the resting slot S has no settled slot, ledger row or grant.
+    expect({ ...activity }).toEqual({ slot: S + 1, requested: { kind: 'rest' }, version: 2, stance: 'offensive' });
+    expect(await sql`select current_build->>'stance' as stance, pending_build from public.builds where gladiator_id=${f.gid}`)
+      .toEqual([{ stance: 'offensive', pending_build: null }]);
+    // The build is free, so no money moved but its zero ledger row; the resting slot S has no settled slot, ledger row or grant.
     const after = await progressOf(f);
-    expect(after).toMatchObject({ money: '100', renown: before.renown, xp: before.xp, earned: before.earned, settled: 0, ledger: before.ledger + 1 });
+    expect(after).toMatchObject({ money: before.money, renown: before.renown, xp: before.xp, earned: before.earned, settled: 0, ledger: before.ledger + 1 });
     expect(await sql`select reason, money_delta::int as delta from public.wallet_ledger where gladiator_id=${f.gid} and reason='build'`)
-      .toEqual([{ reason: 'build', delta: -200 }]);
+      .toEqual([{ reason: 'build', delta: 0 }]);
   });
 
   it('backfills the deploy time for existing owners, so nobody rests on the first boundary after M22', async () => {

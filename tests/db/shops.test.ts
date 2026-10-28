@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge } from '../fixtures/db.ts';
+import { sql, account, resetIdentity, admin, anonymous, creation, request, directEdge, makeLegacyPending } from '../fixtures/db.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, prepareGrant, prepareShopPurchase } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
@@ -239,7 +239,10 @@ describe('inventory and NPC shops', () => {
     expect(await poor.wallet()).toEqual({ money: 39, renown: 49 });
     const held = await fighter({ money: 139 });
     const state = await held.state();
-    expect(await send(held.token, { ...equip(state, state.currentBuild.equipment.weapon!), classId: 'berserker' })).toMatchObject({ ok: true, value: { reservedMoney: 100 } });
+    const hold = equip(state, state.currentBuild.equipment.weapon!);
+    expect(await send(held.token, hold)).toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+    // The server queues no fee any more; a build queued before the release holds one (100 here), as it was left.
+    await makeLegacyPending(sql, held.gid, hold.operationId, { fee: 100 });
     expect(await send(held.token, buy('sword:1:common'))).toHaveCode('insufficient-funds');
     expect(await send(held.token, buy('round-shield:1:common'))).toMatchObject({ ok: true, value: { moneyDebit: 30 } });
     expect(await held.state()).toMatchObject({ wallets: { money: 109 }, reservedFees: { money: 100 } });

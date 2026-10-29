@@ -92,4 +92,4 @@ More from Avi, 2026-10-29:
     tournaments. Dungeons, number of expeditions, number of training and more. A unique title for the first batch of players
     that they are the test group." Earned titles (tournament wins, dungeon clears, expedition and Training counts, and more);
     a gladiator wears one, shown with its name; a unique founders' title for the first batch of players (the test group).
-    Today only the season "champion" title exists (prestige, Task 21). Avi added: "Titles for gear collection as well".
+    Today only the season "champion" title exists (prestige, Task 21). Avi added: "Titles for gear collection as well" and "For amount of gold".

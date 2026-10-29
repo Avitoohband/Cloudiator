@@ -14,6 +14,7 @@ import { splitNote, suggestedSplit } from '../character/class-bonus';
 import { ClassChips } from '../character/ClassCard';
 import { cappedNote, pointsLeft, raisedNote, setPoints } from '../character/creation-points';
 import { useClockMode } from '../../lib/clock-setting';
+import { PointsStepper, usePressHold, type PointsSource } from '../character/PointsStepper';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
@@ -72,7 +73,9 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const draftVersion = useRef(owner.buildVersion);
   /** The class and points the draft's floor was taken from (`fixedKey`): the current build moves without a new build version when the boundary applies a pending build. */
   const draftFloor = useRef(fixedKey(owner.currentBuild));
-  const reviewId = useId();
+  const reviewId = useId(), respecId = useId();
+  /** A blur that corrects a typed number holds back the Queue build or +1/+5 press that caused it (fix round 2). */
+  const pressHold = usePressHold();
   // A command sent by keyboard whose control went away (Cancel pending build removes its section) gives the focus to its
   // outcome, never to <body>; a pointer command moves nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
@@ -117,14 +120,15 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   function update(next: BuildInput, note = '', undo: Attributes | null = null) { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote({ text: note, undo }); }
   /**
    * A typed or stepped number for one attribute: raised to the current build's value when below it, capped at what is left when
-   * above, with a status line saying which. Only typing can pass either limit (the stepper stops at both), so the field has the
-   * focus then and `heldAtFocus` holds what it started from.
+   * above, with a status line saying which. Only typing can go below (the build step has no −); +5 may ask past the cap, but lands on
+   * it with no line (the counter says it, points hotfix 2026-10-29). So a line comes after typing, when the field has had the
+   * focus and `heldAtFocus` holds what it started from.
    */
-  function changePoints(key: keyof Attributes, wanted: number) {
+  function changePoints(key: keyof Attributes, wanted: number, source: PointsSource = 'field') {
     const floor = owner.currentBuild.allocations[key], held = draft.allocation[key];
     const result = setPoints(draft.allocation, key, wanted, earned, floor);
     update({ ...draft, allocation: result.allocation }, result.raised ? raisedNote(title(key), floor)
-      : result.capped ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
+      : result.capped && source === 'field' ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
   }
   /**
    * "Suggested for {class}": the points left go on the attributes the class's way (only adds, only the points left). Nothing is sent: it
@@ -162,7 +166,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     } catch { if (mounted.current) setError('This change could not be confirmed. Retry to confirm the same request.'); }
     finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
-  function submit(event: FormEvent) { event.preventDefault(); void send('queue-build'); }
+  function submit(event: FormEvent) { event.preventDefault(); if (!pressHold.take()) void send('queue-build'); }
   return <div className="planning-form">
     <div className="build-comparison">
       <section data-testid="current-build"><h2>Current build</h2><BuildSummary build={owner.currentBuild} inventory={owner.inventory} /></section>
@@ -183,13 +187,16 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
           <p className="build-counter" role="status" data-done={left === 0}>{left === 0 ? `All ${earned} spent` : `${left} of ${earned} left`}</p>
           {left > 0 && <button type="button" ref={suggestButton} className="build-suggest" onClick={suggest}>Suggested for {title(draft.classId)}</button>}
         </div>
-        <div className="build-points">{attributes.map(key => <label key={key}>{key}<input type="number" min={owner.currentBuild.allocations[key]} max={draft.allocation[key] + left} step="1" value={draft.allocation[key]} {...reviewed(pointsInvalid(key))}
-          onFocus={() => { heldAtFocus.current[key] = draft.allocation[key]; }} onChange={e => changePoints(key, Number(e.target.value))} /></label>)}</div>
+        <div className="build-points">{attributes.map(key => { const floor = owner.currentBuild.allocations[key], value = draft.allocation[key];
+          return <PointsStepper key={key} label={key} name={title(key)} value={value} floor={floor} cap={Math.max(floor, value + left)} minus={false} hold={pressHold} fieldProps={reviewed(pointsInvalid(key))}
+            onFocus={() => { heldAtFocus.current[key] = value; }} onChange={(wanted, source) => changePoints(key, wanted, source)} />; })}</div>
         <div className="build-points-status">
           <p className="build-points-note" role="status">{pointsNote.text}</p>
           {pointsNote.undo && <button type="button" ref={undoButton} className="build-undo" onClick={undoSuggestion}>Undo</button>}
         </div>
         <p>{POINTS_NOTE}</p>
+        {/* Respec, a paid option to come (Avi, change round 1): shown gray and aria-disabled with the line that says so; it does nothing. */}
+        <div className="build-respec"><button type="button" aria-disabled="true" aria-describedby={respecId}>Respec</button><span id={respecId}>Coming later as a paid option</span></div>
       </fieldset>
       <fieldset disabled={busy}><legend>Equipment</legend>
         {slots.map(slot => <label key={slot}>{slot}<select value={draft.equipment[slot] ?? ''} disabled={slot === 'offHand' && twoHands} {...reviewed(equipmentInvalid)} onChange={e => {

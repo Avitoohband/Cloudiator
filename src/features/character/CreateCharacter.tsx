@@ -23,6 +23,7 @@ import {
 } from './creation-points';
 import { LookPicker } from './LookPicker';
 import { lookFromDraft, lookRandom } from './look-picker';
+import { PointsStepper, usePressHold, type PointsSource } from './PointsStepper';
 import styles from './CreateCharacter.module.css';
 
 const classes = ['berserker', 'guardian', 'duelist'] as const;
@@ -113,6 +114,8 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   const [capped, setCapped] = useState('');
   /** What each points field held when it took the focus: the capped line says it differently when that was 0 (ruling R10). */
   const heldAtFocus = useRef<Partial<Record<keyof Attributes, number>>>({});
+  /** A blur that corrects a typed number holds back the Create or −/+1/+5 press that caused it (fix round 2). */
+  const pressHold = usePressHold();
   const [busy, setBusy] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const sending = useRef(false);
@@ -152,17 +155,18 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
     setDraft(clean); setError(null); setCapped(note); setStorageAvailable(persist(clean));
   }
   /**
-   * A typed or stepped number for one attribute: capped at what is left, with a status line when it was. Only typing can pass
-   * the cap (a stepper stops at it), so the field has the focus then and `heldAtFocus` holds what it started from.
+   * A typed or stepped number for one attribute: capped at what is left, with a status line when a typed number was. +5 may ask
+   * past the cap too, but lands on it with no line (the counter says it, points hotfix 2026-10-29). Only a typed number gets the
+   * line, so the field has had the focus then and `heldAtFocus` holds what it started from.
    */
-  function changePoints(key: keyof Attributes, wanted: number) {
+  function changePoints(key: keyof Attributes, wanted: number, source: PointsSource = 'field') {
     const result = setPoints(draft.allocation, key, wanted, creationPoints), held = draft.allocation[key];
     update({ ...draft, allocation: result.allocation },
-      result.capped ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
+      result.capped && source === 'field' ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (sending.current || !accountId || !ready) return;
+    if (pressHold.take() || sending.current || !accountId || !ready) return;
     const name = draft.name.trim();
     if (!/^[A-Za-z0-9 _-]{3,20}$/.test(name)) { setError(NAME_RULE); return; }
     if (!preview) { setError(POINTS_RULE); return; }
@@ -238,25 +242,13 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
           </div>
           {ATTRIBUTE_KEYS.map(key => {
             const value = draft.allocation[key], name = title(key);
-            // The steppers stay in the tab order at their limit (aria-disabled, not disabled), so a keyboard user who spends the
-            // last point keeps the focus instead of losing it to <body>.
-            const atZero = value <= 0, atCap = left === 0;
-            return <div key={key} className={styles.row}>
-              <label htmlFor={`points-${key}`}>{name}<span className={styles.sr}> points</span></label>
-              <span id={`${rowsId}-${key}`} className={styles.hint}>{ATTRIBUTE_HINTS[key]}</span>
-              <div className={styles.controls}>
-                <span className={styles.base} aria-hidden="true">{base} +</span>
-                <button type="button" className={styles.step} aria-label={`Remove a point from ${name}`} aria-disabled={atZero || undefined}
-                  onClick={() => { if (!atZero) changePoints(key, value - 1); }}>−</button>
-                <input id={`points-${key}`} className={styles.value} type="number" min="0" max={value + left} step="1" inputMode="numeric" value={value}
-                  onFocus={() => { heldAtFocus.current[key] = value; }} onChange={event => changePoints(key, Number(event.target.value))}
-                  aria-invalid={pointsInvalid ? true : undefined}
-                  aria-describedby={`${rowsId}-${key} ${rowsId}-${key}-total${pointsInvalid ? ` ${errorId}` : ''}`} />
-                <button type="button" className={styles.step} aria-label={`Add a point to ${name}`} aria-disabled={atCap || undefined}
-                  onClick={() => { if (!atCap) changePoints(key, value + 1); }}>+</button>
-                <span id={`${rowsId}-${key}-total`} className={styles.total}><span className={styles.sr}>Total </span><span aria-hidden="true">= </span>{base + value}</span>
-              </div>
-            </div>;
+            return <PointsStepper key={key} id={`points-${key}`} className={styles.row} name={name} value={value} floor={0} cap={value + left} hold={pressHold}
+              label={<>{name}<span className={styles.sr}> points</span></>}
+              hint={<span id={`${rowsId}-${key}`} className={styles.hint}>{ATTRIBUTE_HINTS[key]}</span>}
+              before={<span className={styles.base} aria-hidden="true">{base} +</span>}
+              after={<span id={`${rowsId}-${key}-total`} className={styles.total}><span className={styles.sr}>Total </span><span aria-hidden="true">= </span>{base + value}</span>}
+              fieldProps={{ 'aria-invalid': pointsInvalid || undefined, 'aria-describedby': `${rowsId}-${key} ${rowsId}-${key}-total${pointsInvalid ? ` ${errorId}` : ''}` }}
+              onFocus={() => { heldAtFocus.current[key] = value; }} onChange={(wanted, source) => changePoints(key, wanted, source)} />;
           })}
           <p role="status" className={styles.capped}>{capped}</p>
         </fieldset>

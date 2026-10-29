@@ -111,24 +111,9 @@
 
 /*
  * The ten starting points (launch feedback, 2026-10-25): a counter with ten pips, two shortcuts and one row per attribute
- * ("5 +", minus, the points, plus, "= total"). Controls are 44 px; the longest row (about 240 px) fits a 360 px phone.
- * Text on the dark fills is 4.5:1 or better.
+ * ("5 +", −, the points, +1, +5, "= total"; the shared PointsStepper since the points hotfix of 2026-10-29). Controls are
+ * 44 px; the controls (about 285 px) fit the dialog on a 360 px phone. Text on the dark fills is 4.5:1 or better.
  */
-.points input.value[type='number'] {
-  flex: none;
-  width: 56px;
-  padding: 0;
-  text-align: center;
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
-
-.points input.value[type='number']::-webkit-inner-spin-button,
-.points input.value[type='number']::-webkit-outer-spin-button {
-  margin: 0;
-  -webkit-appearance: none;
-}
-
 .counter {
   display: inline-block;
   margin: 0 0 0.5rem;
@@ -175,8 +160,7 @@
 }
 
 .suggest,
-.reset,
-.step {
+.reset {
   min-height: 44px;
   border-radius: 8px;
   font-weight: 700;
@@ -200,7 +184,6 @@
 }
 
 .row {
-  display: grid;
   padding: 0.6rem 0 0.4rem;
   border-top: 1px solid var(--line);
 }
@@ -215,13 +198,6 @@
   font-size: 0.8rem;
 }
 
-.controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 0.35rem;
-}
-
 .base {
   min-width: 1.9rem;
   color: var(--muted);
@@ -229,27 +205,8 @@
   text-align: right;
 }
 
-.step {
-  flex: none;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 1px solid var(--field-line);
-  background: #111b2d;
-  color: var(--ink);
-  font-size: 1.25rem;
-  line-height: 1;
-}
-
-/* At its limit a stepper only looks unavailable: it stays focusable, and the text keeps its contrast. */
-.step[aria-disabled='true'] {
-  border-style: dashed;
-  color: #8d99b0;
-  cursor: not-allowed;
-}
-
 .total {
-  min-width: 3.4rem;
+  min-width: 2.75rem;
   color: var(--gold);
   font-weight: 800;
 }
@@ -265,8 +222,7 @@
 }
 
 .suggest:focus-visible,
-.reset:focus-visible,
-.step:focus-visible {
+.reset:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
 }

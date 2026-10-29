@@ -8,7 +8,7 @@ import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
 import { expectTimeOnOneLine, slotTime, storeClock } from './slot-time';
-import { contrastIssues, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
+import { contrastIssues, expectPointsFit, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 
 async function planningFlow(context: BrowserContext, setup?: (state: OwnerState) => void) {
   let state = structuredClone(ownerFixture);
@@ -171,13 +171,15 @@ test('shows the points left, caps a typed number and never goes below the saved 
   await expect(strength).toHaveAttribute('max', '7');
   await expect(agility).toHaveAttribute('min', '2');
   await expect(agility).toHaveAttribute('max', '5');
-  // Typing below the saved value raises it back, with the line that says why.
+  // Typing below the saved value raises it back when the field is left (Tab), with the line that says why.
   await strength.fill('0');
+  await page.keyboard.press('Tab');
   await expect(strength).toHaveValue('4');
   await expect(build.getByText("Strength can't go below 4: added points are permanent.", { exact: true })).toBeVisible();
   await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
   // Typing more than is left is capped at the field's value plus what is left, with the creation dialog's line.
   await strength.fill('99');
+  await page.keyboard.press('Tab');
   await expect(strength).toHaveValue('7');
   await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
   await expect(build.getByText("Strength can't go below 4", { exact: false })).toHaveCount(0);
@@ -187,6 +189,7 @@ test('shows the points left, caps a typed number and never goes below the saved 
   await expect(agility).toHaveAttribute('max', '2');
   // Nothing is left to add.
   await agility.fill('9');
+  await page.keyboard.press('Tab');
   await expect(agility).toHaveValue('2');
   await expect(build.getByText('No points left to add, so Agility stays at 2.', { exact: true })).toBeVisible();
   // For Avi's visual review (the panel scrolls, so viewport shots): the class, the counter and the points; then the status line and the note.
@@ -209,10 +212,279 @@ test('shows the points left, caps a typed number and never goes below the saved 
   await expect(build.getByText('All 12 spent', { exact: true })).toBeVisible();
   // The floor is the CURRENT build's: the pending build can be revised down to it, and no lower.
   await strength.fill('1');
+  await page.keyboard.press('Tab');
   await expect(strength).toHaveValue('4');
   await expect(build.getByText("Strength can't go below 4: added points are permanent.", { exact: true })).toBeVisible();
   await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+// ---- Points on a phone (Avi, 2026-10-29, production hotfix) ----------------------------------------------------------------------
+// "People can't add points. When they write any number, it automatically reset to max." Every keystroke was applied at once, so a
+// phone's caret after the 4 made 45 (capped to 7), and Backspace was raised straight back to the floor. Now a tap or click selects
+// the whole value, an empty or out-of-range field waits for Tab or Enter, and −, +1 and +5 sit beside every field.
+
+/** Puts the focus in a field the way the project's player does: a tap on the phone, a click on the desktop. */
+const press = (testInfo: { project: { name: string } }, field: ReturnType<typeof points>) => testInfo.project.name === 'mobile' ? field.tap() : field.click();
+
+test('types over a build point after a tap or click, waits for Tab out of range, and steps by 1 and 5', async ({ page, context }, testInfo) => {
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const strength = points(page, 'strength');
+  const counter = build.getByRole('status').filter({ hasText: /of 12 left|All 12 spent/ });
+  const lines = build.getByText(/can take at most|can't go below|No points left/);
+  const add = build.getByRole('button', { name: 'Add a point to Strength', exact: true });
+  const addFive = build.getByRole('button', { name: 'Add 5 points to Strength', exact: true });
+  await expect(counter).toHaveText('3 of 12 left');
+  // 1. The tap (or click) selects the 4, so the 5 replaces it and is applied at once.
+  await press(testInfo, strength);
+  await page.keyboard.type('5');
+  await expect(strength).toHaveValue('5');
+  await expect(counter).toHaveText('2 of 12 left');
+  // 2. An emptied field stays empty and changes nothing; the next digit is applied.
+  await page.keyboard.press('End');
+  await page.keyboard.press('Backspace');
+  await expect(strength).toHaveValue('');
+  await expect(counter).toHaveText('2 of 12 left');
+  await page.keyboard.type('6');
+  await expect(strength).toHaveValue('6');
+  await expect(counter).toHaveText('1 of 12 left');
+  // 3. Above the cap it stays as typed until Tab, then takes the cap with the capped line.
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('9');
+  await expect(strength).toHaveValue('9');
+  await expect(counter).toHaveText('1 of 12 left');
+  await expect(lines).toHaveCount(0);
+  await reviewShot(page, testInfo, 'points-build-typing');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('7');
+  await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
+  await expect(counter).toHaveText('All 12 spent');
+  // 4. Below the floor it waits too, then is raised with its line.
+  await strength.fill('1');
+  await expect(strength).toHaveValue('1');
+  await expect(counter).toHaveText('All 12 spent');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('4');
+  await expect(build.getByText("Strength can't go below 4: added points are permanent.", { exact: true })).toBeVisible();
+  await expect(counter).toHaveText('3 of 12 left');
+  // An emptied field shows its value again on Tab, with no change and no line.
+  await strength.fill('');
+  await expect(strength).toHaveValue('');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('4');
+  await expect(counter).toHaveText('3 of 12 left');
+  // 5. +1 adds one; +5 with 2 left stops at the cap with no capped line (the counter says it), and both then stop.
+  await add.click();
+  await expect(strength).toHaveValue('5');
+  await expect(counter).toHaveText('2 of 12 left');
+  await addFive.click();
+  await expect(strength).toHaveValue('7');
+  await expect(counter).toHaveText('All 12 spent');
+  await expect(lines).toHaveCount(0);
+  await expect(add).toHaveAttribute('aria-disabled', 'true');
+  await expect(addFive).toHaveAttribute('aria-disabled', 'true');
+  await expect(build.getByRole('button', { name: 'Add 5 points to Agility', exact: true })).toHaveAttribute('aria-disabled', 'true');
+  await addFive.click({ force: true });
+  await expect(strength).toHaveValue('7');
+  await expect(lines).toHaveCount(0);
+  // 6. No − in the build step: points can't be taken back, respec comes later as a paid option (Avi, change round 1). Typing still
+  // fixes an unqueued +5, down to the saved 4.
+  await expect(build.getByRole('button', { name: /^Remove a point from/ })).toHaveCount(0);
+  await strength.fill('4');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('4');
+  await expect(counter).toHaveText('3 of 12 left');
+  await expect(lines).toHaveCount(0);
+  await expect(add).not.toHaveAttribute('aria-disabled', 'true');
+  // Enter commits a waiting number and does not queue the build; ArrowUp still steps.
+  await strength.fill('99');
+  await page.keyboard.press('Enter');
+  await expect(strength).toHaveValue('7');
+  await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
+  await expect(strength).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(strength).toHaveValue('6');
+  await expect(counter).toHaveText('1 of 12 left');
+  await page.keyboard.press('ArrowUp');
+  await expect(strength).toHaveValue('7');
+  expect(flow.commands).toHaveLength(0);
+});
+
+// Fix round 2 (review Minor 1): a waiting number is corrected when the field loses the focus. The press that took the focus away is
+// skipped once, so one tap never both corrects the number and queues the build or adds a point: the player reads the line first.
+test('skips the Queue build press that corrected a waiting number, so its line is read first', async ({ page, context }, testInfo) => {
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const strength = points(page, 'strength');
+  const queue = page.getByRole('button', { name: 'Queue build', exact: true });
+  await press(testInfo, strength);
+  await page.keyboard.type('9');
+  await expect(strength).toHaveValue('9');
+  await (testInfo.project.name === 'mobile' ? queue.tap() : queue.click());
+  await expect(strength).toHaveValue('7');
+  await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(flow.commands).toHaveLength(0);
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toHaveCount(0);
+  // The next press acts.
+  await (testInfo.project.name === 'mobile' ? queue.tap() : queue.click());
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', allocation: { strength: 7 } });
+});
+
+test('skips the +1 press that corrected a waiting number; the next press acts', async ({ page, context }, testInfo) => {
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const strength = points(page, 'strength');
+  const add = build.getByRole('button', { name: 'Add a point to Strength', exact: true });
+  const tap = (locator: typeof add) => testInfo.project.name === 'mobile' ? locator.tap() : locator.click();
+  const raised = build.getByText("Strength can't go below 4: added points are permanent.", { exact: true });
+  // Below the floor: the +1 press raises the 1 to 4 and is skipped, so the raised line stays; the next +1 adds one.
+  await press(testInfo, strength);
+  await page.keyboard.type('1');
+  await tap(add);
+  await expect(strength).toHaveValue('4');
+  await expect(raised).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(strength).toHaveValue('4');
+  await expect(raised).toBeVisible();
+  await tap(add);
+  await expect(strength).toHaveValue('5');
+  await expect(raised).toHaveCount(0);
+  // Over the cap: the +1 press caps the 9 at 7 with its line; another +1 does nothing at the cap and adds no line of its own.
+  await press(testInfo, strength);
+  await page.keyboard.type('9');
+  await tap(add);
+  await expect(strength).toHaveValue('7');
+  const capped = build.getByText(/can take at most|can't go below|No points left/);
+  await expect(capped).toHaveText('Strength can take at most 7, so it was set to 7.');
+  await add.click({ force: true });
+  await expect(strength).toHaveValue('7');
+  await expect(capped).toHaveText('Strength can take at most 7, so it was set to 7.');
+  expect(flow.commands).toHaveLength(0);
+});
+
+test('Enter with an applied number still queues the build', async ({ page, context }, testInfo) => {
+  // The other half of the Enter rule: Enter takes only a waiting number; an applied one sends the form as before.
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  await openMenu(page, 'My gladiator');
+  const strength = points(page, 'strength');
+  await press(testInfo, strength);
+  await page.keyboard.type('5');
+  await expect(strength).toHaveValue('5');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', allocation: { strength: 5 } });
+});
+
+test('a press dragged out of a points field leaves no stale selection for the next click', async ({ page, context }, testInfo) => {
+  // Fix round 2 (review Minor 3): the press that focuses a field selects its value on release. Released outside the field, it must
+  // not select the value at the next click inside the still focused field: that click places the caret.
+  test.skip(testInfo.project.name !== 'desktop', 'A mouse drag.');
+  await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const strength = points(page, 'strength');
+  await strength.scrollIntoViewIfNeeded();
+  const box = (await strength.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y - 60, { steps: 4 });
+  await page.mouse.up();
+  await expect(strength).toBeFocused();
+  // A click at the field's right end puts the caret after the 4, so a typed 5 makes 45 (which waits, over the cap of 7).
+  await strength.click({ position: { x: box.width - 4, y: box.height / 2 } });
+  await page.keyboard.type('5');
+  await expect(strength).toHaveValue('45');
+  await expect(mine.locator('.planning-form').getByText('3 of 12 left', { exact: true })).toBeVisible();
+});
+
+test('commits a waiting number against the floor of a pending build that took effect while the field had the focus', async ({ page, context }) => {
+  // The React async-state rule: a background owner read moves the floor under typed text; the commit uses the new floor.
+  const flow = await planningFlow(context, state => {
+    levelled(state);
+    state.buildVersion = 2;
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, allocations: { strength: 6, agility: 2, vitality: 1, endurance: 1, precision: 1 } },
+      effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
+  });
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const strength = points(page, 'strength');
+  await expect(strength).toHaveValue('6');
+  await strength.fill('2');
+  await expect(strength).toHaveValue('2');
+  await takeEffect(page, flow);
+  await expect(strength).toHaveAttribute('min', '6');
+  await expect(strength).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('6');
+  await expect(build.getByText("Strength can't go below 6: added points are permanent.", { exact: true })).toBeVisible();
+  await expect(build.getByText('1 of 12 left', { exact: true })).toBeVisible();
+});
+
+test('fits the build points on a 360 x 740 phone: no sideways scroll, 44 px controls, five whole rows', async ({ page, context }, testInfo) => {
+  await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const group = mine.locator('.planning-form').getByRole('group', { name: /^Attribute points/ });
+  await group.scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'points-build-wide');
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.waitForTimeout(500);
+  await expectPointsFit(page, group, ['strength', 'agility', 'vitality', 'endurance', 'precision'], ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision'], { minus: false });
+  // The field, +1 and +5 for each attribute, then Respec; it too fits the phone and is a 44 px target. With 3 points left the
+  // counter row also offers "Suggested for Berserker" (Patch A Task 5).
+  expect(await group.locator('button, input').count()).toBe(5 * 3 + 1 + 1);
+  const respec = (await group.getByRole('button', { name: 'Respec', exact: true }).boundingBox())!, area = (await group.boundingBox())!;
+  expect(respec.x >= area.x && respec.x + respec.width <= area.x + area.width && respec.height >= 44 && respec.width >= 44, JSON.stringify(respec)).toBe(true);
+  await group.scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'points-build-360');
+  await group.getByRole('button', { name: 'Respec', exact: true }).scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'points-build-360-respec');
+});
+
+test('shows Respec as a paid option to come: gray, aria-disabled, described, and pressing it does nothing', async ({ page, context }) => {
+  // Avi, change round 1 (2026-10-29): "No option for take back points for now, only respec the future with real money. So you can add
+  // a respec button in gray or something, like it's disabled, so people will know that it is a feature that should come in the future."
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const group = build.getByRole('group', { name: /^Attribute points/ });
+  const respec = group.getByRole('button', { name: 'Respec', exact: true });
+  await expect(respec).toBeVisible();
+  await expect(respec).toHaveText('Respec');
+  await expect(respec).toHaveAttribute('aria-disabled', 'true');
+  expect(await respec.evaluate(el => (el as HTMLButtonElement).disabled), 'focusable, not disabled').toBe(false);
+  await expect(respec).toHaveAccessibleDescription('Coming later as a paid option');
+  await expect(group.getByText('Coming later as a paid option', { exact: true })).toBeVisible();
+  expect(await respec.evaluate(el => getComputedStyle(el).cursor)).toBe('not-allowed');
+  const box = (await respec.boundingBox())!;
+  expect(box.width >= 44 && box.height >= 44, JSON.stringify(box)).toBe(true);
+  // Pressing it, by pointer or by keyboard, sends nothing and changes nothing on the form.
+  const form = () => build.evaluate(el => `${(el as HTMLElement).innerText}|${[...el.querySelectorAll('input, select')].map(field => (field as HTMLInputElement).value).join(',')}`);
+  const before = await form();
+  await respec.click({ force: true });
+  await respec.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(500);
+  await expect(respec).toBeFocused();
+  expect(await form()).toBe(before);
+  await expect(build.getByRole('status').filter({ hasText: /can take at most|can't go below|No points left|Build queued/ })).toHaveCount(0);
+  await expect(build.getByRole('alert')).toHaveCount(0);
+  expect(flow.commands).toHaveLength(0);
 });
 
 test('counts the pending build against the points earned, and can still cancel it', async ({ page, context }) => {
@@ -266,6 +538,7 @@ test('clears a points line when the build is reloaded after a conflict', async (
   const mine = await openMenu(page, 'My gladiator');
   const build = mine.locator('.planning-form');
   await points(page, 'strength').fill('99');
+  await page.keyboard.press('Tab');
   await expect(build.getByText('Strength can take at most 7, so it was set to 7.', { exact: true })).toBeVisible();
   // Another session changed the build: the refusal reloads it, and the line about the old draft goes with the draft.
   flow.conflictNext();

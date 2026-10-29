@@ -378,10 +378,10 @@ test('saves the whole day with one button as one command, and Undo restores the 
   await page.getByLabel('morning activity').selectOption('rest');
   await page.getByLabel('evening activity').selectOption('arena');
   await expect(schedule.getByText('Unsaved changes: morning, evening.')).toBeVisible();
-  // The running notice, the badge, the unsaved line and the enabled buttons all meet the contrast minimums.
-  expect(await contrastIssues(schedule), 'the schedule with unsaved changes').toEqual([]);
   await expect(saveDay(page)).toBeEnabled();
   await expect(undoDay(page)).toBeEnabled();
+  // The running notice, the badge, the unsaved line and the enabled buttons all meet the contrast minimums.
+  expect(await contrastIssues(schedule), 'the schedule with unsaved changes').toEqual([]);
   expect(flow.commands).toEqual([]);
   // Undo puts back the saved day.
   await undoDay(page).click();
@@ -403,10 +403,10 @@ test('saves the whole day with one button as one command, and Undo restores the 
   expect(flow.commands[0]).toMatchObject({ kind: 'edit-day-schedule', expectedVersion: 1,
     day: { morning: { kind: 'rest' }, afternoon: { kind: 'expedition', expeditionId: 'woodland' }, evening: { kind: 'arena' } } });
   expect(flow.commands[0]).not.toHaveProperty('phase');
-  expect(await contrastIssues(schedule), 'the schedule with the saved line').toEqual([]);
   // The saved day is now the saved plan: nothing left to save.
   await expect(saveDay(page)).toBeDisabled();
   await expect(undoDay(page)).toBeDisabled();
+  expect(await contrastIssues(schedule), 'the schedule with the saved line').toEqual([]);
   await expect(page.getByLabel('morning activity')).toHaveValue('rest');
   await expect(page.getByLabel('afternoon activity').locator('option[value="expedition:mountain"]')).toBeDisabled();
   await reviewShot360(page, testInfo, 'planning-schedule-saved', saved);

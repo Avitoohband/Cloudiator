@@ -98,7 +98,7 @@ export type ExpeditionSceneState = {
    * The gladiator as the first revealed battle log shows it (participant 0): its id and gear. The logged
    * name is not an identity (Task 9 logs say "Gladiator"); views take names from the public world actor.
    */
-  readonly gladiator: { readonly id: string; readonly equipmentSilhouettes: readonly string[] } | null;
+  readonly gladiator: StageGladiator | null;
   /** The arrival stage is revealed. */
   readonly complete: boolean;
   /** Once complete: from the summary when settled, otherwise from the revealed encounters. */
@@ -116,6 +116,20 @@ export type ExpeditionSceneState = {
 };
 
 type Battled = RevealedStage & { battleLog: BattleLog };
+type StageGladiator = { readonly id: string; readonly equipmentSilhouettes: readonly string[] };
+
+const gladiatorOf = (log: BattleLog): StageGladiator =>
+  ({ id: log.participants[0].gladiatorId ?? log.participants[0].id, equipmentSilhouettes: [...log.participants[0].equipmentSilhouettes] });
+
+/**
+ * The gladiator of the whole timeline, whatever the display time: the first battle log's participant 0. The state's
+ * `gladiator` knows only the logs revealed by its display time, so it names nobody until the first fight starts; a view that
+ * replays an old trip needs the gladiator from its first moment (Patch A Task 7).
+ */
+export function timelineGladiator(timeline: RevealedTimeline): StageGladiator | null {
+  const log = timeline.stages.find((stage): stage is Battled => !!stage.battleLog)?.battleLog;
+  return log ? gladiatorOf(log) : null;
+}
 
 /** Deep-freezes the state it built; the caller's battle logs are shared by reference and left untouched. */
 function freeze<V>(value: V, shared: ReadonlySet<object>): V {
@@ -135,7 +149,7 @@ function logOutcome(log: BattleLog): 'victory' | 'defeat' {
 }
 
 /** The outcome of an ended encounter: its log, else the stage that follows it, else its published label. */
-function encounterOutcome(stage: RevealedStage, next: RevealedStage | undefined): 'victory' | 'defeat' | null {
+export function encounterOutcome(stage: RevealedStage, next: RevealedStage | undefined): 'victory' | 'defeat' | null {
   if (stage.battleLog) return logOutcome(stage.battleLog);
   if (next?.kind === 'exploration' || next?.kind === 'travel') return 'victory';
   if (next?.kind === 'return' && next.endsAtMs > next.startedAtMs) return 'defeat';
@@ -143,7 +157,7 @@ function encounterOutcome(stage: RevealedStage, next: RevealedStage | undefined)
   return word === 'victory' || word === 'defeat' ? word : null;
 }
 
-const isFinal = (stage: RevealedStage) => stage.kind === 'settlement' || (stage.kind === 'return' && stage.endsAtMs <= stage.startedAtMs);
+export const isFinal = (stage: RevealedStage) => stage.kind === 'settlement' || (stage.kind === 'return' && stage.endsAtMs <= stage.startedAtMs);
 const point = (name: string) => name as JourneyPoint;
 const segmentOf = (from: JourneyPoint) => Math.max(0, JOURNEY.indexOf(from as (typeof JOURNEY)[number]));
 
@@ -177,6 +191,44 @@ function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToC
   const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
   const approach = Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS);
   return t < approach ? { ...go(here, spot, leave, 'search'), untilMs: approach - leave } : go(spot, next, approach, 'wait');
+}
+
+/** A leg the journey walks: the gladiator sets off from `from` for `to` at `atMs` (display time). */
+export type StageWalk = { readonly atMs: number; readonly from: JourneyPoint; readonly to: JourneyPoint };
+
+/**
+ * Every leg `journeyAt` walks over the whole timeline, in order: from each exploring, travelling or returning stage, the leg
+ * from its leave time (the result poses are over) and, for the first two kinds, the leg from its approach time (it sets off
+ * from the search spot for the next encounter spot). A leg is listed when some display time puts the route on it, so the route
+ * `renderExpeditionStage` returns a millisecond after `atMs` is this leg and has walked at most that long.
+ *
+ * Only these legs are walks. The steps a search takes around its spot (`SEARCH_PATTERN` in expedition-path.ts) are the pose's,
+ * not the route's: the route stays on the leg that brought the gladiator to the spot until the approach, so they are not
+ * listed, and a search's wander time is part of the search, not of any walk. The same goes for a fight, its result poses and a
+ * rest, which stay where they are.
+ */
+export function stageWalks(timeline: RevealedTimeline): StageWalk[] {
+  const walks: StageWalk[] = [];
+  const { stages } = timeline;
+  let encounters = 0;
+  let last: RevealedStage | undefined;
+  stages.forEach((stage, i) => {
+    if (stage.kind === 'encounter') { last = stage; encounters += 1; return; }
+    if (isFinal(stage)) return;
+    const n = Math.min(encounters, EXPEDITION_ENCOUNTERS);
+    const here = point(n ? `encounter-${n}` : 'start');
+    // The fighters finish their result poses before the gladiator moves on (journeyAt's `leave`).
+    const leave = last ? last.endsAtMs + REPLAY_OUTRO_MS : stage.startedAtMs;
+    if (stage.kind === 'return') { walks.push({ atMs: leave, from: here, to: 'safe' }); return; }
+    const spot = point(`search-${n + 1}`);
+    const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
+    const approach = Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS);
+    // The stage is current until the next one starts; a leg that no display time reaches while it is current is not walked.
+    const until = stages[i + 1]?.startedAtMs ?? Infinity;
+    if (leave < Math.min(approach, until)) walks.push({ atMs: leave, from: here, to: spot });
+    if (approach < until) walks.push({ atMs: approach, from: spot, to: next });
+  });
+  return walks;
 }
 
 export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: number): ExpeditionSceneState {
@@ -238,9 +290,7 @@ export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: 
     hp = { current: battle.finished ? battle.log.finalHp[0] : reduceReplay(battle.log, battle.elapsedMs).hp[0], max: me.maxHealth, encounter: battle.encounter };
   }
   const firstLog = revealed.find((stage): stage is Battled => !!stage.battleLog)?.battleLog;
-  const gladiator = firstLog
-    ? { id: firstLog.participants[0].gladiatorId ?? firstLog.participants[0].id, equipmentSilhouettes: [...firstLog.participants[0].equipmentSilhouettes] }
-    : null;
+  const gladiator = firstLog ? gladiatorOf(firstLog) : null;
 
   // Journey.
   const outcomes = stages.filter(s => s.encounter !== null && s.outcome !== null);

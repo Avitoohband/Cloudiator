@@ -6,10 +6,12 @@ import { reduceReplay, REPLAY_OUTRO_MS } from '@/game/replay';
 import { planStage, stageAt, type StageLayout } from '@/game/battle-stage';
 import { loadAssetManifest, type MapData } from '@/game/assets';
 import { CATALOG_V1 } from '@domain/catalog-v1';
-import { gladiatorPose, journeyMap } from '@/game/expedition-path';
+import { gladiatorPose, journeyMap, legPath } from '@/game/expedition-path';
+import { pathLength } from '@/game/paths';
 import {
-  EXPEDITION_APPROACH_MS, EXPEDITION_ENCOUNTERS, JOURNEY, expeditionRevealMarks, renderExpeditionStage, type ExpeditionSceneState,
+  EXPEDITION_APPROACH_MS, EXPEDITION_ENCOUNTERS, JOURNEY, expeditionRevealMarks, renderExpeditionStage, stageWalks, timelineGladiator, type ExpeditionSceneState,
 } from '@/game/expedition-stage';
+import { EXPEDITION_GLADIATORS } from '../fixtures/expedition-ids';
 
 const MIN = 60_000;
 const start = (t: RevealedTimeline) => t.stages[0].startedAtMs;
@@ -380,6 +382,105 @@ describe('journey and progress', () => {
     expect(expeditionRevealMarks(renderExpeditionStage(t, fight.startedAtMs + 1_000))).toEqual([fight.endsAtMs, s + 60 * MIN, s + 80 * MIN]);
     expect(expeditionRevealMarks(at(t, 85))).toEqual([]);
     expect(expeditionRevealMarks(at(T.delayed, 45))).toEqual([start(T.delayed) + 60 * MIN, start(T.delayed) + 80 * MIN]);
+  });
+});
+
+describe('stage walks and the whole-timeline gladiator (Patch A Task 7)', () => {
+  const manifest = loadAssetManifest();
+  const SPEED = manifest.actors.gladiator.walk.tilesPerSecond;
+  const journeyOf = (id: string) => journeyMap(manifest.maps.find(m => m.id === id) as MapData);
+  const timelines = Object.entries(T);
+
+  it('stageWalks names every leg the journey walks', () => {
+    for (const [key, t] of timelines) {
+      const walks = stageWalks(t);
+      expect(walks.length, key).toBeGreaterThan(0);
+      for (const w of walks) {
+        const route = renderExpeditionStage(t, w.atMs + 1).route!;
+        expect(route.from, `${key} ${w.from}>${w.to}`).toBe(w.from);
+        expect(route.to, `${key} ${w.from}>${w.to}`).toBe(w.to);
+        expect(route.walkedMs, `${key} ${w.from}>${w.to}`).toBeLessThanOrEqual(1);
+      }
+      // In order, and nothing twice.
+      expect(walks.map(w => w.atMs), key).toEqual([...walks.map(w => w.atMs)].sort((a, b) => a - b));
+      expect(new Set(walks.map(w => w.atMs)).size, key).toBe(walks.length);
+    }
+  });
+
+  it('stageWalks lists the legs of a success and of a defeat, from the leave time and from the approach time', () => {
+    const w = T.woodland;
+    const s = start(w);
+    const leave = (n: number) => encounterStage(w, n).endsAtMs + REPLAY_OUTRO_MS;
+    expect(stageWalks(w)).toEqual([
+      { atMs: s, from: 'start', to: 'search-1' },
+      { atMs: s + 20 * MIN - EXPEDITION_APPROACH_MS, from: 'search-1', to: 'encounter-1' },
+      { atMs: leave(1), from: 'encounter-1', to: 'search-2' },
+      { atMs: s + 40 * MIN - EXPEDITION_APPROACH_MS, from: 'search-2', to: 'encounter-2' },
+      { atMs: leave(2), from: 'encounter-2', to: 'search-3' },
+      { atMs: s + 60 * MIN - EXPEDITION_APPROACH_MS, from: 'search-3', to: 'encounter-3' },
+      { atMs: leave(3), from: 'encounter-3', to: 'search-4' },
+      { atMs: s + 80 * MIN - EXPEDITION_APPROACH_MS, from: 'search-4', to: 'end' },
+    ]);
+    // After a defeat the only walk after the fight is back to the safe point.
+    const o = T.outpost;
+    expect(stageWalks(o)).toEqual([
+      { atMs: start(o), from: 'start', to: 'search-1' },
+      { atMs: start(o) + 20 * MIN - EXPEDITION_APPROACH_MS, from: 'search-1', to: 'encounter-1' },
+      { atMs: encounterStage(o, 1).endsAtMs + REPLAY_OUTRO_MS, from: 'encounter-1', to: 'search-2' },
+      { atMs: start(o) + 40 * MIN - EXPEDITION_APPROACH_MS, from: 'search-2', to: 'encounter-2' },
+      { atMs: encounterStage(o, 2).endsAtMs + REPLAY_OUTRO_MS, from: 'encounter-2', to: 'safe' },
+    ]);
+    // A timeline cut short lists only what its stages walk.
+    expect(stageWalks({ ...w, stages: w.stages.slice(0, 1) })).toHaveLength(2);
+    expect(stageWalks({ ...w, stages: [] })).toEqual([]);
+  });
+
+  it('stageWalks misses no leg: every leg the route walks, sampled across each trip, is listed', () => {
+    for (const [key, t] of timelines) {
+      const listed = new Set(stageWalks(t).map(w => `${w.atMs} ${w.from}>${w.to}`));
+      const seen = new Set<string>();
+      for (let ms = start(t) - MIN; ms <= start(t) + 90 * MIN; ms += 1_000) {
+        const route = renderExpeditionStage(t, ms).route;
+        for (const r of [route, route?.rest]) if (r && r.from !== r.to && r.walkedMs > 0) seen.add(`${ms - r.walkedMs} ${r.from}>${r.to}`);
+      }
+      expect(seen.size, key).toBeGreaterThan(0);
+      expect([...seen].sort(), key).toEqual([...listed].sort());
+    }
+  });
+
+  it('does not list the steps around a search spot (the wander) as legs', () => {
+    // A search walks 1 to 1.4 tiles around its spot (SEARCH_PATTERN). Those steps are the pose's: the route stays on the leg
+    // that brought the gladiator to the spot, so no leg of its own starts inside a search.
+    const t = T.woodland;
+    const journey = journeyOf('woodland');
+    const departure = start(t);
+    const approach = departure + 20 * MIN - EXPEDITION_APPROACH_MS;
+    const arrivedMs = (pathLength(legPath(journey, 'start', 'search-1')!) / SPEED) * 1000;
+    const steps: number[] = [];
+    const legs = new Set<string>();
+    for (let ms = departure + arrivedMs + 1; ms < approach; ms += 250) {
+      const route = renderExpeditionStage(t, ms).route!;
+      legs.add(`${ms - route.walkedMs} ${route.from}>${route.to} ${route.then}`);
+      if (gladiatorPose(journey, route, SPEED).walking) steps.push(ms);
+    }
+    expect(steps.length, 'the gladiator steps around the spot while searching').toBeGreaterThan(10);
+    expect([...legs]).toEqual([`${departure} start>search-1 search`]);
+    expect(stageWalks(t).filter(w => w.atMs > departure && w.atMs < approach)).toEqual([]);
+  });
+
+  it('timelineGladiator reads the gladiator from the whole timeline', () => {
+    const w = T.woodland;
+    const first = logOf(w, 1).participants[0];
+    expect(timelineGladiator(w)).toEqual({ id: EXPEDITION_GLADIATORS.aster.id, equipmentSilhouettes: [...first.equipmentSilhouettes] });
+    // Whatever the display time: the revealed stages alone name no gladiator before the first fight starts.
+    expect(at(w, 1).gladiator).toBeNull();
+    expect(timelineGladiator({ ...w, stages: w.stages.slice(0, 1) })).toBeNull();
+    expect(timelineGladiator(T.spectator)).toEqual({ id: EXPEDITION_GLADIATORS.varro.id, equipmentSilhouettes: [...logOf(T.spectator, 1).participants[0].equipmentSilhouettes] });
+    // The first log, not the latest one, and the same answer as the state gives once a fight is revealed.
+    expect(timelineGladiator(w)).toEqual(at(w, 30).gladiator);
+    // Pruned logs and a cleaned-up timeline name nobody.
+    expect(timelineGladiator(T.expired)).toBeNull();
+    expect(timelineGladiator({ ...w, stages: [] })).toBeNull();
   });
 });
 

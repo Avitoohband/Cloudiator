@@ -23,3 +23,11 @@ Still open in the current plan: Task 10, expedition replays that show the whole 
 resting), design and mockup first. Items 3 and Task 10 overlap (watching an expedition) and should be designed together.
 
 Avi, 2026-10-29: "Yes, you can plan them." Planning starts with a design pass (code map + clickable mockups over real screenshots for the UI items), then a spec and a plan.
+
+Avi, 2026-10-29 after the mockups (local clickable page over 37 real screenshots) and the party-dungeon proposal: "yes, and
+your recommendations, go". Decisions: (1) announce a new player during their first slot only (no database change); (2) the
+whole-trip replay runs about 1¼ minutes (walking sped up, fights at real speed); (3) the 12/24-hour setting is per device;
+(4) a dungeon run is 3 rooms then a boss in one afternoon; (5) automatic grouping plus hired fighters first, friend invites
+later; (6) dungeons in the afternoon only; (7) a party that loses to the boss still gets paid for the rooms it cleared;
+(8) friends in a party may see each other's planned dungeon, only within the party (with invites, later). Next: Patch A (items
+2-8 + whole-trip replay, no migration) and Patch B (party dungeons MVP, M26), each with a spec and a plan, then build.

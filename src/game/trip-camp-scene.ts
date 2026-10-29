@@ -4,7 +4,9 @@
 // actor, no clock of its own. It lives in the expedition viewport's Phaser game beside the expedition scene (src/game/
 // ExpeditionViewport.tsx), which adds it when the replay starts (its atlases load then) and runs one of the two at a time, so the
 // replay never opens a second WebGL context. The map and the camera are the expedition's (src/game/map-layer.ts): the light of the
-// chapter's time of day (`now()`), props that fade while they hide the gladiator, the viewport's zoom, pan and Follow controls.
+// chapter's time of day (the vignette's `displayMs`), props that fade while they hide the gladiator, the viewport's zoom, pan and
+// Follow controls. Each chapter opens with the camera on the gladiator, Follow or not (the gate and the beds are about 29 tiles
+// apart); after that, only a following camera moves with it.
 // With reduced motion there is no fade at the gate and the props and torches hold still; the walks are still shown.
 import type * as PhaserNS from 'phaser';
 import type { AssetManifest, MapData } from './assets';
@@ -31,15 +33,18 @@ export type TripCampDebug = {
   /** The camp chapter drawn last frame (null: none, the scene draws no gladiator). */
   kind: TripVignette['kind'] | null;
   gladiator: { x: number; y: number; action: string; alpha: number; layers: string[] } | null;
-  /** The camera: whether it follows the gladiator (the viewport's Follow toggle), and its zoom. */
+  /** The camera: whether it follows the gladiator (the viewport's Follow toggle), its zoom, and the world rectangle it shows. */
   following: boolean;
   zoom: number;
+  worldView: { x: number; y: number; width: number; height: number };
 };
 export type TripCampHandle = {
   setLook(look: GladiatorLook): void;
   setReducedMotion(reduced: boolean): void;
   /** Removes the scene's bridge listeners. Idempotent; also runs when the game destroys the scene. */
   dispose(): void;
+  /** Drawn and able to draw, as `debug().ready`, without building the debug state (the viewport asks every frame). */
+  ready(): boolean;
   debug(): TripCampDebug;
 };
 export type TripCampSceneDeps = {
@@ -50,8 +55,6 @@ export type TripCampSceneDeps = {
   vignette: () => TripVignette | null;
   look: GladiatorLook;
   reducedMotion: boolean;
-  /** The display time the chapter shows (the departure, or the end of the slot), for the light of its time of day. */
-  now?: () => number;
   /** The viewport's camera controls and Follow toggle; without it the camera only follows the gladiator. */
   bridge?: SceneBridge;
   /** Whether the camera starts following the gladiator: the viewport's Follow toggle when the scene is added (default true). */
@@ -82,9 +85,12 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
   let look = deps.look;
   let layer: MapLayer | null = null;
   let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text } | null = null;
-  /** What the last frame drew; `snap` moves the camera onto the gladiator at once (a new chapter, or the scene woke). */
-  let last: { kind: TripVignette['kind'] | null; pose: VignettePose | null; frames: string; flip: boolean; snap: boolean } =
-    { kind: null, pose: null, frames: '', flip: false, snap: true };
+  /**
+   * What the last frame drew; `snap` puts the camera on the gladiator at once (a new chapter, or the scene woke); `lightMs` is the
+   * time the map was last lit at (the chapter's display time, on by its elapsed time).
+   */
+  let last: { kind: TripVignette['kind'] | null; pose: VignettePose | null; frames: string; flip: boolean; snap: boolean; lightMs: number } =
+    { kind: null, pose: null, frames: '', flip: false, snap: true, lightMs: Number.NaN };
 
   class TripCampScene extends P.Scene {
     constructor() { super({ key: TRIP_CAMP_SCENE }); }
@@ -157,7 +163,9 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
 
     tick() {
       const vignette = deps.vignette();
-      layer?.update(deps.now?.() ?? 0, reducedMotion);
+      // The light of the chapter's time of day; the torches and the props' loops run on with the chapter (and hold when paused).
+      if (vignette) last.lightMs = vignette.displayMs + vignette.elapsedMs;
+      if (Number.isFinite(last.lightMs)) layer?.update(last.lightMs, reducedMotion);
       const snap = last.snap || vignette?.kind !== last.kind;
       last.kind = vignette?.kind ?? null;
       const pose = vignette ? vignettePose(map, vignette, look.key, speed, { fades: !reducedMotion }) : null;
@@ -179,7 +187,8 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
         if (flip !== last.flip || hero.container.scaleX !== (flip ? -1 : 1)) { hero.container.setScale(flip ? -1 : 1, 1); last.flip = flip; }
         hero.container.setPosition(feet.x, feet.y).setDepth(feet.y);
         hero.label.setText(look.name).setPosition(feet.x, feet.y - NAME_LIFT);
-        if (camera.following()) camera.follow(feet, snap);
+        // A new chapter (or a wake) opens on the gladiator, Follow or not; then only a following camera keeps up.
+        if (snap || camera.following()) camera.follow(feet, snap);
         last.snap = false;
       }
       // Props fade only for a gladiator in view.
@@ -199,6 +208,11 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
     disposed = true;
     camera.dispose();
   }
+  /** The world rectangle the camera shows (empty before the scene is drawn). */
+  function worldView() {
+    const view = live() ? scene.cameras.main.worldView : null;
+    return view ? { x: view.x, y: view.y, width: view.width, height: view.height } : { x: 0, y: 0, width: 0, height: 0 };
+  }
 
   const handle: TripCampHandle = {
     setReducedMotion(reduced) { reducedMotion = reduced; },
@@ -209,6 +223,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
       if (changed && live()) scene.buildHero();
     },
     dispose,
+    ready: live,
     debug() {
       const pose = last.pose;
       return {
@@ -219,6 +234,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
           : null,
         following: camera.following(),
         zoom: camera.view().zoom,
+        worldView: worldView(),
       };
     },
   };

@@ -131,7 +131,9 @@ const walkMs = (path: TilePoint[], tilesPerSecond: number) => (pathLength(path) 
  * The gladiator in a camp chapter, `vignette.elapsedMs` into it (held to the chapter), walking at `tilesPerSecond`; `key` (its id)
  * picks its bed. `alpha` is how much of it shows (the fades at the gate).
  */
-export function vignettePose(map: MapData, vignette: TripVignette, key: string, tilesPerSecond: number, options: VignetteOptions = {}): VignettePose {
+export function vignettePose(
+  map: MapData, vignette: Pick<TripVignette, 'kind' | 'elapsedMs' | 'durationMs'>, key: string, tilesPerSecond: number, options: VignetteOptions = {},
+): VignettePose {
   const walks = walksOf(map);
   const fades = options.fades !== false;
   const total = Math.max(0, finite(vignette.durationMs));

@@ -27,10 +27,12 @@ export type ExpeditionSceneTestHook = {
   debug(): ExpeditionDebugState | null;
   props(): ExpeditionPropDebug[];
   canvases(): number;
-  /** The map drawn now: the expedition's, or the camp's while a camp chapter of the whole-trip replay plays. */
+  /** The map drawn now, read from the game: the camp's while its scene runs (a camp chapter of the whole-trip replay), else the expedition's. */
   map(): ExpeditionEnvironment | 'camp';
   /** The camp scene of the whole-trip replay, once the replay has added it (null before, and outside the replay). */
   camp(): TripCampDebug | null;
+  /** The expedition scene is asleep (while the camp scene runs). */
+  expeditionAsleep(): boolean;
 };
 declare global {
   interface Window { __cloudiatorExpeditionScene?: ExpeditionSceneTestHook }
@@ -90,8 +92,6 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
     let game: ReturnType<typeof startGame> | null = null;
     /** The whole-trip replay has asked for the camp's scene (asked once: a module that fails to load leaves the camp undrawn). */
     let campAsked = false;
-    /** The camp's map is the one drawn this frame. */
-    let showingCamp = false;
     setFollowing(true);
     setReturned(false);
     const disposeCamp = () => {
@@ -160,8 +160,6 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
             vignette: () => vignetteRef.current?.() ?? null,
             look: lookRef.current,
             reducedMotion: reduced.current,
-            // The light of the chapter's time of day: the display time the view draws (the departure, or the end of the slot).
-            now: () => stateRef.current()?.displayNowMs ?? 0,
             bridge,
             following: followingRef.current,
           });
@@ -174,11 +172,10 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
       const choose = () => {
         const read = vignetteRef.current;
         if (read && !campAsked) addCamp();
-        const wanted = !!read && !!tripScene && read() !== null && !!campHandle.current?.debug().ready;
+        const wanted = !!read && !!tripScene && read() !== null && !!campHandle.current?.ready();
         const [run, rest] = wanted ? [tripScene, created.scene] : [created.scene, tripScene];
         if (rest?.sys.isActive()) phaser.scene.sleep(rest);
         if (run?.sys.isSleeping()) phaser.scene.wake(run);
-        showingCamp = wanted;
       };
       phaser.events.on(P.Core.Events.PRE_STEP, choose);
       if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true') {
@@ -186,8 +183,9 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
           debug: () => handle.current?.debug() ?? null,
           props: () => handle.current?.props() ?? [],
           canvases: () => document.querySelectorAll('canvas').length,
-          map: () => (showingCamp ? 'camp' : environment),
+          map: () => (tripScene?.sys.isActive() ? 'camp' : environment),
           camp: () => campHandle.current?.debug() ?? null,
+          expeditionAsleep: () => created.scene.sys.isSleeping(),
         };
       }
     })().catch(error => fail('error', error instanceof Error ? error.message : String(error)));

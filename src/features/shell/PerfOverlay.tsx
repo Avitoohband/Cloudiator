@@ -11,7 +11,7 @@
 // too; it takes no pointer and no keyboard, and screen readers skip it.
 import { useEffect, useRef, useState } from 'react';
 import { FrameMeter, type FrameStats } from '../../lib/frame-stats';
-import type { SceneAddress } from './scene-url';
+import { sceneDetail, type SceneAddress } from './scene-url';
 import styles from './shell.module.css';
 
 export type PerfShown = { phase: string; seconds: number; current: number; stats: FrameStats; rolling: FrameStats; renderer: string };
@@ -23,8 +23,8 @@ export type PerfShown = { phase: string; seconds: number; current: number; stats
 export function perfPhaseOf(campStatus: 'loading' | 'ready' | 'unavailable', scene: SceneAddress | null): { label: string; key: string } {
   const camp = campStatus === 'ready' ? 'camp' : campStatus === 'unavailable' ? 'camp unavailable' : 'loading';
   if (!scene) return { label: camp, key: campStatus };
-  const stage = scene.kind === 'replay' && scene.activityId !== null ? scene.stageId ?? '' : '';
-  return { label: scene.kind, key: `${campStatus}|${scene.kind}|${scene.activityId ?? ''}|${stage}` };
+  // A replay's stage, or an expedition's whole-trip `play` (Patch A Task 9: live and trip are measured apart).
+  return { label: scene.kind, key: `${campStatus}|${scene.kind}|${scene.activityId ?? ''}|${sceneDetail(scene) ?? ''}` };
 }
 
 /** The WebGL renderer string (unmasked where the browser allows), from a probe context released at once. */

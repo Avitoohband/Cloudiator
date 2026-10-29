@@ -4,7 +4,8 @@
 // browser. The scene draws the stage state it reads every frame; it keeps no clock of its own. If WebGL
 // or the art is missing, the host shows a note, and the progress strip, log and result keep working
 // because they are React. Once the scene's gladiator has left for camp, a banner over the scene says
-// so. Unmounting removes the scene's bridge listeners and destroys the game.
+// so; a `banner` the view gives (the whole-trip replay's camp chapters, Patch A Task 9) takes its place.
+// Unmounting removes the scene's bridge listeners and destroys the game.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { SceneBridge } from './bridge';
 import type { ExpeditionSceneState } from './expedition-stage';
@@ -21,7 +22,7 @@ declare global {
   interface Window { __cloudiatorExpeditionScene?: ExpeditionSceneTestHook }
 }
 
-export function ExpeditionViewport({ environment, state, look, bridge, reducedMotion, label }: {
+export function ExpeditionViewport({ environment, state, look, bridge, reducedMotion, label, banner = null, wander = true }: {
   environment: ExpeditionEnvironment;
   /** The stage state at the display clock; the scene reads it every frame. */
   state: () => ExpeditionSceneState | null;
@@ -30,12 +31,20 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
   reducedMotion: boolean;
   /** Accessible description of the scene. */
   label: string;
+  /** Shown over the scene where "Returned to camp" shows, in its place ("Leaving camp", "Resting until 3:00 AM"). */
+  banner?: string | null;
+  /**
+   * Whether a search walks its steps around the spot (Task 24 search pose). The whole-trip replay runs a search at about x150, so
+   * the steps would strobe: it holds the search on the spot (turns only).
+   */
+  wander?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<ExpeditionSceneHandle | null>(null);
   const stateRef = useRef(state);
   const lookRef = useRef(look);
   const reduced = useRef(reducedMotion);
+  const wanderRef = useRef(wander);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [following, setFollowing] = useState(true);
   const [returned, setReturned] = useState(false);
@@ -44,6 +53,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { lookRef.current = look; handle.current?.setLook(look); }, [look]);
   useEffect(() => { reduced.current = reducedMotion; handle.current?.setReducedMotion(reducedMotion); }, [reducedMotion]);
+  useEffect(() => { wanderRef.current = wander; }, [wander]);
   useEffect(() => bridge.on('follow-character', ({ gladiatorId }) => setFollowing(gladiatorId !== null)), [bridge]);
 
   useEffect(() => {
@@ -79,6 +89,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
         look: lookRef.current,
         bridge,
         reducedMotion: reduced.current,
+        wander: () => wanderRef.current,
         onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },
         onReturned: next => { if (!cancelled) setReturned(next); },
         onError: (reason, message) => fail(reason, reason === 'assets'
@@ -143,7 +154,8 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
         // Phaser cancels the default pointerdown, so focus the host ourselves for the arrow keys.
         onPointerDown={() => host.current?.focus({ preventScroll: true })}
       />
-      {status.kind === 'ready' && returned && <p className={styles.returned}>Returned to camp</p>}
+      {status.kind === 'ready' && (banner ?? (returned ? 'Returned to camp' : null)) !== null
+        && <p key={banner ?? 'returned'} className={styles.returned} data-testid="scene-banner">{banner ?? 'Returned to camp'}</p>}
       {!unavailable && (
         <div className={styles.controls} role="group" aria-label="Camera controls">
           <button type="button" onClick={() => bridge.emit('camera-zoom', { direction: 'in' })} aria-label="Zoom in">+</button>

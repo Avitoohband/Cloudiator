@@ -56,8 +56,10 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   }, []);
 
   // Another scene in the same dialog (an expedition's encounter replay, or Back and Forward between scenes) starts at its
-  // top with the focus on Back to camp, as the first one did: the control that opened it is gone (fix round 1, M6).
-  const sceneKey = `${view.kind}|${view.activityId}|${sceneDetail(view) ?? ''}`;
+  // top with the focus on Back to camp, as the first one did: the control that opened it is gone (fix round 1, M6). An
+  // expedition's live view and its whole-trip replay (`play`) are one scene: the view switches between them itself, keeping its
+  // reads and its place, and puts the focus on ▶ or back on its own button (Patch A Task 9).
+  const sceneKey = `${view.kind}|${view.activityId}|${view.kind === 'replay' ? sceneDetail(view) ?? '' : ''}`;
   const shownKey = useRef(sceneKey);
   useLayoutEffect(() => {
     if (shownKey.current === sceneKey) return;
@@ -67,11 +69,13 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   }, [sceneKey]);
 
   const player = state.viewer === 'player';
-  const reads = useMemo<(ExpeditionReads & Partial<Pick<GameGateway, 'looks'>>) | null>(() => {
+  const reads = useMemo<(ExpeditionReads & Partial<Pick<GameGateway, 'looks' | 'restAfter'>>) | null>(() => {
     if (!gateway) return null;
     if (player) return gateway;
-    // The fighters' looks are public, so a visitor's replay reads them too.
-    return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; }, looks: ids => gateway.looks(ids) };
+    // The fighters' looks are public, so a visitor's replay reads them too, and whether a trip's next slot was a Rest (the whole-trip
+    // replay's last chapter, Patch A Task 9).
+    return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; }, looks: ids => gateway.looks(ids),
+      restAfter: (gladiatorId, tripEndMs) => gateway.restAfter(gladiatorId, tripEndMs) };
   }, [gateway, player]);
   // The camp's own world actors already hold their looks: a replay of those fighters reads nothing (the replay takes them once,
   // when it mounts, so a world refresh never changes a replay in play).
@@ -103,7 +107,8 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
               : <ActivityReplay key={viewKey} reads={reads} activityId={activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2}
                 viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} />
             : loading ? <p role="status">Loading the expedition…</p>
-              : <ExpeditionView key={viewKey} reads={reads} activityId={activityId} fixture={fixture} play={view.play ?? null} revision={state.revision} world={state.world}
+              : <ExpeditionView key={viewKey} reads={reads} activityId={activityId} fixture={fixture} play={view.play ?? null}
+                onPlay={play => onWatch?.(play ? { kind: 'expedition', activityId, play } : { kind: 'expedition', activityId })} revision={state.revision} world={state.world}
                 worldFailed={!state.world && state.syncError !== null} owner={player ? state.owner : null}
                 overCamp={{ onWatch: stageId => onWatch?.({ kind: 'replay', activityId, stageId }) }} />}
       </div>

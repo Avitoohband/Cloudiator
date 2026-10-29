@@ -4,8 +4,10 @@
 // expedition as a scene over itself, Task 13.8). It follows one expedition's revealed timeline and only reads; it never
 // sends commands. The page mounts the shared game state: its sync controller's revision re-reads the timeline (the
 // view has no poll of its own), and its world and owner name the gladiator. Fixture mode (?mode=fixture in a
-// fixture-enabled build) may add &minute=<0..90> to open the sample at that minute. `&play=trip` opens the whole-trip replay.
-import { Suspense, useEffect, useState } from 'react';
+// fixture-enabled build) may add &minute=<0..90> to open the sample at that minute. `&play=trip` opens the whole-trip replay; the
+// view switches between it and the live view itself, recording each switch as a history entry (`pushState`, which the router's
+// search params follow), so Back and Forward switch back without remounting the view (Patch A Task 9).
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
@@ -36,6 +38,11 @@ function ExpeditionShell() {
   // The expedition is the account's own read: once the session is known, a sign-out, expiry or account switch (here or in
   // another tab) remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1).
   const reader = game.session.userId ?? 'visitor';
+  const recordPlay = useCallback((next: 'trip' | null) => {
+    const url = new URL(window.location.href);
+    if (next) url.searchParams.set('play', next); else url.searchParams.delete('play');
+    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   return <div className="game-shell">
     <header className="topbar">
       <Link className="brand" href="/">CLOUDIATOR <span>CHRONICLES OF THE ARENA</span></Link>
@@ -45,8 +52,9 @@ function ExpeditionShell() {
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page" tabIndex={-1}>
       {!activityId ? <ExpeditionUnavailable fixture={fixture} reason="not-found" />
-        : reads && game.session.status !== 'loading' ? <ExpeditionView key={`${fixture}|${activityId}|${minute}|${play}|${reader}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute} play={play}
-          revision={game.revision} world={game.world} worldFailed={!game.world && game.syncError !== null} owner={game.owner} />
+        : reads && game.session.status !== 'loading' ? <ExpeditionView key={`${fixture}|${activityId}|${minute}|${reader}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute}
+          play={play} onPlay={recordPlay} revision={game.revision} world={game.world} worldFailed={!game.world && game.syncError !== null} owner={game.owner}
+          ownerLoading={game.viewer === 'loading'} />
           : <p role="status">Loading the expedition…</p>}
     </main>
     <footer className="game-footer">CLOUDIATOR <span>Expeditions show only revealed stages; watching never changes their result.</span></footer>

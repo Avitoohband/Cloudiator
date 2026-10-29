@@ -384,6 +384,25 @@ describe('a trip still running', () => {
     expect(decided.endMs).toBeGreaterThan(decided.startMs);
   });
 
+  // Task 7 review, added in Task 9: while a fight is on, its plan is the same whether the log says it is won or lost, so nothing
+  // (a chapter, its length, a piece) gives the result away. The won copy is the Outpost's lost fight 2 with its winner turned.
+  it('plans a fight being fought the same, won or lost, until it ends', () => {
+    const lost = encounters('outpost')[1];
+    const log = lost.battleLog!;
+    const wonCopy: RevealedTimeline = { ...TIMELINES.outpost, stages: TIMELINES.outpost.stages.map(stage => (stage.id !== lost.id ? stage
+      : { ...stage, label: stage.label.replace(/defeat/i, 'victory'), battleLog: { ...log, winnerId: log.participants[0].id } })) };
+    expect(log.winnerId).not.toBe(log.participants[0].id);
+    const walkMs = walk('outpost');
+    for (const ms of [lost.startedAtMs + 1_000, lost.endsAtMs - 1]) {
+      const asLost = planTrip(cutAt(TIMELINES.outpost, ms), { walkMs, resting: false, nowMs: ms });
+      const asWon = planTrip(cutAt(wonCopy, ms), { walkMs, resting: false, nowMs: ms });
+      expect(asWon, `at ${ms - lost.startedAtMs} ms into the fight`).toEqual(asLost);
+    }
+    // Once it has ended the two differ: the lost one has its cross and the safe point.
+    expect(labels(planTrip(cutAt(wonCopy, lost.endsAtMs), { walkMs, resting: false, nowMs: lost.endsAtMs }))).not.toContain('Fight 2 ✗');
+    expect(labels(planTrip(cutAt(TIMELINES.outpost, lost.endsAtMs), { walkMs, resting: false, nowMs: lost.endsAtMs }))).toContain('Fight 2 ✗');
+  });
+
   it('asks for the display clock, and shows nothing of a trip it is not given one for', () => {
     // The clock is how the plan knows which stages and which results are not to be shown yet: there is no safe default.
     // @ts-expect-error `nowMs` is required

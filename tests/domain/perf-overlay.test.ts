@@ -27,6 +27,16 @@ describe('the frame overlay phases', () => {
     // A scene opened by a link before the camp is ready: the camp getting ready under it starts a new phase too.
     expect(perfPhaseOf('loading', { kind: 'replay', activityId: 'a1' }).key).not.toBe(replay.key);
   });
+
+  // Patch A Task 9: an expedition's live view and its whole-trip replay (`play=trip`) are separate measurement phases.
+  it('measures an expedition live and its whole-trip replay as separate phases', async () => {
+    const { perfPhaseOf } = await import('@/features/shell/PerfOverlay');
+    const live = perfPhaseOf('ready', { kind: 'expedition', activityId: 'e1' });
+    const trip = perfPhaseOf('ready', { kind: 'expedition', activityId: 'e1', play: 'trip' });
+    expect(trip.label).toBe('expedition');
+    expect(trip.key).not.toBe(live.key);
+    expect(perfPhaseOf('ready', { kind: 'expedition', activityId: 'e1', play: 'trip' }).key).toBe(trip.key);
+  });
 });
 
 describe('the frame overlay readout', () => {

@@ -141,7 +141,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await results.getByRole('button', { name: /^Replay: Aster returned victorious from an expedition/ }).first().click();
     const expedition = scene(page, 'Expedition');
     await expect(expedition).toBeVisible();
-    // A result opens the whole-trip replay (Patch A Task 8): its address carries `play=trip`, which the view acts on from Task 9.
+    // A result opens the whole-trip replay (Patch A Task 8): its address carries `play=trip`, and the view opens as that replay (Task 9).
     expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland, play: 'trip' });
     await expect(expedition.getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
     await expect(scene(page, 'Replay')).toHaveCount(0);
@@ -150,7 +150,10 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await page.waitForFunction(() => window.__cloudiatorExpeditionScene?.debug()?.ready === true, null, { timeout: 45_000 });
     await settled(page);
     await page.screenshot({ path: testInfo.outputPath(`scene-expedition-result-${testInfo.project.name}.png`) });
-    // Its encounter replays open the replay scene; Back to camp returns to the camp, not to the expedition.
+    // Its encounter replays open the replay scene; Back to camp returns to the camp, not to the expedition. The whole-trip replay
+    // starts at "Leaving camp", whose log has only the departure: at its end the log holds every encounter (Patch A Task 9).
+    await expect(expedition.getByRole('button', { name: 'Play', exact: true })).toBeFocused();
+    await page.evaluate(() => window.__cloudiatorExpedition!.seek(Number.MAX_SAFE_INTEGER));
     const watch = expedition.getByRole('button', { name: /^Watch the replay of encounter 1$/ });
     await watch.click();
     await expect(scene(page, 'Replay')).toBeVisible();
@@ -158,10 +161,11 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     // The focus moves with the scene (fix round 1, M6): to Back to camp, never to <body>.
     await expect(backToCamp(page)).toBeFocused();
     await expect(scene(page, 'Replay').getByRole('button', { name: 'Encounter 1: victory', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    // The browser's Back returns to the expedition scene, again with the focus in the scene.
+    // The browser's Back returns to the expedition scene, again with the focus in the scene: its whole-trip replay starts with ▶
+    // focused (Patch A Task 9).
     await page.goBack();
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
-    await expect(backToCamp(page)).toBeFocused();
+    await expect(scene(page, 'Expedition').getByRole('button', { name: 'Play', exact: true })).toBeFocused();
     await page.goForward();
     await expect(scene(page, 'Replay')).toBeVisible();
     await expect(backToCamp(page)).toBeFocused();
@@ -182,9 +186,11 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
 
   test('carries the whole-trip address (&play=trip) on an expedition scene and on its page, and ignores any other play', async ({ page }) => {
     const woodland = EXPEDITION_FIXTURES.woodland.activityId;
-    // A shared link opens the expedition over the camp with its play kept in the address (the view acts on it from Task 9); Back to camp drops it.
+    // A shared link opens the expedition over the camp with its play kept in the address, as the whole-trip replay (Task 9); Back
+    // to camp drops it.
     await page.goto(`/game/?mode=fixture&view=expedition&activity=${woodland}&play=trip`);
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    await expect(scene(page, 'Expedition').getByTestId('replay-badge')).toBeVisible();
     expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland, play: 'trip' });
     await campReady(page);
     await backToCamp(page).click();
@@ -198,11 +204,15 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     // Any other value is ignored: the scene opens, and a result's whole-trip replay is a different scene from the live one.
     await page.goto(`/game/?mode=fixture&view=expedition&activity=${woodland}&play=fast`);
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    await expect(scene(page, 'Expedition').getByRole('button', { name: '▶ Watch the whole trip', exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(scene(page, 'Expedition').getByTestId('replay-badge')).toHaveCount(0);
     // The deep link page takes the same address.
     await page.goto(`/expedition/?mode=fixture&activity=${woodland}&play=trip`);
     await expect(page.getByRole('heading', { level: 1, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId('replay-badge')).toBeVisible();
     await page.goto(`/expedition/?mode=fixture&activity=${woodland}&play=fast`);
     await expect(page.getByRole('heading', { level: 1, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId('replay-badge')).toHaveCount(0);
   });
 
   test('keeps /replay/ and /expedition/ deep links working', async ({ page }) => {

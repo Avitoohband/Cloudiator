@@ -6,13 +6,93 @@
 
 .header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.6rem 1rem;
 }
 
 .heading {
   min-width: 0;
+  margin-right: auto;
+}
+
+/* Patch A Task 9: the LIVE badge and "⏪ Watch from the start", the replay's badge, or "▶ Watch the whole trip". */
+.modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modes:empty {
+  display: none;
+}
+
+.liveBadge,
+.replayBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font: 700 12px/1.4 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.liveBadge {
+  color: #ffd9cf;
+  background: rgba(70, 30, 26, 0.92);
+  border: 1px solid #a3584a;
+}
+
+.liveBadge i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff6b57;
+  box-shadow: 0 0 6px #ff6b57;
+}
+
+.replayBadge {
+  color: #ffe1a3;
+  background: rgba(71, 54, 35, 0.92);
+  border: 1px solid #88683d;
+}
+
+.rewind,
+.wholeTrip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 0.8rem;
+  color: var(--ink);
+  background: #ffffff12;
+  border: 1px solid #ffffff2b;
+  border-radius: 8px;
+  font: 600 0.85rem/1 system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wholeTrip {
+  color: #2a1d05;
+  background: var(--gold);
+  border-color: #ffe48f;
+  font-weight: 700;
+}
+
+.rewind:hover {
+  border-color: var(--gold);
+}
+
+.wholeTrip:hover {
+  background: #ffd886;
 }
 
 .heading p {
@@ -156,29 +236,103 @@
   box-shadow: 0 0 0 2px #1a1423;
 }
 
-.markers {
+/*
+ * The named marks under the strip (Patch A Task 9), each at its minute (0, 20, 40, 60, 80): the first starts there, the last
+ * ends there. A narrow screen lists them in rows instead.
+ */
+.marks {
   position: relative;
-  height: 1.3rem;
-  margin: 0.2rem 0 0;
+  height: 2rem;
+  margin: 0.35rem 0 0;
   padding: 0;
   list-style: none;
-  color: var(--muted);
-  font-size: 0.7rem;
+  color: #8e94a6;
+  font-size: 0.75rem;
 }
 
-.markers li {
+.marks li {
   position: absolute;
   top: 0;
+  display: flex;
+  align-items: center;
+  min-height: 1.9rem;
   transform: translateX(-50%);
   white-space: nowrap;
 }
 
-.markers li:first-child {
+.marks li:first-child {
   transform: none;
 }
 
-.markers li:last-child {
+.marks li:last-child {
   transform: translateX(-100%);
+}
+
+.marks .passed {
+  color: var(--ink);
+}
+
+.markButton {
+  min-height: 1.9rem;
+  padding: 0 0.6rem;
+  color: #ffe1a3;
+  background: rgba(71, 54, 35, 0.92);
+  border: 1px solid #88683d;
+  border-radius: 999px;
+  font: 700 0.75rem/1 system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.markButton:hover {
+  border-color: #ffe1a3;
+}
+
+/* The whole-trip replay's bar, where the strip is in the live view. */
+.tripBar {
+  min-width: 0;
+}
+
+.backLive {
+  min-height: 34px;
+  padding: 0 10px;
+  color: #ffd9cf;
+  background: rgba(70, 30, 26, 0.92);
+  border: 1px solid #a3584a;
+  border-radius: 8px;
+  font: 700 12px/1 system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.backLive:hover {
+  border-color: #ffd9cf;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .backLive {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .marks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.9rem;
+    height: auto;
+  }
+
+  .marks li,
+  .marks li:first-child,
+  .marks li:last-child {
+    position: static;
+    transform: none;
+  }
+
+  .markButton {
+    min-height: 44px;
+  }
 }
 
 .columns {
@@ -305,6 +459,17 @@
 @media (max-width: 420px) {
   .header {
     align-items: center;
+  }
+
+  /* The title keeps the Camp link beside it; the badge and its button go on the row below. */
+  .header .camp {
+    order: 1;
+  }
+
+  .header:has(.camp) .modes {
+    order: 2;
+    flex-basis: 100%;
+    justify-content: flex-start;
   }
 
   .card {

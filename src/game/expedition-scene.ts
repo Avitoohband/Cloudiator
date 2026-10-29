@@ -43,6 +43,11 @@ export type ExpeditionSceneDeps = {
   look: GladiatorLook;
   bridge: SceneBridge;
   reducedMotion?: boolean;
+  /**
+   * Read every frame: whether a search steps around its spot (default true). The whole-trip replay passes false: at its speed
+   * the steps would strobe, so the search holds on the spot, turning only (Patch A Task 9).
+   */
+  wander?: () => boolean;
   onReady: () => void;
   onError: (reason: 'assets' | 'error', message: string) => void;
   /** Called with true when the expedition is back at camp and the gladiator leaves the scene, and with false if a later state undoes that. */
@@ -459,8 +464,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       }
       this.updateWaiters(state, now);
       const route = state?.route ?? null;
-      // Reduced motion keeps a search on the spot: no steps for the camera to snap to.
-      const pose = route ? gladiatorPose(journey, route, speed, { wander: !reducedMotion }) : null;
+      // Reduced motion keeps a search on the spot: no steps for the camera to snap to; so does the whole-trip replay.
+      const pose = route ? gladiatorPose(journey, route, speed, { wander: !reducedMotion && deps.wander?.() !== false }) : null;
       last.pose = pose;
       // Back at camp: the gladiator leaves the scene where it waited or rested, fading out.
       const returned = route?.then === 'leave';

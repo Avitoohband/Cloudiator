@@ -1,0 +1,167 @@
+/*
+ * The replay bar (Patch A Task 9, the approved mockup's trip bar): ⏮ ▶ ⏭, the chapters, the time and a tail on one dark row. The
+ * touch layout (the shell's `@media (hover: none), (max-width: 480px)`) hides the chapters and names the current one in one line,
+ * with 44 px buttons. A bar with a track (the Arena-replays patch) wraps its chapters onto a row of their own.
+ */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  background: #0f0f12;
+  border: 1px solid var(--line);
+}
+
+.icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 34px;
+  padding: 0;
+  color: var(--ink);
+  background: #ffffff12;
+  border: 1px solid #ffffff2a;
+  border-radius: 8px;
+  font: 600 14px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.icon:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ▶/⏸ is gold. */
+.play {
+  color: #2a1d05;
+  background: var(--gold);
+  border-color: #ffe48f;
+}
+
+.icon:focus-visible,
+.chapters button:focus-visible {
+  outline: 3px solid #ffe48f;
+  outline-offset: 1px;
+}
+
+/* The current chapter in one line: the touch layout's alone. */
+.name {
+  display: none;
+}
+
+.chapters {
+  display: flex;
+  flex: 1 1 0;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chapters li {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.chapters button {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 4px;
+  overflow: hidden;
+  color: #b8bccb;
+  background: #171622;
+  border: 1px solid #ffffff22;
+  border-radius: 7px;
+  font: 500 12px/1 system-ui, sans-serif;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.chapters button.past {
+  color: var(--ink);
+  border-color: #6c5a37;
+}
+
+.chapters button.current {
+  color: #2a1d05;
+  background: var(--gold);
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.chapters button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.track {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.time {
+  flex: none;
+  min-width: 5.5em;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tail {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+
+/* With a track the chapters wrap onto a row of their own, under the controls. */
+.bar[data-track] .chapters {
+  flex-basis: 100%;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .icon {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+  }
+
+  .chapters {
+    display: none;
+  }
+
+  /* The chapter's name wraps rather than being cut short beside the three buttons and the time. */
+  .name {
+    display: block;
+    flex: 1 1 6rem;
+    min-width: 0;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .time {
+    min-width: 0;
+  }
+
+  /* With a track: the track and the time first, then the buttons, the name and the tail. */
+  .bar[data-track] .track {
+    order: -2;
+    flex-basis: calc(100% - 7em);
+  }
+
+  .bar[data-track] .time {
+    order: -1;
+  }
+}

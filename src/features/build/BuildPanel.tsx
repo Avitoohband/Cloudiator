@@ -11,6 +11,7 @@ import { deriveStats, preserveStamina } from '@domain/stats';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { cappedNote, pointsLeft, raisedNote, setPoints } from '../character/creation-points';
+import { PointsStepper, type PointsSource } from '../character/PointsStepper';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
@@ -93,14 +94,15 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   function update(next: BuildInput, note = '') { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote(note); }
   /**
    * A typed or stepped number for one attribute: raised to the current build's value when below it, capped at what is left when
-   * above, with a status line saying which. Only typing can pass either limit (the stepper stops at both), so the field has the
-   * focus then and `heldAtFocus` holds what it started from.
+   * above, with a status line saying which. Only typing can go below (− stops at the floor); +5 may ask past the cap, but lands on
+   * it with no line (the counter says it, points hotfix 2026-10-29). So a line comes after typing, when the field has had the
+   * focus and `heldAtFocus` holds what it started from.
    */
-  function changePoints(key: keyof Attributes, wanted: number) {
+  function changePoints(key: keyof Attributes, wanted: number, source: PointsSource = 'field') {
     const floor = owner.currentBuild.allocations[key], held = draft.allocation[key];
     const result = setPoints(draft.allocation, key, wanted, earned, floor);
     update({ ...draft, allocation: result.allocation }, result.raised ? raisedNote(title(key), floor)
-      : result.capped ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
+      : result.capped && source === 'field' ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
   }
   async function send(kind: BuildCommand['kind']) {
     if (sending.current || (kind === 'queue-build' && !valid.ok)) return;
@@ -142,8 +144,9 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       </fieldset>
       <fieldset disabled={busy}><legend>Attribute points · {owner.progression.earnedAttributePoints} earned</legend>
         <p className="build-counter" role="status" data-done={left === 0}>{left === 0 ? `All ${earned} spent` : `${left} of ${earned} left`}</p>
-        <div className="build-points">{attributes.map(key => <label key={key}>{key}<input type="number" min={owner.currentBuild.allocations[key]} max={draft.allocation[key] + left} step="1" value={draft.allocation[key]} {...reviewed(pointsInvalid(key))}
-          onFocus={() => { heldAtFocus.current[key] = draft.allocation[key]; }} onChange={e => changePoints(key, Number(e.target.value))} /></label>)}</div>
+        <div className="build-points">{attributes.map(key => { const floor = owner.currentBuild.allocations[key], value = draft.allocation[key];
+          return <PointsStepper key={key} label={key} name={title(key)} value={value} floor={floor} cap={Math.max(floor, value + left)} fieldProps={reviewed(pointsInvalid(key))}
+            onFocus={() => { heldAtFocus.current[key] = value; }} onChange={(wanted, source) => changePoints(key, wanted, source)} />; })}</div>
         <p className="build-points-note" role="status">{pointsNote}</p>
         <p>{POINTS_NOTE}</p>
       </fieldset>

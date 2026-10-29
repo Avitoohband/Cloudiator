@@ -94,7 +94,9 @@ main[tabindex="-1"]:focus { outline: none; }
 .build-comparison { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,250px),1fr)); gap: 1rem; }
 .build-comparison section { background: #111b2d; padding: 1rem; }
 .build-comparison dl div { display: flex; justify-content: space-between; text-transform: capitalize; }
-.build-points { display: grid; grid-template-columns: repeat(auto-fit,minmax(115px,1fr)); gap: .8rem; }
+/* The build step's points: one row per attribute (PointsStepper), as in the creation dialog (points hotfix, 2026-10-29). */
+.build-points { display: grid; }
+.build-points > div { padding: .5rem 0; border-top: 1px solid var(--line); }
 /* The build step's points counter and status line (2026-10-28), as the creation dialog's (CreateCharacter.module.css .counter, .capped). */
 .build-counter { display: inline-block; margin: 0 0 .5rem; padding: .3rem .8rem; border: 1px solid var(--gold); border-radius: 999px; background: #3a3020; color: var(--gold); font-size: .9rem; font-weight: 800; white-space: nowrap; }
 .build-counter[data-done="true"] { border-color: #4fb58a; background: #1f4a3a; color: #9be3c0; }

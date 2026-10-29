@@ -6,6 +6,8 @@ import type { GameCommand } from '../../supabase/functions/_shared/contracts/com
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { chipToggle, cornerChip, creationDialog, joinButton, openMenu, signOutFromChip, spendSuggestedPoints } from './shell-helpers';
+import { expectPointsFit } from './a11y-helpers';
+import { reviewShot } from './review-shots';
 
 /** A visitor's My gladiator panel (Task 13.6). */
 const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
@@ -268,20 +270,26 @@ test('validates names and the ten whole points, derives starters and permits key
   await expect(page.locator('p[role=alert]')).toContainText('3–20');
   expect(flow.commands).toHaveLength(0);
   await dialog.getByLabel('Gladiator name').fill('  Keyboard Fighter  ');
-  // A typed number is a whole number: a fraction is floored, an empty field counts as 0, and more than is left is capped
-  // at what is left (Avi: with 7 left, typing 10 sets 7) with a short line saying so.
+  // A typed number is a whole number: a fraction is floored and more than is left is capped at what is left (Avi: with 7 left,
+  // typing 10 sets 7) with a short line saying so, both when the field is left (Tab); an emptied field changes nothing (points
+  // hotfix, 2026-10-29).
   const strength = dialog.getByLabel('Strength points'), agility = dialog.getByLabel('Agility points');
   await dialog.getByRole('button', { name: 'Reset points' }).click();
   await strength.fill('2.5');
+  await page.keyboard.press('Tab');
   await expect(strength).toHaveValue('2');
   await expect(counter).toHaveText('8 of 10 left');
   await strength.fill('3');
   await expect(counter).toHaveText('7 of 10 left');
   await agility.fill('10');
+  await page.keyboard.press('Tab');
   await expect(agility).toHaveValue('7');
   await expect(capped).toHaveText('Only 7 points left, so Agility was set to 7.');
   await expect(counter).toHaveText('All 10 spent');
   await agility.fill('');
+  await expect(agility).toHaveValue('');
+  await expect(counter).toHaveText('All 10 spent');
+  await agility.fill('0');
   await expect(agility).toHaveValue('0');
   await expect(counter).toHaveText('7 of 10 left');
   await expect(capped).toHaveCount(0);
@@ -343,9 +351,10 @@ test('spends the ten points with a counter, steppers, a cap and the class sugges
   await remove('Agility').click({ force: true });
   await expect(field('Agility')).toHaveValue('0');
   await expect(counter).toHaveText('8 of 10 left');
-  // Typing more than is left is capped at what is left, and says so; the next change clears the line.
+  // Typing more than is left is capped at what is left when the field is left (Tab), and says so; the next change clears the line.
   await field('Strength').fill('3');
   await field('Agility').fill('10');
+  await page.keyboard.press('Tab');
   await expect(field('Agility')).toHaveValue('7');
   await expect(capped).toHaveText('Only 7 points left, so Agility was set to 7.');
   await expect(counter).toHaveText('All 10 spent');
@@ -357,6 +366,7 @@ test('spends the ten points with a counter, steppers, a cap and the class sugges
   await add('Vitality').click({ force: true });
   await expect(field('Vitality')).toHaveValue('0');
   await field('Strength').fill('99');
+  await page.keyboard.press('Tab');
   await expect(field('Strength')).toHaveValue('3');
   await expect(capped).toHaveText('No points left to add, so Strength stays at 3.');
   await field('Agility').fill('4');
@@ -383,8 +393,13 @@ test('spends the ten points with a counter, steppers, a cap and the class sugges
   await expect(dialog.getByLabel('Duelist', { exact: true })).toBeChecked();
   await expect(counter).toHaveText('All 10 spent');
   for (const [index, name] of names.entries()) await expect(field(name)).toHaveValue(String(splits.Duelist[index]));
-  // An empty field counts as 0.
+  // An emptied field changes nothing, and shows its value again when left (points hotfix, 2026-10-29); 0 gives the points back.
   await field('Precision').fill('');
+  await expect(field('Precision')).toHaveValue('');
+  await expect(counter).toHaveText('All 10 spent');
+  await page.keyboard.press('Tab');
+  await expect(field('Precision')).toHaveValue('4');
+  await field('Precision').fill('0');
   await expect(field('Precision')).toHaveValue('0');
   await expect(counter).toHaveText('4 of 10 left');
   await expect(dialog.getByText('Spend 4 more points to continue.')).toBeVisible();
@@ -393,6 +408,7 @@ test('spends the ten points with a counter, steppers, a cap and the class sugges
 
 test('caps a number typed one key at a time at what the field can take, as the capped line says', async ({ page, context }) => {
   // Fix round 1: with 7 left, "10" typed digit by digit passes through 1 (6 left) and still says 7, never "Only 6 points left".
+  // Since the points hotfix (2026-10-29) a number over the cap stays as typed until the field is left (Tab), then is capped.
   const flow = await identityFlow(context);
   await page.goto('/game/');
   await flow.signIn(page);
@@ -414,6 +430,9 @@ test('caps a number typed one key at a time at what the field can take, as the c
   await expect(counter).toHaveText('6 of 10 left');
   await expect(capped).toHaveCount(0);
   await page.keyboard.press('0');
+  await expect(field('Endurance')).toHaveValue('10');
+  await expect(capped).toHaveCount(0);
+  await page.keyboard.press('Tab');
   await expect(field('Endurance')).toHaveValue('7');
   await expect(capped).toHaveText('Only 7 points left, so Endurance was set to 7.');
   await expect(counter).toHaveText('All 10 spent');
@@ -424,6 +443,7 @@ test('caps a number typed one key at a time at what the field can take, as the c
   await field('Agility').fill('3');
   await expect(counter).toHaveText('5 of 10 left');
   await typeOver('Strength', ['9']);
+  await page.keyboard.press('Tab');
   await expect(field('Strength')).toHaveValue('7');
   await expect(capped).toHaveText('Strength can take at most 7, so it was set to 7.');
   await expect(counter).toHaveText('All 10 spent');
@@ -437,6 +457,7 @@ test('caps a number typed one key at a time at what the field can take, as the c
   await expect(field('Agility')).toHaveValue('1');
   await expect(capped).toHaveCount(0);
   await page.keyboard.press('0');
+  await page.keyboard.press('Tab');
   await expect(field('Agility')).toHaveValue('7');
   await expect(capped).toHaveText('Agility can take at most 7, so it was set to 7.');
   // Several digits at once, over a field of 0: the same line.
@@ -445,8 +466,117 @@ test('caps a number typed one key at a time at what the field can take, as the c
   await field('Precision').focus();
   await field('Precision').selectText();
   await field('Precision').pressSequentially('10');
+  await page.keyboard.press('Tab');
   await expect(field('Precision')).toHaveValue('7');
   await expect(capped).toHaveText('Only 7 points left, so Precision was set to 7.');
+});
+
+test('types over a creation point after a tap or click, waits for Enter or Tab out of range, and steps by 1 and 5', async ({ page, context }, testInfo) => {
+  // Points hotfix (Avi, 2026-10-29): on a phone a digit went after the 0 already there and was capped, and Backspace gave 0. Now a
+  // tap or click selects the value, an empty or out-of-range field waits for Enter or Tab, and −, +1 and +5 sit beside it.
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left|can take at most/ });
+  const strength = dialog.getByLabel('Strength points');
+  const button = (verb: string, name: string) => dialog.getByRole('button', { name: `${verb} ${name}`, exact: true });
+  // Three points in Agility first, so Strength can take 7.
+  for (let i = 0; i < 3; i++) await button('Add a point to', 'Agility').click();
+  await expect(counter).toHaveText('7 of 10 left');
+  // 1. The tap (or click) selects the 0, so the 5 replaces it and is applied at once.
+  await (testInfo.project.name === 'mobile' ? strength.tap() : strength.click());
+  await page.keyboard.type('5');
+  await expect(strength).toHaveValue('5');
+  await expect(counter).toHaveText('2 of 10 left');
+  // 2. An emptied field stays empty and changes nothing; the next digit is applied.
+  await page.keyboard.press('End');
+  await page.keyboard.press('Backspace');
+  await expect(strength).toHaveValue('');
+  await expect(counter).toHaveText('2 of 10 left');
+  await page.keyboard.type('6');
+  await expect(strength).toHaveValue('6');
+  await expect(counter).toHaveText('1 of 10 left');
+  // 3. Above the cap it stays as typed; Enter takes the cap with the capped line (Strength held 0 when it took the focus, and 7
+  // were left then), and creates nothing.
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('9');
+  await expect(strength).toHaveValue('9');
+  await expect(counter).toHaveText('1 of 10 left');
+  await expect(capped).toHaveCount(0);
+  await reviewShot(page, testInfo, 'points-creation-typing');
+  await page.keyboard.press('Enter');
+  await expect(strength).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Strength was set to 7.');
+  await expect(counter).toHaveText('All 10 spent');
+  await expect(strength).toBeFocused();
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  // 4. Below 0 and a fraction wait for Tab too: -1 gives 0 and 2.5 gives 2, with no line (0 is no saved value to keep).
+  await strength.fill('-1');
+  await expect(strength).toHaveValue('-1');
+  await expect(counter).toHaveText('All 10 spent');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('0');
+  await expect(capped).toHaveCount(0);
+  await expect(counter).toHaveText('7 of 10 left');
+  await strength.fill('2.5');
+  await expect(strength).toHaveValue('2.5');
+  await expect(counter).toHaveText('7 of 10 left');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('2');
+  await expect(counter).toHaveText('5 of 10 left');
+  // An emptied field shows its value again on Tab, with no change and no line.
+  await strength.fill('');
+  await expect(strength).toHaveValue('');
+  await expect(counter).toHaveText('5 of 10 left');
+  await page.keyboard.press('Tab');
+  await expect(strength).toHaveValue('2');
+  await expect(counter).toHaveText('5 of 10 left');
+  // 5. +1 adds one; +5 with 4 left stops at the cap with no capped line (the counter says it), and both then stop.
+  await button('Add a point to', 'Strength').click();
+  await expect(strength).toHaveValue('3');
+  await expect(counter).toHaveText('4 of 10 left');
+  await button('Add 5 points to', 'Strength').click();
+  await expect(strength).toHaveValue('7');
+  await expect(counter).toHaveText('All 10 spent');
+  await expect(capped).toHaveCount(0);
+  await expect(button('Add a point to', 'Strength')).toHaveAttribute('aria-disabled', 'true');
+  await expect(button('Add 5 points to', 'Strength')).toHaveAttribute('aria-disabled', 'true');
+  // 6. − takes them back to 0, and stops there.
+  for (let i = 0; i < 7; i++) await button('Remove a point from', 'Strength').click();
+  await expect(strength).toHaveValue('0');
+  await expect(counter).toHaveText('7 of 10 left');
+  await expect(button('Remove a point from', 'Strength')).toHaveAttribute('aria-disabled', 'true');
+  // +5 from 0 with 10 left gives 5, and again gives 10.
+  await dialog.getByRole('button', { name: 'Reset points', exact: true }).click();
+  await expect(counter).toHaveText('10 of 10 left');
+  await button('Add 5 points to', 'Vitality').click();
+  await expect(dialog.getByLabel('Vitality points')).toHaveValue('5');
+  await expect(counter).toHaveText('5 of 10 left');
+  await button('Add 5 points to', 'Vitality').click();
+  await expect(dialog.getByLabel('Vitality points')).toHaveValue('10');
+  await expect(counter).toHaveText('All 10 spent');
+  await expect(capped).toHaveCount(0);
+  expect(flow.commands).toHaveLength(0);
+});
+
+test('fits the creation points on a 360 x 740 phone: no sideways scroll, 44 px controls, five whole rows', async ({ page, context }, testInfo) => {
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const group = dialog.getByRole('group', { name: 'Spend 10 starting points', exact: true });
+  const names = ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision'];
+  await group.getByRole('spinbutton', { name: 'Strength points', exact: true }).scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'points-creation-wide');
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.waitForTimeout(500);
+  await expectPointsFit(page, group, names.map(name => `${name} points`), names);
+  await group.getByRole('spinbutton', { name: 'Strength points', exact: true }).scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'points-creation-360');
 });
 
 test('a saved draft keeps its points, unless the counter could not show them', async ({ page, context }) => {

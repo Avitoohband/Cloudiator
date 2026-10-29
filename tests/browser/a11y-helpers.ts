@@ -202,3 +202,45 @@ export async function a11yShot(page: Page, testInfo: TestInfo, name: string) {
 
 /** The page never scrolls sideways. */
 export const noHorizontalScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+
+/**
+ * The attribute points fit the screen (points hotfix, 2026-10-29): no sideways scroll, and each row (its label, its field and its
+ * −, +1 and +5) lies whole inside `group`, below the row before it, with every button at least 44 x 44 px. `fields` are the
+ * fields' accessible names and `names` the title-case names the buttons use, in the same order.
+ */
+export async function expectPointsFit(page: Page, group: Locator, fields: string[], names: string[]) {
+  expect(await noHorizontalScroll(page), 'the page does not scroll sideways').toBe(true);
+  const area = (await group.boundingBox())!;
+  const inside = (box: { x: number; width: number }, what: string) => {
+    expect(box.x, `${what} starts inside the points`).toBeGreaterThanOrEqual(area.x - 0.5);
+    expect(box.x + box.width, `${what} ends inside the points`).toBeLessThanOrEqual(area.x + area.width + 0.5);
+  };
+  let above = -Infinity;
+  for (const [index, name] of names.entries()) {
+    const field = group.getByRole('spinbutton', { name: fields[index], exact: true });
+    const buttons = ['Remove a point from', 'Add a point to', 'Add 5 points to'].map(verb => group.getByRole('button', { name: `${verb} ${name}`, exact: true }));
+    let top = Infinity, bottom = -Infinity;
+    const label = await field.evaluate(el => {
+      const label = (el as HTMLInputElement).labels?.[0];
+      if (!label) return null;
+      const rect = label.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clipped: label.scrollWidth > label.clientWidth + 0.5 };
+    });
+    expect(label, `${name} has a label`).not.toBeNull();
+    expect(label!.clipped, `${name}'s label is not clipped`).toBe(false);
+    inside(label!, `${name}'s label`);
+    top = Math.min(top, label!.y);
+    for (const [i, control] of [field, ...buttons].entries()) {
+      await expect(control).toBeVisible();
+      const box = (await control.boundingBox())!;
+      const what = i === 0 ? `${name}'s field` : `${name}'s ${['−', '+1', '+5'][i - 1]}`;
+      inside(box, what);
+      expect(box.height, `${what} is 44 px tall`).toBeGreaterThanOrEqual(44 - 0.5);
+      if (i > 0) expect(box.width, `${what} is 44 px wide`).toBeGreaterThanOrEqual(44 - 0.5);
+      top = Math.min(top, box.y);
+      bottom = Math.max(bottom, box.y + box.height);
+    }
+    expect(top, `${name}'s row starts below the row before it`).toBeGreaterThanOrEqual(above - 0.5);
+    above = bottom;
+  }
+}

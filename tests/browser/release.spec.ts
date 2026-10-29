@@ -293,8 +293,10 @@ test.describe('release accessibility in the fixture preview', () => {
     // review message; the status line says what was done instead (Avi, 2026-10-28).
     const mine = await openMenu(page, 'My gladiator');
     await expectNamedControls(mine, 'My gladiator (player)');
+    // A typed number out of range waits until the field is left (Tab), then is clamped (points hotfix, 2026-10-29).
     const strength = mine.getByRole('spinbutton', { name: 'strength', exact: true });
     await strength.fill('9');
+    await page.keyboard.press('Tab');
     await expect(strength).toHaveValue('2');
     await expect(mine.getByText('No points left to add, so Strength stays at 2.', { exact: true })).toBeVisible();
     await expect(mine.getByText(/^Review your build:/)).toHaveCount(0);
@@ -303,6 +305,7 @@ test.describe('release accessibility in the fixture preview', () => {
     const agility = mine.getByRole('spinbutton', { name: 'agility', exact: true });
     for (const value of ['1.5', '-1']) {
       await strength.fill(value);
+      await page.keyboard.press('Tab');
       await expect(strength, value).toHaveValue('2');
       await expect(mine.getByText("Strength can't go below 2: added points are permanent.", { exact: true }), value).toBeVisible();
       await expect(mine.getByText(/^Review your build:/), value).toHaveCount(0);
@@ -435,18 +438,23 @@ test.describe('release accessibility in the fixture preview', () => {
             - button "Remove a point from Strength"
             - spinbutton "Strength points": "0"
             - button "Add a point to Strength"
+            - button "Add 5 points to Strength"
             - button "Remove a point from Agility"
             - spinbutton "Agility points": "0"
             - button "Add a point to Agility"
+            - button "Add 5 points to Agility"
             - button "Remove a point from Vitality"
             - spinbutton "Vitality points": "0"
             - button "Add a point to Vitality"
+            - button "Add 5 points to Vitality"
             - button "Remove a point from Endurance"
             - spinbutton "Endurance points": "0"
             - button "Add a point to Endurance"
+            - button "Add 5 points to Endurance"
             - button "Remove a point from Precision"
             - spinbutton "Precision points": "0"
             - button "Add a point to Precision"
+            - button "Add 5 points to Precision"
             - status
         - button "Not now"
         - button "Create gladiator" [disabled]
@@ -489,6 +497,7 @@ test.describe('release accessibility in the fixture preview', () => {
     // Contrast in the other states of the form: a capped number (its status line) and all points spent (the preview).
     // Strength held 5 (the suggestion) when it took the focus, so the line names its cap: 2 + the 3 left.
     await strength.fill('99');
+    await page.keyboard.press('Tab');
     await expect(dialog.getByRole('status').filter({ hasText: 'Strength can take at most 5, so it was set to 5.' })).toBeVisible();
     expect(await contrastIssues(await settled(dialog)), 'the creation dialog with a capped number').toEqual([]);
     await dialog.getByRole('button', { name: 'Suggested for Berserker' }).click();

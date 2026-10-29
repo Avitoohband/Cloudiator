@@ -321,7 +321,8 @@ test('fits the creation dialog on a 360 px phone with its actions in view', asyn
   expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), 'the dialog does not scroll sideways').toBe(true);
   const points = dialog.getByRole('group', { name: 'Spend 10 starting points' });
   const controls = points.locator('button, input');
-  expect(await controls.count()).toBe(2 + 5 * 3);
+  // Suggested and Reset, then −, the points, +1 and +5 for each attribute (points hotfix, 2026-10-29).
+  expect(await controls.count()).toBe(2 + 5 * 4);
   for (const control of await controls.all()) {
     const at = await boxOf(control);
     const what = await control.evaluate(el => el.getAttribute('aria-label') ?? el.textContent ?? el.id);

@@ -1,0 +1,97 @@
+/*
+ * One attribute's points (points hotfix, 2026-10-29): the name (and a hint), then − | the number | +1 | +5. The row is one line
+ * when it fits; at 420 px or less the controls go on a second line under the name (Avi). The buttons and the field are 44 px.
+ * Each rule carries two classes, so the panels' global field and button styles (.planning-form input, .creation-form input)
+ * never win, whatever order the stylesheets load in.
+ */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+}
+
+/* The longest name ("Endurance") fits 5.5 rem, so the build step's desktop panel keeps each row on one line. */
+.row .name {
+  display: grid;
+  flex: 1 1 5.5rem;
+  min-width: 0;
+}
+
+.row .label {
+  display: block;
+  margin: 0;
+  font-weight: 700;
+}
+
+.row .controls {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 420px) {
+  .row .controls {
+    flex-basis: 100%;
+  }
+}
+
+.controls .step {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--field-line);
+  border-radius: 8px;
+  background: #111b2d;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* At its limit a button only looks unavailable: it stays focusable, and the text keeps its contrast. */
+.controls .step[aria-disabled='true'] {
+  border-style: dashed;
+  color: #8d99b0;
+  cursor: not-allowed;
+}
+
+.controls .step:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.controls input.value[type='number'] {
+  display: block;
+  flex: none;
+  width: 48px;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--field-line);
+  background: #111b2d;
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.controls input.value[type='number']::-webkit-inner-spin-button,
+.controls input.value[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.controls input.value[type='number']:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}

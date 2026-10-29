@@ -19,7 +19,8 @@ away has no way back to the expedition from the camp, and the replay of a finish
 bonuses vanish after creation; a phone hides stamina and gold behind nothing; a Rest does not say what it gives; the game
 mixes "12:40 PM" (My gladiator, Schedule) with "Sat 10 Oct, 03:00" (Results) in one session; and the Gladiators menu does not
 say how many players there are. Patch A fixes all of these in the client only: **no migration, no Edge change, no new
-command**.
+command**. (Added 2026-10-29: Avi's patch numbers ship in Patch A too, with one small migration, M26; see the last section,
+"Patch numbers and the changelog". Still no Edge change and no new command.)
 
 ## Goals
 
@@ -234,7 +235,8 @@ command**.
 | Announce a newcomer during their first slot only (no database change) | Avi |
 | The whole-trip replay runs about 1¼ minutes, walking sped up, fights at real speed | Avi |
 | The clock setting is per device | Avi |
-| No migration; Patch A = items 2-8 + Task 10 | Avi |
+| No migration; Patch A = items 2-8 + Task 10 (superseded for patch numbers only, next row) | Avi |
+| Patch numbers (1.x, numbered back to the launch) ship in Patch A as 1.4, with migration M26 | Avi |
 | Banner, not an inbox message; visitors see it; the newcomer's own welcome | Claude's call |
 | The camp button is the only new camp element; LIVE badge; named marks; locked future chapters; Back to live | Claude's call |
 | Pace ×150 / real-speed fights / 5 s bookends / 6 s rest; starts paused with ▶ focused | Claude's call |
@@ -263,7 +265,8 @@ command**.
 
 - Next.js 16.4.3 static client; read the relevant guide in `node_modules/next/dist/docs/` before writing code (AGENTS.md).
 - No migration, no Edge function change, no new command, no package download. The new reads are public projections that
-  exist today (`recent_results`) and the owner's notifications read.
+  exist today (`recent_results`) and the owner's notifications read. Exception (Avi, 2026-10-29): one migration, M26, for
+  the patch list ("Patch numbers and the changelog"); still no Edge change and no new command.
 - localStorage only for these per-device conveniences, every access in try/catch, the page correct without it.
 - One formatter module for every time of day; a test fails on any other `hourCycle`, `hour12` or hour-bearing
   `Intl.DateTimeFormat` in `src/`.
@@ -275,9 +278,10 @@ command**.
 
 ## Release
 
-Client only: the gate of record, a whole-branch review, then (Avi's go) the `release` fast-forward; `functions deploy` only
-if the branch changed `supabase/functions` since the last release (Patch A should not). After the client is live, post the
-patch note with `private.post_message` (runbook "Posting a game message"); Avi approves its wording at release.
+The gate of record, a whole-branch review, then (Avi's go) M26 (`db push`), the `release` fast-forward; `functions deploy`
+only if the branch changed `supabase/functions` since the last release (Patch A should not). After the client is live, post
+the patch note with `private.post_message` (runbook "Posting a game message"), then record patch 1.4 with
+`private.record_patch` ("Patch numbers and the changelog", Release); Avi approves the wording of both at release.
 
 **Patch note draft** (credits nobody: these were Avi's own ideas, no player asked; Avi may change any word). Kind
 `patch-notes`, no action.
@@ -308,3 +312,160 @@ for Instagram and WhatsApp stories; uploads and posts only on Avi's go.
 
 Component structure and CSS beyond the sizes quoted; how the camp scene draws the vignettes (within one Phaser game);
 test layout; the exact fade timing; copy for screen-reader-only text not quoted here.
+
+## Patch numbers and the changelog (Avi, 2026-10-29)
+
+Avi, after the game-messages release: "please also add patch numbers. it should be written somewhere at the server", "it
+should be noted each feature you add and in which patch", "so the marketing agent will know which changes has been made
+since last video, and he won't miss out anything".
+
+**Avi chose** (a) 1.x numbers, applied back to the earlier releases (table below), Patch A = 1.4, Arena replays 1.5, Party
+dungeons 1.6; (b) it ships **in Patch A**, so Patch A gains one small migration, **M26**, and Party dungeons' migration
+becomes M27. **Avi approved the concept:** the server keeps the list of patches (number, name, date) and each patch's
+features; players see the current patch in the account menu and on each patch note; an open game whose build is behind the
+server's newest patch says "A new patch is out — reload".
+
+Everything else in this section is **Claude's call** (design pass, 2026-10-29), shown in the clickable mockup
+`.superpowers/design/2026-10-29-patch-numbers/mockups.html` (over real screenshots of the fixture preview at `28ed3ae`;
+git-ignored). **Avi has not looked at that mockup yet.** By his rule, the UI copy and placement below are a draft until he
+approves it in chat, and Task 11b's UI steps wait for that approval.
+
+### The numbers
+
+| Patch | Title (players see it) | Released (UTC) | What shipped | Patch note |
+| --- | --- | --- | --- | --- |
+| 1.0 | Public launch | 2026-10-25 09:20 (the first slot, epoch 373525) | `1b4fdbf`, M01–M22 | none |
+| 1.1 | Evening Arena, waiting monsters, clearer menus | 2026-10-26 09:29 (deploy record `6d6290a`) | M23 with `1724a79`, then the waiting monsters `84f2d44` | id 1 |
+| 1.2 | Choose your gladiator's look | 2026-10-27 10:07 (deploy record `35bbf56`) | M24 with `86af8c8` (Codex's polish included) | id 2 |
+| 1.2.1 | Clearer busy buttons | 2026-10-27 15:30 (new CSS served) | `1b57ba5` | none |
+| 1.3 | Messages, gold, fixed builds and bigger beds | 2026-10-29 08:44 (new client live) | M25 with `d996d59` | id 3 |
+| 1.3.1 | Phone attribute points | 2026-10-29 about 17:40 (points-hotfix ledger) | `b1e9bb7` | id 4, "Attribute points: easier on a phone" |
+| 1.4 | Patch A (title from its patch note) | at its release | M26 with Patch A | posted at its release |
+
+- **The waiting monsters belong to 1.1** (Claude's call). Avi's list does not name that release. It went out the same
+  morning as the launch feedback, and note 1 announced both. The keyboard-focus release is 1.2.1, as Avi listed it.
+- **The times** come from the release records where they name one (1.2.1, 1.3), from the deploy record commit otherwise
+  (1.1, 1.2), from the first slot for 1.0, and from the hotfix ledger's "about 17:40 UTC" for 1.3.1 (Claude's call). Players
+  see the date only.
+- **Numbering from now on** (Claude's call, from Avi's examples): a release with new features takes the next second number
+  (1.5); a fix-only release from `release` takes the next third number (1.4.1). Every release gets a row, a fix too, with or
+  without a patch note.
+- **The titles** follow the patch notes where one exists (Claude's call). Two are shortened: 1.2 drops "New:", and 1.3.1
+  uses Avi's own words, "Phone attribute points".
+
+### `docs/CHANGELOG.md`
+
+The repository's list of every patch and its features, newest first, for the marketing and video agents. A "Videos" table
+says which patch each made video covered (`appearance-and-ui-update` 1.1 and 1.2, `messages-look-and-beds-update` 1.3), and
+the top line says "Everything above the last video's patch is new since that video". The released sections are the
+server's rows word for word: a test compares the M26 seed with them. The patch in progress has its own section with
+"Built" and "Planned" lists. **Every task that builds a player-visible feature adds its line there in the same commit.**
+The release finalizes the section and records it on the server. Bullets are plain text, one line, at most 240 characters,
+with no Markdown: players read them as they are.
+
+### Server: M26 from `supabase/sql/19-patches.sql`
+
+- **`public.patches`**:
+  - `number text primary key`, matching `^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})(\.[1-9][0-9]{0,2})?$` ("1.0" and
+    "1.2.1", never "1.3.0");
+  - `sort_key integer generated always as (major × 1,000,000 + minor × 1,000 + third) stored`, unique (1.2.1 is 1,002,001);
+  - `title text`, 1–80 characters, not blank;
+  - `released_at_ms bigint` ≥ 0;
+  - `message_id bigint`: the patch note's id, null or unique. A fix may have no note. There is no foreign key (Claude's
+    call): the database tests' reset truncates `game_messages` on its own, which a foreign key would refuse, and a message
+    is never deleted, only hidden. `record_patch` checks the id instead.
+- **`public.patch_features`**: `patch text` referencing `public.patches(number)`, `position smallint` 1–20, and `text text`,
+  1–240 characters, not blank. The primary key is `(patch, position)`.
+- **Access** (the access matrix's `OPEN` list, as `game_messages`): RLS on both tables; SELECT for `anon`, `authenticated`
+  and `service_role`; the policy `player_read using (true)` for `anon` and `authenticated`. Nobody writes through the Data
+  API. Patch numbers are public on purpose: they say nothing about any player.
+- **The newest patch rides the revision poll** (Claude's call). `public.world_revision` (15-release.sql's view) is restated
+  with one more column, `latest_patch`: the number of the patch with the highest `sort_key`, null with no row. Every client
+  already reads that view every 30 s, on focus and on return to the tab. So the newest patch costs **no new request, no Edge
+  change and no new command**. An older client asks for its named columns only, so the new column changes nothing for it. No
+  `projection_changed` trigger is needed: the number comes with every revision read, whatever the revision.
+- **Writes are the operator's only**, as with `private.post_message`. `private.record_patch(number text, title text,
+  features text[], message_id bigint default null) returns text` inserts the patch and its features (positions 1…n) in one
+  statement, stamped with the database time (`clock_timestamp()`, never back-dated). It refuses with SQLSTATE 23514:
+  - an empty list, or one longer than 20;
+  - a number not above every recorded one;
+  - a message that is not a visible `patch-notes` message.
+
+  A repeated number is 23505. No client role may execute it, and neither may `service_role`. A correction is a plain owner
+  `update` after Avi's go.
+- **The seed:** M26 inserts 1.0 to 1.3.1 with their features from CHANGELOG.md and the times above. It finds `message_id` by
+  the posted note's kind and exact title (`patch-notes`, the four titles above). Production then links notes 1–4, and a
+  local database (no notes) stores null.
+
+### Client
+
+- **`PATCH`** (`src/lib/patch.ts`, `export const PATCH = '1.4'`): the patch this build is.
+  - The first commit of a patch's work sets it and opens the patch's CHANGELOG section. A unit test fails unless `PATCH`
+    equals the number of CHANGELOG.md's top section. A fix release from `release` sets the next third number in its first
+    commit the same way.
+  - Beside it: `patchSortKey` (the generated column's arithmetic) and `isBehind(latest, build = PATCH)`.
+- **Reads:**
+  - The revision read asks for `latest_patch` too, through a client-side type, `RevisionRead`. The shared contracts under
+    `supabase/functions/_shared` are not changed, so `game-command` needs no deploy.
+  - The sync keeps `latestPatch` from every refresh. A missing or malformed value is null, which shows no notice.
+  - `readPatches` reads 20 patches at a time, newest first, with their features.
+  - After the messages read, one small read finds the patch numbers of the notes it holds
+    (`patches?select=number,message_id&message_id=in.(…)`). When it fails, the notes show without numbers.
+- **The account menu** (desktop and phone): a row "Patch **1.4**" with a button "Patch history ›", after the Clock row and
+  before Sign out. When the server is ahead, "Patch 1.5 is out" and a gold "Reload" show under it. An account without a
+  gladiator has no messages panel, so its row has no button. Visitors have no account menu.
+- **Each patch note** shows "Patch 1.3" after its tag, in the list and in the opened note. The number is a button that opens
+  Patch history at that patch. Admin messages and notes without a patch row show no number.
+- **Patch history** opens inside the messages panel, from the account menu's button and from a note's number. It is not a
+  new menu or a third tab: a 360 px panel has no room for one. It has "‹ Back to messages" and ×, then:
+  - the heading "Patch history" and the line "You are playing Patch 1.4" (when behind, "· Patch 1.5 is out" and Reload);
+  - the patches, newest first. Each is a disclosure button with the number, title and date ("1.3 · Messages, gold, fixed
+    builds and bigger beds · 29 Oct"). The newest (or the one a note named) is open and the others are closed. An open
+    patch lists its features and, when it has a visible note, "Read the patch note ›";
+  - "Older patches", which reads the next 20.
+- **"A new patch is out — reload"** shows when `isBehind(latestPatch)`. It is a status in the notice column under the chip
+  (below the arrival banner where that stacks there), drawn like the sign-in notice.
+  - Desktop: "**A new patch is out** — reload to play Patch 1.5." with a gold "Reload" and × (name "Later"). Phone:
+    "**Patch 1.5 is out**" with "Reload" and ×.
+  - It **never interrupts a fight or a dialog**. It is not shown while a scene is open (expedition, replay, Arena bout) or a
+    modal dialog (creation, change look), and not on the `/expedition/` and `/replay/` pages. It waits and shows when they
+    close. It never takes the focus, has no timer and never reloads by itself. Visitors see it too.
+  - × hides it for this page's life, for that number; a newer number shows it again. Nothing is stored on the device: a
+    reload fixes the cause. Reload reloads the current address.
+- **Fixture:** the fixture gateway answers `latestPatch` = `PATCH`, and its history is the seed plus 1.4. Browser tests set
+  a newer number through the live-routed fake.
+
+### Release
+
+- **Order** (Task 12):
+  1. M26 (`db push`; the dry run lists exactly M26).
+  2. The Edge functions, only if `supabase/functions` changed (Patch A: no).
+  3. The client (`release` fast-forward).
+  4. Once the new client is live, each after Avi's go: the patch note (`private.post_message`, which answers its id), then
+     the patch row (`private.record_patch('1.4', <title>, <features>, <note id>)`).
+- **Why this order:**
+  - The 1.4 client's revision read names M26's column, so a 1.4 client on a database without M26 could not read the
+    camp at all. M26 goes first, as in every migration release.
+  - Recording 1.4 only after its client is live means a reload always brings 1.4: no notice that a reload cannot clear.
+  - Tabs still open on 1.3.1 show no notice (their code predates it). From 1.4 on, every open tab learns of the next patch
+    within one poll.
+- **The row's text is CHANGELOG.md's section, word for word.** `node scripts/patch-statement.mjs 1.4 --message <id>` writes
+  the one statement (UTF-8 without a byte-order mark), and Avi approves it with the patch note. The runbook's new
+  "Recording a patch" section has the steps and the read-back (`latest_patch` is 1.4 on the public revision read).
+- **Every future plan's release task** records its patch the same way, a fix release too.
+
+### Decisions
+
+| Decision | Who |
+| --- | --- |
+| 1.x numbers back to the launch; Patch A = 1.4, Arena replays 1.5, Party dungeons 1.6 | Avi |
+| Ships in Patch A with M26; Party dungeons' migration becomes M27 | Avi |
+| Server list of patches and features; the patch in the account menu and on each note; the reload notice | Avi |
+| Waiting monsters in 1.1; seed times from the release records; titles from the notes | Claude's call |
+| Next second number for features, next third for fixes; every release gets a row | Claude's call |
+| `latest_patch` on the existing revision view; no trigger, no Edge change, no new command | Claude's call |
+| `record_patch` refuses a number not above every recorded one | Claude's call |
+| No foreign key from a patch to its note (`record_patch` checks it); note numbers by one small read after the messages read | Claude's call |
+| Patch history inside the messages panel, opened from the menu and a note's number | Claude's call |
+| The notice in the notice column; hidden under scenes and dialogs; × for the page's life only; visitors see it | Claude's call |
+| `PATCH` pinned to CHANGELOG.md's top section; the statement built from CHANGELOG.md | Claude's call |

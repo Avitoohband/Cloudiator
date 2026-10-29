@@ -162,6 +162,18 @@ draft added `gladiators_appearance_check` before creating
 unchanged, before the column, and `tests/db/appearance.test.ts` pins the order;
 see the M24 record in [the migration guide](docs/operations/migrations.md). The
 rule as a general practice is adopted, not separately tested.
+Avi approved on 2026-10-29 (M25 lesson): before committing a generated
+migration, compare the replayed database's schema fingerprint
+(`scripts/schema-fingerprint.sql`, which includes every constraint definition)
+with the fingerprint of the tested source applied on the previous migrations;
+they must be byte-equal. Observed with CLI 2.120.0: the generated M25 draft
+emitted the source's `between … and …` inside an AND as deparsed text that
+re-parses as one flat AND, a different stored (though equivalent) CHECK
+expression, and the fingerprints differed by two lines. Tested fix for M25:
+restate the source's CHECK expression in the draft; the replay then matched the
+source byte for byte (1,210 lines); see the M25 record in
+[the migration guide](docs/operations/migrations.md). The rule as a general
+practice is adopted, not separately tested.
 
 # Postgres concurrency — persistent project override
 

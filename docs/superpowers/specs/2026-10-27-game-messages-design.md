@@ -182,8 +182,8 @@ player's own results.
   count; the button's badge is the sum.
 - **A notification per settled activity**, newest first, built from the owner's own settled activity summaries (already
   owner-only under RLS, the same data the result screens use), so nothing new is stored per result: Training (XP, attribute
-  points), Expedition (destination, result, money, XP, each item found with its tier and rarity, extra items sold for
-  gold), Arena (victory or defeat, renown, rating change) and Tournament (result, money, renown). Rest gives nothing and is
+  points), Expedition (destination, result, gold, XP, each item found with its tier and rarity, gold for items that did
+  not fit), Arena (victory or defeat, renown, rating change) and Tournament (result, gold, renown). Rest gives nothing and is
   left out (**Claude's call**). "Level up! Now level {n}" shows on the activity that raised the level; how the level change
   is known is the builder's (stored settlement data first; never a guess shown as fact).
 - **New since last seen:** one "seen up to" time per account, server-side, so every device agrees. Opening the

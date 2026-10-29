@@ -65,3 +65,9 @@ Economy and progression feedback from Avi, 2026-10-29 (collected; an economy des
 16. **Higher leagues, higher prizes**: "higher leagues have higher prises".
 17. **Lower prizes and lower expedition gold**: "again the prises should be lower and the gold from expeditions".
 18. **Harder progression**: "the game should be harder to progress".
+
+Gear feedback from Avi, 2026-10-29 (collected; a gear design pass follows, aligned with the economy pass):
+
+19. **More gear**, "much more clothes, and weapons": "we need to add more gear".
+20. **Attribute requirements**: "certain gear demands certain attributes to wear".
+21. **New weapons**: "also new weapons".

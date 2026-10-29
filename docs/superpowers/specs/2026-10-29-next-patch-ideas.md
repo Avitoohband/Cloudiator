@@ -55,3 +55,13 @@ Being fixed as a hotfix from the release branch (`claude/points-hotfix`).
 Avi, 2026-10-29: the Arena-replay spec and plan (`docs/superpowers/specs/2026-10-29-arena-replays-design.md`,
 `docs/superpowers/plans/2026-10-29-arena-replays.md`) are approved ("Ok"). It ships as patch 1.5, after Patch A (1.4) and
 before Party dungeons (1.6).
+
+Economy and progression feedback from Avi, 2026-10-29 (collected; an economy design pass follows):
+
+13. **Gold harder to get**, so it matches the tournament prizes: "about gold, it should be harder to get, so it match the
+    trounements prises".
+14. **A skins shop for renown**: "about renown, start the skins shop".
+15. **More PvE**: "we need to develop the pve aspect more".
+16. **Higher leagues, higher prizes**: "higher leagues have higher prises".
+17. **Lower prizes and lower expedition gold**: "again the prises should be lower and the gold from expeditions".
+18. **Harder progression**: "the game should be harder to progress".

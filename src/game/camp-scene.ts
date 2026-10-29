@@ -10,7 +10,7 @@ import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/reads';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
-import { layersFor, layoutCamp, type Placement } from './actors';
+import { isNewcomer, layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import {
   ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, updateRingSchedule, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
@@ -74,7 +74,7 @@ export type CampDebugActor = {
   visible: boolean; depth: number; walking: boolean;
   /** Mirrored to face south-west (or west in a ring). */
   flip: boolean;
-  /** The always-visible tag over an NPC fallback opponent, else null. */
+  /** The always-visible tag over an NPC fallback opponent ("NPC"), a newcomer ("NEW") or a tournament champion ("Champion"), else null. */
   marker: string | null;
   /** World-space boxes of the nameplate and NPC tag drawn over the actor now. */
   plates: Rect[];
@@ -163,7 +163,7 @@ type ActorView = {
   arena?: { key: string; battleId: string; spot: RingSpot } | null;
   /** A fight pose from the battle log, drawn instead of the routine frame. */
   pose?: Pose | null;
-  /** NPC fallback opponents carry a small always-visible "NPC" tag; a tournament champion a "Champion" tag. */
+  /** NPC fallback opponents carry a small always-visible "NPC" tag; a tournament champion a "Champion" tag; a newcomer a "NEW" tag. */
   marker?: PhaserNS.GameObjects.Text;
   /** The spectator spot an eliminated tournament entrant stands at. */
   spectator?: SpectatorSpot | null;
@@ -490,9 +490,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (!existing) {
           const v = this.createPlayer(actor, placement);
           views.set(actor.gladiatorId, v);
+          this.tagNewcomer(v, isNewcomer(actor));
           if (!initial) this.walkTo(v, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing }, { from: GATE });
           continue;
         }
+        this.tagNewcomer(existing, isNewcomer(actor));
         if (lookKey(placement) !== existing.look) this.restyle(existing, placement);
         existing.placement = placement;
         existing.location = actor.location;
@@ -893,11 +895,28 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (!v.arena && v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
       }
       const champion = entrant && !inRing && tournamentRoles.get(v.id)?.role === 'champion';
-      if (champion && !v.marker) {
+      const crowned = v.marker?.text === 'Champion';
+      if (champion && !crowned) {
+        v.marker?.destroy();
         v.marker = this.add.text(0, 0, 'Champion', { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color: '#1a1423', backgroundColor: '#f2c66b', padding: { x: 3, y: 1 } })
           .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2);
-      } else if (!champion && v.marker) {
-        v.marker.destroy();
+      } else if (!champion && crowned) {
+        v.marker!.destroy();
+        v.marker = undefined;
+      }
+    }
+
+    /**
+     * A newcomer (in orientation, not resting) carries an always-visible gold "NEW" tag over its nameplate, drawn like the "NPC" and
+     * "Champion" tags, for as long as it is new (Patch A item 2). Only the tag this puts up is taken down; another kind stays.
+     */
+    tagNewcomer(v: ActorView, isNew: boolean) {
+      const tagged = v.marker?.text === 'NEW';
+      if (isNew && !v.marker) {
+        v.marker = this.add.text(0, 0, 'NEW', { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color: '#2a1d05', backgroundColor: '#f2c66b', padding: { x: 3, y: 1 } })
+          .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2).setVisible(false);
+      } else if (!isNew && tagged) {
+        v.marker!.destroy();
         v.marker = undefined;
       }
     }

@@ -1,0 +1,187 @@
+/*
+ * The arrival banner (Patch A item 2, the approved mockup). It sits in its own slot, never inside another element's box, so the
+ * away button (Task 11) can sit alongside it: the slot is on the camp's top edge, the away button on its bottom edge.
+ *
+ * Three places, by the shell's own layouts:
+ *  - a pointer window of 1280 px or more: the top row, 560 px (422 px at 1280, where the menu panel and the chip leave that much), centred
+ *    on the window once it can be. It keeps clear of an open menu panel (the rail and the panel take the left 458 px) and of the corner
+ *    chip (about 400 px at the right);
+ *  - a pointer window between 481 and 1279 px: under the chip, right-aligned, 420 px;
+ *  - the touch layout (no hover, or a window under 481 px): under the chip, full width with 12 px gutters, 64 px from the top so the
+ *    chip and its tap area stay clear. The shell moves its notices below it while it shows (`data-arrival` in shell.module.css).
+ */
+.slot {
+  position: absolute;
+  top: 12px;
+  left: max(458px, calc(50% - 280px));
+  width: min(560px, calc(100% - 400px - max(458px, calc(50% - 280px))));
+  z-index: 9;
+  /* The empty slot covers nothing, and the banner's own box takes the pointer. */
+  pointer-events: none;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--glass-line);
+  border-left: 3px solid var(--gold);
+  border-radius: 12px;
+  background: var(--glass);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.banner[data-fading='true'] {
+  animation: fadeOut 0.4s ease forwards;
+}
+
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+  }
+}
+
+.horn {
+  flex: none;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.copy p {
+  margin: 0;
+}
+
+.copy .eyebrow {
+  margin-bottom: 4px;
+  color: var(--gold);
+  font-size: 10.4px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.text {
+  overflow-wrap: anywhere;
+}
+
+.find {
+  flex: none;
+  min-height: 34px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.find:disabled {
+  opacity: 0.55;
+}
+
+.close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--glass-2);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.close:hover {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.find:focus-visible,
+.close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.narrow {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner[data-fading='true'] {
+    animation: none;
+  }
+}
+
+/* A pointer window of 481-1279 px: no room beside the menu panel and the chip, so it goes under the chip, at the right. */
+@media (hover: hover) and (min-width: 481px) and (max-width: 1279px) {
+  .slot {
+    top: 64px;
+    left: auto;
+    right: 12px;
+    width: min(420px, calc(100% - 24px));
+  }
+}
+
+/* The touch layout (the shell's: no hover, or a window under 481 px): under the chip, full width, the touch targets 44 px. */
+@media (hover: none), (max-width: 480px) {
+  .slot {
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  .banner {
+    gap: 8px;
+    padding: 8px 6px 8px 12px;
+    font-size: 13px;
+  }
+
+  .horn {
+    display: none;
+  }
+
+  .wide {
+    display: none;
+  }
+
+  .narrow {
+    display: inline;
+  }
+
+  .find {
+    min-height: 44px;
+    padding: 5px 14px;
+  }
+
+  .close {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+}

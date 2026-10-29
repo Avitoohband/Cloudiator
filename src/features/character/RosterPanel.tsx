@@ -9,10 +9,13 @@
 // A gladiator resting at home (Task 23.9) is listed but not drawn: its row says so, and that is its buttons' reason. The
 // owner's own resting gladiator says it in the owner's own words (`ownPlace`, fix round 1), in its row and as the reason
 // Find and Follow my gladiator are off. Names render as React text.
+// Patch A item 2: while anyone is new (in orientation, not resting), "NEW IN CAMP" lists the newcomers first, each name followed by
+// a NEW pill, then "EVERYONE" lists the rest; a newcomer is listed once, and the filter applies to both parts.
 import { useId, useState } from 'react';
-import type { WorldSnapshot } from '@contracts/reads';
+import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { SceneBridge } from '../../game/bridge';
-import { classLine, countLine, isAway, matchLine, placeOf, playerCounts, restingText } from './actor-text';
+import { newcomers } from '../arrivals/arrivals';
+import { campViewReason, classLine, countLine, isAway, matchLine, placeOf, playerCounts, restingText } from './actor-text';
 import { ownRestingText } from './activity-status';
 import styles from './CharacterPanel.module.css';
 
@@ -39,8 +42,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
   const reasonId = useId();
   const awayId = useId();
   const absentId = useId();
-  const reason = sceneStatus === 'unavailable' ? 'The camp view is unavailable, so gladiators cannot be shown on the map.'
-    : sceneStatus === 'loading' || !roster ? 'The camp view is still opening.' : null;
+  const reason = campViewReason(sceneStatus, roster !== null);
   const inCamp = new Set(roster?.inCamp ?? []);
   const query = filter.trim().toLowerCase();
   const actors = [...(world?.actors ?? [])].filter(a => a.name.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
@@ -57,6 +59,43 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
   const counts = playerCounts(world?.actors ?? []);
   const [countLead, countWide] = query && actors.length > 0 ? matchLine(actors.length, counts.total, filter.trim()) : countLine(counts, false);
   const countNarrow = query && actors.length > 0 ? countWide : countLine(counts, true)[1];
+  // The newcomers first (newest first), then everyone else by name; a newcomer appears in the first part only.
+  const fresh = newcomers(actors);
+  const freshIds = new Set(fresh.map(a => a.gladiatorId));
+  const rest = actors.filter(a => !freshIds.has(a.gladiatorId));
+  const row = (actor: PublicActor, isNew: boolean) => {
+    // Neither drawn in the camp nor away (13.5 review): the row says why its buttons are off. A resting gladiator is
+    // never drawn, whatever the roster last said; its row says where it is instead, once.
+    const away = isAway(actor);
+    const resting = actor.resting && !away;
+    const absent = !reason && !away && (resting || !inCamp.has(actor.gladiatorId));
+    const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
+    return (
+      <li key={actor.gladiatorId} className={styles.row}>
+        <p className={styles.who}>
+          <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
+          {actor.gladiatorId === ownerId ? ' (you)' : ''}
+          {isNew && <span className={styles.newPill}>NEW</span>}
+          <span>{resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`}</span>
+          {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>
+            {!resting ? 'Not in the camp right now.' : actor.gladiatorId === ownerId ? ownLine : restingText(actor.name)}
+          </span>}
+        </p>
+        {away ? (actor.activityId ? (
+          <span className={styles.actions}>
+            <button type="button" aria-label={`Watch ${actor.name}'s expedition`}
+              onClick={() => bridge.emit('view-expedition', { activityId: actor.activityId! })}>Watch expedition</button>
+          </span>
+        ) : <span className={styles.away}>On an expedition</span>) : (
+          <span className={styles.actions}>
+            <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Find ${actor.name}`} onClick={() => find(actor.gladiatorId)}>Find</button>
+            <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Follow ${actor.name}`}
+              aria-pressed={following === actor.gladiatorId && !reason && !absent} onClick={() => follow(actor.gladiatorId)}>Follow</button>
+          </span>
+        )}
+      </li>
+    );
+  };
   return (
     <section aria-label="Gladiators in the world">
       {reason && <p id={reasonId} className={styles.reason}>{reason}</p>}
@@ -80,42 +119,14 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
           </>}
         </p>
       )}
-      {actors.length === 0 ? <p className="muted">{world ? `No gladiator matches “${filter.trim()}”.` : 'The world is still loading.'}</p> : (
-        <ul className={styles.list} aria-label="Gladiators">
-          {actors.map(actor => {
-            // Neither drawn in the camp nor away (13.5 review): the row says why its buttons are off. A resting gladiator is
-            // never drawn, whatever the roster last said; its row says where it is instead, once.
-            const away = isAway(actor);
-            const resting = actor.resting && !away;
-            const absent = !reason && !away && (resting || !inCamp.has(actor.gladiatorId));
-            const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
-            return (
-              <li key={actor.gladiatorId} className={styles.row}>
-                <p className={styles.who}>
-                  <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
-                  {actor.gladiatorId === ownerId ? ' (you)' : ''}
-                  <span>{resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`}</span>
-                  {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>
-                    {!resting ? 'Not in the camp right now.' : actor.gladiatorId === ownerId ? ownLine : restingText(actor.name)}
-                  </span>}
-                </p>
-                {away ? (actor.activityId ? (
-                  <span className={styles.actions}>
-                    <button type="button" aria-label={`Watch ${actor.name}'s expedition`}
-                      onClick={() => bridge.emit('view-expedition', { activityId: actor.activityId! })}>Watch expedition</button>
-                  </span>
-                ) : <span className={styles.away}>On an expedition</span>) : (
-                  <span className={styles.actions}>
-                    <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Find ${actor.name}`} onClick={() => find(actor.gladiatorId)}>Find</button>
-                    <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Follow ${actor.name}`}
-                      aria-pressed={following === actor.gladiatorId && !reason && !absent} onClick={() => follow(actor.gladiatorId)}>Follow</button>
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {actors.length === 0 ? <p className="muted">{world ? `No gladiator matches “${filter.trim()}”.` : 'The world is still loading.'}</p> : <>
+        {fresh.length > 0 && <>
+          <p className={`eyebrow ${styles.partTitle}`}>NEW IN CAMP</p>
+          <ul className={styles.list} aria-label="New in camp">{fresh.map(actor => row(actor, true))}</ul>
+        </>}
+        {fresh.length > 0 && rest.length > 0 && <p className={`eyebrow ${styles.partTitle}`}>EVERYONE</p>}
+        {rest.length > 0 && <ul className={styles.list} aria-label="Gladiators">{rest.map(actor => row(actor, false))}</ul>}
+      </>}
     </section>
   );
 }

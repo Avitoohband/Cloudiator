@@ -134,3 +134,43 @@ describe('players count', () => {
     expect(panel({ world: null })).not.toContain('players-count');
   });
 });
+
+// Patch A item 2: newcomers (in orientation) are listed first under NEW IN CAMP, each with a NEW pill, then everyone else under
+// EVERYONE; a newcomer is listed once. The eyebrows come below the count line and only while someone is new.
+describe('newcomers in the list', () => {
+  const ursa: PublicActor = { ...actor('Ursa', 'orientation'), startsAtMs: 3_000 };
+  const nero: PublicActor = { ...actor('Nero', 'orientation'), startsAtMs: 2_000 };
+  const world = (...extra: PublicActor[]): WorldSnapshot => ({ ...WORLD, actors: [...WORLD.actors, ...extra] });
+  const rows = (html: string) => [...html.matchAll(/aria-label="Profile: ([^"]+)"/g)].map(m => m[1]);
+
+  it('lists newcomers first with a NEW pill, once', () => {
+    const html = panel({ world: world(ursa) });
+    const eyebrow = html.indexOf('NEW IN CAMP'), row = html.indexOf('Profile: Ursa'), everyone = html.indexOf('EVERYONE');
+    expect(eyebrow).toBeGreaterThan(html.indexOf('data-testid="players-count"'));
+    expect(row).toBeGreaterThan(eyebrow);
+    expect(everyone).toBeGreaterThan(row);
+    // The pill sits in Ursa's row, after her name; the other rows have none.
+    const ursaRow = /<li[^>]*>(?:(?!<\/li>).)*aria-label="Profile: Ursa"(?:(?!<\/li>).)*<\/li>/.exec(html)![0];
+    expect(ursaRow).toMatch(/>NEW<\/span>/);
+    expect(html.match(/>NEW<\/span>/g)).toHaveLength(1);
+    // Listed once, and everyone else follows in the second part.
+    expect(html.match(/Profile: Ursa/g)).toHaveLength(1);
+    expect(rows(html)).toEqual(['Ursa', 'Aster', 'Brutus', 'Corvina']);
+  });
+  it('lists several newcomers newest first, then everyone by name', () => {
+    expect(rows(panel({ world: world(nero, ursa) }))).toEqual(['Ursa', 'Nero', 'Aster', 'Brutus', 'Corvina']);
+  });
+  it('shows neither eyebrow with nobody new, nor for a resting or settled gladiator', () => {
+    for (const w of [WORLD, world({ ...ursa, resting: true }), world({ ...ursa, location: 'camp' })]) {
+      const html = panel({ world: w });
+      expect(html).not.toContain('NEW IN CAMP');
+      expect(html).not.toContain('EVERYONE');
+      expect(html).not.toMatch(/>NEW<\/span>/);
+    }
+  });
+  it('keeps the owner’s own row and buttons in the new part', () => {
+    const html = panel({ world: world(ursa), ownerId: ursa.gladiatorId, roster: { ...ROSTER, inCamp: [...ROSTER.inCamp, ursa.gladiatorId] } });
+    expect(html).toContain('Ursa</button> (you)');
+    expect(button(html, 'Find Ursa')).not.toContain('disabled');
+  });
+});

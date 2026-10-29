@@ -56,6 +56,15 @@ export function matchLine(shown: number, total: number, query: string): [lead: s
   return [`${shown} of ${total} ${total === 1 ? 'player' : 'players'}`, ` match “${query}”`];
 }
 
+/**
+ * Why Find cannot take the camera to a gladiator yet, or null: the camp view is unavailable (no WebGL, art that failed to load) or
+ * still opening (the scene has not said who it draws). The Gladiators list and the arrival banner say the same words.
+ */
+export function campViewReason(sceneStatus: 'loading' | 'ready' | 'unavailable', hasRoster: boolean): string | null {
+  return sceneStatus === 'unavailable' ? 'The camp view is unavailable, so gladiators cannot be shown on the map.'
+    : sceneStatus === 'loading' || !hasRoster ? 'The camp view is still opening.' : null;
+}
+
 /** The equipped gear the world shows, e.g. "Sword, shield, helmet". */
 export function gearText(silhouettes: readonly EquipmentSilhouette[]): string {
   const names = silhouettes.map(s => GEAR[s] ?? s);

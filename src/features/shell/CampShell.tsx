@@ -24,6 +24,9 @@
 // (Task 23.4, C8), and goes on from the shared clock's time when the scene closes.
 //
 // Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
+//
+// Patch A item 2: a new player is announced. One banner in its own slot (`ArrivalSlot`), for every viewer, once the viewer is known
+// (the newcomer's own player is welcomed instead of announced) and while no scene covers the camp; Find is the Gladiators list's.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
@@ -32,10 +35,13 @@ import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../character/useGameState';
 import { CharacterPanel } from '../character/CharacterPanel';
 import { ownRestingText } from '../character/activity-status';
+import { campViewReason } from '../character/actor-text';
 import { CreateCharacter } from '../character/CreateCharacter';
 import { ChangeLookDialog } from '../character/ChangeLookDialog';
 import { lookSavedLine } from '../character/look-change';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
+import { ArrivalBannerView, ArrivalSlot } from '../arrivals/ArrivalBanner';
+import { useArrivals } from '../arrivals/useArrivals';
 import { ProfileLayer } from '../character/ProfileCard';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { useMinuteNow } from '../schedule/use-minute-now';
@@ -347,6 +353,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
   const perfPhase = perfPhaseOf(game.sceneStatus, scene);
   const ownerId = owner?.gladiatorId ?? null;
+  // The arrival banner (Patch A item 2): not while the viewer is still loading (the owner's own welcome would flash as an announcement),
+  // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
+  const arrivals = useArrivals(world, ownerId);
+  const arrival = arrivals.banner !== null && scene === null && game.viewer !== 'loading' ? arrivals.banner : null;
+  const { dismiss: dismissArrival } = arrivals;
   // The owner's own words while its gladiator rests at home (Task 23.9 fix round 1): when it is back on its schedule once
   // that is known (a short time, Task 23.10), else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
   const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot, nowMs, clockMode) : null;
@@ -378,7 +389,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   };
 
   return (
-    <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}>
+    <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}
+      data-arrival={arrival ? 'shown' : undefined}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
@@ -401,6 +413,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
           <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setSignInNotice(null)}>×</button>
         </div>}
       </div>
+      <ArrivalSlot>
+        {arrival && <ArrivalBannerView key={`${arrival.kind}:${arrival.ids.join(',')}`} banner={arrival} findReason={campViewReason(game.sceneStatus, roster !== null)}
+          onFind={() => { bridge.emit('find-character', { gladiatorId: arrival.findId }); handBack(); }} onDismiss={dismissArrival} />}
+      </ArrivalSlot>
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}

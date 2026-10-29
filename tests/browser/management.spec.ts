@@ -5,7 +5,7 @@ import type { OwnerState, PublicActor, ResultRow } from '../../supabase/function
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
-import { closeMenu, cornerChip, expectOwnerShown, menuDialog, openMenu, railMenus, touchLayout } from './shell-helpers';
+import { closeMenu, cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
 // list and the standings), the merchants' shortcuts into Inventory and shops, and the owner's pending build through a
@@ -39,7 +39,9 @@ const boxOf = async (locator: Locator) => (await locator.boundingBox())!;
 test.describe('profile cards and merchants in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');
 
-  test('opens a public profile card from a camp click, the Gladiators list and the standings', { tag: '@render' }, async ({ page }, testInfo) => {
+  test('opens a public profile card from a camp click, the Gladiators list and the standings', { tag: '@render' }, async ({ page, context }, testInfo) => {
+    // The arrival banner (Patch A item 2) would cover the top of the camp, where this test clicks "away from anyone".
+    await quietArrivals(context);
     await openCamp(page, '/game/?mode=fixture&as=visitor');
     const touch = await touchLayout(page);
     // A camp click on Aster, who is training: the card shows the public actor and its loaded rating, and nothing private.

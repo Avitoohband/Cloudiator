@@ -303,6 +303,25 @@
   }
 }
 
+/* The Gladiators list's two parts while anyone is new (Patch A item 2): the eyebrows "NEW IN CAMP" and "EVERYONE" below the count line,
+   and the gold NEW pill after a newcomer's name. `.who span` is a block of muted small text, so the pill outranks it. */
+p.partTitle {
+  margin: 0.7rem 0 0.15rem;
+}
+
+.who .newPill {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #2a1d05;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  vertical-align: 1px;
+}
+
 .list {
   list-style: none;
   margin: 0;

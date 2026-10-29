@@ -50,6 +50,12 @@ export function locationKind(location: string): RoutineKind {
   return 'idle';
 }
 
+/**
+ * A gladiator who has just arrived (Patch A item 2): its public location is `orientation` (from its creation until its first
+ * boundary, at most one slot) and it is not resting at home. The arrival banner, the Gladiators list and the camp's "NEW" tag all use it.
+ */
+export const isNewcomer = (actor: Pick<PublicActor, 'location' | 'resting'>): boolean => actor.location === 'orientation' && !actor.resting;
+
 const ZONE_FOR: Record<RoutineKind, ZoneId | null> = {
   training: 'training', rest: 'rest', arena: 'arena', tournament: 'arena', away: null, orientation: 'expedition-gate', idle: 'merchants',
 };

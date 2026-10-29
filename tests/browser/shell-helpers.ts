@@ -1,7 +1,11 @@
 // Drives the full-screen camp shell (Task 13.5) the way a player does: the hidden rail on desktop, the ☰ button and
 // bottom sheets on touch. Specs open menus through these helpers instead of relying on any page layout.
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { ARRIVALS_KEY } from '../../src/features/arrivals/arrivals';
 import { COMPACT_QUERY } from '../../src/features/shell/rail-reveal';
+import { isNewcomer } from '../../src/game/actors';
+import { createDemoWorld } from '../../src/game/demo-world';
+import { worldFixture } from '../fixtures/domain';
 
 /** The shell's touch layout: no hover (plan Decision 3, the Playwright mobile project) or a window under 481 px. */
 export const touchLayout = (page: Page) => page.evaluate(query => matchMedia(query).matches, COMPACT_QUERY);
@@ -77,4 +81,19 @@ export async function signOutFromChip(page: Page) {
 /** Waits until the corner chip shows the signed-in owner `name` (the shell's sign that the owner has loaded). */
 export async function expectOwnerShown(page: Page, name: string, timeout = 45_000) {
   await expect(cornerChip(page).getByTestId('chip-name')).toHaveText(name, { timeout });
+}
+
+/**
+ * Marks the fixture preview's newcomers (the demo crowd's gladiators in orientation) as already announced on this device, before
+ * every page load of `context`, so the arrival banner (Patch A item 2) does not cover what a fixture-mode test clicks, types into or
+ * screenshots. A test about the banner itself does not call it. The crowd's ids come from its first hundred gladiators (the preview
+ * uses the first forty or so), a superset that costs nothing: the fixture gateway itself cannot be loaded by the runner, which cannot
+ * import the JSON the fixtures hold.
+ */
+export async function quietArrivals(context: BrowserContext): Promise<void> {
+  const crowd = createDemoWorld(worldFixture.serverNowMs, 100, 0).actors;
+  const ids = [...worldFixture.actors, ...crowd].filter(isNewcomer).map(actor => actor.gladiatorId);
+  await context.addInitScript(({ key, ids }) => {
+    try { localStorage.setItem(key, JSON.stringify(ids)); } catch { /* No storage: nothing is remembered, and nothing to quiet. */ }
+  }, { key: ARRIVALS_KEY, ids });
 }

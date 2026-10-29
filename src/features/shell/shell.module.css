@@ -633,6 +633,14 @@
   opacity: 0.8;
 }
 
+/* While an arrival banner shows under the chip (a pointer window of 481-1279 px, and the touch layout below), the notices below the chip
+   move under it: the banner is at most three lines, about 90 px, from 64 px (Patch A item 2). */
+@media (hover: hover) and (min-width: 481px) and (max-width: 1279px) {
+  .shell[data-arrival='shown'] .notices {
+    top: 160px;
+  }
+}
+
 /* A narrow window with a pointer: the pill moves beside the rail, clear of the chip. */
 @media (hover: hover) and (min-width: 481px) and (max-width: 924px) {
   .pill {
@@ -820,5 +828,9 @@
 
   .notices {
     top: 52px;
+  }
+
+  .shell[data-arrival='shown'] .notices {
+    top: 160px;
   }
 }

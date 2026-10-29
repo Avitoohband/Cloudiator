@@ -14,7 +14,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { chipToggle, cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { chipToggle, cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -86,9 +86,11 @@ test.describe('release accessibility in the fixture preview', () => {
     await shot(page, testInfo, 'art-failed-schedule');
   });
 
-  test('completes a keyboard-only journey through every menu with focus never on body', { tag: '@render' }, async ({ page }, testInfo) => {
+  test('completes a keyboard-only journey through every menu with focus never on body', { tag: '@render' }, async ({ page, context }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop', 'The pointer layout; the touch layout has its own journey below.');
     test.setTimeout(240_000);
+    // The arrival banner (Patch A item 2) is one more Dismiss and Find in the Tab order; this journey is about the menus.
+    await quietArrivals(context);
     await watchFocus(page);
     // A sign-in that came back cancelled leaves a notice with a Dismiss button: one more control to leave by keyboard.
     await openFixtureCamp(page, '/game/?mode=fixture&signin=cancelled');

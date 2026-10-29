@@ -2,8 +2,10 @@
 // Task 1, whose signature this is). It only lays out what it is given: ⏮ ▶/⏸ ⏭ icon buttons named by their steps, the chapters
 // as buttons with the current one marked, a track, the time and a tail. Desktop: one row `⏮ ▶ ⏭ track time tail`, with the
 // chapters on a row below; without a track (the trip) the chapters take the track's place in the row, as the approved mockup
-// draws the trip's bar. In the touch layout the chapters are hidden and one line names the current one ("3 / 8 · Fight 1").
-// It keeps no state and reads no clock.
+// draws the trip's bar; a bar too narrow for them takes them onto their own row, at their own widths, wrapping rather than cutting
+// a label short. In the touch layout the chapters are hidden and one line names the current one ("3 / 8 · Fight 1"). A step that
+// is not available is `aria-disabled` (it keeps the focus it may have, at the first or last chapter) and does nothing. It keeps no
+// state and reads no clock.
 import type { JSX, ReactNode, Ref } from 'react';
 import styles from './ReplayBar.module.css';
 
@@ -20,7 +22,8 @@ const named = (name: string, shortcut?: string) => ({
 });
 
 function StepButton({ step, icon }: { step: BarStep; icon: string }) {
-  return <button type="button" className={styles.icon} {...named(step.name, step.shortcut)} disabled={step.disabled} onClick={step.onClick}>
+  return <button type="button" className={styles.icon} {...named(step.name, step.shortcut)} aria-disabled={step.disabled ? true : undefined}
+    onClick={() => { if (!step.disabled) step.onClick(); }}>
     <span aria-hidden="true">{icon}</span>
   </button>;
 }
@@ -30,7 +33,7 @@ function Chapters({ chapters }: { chapters: BarChapters }) {
     {chapters.items.map((item, index) => <li key={item.id}>
       <button type="button" aria-current={index === chapters.current ? 'step' : undefined}
         className={index === chapters.current ? styles.current : index < chapters.current ? styles.past : undefined}
-        disabled={item.disabled} title={item.title} onClick={() => chapters.onSelect(index)}>{item.label}</button>
+        disabled={item.disabled} title={item.title ?? item.label} onClick={() => chapters.onSelect(index)}>{item.label}</button>
     </li>)}
   </ol>;
 }

@@ -40,6 +40,18 @@ describe('the replay bar', () => {
     expect(html.indexOf('0:07 / 0:23')).toBeLessThan(html.indexOf('⚑ Result'));
   });
 
+  // Task 9 fix round 1: a step that becomes unavailable keeps the focus (aria-disabled, not disabled), and every chapter names its
+  // whole label on hover, for a label cut short.
+  it('keeps a step that is not available focusable, and titles every chapter with its label', () => {
+    const html = bar({ previous: step('Previous chapter', '', true), chapters: { items: [{ id: 'a', label: 'Heading home' },
+      { id: 'b', label: 'Back in camp', disabled: true, title: 'Not yet: plays when it happens' }], current: 0, onSelect: noop } });
+    expect(button(html, 'Previous chapter')).toContain('aria-disabled="true"');
+    expect(button(html, 'Previous chapter')).not.toMatch(/\sdisabled=""/);
+    expect(html).toMatch(/title="Heading home"[^>]*>Heading home</);
+    expect(html).toContain('title="Not yet: plays when it happens"');
+    expect(button(bar({ next: step('Next chapter', '') }), 'Next chapter')).not.toContain('aria-disabled');
+  });
+
   it('gives a step without a shortcut no key hint, and a play button without one no aria-keyshortcuts', () => {
     const html = bar({ play: { playing: false, onToggle: noop }, previous: { name: 'Previous chapter', disabled: false, onClick: noop } });
     expect(button(html, 'Previous chapter')).toContain('title="Previous chapter"');

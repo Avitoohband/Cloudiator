@@ -40,6 +40,6 @@ export function TripBar({ plan, index, positionMs, allowed, catchUp, playing, pl
         onSelect: onChapter,
       }}
       time={<span data-testid="replay-time">{`${clockText(positionMs)} / ${catchUp ? 'now' : clockText(plan.totalMs)}`}</span>}
-      tail={catchUp ? <button type="button" className={styles.backLive} onClick={onLive}>● Back to live</button> : undefined} />
+      tail={catchUp ? <button type="button" className={styles.backLive} onClick={onLive}><span aria-hidden="true">● </span>Back to live</button> : undefined} />
   </div>;
 }

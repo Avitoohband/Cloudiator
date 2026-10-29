@@ -204,7 +204,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     // Any other value is ignored: the scene opens, and a result's whole-trip replay is a different scene from the live one.
     await page.goto(`/game/?mode=fixture&view=expedition&activity=${woodland}&play=fast`);
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
-    await expect(scene(page, 'Expedition').getByRole('button', { name: '▶ Watch the whole trip', exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(scene(page, 'Expedition').getByRole('button', { name: 'Watch the whole trip', exact: true })).toBeVisible({ timeout: 45_000 });
     await expect(scene(page, 'Expedition').getByTestId('replay-badge')).toHaveCount(0);
     // The deep link page takes the same address.
     await page.goto(`/expedition/?mode=fixture&activity=${woodland}&play=trip`);

@@ -170,6 +170,22 @@ export function planTrip(timeline: RevealedTimeline, options: TripPlanOptions): 
   return { chapters, totalMs: cursor, departureMs, endMs, pieces };
 }
 
+/**
+ * The latest moment by `nowMs` at which the plan can have changed: a stage's reveal or a fight's end (-Infinity before anything is
+ * revealed). The plan reads the display clock only through which stages are revealed (`revealedAtMs <= nowMs`) and which fights
+ * have ended (`endsAtMs <= nowMs`), so the plan of the timeline cut at this moment, at this moment, is the plan at `nowMs`; a
+ * view that keys its plan on it rebuilds the plan each time its clock passes one of them, and at no other time (Patch A Task 9).
+ */
+export function tripBoundary(timeline: RevealedTimeline, nowMs: number): number {
+  let at = -Infinity;
+  for (const stage of timeline.stages) {
+    if (stage.revealedAtMs > nowMs) continue;
+    at = Math.max(at, stage.revealedAtMs);
+    if (stage.kind === 'encounter' && stage.endsAtMs <= nowMs) at = Math.max(at, stage.endsAtMs);
+  }
+  return at;
+}
+
 /** What the scene of a camp chapter draws: which one, how far into it, and how long it lasts (replay ms). */
 export type TripVignette = { kind: 'leaving' | 'back' | 'resting'; elapsedMs: number; durationMs: number };
 /** The chapter at a replay position and the display time the expedition scene draws there (the camp's vignettes draw none). */

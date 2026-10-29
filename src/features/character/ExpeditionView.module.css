@@ -315,6 +315,18 @@
   }
 }
 
+/* A touch screen of any width: 44 px marks (fix round 1). */
+@media (hover: none) {
+  .marks {
+    height: 2.9rem;
+  }
+
+  .marks li,
+  .markButton {
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 760px) {
   .marks {
     display: flex;

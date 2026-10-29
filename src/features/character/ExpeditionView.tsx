@@ -39,7 +39,7 @@ import {
   EXPEDITION_ENCOUNTERS, EXPEDITION_MS, expeditionRevealMarks, isFinal, renderExpeditionStage, timelineGladiator, type ExpeditionSceneState, type JourneyPoint,
   type VisibleStage,
 } from '../../game/expedition-stage';
-import { firstLocked, planTrip, tripFrame, tripPositionOf, type TripChapterId, type TripPlan } from '../../game/trip-replay';
+import { firstLocked, planTrip, tripBoundary, tripFrame, tripPositionOf, type TripChapterId, type TripPlan } from '../../game/trip-replay';
 import type { ExpeditionEnvironment, GladiatorLook } from '../../game/expedition-scene';
 import { ExpeditionViewport } from '../../game/ExpeditionViewport';
 import { createSceneBridge } from '../../game/bridge';
@@ -213,39 +213,27 @@ type WalkMs = (from: JourneyPoint, to: JourneyPoint) => number;
 
 /**
  * How long the gladiator takes to walk each leg of the expedition's map (its path at the actors' walking speed), for the
- * whole-trip plan. The map and the speed come with the art (the scene loads the same module), so this is null until they have.
+ * whole-trip plan. The map and the speed come with the art (the scene loads the same module), so `walkMs` is null until they
+ * have; `failed` says they never will (the module did not load, or the map has no expedition layout).
  */
-function useWalkTimes(environment: ExpeditionEnvironment | null): WalkMs | null {
-  const [loaded, setLoaded] = useState<{ environment: ExpeditionEnvironment; walkMs: WalkMs } | null>(null);
+function useWalkTimes(environment: ExpeditionEnvironment | null): { walkMs: WalkMs | null; failed: boolean } {
+  const [loaded, setLoaded] = useState<{ environment: ExpeditionEnvironment; walkMs: WalkMs | null } | null>(null);
   useEffect(() => {
     if (!environment) return;
     let active = true;
     Promise.all([import('../../game/assets'), import('../../game/expedition-path'), import('../../game/paths')]).then(([assets, path, paths]) => {
+      if (!active) return;
       const manifest = assets.loadAssetManifest();
       const map = manifest.maps.find(m => m.id === environment);
-      if (!active || !map?.expedition) return;
+      if (!map?.expedition) { setLoaded({ environment, walkMs: null }); return; }
       const journey = path.journeyMap(map);
       const speed = manifest.actors.gladiator.walk.tilesPerSecond;
       setLoaded({ environment, walkMs: (from, to) => { const leg = path.legPath(journey, from, to); return leg ? (paths.pathLength(leg) / speed) * 1000 : 0; } });
-    }).catch(() => undefined);
+    }).catch(() => { if (active) setLoaded({ environment, walkMs: null }); });
     return () => { active = false; };
   }, [environment]);
-  return loaded && loaded.environment === environment ? loaded.walkMs : null;
-}
-
-/**
- * The latest moment by `nowMs` at which the whole-trip plan can have changed: a stage's reveal or a fight's end. The plan depends
- * on the display clock only through which stages are revealed and which fights have ended by then, so the plan at this moment is
- * the plan at `nowMs`, and it is rebuilt each time the clock passes one of them (not only on a read).
- */
-function tripBoundary(timeline: RevealedTimeline, nowMs: number): number {
-  let at = -Infinity;
-  for (const stage of timeline.stages) {
-    if (stage.revealedAtMs > nowMs) continue;
-    at = Math.max(at, stage.revealedAtMs);
-    if (stage.kind === 'encounter' && stage.endsAtMs <= nowMs) at = Math.max(at, stage.endsAtMs);
-  }
-  return at;
+  const mine = loaded && loaded.environment === environment ? loaded : null;
+  return { walkMs: mine?.walkMs ?? null, failed: !!mine && !mine.walkMs };
 }
 
 /** The arrival is revealed by `nowMs`: the trip is over. */
@@ -423,7 +411,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   // The whole-trip plan, rebuilt on each read, when the display clock passes a reveal or a fight's end, and when the Rest is
   // known. It is planned on the timeline cut at that moment (the fixture's reads hold every stage; the planner reads only the
   // revealed ones too), at that moment, so it never says more than the display clock has revealed.
-  const walkMs = useWalkTimes(environment);
+  const { walkMs, failed: walkFailed } = useWalkTimes(environment);
   const boundary = timeline && displayMs !== null ? tripBoundary(timeline, displayMs) : null;
   const plan = useMemo(() => {
     if (!timeline || !walkMs || boundary === null) return null;
@@ -506,12 +494,21 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
     hold(plan.chapters.find(c => c.id === pending)?.startMs ?? 0);
   }, [hold, plan]);
 
-  // The replay starts paused with ▶ focused (and the live view gives the focus back to its own button).
+  // The replay starts paused with ▶ focused, once its bar is there (dropped if the replay turns out not to be possible). Back to
+  // live gives the focus to the live view's own button, once the live view is rendered, and only when the switch took it away (it
+  // was in the bar, which is gone, so it is on <body>): a focus the player put elsewhere (the log) stays there, and a target that
+  // is not rendered is dropped.
   useEffect(() => {
-    const target = focusNext.current === 'play' ? playRef.current : focusNext.current === 'live' ? watchRef.current : null;
-    if (!target) return;
+    const want = focusNext.current;
+    if (want === 'play') {
+      if (tripRuledOut) focusNext.current = null;
+      else if (tripMode && playRef.current) { focusNext.current = null; playRef.current.focus({ preventScroll: true }); }
+      return;
+    }
+    if (want !== 'live' || mode !== 'live') return;
     focusNext.current = null;
-    target.focus({ preventScroll: true });
+    const active = document.activeElement;
+    if (watchRef.current && (!active || active === document.body)) watchRef.current.focus({ preventScroll: true });
   });
 
   // A hidden tab pauses the replay.
@@ -549,19 +546,30 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
     return () => { window.clearInterval(timer); activeLoops -= 1; };
   }, [limitOf, now, position, read, toLive]);
 
-  // What the scene and the panels show: the display clock live, the replay clock's display time in the whole-trip replay.
-  // The whole-trip replay is shown while the trip's replays are kept (an expired one is the live view's "no longer kept").
-  const tripMode = mode === 'trip' && !(state?.replayExpired ?? false);
+  // What the scene and the panels show: the display clock live, the replay clock's display time in the whole-trip replay. The
+  // whole-trip replay is shown while the trip's replays are kept (an expired one is the live view's "no longer kept") and while it
+  // can be planned: without the walking times (their module failed to load) or a departure there is no plan, and the view is live.
+  // Until its plan is there (the walking times load with the art), the replay shows the departure, never the trip's end (fix
+  // round 1: the result, the later log and the arrival were shown for a moment, a spoiler).
+  const plannable = !!environment && !walkFailed && !(walkMs && timeline && boundary !== null && !plan);
+  const tripMode = mode === 'trip' && !(state?.replayExpired ?? false) && plannable;
+  /** Once the timeline is read, whether this trip can have no replay here (its replays are gone, or it cannot be planned). */
+  const tripRuledOut = !!state && (state.replayExpired || !plannable);
   const capMs = plan && timeline && displayMs !== null ? capOf(plan, timeline, displayMs) : null;
   const frame = tripMode && plan ? tripFrame(plan, within(positionMs, 0, capMs ?? plan.totalMs)) : null;
-  const frameMs = frame ? frame.displayMs : null;
-  const shown = useMemo(() => (frameMs !== null && timeline ? renderExpeditionStage(timeline, frameMs) : state), [frameMs, state, timeline]);
+  const shownMs = frame ? frame.displayMs : tripMode ? departureMs : null;
+  const shown = useMemo(() => (shownMs !== null && timeline ? renderExpeditionStage(timeline, shownMs) : state), [shownMs, state, timeline]);
+  /** The display time the scene draws (and the test hook reports): the replay's, the departure's while it is prepared, or now. */
+  const drawn = useRef<{ trip: boolean; departureMs: number | null }>({ trip: false, departureMs: null });
+  useEffect(() => { drawn.current = { trip: tripMode, departureMs }; }, [departureMs, tripMode]);
+  const drawnMs = useCallback(() => {
+    const p = planRef.current, d = drawn.current;
+    return d.trip ? (p ? tripFrame(p, position()).displayMs : d.departureMs ?? now()) : now();
+  }, [now, position]);
   const sceneState = useCallback(() => {
     const t = timelineRef.current;
-    if (!t || !clock.current) return null;
-    const p = planRef.current;
-    return renderExpeditionStage(t, modeRef.current === 'trip' && p ? tripFrame(p, position()).displayMs : now());
-  }, [now, position]);
+    return t && clock.current ? renderExpeditionStage(t, drawnMs()) : null;
+  }, [drawnMs]);
 
   // Moves the replay a chapter on or back (it stops playing): past the last chapter a running trip may show, back to live.
   const step = useCallback((by: -1 | 1) => {
@@ -598,8 +606,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
       state: () => {
         const t = timelineRef.current;
         if (!t || !clock.current) return null;
-        const p = planRef.current;
-        const s = renderExpeditionStage(t, modeRef.current === 'trip' && p ? tripFrame(p, position()).displayMs : now());
+        const s = renderExpeditionStage(t, drawnMs());
         return {
           activityId: s.activityId, phase: s.phase, displayNowMs: s.displayNowMs, minute: s.progress?.minute ?? null, labels: s.stages.map(x => x.label),
           current: s.current?.label ?? null, hp: s.hp, route: s.route, replays: s.stages.filter(x => x.replay).map(x => x.id), complete: s.complete,
@@ -629,7 +636,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
       seek: ms => hold(ms, true),
     };
     return () => { delete window.__cloudiatorExpedition; };
-  }, [bridge, count, environment, hold, name, now, isOwner, position]);
+  }, [bridge, count, drawnMs, environment, hold, name, now, isOwner, position]);
 
   if (failure) return <ExpeditionUnavailable fixture={fixture} reason={failure} overCamp={!!overCamp} />;
   if (!timeline || !state || !shown) return <p role="status">Loading the expedition…</p>;
@@ -665,7 +672,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   const allowed = plan ? firstLocked(plan, capMs) : 0;
   // The Result card of the replay shows the result from "Back in camp" on (the settlement comes after it), as the live view has it.
   const backIndex = plan ? plan.chapters.findIndex(c => c.id === 'back') : -1;
-  const resultShown = !frame || (backIndex >= 0 && frame.index >= backIndex);
+  const resultShown = !tripMode || (!!frame && backIndex >= 0 && frame.index >= backIndex);
   return (
     <section className={styles.view} aria-labelledby={titleId}>
       <header className={styles.header}>
@@ -679,7 +686,8 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
               <span className={styles.liveBadge} data-testid="live-badge"><i aria-hidden="true" />{compact ? 'LIVE' : `LIVE · minute ${minute}`}</span>
               {offerTrip && <button ref={watchRef} type="button" className={styles.rewind} aria-label="Watch from the start" title="Watch from the start"
                 onClick={() => toTrip('leaving', true)}><span aria-hidden="true">⏪</span>{compact ? null : <span> Watch from the start</span>}</button>}
-            </> : offerTrip ? <button ref={watchRef} type="button" className={styles.wholeTrip} onClick={() => toTrip('leaving', true)}>▶ Watch the whole trip</button> : null}
+            </> : offerTrip ? <button ref={watchRef} type="button" className={styles.wholeTrip} onClick={() => toTrip('leaving', true)}>
+              <span aria-hidden="true">▶ </span>Watch the whole trip</button> : null}
         </div>
         {!overCamp && <Link className={styles.camp} href={campHref}>Camp</Link>}
       </header>

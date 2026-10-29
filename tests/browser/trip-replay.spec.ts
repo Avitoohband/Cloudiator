@@ -13,7 +13,7 @@ import { planTrip, tripPositionOf } from '../../src/game/trip-replay';
 import type { MapData } from '../../src/game/assets';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { quietArrivals, touchLayout } from './shell-helpers';
-import { noHorizontalScroll } from './a11y-helpers';
+import { focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { slotTime } from './slot-time';
 
 // Patch A Task 9 (spec "Item 3 + Task 10", the approved mockup's live view and whole-trip replay; plan Review Focus 1, 3 and 4):
@@ -67,9 +67,9 @@ const playButton = (page: Page) => bar(page).getByRole('button', { name: 'Play',
 const pauseButton = (page: Page) => bar(page).getByRole('button', { name: 'Pause', exact: true });
 const nextButton = (page: Page) => bar(page).getByRole('button', { name: 'Next chapter', exact: true });
 const previousButton = (page: Page) => bar(page).getByRole('button', { name: 'Previous chapter', exact: true });
-const backToLive = (page: Page) => bar(page).getByRole('button', { name: '● Back to live', exact: true });
+const backToLive = (page: Page) => bar(page).getByRole('button', { name: 'Back to live', exact: true });
 const watchFromStart = (page: Page) => page.getByRole('button', { name: 'Watch from the start', exact: true });
-const watchWholeTrip = (page: Page) => page.getByRole('button', { name: '▶ Watch the whole trip', exact: true });
+const watchWholeTrip = (page: Page) => page.getByRole('button', { name: 'Watch the whole trip', exact: true });
 const marks = (page: Page) => page.getByRole('list', { name: 'Trip marks' }).getByRole('listitem');
 const phase = (page: Page) => page.getByRole('status', { name: 'Current stage' });
 const result = (page: Page) => page.getByRole('region', { name: 'Result' });
@@ -80,6 +80,9 @@ const expeditionDialog = (page: Page) => page.getByRole('dialog', { name: 'Exped
 const search = (page: Page) => Object.fromEntries(new URL(page.url()).searchParams);
 /** The bar's time ("0:13 / now"), read from the bar's text after its buttons and chapters. */
 const barTime = (page: Page) => bar(page).getByTestId('replay-time');
+
+/** The next-slot Rest read (`recent_results` by gladiator). */
+const isRestRead = (url: string) => url.includes('/rest/v1/recent_results') && new URL(url).searchParams.has('gladiator_id');
 
 /** Goes to a chapter: its button on desktop, ⏭ and ⏮ in the touch layout (which shows one chapter name and no buttons). */
 async function goToChapter(page: Page, label: string) {
@@ -218,14 +221,21 @@ test.describe('the whole-trip replay', () => {
     await expect(phase(page)).toContainText('Home through the gate, with all gear kept.');
   });
 
-  test('offers Resting only after a real Rest', async ({ page }) => {
+  test('offers Resting only after a real Rest', async ({ page, context }) => {
     await view.open(page, view.page('woodland', '&play=trip'));
     await view.planned(page);
     await expect.poll(() => chapterLabels(page)).toEqual(WOODLAND_CHAPTERS);
-    await view.open(page, view.page('mountain', '&play=trip'));
+    // Mountain Pass, read live as a visitor: its next slot's public result was not a Rest. Once that one read has answered, the
+    // replay ends at the gate.
+    const end = startOf('mountain') + 80 * MIN;
+    const { summary: _owner, ...shown } = structuredClone(TIMELINES.mountain);
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(end + SLOT_MS + 10 * MIN), revision: 'trip-mountain' }, timelines: { [idOf('mountain')]: shown } });
+    const answered = page.waitForResponse(response => isRestRead(response.url()));
+    await view.open(page, `/expedition/?activity=${idOf('mountain')}&play=trip`);
     await view.planned(page);
-    // The Rest read has answered (no Rest) once the bar stops changing; Mountain Pass ends at the gate.
-    await page.waitForTimeout(1_000);
+    await answered;
+    await nextFrames(page);
+    expect(live.requests.filter(r => r.table === 'recent_results' && r.query.has('gladiator_id'))).toHaveLength(1);
     expect((await chapterLabels(page)).at(-1)).toBe('Back in camp');
     expect(await chapterLabels(page)).not.toContain('Resting');
   });
@@ -389,6 +399,100 @@ test.describe('the whole-trip replay', () => {
     // The same view all along: switching modes reads nothing again.
     expect(await page.evaluate(() => window.__cloudiatorExpedition!.reads())).toBe(reads);
     await expect(expeditionDialog(page)).toBeVisible();
+    // Back to camp leaves in one step, from the trip opened over the live view.
+    await page.getByRole('button', { name: 'Back to camp', exact: true }).click();
+    await expect(expeditionDialog(page)).toHaveCount(0);
+    expect(search(page)).toEqual({ mode: 'fixture' });
+  });
+
+  test('goes from live to the whole trip and back with the browser history, on the expedition page', async ({ page }) => {
+    await view.open(page, view.page('woodland'));
+    await view.planned(page);
+    const reads = await page.evaluate(() => window.__cloudiatorExpedition!.reads());
+    await watchWholeTrip(page).click();
+    await expect(replayBadge(page)).toBeVisible();
+    expect(search(page)).toEqual({ mode: 'fixture', activity: idOf('woodland'), play: 'trip' });
+    await expect(playButton(page)).toBeFocused();
+    await page.goBack();
+    await expect(watchWholeTrip(page)).toBeVisible();
+    expect(search(page)).toEqual({ mode: 'fixture', activity: idOf('woodland') });
+    await expect(watchWholeTrip(page)).toBeFocused();
+    await page.goForward();
+    await expect(replayBadge(page)).toBeVisible();
+    expect(await view.trip(page)).toMatchObject({ mode: 'trip', chapter: 'leaving' });
+    await expect(playButton(page)).toBeFocused();
+    expect(search(page)).toEqual({ mode: 'fixture', activity: idOf('woodland'), play: 'trip' });
+    expect(await page.evaluate(() => window.__cloudiatorExpedition!.reads())).toBe(reads);
+  });
+
+  // Fix round 1, Important 1: a finished trip opened as its replay never shows its end (the result, the later log, the arrival)
+  // while the plan's walking times load; it shows the departure until the first chapter is there.
+  test('never shows how the trip ended while the replay is being prepared', async ({ page }) => {
+    await page.addInitScript(() => {
+      const seen: string[] = [];
+      (window as unknown as { __tripSpoilers: string[] }).__tripSpoilers = seen;
+      const check = () => {
+        if (window.__cloudiatorExpedition?.trip()) return;
+        const text = document.querySelector('main')?.textContent ?? '';
+        for (const word of ['Defeated', 'Encounter 2: defeat', 'after a defeat', 'Arrive at camp', 'Processing results']) if (text.includes(word) && !seen.includes(word)) seen.push(word);
+      };
+      new MutationObserver(check).observe(document, { subtree: true, childList: true, characterData: true });
+    });
+    await view.open(page, view.page('outpost', '&minute=90&play=trip'));
+    await view.planned(page);
+    await expect(replayBadge(page)).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __tripSpoilers: string[] }).__tripSpoilers)).toEqual([]);
+    // Once planned, the first chapter, not the end.
+    expect(await view.trip(page)).toMatchObject({ mode: 'trip', chapter: 'leaving' });
+    await expect(result(page)).toContainText('The result is known when the expedition returns at minute 80.');
+  });
+
+  test('falls back to the live view when the replay cannot be planned', async ({ page }) => {
+    // The walking times come with the art: a build whose art module cannot load has no plan, so the address's replay shows live.
+    await page.route('**/_next/static/chunks/**', async route => {
+      const response = await route.fetch();
+      const body = await response.text();
+      return /function loadAssetManifest\b/.test(body) ? route.abort() : route.fulfill({ response, body });
+    });
+    await view.open(page, view.page('woodland', '&minute=30&play=trip'));
+    await view.hold(page, 'woodland', 30);
+    await expect(liveBadge(page)).toBeVisible({ timeout: 10_000 });
+    await expect(replayBadge(page)).toHaveCount(0);
+    await expect(page.getByText('Preparing the whole trip…')).toHaveCount(0);
+    await expect(marks(page)).toHaveCount(5);
+    expect(await view.trip(page)).toBeNull();
+  });
+
+  test('keeps the focus on ⏮ and ⏭ at the ends, and leaves a focus elsewhere when the replay returns to live', async ({ page }) => {
+    await watchFocus(page);
+    await view.open(page, view.page('woodland', '&play=trip'));
+    await view.planned(page);
+    // Keyboard only: ⏭ to the last chapter, then ⏮ to the first. The button that becomes unavailable keeps the focus.
+    await expect.poll(() => chapterLabels(page)).toEqual(WOODLAND_CHAPTERS);
+    await nextButton(page).focus();
+    for (let i = 0; i < 9; i += 1) await page.keyboard.press('Enter');
+    await expect.poll(async () => (await view.trip(page))!.chapter).toBe('resting');
+    await expect(nextButton(page)).toBeFocused();
+    await expect(nextButton(page)).toBeDisabled();
+    await previousButton(page).focus();
+    for (let i = 0; i < 9; i += 1) await page.keyboard.press('Enter');
+    await expect.poll(async () => (await view.trip(page))!.chapter).toBe('leaving');
+    await expect(previousButton(page)).toBeFocused();
+    expect(await focusDrops(page)).toEqual([]);
+    // A running trip played up to now returns to live; a focus the player put in the log stays there.
+    await view.open(page, view.page('woodland', '&minute=30'));
+    await view.hold(page, 'woodland', 30);
+    await view.planned(page);
+    await watchFromStart(page).click();
+    await view.seek(page, (await view.trip(page))!.capMs! - 400);
+    await playButton(page).click();
+    const watch = page.getByRole('link', { name: 'Watch the replay of encounter 1' });
+    await watch.focus();
+    await expect(liveBadge(page)).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(300);
+    await expect(watch).toBeFocused();
+    expect(await focusedElement(page)).toContain('Watch the replay of encounter 1');
+    expect(await focusDrops(page)).toEqual([]);
   });
 
   test('phone: one chapter name with ⏮ ▶ ⏭', async ({ page }, testInfo) => {
@@ -429,6 +533,58 @@ test.describe('the whole-trip replay', () => {
     expect(box.x + box.width).toBeLessThanOrEqual(360);
     await bar(page).scrollIntoViewIfNeeded();
     await shot(page, testInfo, 'phone-catch-up-360');
+    // A touch screen wider than a phone keeps 44 px marks.
+    if (await page.evaluate(() => matchMedia('(hover: none)').matches)) {
+      await backToLive(page).click();
+      await page.setViewportSize({ width: 820, height: 1000 });
+      await page.waitForTimeout(300);
+      const mark = (await page.getByRole('list', { name: 'Trip marks' }).getByRole('button').boundingBox())!;
+      expect(mark.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('phone: the scene over the camp fits 360 × 740, live and replaying', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    const dialogFits = () => expeditionDialog(page).evaluate(d => d.scrollWidth <= d.clientWidth);
+    await view.open(page, view.camp('woodland'));
+    await view.hold(page, 'woodland', 30);
+    await view.planned(page);
+    await expect(liveBadge(page)).toHaveText('LIVE');
+    await expect(marks(page)).toHaveCount(5);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    expect(await dialogFits()).toBe(true);
+    await watchFromStart(page).click();
+    await expect(backToLive(page)).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    expect(await dialogFits()).toBe(true);
+    const box = (await bar(page).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+    for (const button of [previousButton(page), playButton(page), nextButton(page), backToLive(page)]) {
+      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    await bar(page).scrollIntoViewIfNeeded();
+    await view.sceneReady(page);
+    await shot(page, testInfo, 'phone-camp-catch-up-360');
+  });
+
+  test('lays the chapters out whole on a desktop, from a narrow window to a wide one', async ({ page }, testInfo) => {
+    await view.open(page, view.page('woodland', '&play=trip'));
+    await view.planned(page);
+    test.skip(await touchLayout(page), 'The touch layout shows one chapter name instead of the buttons.');
+    const cut = () => chapterList(page).getByRole('button').evaluateAll(buttons => buttons
+      .filter(b => b.scrollWidth > b.clientWidth + 1 || b.getAttribute('title') !== b.textContent).map(b => b.textContent));
+    for (const width of [1280, 900, 700, 520]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(300);
+      expect(await cut(), `chapters cut or untitled at ${width} px`).toEqual([]);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await goToChapter(page, 'Heading home');
+    await view.sceneReady(page);
+    await shot(page, testInfo, 'trip-heading-home-1280');
   });
 });
 
@@ -506,9 +662,12 @@ test.describe('the whole-trip replay for its owner and for others', () => {
       refused += 1;
       return route.fulfill({ status: 500, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ code: 'XX000', message: 'internal error' }) });
     });
+    const refusedAnswer = page.waitForResponse(response => isRestRead(response.url()));
     await view.open(page, `/expedition/?activity=${idOf('woodland')}&play=trip`);
     await view.planned(page);
-    await page.waitForTimeout(1_000);
+    await refusedAnswer;
+    await nextFrames(page);
+    expect(refused).toBe(1);
     expect(await chapterLabels(page)).toEqual(WOODLAND_CHAPTERS.slice(0, -1));
     // (Next's route announcer is an empty alert region: no alert says anything.)
     await expect(page.getByRole('alert').filter({ hasText: /\S/ })).toHaveCount(0);

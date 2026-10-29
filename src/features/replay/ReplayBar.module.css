@@ -4,6 +4,7 @@
  * with 44 px buttons. A bar with a track (the Arena-replays patch) wraps its chapters onto a row of their own.
  */
 .bar {
+  container-type: inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -29,7 +30,7 @@
   cursor: pointer;
 }
 
-.icon:disabled {
+.icon[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -52,9 +53,14 @@
   display: none;
 }
 
+/*
+ * The chapters fill the row, each sized from its label (never narrower: a label is not cut short) and sharing what is left. Where
+ * the bar has no room for them beside the controls, they take a row of their own below them and wrap there (fix round 1).
+ */
 .chapters {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
   margin: 0;
@@ -64,23 +70,19 @@
 
 .chapters li {
   display: flex;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .chapters button {
   flex: 1 1 auto;
-  min-width: 0;
   height: 34px;
-  padding: 0 4px;
-  overflow: hidden;
+  padding: 0 6px;
   color: #b8bccb;
   background: #171622;
   border: 1px solid #ffffff22;
   border-radius: 7px;
   font: 500 12px/1 system-ui, sans-serif;
   white-space: nowrap;
-  text-overflow: ellipsis;
   cursor: pointer;
 }
 
@@ -124,9 +126,16 @@
   align-items: center;
 }
 
-/* With a track the chapters wrap onto a row of their own, under the controls. */
+/* With a track, or in a bar too narrow for them beside the controls, the chapters take a row of their own under them. */
 .bar[data-track] .chapters {
   flex-basis: 100%;
+}
+
+@container (max-width: 860px) {
+  .chapters {
+    order: 1;
+    flex-basis: 100%;
+  }
 }
 
 @media (hover: none), (max-width: 480px) {

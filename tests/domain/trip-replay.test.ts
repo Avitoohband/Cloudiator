@@ -9,7 +9,7 @@ import { EXPEDITION_MS, stageWalks, type JourneyPoint } from '@/game/expedition-
 import { pathLength } from '@/game/paths';
 import { REPLAY_OUTRO_MS } from '@/game/replay';
 import {
-  TRIP_PACE, clockText, firstLocked, planTrip, tripFrame, tripPositionOf, type TripChapterId, type TripPlan,
+  TRIP_PACE, clockText, firstLocked, planTrip, tripBoundary, tripFrame, tripPositionOf, type TripChapterId, type TripPlan,
 } from '@/game/trip-replay';
 
 const MIN = 60_000;
@@ -422,6 +422,29 @@ describe('a trip still running', () => {
     const lost = encounters('outpost')[1];
     const early = planTrip(TIMELINES.outpost, { walkMs: walk('outpost'), resting: true, nowMs: lost.endsAtMs + 5_000 })!;
     expect(early.chapters.map(c => [c.id, c.revealed])).toEqual([['leaving', true], ['trail', true], ['fight-1', true], ['fight-2', true], ['safe-point', true], ['back', false]]);
+  });
+
+  // Task 9 fix round 1: the view plans at the latest reveal or fight end by its clock (`tripBoundary`), so the plan changes only
+  // there. It must be the plan at the clock itself, at every moment of a trip.
+  it('plans at the last boundary by the clock exactly as at the clock', () => {
+    for (const key of ['woodland', 'outpost', 'mountain'] as const) {
+      const walkMs = walk(key);
+      for (let quarter = 0; quarter <= 90 * 4; quarter += 1) {
+        for (const extra of [0, 1_000, 7_500]) {
+          const nowMs = clockAt(key, quarter / 4) + extra;
+          const boundary = tripBoundary(TIMELINES[key], nowMs);
+          expect(boundary, `${key} at ${nowMs}`).toBeLessThanOrEqual(nowMs);
+          const cutAtBoundary = { ...TIMELINES[key], stages: TIMELINES[key].stages.filter(s => s.revealedAtMs <= boundary) };
+          expect(planTrip(cutAtBoundary, { walkMs, resting: true, nowMs: boundary }), `${key} at minute ${quarter / 4} + ${extra} ms`)
+            .toEqual(planTrip(TIMELINES[key], { walkMs, resting: true, nowMs }));
+        }
+      }
+    }
+    // It moves at each reveal and at each fight's end, and nowhere between.
+    const fight = encounters('woodland')[0];
+    expect(tripBoundary(TIMELINES.woodland, fight.startedAtMs + 1_000)).toBe(fight.revealedAtMs);
+    expect(tripBoundary(TIMELINES.woodland, fight.endsAtMs)).toBe(fight.endsAtMs);
+    expect(tripBoundary(TIMELINES.woodland, startOf('woodland') - 1)).toBe(-Infinity);
   });
 
   it('finds the first locked chapter: the first that starts after the cap, or none without one', () => {

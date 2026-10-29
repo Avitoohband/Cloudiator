@@ -37,6 +37,8 @@ Still being built:
 - 1.4 · Watch your expedition: a button on the camp while your gladiator is away, and the whole trip when it is back.
 - 1.4 · Patch numbers: the patch you play in the menu, a number on each patch note, and Patch history.
 - 1.4 · When a new patch is out, an open game says so, and Reload brings it in.
+- 1.4 · A bigger profile card: click a gladiator's name for its look, class bonuses, attributes, stats, gear and Arena
+  record (it waits for Avi's look at its mockup).
 
 Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
@@ -206,6 +208,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Visitors welcome | Anyone can watch the camp and the public menus without signing in. | 1.0 | Live | `/game/?mode=fixture&as=visitor` | — |
 | New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | In 1.4 | Fixture camp (it always shows a banner) → Find | — |
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | In 1.4 | Fixture camp → Gladiators, the line on top | — |
+| Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | In 1.4 | Not built yet: it waits for Avi's look at its mockup (`.superpowers/design/2026-10-29-profile-card/`) | — |
 | Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.6 | Planned 1.6 | Being designed | — |
 
 ### Settings and accessibility

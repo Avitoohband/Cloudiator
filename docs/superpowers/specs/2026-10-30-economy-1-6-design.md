@@ -450,3 +450,8 @@ stories; uploads and posts only on Avi's go. The release report reminds Avi of i
 | Players feel robbed by the cut | The day-ahead message, the patch note, and levels, items and renown kept (Avi's decision) |
 | Training at the cap feels broken | The Schedule line and the notification say why, and until which level |
 | Old clients show old numbers after the switch | The patch row makes every 1.4+ tab show the reload notice within one poll |
+
+## Avi's answers to the open questions (2026-10-30, question form) — binding, they override any text above
+
+1. The day-before warning message **says plainly that everyone's gold will be cut to a quarter** (with the new salvage value), so nobody sells at 10 just before the cut.
+2. **Gear drops are halved** on expeditions: 10 / 15 / 20 % (Woodland / Outpost / Mountain).

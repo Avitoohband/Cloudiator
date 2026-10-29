@@ -610,6 +610,12 @@ launch (24.12)").
 
 ### A later release
 
+Status 2026-10-29: production runs release `d996d59` with all 25 migrations (M01–M25, last `20261028165017_messages`); the
+Edge function `game-command` was deployed for it. The M25 release followed the steps below with
+two additions: an operator write that marked every account's old results as seen (before the client), and the three patch
+notes posted after the deployed checks (runbook, "Posting a game message"). Its evidence is in release-evidence "Game
+messages, notifications, free look change, fixed builds, gold and bigger beds (M25), 2026-10-29".
+
 Decision 2: `db push`, then `functions deploy`, then the `release` fast-forward. Read each new migration's
 "Release (Task NN)" note in [migrations.md](migrations.md) first; a note that orders things differently wins (for example a
 new rules version: [runbook, "Retained-rule deployments"](runbook.md#retained-rule-deployments)).

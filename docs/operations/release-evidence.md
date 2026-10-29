@@ -1299,3 +1299,83 @@ The public game: **https://cloudiator-arena.pages.dev** (production `djkblzbnrit
   weekly export cover it ([runbook, "Free-tier pausing"](runbook.md#free-tier-pausing)).
 - The hosted export has not run yet (24.10); the first production weekly export is its first hosted test.
 - The frame rate was measured on one phone (Adreno 740, 60 fps); slower phones are not measured.
+
+## Game messages, notifications, free look change, fixed builds, gold and bigger beds (M25), 2026-10-29
+
+The next patch after the appearance release ([design](../superpowers/specs/2026-10-27-game-messages-design.md), plan
+`docs/superpowers/plans/2026-10-28-game-messages.md`, Tasks 1 to 7c built and Task 8 the release): a messages inbox beside
+the corner chip with patch notes (the first offers a free, unlimited look change), notifications of the player's own
+results, a build step that shows the points left and no longer lets a class change or a lower attribute through, the
+currency called gold in every word a player reads, and bigger camp beds (Punchy's request). One migration, M25
+(`20261028165017_messages.sql`), and one changed Edge function, `game-command`. Every build task had a spec and quality
+review; the whole-branch review led to one fix wave (`9573f59`). Avi's go in chat, 2026-10-29: "mark old results as seen, go
+for production". Released: `d996d59` = Tasks 1 to 7c, the review fixes (`9573f59`), the docs (`59cc837`) and a test-only
+race fix (`d996d59`); `release` fast-forwarded from `1b57ba5`, and `origin/codex/gladiator-arena` is at `d996d59` too.
+
+### Gate of record (`d996d59`)
+
+`node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs`: **exit 0, 12 of 12** on the third run. The first
+two runs did not pass for reasons outside the product code (infrastructure and a test race); they are not product evidence.
+
+| Run | Result | Cause and fix |
+|---|---|---|
+| 1 (about 07:30 UTC) | `edge` failed (the container was recreated while the gate waited for it to settle, and the worker gave no answer in 300 s); `db` was skipped because it needs `edge`; the other ten steps passed | Infrastructure. Found afterwards: the local containers had lost their host ports after a Docker Desktop restart, and Windows had reserved TCP 54232–54331, which covers the database port 54322. Fix: a PC reboot (at 07:45) cleared the reserved range, and a local `supabase stop` and `start` restored the ports. |
+| 2 | 11 of 12: `edge` settled in 35 s, `db` 390 of 390 passed with the Edge container unchanged, unit, typecheck, assets, build, static, browser-build, browser-static, production and diff passed; `browser` had 1 failure | The known test race at `planning.spec.ts:368` (mobile): the schedule's colour contrast was sampled before the buttons' enabled waits. Fix, test only, `d996d59` (the same move at `:406` too): the contrast is sampled after the waits; `--repeat-each 3` passed 156 of 156. |
+| 3 (at `d996d59`) | **12 of 12:** unit 1,741 (94 files), typecheck, `assets --check`, build, static, `edge` settled in 36 s, `db` 390 passed (28 files) with the Edge container unchanged, `browser` in 13 min 36 s, browser-build, browser-static, production, diff | — |
+
+### Hosted pre-check
+
+Read-only, Thursday 2026-10-29 08:41 UTC (outside Wednesday and Saturday 17:20–20:00 UTC):
+
+| Check | Result |
+|---|---|
+| `boundaries_open` | 0 |
+| Pending builds that change the class or lower an attribute | 0 |
+| Gladiators whose XP and level do not equal their completed results' XP (the notifications' Level-up line derives from them) | 0 |
+| Gladiators | 10 |
+
+### Release steps (production `djkblzbnritgbmctsvob`, UTC)
+
+| Step | Result |
+|---|---|
+| 1. `db push --dry-run`, `db push` | The dry run listed exactly `20261028165017_messages.sql`; M25 applied 08:41:44–08:41:48. |
+| 2. Schema fingerprint and access audit against the local M01–M25 replay | Fingerprint: hosted 1,207 lines, local 1,210. The only differing lines are platform default ACLs (the `realtime` default-ACL wording; `supabase_functions` exists only locally) and live seed lines (`seed-retention`, `seed-retention-jobs`, `seed-owner-signals` 10): **0 game-schema differences**. Access audit: hosted 602 rows, **0 findings**; local 638 rows, the 36 extra being platform-default rows for `supabase_functions`; 0 differing rows in `public` and `private`. |
+| 3. Mark the old results as seen (Avi's decision; the final review's Minor 1) | One operator statement with the same clock and merge as `see_notifications`, run before the client: before, 10 owners, 10 of them with new results, 318 new results; after, 0 owners with new results, 0 new results; `notification_marks` 10. |
+| 4. `functions deploy game-command --project-ref djkblzbnritgbmctsvob` | Script 803 kB, about 08:42–08:43. |
+| 5. `release` fast-forwarded `1b57ba5` to `d996d59` | Pushed 08:43:27; the new client was live at 08:44:37 (the new bed atlas `camp/props.b2b178ef35.png` answered 200). |
+| 6. Deployed automatic checks (`tests/browser/playwright.deployed.config.ts`, `--grep-invert @attested`) | 9 passed; the evidence block is below. |
+| 7. The three patch notes, posted with `private.post_message` | Posted word for word from the spec (runbook, "Posting a game message"); the table below. |
+
+Deployed evidence, desktop and mobile projects:
+
+| Project | Check | Evidence |
+|---|---|---|
+| desktop | `fixedRoutesReload` | 5 of 5 routes loaded and reloaded with 200; problems 0; favicon 404 on 1 load (recorded) |
+| mobile | `fixedRoutesReload` | 5 of 5 routes loaded and reloaded with 200; problems 0; favicon 404 on 1 load (recorded) |
+| desktop | `securityHeaders` | connect-src origin `https://djkblzbnritgbmctsvob.supabase.co`; 6 paths checked against `_headers`; 0 problems |
+| desktop | `connectSrc` | connect-src exactly `'self' https://djkblzbnritgbmctsvob.supabase.co` on 5 of 5 routes |
+| desktop | `compression` | 30 of 30 responses `br` or `gzip` |
+| desktop | `cors` | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 `unauthenticated` |
+| desktop | `anonDenied` | 19 of 19 anonymous probes refused as expected (the 14 earlier ones and 5 new M25 probes) |
+| desktop | `authProvidersGoogleOnly` | `GET /auth/v1/settings` 200; Google only, sign-up open |
+| desktop | `shippedAssetsClean` | scanned 44 assets, 25 of them JavaScript; 0 problems |
+
+### The three patch notes
+
+| id | Title | Blocks | `published_at_ms` | Posted (UTC) |
+|---|---|---|---|---|
+| 1 | Evening Arena, waiting monsters, clearer menus | 5 | 1793263579347 | 2026-10-29 08:46:19 |
+| 2 | New: choose your gladiator's look | 2, with the `change-look` action | 1793263583304 | 2026-10-29 08:46:23 |
+| 3 | Messages, gold, fixed builds and bigger beds | 6, with the credit to Punchy | 1793263588662 | 2026-10-29 08:46:28 |
+
+All three are visible. Read-back afterwards: each of the 10 owners has 3 unread messages, and 0 owners have new results.
+
+### Known effects and open items
+
+- **Tabs still open on `1b57ba5` lose the camp art** when the camp scene next reloads ("The camp art could not load…") until
+  the tab is reloaded. This follows from the hashed atlas image names (only `camp/props` changed).
+- **Avi's in-game journey** (the attested checks) is not done yet. It also exercises the hosted Notifications read (the
+  embedded count) once.
+- **Retained rules:** M25 changes no rules version (no executor change), so there was nothing to retain (runbook,
+  "Retained-rule deployments").
+- **Runbook:** the anonymous-probe count of the deployed checks is now 19 (it was 14).

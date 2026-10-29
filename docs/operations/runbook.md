@@ -156,6 +156,8 @@ To ship changed rules:
 4. Never delete a `rules_versions` row: boundaries, snapshots and jobs reference it. Remove `v1`'s executors only when
    `select count(*) from private.jobs where rules_version = 'v1' and status <> 'completed';` is `0` and no boundary is open.
 
+M25 (game messages, 2026-10-29) changed no rules version (no executor change), so there was nothing to retain.
+
 ### Exception: the launch feedback rules changed in place (M23)
 
 The launch feedback (2026-10-25, [design](../superpowers/specs/2026-10-25-launch-feedback-design.md), "The change surface")
@@ -240,7 +242,9 @@ and its **Change look** action needs the new Edge function. A gladiator created 
    title, preview, action or body is refused by the table's constraints (SQLSTATE 23514) and stores nothing. The post raises
    the world revision, so open clients show the badge within one poll.
 3. Several notes of one release are posted one after the other, oldest first, so the newest is on top (this patch: the launch
-   note, then the look note, then the release note; spec "Settled after the builder check").
+   note, then the look note, then the release note; spec "Settled after the builder check"). The first three notes were
+   posted at the M25 release on 2026-10-29 (ids 1 to 3, in that order; release-evidence "Game messages, notifications, free
+   look change, fixed builds, gold and bigger beds (M25), 2026-10-29").
 4. Read back, read-only:
    `npx supabase db query --linked --project-ref <ref> "select id, kind, title, action, hidden, published_at_ms from public.game_messages order by id desc limit 5"`.
 
@@ -668,7 +672,7 @@ deployed evidence | desktop | securityHeaders | connect-src origin https://<proj
 deployed evidence | desktop | connectSrc | connect-src exactly 'self' https://<project>.supabase.co on 5 of 5 routes
 deployed evidence | desktop | compression | <n> of <n> responses br or gzip
 deployed evidence | desktop | cors | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 unauthenticated
-deployed evidence | desktop | anonDenied | 14 of 14 anonymous probes refused as expected
+deployed evidence | desktop | anonDenied | 19 of 19 anonymous probes refused as expected
 deployed evidence | desktop | authProvidersGoogleOnly | GET /auth/v1/settings 200; Google only, sign-up open
 deployed evidence | desktop | shippedAssetsClean | scanned <n> assets, <m> of them JavaScript; 0 problems
 ```
@@ -683,10 +687,12 @@ variable, a failed crawl) has no line, and its error names the cause. Copy the b
   `/_next/static/` chunk carry exactly what the generated `_headers` gives that path), `connectSrc` (exactly `'self'` and the
   project), `compression` (every route's HTML and crawled chunk `br` or `gzip`), `cors` (the command preflight from the site:
   204 or 200, exactly the site's grant, never `*`, `Access-Control-Max-Age: 7200`; from another origin 403 with no grant; the
-  worker without its secret 401 `unauthenticated`), `anonDenied` (14 anonymous probes from `tests/db/access-matrix.test.ts`
+  worker without its secret 401 `unauthenticated`), `anonDenied` (19 anonymous probes from `tests/db/access-matrix.test.ts`
   that change nothing even if granted: backend-only and owner RPCs with null arguments, empty inserts, an update and a delete
   filtered on `is.null` of a NOT NULL primary-key column, and the unexposed `private` schema, a table read and a call of the
-  STRICT `schedule_effective_slot` with null arguments; no function that acts without arguments, such as `cleanup_tick`, is
+  STRICT `schedule_effective_slot` with null arguments; M25 added five of the 19: the RPCs `change_appearance`,
+  `read_message` and `see_notifications` with null arguments, an empty insert into `game_messages`, and `private.post_message`
+  through the unexposed `private` schema (so run the deployed checks only after M25 is on the project); no function that acts without arguments, such as `cleanup_tick`, is
   called; `tests/deployed.test.ts` checks these rules against the migrations), `authProvidersGoogleOnly` (`/auth/v1/settings`: Google alone, sign-up open),
   `shippedAssetsClean` (the release scan's patterns, `scripts/release-scan.mjs`, over every asset the routes reference or load).
   Every page runs under the CSP-violation listener.

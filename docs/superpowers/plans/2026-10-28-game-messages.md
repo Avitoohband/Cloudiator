@@ -67,15 +67,15 @@ points"); code map `docs/superpowers/specs/2026-10-27-game-messages-code-map.md`
 - Produces: `lockedChange(current: BuildInput, next: BuildInput): 'class' | 'points' | null`. `buildChangeFee` is unchanged
   and returns 0 for every change `lockedChange` allows.
 
-- [ ] **Step 1: Failing tests**: `lockedChange` is `'class'` for another class, `'points'` when any attribute is one lower,
+- [x] **Step 1: Failing tests**: `lockedChange` is `'class'` for another class, `'points'` when any attribute is one lower,
   `null` for a stance change, an equipment change and +1 on any attribute; `prepareBuild` refuses a class change and a
   decrease; DB: a class change and a decrease are refused `invalid` with no reservation and no new build version; a stance
   change plus one point is accepted with `reservedMoney` 0; a pending build may be revised down to the current build's
   values (not below) and still be cancelled.
-- [ ] **Step 2: Run** `npx vitest run tests/domain/build.test.ts tests/backend` and `npm run test:db -- tests/db/build-locks.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement**; apply `18-messages.sql` locally with the psql fallback (container label check first).
-- [ ] **Step 4: Run** the step 2 commands and the existing planning tests; expect PASS.
-- [ ] **Step 5: Commit** `feat: keep the class and added points of a build`.
+- [x] **Step 2: Run** `npx vitest run tests/domain/build.test.ts tests/backend` and `npm run test:db -- tests/db/build-locks.test.ts`; expect FAIL.
+- [x] **Step 3: Implement**; apply `18-messages.sql` locally with the psql fallback (container label check first).
+- [x] **Step 4: Run** the step 2 commands and the existing planning tests; expect PASS.
+- [x] **Step 5: Commit** `feat: keep the class and added points of a build`.
 
 ### Task 2: The change-appearance command
 
@@ -96,15 +96,15 @@ points"); code map `docs/superpowers/specs/2026-10-27-game-messages-code-map.md`
 - Produces: `legacyAppearance(gladiatorId: string): Appearance` (male, short, skin `(h>>>11)%5`, hairColor `(h>>>5)%6`,
   cloth `h%12` with `h = hashString(gladiatorId)`); command result value `{ appearance: Appearance; receivedAtMs: number }`.
 
-- [ ] **Step 1: Failing tests**: `lookFor(legacyAppearance(id), id, s)` equals `lookFor(null, id, s)` for 50 ids;
+- [x] **Step 1: Failing tests**: `lookFor(legacyAppearance(id), id, s)` equals `lookFor(null, id, s)` for 50 ids;
   `parseCommand` accepts a valid change and refuses each invalid look of the appearance tests and an extra key; DB: a
   legacy gladiator changes to a chosen look and `world_actors` shows it and the world revision rises; three changes in a
   row all apply (no limit); the same operation id replays the stored result and a different body under it is `conflict`;
   an account without a gladiator gets `not-found`; an invalid look writes nothing.
-- [ ] **Step 2: Run** `npx vitest run tests/backend tests/game` and `npm run test:db -- tests/db/change-appearance.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement**; reapply the source.
-- [ ] **Step 4: Run** the step 2 commands; expect PASS.
-- [ ] **Step 5: Commit** `feat: let a player change their gladiator's look`.
+- [x] **Step 2: Run** `npx vitest run tests/backend tests/game` and `npm run test:db -- tests/db/change-appearance.test.ts`; expect FAIL.
+- [x] **Step 3: Implement**; reapply the source.
+- [x] **Step 4: Run** the step 2 commands; expect PASS.
+- [x] **Step 5: Commit** `feat: let a player change their gladiator's look`.
 
 ### Task 3: Messages, read marks and the inbox
 
@@ -142,17 +142,17 @@ points"); code map `docs/superpowers/specs/2026-10-27-game-messages-code-map.md`
   string }`; `type GameMessage = { id: number; kind: 'patch-notes' | 'admin'; title: string; preview: string; body:
   MessageBlock[]; action: 'change-look' | null; publishedAtMs: number }`; `GameGateway.messages(): Promise<GameMessage[]>`.
 
-- [ ] **Step 1: Failing tests**: posting as `postgres` returns an id and raises the world revision; `anon`,
+- [x] **Step 1: Failing tests**: posting as `postgres` returns an id and raises the world revision; `anon`,
   `authenticated` and `service_role` cannot execute `post_message` or `hide_message`; a bad kind, an 81-character title, a
   body with an unknown key, an empty block or 2,001 characters is refused; visitors and players read visible rows only
   (a hidden one disappears); `read_message` marks only the caller's account, a repeat is a no-op, a hidden or missing id is
   `not-found`, and no receipt row is written; `owner_state.inbox`: a message posted before the gladiator was created is not
   counted, one after is, reading it lowers `unread` and adds its id to `readIds`, and a second session of the same account
   sees the same; `parseCommand` accepts `read-message` with id 1 and refuses 0, 1.5, a string and an extra key.
-- [ ] **Step 2: Run** `npm run test:db -- tests/db/messages.test.ts` and `npx vitest run tests/backend tests/api`; expect FAIL.
-- [ ] **Step 3: Implement**; reapply the source; update the literals and fixtures.
-- [ ] **Step 4: Run** the step 2 commands, `npm run typecheck` and `npx vitest run`; expect PASS.
-- [ ] **Step 5: Commit** `feat: store game messages and each player's read marks`.
+- [x] **Step 2: Run** `npm run test:db -- tests/db/messages.test.ts` and `npx vitest run tests/backend tests/api`; expect FAIL.
+- [x] **Step 3: Implement**; reapply the source; update the literals and fixtures.
+- [x] **Step 4: Run** the step 2 commands, `npm run typecheck` and `npx vitest run`; expect PASS.
+- [x] **Step 5: Commit** `feat: store game messages and each player's read marks`.
 
 ### Task 3b: Notifications (server and reads)
 
@@ -177,15 +177,15 @@ Spec "Added 2026-10-28: notifications".
   settledAtMs: number; summary: ActivitySummary; destination: string | null; levelAfter: number | null }`;
   `GameGateway.notifications(): Promise<GameNotification[]>`.
 
-- [ ] **Step 1: Failing tests**: DB: a settled training after the gladiator's creation counts 1 new; `see_notifications`
+- [x] **Step 1: Failing tests**: DB: a settled training after the gladiator's creation counts 1 new; `see_notifications`
   sets the mark, a lower `up_to_ms` never moves it back, a future one is cut to now, another account's mark is untouched;
   an unrevealed Arena result is not counted; a rest is not counted. Units: `notificationLines` for training ("+40 XP",
   "+1 attribute point"), an expedition with money, XP, a Rare Iron sword (tier 5) and an overflow sale, an Arena victory
   with renown and rating change, and "Level up! Now level 4" only when `levelAfter` is set.
-- [ ] **Step 2: Run** `npm run test:db -- tests/db/notifications.test.ts` and `npx vitest run tests/features tests/backend`; expect FAIL.
-- [ ] **Step 3: Implement**; decide `levelAfter` from stored settlement data and ledger the ruling.
-- [ ] **Step 4: Run** the step 2 commands and `npm run typecheck`; expect PASS.
-- [ ] **Step 5: Commit** `feat: notify players of their own results`.
+- [x] **Step 2: Run** `npm run test:db -- tests/db/notifications.test.ts` and `npx vitest run tests/features tests/backend`; expect FAIL.
+- [x] **Step 3: Implement**; decide `levelAfter` from stored settlement data and ledger the ruling.
+- [x] **Step 4: Run** the step 2 commands and `npm run typecheck`; expect PASS.
+- [x] **Step 5: Commit** `feat: notify players of their own results`.
 
 ### Task 4: M25
 
@@ -198,11 +198,11 @@ Spec "Added 2026-10-28: notifications".
   `docs/operations/runbook.md` (new section "Posting a game message": `post_message` and `hide_message` through
   `db query --linked` after Avi's go, never before the client that shows messages is live)
 
-- [ ] **Step 1: Generate and complete M25**; `db reset --local --no-seed --yes`; inspect the replayed functions,
+- [x] **Step 1: Generate and complete M25**; `db reset --local --no-seed --yes`; inspect the replayed functions,
   `search_path`, ACLs, policies, triggers and the invoker view.
-- [ ] **Step 2: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
+- [x] **Step 2: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
   `npm run test:db` under the DB-test rule, lint and advisors `--local`; expect PASS.
-- [ ] **Step 3: Commit** `feat: messages, read marks, look changes and fixed builds (M25)`.
+- [x] **Step 3: Commit** `feat: messages, read marks, look changes and fixed builds (M25)`.
 
 ### Task 5: The build step: points left, capped, class fixed
 
@@ -216,14 +216,14 @@ Spec "Added 2026-10-28: notifications".
   line; the "Estimated reservation" line goes, every change being free)
 - Test: `tests/domain/creation-points.test.ts`, `tests/browser/planning.spec.ts` (or the spec that covers `BuildPanel`)
 
-- [ ] **Step 1: Failing tests**: units for the total and floor parameters (creation unchanged); browser: with 12 earned
+- [x] **Step 1: Failing tests**: units for the total and floor parameters (creation unchanged); browser: with 12 earned
   and 9 spent the counter reads "3 of 12 left"; typing 99 into Strength sets value + 3 with the capped line; typing 0 into
   an attribute the current build has at 4 sets 4 with "Strength can't go below 4: added points are permanent."; no class
   select exists and "Class: Berserker" shows; Queue build sends the current class.
-- [ ] **Step 2: Run** `npx vitest run tests/domain/creation-points.test.ts` and the browser spec; expect FAIL.
-- [ ] **Step 3: Implement**.
-- [ ] **Step 4: Run** the step 2 commands and the creation browser tests; expect PASS.
-- [ ] **Step 5: Commit** `feat: show the points left and keep added points in the build`.
+- [x] **Step 2: Run** `npx vitest run tests/domain/creation-points.test.ts` and the browser spec; expect FAIL.
+- [x] **Step 3: Implement**.
+- [x] **Step 4: Run** the step 2 commands and the creation browser tests; expect PASS.
+- [x] **Step 5: Commit** `feat: show the points left and keep added points in the build`.
 
 ### Task 6: The messages button and panel
 
@@ -242,7 +242,7 @@ Spec "Added 2026-10-28: notifications".
   Promise<GameMessage[]>; loadNotifications(): Promise<GameNotification[]>; read(id: number): Promise<void>;
   seeNotifications(upToMs: number): Promise<void>; changeLook(): void })`.
 
-- [ ] **Step 1: Failing tests**: units for `badgeText` (0 → null, 2 → "2", 10 → "9+") and `isUnread`; browser: a visitor
+- [x] **Step 1: Failing tests**: units for `badgeText` (0 → null, 2 → "2", 10 → "9+") and `isUnread`; browser: a visitor
   sees no button; a player with 2 unread sees "Messages, 2 new" and a "2" badge; the panel lists newest first with tags,
   dates and previews; opening the look note sends `read-message` with its id and the badge drops after the owner re-read;
   Back and Close work, Escape closes and the focus returns to the button; a message text with `<b>x</b>` shows literally;
@@ -251,11 +251,11 @@ Spec "Added 2026-10-28: notifications".
   the panel has two tabs, "Messages" and "Notifications", each with its count; the badge is their sum; opening
   Notifications sends `see-notifications` with the newest shown time and its count clears after the owner re-read; a
   notification lists its lines (items by name, tier and rarity) and a "Level up!" line when there is one.
-- [ ] **Step 2: Run** `npx vitest run tests/features/messages.test.ts` and
+- [x] **Step 2: Run** `npx vitest run tests/features/messages.test.ts` and
   `npx playwright test --config node_modules/.cache/pw-claude.config.mjs tests/browser/messages.spec.ts`; expect FAIL.
-- [ ] **Step 3: Implement** as the spec's Layout and Accessibility decisions say.
-- [ ] **Step 4: Run** the step 2 commands; expect PASS.
-- [ ] **Step 5: Commit** `feat: show game messages beside the corner chip`.
+- [x] **Step 3: Implement** as the spec's Layout and Accessibility decisions say.
+- [x] **Step 4: Run** the step 2 commands; expect PASS.
+- [x] **Step 5: Commit** `feat: show game messages beside the corner chip`.
 
 ### Task 7: The change-look dialog
 
@@ -273,14 +273,14 @@ Spec "Added 2026-10-28: notifications".
 - Produces: `ChangeLookDialog({ owner, gateway, refresh, onClose }: { owner: OwnerState; gateway: GameGateway; refresh():
   Promise<void>; onClose(saved: boolean): void })`.
 
-- [ ] **Step 1: Failing tests**: Change look opens the dialog on the legacy look with Save disabled; choosing Female and
+- [x] **Step 1: Failing tests**: Change look opens the dialog on the legacy look with Save disabled; choosing Female and
   Ponytail enables Save, which sends exactly `{ body: 'female', hair: 'ponytail', … }`; after the reply the dialog closes
   and "Look saved. Aster wears it in camp now." is announced; Cancel and Escape close without a command; a refusal keeps the
   dialog open with the error; at 360 × 740 the dialog fits and its targets are 44 px; reduced motion shows a still preview.
-- [ ] **Step 2: Run** the browser spec; expect FAIL.
-- [ ] **Step 3: Implement**.
-- [ ] **Step 4: Run** the browser spec; expect PASS.
-- [ ] **Step 5: Commit** `feat: change a gladiator's look from the patch note`.
+- [x] **Step 2: Run** the browser spec; expect FAIL.
+- [x] **Step 3: Implement**.
+- [x] **Step 4: Run** the browser spec; expect PASS.
+- [x] **Step 5: Commit** `feat: change a gladiator's look from the patch note`.
 
 ### Task 7b: The currency is called gold
 
@@ -299,16 +299,16 @@ gold, and the Task 3b/6 notification lines say gold from the start.
 - Test: `tests/domain/currency-word.test.ts` (new); the browser specs that expect the old word (`market`, `inventory`,
   `management`, `planning`, `expedition`, `full-screen`).
 
-- [ ] **Step 1:** Write `tests/domain/currency-word.test.ts`: the amount formatter gives `'1,250 gold'` for 1250, and every
+- [x] **Step 1:** Write `tests/domain/currency-word.test.ts`: the amount formatter gives `'1,250 gold'` for 1250, and every
   text builder in `market-text`, `schedule-text`, `tournament-text`, `build-refusal` and `gear` (sample values) gives
   text that does `not.toMatch(/\bmoney\b/i)`. Run `npx vitest run tests/domain/currency-word.test.ts`: FAIL on
   "1,250 money".
-- [ ] **Step 2:** Change the words in the files above ("money" → "gold", "Available money" → "Available gold"). Afterwards
+- [x] **Step 2:** Change the words in the files above ("money" → "gold", "Available money" → "Available gold"). Afterwards
   `git grep -n -i -w money -- src/features` lists only identifiers, never text. The test passes.
-- [ ] **Step 3:** In `full-screen.spec.ts` (fixture preview) open every menu and assert
+- [x] **Step 3:** In `full-screen.spec.ts` (fixture preview) open every menu and assert
   `expect(page.locator('body')).not.toContainText(/\bmoney\b/i)`; change the specs that expected "money" to "gold". Run the
   private Playwright config: pass.
-- [ ] **Step 4:** Commit `feat: call the currency gold`.
+- [x] **Step 4:** Commit `feat: call the currency gold`.
 
 ### Task 7c: Bigger beds in the camp (Punchy's request)
 
@@ -320,35 +320,36 @@ than a tile. The credit line is in the spec's third patch note.
 **Files:** `assets/source/generators/props.mjs` (the bed frames), `assets/source/generators/maps.mjs` (placement),
 the regenerated camp atlas under `public/assets/camp/`, and `tests/assets` (station counts and footprints).
 
-- [ ] **Step 1:** Design first, Avi's mockup rule: draw the new bed next to a gladiator at the camp's zoom, and show Avi
+- [x] **Step 1:** Design first, Avi's mockup rule: draw the new bed next to a gladiator at the camp's zoom, and show Avi
   a before-and-after over a real camp screenshot. The bed is sized for a gladiator lying on it (a footprint of at least
   1 × 2 tiles, a pillow end and a blanket; the generator's own palette), and the beds still give 12 rest spots. Build
   only after Avi approves the look.
-- [ ] **Step 2:** Test first in `tests/assets`: 12 beds, each footprint as approved, no two overlapping, none on a path
+- [x] **Step 2:** Test first in `tests/assets`: 12 beds, each footprint as approved, no two overlapping, none on a path
   tile, and every bed reachable (the existing station-count and walkability tests extended). Run: FAIL on the old 1 × 1
   footprint.
-- [ ] **Step 3:** Change the generators, rebuild with `node assets/source/build-assets.mjs` (then `--check`, which covers
+- [x] **Step 3:** Change the generators, rebuild with `node assets/source/build-assets.mjs` (then `--check`, which covers
   provenance), refresh the review sheets with `node assets/source/tools/review-sheets.mjs`, and check the camp's
   50-gladiator layout test still places everyone. As this is the next art release, also delete the old atlas files kept
   from the last one (`assets/source/retained.mjs`, the runbook's open item).
-- [ ] **Step 4:** Look at it in the fixture preview at desktop and phone size next to the mockup Avi approved; commit
+- [x] **Step 4:** Look at it in the fixture preview at desktop and phone size next to the mockup Avi approved; commit
   `feat: bigger camp beds`.
 
 ### Task 8: Gate, review and release
 
-- [ ] **Step 1:** Start the local Edge serve; run the gate of record; expect 12/12 (DB-test rule; no build during the
+- [x] **Step 1:** Start the local Edge serve; run the gate of record; expect 12/12 (DB-test rule; no build during the
   browser run).
-- [ ] **Step 2:** A fresh reviewer checks the whole branch against the spec; fix what it finds; rerun the affected tests and
+- [x] **Step 2:** A fresh reviewer checks the whole branch against the spec; fix what it finds; rerun the affected tests and
   the gate.
-- [ ] **Step 3:** Hosted pre-checks (read-only, `db query --linked --agent no`): no open boundary; the count of pending
+- [x] **Step 3:** Hosted pre-checks (read-only, `db query --linked --agent no`): no open boundary; the count of pending
   builds that change class or lower an attribute (expect 0; any found apply as queued, note them).
-- [ ] **Step 4:** Avi's go in chat, with the three notes' text. Then `db push --dry-run` (exactly M25), `db push`, the access
+- [x] **Step 4:** Avi's go in chat, with the three notes' text. Then `db push --dry-run` (exactly M25), `db push`, the access
   audit and fingerprint; `functions deploy game-command --project-ref djkblzbnritgbmctsvob`; the `release` fast-forward;
   the deployed checks about 2 minutes after Pages is live.
-- [ ] **Step 5:** Post the launch note, then the look note, then the release note, with `private.post_message`; read back
+- [x] **Step 5:** Post the launch note, then the look note, then the release note, with `private.post_message`; read back
   3 visible messages and the inbox of one account (unread 3).
-- [ ] **Step 6:** Record the evidence in `release-evidence.md` and `deployment.md`, update HANDOFF; commit
-  `deploy: ship game messages and fixed builds`.
+- [x] **Step 6:** Record the evidence in `release-evidence.md` and `deployment.md`, update HANDOFF; commit
+  `deploy: ship game messages and fixed builds`. (Done 2026-10-29, also in `runbook.md` and this plan; committed as
+  `docs: record the game-messages release (M25, d996d59)`.)
 
 ### Task 9: A short clip of the new features for Avi's players
 
@@ -372,7 +373,13 @@ Avi, 2026-10-28: "for the expedition replay, make more to see, not only the batt
 he arrives back, and when he rests, so the player can watch it all." Not designed yet: before building, a short design and
 a clickable mockup over the real expedition scene (Avi's mockup rule), then its own tasks in this plan.
 
-## Status (2026-10-28)
+## Status (2026-10-29)
 
-Avi: "all I say insert to a plan for next patch." This plan is the **next patch**: nothing in it is built yet (Task 1 had
-not started). It waits for Avi's go; the video of the changes already live is separate work.
+Released 2026-10-29: Tasks 1 to 8 (1, 2, 3, 3b, 4, 5, 6, 7, 7b, 7c and 8) are done, and production runs `d996d59` with
+M01–M25 (Avi's go in chat: "mark old results as seen, go for production"). The evidence is in
+[release-evidence.md](../../operations/release-evidence.md), "Game messages, notifications, free look change, fixed builds,
+gold and bigger beds (M25), 2026-10-29". **Tasks 9 and 10 remain:** the players' clip, and the expedition replays (design and
+mockup first). Open: Avi's in-game journey (the attested deployed checks).
+
+Earlier (2026-10-28): Avi: "all I say insert to a plan for next patch." This plan was the **next patch**, built after his go
+("go build the next patch").

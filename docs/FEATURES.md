@@ -1,8 +1,8 @@
 # Cloudiator features: what to film
 
-Every player-visible feature, from the launch (1.0) to the planned 1.6, for whoever makes a reel or a video. The exact
+Every player-visible feature, from the launch (1.0) to the planned 1.7, for whoever makes a reel or a video. The exact
 words players see are in [CHANGELOG.md](CHANGELOG.md). This file says what each feature gives a player, where to find it on
-screen, and which video already showed it. Updated 2026-10-29, while 1.4 is being built.
+screen, and which video already showed it. Updated 2026-10-30, while 1.4 is being built.
 
 ## New since the last video
 
@@ -81,7 +81,7 @@ Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
 ## Features by area
 
-**Status:** Live (in the game now) · In 1.4 (not out yet) · Planned 1.5 / Planned 1.6 (designed, not built: don't film
+**Status:** Live (in the game now) · In 1.4 (not out yet) · Planned 1.5 / 1.6 / 1.7 (designed, not built: don't film
 them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
@@ -126,6 +126,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Stamina | Each activity costs stamina, a Rest refills it, and a part you cannot afford becomes a Rest. | 1.0 | Live | The ⚡ number beside your name; Schedule | — |
 | Plan the whole day | Plan all three parts and save once; the schedule says which part is running now. | 1.1 | Live | Schedule (test player) | Looks update |
 | A Rest shows its stamina | A Rest says how much stamina it gives back, in the Schedule and on My gladiator. | 1.4 | In 1.4 | Schedule, under a Rest (test player) | — |
+| Training limit | Training gives a point until your gladiator has 10 + 4 × its level in points; at that limit the Schedule says Training is full and until which level, and Notifications say a Training gave no point. | 1.6 | Planned 1.6 | Not built | — |
 
 ### Expeditions and dungeons
 
@@ -140,12 +141,13 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
 | Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | In 1.4 | The first seconds of any whole-trip replay | — |
 | Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | Still being built: the camp during your own trip (test player) | — |
-| Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.6 | Planned 1.6 | Not built | — |
-| Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.6 | Planned 1.6 | Not built | — |
-| Rooms, then the boss | A run is 3 rooms, then the boss, in one afternoon; health carries from fight to fight. | 1.6 | Planned 1.6 | Not built | — |
-| Dungeon rewards | Every fight your party wins pays you; the boss pays most and opens a chest; lose to the boss and you keep what the rooms paid. A run costs 40 stamina. | 1.6 | Planned 1.6 | Not built | — |
-| Watch your run | Watch the party walk the dungeon live, with the camp button and a replay of the whole run. | 1.6 | Planned 1.6 | Not built | — |
-| Off to the dungeon | The party leaves through the camp gate together, and the camp shows where it went ("In Wolf Den"). | 1.6 | Planned 1.6 | Not built | — |
+| Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | Planned 1.6 | Not built | — |
+| Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.7 | Planned 1.7 | Not built | — |
+| Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.7 | Planned 1.7 | Not built | — |
+| Rooms, then the boss | A run is 3 rooms, then the boss, in one afternoon; health carries from fight to fight. | 1.7 | Planned 1.7 | Not built | — |
+| Dungeon rewards | Every fight your party wins pays you; the boss pays most and opens a chest; lose to the boss and you keep what the rooms paid. A run costs 40 stamina. | 1.7 | Planned 1.7 | Not built | — |
+| Watch your run | Watch the party walk the dungeon live, with the camp button and a replay of the whole run. | 1.7 | Planned 1.7 | Not built | — |
+| Off to the dungeon | The party leaves through the camp gate together, and the camp shows where it went ("In Wolf Den"). | 1.7 | Planned 1.7 | Not built | — |
 
 ### Arena and tournaments
 
@@ -162,6 +164,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Planned 1.5 | Not built | — |
 | Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Planned 1.5 | Not built | — |
 | Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Planned 1.5 | Not built | — |
+| Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Planned 1.6 | Not built | — |
+| Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Planned 1.6 | Not built | — |
 
 ### Results and replays
 
@@ -178,8 +182,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Planned 1.5 | Not built | — |
 | No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Planned 1.5 | Not built | — |
 | Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Planned 1.5 | Not built | — |
-| Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.6 | Planned 1.6 | Not built | — |
-| Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.6 | Planned 1.6 | Not built | — |
+| Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.7 | Planned 1.7 | Not built | — |
+| Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.7 | Planned 1.7 | Not built | — |
 
 ### Market, shops and gold
 
@@ -189,6 +193,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Player market | Buy from and sell to other players at fixed prices; visitors can browse. | 1.0 | Live | Marketplace (the fixture camp has sample listings) | Concept trailer |
 | A fair market fee | A sale's fee is at least 1 gold and the lowest price is 2 gold; the sell form shows what you receive. | 1.1 | Live | Marketplace → Sell | Looks update |
 | Gold | Money is called gold everywhere; your amount is unchanged. | 1.3 | Live | Marketplace; My gladiator | Messages update |
+| Salvage at 4 gold | Salvage sells to merchants for 4 gold instead of 10 (a game message warns a day before). | 1.6 | Planned 1.6 | Not built | — |
+| A new economy | When 1.6 goes live everyone's gold is cut to a quarter; levels, items, points and renown stay, and shop prices do not change. | 1.6 | Planned 1.6 | Not visual: the patch note says it | — |
 
 ### Messages and notifications
 
@@ -209,7 +215,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | In 1.4 | Fixture camp (it always shows a banner) → Find | — |
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | In 1.4 | Fixture camp → Gladiators, the line on top | — |
 | Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | In 1.4 | Not built yet: it waits for Avi's look at its mockup (`.superpowers/design/2026-10-29-profile-card/`) | — |
-| Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.6 | Planned 1.6 | Being designed | — |
+| Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Planned 1.6 | Not built | — |
+| Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.7 | Planned 1.7 | Being designed | — |
 
 ### Settings and accessibility
 
@@ -234,7 +241,10 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 - A rotating schedule: a routine of several different days that repeats.
 - Undo a purchase you just made.
 - How many you already own, beside each market and shop item.
-- Friend parties and invites for dungeons (after 1.6).
+- Friend parties and invites for dungeons (after 1.7).
+- A renown skins shop: colours and dyes for clothes and weapons (1.7 or 1.8).
+- New gear with level and attribute requirements (a later patch).
+- The Deep: a weekly solo delve from level 15 (after the dungeons).
 - A summoner class, with spirits or animal spirits.
 - Respec as a paid option (the gray Respec button since 1.3.1).
 

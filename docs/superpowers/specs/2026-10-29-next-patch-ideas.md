@@ -93,3 +93,8 @@ More from Avi, 2026-10-29:
     that they are the test group." Earned titles (tournament wins, dungeon clears, expedition and Training counts, and more);
     a gladiator wears one, shown with its name; a unique founders' title for the first batch of players (the test group).
     Today only the season "champion" title exists (prestige, Task 21). Avi added: "Titles for gear collection as well" and "For amount of gold".
+
+27. **More NPCs, more guards (Avi, 2026-10-30).** "Add more npcs. More guards".
+28. **A bigger camp map.** "i want to make the map bigger".
+29. **Future facilities where the trees are.** "also where there are trees in the camp, in the future it will be new
+    facilities": the wooded parts of the camp are reserved as plots for new buildings later.

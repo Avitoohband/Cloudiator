@@ -31,6 +31,11 @@
 // a fade and the focus in it survive): CSS takes it out of the column into the top row when the chip leaves room for it beside
 // (`bannerPlace`, the chip's width measured, `data-stacked`); in a window where the column reaches over an open menu panel it waits for the
 // panel to close.
+//
+// Patch A item 3: the away button. While the player's own gladiator is on an expedition (and for the slot after it) a pill at the bottom of
+// the camp (beside ☰ on a phone) says where it is and opens the live view, or offers the whole trip once it is back (`AwayButton`,
+// `useAwayTrip`, `away-trip.ts`). Like the arrival banner it is not mounted while a scene covers the camp; unlike it, it is the player's own
+// (nothing is read for a visitor). The scene it opens gives the focus back to it when the camp returns.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
@@ -69,8 +74,10 @@ import { MenuSurface } from './MenuSurface';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
+import { AwayButton } from './AwayButton';
 import { SceneOverlay } from './SceneOverlay';
 import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
+import { useAwayTrip } from './useAwayTrip';
 import { useCampClicks } from './useCampClicks';
 import { useFocusRescue } from './useFocusRescue';
 import { useJoining } from './useJoining';
@@ -302,6 +309,16 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // A scene takes the screen: the profile card closes (the menus stay, to come back to).
   const sceneKey = scene ? `${scene.kind}|${scene.activityId}` : null;
   useEffect(() => { if (sceneKey) closeCard(false); }, [sceneKey, closeCard]);
+  // The away button (Patch A item 3): the player's own trip, from the owner state, the world, the owner's results and its timeline. It opens
+  // the scene `awayScene` names; when the scene closes, the focus goes back to the button (the scene's own opener is gone with it).
+  const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs });
+  const awayOpened = useRef(false);
+  const openFromAway = useCallback((view: SceneView) => { awayOpened.current = true; openScene(view); }, [openScene]);
+  useEffect(() => {
+    if (scene !== null || !awayOpened.current) return;
+    awayOpened.current = false;
+    document.querySelector<HTMLElement>('[data-away-main]')?.focus({ preventScroll: true });
+  }, [scene]);
   // Results open each kept result by its kind: an expedition its expedition, a bout its replay (13.7 review).
   const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind']) => {
     const view = sceneForResult(activityId, kind);
@@ -428,6 +445,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
           </div>}
         </div>
       </div>
+      {away.state && scene === null && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}

@@ -81,3 +81,9 @@ More from Avi, 2026-10-29:
 24. **A suggested spread per class in the attributes section**: "the attributes section should have suggestion for spread
     attributes for each class". Built in 1.4 (Patch A Task 5): the class card's "of every 10 points" split on My gladiator, and
     "Suggested for {Class}" with Undo in the Build panel.
+
+25. **Long endgame dungeons (Avi, 2026-10-29).** "a player could go the dungeon, it takes a whole day, even more than a day. he
+    going thorugh stages there. every few levels there is mini boss, and there is the dungeon final boss at the end which is
+    high level gladitor, or monster. big prises at the end, those dungeos are super hard and not for early game at all."
+    Different from 1.6's party dungeons (3 rooms and a boss in one afternoon): a multi-day delve of many stages, mini bosses
+    every few stages, a final boss, big prizes, endgame only. Goes into the PvE part of the economy pass, then its own design.

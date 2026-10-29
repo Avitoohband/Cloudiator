@@ -38,7 +38,7 @@ Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi appr
 - The Gladiators list shows how many players there are and where they are now.
 - On an expedition, a gladiator searches slowly around each spot instead of squatting.
 - The live view of an expedition shows LIVE with the minute and names each mark on its timeline: leaving camp, each fight and the way back. Watch from the start replays what you missed, never past now.
-- Replay a whole trip in about a minute and a quarter: leaving camp, the trail, the fights at their real speed, coming home and resting.
+- Replay a whole trip in about a minute and a quarter: out through the camp's gate, the trail, the fights at their real speed, home through the gate, and to bed in camp when a Rest follows.
 - A replay names and draws your gladiator from its first moment, not only from its first fight.
 
 ### Planned

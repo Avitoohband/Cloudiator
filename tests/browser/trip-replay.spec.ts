@@ -9,7 +9,8 @@ import { lookFor } from '../../src/game/actors';
 import { journeyMap, legPath } from '../../src/game/expedition-path';
 import { stageWalks, type JourneyPoint } from '../../src/game/expedition-stage';
 import { pathLength } from '../../src/game/paths';
-import { planTrip, tripPositionOf } from '../../src/game/trip-replay';
+import { planTrip, tripPositionOf, type TripChapterId } from '../../src/game/trip-replay';
+import { bedFor } from '../../src/game/trip-vignette';
 import type { MapData } from '../../src/game/assets';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { quietArrivals, touchLayout } from './shell-helpers';
@@ -29,6 +30,7 @@ const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const KEYS = Object.keys(EXPEDITION_FIXTURES) as ExpeditionFixtureKey[];
 const TIMELINES = Object.fromEntries(KEYS.map(key => [key, readJson(`tests/fixtures/expeditions/${key}.json`)])) as Record<ExpeditionFixtureKey, RevealedTimeline>;
 const MAPS = Object.fromEntries(['woodland', 'outpost', 'mountain'].map(id => [id, readJson(`public/assets/expeditions/${id}-map.json`)])) as Record<string, MapData>;
+const CAMP_MAP = readJson('public/assets/camp/map.json') as MapData;
 const SPEED: number = readJson('public/assets/manifest.json').actors.gladiator.walk.tilesPerSecond;
 const idOf = (key: ExpeditionFixtureKey) => EXPEDITION_FIXTURES[key].activityId;
 const startOf = (key: ExpeditionFixtureKey) => TIMELINES[key].stages[0].startedAtMs;
@@ -115,6 +117,16 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 const walk = (map: string) => {
   const journey = journeyMap(MAPS[map]);
   return (from: JourneyPoint, to: JourneyPoint) => (pathLength(legPath(journey, from, to)!) / SPEED) * 1000;
+};
+/** The Woodland replay as the view plans it once the trip is over (its next slot was a Rest, so it ends with Resting). */
+const woodlandTrip = () => planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: true, nowMs: startOf('woodland') + 200 * MIN })!;
+/** The map the viewport draws now (the expedition's, or the camp's in a camp chapter) and its camp scene (Task 10). */
+const drawn = (page: Page) => page.evaluate(() => ({ map: window.__cloudiatorExpeditionScene!.map(), camp: window.__cloudiatorExpeditionScene!.camp() }));
+const canvases = (page: Page) => page.evaluate(() => window.__cloudiatorExpeditionScene!.canvases());
+/** Brings the scene into view for a screenshot, its banner faded in. */
+const sceneInView = async (page: Page) => {
+  await page.getByRole('application', { name: /^Isometric view of the / }).scrollIntoViewIfNeeded();
+  await sceneBanner(page).evaluate(banner => Promise.all(banner.getAnimations().map(animation => animation.finished)).then(() => true));
 };
 
 test.describe('the whole-trip replay', () => {
@@ -603,6 +615,145 @@ test.describe('the whole-trip replay', () => {
     await bar(page).scrollIntoViewIfNeeded();
     await view.sceneReady(page);
     await shot(page, testInfo, 'phone-camp-catch-up-360');
+  });
+
+  // Patch A Task 10 (spec "Camp bookends"): the camp chapters are drawn on the camp's own map, at the gate (41, 22) and on the
+  // gladiator's bed, by a second scene in the viewport's own Phaser game (no new canvas, no new WebGL context).
+  test.describe('the camp bookends', () => {
+    test('draws the camp bookends in the same viewport', async ({ page }, testInfo) => {
+      const look = lookFor(null, ASTER.id, fights('woodland')[0].battleLog!.participants[0].equipmentSilhouettes).layers;
+      const plan = woodlandTrip();
+      const start = (id: TripChapterId) => plan.chapters.find(c => c.id === id)!.startMs;
+      // Over the camp, whose own game has a canvas already.
+      await view.open(page, view.camp('woodland', '&play=trip'));
+      await view.planned(page);
+      await view.sceneReady(page);
+      expect((await view.trip(page))!.totalMs).toBe(plan.totalMs);
+      const counts = new Set([await canvases(page)]);
+      // Leaving camp, paused at its start: the camp's map, the gladiator walking to the gate, in Aster's look.
+      await expect.poll(async () => (await drawn(page)).map, { timeout: 30_000 }).toBe('camp');
+      expect((await drawn(page)).camp).toMatchObject({ ready: true, kind: 'leaving', gladiator: { action: 'walk', alpha: 1, layers: look } });
+      await expect(sceneBanner(page)).toHaveText('Leaving camp');
+      await view.seek(page, 2_000);
+      await sceneInView(page);
+      await shot(page, testInfo, 'camp-leaving');
+      counts.add(await canvases(page));
+      // At the gate after the walk, then fading out there.
+      await view.seek(page, 4_200);
+      expect((await drawn(page)).camp!.gladiator).toMatchObject({ x: 41.5, y: 22.5, action: 'idle', alpha: 1 });
+      await view.seek(page, 4_750);
+      const fading = (await drawn(page)).camp!.gladiator!.alpha;
+      expect(fading).toBeGreaterThan(0);
+      expect(fading).toBeLessThan(1);
+      // On the trail: the expedition's map, its gladiator drawn.
+      await view.seek(page, start('trail') + 1_000);
+      expect((await view.trip(page))!.chapter).toBe('trail');
+      await expect.poll(async () => (await drawn(page)).map).toBe('woodland');
+      await expect.poll(async () => (await view.scene(page)).gladiator?.visible).toBe(true);
+      counts.add(await canvases(page));
+      await view.seek(page, start('fight-2') + 1_000);
+      await expect.poll(async () => (await drawn(page)).map).toBe('woodland');
+      // Back in camp: fading in at the gate, then walking in.
+      await view.seek(page, start('back') + 250);
+      await expect.poll(async () => (await drawn(page)).camp?.kind).toBe('back');
+      expect((await drawn(page)).map).toBe('camp');
+      const arriving = (await drawn(page)).camp!.gladiator!;
+      expect(arriving).toMatchObject({ x: 41.5, y: 22.5 });
+      expect(arriving.alpha).toBeGreaterThan(0);
+      expect(arriving.alpha).toBeLessThan(1);
+      await expect(sceneBanner(page)).toHaveText('Back in camp');
+      await view.seek(page, start('back') + 2_500);
+      const walking = (await drawn(page)).camp!.gladiator!;
+      expect(walking).toMatchObject({ action: 'walk', alpha: 1 });
+      expect(walking.x).toBeLessThan(41.5);
+      await sceneInView(page);
+      await shot(page, testInfo, 'camp-back');
+      counts.add(await canvases(page));
+      // The end of Resting: asleep on its bed of the rest zone.
+      await view.seek(page, plan.totalMs);
+      await expect.poll(async () => (await drawn(page)).camp?.kind).toBe('resting');
+      const bed = bedFor(CAMP_MAP, ASTER.id);
+      expect((await drawn(page)).camp!.gladiator).toMatchObject({ action: 'sleep', x: bed.x + 0.5, y: bed.y + 0.5, alpha: 1, layers: look });
+      await expect(sceneBanner(page)).toHaveText(/^Resting/);
+      await sceneInView(page);
+      await shot(page, testInfo, 'camp-resting');
+      counts.add(await canvases(page));
+      // And back to the trail's end on the expedition's map.
+      await view.seek(page, start('heading-home') + 1_000);
+      await expect.poll(async () => (await drawn(page)).map).toBe('woodland');
+      counts.add(await canvases(page));
+      expect([...counts]).toHaveLength(1);
+    });
+
+    test('keeps the Follow toggle in the camp chapters, and their camera controls work', async ({ page }) => {
+      // Follow turned off in the live view before the replay is asked for: the camp's camera starts free too.
+      await view.open(page, view.page('woodland'));
+      await view.sceneReady(page);
+      const follow = page.getByRole('button', { name: 'Follow the gladiator', exact: true });
+      await follow.click();
+      await expect(follow).toHaveAttribute('aria-pressed', 'false');
+      await view.planned(page);
+      await watchWholeTrip(page).click();
+      await expect.poll(async () => (await drawn(page)).map, { timeout: 30_000 }).toBe('camp');
+      expect((await drawn(page)).camp).toMatchObject({ kind: 'leaving', following: false });
+      await follow.click();
+      await expect(follow).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(async () => (await drawn(page)).camp?.following).toBe(true);
+      // Zoom in acts on the camp's camera while it runs, and Reset takes it back.
+      const zoom = async () => (await drawn(page)).camp!.zoom;
+      const opening = await zoom();
+      await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+      await expect.poll(zoom).toBeGreaterThan(opening);
+      await page.getByRole('button', { name: 'Reset zoom', exact: true }).click();
+      await expect.poll(zoom).toBe(opening);
+    });
+
+    test.describe('with reduced motion', () => {
+      test.use({ reducedMotion: 'reduce' });
+
+      test('shows the walks with no fade at the gate', async ({ page }) => {
+        const plan = woodlandTrip();
+        const back = plan.chapters.find(c => c.id === 'back')!.startMs;
+        await view.open(page, view.page('woodland', '&play=trip'));
+        await view.planned(page);
+        await view.sceneReady(page);
+        await expect.poll(async () => (await drawn(page)).map, { timeout: 30_000 }).toBe('camp');
+        const seen: { at: number; kind: string | null; alpha: number; x: number }[] = [];
+        for (const at of [0, 1_000, 3_000, 4_400, 4_600, 4_750, 4_950, back, back + 100, back + 250, back + 400, back + 2_000, plan.totalMs - 3_000, plan.totalMs]) {
+          await view.seek(page, at);
+          const { camp } = await drawn(page);
+          seen.push({ at, kind: camp?.kind ?? null, alpha: camp?.gladiator?.alpha ?? Number.NaN, x: camp?.gladiator?.x ?? Number.NaN });
+        }
+        expect(seen.filter(s => s.alpha !== 0 && s.alpha !== 1), 'alphas between 0 and 1').toEqual([]);
+        // In at once at the gate, gone at once there when the fade would start; the walks still move.
+        expect(seen.find(s => s.at === back + 100)).toMatchObject({ kind: 'back', alpha: 1 });
+        expect(seen.find(s => s.at === 4_750)).toMatchObject({ kind: 'leaving', alpha: 0 });
+        expect(seen.find(s => s.at === 1_000)!.x).toBeLessThan(seen.find(s => s.at === 3_000)!.x);
+        expect(seen.find(s => s.at === back + 2_000)!.x).toBeLessThan(41.5);
+      });
+    });
+
+    test('phone: the camp bookends at 360 × 740', async ({ page }, testInfo) => {
+      const plan = woodlandTrip();
+      const back = plan.chapters.find(c => c.id === 'back')!.startMs;
+      await page.setViewportSize({ width: 360, height: 740 });
+      await view.open(page, view.camp('woodland', '&play=trip'));
+      await view.planned(page);
+      await view.sceneReady(page);
+      await expect.poll(async () => (await drawn(page)).map, { timeout: 30_000 }).toBe('camp');
+      for (const [at, kind, banner, name] of [
+        [2_000, 'leaving', 'Leaving camp', 'phone-camp-leaving-360'],
+        [back + 2_500, 'back', 'Back in camp', 'phone-camp-back-360'],
+        [plan.totalMs, 'resting', 'Resting', 'phone-camp-resting-360'],
+      ] as const) {
+        await view.seek(page, at);
+        await expect.poll(async () => (await drawn(page)).camp?.kind).toBe(kind);
+        await expect(sceneBanner(page)).toHaveText(new RegExp(`^${banner}`));
+        expect(await noHorizontalScroll(page)).toBe(true);
+        await sceneInView(page);
+        await shot(page, testInfo, name);
+      }
+    });
   });
 
   test('lays the chapters out whole on a desktop, from a narrow window to a wide one', async ({ page }, testInfo) => {

@@ -11,6 +11,8 @@ ignored by git, so **this spec carries the approved copy word for word**) and an
 The mockups are the approved UI: where this spec quotes copy, layout or behaviour, it is the mockup's. Decisions are marked
 **Avi**, **Claude's call** (stated in the design draft or the mockup notes and approved with them) or **Planner's call**
 (made while writing this spec, for a case the mockups do not show; Avi can overrule any of them).
+An **Implementer's call** is the same kind of decision, made while building a task (its report names it), for a case neither the mockups nor
+this spec show.
 
 ## Intent
 
@@ -247,6 +249,8 @@ whose public data joins M26; see "A richer profile card", after it.)
 | "players" wording; everyone counts | Claude's call |
 | Banner hidden under a scene; newest first; welcome before others; newcomer listed once | Planner's call |
 | Away sub-line from minute 60 or after a defeat; defeat sub-line "No rewards · all gear kept"; close per activity | Planner's call |
+| Phone words of the away button's back state: "{name} · back from {expedition}", "▶ Replay", after a defeat "{name} · back after a defeat" (the mockup shows the running state only) | Implementer's call |
+| The away button moves to the right of an open desktop menu panel (left edge 458 px, as the arrival banner's slot keeps clear) and hides below 830 px while a panel is open; on a phone it also hides under a profile card | Implementer's call |
 | Mark wording for lost, in-progress, unreplayable and unfought fights; Watch the whole trip on a finished live view | Planner's call |
 | Walks at ×8 inside the ×150 budget; Result card shown from "Back in camp"; defeat phase text | Planner's call |
 | No-number line on My gladiator; tournament wording kept apart from its time parts | Planner's call |

@@ -41,10 +41,10 @@ Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi appr
 - The live view of an expedition shows LIVE with the minute and names each mark on its timeline: leaving camp, each fight and the way back. Watch from the start replays what you missed, never past now.
 - Replay a whole trip in about a minute and a quarter: out through the camp's gate, the trail, the fights at their real speed, home through the gate, and to bed in camp when a Rest follows.
 - A replay names and draws your gladiator from its first moment, not only from its first fight.
+- While your gladiator is away, a button on the camp shows where it is and opens the live view. Once it is back, the same button offers the whole trip with your own result.
 
 ### Planned
 
-- Watch your expedition: while your gladiator is away, a button at the bottom of the camp shows where it is and opens the live view.
 - Patch numbers: the menu under your name shows the patch you are playing, each patch note shows its number, and Patch history lists what every patch added.
 - When a new patch is out, an open game says so, and Reload brings it in.
 - Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp.

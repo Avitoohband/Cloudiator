@@ -71,3 +71,13 @@ Gear feedback from Avi, 2026-10-29 (collected; a gear design pass follows, align
 19. **More gear**, "much more clothes, and weapons": "we need to add more gear".
 20. **Attribute requirements**: "certain gear demands certain attributes to wear".
 21. **New weapons**: "also new weapons".
+
+More from Avi, 2026-10-29:
+
+22. **A respec offered in a message**, with an explanation of which attributes suit which class, coming with a video: "respec
+    option for attributes in messages with explanation about which attrubutes good for which class. it will come with video."
+    (Like 1.3's free look change from a patch note. It fits the gear-requirement change, ideas 19-21.)
+23. **New classes ahead, maybe**: "maybe new classes ahead" (summoners are already noted as a future class).
+24. **A suggested spread per class in the attributes section**: "the attributes section should have suggestion for spread
+    attributes for each class". Built in 1.4 (Patch A Task 5): the class card's "of every 10 points" split on My gladiator, and
+    "Suggested for {Class}" with Undo in the Build panel.

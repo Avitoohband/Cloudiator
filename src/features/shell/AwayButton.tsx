@@ -5,9 +5,9 @@
 // once it is back, the same pill offers the whole trip with the owner's own result and a × that closes it for that trip. The words, the
 // scene it opens and the progress are `away-trip.ts`'s; this draws them. The main control is one button holding all of the text, so a
 // screen reader reads it as one sentence and the pill is one target; the × is a second button beside it (a button cannot hold a button).
-// Both are hidden while a menu sheet or the touch icon row covers the bottom (CSS, `data-sheet`, `data-rail`), and the shell does not
+// Both are hidden while a menu sheet, the touch icon row or a touch profile card covers the bottom (CSS, `data-sheet`, `data-rail`, `data-card`), and the shell does not
 // mount the pill while a scene covers the camp. The icon is the state's: a new state names its own (the record is exhaustive).
-import { useSyncExternalStore } from 'react';
+import { Fragment, useSyncExternalStore } from 'react';
 import { COMPACT_QUERY } from './rail-reveal';
 import { awayProgress, awayScene, awayText, type AwayState } from './away-trip';
 import type { SceneView } from './scene-url';
@@ -43,7 +43,7 @@ export function AwayButton({ state, onOpen, onClose }: {
         {!compact && <span className={styles.awayIcon} aria-hidden="true">{ICON[state.kind]}</span>}
         <span className={styles.awayText}>
           <span className={styles.awayTitle}><b>{text.name}</b>{text.title}</span>
-          <span className={styles.awaySub}>{text.sub}</span>
+          <span className={styles.awaySub}>{text.sub.split(' · ').map((part, i) => <Fragment key={i}>{i > 0 && ' · '}<span className={styles.awayPart}>{part}</span></Fragment>)}</span>
           {progress !== null && <span className={styles.awayMeter} aria-hidden="true"><i style={{ width: `${Math.round(progress * 1000) / 10}%` }} /></span>}
         </span>
         <span className={styles.awayGo}><span aria-hidden="true">{glyph} </span>{label.join(' ')}</span>

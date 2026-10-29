@@ -1,6 +1,6 @@
-import { mkdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type Locator, type Page, type TestInfo } from './fixtures';
+import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { OwnerState, PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS, type ExpeditionFixtureKey } from '../fixtures/expedition-ids';
@@ -64,9 +64,41 @@ const boxOf = async (locator: Locator): Promise<Box> => (await locator.boundingB
 /** Whether two boxes share no area (half a pixel of rounding allowed). */
 const clear = (a: Box, b: Box) => a.x >= b.x + b.width - 0.5 || b.x >= a.x + a.width - 0.5 || a.y >= b.y + b.height - 0.5 || b.y >= a.y + a.height - 0.5;
 const burger = (page: Page) => page.getByRole('button', { name: 'Menus', exact: true });
-const clockOf = (page: Page) => page.evaluate(() => window.__cloudiatorShell!.clock.now());
 /** Holds the shared display clock at `ms`, which the button (and a scene opened over the camp) show. */
 const hold = (page: Page, ms: number) => page.evaluate(at => window.__cloudiatorShell!.clock.freeze(at), ms);
+
+/**
+ * How many lines the first occurrence of `needle` in the button's text is drawn on (a range over the text, which may run across the
+ * spans holding it): 1 when it is kept whole, 2 when a line break falls inside it.
+ */
+const linesOf = (scope: Locator, needle: string) => scope.evaluate((root, text) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let all = '';
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) { nodes.push(node as Text); all += (node as Text).data; }
+  const at = all.indexOf(text);
+  if (at < 0) throw new Error(`"${text}" is not in "${all}"`);
+  const locate = (offset: number): [Text, number] => {
+    let seen = 0;
+    for (const node of nodes) { if (offset <= seen + node.data.length) return [node, offset - seen]; seen += node.data.length; }
+    throw new Error('offset out of range');
+  };
+  const range = document.createRange();
+  range.setStart(...locate(at));
+  range.setEnd(...locate(at + text.length));
+  return new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => Math.round(rect.top))).size;
+}, needle);
+
+/** A camp click on `id`'s body, centred at zoom 2 (the click a player makes on a gladiator), which opens its profile card. */
+async function clickInCamp(page: Page, id: string) {
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+  const actor = (await page.evaluate(() => window.__cloudiatorCamp!.state()!)).actors.find(a => a.id === id)!;
+  await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: actor.x, y: actor.y });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
+  const at = (await page.evaluate(x => window.__cloudiatorCamp!.screenOf(x), id))!;
+  const box = (await page.locator('canvas').boundingBox())!;
+  await page.mouse.click(box.x + at.x, box.y + at.y - 16);
+}
 
 /** Opens the camp as the signed-in owner, with the display clock held at `at`. */
 async function openCamp(page: Page, at: number, url = '/game/') {
@@ -76,23 +108,10 @@ async function openCamp(page: Page, at: number, url = '/game/') {
   await hold(page, at);
 }
 
-/** Saves an evidence screenshot in the test's output folder, and in AWAY_SHOTS when that is set (Task 11's final-code shots). */
-async function shot(page: Page, testInfo: TestInfo, name: string) {
-  // The camp's art loads after its first frame: the shot shows it, not the placeholder.
-  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
-  await page.waitForTimeout(400);
-  const file = `${name}-${testInfo.project.name}.png`;
-  await page.screenshot({ path: testInfo.outputPath(file) });
-  if (process.env.AWAY_SHOTS) {
-    mkdirSync(process.env.AWAY_SHOTS, { recursive: true });
-    await page.screenshot({ path: `${process.env.AWAY_SHOTS}/${file}` });
-  }
-}
-
 test.describe('the away button on the camp', () => {
   test.skip(production, 'The away button checks use the development-only intercepted Supabase transport and fixture timelines.');
 
-  test('shows where my gladiator is and opens the live view', async ({ page, context }, testInfo) => {
+  test('shows where my gladiator is and opens the live view', async ({ page, context }) => {
     const start = startOf('woodland');
     await live(context, { key: 'woodland', state: 'running', at: start + 30 * MIN });
     await watchFocus(page);
@@ -111,7 +130,6 @@ test.describe('the away button on the camp', () => {
     await expect(dismiss(page)).toHaveCount(0);
     expect(await contrastIssues(awayButton(page))).toEqual([]);
     await expectNamedControls(awayButton(page), 'the away button');
-    await shot(page, testInfo, 'away-running');
 
     // Watch live opens the live view over the camp (no `play`), at the held minute.
     await awayMain(page).click();
@@ -128,7 +146,7 @@ test.describe('the away button on the camp', () => {
     expect(await focusDrops(page)).toEqual([]);
   });
 
-  test('offers the whole trip once back, with my own result, until I close it', async ({ page, context }, testInfo) => {
+  test('offers the whole trip once back, with my own result, until I close it', async ({ page, context }) => {
     const start = startOf('woodland');
     const at = start + SLOT_MS + 10 * MIN;
     await live(context, { key: 'woodland', state: 'after', at });
@@ -146,7 +164,6 @@ test.describe('the away button on the camp', () => {
     await expect(awayButton(page).locator('i')).toHaveCount(0);
     expect(await contrastIssues(awayButton(page))).toEqual([]);
     await expectNamedControls(awayButton(page), 'the away button, back');
-    await shot(page, testInfo, 'away-back');
 
     // The whole trip: the replay at its first chapter.
     await awayMain(page).click();
@@ -171,7 +188,7 @@ test.describe('the away button on the camp', () => {
     expect(errors).toEqual([]);
   });
 
-  test('shows a lost trip with no rewards, and the result still processing while it is', async ({ page, context }, testInfo) => {
+  test('shows a lost trip with no rewards, and the result still processing while it is', async ({ page, context }) => {
     const start = startOf('outpost');
     // The Outpost trip is over (minute 85) and settled in the slot after it; the owner's result: a defeat, nothing earned, all gear kept.
     const timeline = TIMELINES.outpost;
@@ -186,7 +203,6 @@ test.describe('the away button on the camp', () => {
     const compact = await touchLayout(page);
     await expect(awayMain(page)).toContainText(compact ? 'Aster · back after a defeat' : 'Aster is back after a defeat on the Ruined Outpost');
     await expect(awayMain(page)).toContainText('No rewards · all gear kept');
-    await shot(page, testInfo, 'away-lost');
 
     // The trip is over and still the owner's current activity, with no result yet: processing.
     transport.setOwner(ownerOf('outpost', 'running'));
@@ -197,7 +213,6 @@ test.describe('the away button on the camp', () => {
     await expect(awayMain(page)).toContainText('Processing results…', { timeout: 15_000 });
     await expect(awayMain(page)).toContainText(compact ? 'Aster · back from Ruined Outpost' : 'Aster is back from the Ruined Outpost');
     await expect(awayMain(page)).not.toContainText('No rewards');
-    await shot(page, testInfo, 'away-processing');
   });
 
   test('says the next fight is off after a revealed defeat, and reads the owner’s timeline once after each fight’s minute', async ({ page, context }) => {
@@ -312,7 +327,7 @@ test.describe('the away button on the camp', () => {
     await expect(awayButton(page)).toHaveCount(0);
   });
 
-  test('shows nothing to a visitor, nor while a scene is open', async ({ page, context }) => {
+  test('shows nothing to a visitor', async ({ page, context }) => {
     const start = startOf('woodland');
     // A visitor's live camp, with Aster away: public reads only, and no button.
     const visitor = await routeLiveReads(context, { world: worldOf('woodland', 'running', start + 30 * MIN), serverNowMs: () => start + 30 * MIN });
@@ -341,7 +356,7 @@ test.describe('the away button on the camp', () => {
     await expect(awayButton(page)).toHaveCount(0);
   });
 
-  test('desktop: bottom centre, and beside an open menu panel, never under it', async ({ page, context }, testInfo) => {
+  test('desktop: bottom centre, and beside an open menu panel, never under it', async ({ page, context }) => {
     const start = startOf('woodland');
     await live(context, { key: 'woodland', state: 'running', at: start + 30 * MIN });
     await page.setViewportSize({ width: 1280, height: 720 });
@@ -359,7 +374,6 @@ test.describe('the away button on the camp', () => {
     const beside = await boxOf(awayButton(page));
     expect(clear(beside, await boxOf(panel))).toBe(true);
     expect(beside.x).toBeGreaterThanOrEqual((await boxOf(panel)).x + (await boxOf(panel)).width);
-    await shot(page, testInfo, 'away-desktop-panel');
     // In a window too narrow to hold it beside the panel, it waits for the panel to close.
     await page.setViewportSize({ width: 800, height: 720 });
     await expect(awayButton(page)).toBeHidden();
@@ -370,7 +384,7 @@ test.describe('the away button on the camp', () => {
     expect(narrow.x + narrow.width).toBeLessThanOrEqual(800 - 11.5);
   });
 
-  test('phone: beside ☰, hidden under a sheet or the icon row', async ({ page, context }, testInfo) => {
+  test('phone: beside ☰, hidden under a sheet or the icon row', async ({ page, context }) => {
     const start = startOf('woodland');
     const ursa: PublicActor = { ...worldFixture.actors[0], gladiatorId: 'a0000000-0000-4000-8000-000000000001', name: 'Ursa', classId: 'guardian', location: 'orientation',
       activityId: null, activityStatus: 'active', startsAtMs: start + 28 * MIN, endsAtMs: start + 28 * MIN + SLOT_MS };
@@ -393,7 +407,6 @@ test.describe('the away button on the camp', () => {
     await expect(awayMain(page)).toContainText('Aster · Woodland Path');
     await expect(awayMain(page)).toContainText('Minute 30 of 80');
     await expect(awayMain(page)).toContainText('● Live');
-    await shot(page, testInfo, 'away-phone-390');
 
     // Under the banner, the notice, the chip and its open menu: no overlap, at 360 × 740.
     await page.setViewportSize({ width: 360, height: 740 });
@@ -411,7 +424,6 @@ test.describe('the away button on the camp', () => {
     const menuOfChip = await openChipMenu(page);
     expect(clear(small, await boxOf(menuOfChip)), 'no overlap with the chip’s open menu').toBe(true);
     expect(await noHorizontalScroll(page)).toBe(true);
-    await shot(page, testInfo, 'away-phone-360');
     await page.keyboard.press('Escape');
 
     // Under a sheet it is hidden (it is not in the way of the sheet). Closing the sheet leaves the icon row, which takes its place: the
@@ -432,7 +444,7 @@ test.describe('the away button on the camp', () => {
     expect(await noHorizontalScroll(page)).toBe(true);
   });
 
-  test('phone: the back state and a long name fit 360 × 740 beside ☰', async ({ page, context }, testInfo) => {
+  test('phone: the back state and a long name fit 360 × 740 beside ☰', async ({ page, context }) => {
     const start = startOf('woodland');
     const at = start + SLOT_MS + 10 * MIN;
     await live(context, { key: 'woodland', state: 'after', at, over: { name: 'Quintus Maximilianus' } });
@@ -453,6 +465,62 @@ test.describe('the away button on the camp', () => {
     expect((await boxOf(dismiss(page))).width).toBeGreaterThanOrEqual(43.5);
     expect((await boxOf(dismiss(page))).height).toBeGreaterThanOrEqual(43.5);
     expect((await boxOf(awayMain(page))).height).toBeGreaterThanOrEqual(43.5);
-    await shot(page, testInfo, 'away-phone-back-360');
+    // Each part of the line under the name stays whole: "+100 XP" is not split between two lines.
+    for (const part of ['Success', '+20 gold', '+100 XP']) expect(await linesOf(awayButton(page), part), `"${part}" on one line`).toBe(1);
+  });
+
+  test('phone: hidden while a profile card covers the bottom, and back when it closes', async ({ page, context }) => {
+    const start = startOf('woodland');
+    const at = start + SLOT_MS + 10 * MIN;
+    // The worst case for the card's sheet: the tallest pill (the back state with a 20-character name), and a gladiator in camp to click.
+    const corvina: PublicActor = { ...worldFixture.actors[0], gladiatorId: 'a0000000-0000-4000-8000-0000000000c1', name: 'Corvina', classId: 'duelist', location: 'camp',
+      activityId: null, activityStatus: 'active', startsAtMs: at - 4_000_000, endsAtMs: at + 800_000, visibleStage: null, resting: false };
+    await live(context, { key: 'woodland', state: 'after', at, extra: [corvina], over: { name: 'Quintus Maximilianus' } });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Quintus Maximilianus');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true, null, { timeout: 45_000 });
+    await hold(page, at);
+    await expect(awayButton(page)).toBeVisible();
+    // A camp click on Corvina opens her card as a sheet above ☰ (bottom 76 px), which would cover the top of the pill: the pill gives way.
+    await clickInCamp(page, corvina.gladiatorId);
+    const card = page.getByRole('dialog', { name: 'Profile: Corvina', exact: true });
+    await expect(card).toBeVisible();
+    expect((await boxOf(card)).y + (await boxOf(card)).height).toBeGreaterThan(740 - 76 - 1);
+    await expect(awayButton(page)).toBeHidden();
+    expect(await noHorizontalScroll(page)).toBe(true);
+    // Closing the card brings it back.
+    await card.getByRole('button', { name: 'Close profile' }).click();
+    await expect(card).toHaveCount(0);
+    await expect(awayButton(page)).toBeVisible();
+  });
+
+  test('desktop: at 830 px the back state fits beside an open panel with its ×, and below that it waits', async ({ page, context }) => {
+    const start = startOf('woodland');
+    const at = start + SLOT_MS + 10 * MIN;
+    await live(context, { key: 'woodland', state: 'after', at });
+    await page.setViewportSize({ width: 830, height: 720 });
+    await openCamp(page, at);
+    test.skip(await touchLayout(page), 'The touch layout has its own placement (the phone tests).');
+    const panel = await openMenu(page, 'My gladiator');
+    await expect(awayButton(page)).toBeVisible();
+    // The panel takes the left 458 px (its 66 px start, its 380 px width, and 12 px of air): the pill is what is left, 360 px with 12 px of margin.
+    const away = await boxOf(awayButton(page)), beside = await boxOf(panel);
+    expect(Math.abs(away.x - 458), 'its left edge').toBeLessThanOrEqual(1);
+    expect(Math.abs(away.width - 360), 'its width').toBeLessThanOrEqual(1);
+    expect(Math.abs(away.x + away.width - (830 - 12)), 'its right edge, 12 px from the window').toBeLessThanOrEqual(1);
+    expect(clear(away, beside)).toBe(true);
+    // Everything in it fits: the × inside the pill, the text and the action not cut off.
+    const cross = await boxOf(dismiss(page)), main = await boxOf(awayMain(page));
+    expect(cross.x).toBeGreaterThanOrEqual(away.x - 0.5);
+    expect(cross.x + cross.width).toBeLessThanOrEqual(away.x + away.width + 0.5);
+    expect(main.x + main.width).toBeLessThanOrEqual(cross.x + 0.5);
+    expect(await awayMain(page).evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    // One pixel less and there is no room beside the panel: it waits for the panel to close.
+    await page.setViewportSize({ width: 829, height: 720 });
+    await expect(awayButton(page)).toBeHidden();
+    await page.setViewportSize({ width: 830, height: 720 });
+    await expect(awayButton(page)).toBeVisible();
   });
 });

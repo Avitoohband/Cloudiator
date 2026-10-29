@@ -634,6 +634,11 @@
   font-size: 12px;
 }
 
+/* A part of the line under the name ("+100 XP") is kept whole: the line breaks at the "·" between parts. */
+.awayPart {
+  white-space: nowrap;
+}
+
 .awayMeter {
   display: block;
   height: 4px;
@@ -997,8 +1002,8 @@
 
 /*
  * The away button on a phone (the mockup): beside ☰ (its left 70 px, as the icon row's, its right 12 px, its bottom as ☰'s), without the
- * icon, with the phone's shorter words; the touch targets are 44 px. A sheet or the revealed icon row takes its place, so it is hidden
- * under them (as ☰ and the row are under a sheet).
+ * icon, with the phone's shorter words; the touch targets are 44 px. A sheet, the revealed icon row or a profile card takes its place, so
+ * it is hidden under them (as ☰ and the row are under a sheet).
  */
 @media (hover: none), (max-width: 480px) {
   .away {
@@ -1036,8 +1041,10 @@
     background: none;
   }
 
+  /* The profile card is a sheet above ☰ here (bottom 76 px, z-index 11): it would cover the top of the pill, so the pill waits. */
   .shell[data-sheet='open'] .away,
-  .shell[data-rail='shown'] .away {
+  .shell[data-rail='shown'] .away,
+  .shell[data-card='open'] .away {
     visibility: hidden;
   }
 }

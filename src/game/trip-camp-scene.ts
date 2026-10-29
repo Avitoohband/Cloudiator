@@ -5,8 +5,8 @@
 // ExpeditionViewport.tsx), which adds it when the replay starts (its atlases load then) and runs one of the two at a time, so the
 // replay never opens a second WebGL context. The map and the camera are the expedition's (src/game/map-layer.ts): the light of the
 // chapter's time of day (the vignette's `displayMs`), props that fade while they hide the gladiator, the viewport's zoom, pan and
-// Follow controls. Each chapter opens with the camera on the gladiator, Follow or not (the gate and the beds are about 29 tiles
-// apart); after that, only a following camera moves with it.
+// Follow controls. A following camera keeps the gladiator in the middle; with Follow off, each chapter still opens in view (the gate
+// and the beds are about 29 tiles apart): the camera is placed once on the middle of the chapter's walk.
 // With reduced motion there is no fade at the gate and the props and torches hold still; the walks are still shown.
 import type * as PhaserNS from 'phaser';
 import type { AssetManifest, MapData } from './assets';
@@ -30,9 +30,12 @@ export const TRIP_CAMP_SCENE = 'trip-camp';
 export type TripCampDebug = {
   /** Drawn and able to draw (its art loaded, never failed). */
   ready: boolean;
+  /** It cannot draw (its art did not load, or it threw): never shown. Not ready and not failed: still loading. */
+  failed: boolean;
   /** The camp chapter drawn last frame (null: none, the scene draws no gladiator). */
   kind: TripVignette['kind'] | null;
-  gladiator: { x: number; y: number; action: string; alpha: number; layers: string[] } | null;
+  /** `nameLift`: how far the name's bottom edge sits over the gladiator's feet (screen px). */
+  gladiator: { x: number; y: number; action: string; alpha: number; layers: string[]; nameLift: number } | null;
   /** The camera: whether it follows the gladiator (the viewport's Follow toggle), its zoom, and the world rectangle it shows. */
   following: boolean;
   zoom: number;
@@ -66,6 +69,8 @@ const BG = 0x1c3f24;
 const DEFAULT_ZOOM = ZOOM_STEP ** 2;
 /** The name sits this far over the gladiator's feet, as in the expedition scene. */
 const NAME_LIFT = 46;
+/** Lying down, the body reaches 16 px over the feet: the name sits just over it, not over the bed behind. */
+const SLEEP_NAME_LIFT = 20;
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -186,9 +191,11 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
         if (frames.join('|') !== last.frames) { hero.layers.forEach((l, i) => l.sprite.setFrame(frames[i])); last.frames = frames.join('|'); }
         if (flip !== last.flip || hero.container.scaleX !== (flip ? -1 : 1)) { hero.container.setScale(flip ? -1 : 1, 1); last.flip = flip; }
         hero.container.setPosition(feet.x, feet.y).setDepth(feet.y);
-        hero.label.setText(look.name).setPosition(feet.x, feet.y - NAME_LIFT);
-        // A new chapter (or a wake) opens on the gladiator, Follow or not; then only a following camera keeps up.
-        if (snap || camera.following()) camera.follow(feet, snap);
+        hero.label.setText(look.name).setPosition(feet.x, feet.y - (pose.action === 'sleep' ? SLEEP_NAME_LIFT : NAME_LIFT));
+        // A following camera keeps the gladiator in the middle. A free one is placed once, when a chapter opens (or the scene
+        // wakes), on the middle of the chapter's whole walk, so the walk stays in view from its start to its end.
+        if (camera.following()) camera.follow(feet, snap);
+        else if (snap) camera.follow(walkMiddle(vignette), true);
         last.snap = false;
       }
       // Props fade only for a gladiator in view.
@@ -207,6 +214,12 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
     if (disposed) return;
     disposed = true;
     camera.dispose();
+  }
+  /** The screen point halfway along the chapter's walk: between where the gladiator is at its start and at its end. */
+  function walkMiddle(vignette: TripVignette) {
+    const from = vignettePose(map, { ...vignette, elapsedMs: 0 }, look.key, speed);
+    const to = vignettePose(map, { ...vignette, elapsedMs: vignette.durationMs }, look.key, speed);
+    return worldToScreen((from.x + to.x) / 2, (from.y + to.y) / 2);
   }
   /** The world rectangle the camera shows (empty before the scene is drawn). */
   function worldView() {
@@ -228,9 +241,10 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
       const pose = last.pose;
       return {
         ready: live(),
+        failed,
         kind: last.kind,
         gladiator: hero && pose
-          ? { x: pose.x, y: pose.y, action: pose.action, alpha: hero.container.alpha, layers: hero.layers.map(l => l.id) }
+          ? { x: pose.x, y: pose.y, action: pose.action, alpha: hero.container.alpha, layers: hero.layers.map(l => l.id), nameLift: hero.container.y - hero.label.y }
           : null,
         following: camera.following(),
         zoom: camera.view().zoom,

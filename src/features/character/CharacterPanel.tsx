@@ -13,6 +13,8 @@ import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
 import { useClockMode } from '../../lib/clock-setting';
+import { RestGainText } from '../schedule/RestGainText';
+import { restingGain, restingGainText } from '../schedule/rest-stamina';
 import { slotTimeText } from '../schedule/slot-time';
 import { activityStatus } from './activity-status';
 import type { Viewer } from './useGameState';
@@ -44,6 +46,9 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   const status = activityStatus(owner, slotIndex ?? 0, now, { resting, clock: clockMode });
   // The end is shown as every slot time is (Task 24.0b); one that cannot be shown (`slotTimeText` gives '') is left out.
   const ends = status.endsAtMs === null ? '' : slotTimeText(status.endsAtMs, now, clockMode);
+  // While a Rest runs (also the one a skipped activity became, "Resting (not enough stamina)") the box says what it will give back when
+  // its slot ends (Patch A item 6). A Rest that has not started, or is over, shows none; nor does resting at home, which has no activity.
+  const gain = activity?.kind === 'rest' && status.status === 'in-progress' ? restingGainText(restingGain(owner)) : null;
   return (
     <section className={styles.summary} aria-labelledby={headingId}>
       <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
@@ -59,6 +64,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
         <span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span>
         {activity && <p>{activity.label}</p>}
         <p className={styles.status} role="status">{status.label}{ends ? ` · ends ${ends}` : ''}</p>
+        {gain && <p className={styles.gain} data-testid="rest-gain"><RestGainText text={gain} /></p>}
       </div>
       <label className={styles.stamina} htmlFor={staminaId}>Stamina <span>{owner.stamina.current} / {owner.stamina.maximum}</span></label>
       <progress id={staminaId} className={styles.bar} value={owner.stamina.current} max={owner.stamina.maximum} />

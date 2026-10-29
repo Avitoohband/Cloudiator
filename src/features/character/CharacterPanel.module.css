@@ -64,6 +64,11 @@
   color: #b9e6d4;
 }
 
+/* What the running Rest will give back (Patch A item 6); the gain itself is bold. */
+.gain {
+  color: #9fe0c3;
+}
+
 .stamina {
   display: flex;
   justify-content: space-between;

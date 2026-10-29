@@ -47,6 +47,7 @@ main[tabindex="-1"]:focus { outline: none; }
 .schedule-slot[data-running] { box-shadow: inset 0 0 0 1px #5b7bb5; }
 .schedule-slot p.slot-note, .schedule-slot p.slot-hint { margin: .5rem 0 0; }
 .schedule-slot p.slot-note { color: var(--gold); }
+.schedule-slot p.slot-hint b { color: var(--gold); }
 .schedule-slot p:last-child { margin-bottom: 0; }
 .schedule-running { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: var(--ink); background: #23304a; border: 1px solid #5b7bb5; border-left-width: 3px; }
 .schedule-unsaved { margin: 1rem 0 0; font-size: .85rem; color: var(--gold); }

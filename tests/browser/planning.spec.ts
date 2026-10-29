@@ -1,13 +1,14 @@
 import { test, expect, type BrowserContext, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
-import { ownerFixture } from '../fixtures/domain';
+import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
+import { itemFixture, ownerFixture } from '../fixtures/domain';
 import type { GameCommand, Phase } from '../../supabase/functions/_shared/contracts/commands';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
-import { reviewShot360 } from './review-shots';
+import { reviewShot, reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
 import { expectTimeOnOneLine, slotTime, storeClock } from './slot-time';
-import { contrastIssues, focusDrops, focusedElement, watchFocus } from './a11y-helpers';
+import { contrastIssues, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 
 async function planningFlow(context: BrowserContext, setup?: (state: OwnerState) => void) {
   let state = structuredClone(ownerFixture);
@@ -341,6 +342,8 @@ test('takes the new class when a pending class change from before the release ta
 
 /** The select values a part offers (read from the page, apart from the panel's own lists). */
 const optionValues = (page: Page, phase: string) => page.getByLabel(`${phase} activity`).locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
+/** The line under a part's select (its choice's hint). */
+const hintOf = (page: Page, phase: Phase) => page.locator('.schedule-slot').filter({ has: page.getByRole('heading', { name: phase, exact: true }) }).locator('.slot-hint');
 const saveDay = (page: Page) => page.getByRole('button', { name: 'Save schedule', exact: true });
 const undoDay = (page: Page) => page.getByRole('button', { name: 'Undo changes', exact: true });
 
@@ -362,9 +365,160 @@ test('offers Arena only in the evening and says why under the morning and the af
   // Each choice says what it costs; Arena also says when its bout is revealed and that Wednesday and Saturday evenings are the tournament.
   await expect(schedule.getByText('Practice yard: builds experience. Costs 20 stamina.')).toBeVisible();
   await expect(schedule.getByText('Gathers loot and gold over the slot. Costs 30 stamina.')).toBeVisible();
-  await expect(schedule.getByText('Recovers stamina. Costs nothing.')).toBeVisible();
+  // A Rest says what it gives back (Patch A item 6): the number depends on the part running now and is pinned below, with the clock held.
+  await expect(hintOf(page, 'evening')).toHaveText(/^(Refills stamina to full: \+\d+ \(\d+ → 104\)|Stamina will already be full \(104\): this rest adds nothing)\. Costs nothing\.$/);
   await page.getByLabel('evening activity').selectOption('arena');
   await expect(schedule.getByText('Bout revealed at minute 60, rewards at 80. Wed and Sat 18:40 UTC: the tournament. Costs 25 stamina.')).toBeVisible();
+});
+
+// Patch A item 6: a Rest says how much stamina it gives, projected from the owner's stamina and the draft day. The shared clock is held in a
+// morning (slot n is phase n mod 3; 373248 is a morning) with the owner's training running and paid; the saved day is training, training, rest.
+test.describe('what a Rest gives back', () => {
+  const MORNING_SLOT = 373_248, EVENING_SLOT = MORNING_SLOT + 2;
+  const MORNING = MORNING_SLOT * SLOT_MS + 25 * 60_000;
+  const NO_NUMBER = 'Refills stamina to full. Costs nothing.';
+  /** The owner at `stamina` of 104 with the morning's training running and a Rest saved for the evening; `more` changes it further. */
+  const rester = (stamina: number, more?: (state: OwnerState) => void) => (state: OwnerState) => {
+    state.stamina = { current: stamina, maximum: 104 };
+    state.schedule = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'rest' } };
+    state.currentActivity = { ...state.currentActivity!, kind: 'training', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
+    more?.(state);
+  };
+  async function openAtMorning(page: Page, context: BrowserContext, stamina: number, more?: (state: OwnerState) => void) {
+    const flow = await planningFlow(context, rester(stamina, more));
+    await page.goto('/game/');
+    const schedule = await openMenu(page, 'Schedule');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), MORNING);
+    return { flow, schedule };
+  }
+  /** The owner wearing every heavy piece of tier 1: 29 load against a capacity of 24.7, so training costs 24, an expedition 36 and Arena 30. */
+  const heavy = (state: OwnerState) => {
+    const worn = ['axe:1:common', 'round-shield:1:common', 'iron-helmet:1:common', 'heavy-armor:1:common', 'heavy-boots:1:common'].map(id => itemFixture(CATALOG_V1.items[id]));
+    const [weapon, offHand, head, body, feet] = worn;
+    state.inventory = worn;
+    state.currentBuild = { ...state.currentBuild, equipment: { weapon: weapon.id, offHand: offHand.id, head: head.id, body: body.id, feet: feet.id } };
+  };
+  /** A build queued to take effect at slot `effectiveSlotIndex`. */
+  const pending = (effectiveSlotIndex: number) => (state: OwnerState) => {
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, stance: 'offensive' }, effectiveSlotIndex, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
+    state.buildVersion = 2;
+  };
+
+  test('says how much stamina a Rest gives back, from the draft day', async ({ page, context }, testInfo) => {
+    const { flow, schedule } = await openAtMorning(page, context, 74);
+    // 74 now, the afternoon's training takes 20: the evening's Rest finds 54 and gives 50. The other choices keep their own hint.
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +50 (54 → 104). Costs nothing.');
+    await expect(hintOf(page, 'morning')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+    await expect(hintOf(page, 'afternoon')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+    // The gain is the one emphasised thing in the line (the approved mockup's bold "+50").
+    await expect(hintOf(page, 'evening').locator('b')).toHaveText('+50');
+    expect(await contrastIssues(schedule), 'the schedule with a Rest that gives stamina').toEqual([]);
+    await hintOf(page, 'evening').scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, 'rest-stamina-evening');
+    await reviewShot360(page, testInfo, 'rest-stamina-evening', hintOf(page, 'evening'));
+    // The afternoon becomes a Rest in the draft: it gives what the running part left (74 -> 104), and the evening's then adds nothing.
+    await page.getByLabel('afternoon activity').selectOption('rest');
+    await expect(hintOf(page, 'afternoon')).toHaveText('Refills stamina to full: +30 (74 → 104). Costs nothing.');
+    await expect(hintOf(page, 'evening')).toHaveText('Stamina will already be full (104): this rest adds nothing. Costs nothing.');
+    await reviewShot(page, testInfo, 'rest-stamina-full');
+    await reviewShot360(page, testInfo, 'rest-stamina-full', hintOf(page, 'evening'));
+    // On a 360 px phone the longest of the lines wraps inside its card: nothing spills out of it and the page does not scroll sideways.
+    const size = page.viewportSize()!;
+    await page.setViewportSize({ width: 360, height: 740 });
+    await hintOf(page, 'evening').scrollIntoViewIfNeeded();
+    expect(await noHorizontalScroll(page), 'no sideways scroll at 360 px').toBe(true);
+    expect(await hintOf(page, 'evening').evaluate(line => line.scrollWidth <= line.clientWidth && line.getBoundingClientRect().right <= window.innerWidth), 'the line fits its card at 360 px').toBe(true);
+    await page.setViewportSize(size);
+    // The hint describes its select, and a change is only a draft: nothing is sent until Save.
+    await expect(page.getByLabel('evening activity')).toHaveAccessibleDescription(/Stamina will already be full \(104\)/);
+    expect(flow.commands).toEqual([]);
+    // Undo puts back the saved day, and its number.
+    await undoDay(page).click();
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +50 (54 → 104). Costs nothing.');
+    // A Rest in the morning looks to the next morning, after the afternoon's training and the evening's Rest (74 - 20, then full).
+    await page.getByLabel('morning activity').selectOption('rest');
+    await expect(hintOf(page, 'morning')).toHaveText('Stamina will already be full (104): this rest adds nothing. Costs nothing.');
+    // The number follows the clock: in the afternoon the evening's Rest comes straight after the running, paid, afternoon.
+    await undoDay(page).click();
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), (MORNING_SLOT + 1) * SLOT_MS + 25 * 60_000);
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +30 (74 → 104). Costs nothing.');
+    expect(flow.commands).toEqual([]);
+  });
+
+  test('uses the costs of an overloaded build, as the boundary does', async ({ page, context }) => {
+    // An expedition costs 36 here where the base is 30: 74 - 36 = 38 reaches the evening's Rest (the unloaded build would have 44).
+    await openAtMorning(page, context, 74, state => { heavy(state); state.schedule.afternoon = { kind: 'expedition', expeditionId: 'woodland' }; });
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +66 (38 → 104). Costs nothing.');
+    // The training of the draft's afternoon costs 24 for this build, not 20.
+    await page.getByLabel('afternoon activity').selectOption('training');
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +54 (50 → 104). Costs nothing.');
+  });
+
+  test('turns a part the overloaded build cannot afford into a Rest, though the base cost is affordable', async ({ page, context }) => {
+    // 34 stamina: the base expedition (30) would leave 4, but this build pays 36, cannot, and rests instead: the evening then adds nothing.
+    await openAtMorning(page, context, 34, state => { heavy(state); state.schedule.afternoon = { kind: 'expedition', expeditionId: 'woodland' }; });
+    await expect(hintOf(page, 'evening')).toHaveText('Stamina will already be full (104): this rest adds nothing. Costs nothing.');
+  });
+
+  test('gives no number while a pending build takes effect at or before the Rest', async ({ page, context }) => {
+    const { schedule } = await openAtMorning(page, context, 74, pending(EVENING_SLOT));
+    await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
+    // The other parts keep their own hints.
+    await expect(hintOf(page, 'morning')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+    expect(await contrastIssues(schedule), 'the schedule with no number').toEqual([]);
+    // A Rest that comes before the build takes effect (the afternoon's) keeps its number; the evening's still has none.
+    await page.getByLabel('afternoon activity').selectOption('rest');
+    await expect(hintOf(page, 'afternoon')).toHaveText('Refills stamina to full: +30 (74 → 104). Costs nothing.');
+    await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
+  });
+
+  test('gives its number to a Rest that comes before the pending build takes effect', async ({ page, context }) => {
+    await openAtMorning(page, context, 74, pending(EVENING_SLOT + 1));
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +50 (54 → 104). Costs nothing.');
+  });
+
+  test('says on My gladiator what the running Rest will give, and nothing once it is over', async ({ page, context }, testInfo) => {
+    await planningFlow(context, state => {
+      state.stamina = { current: 74, maximum: 104 };
+      state.currentActivity = { ...state.currentActivity!, kind: 'rest', label: 'Resting in camp', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
+    });
+    await page.goto('/game/');
+    const summary = await openMenu(page, 'My gladiator');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), MORNING);
+    const gain = page.getByTestId('rest-gain');
+    await expect(gain).toHaveText('Stamina refills to 104 when it ends: +30');
+    await expect(gain.locator('b')).toHaveText('+30');
+    // It sits in the activity box, under the status line.
+    await expect(summary.getByRole('status').filter({ hasText: /^In progress/ })).toBeVisible();
+    expect(await contrastIssues(summary), 'My gladiator with the running Rest').toEqual([]);
+    await reviewShot(page, testInfo, 'rest-gain-mygladiator');
+    await reviewShot360(page, testInfo, 'rest-gain-mygladiator', gain);
+    // Past it (the afternoon, its results settled) the line is gone: past rests show no number.
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), (MORNING_SLOT + 1) * SLOT_MS + 25 * 60_000);
+    await expect(page.getByTestId('rest-gain')).toHaveCount(0);
+  });
+
+  test('gives no number on My gladiator while a pending build takes effect when the Rest ends', async ({ page, context }) => {
+    await planningFlow(context, state => {
+      state.stamina = { current: 74, maximum: 104 };
+      state.currentActivity = { ...state.currentActivity!, kind: 'rest', label: 'Resting in camp', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
+      pending(MORNING_SLOT + 1)(state);
+    });
+    await page.goto('/game/');
+    await openMenu(page, 'My gladiator');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), MORNING);
+    await expect(page.getByTestId('rest-gain')).toHaveText('Stamina refills to full when it ends.');
+  });
+
+  test('gives no number when the current build\'s costs cannot be derived', async ({ page, context }) => {
+    // The equipped weapon is not among the owner's items, so the build does not validate and its overload is not known.
+    await openAtMorning(page, context, 74, state => { state.currentBuild = { ...state.currentBuild, equipment: { ...state.currentBuild.equipment, weapon: 'item-that-is-gone' } }; });
+    await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
+    await expect(hintOf(page, 'morning')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+  });
 });
 
 test('saves the whole day with one button as one command, and Undo restores the saved day', async ({ page, context }, testInfo) => {

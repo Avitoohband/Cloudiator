@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ActivityChoice, DayScheduleValue, GameCommand, Phase, Schedule } from '@contracts/commands';
 import type { OwnerState } from '@contracts/reads';
 import { nextPhaseStart } from '@domain/clock';
@@ -9,6 +9,8 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { useClockMode } from '../../lib/clock-setting';
 import { useOutcomeFocus } from '../shell/focus-lost';
+import { RestGainText } from './RestGainText';
+import { activityCosts, projectRest, restHint } from './rest-stamina';
 import { PHASES, arenaNote, choiceHint, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from './schedule-text';
 import { slotTimeText } from './slot-time';
 import { useMinuteNow } from './use-minute-now';
@@ -125,6 +127,16 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
     return time ? <p>Estimated next start: {time}</p> : null;
   };
   const level = owner.progression.level, locked = lockedChoices(level);
+  /** What each kind of activity costs the current build (null when it cannot be derived): a Rest's number is walked from them. */
+  const costs = useMemo(() => activityCosts({ currentBuild: owner.currentBuild, inventory: owner.inventory, progression: owner.progression }),
+    [owner.currentBuild, owner.inventory, owner.progression]);
+  /**
+   * The line under a part's select. A Rest says how much stamina it will give (Patch A item 6), projected from the draft day against the
+   * shared clock (null until mounted: no number then, and the same words as when no number can be told); the other choices say what they cost.
+   */
+  const hintFor = (phase: Phase) => draft[phase].kind === 'rest'
+    ? <RestGainText text={restHint(slot === null ? null : projectRest({ phase, nowMs: slotStart, owner, day: draft, costs }))} />
+    : choiceHint(draft[phase], clockMode);
   return <div className="planning-form">
     <h2>Repeating schedule</h2>
     <p className="muted">Edits apply to the next occurrence that has not started. Your current activity continues.</p>
@@ -144,7 +156,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
           {options.map(({ choice, shut }) => <option key={choiceKey(choice)} value={choiceKey(choice)} disabled={shut}>{optionLabel(choice)}</option>)}
         </select>
         {note && <p id={noteLine} className="slot-note">{note}</p>}
-        <p id={hintLine} className="slot-hint">{choiceHint(draft[phase], clockMode)}</p>
+        <p id={hintLine} className="slot-hint">{hintFor(phase)}</p>
         {estimate(phase)}
       </article>;
     })}</div>

@@ -91,6 +91,52 @@ describe('My gladiator', () => {
     expect(text(panel(structuredClone(ownerFixture), SLOT * SLOT_MS + 40 * 60_000))).not.toContain('Resting at home');
   });
 
+  // Patch A item 6: while a Rest runs, the activity box says what it will give back when its slot ends.
+  describe('the running Rest', () => {
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    const resting = (stamina: number, label = 'Resting in camp'): OwnerState => {
+      const owner = structuredClone(ownerFixture);
+      return { ...owner, processedSlotIndex: SLOT, stamina: { current: stamina, maximum: 104 }, currentActivity: { ...owner.currentActivity!, kind: 'rest', label } };
+    };
+    const line = (html: string) => /data-testid="rest-gain"[^>]*>(.*?)<\/p>/.exec(html)?.[1].replace(/<[^>]+>/g, '');
+
+    it('says what the running Rest will give', () => {
+      expect(line(panel(resting(74), nowMs))).toBe('Stamina refills to 104 when it ends: +30');
+      // The gain is the one thing in the line that is emphasised (the approved mockup's bold "+30").
+      expect(panel(resting(74), nowMs)).toContain('<b>+30</b>');
+      // A training owner renders no such line.
+      expect(line(panel({ ...resting(74), currentActivity: { ...resting(74).currentActivity!, kind: 'training' } }, nowMs))).toBeUndefined();
+      expect(text(panel(structuredClone(ownerFixture), nowMs))).not.toContain('Stamina refills');
+    });
+
+    it('says a full Rest adds nothing', () => {
+      expect(line(panel(resting(104), nowMs))).toBe('Stamina is already full (104): this rest adds nothing');
+    });
+
+    it('says it too for the Rest a skipped activity became', () => {
+      expect(line(panel(resting(12, 'Resting (not enough stamina)'), nowMs))).toBe('Stamina refills to 104 when it ends: +92');
+    });
+
+    it('gives no number while a pending build takes effect when the Rest ends', () => {
+      const owner = resting(74);
+      const build = { build: owner.currentBuild, effectiveSlotIndex: SLOT + 1, reservedMoney: 0, reservedItemIds: [], operationId: 'pending-op' };
+      expect(line(panel({ ...owner, pendingBuild: build }, nowMs))).toBe('Stamina refills to full when it ends.');
+      expect(line(panel({ ...owner, pendingBuild: { ...build, effectiveSlotIndex: SLOT + 2 } }, nowMs))).toBe('Stamina refills to 104 when it ends: +30');
+    });
+
+    it('says nothing about a Rest that is not running: scheduled, over, or at home with no activity', () => {
+      const owner = resting(74), activity = owner.currentActivity!;
+      // Scheduled: it has not started.
+      expect(line(panel({ ...owner, currentActivity: { ...activity, startsAtMs: nowMs + 60_000, endsAtMs: nowMs + SLOT_MS } }, nowMs))).toBeUndefined();
+      // Over: its slot has ended and its results are settled (completed), or still being settled (processing results).
+      const later = (SLOT + 1) * SLOT_MS + 60_000;
+      expect(line(panel({ ...owner, processedSlotIndex: SLOT + 1, currentActivity: { ...activity, status: 'completed' } }, later))).toBeUndefined();
+      expect(line(panel(owner, later))).toBeUndefined();
+      // Resting at home with no activity (Task 23.8) is not a Rest activity.
+      expect(line(panel({ ...owner, currentActivity: null, restingUntilSlot: SLOT + 1 }, nowMs))).toBeUndefined();
+    });
+  });
+
   // Fix round 1 (review Minor 1): resting in the world before the presence is answered.
   it('shows "Resting at home." while its gladiator rests and its return is not known yet', () => {
     const owner: OwnerState = { ...structuredClone(ownerFixture), currentActivity: null, processedSlotIndex: SLOT, restingUntilSlot: null };

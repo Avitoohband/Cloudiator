@@ -6,14 +6,17 @@ import { expect, test, type Locator, type Page } from './fixtures';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { screenToWorld } from '../../src/game/iso';
-import { contrastIssues, noHorizontalScroll } from './a11y-helpers';
+import { contrastIssues, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { routeLiveReads, seedSession, testUser } from './live-routes';
 import { cornerChip, expectOwnerShown, openMenu, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const ARRIVALS_KEY = 'cloudiator.arrivals-seen.v1';
 const NOW = worldFixture.serverNowMs;
-const IDS = { aster: worldFixture.actors[0].gladiatorId, ursa: 'a0000000-0000-4000-8000-000000000001', nero: 'a0000000-0000-4000-8000-000000000002', vita: 'a0000000-0000-4000-8000-000000000003' };
+const IDS = { aster: worldFixture.actors[0].gladiatorId, ursa: 'a0000000-0000-4000-8000-000000000001', nero: 'a0000000-0000-4000-8000-000000000002', vita: 'a0000000-0000-4000-8000-000000000003',
+  long: 'a0000000-0000-4000-8000-000000000004' };
+/** A name of the longest length a gladiator may have (20 characters). */
+const LONG_NAME = 'Quintus Maximilianus';
 
 const person = (gladiatorId: string, name: string, classId: PublicActor['classId'], location: PublicActor['location'], startsAtMs: number): PublicActor => ({
   ...worldFixture.actors[0], gladiatorId, name, classId, location, activityId: null, activityStatus: 'active', startsAtMs, endsAtMs: startsAtMs + 4_800_000,
@@ -22,6 +25,7 @@ const ursa = person(IDS.ursa, 'Ursa', 'guardian', 'orientation', NOW - 60_000);
 const nero = person(IDS.nero, 'Nero', 'duelist', 'orientation', NOW - 120_000);
 const vita = person(IDS.vita, 'Vita', 'berserker', 'orientation', NOW - 180_000);
 const aster = person(IDS.aster, 'Aster', 'guardian', 'camp', NOW - 4_000_000);
+const longcomer = person(IDS.long, LONG_NAME, 'duelist', 'orientation', NOW - 30_000);
 /** The live world with the given newcomers (Aster at camp). */
 const worldOf = (...newcomers: PublicActor[]): WorldSnapshot => ({ ...worldFixture, revision: 'arrivals-1', actors: [aster, ...newcomers] });
 
@@ -42,6 +46,15 @@ const cameraFrom = (page: Page, name: string) => page.evaluate(([who]) => {
   return { x: s.camera.centerX - (a.x - a.y) * 32, y: s.camera.centerY - ((a.x + a.y) * 16 - 24) };
 }, [name]);
 const near = async (page: Page, name: string) => { const d = await cameraFrom(page, name); return Math.hypot(d.x, d.y); };
+type Box = { x: number; y: number; width: number; height: number };
+/** Whether two boxes share no area. */
+const clear = (a: Box, b: Box) => a.x >= b.x + b.width - 0.5 || b.x >= a.x + a.width - 0.5 || a.y >= b.y + b.height - 0.5 || b.y >= a.y + a.height - 0.5;
+/** Whether what is painted at the middle of `locator` is the locator's own element (or inside it), not something drawn over it. */
+const paintedOver = (locator: Locator) => locator.evaluate(el => {
+  const r = el.getBoundingClientRect();
+  const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  return !(top && (el === top || el.contains(top)));
+});
 
 test.describe('Patch A: a new player is announced', () => {
   test.skip(production, 'Live mode uses the development-only intercepted Supabase transport.');
@@ -200,11 +213,15 @@ test.describe('Patch A: a new player is announced', () => {
     await expect.poll(markers).toEqual({ Ursa: null, Nero: 'NEW', Aster: null });
     await page.evaluate(w => window.__cloudiatorCamp!.setWorld(w), world);
     await expect.poll(markers).toEqual({ Ursa: 'NEW', Nero: 'NEW', Aster: null });
+    // The tag is drawn, not only named: close up on Ursa the camp has a box for her nameplate and one for the NEW tag over it; Aster has the nameplate only.
+    const plates = (name: string) => page.evaluate(who => window.__cloudiatorCamp!.state()!.actors.find(a => a.name === who)!.plates.length, name);
+    await page.evaluate(([x, y]) => window.__cloudiatorCamp!.centerOn(x, y, 2), [39.5, 22.5]);
+    await expect.poll(() => plates('Ursa')).toBe(2);
+    expect(await plates('Aster')).toBeLessThanOrEqual(1);
 
     // The Gladiators list: the count, then NEW IN CAMP with the newest first and a NEW pill each, then EVERYONE with the rest.
     const roster = await openMenu(page, 'Gladiators');
     // The banner covers neither the open menu (the panel beside the rail, or the sheet) nor the corner chip.
-    const clear = (a: { x: number; y: number; width: number; height: number }, b: typeof a) => a.x >= b.x + b.width || b.x >= a.x + a.width || a.y >= b.y + b.height || b.y >= a.y + a.height;
     await expect(banner(page)).toBeVisible();
     expect(clear(await boxOf(banner(page)), await boxOf(roster)), 'the banner and the open menu').toBe(true);
     expect(clear(await boxOf(banner(page)), await boxOf(cornerChip(page))), 'the banner and the chip').toBe(true);
@@ -296,7 +313,7 @@ test.describe('Patch A: a new player is announced', () => {
       expect(await near(page, 'Ursa')).toBeLessThan(40);
     });
 
-    test('phone: at 360 × 740 it fits, with a notice under it and no sideways scroll', async ({ page, context }) => {
+    test('phone: at 360 × 740 it fits, with no sideways scroll', async ({ page, context }) => {
       // Three arrivals make the longest sentence; the welcome is the longest of all, so the owner's view is checked too.
       const world = worldOf(ursa, nero, vita);
       const owner = { ...structuredClone(ownerFixture), gladiatorId: IDS.ursa, name: 'Ursa' };
@@ -343,5 +360,155 @@ test.describe('Patch A: a new player is announced', () => {
     await page.waitForFunction(() => window.__cloudiatorCamp?.world()?.revision === 'arrivals-2', null, { timeout: 15_000 });
     await page.waitForTimeout(500);
     await expect(banner(page)).toHaveCount(0);
+  });
+
+  // Fix round 1: the banner never covers the camp's controls (the spec's anti-goal), whatever the chip's width.
+  test.describe('on a pointer window', () => {
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'A pointer layout: the desktop project.'); });
+
+    test('keeps clear of the chip with a 20-character name and a 5-digit purse', async ({ page, context }) => {
+      await seedSession(context);
+      const owner = { ...structuredClone(ownerFixture), name: LONG_NAME, wallets: { money: 12_345, renown: 35 } };
+      const world = worldOf(ursa);
+      await routeLiveReads(context, { world, owner });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto('/game/');
+      await expectOwnerShown(page, LONG_NAME);
+      await waitForCamp(page, world.actors.length);
+      await expect(banner(page)).toBeVisible();
+      // The chip is far wider than Aster's (371 px): the banner is not beside it any more, and nothing of the chip is painted over.
+      await expect.poll(async () => clear(await boxOf(banner(page)), await boxOf(cornerChip(page)))).toBe(true);
+      expect((await boxOf(cornerChip(page))).width).toBeGreaterThan(450);
+      expect(await paintedOver(cornerChip(page).getByTestId('chip-name'))).toBe(false);
+      expect(await paintedOver(cornerChip(page).getByRole('button', { name: /Messages/ }))).toBe(false);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+
+    test('is not painted over the fixture pill, and does not cover it', async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto('/game/?mode=fixture');
+      await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+      await expect(banner(page)).toBeVisible();
+      const pill = page.getByText('Fixture mode — progress is not saved online');
+      await expect(pill).toBeVisible();
+      expect(clear(await boxOf(banner(page)), await boxOf(pill)), 'the banner and the pill').toBe(true);
+    });
+
+    test('leaves an open menu panel alone in a narrow window, and shows the banner when it closes', async ({ page, context }) => {
+      const world = worldOf(ursa);
+      await routeLiveReads(context, { world });
+      await page.setViewportSize({ width: 800, height: 720 });
+      // A notice (the sign-in that came back cancelled) is in the column too: it keeps its 320 px, clear of the panel.
+      await page.goto('/game/?signin=cancelled');
+      await waitForCamp(page, world.actors.length);
+      // No panel: the banner is under the chip. A panel opens: the banner waits, so the panel's header and × are not covered.
+      await expect(banner(page)).toBeVisible();
+      const roster = await openMenu(page, 'Gladiators');
+      await expect(banner(page)).toHaveCount(0);
+      const close = roster.locator('[data-menu-close]');
+      expect(await paintedOver(close), 'the panel’s × is what is painted at its middle').toBe(false);
+      // Closing the menu shows it, for its 15 s from then, and it is clear of the chip.
+      await close.click();
+      await expect(banner(page)).toBeVisible();
+      expect(clear(await boxOf(banner(page)), await boxOf(cornerChip(page)))).toBe(true);
+    });
+
+    test('stacks the notices under the banner in the column below the chip, 20-character name and all', async ({ page, context }) => {
+      const world = worldOf(longcomer);
+      await routeLiveReads(context, { world });
+      await page.setViewportSize({ width: 1100, height: 720 });
+      await page.goto('/game/?signin=cancelled');
+      await waitForCamp(page, world.actors.length);
+      await expect(banner(page)).toBeVisible();
+      const notice = page.getByRole('status').filter({ hasText: 'Google sign-in was canceled' });
+      await expect(notice).toBeVisible();
+      const b = await boxOf(banner(page)), n = await boxOf(notice), chip = await boxOf(cornerChip(page));
+      expect(b.height, 'a long name makes a tall banner').toBeGreaterThan(70);
+      expect(n.y, 'the notice starts under the banner').toBeGreaterThanOrEqual(b.y + b.height);
+      expect(b.y).toBeGreaterThanOrEqual(chip.y + chip.height);
+      expect(clear(b, n) && clear(b, chip) && clear(n, chip)).toBe(true);
+      // Find keeps its whole name for assistive technology.
+      await expect(page.getByRole('button', { name: `Find ${LONG_NAME}`, exact: true })).toBeVisible();
+    });
+  });
+
+  test.describe('on a phone, with a notice', () => {
+    test.use({ viewport: { width: 360, height: 740 } });
+
+    test('stacks the notices under the banner at 360 × 740, 20-character name and all', async ({ page, context }) => {
+      const world = worldOf(longcomer);
+      await routeLiveReads(context, { world });
+      await page.goto('/game/?signin=cancelled');
+      await waitForCamp(page, world.actors.length);
+      await expect(banner(page)).toBeVisible();
+      const notice = page.getByRole('status').filter({ hasText: 'Google sign-in was canceled' });
+      await expect(notice).toBeVisible();
+      const b = await boxOf(banner(page)), n = await boxOf(notice), chip = await boxOf(cornerChip(page));
+      expect(b.height, 'a long name makes a tall banner').toBeGreaterThan(70);
+      expect(n.y, 'the notice starts under the banner').toBeGreaterThanOrEqual(b.y + b.height);
+      expect(b.y).toBeGreaterThan(chip.y + chip.height);
+      expect(clear(b, n)).toBe(true);
+      expect(n.x + n.width).toBeLessThanOrEqual(360);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+  });
+
+  test('is closed by the keyboard, the welcome and then the arrival, with the focus never on the body', async ({ page, context }) => {
+    const world = worldOf(ursa, nero, vita);
+    const owner = { ...structuredClone(ownerFixture), gladiatorId: IDS.ursa, name: 'Ursa' };
+    await seedSession(context, testUser('ursa@example.invalid'));
+    await routeLiveReads(context, { world, owner });
+    await watchFocus(page);
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Ursa');
+    await waitForCamp(page, world.actors.length);
+    await expect(banner(page)).toHaveAttribute('data-kind', 'welcome');
+    const find = () => page.getByRole('button', { name: /^Find (Ursa|Nero)$/ });
+    const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true });
+    // Tab from Find to Dismiss, Enter: the welcome goes, the others' banner takes its place.
+    await find().focus();
+    await page.keyboard.press('Tab');
+    await expect(dismiss).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(banner(page)).toHaveAttribute('data-kind', 'arrival');
+    expect(await focusedElement(page), 'the focus is on the page after the welcome').not.toBe('body');
+    // The same for the arrival.
+    await find().focus();
+    await page.keyboard.press('Tab');
+    await expect(dismiss).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(banner(page)).toHaveCount(0);
+    expect(await focusedElement(page), 'the focus is on the page after the arrival').not.toBe('body');
+    expect(await focusDrops(page), 'the focus never fell to <body>').toEqual([]);
+    expect(await seenOnDevice(page)).toEqual([IDS.ursa, IDS.nero, IDS.vita]);
+  });
+
+  test('follows the world while it shows: a newcomer who settles leaves it, a new one joins it, and nothing is stored until it closes', async ({ page, context }) => {
+    // AGENTS.md's async-state rule: the banner is the latest world's, never a flag kept from an earlier read.
+    const world = worldOf(ursa, nero);
+    const live = await routeLiveReads(context, { world });
+    await page.goto('/game/');
+    await waitForCamp(page, world.actors.length);
+    await expect(banner(page)).toBeVisible();
+    expect(await shown(page)).toContain('Ursa and Nero have arrived in the camp.');
+    /** A read lands: the next world's revision is read at once (the tab coming back), and the camp shows it. */
+    const read = async (revision: string, actors: PublicActor[]) => {
+      live.setWorld({ ...world, revision, actors });
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await page.waitForFunction(r => window.__cloudiatorCamp?.world()?.revision === r, revision, { timeout: 15_000 });
+    };
+    // Ursa is at camp now: the banner is Nero's alone, and nothing is stored.
+    await read('arrivals-2', [aster, { ...ursa, location: 'camp' as const }, nero]);
+    await expect.poll(() => shown(page)).toContain('Nero, a new Duelist, has arrived');
+    await expect(banner(page).locator('b:visible')).toHaveText('Nero');
+    expect(await seenOnDevice(page)).toEqual([]);
+    // A third newcomer merges in, and it is still unstored.
+    await read('arrivals-3', [aster, { ...ursa, location: 'camp' as const }, nero, vita]);
+    await expect.poll(() => shown(page)).toContain('Nero and Vita have arrived in the camp.');
+    expect(await seenOnDevice(page)).toEqual([]);
+    // Closing it remembers exactly the two it named, not Ursa.
+    await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await expect(banner(page)).toHaveCount(0);
+    expect(await seenOnDevice(page)).toEqual([IDS.nero, IDS.vita]);
   });
 });

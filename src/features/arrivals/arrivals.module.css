@@ -2,22 +2,38 @@
  * The arrival banner (Patch A item 2, the approved mockup). It sits in its own slot, never inside another element's box, so the
  * away button (Task 11) can sit alongside it: the slot is on the camp's top edge, the away button on its bottom edge.
  *
- * Three places, by the shell's own layouts:
- *  - a pointer window of 1280 px or more: the top row, 560 px (422 px at 1280, where the menu panel and the chip leave that much), centred
- *    on the window once it can be. It keeps clear of an open menu panel (the rail and the panel take the left 458 px) and of the corner
- *    chip (about 400 px at the right);
- *  - a pointer window between 481 and 1279 px: under the chip, right-aligned, 420 px;
- *  - the touch layout (no hover, or a window under 481 px): under the chip, full width with 12 px gutters, 64 px from the top so the
- *    chip and its tap area stay clear. The shell moves its notices below it while it shows (`data-arrival` in shell.module.css).
+ * Two places, decided by the shell from the chip's measured width (`bannerPlace`, `data-stacked`):
+ *  - not stacked, a pointer window with room: the top row, centred on the window once it can be, held clear of the rail and an open menu
+ *    panel (the left 458 px) and of the corner chip and the notices under it (`--chip-w`, the chip's measured width, or the notices' 320 px if
+ *    more, with the 12 px margin and a 12 px gap), 380-560 px wide.
+ *    Its z-index is 8, the menu panels' (which come later in the page), under the chip and the notices (9), so nothing of theirs is covered;
+ *  - stacked: first in the column the notices share under the chip (`.notices` in shell.module.css): the touch layout's full width with
+ *    12 px gutters, or 420 px at the right of a pointer window the top row does not fit. The notices flow below it.
+ * The fixture pill (`data-pill`) takes the top row's middle, so there the banner starts below it.
  */
 .slot {
   position: absolute;
   top: 12px;
   left: max(458px, calc(50% - 280px));
-  width: min(560px, calc(100% - 400px - max(458px, calc(50% - 280px))));
-  z-index: 9;
+  width: min(560px, calc(100% - max(var(--chip-w, 371px), 320px) - 24px - max(458px, calc(50% - 280px))));
+  z-index: 8;
   /* The empty slot covers nothing, and the banner's own box takes the pointer. */
   pointer-events: none;
+}
+
+[data-pill='shown'] .slot {
+  top: 52px;
+}
+
+.slot[data-stacked='true'] {
+  position: static;
+  width: auto;
+  z-index: auto;
+  justify-self: stretch;
+}
+
+.slot[data-stacked='true'] .banner {
+  margin-bottom: 6px;
 }
 
 .banner {
@@ -75,7 +91,11 @@
 }
 
 .find {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-height: 34px;
   padding: 5px 12px;
   border: 1px solid transparent;
@@ -137,25 +157,8 @@
   }
 }
 
-/* A pointer window of 481-1279 px: no room beside the menu panel and the chip, so it goes under the chip, at the right. */
-@media (hover: hover) and (min-width: 481px) and (max-width: 1279px) {
-  .slot {
-    top: 64px;
-    left: auto;
-    right: 12px;
-    width: min(420px, calc(100% - 24px));
-  }
-}
-
-/* The touch layout (the shell's: no hover, or a window under 481 px): under the chip, full width, the touch targets 44 px. */
+/* The touch layout (the shell's: no hover, or a window under 481 px): the touch targets 44 px, the phone's shorter words. */
 @media (hover: none), (max-width: 480px) {
-  .slot {
-    top: 64px;
-    left: 12px;
-    right: 12px;
-    width: auto;
-  }
-
   .banner {
     gap: 8px;
     padding: 8px 6px 8px 12px;

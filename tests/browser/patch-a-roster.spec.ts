@@ -50,7 +50,14 @@ test.describe('Patch A: the players count', () => {
     expect(await shown()).toMatch(/^\d+ of 50 players match “ar”$/);
     const matches = Number(/^(\d+) of/.exec(await shown())![1]);
     expect(matches).toBeGreaterThan(0);
-    expect(await page.getByRole('list', { name: 'Gladiators' }).getByRole('listitem').count()).toBe(matches);
+    // Every row, in both parts of the list: the newcomers (in orientation) are listed first, under "New in camp", and once.
+    expect(await (await openMenu(page, 'Gladiators')).getByRole('listitem').count()).toBe(matches);
+    // And with a name that matches a newcomer ("Ursa", in orientation in the preview): she is counted once, in the first part.
+    await filter.fill('urs');
+    await expect(count).toHaveText(/^\d+ of 50 players match “urs”$/);
+    const withNewcomer = Number(/^(\d+) of/.exec(await shown())![1]);
+    expect(await page.getByRole('list', { name: 'New in camp' }).getByRole('listitem').count()).toBe(1);
+    expect(await (await openMenu(page, 'Gladiators')).getByRole('listitem').count()).toBe(withNewcomer);
 
     // No match: today's line, and no count.
     await filter.fill('zzz');

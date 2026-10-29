@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublicActor } from '@contracts/reads';
 import { arrivalBanner, newcomers } from '../../src/features/arrivals/arrivals';
+import { bannerPlace } from '../../src/features/arrivals/placement';
 import { worldFixture } from '../fixtures/domain';
 
 // Patch A item 2: a new player is announced. Ursa (a Guardian) and Nero (a Duelist) are in orientation, Ursa the newer; Vita arrived
@@ -84,5 +85,36 @@ describe('the device memory of announced arrivals', () => {
   });
   it('reads nothing at all when storage throws on a read', async () => {
     throwingStorage(); const a = await fresh(); expect(a.readSeenArrivals().size).toBe(0);
+  });
+});
+
+// Fix round 1: where the banner sits follows the chip's measured width. On a pointer window it takes the top row when at least 380 px
+// are left between the 458 px the rail and a menu panel take and the chip (plus its 12 px margin and a 12 px gap); otherwise it goes
+// under the chip in the column the notices share, 420 px at the right, and there it would cover an open menu panel only in a window
+// narrower than 890 px. The touch layout is always the column.
+describe('where the banner sits', () => {
+  it('takes the top row while 380 px are left beside the chip', () => {
+    // Aster's chip is 371 px wide: 1280 - 24 - 371 - 458 = 427 px.
+    expect(bannerPlace({ windowWidth: 1280, chipWidth: 371, compact: false })).toEqual({ stacked: false, coversPanel: false });
+    expect(bannerPlace({ windowWidth: 1920, chipWidth: 600, compact: false })).toEqual({ stacked: false, coversPanel: false });
+  });
+  it('keeps clear of the notices under a narrow chip too (they are up to 320 px wide)', () => {
+    // A visitor's chip is about 255 px wide, but its notices reach 320 px left from the window's edge: 1100 - 24 - 320 - 458 = 298 px.
+    expect(bannerPlace({ windowWidth: 1100, chipWidth: 255, compact: false })).toEqual({ stacked: true, coversPanel: false });
+    expect(bannerPlace({ windowWidth: 1280, chipWidth: 255, compact: false })).toEqual({ stacked: false, coversPanel: false });
+  });
+  it('goes under the chip when a long name or a big purse widens it', () => {
+    // 1280 - 24 - 480 - 458 = 318 px: not enough. Under the chip its left edge is 848 px, clear of the panel.
+    expect(bannerPlace({ windowWidth: 1280, chipWidth: 480, compact: false })).toEqual({ stacked: true, coversPanel: false });
+    expect(bannerPlace({ windowWidth: 1280, chipWidth: 372 + 60, compact: false }).stacked).toBe(true);
+  });
+  it('says when under the chip it would cover an open menu panel (a window under 890 px)', () => {
+    expect(bannerPlace({ windowWidth: 800, chipWidth: 371, compact: false })).toEqual({ stacked: true, coversPanel: true });
+    expect(bannerPlace({ windowWidth: 889, chipWidth: 270, compact: false })).toEqual({ stacked: true, coversPanel: true });
+    expect(bannerPlace({ windowWidth: 890, chipWidth: 270, compact: false })).toEqual({ stacked: true, coversPanel: false });
+  });
+  it('is always the column in the touch layout, where a sheet never reaches it', () => {
+    expect(bannerPlace({ windowWidth: 390, chipWidth: 200, compact: true })).toEqual({ stacked: true, coversPanel: false });
+    expect(bannerPlace({ windowWidth: 1600, chipWidth: 200, compact: true })).toEqual({ stacked: true, coversPanel: false });
   });
 });

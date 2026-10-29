@@ -5,8 +5,9 @@
 // the button ("Find", still named "Find {name}"). It stays 15 s, the remaining time paused while the pointer is over it or the focus
 // is inside it, then fades (no fade with reduced motion); × and Find close it at once, and a close always tells the owner
 // (`onDismiss`) so the ids are remembered. Find is disabled, with the reason as its description, while the camp view cannot show
-// the gladiator. The banner sits in its own slot (`ArrivalSlot`), a polite status that is always in the page so a banner that
-// arrives is announced; the shell mounts the banner in it only while no scene covers the camp.
+// the gladiator, and its label is cut short (never its name for assistive technology) so a 20-character name does not make a tall banner.
+// The banner sits in its own slot (`ArrivalSlot`), a polite status that is always in the page so a banner that arrives is announced;
+// the shell mounts the banner in it only while no scene covers the camp.
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { ArrivalBanner } from './arrivals';
 import styles from './arrivals.module.css';
@@ -17,9 +18,13 @@ export const SHOW_MS = 15_000;
 export const FADE_MS = 400;
 const WELCOME_LEAD = 'Welcome to the camp, ';
 
-/** The banner's place: a polite status, always present, with the banner inside it while there is one. */
-export function ArrivalSlot({ children }: { children?: ReactNode }) {
-  return <div className={styles.slot} role="status" data-arrival-slot="">{children}</div>;
+/**
+ * The banner's place: a polite status, always present, with the banner inside it while there is one. `stacked` is the shell's
+ * (`bannerPlace`): the slot is the first thing in the column of notices under the chip, not a row of its own across the top; the shell
+ * puts it in the right parent, and the styling follows `data-stacked`.
+ */
+export function ArrivalSlot({ stacked, children }: { stacked: boolean; children?: ReactNode }) {
+  return <div className={styles.slot} role="status" data-arrival-slot="" data-stacked={stacked ? 'true' : 'false'}>{children}</div>;
 }
 
 /** The sentence with the first name in bold (the newest arrival's, or the welcomed player's). */

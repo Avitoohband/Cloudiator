@@ -27,7 +27,9 @@
 //
 // Patch A item 2: a new player is announced. One banner in its own slot (`ArrivalSlot`), for every viewer, once the viewer is known
 // (the newcomer's own player is welcomed instead of announced) and while no scene covers the camp; Find is the Gladiators list's.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// The slot sits in the top row when the chip leaves room for it beside, and otherwise first in the column the notices share under the
+// chip (`bannerPlace`, the chip's width measured); in a window where that column reaches over an open menu panel it waits for the panel to close.
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
@@ -42,6 +44,7 @@ import { lookSavedLine } from '../character/look-change';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
 import { ArrivalBannerView, ArrivalSlot } from '../arrivals/ArrivalBanner';
 import { useArrivals } from '../arrivals/useArrivals';
+import { useBannerPlace } from '../arrivals/useBannerPlace';
 import { ProfileLayer } from '../character/ProfileCard';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { useMinuteNow } from '../schedule/use-minute-now';
@@ -356,8 +359,15 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // The arrival banner (Patch A item 2): not while the viewer is still loading (the owner's own welcome would flash as an announcement),
   // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
   const arrivals = useArrivals(world, ownerId);
-  const arrival = arrivals.banner !== null && scene === null && game.viewer !== 'loading' ? arrivals.banner : null;
+  const place = useBannerPlace(shellRef, game.viewer);
+  const arrival = arrivals.banner !== null && scene === null && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
   const { dismiss: dismissArrival } = arrivals;
+  const arrivalSlot = (
+    <ArrivalSlot stacked={place.stacked}>
+      {arrival && <ArrivalBannerView key={`${arrival.kind}:${arrival.ids.join(',')}`} banner={arrival} findReason={campViewReason(game.sceneStatus, roster !== null)}
+        onFind={() => { bridge.emit('find-character', { gladiatorId: arrival.findId }); handBack(); }} onDismiss={dismissArrival} />}
+    </ArrivalSlot>
+  );
   // The owner's own words while its gladiator rests at home (Task 23.9 fix round 1): when it is back on its schedule once
   // that is known (a short time, Task 23.10), else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
   const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot, nowMs, clockMode) : null;
@@ -390,7 +400,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
 
   return (
     <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}
-      data-arrival={arrival ? 'shown' : undefined}>
+      data-pill={fixture || fixtureRefused ? 'shown' : undefined} style={{ '--chip-w': `${place.chipWidth}px` } as CSSProperties}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
@@ -398,25 +408,25 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
-      <div className={styles.notices}>
-        {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
-            signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
-        {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))
-          && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
-        {/* The saved look's status line. The live region is always there (hidden while empty), so the text, when it arrives, is announced. */}
-        <div className={savedLook ? styles.signInNotice : styles.sr}>
-          <p role="status" data-testid="look-saved">{savedLook ?? ''}</p>
-          {savedLook && <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setLookSaved(null)}>×</button>}
+      <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>
+        {place.stacked && arrivalSlot}
+        <div className={styles.noticeList}>
+          {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
+              signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
+          {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))
+            && <p className={styles.notice} role="status">Connection lost — showing the last known camp</p>}
+          {/* The saved look's status line. The live region is always there (hidden while empty), so the text, when it arrives, is announced. */}
+          <div className={savedLook ? styles.signInNotice : styles.sr}>
+            <p role="status" data-testid="look-saved">{savedLook ?? ''}</p>
+            {savedLook && <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setLookSaved(null)}>×</button>}
+          </div>
+          {signInNotice && <div className={styles.signInNotice} role="status">
+            <p>{SIGN_IN_MESSAGES[signInNotice]}</p>
+            <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setSignInNotice(null)}>×</button>
+          </div>}
         </div>
-        {signInNotice && <div className={styles.signInNotice} role="status">
-          <p>{SIGN_IN_MESSAGES[signInNotice]}</p>
-          <button type="button" className={styles.dismiss} aria-label="Dismiss" onClick={() => setSignInNotice(null)}>×</button>
-        </div>}
       </div>
-      <ArrivalSlot>
-        {arrival && <ArrivalBannerView key={`${arrival.kind}:${arrival.ids.join(',')}`} banner={arrival} findReason={campViewReason(game.sceneStatus, roster !== null)}
-          onFind={() => { bridge.emit('find-character', { gladiatorId: arrival.findId }); handBack(); }} onDismiss={dismissArrival} />}
-      </ArrivalSlot>
+      {!place.stacked && arrivalSlot}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}

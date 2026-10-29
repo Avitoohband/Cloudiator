@@ -465,6 +465,8 @@
   pointer-events: none;
 }
 
+/* The column under the chip: the arrival banner first while it is stacked there (Patch A item 2, `data-stacked`), then the notices, which
+   flow below it, whatever its height. */
 .notices {
   position: absolute;
   right: 12px;
@@ -472,8 +474,23 @@
   z-index: 9;
   display: grid;
   justify-items: end;
-  gap: 6px;
   max-width: min(320px, calc(100% - 24px));
+  /* The column's own box (up to 420 px with the banner in it, the full width on a phone) is wider than what it holds: only the notices
+     and the banner take the pointer, never the camp or a menu panel's header under the empty part. */
+  pointer-events: none;
+}
+
+.notices[data-stacked='true'] {
+  max-width: min(420px, calc(100% - 24px));
+}
+
+.noticeList {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  /* The notices keep their 320 px, whatever the banner above them takes. */
+  max-width: min(320px, 100%);
+  pointer-events: auto;
 }
 
 .notice {
@@ -631,14 +648,6 @@
   overflow-wrap: anywhere;
   font-weight: 400;
   opacity: 0.8;
-}
-
-/* While an arrival banner shows under the chip (a pointer window of 481-1279 px, and the touch layout below), the notices below the chip
-   move under it: the banner is at most three lines, about 90 px, from 64 px (Patch A item 2). */
-@media (hover: hover) and (min-width: 481px) and (max-width: 1279px) {
-  .shell[data-arrival='shown'] .notices {
-    top: 160px;
-  }
 }
 
 /* A narrow window with a pointer: the pill moves beside the rail, clear of the chip. */
@@ -830,7 +839,11 @@
     top: 52px;
   }
 
-  .shell[data-arrival='shown'] .notices {
-    top: 160px;
+  /* The stacked column spans the width (the banner's 12 px gutters). */
+  .notices[data-stacked='true'] {
+    left: 12px;
+    /* Under the chip's tap area and the messages button (44 px from 12 px), as the mockup has it. */
+    top: 64px;
+    max-width: none;
   }
 }

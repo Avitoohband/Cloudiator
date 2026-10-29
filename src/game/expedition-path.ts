@@ -38,7 +38,18 @@ export type GladiatorPose = {
    * on time. Without it the scene runs the loop on the display clock.
    */
   animMs?: number;
+  /**
+   * Where a following camera looks instead of at the gladiator: the search spot's centre for the whole search, so the
+   * view stays put while the gladiator steps around the spot. The next leg starts on the spot, so the camera does not jump.
+   */
+  follow?: { x: number; y: number };
 };
+
+/**
+ * `wander: false` keeps a search on the spot (crouch, look and turn, no steps). Use it for a fast-forwarded replay, where a
+ * 15 s cycle would strobe, and for reduced motion.
+ */
+export type GladiatorPoseOptions = { readonly wander?: boolean };
 
 /** Resting at the safe point: sit for a while, then sleep, repeating. */
 export const REST_PATTERN = { sitMs: 120_000, sleepMs: 240_000 } as const;
@@ -55,7 +66,8 @@ export const REST_PATTERN = { sitMs: 120_000, sleepMs: 240_000 } as const;
  * At 1 tile per second a cycle takes 14.5 s (a 1-tile step) to 15.3 s (a sideways 1.4-tile step). Cycles alternate
  * between the spot's two wander points, one on each side of it on screen. The cycle still under way when the search ends
  * is spent at the spot instead (steps 1 and 2, then the same with the facings swapped), so the gladiator is on the spot
- * when the next leg starts there. Wander points stay within `reach` tiles of the spot.
+ * when the next leg starts there. Wander points stay within `reach` tiles of the spot. A following camera looks at the
+ * spot for the whole search. With `wander: false` (GladiatorPoseOptions) the whole search is spent on the spot.
  */
 export const SEARCH_PATTERN = { crouchMs: 2_500, lookMs: 2_500, reach: 1.5 } as const;
 
@@ -127,13 +139,17 @@ export function wanderPoints(journey: JourneyMap, spot: JourneyPoint): WanderPoi
 
 const turned = (facing: 'se' | 'sw'): 'se' | 'sw' => (facing === 'se' ? 'sw' : 'se');
 
-/** The search at `spot` (SEARCH_PATTERN), `restMs` after arriving there, for a search that ends `endMs` after arriving. */
-function searchPose(journey: JourneyMap, spot: JourneyPoint, restMs: number, endMs: number, tilesPerSecond: number): GladiatorPose {
+/**
+ * The search at `spot` (SEARCH_PATTERN), `restMs` after arriving there, for a search that ends `endMs` after arriving.
+ * Without `wander` it stays on the spot. A following camera looks at the spot throughout.
+ */
+function searchPose(journey: JourneyMap, spot: JourneyPoint, restMs: number, endMs: number, tilesPerSecond: number, wander: boolean): GladiatorPose {
   const { crouchMs, lookMs } = SEARCH_PATTERN;
   const searchMs = crouchMs + lookMs;
   const roundMs = searchMs + lookMs;
   const centre = journey.points[spot];
-  const at = (p: TilePoint, facing: Direction, animMs: number): GladiatorPose => ({ x: p.x + 0.5, y: p.y + 0.5, action: 'search', facing, walking: false, animMs });
+  const follow = { x: centre.x + 0.5, y: centre.y + 0.5 };
+  const at = (p: TilePoint, facing: Direction, animMs: number): GladiatorPose => ({ x: p.x + 0.5, y: p.y + 0.5, action: 'search', facing, walking: false, animMs, follow });
   // At the spot: crouch and look facing one way, then turn and look the other way; the next round crouches facing the
   // way it last looked.
   const inPlace = (ms: number, facing: 'se' | 'sw'): GladiatorPose => {
@@ -143,7 +159,7 @@ function searchPose(journey: JourneyMap, spot: JourneyPoint, restMs: number, end
     return local < searchMs ? at(centre, first, local) : at(centre, turned(first), crouchMs + local - searchMs);
   };
   const t = Math.max(0, restMs);
-  const points = wanderPoints(journey, spot);
+  const points = wander ? wanderPoints(journey, spot) : [];
   if (!points.length) return inPlace(t, 'se');
   const walkMs = (w: WanderPoint) => (w.length / tilesPerSecond) * 1000;
   const cycleMs = (w: WanderPoint) => roundMs + walkMs(w) + searchMs + walkMs(w);
@@ -166,7 +182,7 @@ function searchPose(journey: JourneyMap, spot: JourneyPoint, restMs: number, end
   local -= roundMs;
   const walk = (path: TilePoint[], ms: number): GladiatorPose => {
     const p = pointAlong(path, (ms * tilesPerSecond) / 1000);
-    return { x: p.x, y: p.y, action: 'walk', facing: facingFor(p.dx, p.dy, w.side), walking: true };
+    return { x: p.x, y: p.y, action: 'walk', facing: facingFor(p.dx, p.dy, w.side), walking: true, follow };
   };
   if (local < walkMs(w)) return walk(w.out, local);
   local -= walkMs(w);
@@ -180,16 +196,16 @@ function arrivalFacing(journey: JourneyMap, to: JourneyPoint): Direction {
 }
 
 /** Where the gladiator is and what it does for a route progress, at `tilesPerSecond`. */
-export function gladiatorPose(journey: JourneyMap, route: RouteProgress, tilesPerSecond: number): GladiatorPose {
+export function gladiatorPose(journey: JourneyMap, route: RouteProgress, tilesPerSecond: number, { wander = true }: GladiatorPoseOptions = {}): GladiatorPose {
   // Leaving after a defeat: it keeps the pose of its rest at the safe point while the scene fades it out.
-  if (route.then === 'leave' && route.rest) return gladiatorPose(journey, route.rest, tilesPerSecond);
+  if (route.then === 'leave' && route.rest) return gladiatorPose(journey, route.rest, tilesPerSecond, { wander });
   const target = journey.points[route.to];
   const arrived = (restMs: number): GladiatorPose => {
     // Searching: it looks around the spot, a few steps at a time, and is back on it when the search ends (`untilMs`,
     // counted like `walkedMs` from when it set off; without one the cycle goes on).
     if (route.then === 'search') {
       const endMs = route.untilMs === undefined ? Infinity : route.untilMs - (route.walkedMs - restMs);
-      return searchPose(journey, route.to, restMs, endMs, tilesPerSecond);
+      return searchPose(journey, route.to, restMs, endMs, tilesPerSecond, wander);
     }
     const facing = arrivalFacing(journey, route.to);
     const at = { x: target.x + 0.5, y: target.y + 0.5, facing, walking: false };

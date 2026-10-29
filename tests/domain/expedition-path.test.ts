@@ -122,6 +122,21 @@ const searchAt = (j: JourneyMap, from: JourneyPoint, spot: JourneyPoint, restMs:
 };
 const off = (pose: { x: number; y: number }, p: TilePoint) => Math.hypot(pose.x - (p.x + 0.5), pose.y - (p.y + 0.5));
 const STEP_MS = 50;
+/**
+ * Poses sampled every STEP_MS around a spot: walkable, within 1.5 tiles of it, never faster than walking (no jump), and
+ * searching whenever it stands, facing se or sw (the search art has only front frames).
+ */
+const expectAround = (map: MapData, centre: TilePoint, poses: GladiatorPose[], label: string) => poses.forEach((p, i) => {
+  const at = `${label} at ${i * STEP_MS} ms`;
+  expect(walkable(map, p.x, p.y), at).toBe(true);
+  expect(off(p, centre), at).toBeLessThanOrEqual(1.5 + 1e-9);
+  if (i) expect(Math.hypot(p.x - poses[i - 1].x, p.y - poses[i - 1].y), at).toBeLessThanOrEqual((SPEED * STEP_MS) / 1000 + 1e-9);
+  if (p.walking) expect(p.action, at).toBe('walk');
+  else {
+    expect(p.action, at).toBe('search');
+    expect(['se', 'sw'], at).toContain(p.facing);
+  }
+});
 
 describe('searching around a spot (Avi, 2026-10-29: slower, looking around)', () => {
   it('times the search cycle by the manifest search loop: a crouch, then a look, about 2.5 s each', () => {
@@ -152,19 +167,7 @@ describe('searching around a spot (Avi, 2026-10-29: slower, looking around)', ()
         // Steps: it walks, with the walk animation, to a point within 1.5 tiles and searches there.
         expect(poses.some(p => p.walking && p.action === 'walk'), label).toBe(true);
         expect(poses.some(p => !p.walking && off(p, centre) > 0.5), label).toBe(true);
-        // Everywhere: walkable, within 1.5 tiles of the spot, never faster than walking (no jump), and searching
-        // whenever it stands, facing se or sw (the search art has only front frames).
-        poses.forEach((p, i) => {
-          const at = `${label} at ${i * STEP_MS} ms`;
-          expect(walkable(map, p.x, p.y), at).toBe(true);
-          expect(off(p, centre), at).toBeLessThanOrEqual(1.5 + 1e-9);
-          if (i) expect(Math.hypot(p.x - poses[i - 1].x, p.y - poses[i - 1].y), at).toBeLessThanOrEqual((SPEED * STEP_MS) / 1000 + 1e-9);
-          if (p.walking) expect(p.action, at).toBe('walk');
-          else {
-            expect(p.action, at).toBe('search');
-            expect(['se', 'sw'], at).toContain(p.facing);
-          }
-        });
+        expectAround(map, centre, poses, label);
         // A cycle of about 12 to 16 s: it sets off from the spot at least twice in 40 s, never before its first search.
         const departures = poses.flatMap((p, i) => (i && p.walking && !poses[i - 1].walking && off(poses[i - 1], centre) === 0 ? [i * STEP_MS] : []));
         expect(departures.length, label).toBeGreaterThanOrEqual(2);
@@ -201,6 +204,64 @@ describe('searching around a spot (Avi, 2026-10-29: slower, looking around)', ()
           const last = gladiatorPose(j, searchAt(j, from, spot, until - 1, until), SPEED);
           expect([last.x, last.y], `${map.id} ${spot}, a search of ${until} ms`).toEqual([start.x, start.y]);
         }
+      }
+    }
+  });
+
+  it('never jumps when the search ends partway through a cycle: it walks back, then searches on the spot', () => {
+    // Searches that end in the second cycle (20 s) or the third (31 s): the step-by-step sweep runs on into the final
+    // cycle, which is spent on the spot, so a jump back onto the spot fails here (review fix round 1, Minor 1).
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot] of SEARCHES) {
+        const centre = j.points[spot];
+        for (const until of [20_000, 31_000]) {
+          const label = `${map.id} ${spot}, a search of ${until} ms`;
+          const poses = Array.from({ length: until / STEP_MS }, (_, i) => gladiatorPose(j, searchAt(j, from, spot, i * STEP_MS, until), SPEED));
+          expectAround(map, centre, poses, label);
+          expect(poses.some(p => p.walking), label).toBe(true);
+          expect(poses.at(-1), label).toMatchObject({ x: centre.x + 0.5, y: centre.y + 0.5, action: 'search', walking: false });
+        }
+      }
+    }
+  });
+
+  it('searches on the spot with wander: false: crouch, look and turn, but no steps', () => {
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot, next] of SEARCHES) {
+        const centre = j.points[spot];
+        for (const until of [undefined, 20_000]) {
+          const label = `${map.id} ${spot}, until ${until}`;
+          const poses = Array.from({ length: 40_000 / STEP_MS }, (_, i) => gladiatorPose(j, searchAt(j, from, spot, i * STEP_MS, until), SPEED, { wander: false }));
+          for (const p of poses) expect(p, label).toMatchObject({ x: centre.x + 0.5, y: centre.y + 0.5, action: 'search', walking: false });
+          expect(poses[0], label).toMatchObject({ facing: 'se' });
+          expect(searchLook(poses[0]), label).toBe('crouch');
+          expect(new Set(poses.map(searchLook)), label).toEqual(new Set(['crouch', 'look']));
+          expect(new Set(poses.map(p => p.facing)), label).toEqual(new Set(['se', 'sw']));
+        }
+        // Only the search changes: the walk to the spot and the leg after it are as before.
+        for (const r of [route(from, spot, 1_500, 'search'), route(spot, next, 1_000, 'wait'), route(spot, next, 10 * 60_000, 'wait')]) {
+          expect(gladiatorPose(j, r, SPEED, { wander: false }), `${map.id} ${spot}`).toEqual(gladiatorPose(j, r, SPEED));
+        }
+      }
+    }
+  });
+
+  it('points a following camera at the search spot while it searches, and at the gladiator on the legs', () => {
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot, next] of SEARCHES) {
+        const centre = { x: j.points[spot].x + 0.5, y: j.points[spot].y + 0.5 };
+        for (const wander of [true, false]) {
+          for (let ms = 0; ms < 40_000; ms += 250) {
+            expect(gladiatorPose(j, searchAt(j, from, spot, ms, 31_000), SPEED, { wander }).follow, `${map.id} ${spot} at ${ms} ms`).toEqual(centre);
+          }
+        }
+        // On the legs it follows the gladiator itself. The leg after the search starts on the spot, so there is no jump.
+        expect(gladiatorPose(j, route(from, spot, 1_500, 'search'), SPEED).follow).toBeUndefined();
+        expect(gladiatorPose(j, route(spot, next, 0, 'wait'), SPEED)).toMatchObject(centre);
+        expect(gladiatorPose(j, route(spot, next, 0, 'wait'), SPEED).follow).toBeUndefined();
       }
     }
   });

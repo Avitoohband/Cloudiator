@@ -209,6 +209,8 @@ export async function readMessages(client: SupabaseClient): Promise<GameMessage[
   return messages;
 }
 const NOTIFICATIONS_PAGE = 20;
+/** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */
+export type NotificationsRead = { items: GameNotification[]; newestSettledMs: number | null };
 type NotificationRow = { id: unknown; settled_at_ms: unknown; summary: unknown; destination: unknown; gladiators?: unknown };
 const NOTIFICATION_KINDS: readonly string[] = ['training', 'expedition', 'arena', 'tournament'];
 const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -264,15 +266,19 @@ function levelsReached(awards: readonly (number | null)[], now: { level: number;
  * bound), because one committed between the clock read and this read is not in the list but its XP is in the level. A count that is not
  * zero (or not there) leaves every `levelAfter` null. Only those columns cross: never a seed, snapshot or receipt. A row this client
  * cannot show (an unknown kind, a summary it cannot read) is left out rather than failing the list, and the levels of the older
- * results are then unknown (null), never guessed.
+ * results are then unknown (null), never guessed. `newestSettledMs` is the newest settled time of EVERY row fetched, left-out rows
+ * included: the badge counts every result of the four kinds, so the "seen" mark must reach the newest fetched row, not the newest one
+ * shown (null when no row was fetched).
  */
-export async function readNotifications(client: SupabaseClient): Promise<GameNotification[]> {
+export async function readNotifications(client: SupabaseClient): Promise<NotificationsRead> {
   const clock = await readRevision(client);
   const rows = checked(await client.from('activities').select('id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))')
     .eq('status', 'completed').in('resolved_kind', NOTIFICATION_KINDS).not('summary', 'is', null).lte('settled_at_ms', clock.serverNowMs)
     .eq('gladiators.newer.status', 'completed').gt('gladiators.newer.settled_at_ms', clock.serverNowMs)
     .order('settled_at_ms', { ascending: false }).order('slot_index', { ascending: false }).limit(NOTIFICATIONS_PAGE)) as unknown as NotificationRow[];
   const page = rows.slice(0, NOTIFICATIONS_PAGE);
+  const fetchedAt = page.map(row => Number(row.settled_at_ms)).filter(Number.isSafeInteger);
+  const newestSettledMs = fetchedAt.length ? Math.max(...fetchedAt) : null;
   const shown = page.map(row => {
     const summary = notifiableSummary(row.summary), settledAtMs = Number(row.settled_at_ms);
     return typeof row.id === 'string' && summary !== null && Number.isSafeInteger(settledAtMs) ? { id: row.id, summary, settledAtMs, destination: row.destination } : null;
@@ -289,7 +295,7 @@ export async function readNotifications(client: SupabaseClient): Promise<GameNot
       ? CATALOG_V1.expeditions[row.destination as keyof typeof CATALOG_V1.expeditions].name : null;
     list.push({ activityId: row.id, kind, settledAtMs: row.settledAtMs, summary: row.summary, destination, levelAfter: levels[i] });
   });
-  return list;
+  return { items: list, newestSettledMs };
 }
 const STANDINGS_PAGE = 50;
 const SEASONS_PAGE = 50;

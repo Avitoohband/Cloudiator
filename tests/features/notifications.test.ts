@@ -23,14 +23,14 @@ it('lists what training earned: XP and attribute points, with the singular for o
   expect(notificationLines(note('training')).lines).toEqual(['No rewards']);
 });
 
-it('lists an expedition: the destination and result, gold, XP, each item with its rarity and tier, and the extra items sold for gold', () => {
+it('lists an expedition: the destination and result, gold, XP, each item with its rarity and tier, and the gold for items that did not fit', () => {
   const sword = item('sword:5:rare', 5, 'rare');
   expect(notificationLines(note('expedition', { result: 'victory', rewards: rewards({ money: 120, xp: 250, items: [sword], overflowMoney: 35 }) }, woodland))).toEqual({
     title: 'Expedition victory: Woodland Path',
-    lines: ['+120 gold', '+250 XP', 'Rare Sword (tier 5)', '+35 gold for extra items sold'], levelUp: null });
+    lines: ['+120 gold', '+250 XP', 'Rare Sword (tier 5)', '+35 gold for items that did not fit'], levelUp: null });
   // A catalog name this client does not know is built from the item's id, so a future item is still listed (never skipped).
   expect(notificationLines(note('expedition', { result: 'victory', rewards: rewards({ money: 120, xp: 250, items: [item('iron-sword:5:rare', 5, 'rare')], overflowMoney: 35 }) }, woodland)).lines)
-    .toEqual(['+120 gold', '+250 XP', 'Rare Iron sword (tier 5)', '+35 gold for extra items sold']);
+    .toEqual(['+120 gold', '+250 XP', 'Rare Iron sword (tier 5)', '+35 gold for items that did not fit']);
   // A stack shows its quantity (not "×1"), and salvage has no tier or rarity worth saying.
   expect(notificationLines(note('expedition', { result: 'victory', rewards: rewards({ items: [item('light-boots:1:uncommon', 1, 'uncommon', 2), item('salvage', 1, 'common', 3), item('salvage', 1, 'common', 1)] }) })).lines)
     .toEqual(['Uncommon Light boots (tier 1) ×2', 'Salvage ×3', 'Salvage']);

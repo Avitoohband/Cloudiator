@@ -15,7 +15,7 @@ import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { buildRefusal } from './build-refusal';
-import { fixedClassAndPoints } from './fixed-build';
+import { fixedClassAndPoints, fixedKey, refloored } from './fixed-build';
 
 const attributes = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
 const slots: EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
@@ -53,15 +53,24 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
   const attempt = useRef<BuildCommand | null>(null), sending = useRef(false), mounted = useRef(false);
   const draftVersion = useRef(owner.buildVersion);
+  /** The class and points the draft's floor was taken from (`fixedKey`): the current build moves without a new build version when the boundary applies a pending build. */
+  const draftFloor = useRef(fixedKey(owner.currentBuild));
   const reviewId = useId();
   // A command sent by keyboard whose control went away (Cancel pending build removes its section) gives the focus to its
   // outcome, never to <body>; a pointer command moves nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
+    const floor = fixedKey(owner.currentBuild);
     if (draftVersion.current !== owner.buildVersion) {
-      draftVersion.current = owner.buildVersion;
+      draftVersion.current = owner.buildVersion; draftFloor.current = floor;
       setDraft(draftFrom(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild)); attempt.current = null; setPointsNote('');
+    } else if (draftFloor.current !== floor) {
+      // The boundary applied the pending build under the open form: the current build (so the class and the floor of every attribute) moved
+      // while the build version did not. Compared by content, since every owner read brings a new object. The draft keeps its unsent edits
+      // but is raised to the new floor, so it can never hold a class or a point the server would refuse (and Queue build is never stuck).
+      draftFloor.current = floor;
+      setDraft(previous => refloored(previous, owner.currentBuild)); attempt.current = null; setPointsNote('');
     }
   }, [owner.buildVersion, owner.currentBuild, owner.pendingBuild]);
   const valid = validateBuild(draft, owner.inventory, owner.progression.earnedAttributePoints, owner.progression.level);

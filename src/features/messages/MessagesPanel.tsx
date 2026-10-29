@@ -5,16 +5,16 @@
 // - Messages: newest first, each row a real button with its tag, date, title and one-line preview; an unread row has a gold dot and a
 //   bold title. Opening a row shows its text with Back and Close, and sends the read mark then (not when the list shows, which would
 //   spend the command budget on messages nobody opened). The text is data: it is only ever rendered as text, never as markup.
-// - Notifications: what each result earned. Opening the tab marks everything shown as seen, once, with the newest shown time; the
-//   rows that were new when the panel opened keep their gold dot while it is open.
+// - Notifications: what each result earned. Opening the tab marks the results as seen, once, up to the newest row the read fetched (a row
+//   the list cannot show included, so the badge always clears); the rows that were new when the panel opened keep their gold dot while it is open.
 // - The world revision does not carry either list, so each is read when its tab is first shown and again when the owner's `inbox`
 //   says it no longer agrees (a message was posted or hidden, a result was credited), once per change of the inbox.
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { GameMessage, GameNotification, Inbox, MessageBlock } from '@contracts/reads';
+import type { GameMessage, Inbox, MessageBlock } from '@contracts/reads';
 import { isNewNotification, isUnread, messageDate, messagesStale, notificationsStale, tagName, badgeText, type MessagingActions } from './messages';
 import { LookDisclaimer } from './LookDisclaimer';
 import { levelUpLine, notificationLines } from './notifications';
-import { useLoadedList } from './useLoadedList';
+import { useLoaded, useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
 
 type Tab = 'messages' | 'notifications';
@@ -62,7 +62,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
   const [seenAtOpen] = useState(inbox.notificationsSeenMs);
 
   const messages = useLoadedList<GameMessage>(load, true);
-  const notes = useLoadedList<GameNotification>(loadNotifications, visitedNotifications);
+  const notes = useLoaded(loadNotifications, visitedNotifications);
+  const noteItems = notes.value?.items ?? null;
 
   // Read a list again when the inbox says it is stale, once per change of what the inbox says about it (a list that stays stale, such as
   // 25 new results behind a 20-row list, is not read in a loop).
@@ -76,10 +77,10 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
   const notesKey = `${inbox.newNotifications}|${inbox.notificationsSeenMs}`;
   const notesAsked = useRef(notesKey);
   useEffect(() => {
-    if (notes.items === null || notesAsked.current === notesKey || !notificationsStale(notes.items, inbox)) return;
+    if (noteItems === null || notesAsked.current === notesKey || !notificationsStale(noteItems, inbox)) return;
     notesAsked.current = notesKey;
     notes.reload();
-  }, [notes.items, notesKey]);
+  }, [noteItems, notesKey]);
 
   // A read mark goes out when a message is opened, once for each message (a failed one is asked again the next time it is opened).
   const readAsked = useRef(new Set<number>());
@@ -104,16 +105,17 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
   // A message the operator hid while it was open is gone from the list the next read brings: back to the list.
   useEffect(() => { if (current !== null && messages.items !== null && detail === null) setCurrent(null); }, [current, messages.items, detail]);
 
-  // The results on show are marked seen up to the newest of them, once for each newest time (a later result sends its own).
+  // The results are marked seen up to the newest row the read fetched, once for each newest time (a later result sends its own). That is
+  // the newest row, not the newest one shown: the badge counts every result of the four kinds, and the list leaves out a row it cannot
+  // read, so a mark that stopped at the newest shown row could leave the badge on for good.
   const seenUpTo = useRef(0);
   useEffect(() => {
-    if (tab !== 'notifications' || notes.items === null || notes.items.length === 0) return;
-    const newest = Math.max(...notes.items.map(n => n.settledAtMs));
-    if (newest <= inbox.notificationsSeenMs || newest <= seenUpTo.current) return;
+    const newest = notes.value?.newestSettledMs ?? null;
+    if (tab !== 'notifications' || newest === null || newest <= inbox.notificationsSeenMs || newest <= seenUpTo.current) return;
     const before = seenUpTo.current;
     seenUpTo.current = newest;
     seeNotifications(newest).catch(() => { if (seenUpTo.current === newest) seenUpTo.current = before; });
-  }, [tab, notes.items]);
+  }, [tab, notes.value]);
 
   const select = (next: Tab) => {
     setTab(next);
@@ -134,7 +136,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
 
   const tabId = (t: Tab) => `${ids}-tab-${t}`;
   const messageCount = messages.items?.length ?? 0;
-  const freshNotes = (notes.items ?? []).filter(n => isNewNotification(n, seenAtOpen)).length;
+  const freshNotes = (noteItems ?? []).filter(n => isNewNotification(n, seenAtOpen)).length;
 
   return (
     <section ref={root} id={id} className={styles.panel} aria-label="Messages" data-testid="messages-panel">
@@ -197,13 +199,13 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
           </div>
         ) : (
           <div role="tabpanel" id={`${ids}-panel-notifications`} aria-labelledby={tabId('notifications')}>
-            {notes.items === null ? (notes.failed ? <Failed what="Notifications" retry={notes.reload} /> : <p role="status" className={styles.state}>Loading notifications…</p>)
+            {noteItems === null ? (notes.failed ? <Failed what="Notifications" retry={notes.reload} /> : <p role="status" className={styles.state}>Loading notifications…</p>)
               : <>
                 {notes.failed && <Failed what="Notifications" retry={notes.reload} />}
-                {notes.items.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
-                  <p className={styles.summary}>Latest {notes.items.length} result{notes.items.length === 1 ? '' : 's'} · {freshNotes > 0 ? `${freshNotes} new` : 'nothing new'}</p>
+                {noteItems.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
+                  <p className={styles.summary}>Latest {noteItems.length} result{noteItems.length === 1 ? '' : 's'} · {freshNotes > 0 ? `${freshNotes} new` : 'nothing new'}</p>
                   <ul className={styles.list}>
-                    {notes.items.map(note => {
+                    {noteItems.map(note => {
                       const { title, lines, levelUp } = notificationLines(note);
                       const fresh = isNewNotification(note, seenAtOpen);
                       return <li key={note.activityId} className={styles.card} data-notification data-unread={fresh ? '' : undefined}>

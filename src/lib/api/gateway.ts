@@ -1,13 +1,13 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { GameMessage, GameNotification, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { GameMessage, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
   GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
-  readTournamentLog,
+  readTournamentLog, type NotificationsRead,
 } from './reads';
-export { GatewayReadError } from './reads';
+export { GatewayReadError, type NotificationsRead } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
@@ -67,7 +67,8 @@ export interface GameGateway {
   /**
    * The newest 50 game messages (patch notes and admin notes), newest first, as plain text. They are public: a visitor reads
    * the same list, and a hidden message is not in it. Whether each is unread is the owner read's `inbox`, not this list. A row
-   * this client cannot show is left out. Load it when the panel opens and at a slow interval; the world revision does not carry it.
+   * this client cannot show is left out. Load it when the panel opens, and again when the owner's `inbox` says the list no longer
+   * agrees (a message was posted or hidden); the world revision does not carry it.
    */
   messages(): Promise<GameMessage[]>;
   /**
@@ -75,8 +76,10 @@ export interface GameGateway {
    * each with its credited summary, an expedition's destination and the level it reached when it raised the level. Owner-only: it needs
    * a signed-in account, and a result appears only once it is revealed (settled at or before the server's now). Whether each is new is
    * the owner read's `inbox` (`notificationsSeenMs`); a `see-notifications` command moves that mark. Load it when the Notifications tab opens.
+   * `newestSettledMs` is the newest settled time of every row the read fetched, a row the list leaves out included (null when there
+   * was none): the mark is sent up to it, so a result this client cannot show never keeps the badge on.
    */
-  notifications(): Promise<GameNotification[]>;
+  notifications(): Promise<NotificationsRead>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;

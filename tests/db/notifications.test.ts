@@ -142,11 +142,11 @@ describe('notifications', () => {
     // Once the reveal time has passed, the same result counts, and the list shows it.
     await sql`update public.activities set settled_at_ms=${(await dbNow()) - 1} where id=${unrevealed}`;
     expect(await inbox()).toMatchObject({ newNotifications: 1 });
-    expect((await readNotifications(owner.client)).map(n => n.activityId)).toEqual([unrevealed]);
+    expect((await readNotifications(owner.client)).items.map(n => n.activityId)).toEqual([unrevealed]);
     // A completed result with no summary (never written by settlement) is not counted or listed either.
     await sql`update public.activities set summary=null where id=${unrevealed}`;
     expect(await inbox()).toMatchObject({ newNotifications: 0 });
-    expect(await readNotifications(owner.client)).toEqual([]);
+    expect(await readNotifications(owner.client)).toEqual({ items: [], newestSettledMs: null });
   });
 
   it('lists the owner\'s results: newest 20 first, revealed and non-rest only, the destination named, and never another account\'s', async () => {
@@ -157,14 +157,14 @@ describe('notifications', () => {
     await activity(owner.gid, 'rest', { settledAt: base + 100 });
     await activity(owner.gid, 'arena', { settledAt: base + 3_600_000 });
     await activity(other.gid, 'training', { settledAt: base + 200, earned: { attributePoints: 1 } });
-    const list = await readNotifications(owner.client);
+    const { items: list } = await readNotifications(owner.client);
     // Newest first, 20 of the 22, with no rest, no unrevealed Arena, nothing of the other gladiator.
     expect(list.map(n => n.activityId)).toEqual(ids.slice(2).reverse());
     expect(list.map(n => n.settledAtMs)).toEqual(Array.from({ length: 20 }, (_, i) => base + 21 - i));
     expect(list[0]).toMatchObject({ kind: 'training', destination: null, summary: { resolvedKind: 'training', rewards: { attributePoints: 1 } } });
     expect(list[1]).toMatchObject({ kind: 'expedition', destination: 'Woodland Path' });
     expect(list.find(n => n.activityId === ids[6])).toMatchObject({ kind: 'expedition', destination: 'Ruined Outpost' });
-    expect((await readNotifications(other.client)).map(n => n.summary.rewards.attributePoints)).toEqual([1]);
+    expect((await readNotifications(other.client)).items.map(n => n.summary.rewards.attributePoints)).toEqual([1]);
     // A visitor has no access to activities at all.
     await expect(readNotifications(anonymous)).rejects.toMatchObject({ code: 'unauthenticated' });
   });
@@ -180,7 +180,7 @@ describe('notifications', () => {
     const arena = await activity(owner.gid, 'arena', { settledAt: base + 4, earned: { renown: 5 } });
     const fourth = await activity(owner.gid, 'expedition', { settledAt: base + 5, earned: { xp: 200 } });
     await sql`update public.gladiators set level=4, xp=0 where id=${owner.gid}`;
-    const levels = async () => Object.fromEntries((await readNotifications(owner.client)).map(n => [n.activityId, n.levelAfter]));
+    const levels = async () => Object.fromEntries((await readNotifications(owner.client)).items.map(n => [n.activityId, n.levelAfter]));
     expect(await levels()).toEqual({ [first]: 2, [second]: 3, [training]: null, [third]: null, [arena]: null, [fourth]: 4 });
     // Settlement adds the next XP and the gladiator's level moves with it: every earlier result keeps its level.
     const fifth = await activity(owner.gid, 'expedition', { settledAt: base + 6, earned: { xp: 100 } });

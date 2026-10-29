@@ -48,7 +48,7 @@ function settled(n: number, resolvedKind: ActivitySummary['resolvedKind'], resul
     rewards: { money: 0, renown: 0, xp: 0, attributePoints: 0, items: [], overflowMoney: 0, ...rewards }, settledAtMs: NOW - minutesAgo * MIN, replayExpiry: { state: 'expired' }, ...extra };
   return { summary, ...(expeditionId ? { expeditionId } : {}) };
 }
-/** Three results: an Arena victory, an expedition that raised the level to 2 (a Rare sword, extra items sold) and a training. The owner is level 2 with 150 XP: 250 XP in all. */
+/** Three results: an Arena victory, an expedition that raised the level to 2 (a Rare sword, gold for items that did not fit) and a training. The owner is level 2 with 150 XP: 250 XP in all. */
 const RESULTS = [
   settled(3, 'arena', 'victory', 10, { renown: 30 }, { ratingDelta: 12 }),
   settled(2, 'expedition', 'victory', 70, { money: 120, xp: 250, overflowMoney: 35, items: [{ catalogId: 'sword:5:rare', catalogVersion: 'v1', tier: 5, rarity: 'rare', quantity: 1 }] }, {}, 'woodland'),
@@ -538,7 +538,7 @@ test.describe('in live mode', () => {
     await expect(titles).toHaveText(['Arena victory', 'Expedition victory: Woodland Path', 'Training finished']);
     const arena = list.locator('[data-notification]').nth(0), expedition = list.locator('[data-notification]').nth(1), training = list.locator('[data-notification]').nth(2);
     await expect(arena.getByRole('listitem')).toHaveText(['+30 renown', 'Rating +12']);
-    await expect(expedition.getByRole('listitem')).toHaveText(['+120 gold', '+250 XP', 'Level up! Now level 2', 'Rare Sword (tier 5)', '+35 gold for extra items sold']);
+    await expect(expedition.getByRole('listitem')).toHaveText(['+120 gold', '+250 XP', 'Level up! Now level 2', 'Rare Sword (tier 5)', '+35 gold for items that did not fit']);
     await expect(training.getByRole('listitem')).toHaveText(['+1 attribute point']);
     expect(live.count('activities')).toBeGreaterThan(notifications);
     // The mark is sent once, with the newest result's time, and the count clears after the owner is read again.
@@ -574,6 +574,22 @@ test.describe('in live mode', () => {
     await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
     await expect(messagesButton(page)).toHaveAccessibleName('Messages');
     expect(sent(commands, 'see-notifications')).toEqual([{ kind: 'see-notifications', operationId: expect.any(String), upToMs: newest(many) }]);
+  });
+
+  test('a newest result the list cannot show still moves the mark, so the badge clears', async ({ page }) => {
+    // The badge counts every completed result of the four kinds, but the list leaves out one this client cannot read (here a negative
+    // amount, which no real result holds). The mark goes up to the newest row read, not the newest one shown, or the badge would stay.
+    const unreadable = settled(7, 'training', 'completed', 2, { attributePoints: 1, renown: -1 });
+    const everything = [unreadable, ...RESULTS];
+    const { commands } = await player(page, { notifications: everything, readIds: [EVENING.id, LOOK.id, RELEASE.id] });
+    await openLive(page);
+    await expect(messagesButton(page)).toHaveAccessibleName('Messages, 4 new');
+    const panel = await openPanel(page);
+    await expect(panel.locator('[data-notification-title]')).toHaveText(['Arena victory', 'Expedition victory: Woodland Path', 'Training finished']);
+    await expect.poll(() => sent(commands, 'see-notifications')).toEqual([{ kind: 'see-notifications', operationId: expect.any(String), upToMs: newest(everything) }]);
+    expect(newest(everything)).toBeGreaterThan(newest(RESULTS));
+    await expect(messagesButton(page)).toHaveAccessibleName('Messages');
+    await expect(badge(page)).toHaveCount(0);
   });
 
   test('a result credited while Notifications is open is listed after the next owner read and seen once more', async ({ page }) => {

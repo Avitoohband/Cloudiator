@@ -59,7 +59,7 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     // The sample messages, newest first (a copy each time); no network.
     messages: async () => structuredClone([...FIXTURE_MESSAGES]),
     // The sample notifications, newest first (a copy each time); no network.
-    notifications: async () => structuredClone([...FIXTURE_NOTIFICATIONS]),
+    notifications: async () => ({ items: structuredClone([...FIXTURE_NOTIFICATIONS]), newestSettledMs: FIXTURE_NOTIFICATIONS.length ? Math.max(...FIXTURE_NOTIFICATIONS.map(n => n.settledAtMs)) : null }),
     // The fixture world's slot is published (Task 23.2's published slot, C5).
     world: async () => ({ ...structuredClone(world), publishedSlotIndex: worldFixture.slotIndex }),
     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex, publishedSlotIndex: worldFixture.slotIndex }),

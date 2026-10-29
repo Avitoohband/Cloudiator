@@ -233,12 +233,14 @@ function signatures(schema: string, name: string): string[][] {
 describe('anonDenied', () => {
   it('probes backend-only functions with null arguments, table writes that match no row, and the private schema', () => {
     const rpcs = ANON_PROBES.filter(p => p.path.startsWith('/rest/v1/rpc/') && !p.profile).map(p => p.path.slice('/rest/v1/rpc/'.length));
-    expect(rpcs).toEqual(['create_gladiator', 'edit_schedule', 'buy_listing', 'claim_jobs', 'complete_job', 'renew_job', 'settle_activity']);
+    expect(rpcs).toEqual(['create_gladiator', 'edit_schedule', 'buy_listing', 'claim_jobs', 'complete_job', 'renew_job', 'settle_activity',
+      // M25: the free look change, a message's read mark and the notifications' "seen up to" mark.
+      'change_appearance', 'read_message', 'see_notifications']);
     expect(ANON_PROBES.filter(p => p.method === 'POST' && !p.path.includes('/rpc/')).map(p => p.label))
-      .toEqual(['insert wallets', 'insert item_instances', 'insert world_actors']);
+      .toEqual(['insert wallets', 'insert item_instances', 'insert world_actors', 'insert game_messages']);
     expect(ANON_PROBES.filter(p => p.profile === 'private').map(p => [p.label, p.expected]))
-      .toEqual([['read private.jobs', ['PGRST106']], ['rpc private.schedule_effective_slot', ['PGRST106']]]);
-    expect(ANON_PROBES).toHaveLength(14);
+      .toEqual([['read private.jobs', ['PGRST106']], ['rpc private.schedule_effective_slot', ['PGRST106']], ['rpc private.post_message', ['PGRST106']]]);
+    expect(ANON_PROBES).toHaveLength(19);
   });
 
   it('calls only functions that take arguments, each argument null, by the names the migrations define', () => {

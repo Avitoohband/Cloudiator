@@ -212,8 +212,9 @@ const rpc = (name: string, args: string[]): AnonProbe => ({ label: `rpc ${name}`
  * anonDenied: a representative set from tests/db/access-matrix.test.ts, chosen so that a probe changes nothing even if a
  * privilege had been granted: backend-only and owner functions called with null arguments only (each refuses or finds nothing
  * with them), inserts of an empty row, an update and a delete filtered on `is.null` of a NOT NULL primary-key column (so no
- * row can match), and the private schema, which the Data API must not serve at all: a table read, and a call of the STRICT
- * private.schedule_effective_slot with null arguments (STRICT returns null without running). No function that acts without
+ * row can match), and the private schema, which the Data API must not serve at all: a table read, a call of the STRICT
+ * private.schedule_effective_slot with null arguments (STRICT returns null without running) and, since M25, a call of
+ * private.post_message with null arguments (it would insert no row: every column it fills is NOT NULL). No function that acts without
  * arguments is called (coordinate_work, refresh_projections, private.cleanup_tick). tests/deployed.test.ts checks each rule
  * against the migrations.
  */
@@ -225,13 +226,22 @@ export const ANON_PROBES: AnonProbe[] = [
   rpc('complete_job', ['job_id', 'lease_token', 'result']),
   rpc('renew_job', ['job_id', 'lease_token']),
   rpc('settle_activity', ['activity_id', 'lease_token']),
+  // M25 (game messages, free look change, notifications): the backend-only commands, each answering a refusal without any grant even with null arguments.
+  rpc('change_appearance', ['actor_id', 'operation_id', 'input']),
+  rpc('read_message', ['actor_id', 'message_id']),
+  rpc('see_notifications', ['actor_id', 'up_to_ms']),
   { label: 'insert wallets', method: 'POST', path: '/rest/v1/wallets', body: {}, expected: ['42501'] },
   { label: 'insert item_instances', method: 'POST', path: '/rest/v1/item_instances', body: {}, expected: ['42501'] },
   { label: 'insert world_actors', method: 'POST', path: '/rest/v1/world_actors', body: {}, expected: ['42501'] },
+  // M25: the public message table is read-only for every API role (the operator posts as postgres).
+  { label: 'insert game_messages', method: 'POST', path: '/rest/v1/game_messages', body: {}, expected: ['42501'] },
   { label: 'update wallets', method: 'PATCH', path: '/rest/v1/wallets?gladiator_id=is.null', body: { money: 0 }, expected: ['42501'] },
   { label: 'delete operation_receipts', method: 'DELETE', path: '/rest/v1/operation_receipts?owner_id=is.null', expected: ['42501'] },
   { label: 'read private.jobs', method: 'GET', path: '/rest/v1/jobs?select=id&limit=1', profile: 'private', expected: ['PGRST106'] },
   { label: 'rpc private.schedule_effective_slot', method: 'POST', path: '/rest/v1/rpc/schedule_effective_slot', body: { phase: null, now_ms: null },
+    profile: 'private', expected: ['PGRST106'] },
+  // M25: the operator's post function, called with null arguments (it would insert nothing); the private schema is not served at all.
+  { label: 'rpc private.post_message', method: 'POST', path: '/rest/v1/rpc/post_message', body: { kind: null, title: null, preview: null, body: null, action: null },
     profile: 'private', expected: ['PGRST106'] },
 ];
 

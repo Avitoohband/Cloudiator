@@ -48,7 +48,7 @@ const row = (n: number, kind: ActivitySummary['resolvedKind'], earned: Partial<C
 test('reads the owner\'s newest 20 settled results from the server\'s now, newest first, with the destination and no private column', async () => {
   const current = snap(2, 0);
   const { client, requests } = api(serve([row(1, 'training', { attributePoints: 1 }, {}, current), row(2, 'expedition', { money: 20, xp: 100 }, {}, current)]), SESSION);
-  const list = await readNotifications(client);
+  const { items: list, newestSettledMs } = await readNotifications(client);
   expect(requests.map(r => r.table)).toEqual(['world_revision', 'activities']);
   const query = requests[1].query;
   expect(query.get('select')).toBe('id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))');
@@ -68,13 +68,15 @@ test('reads the owner\'s newest 20 settled results from the server\'s now, newes
     { activityId: uuid(1), kind: 'training', settledAtMs: SERVER_NOW - 1000, summary: summaryOf(1, 'training', { attributePoints: 1 }), destination: null, levelAfter: null },
     { activityId: uuid(2), kind: 'expedition', settledAtMs: SERVER_NOW - 2000, summary: summaryOf(2, 'expedition', { money: 20, xp: 100 }), destination: 'Woodland Path', levelAfter: 2 },
   ]);
-  expect(await readNotifications(api(serve([]), SESSION).client)).toEqual([]);
+  // The newest settled time of the rows fetched (the "seen" mark's upper bound); none fetched, none.
+  expect(newestSettledMs).toBe(SERVER_NOW - 1000);
+  expect(await readNotifications(api(serve([]), SESSION).client)).toEqual({ items: [], newestSettledMs: null });
 });
 
 test('names the destination from the catalog: the three expeditions, and null for an id it does not know or none', async () => {
   const rows = [row(1, 'expedition', {}, { destination: 'woodland' }), row(2, 'expedition', {}, { destination: 'outpost' }), row(3, 'expedition', {}, { destination: 'mountain' }),
     row(4, 'expedition', {}, { destination: 'volcano' }), row(5, 'expedition', {}, { destination: null }), row(6, 'arena', {}, { destination: 'woodland' })];
-  const list = await readNotifications(api(serve(rows), SESSION).client);
+  const { items: list } = await readNotifications(api(serve(rows), SESSION).client);
   expect(list.map(n => n.destination)).toEqual(['Woodland Path', 'Ruined Outpost', 'Mountain Pass', null, null, null]);
 });
 
@@ -83,15 +85,15 @@ test('derives the level a result reached from the XP of the results after it and
   // 100 (level 2, 0), 350 (level 3, 50), 400 (level 3, 100), 600 (level 4, 0). Arena and training earned no XP and reach no level.
   const rows = [row(1, 'expedition', { xp: 200 }), row(2, 'arena', { renown: 5 }), row(3, 'expedition', { xp: 50 }), row(4, 'training', { attributePoints: 1 }),
     row(5, 'expedition', { xp: 250 }), row(6, 'expedition', { xp: 100 })].map(r => ({ ...r, gladiators: snap(4, 0) }));
-  const list = await readNotifications(api(serve(rows), SESSION).client);
+  const { items: list } = await readNotifications(api(serve(rows), SESSION).client);
   expect(list.map(n => n.levelAfter)).toEqual([4, null, null, null, 3, 2]);
   // The level is claimed by the result that crossed into it, not by a later one: at level 4 with 30 XP (630 in all), a result of 31 XP
   // began at 599 (level 3) and is the one that reached level 4; a result of 30 XP began at exactly 600, already level 4.
-  const crossing = (xp: number) => readNotifications(api(serve([row(1, 'expedition', { xp })].map(r => ({ ...r, gladiators: snap(4, 30) }))), SESSION).client);
+  const crossing = async (xp: number) => (await readNotifications(api(serve([row(1, 'expedition', { xp })].map(r => ({ ...r, gladiators: snap(4, 30) }))), SESSION).client)).items;
   expect((await crossing(31))[0].levelAfter).toBe(4);
   expect((await crossing(30))[0].levelAfter).toBeNull();
   // Several levels in one result: 100 + 200 + 300 = 600 XP at once, from level 1 to level 4.
-  const jump = await readNotifications(api(serve([row(1, 'expedition', { xp: 600 })].map(r => ({ ...r, gladiators: snap(4, 0) }))), SESSION).client);
+  const { items: jump } = await readNotifications(api(serve([row(1, 'expedition', { xp: 600 })].map(r => ({ ...r, gladiators: snap(4, 0) }))), SESSION).client);
   expect(jump[0].levelAfter).toBe(4);
 });
 
@@ -101,24 +103,24 @@ test('never guesses a level: with the gladiator unknown or the numbers inconsist
   const nothingLater = { newer: [{ count: 0 }] };
   for (const gladiators of [null, {}, nothingLater, { level: 2, ...nothingLater }, { level: 'two', xp: 0, ...nothingLater }, { level: 0, xp: 0, ...nothingLater },
     { level: 2, xp: -1, ...nothingLater }, { level: 1.5, xp: 0, ...nothingLater }]) {
-    const list = await readNotifications(api(serve([{ ...expedition(100), gladiators }]), SESSION).client);
+    const { items: list } = await readNotifications(api(serve([{ ...expedition(100), gladiators }]), SESSION).client);
     expect(list.map(n => n.levelAfter), JSON.stringify(gladiators)).toEqual([null]);
   }
   // More XP in the results than the gladiator has ever had cannot be true: nothing is said of the levels.
-  expect((await readNotifications(api(serve([{ ...expedition(500), gladiators: snap(1, 0) }]), SESSION).client))[0].levelAfter).toBeNull();
+  expect((await readNotifications(api(serve([{ ...expedition(500), gladiators: snap(1, 0) }]), SESSION).client)).items[0].levelAfter).toBeNull();
   // A result with a level-up is not claimed when no level was crossed (XP only).
-  expect((await readNotifications(api(serve([{ ...expedition(50), gladiators: snap(1, 50) }]), SESSION).client))[0].levelAfter).toBeNull();
+  expect((await readNotifications(api(serve([{ ...expedition(50), gladiators: snap(1, 50) }]), SESSION).client)).items[0].levelAfter).toBeNull();
   // A result that settled after the server's now (committed between the clock read and this read) may hold XP this list does not show:
   // the numbers cannot be trusted, so no level is claimed. Nor when the count is missing or malformed.
   for (const newer of [[{ count: 1 }], [{ count: 2 }], [], undefined, null, [{ count: '0' }], [{}], [{ count: 0 }, { count: 0 }], 'none']) {
-    const list = await readNotifications(api(serve([{ ...expedition(100), gladiators: { level: 2, xp: 0, newer } }]), SESSION).client);
+    const { items: list } = await readNotifications(api(serve([{ ...expedition(100), gladiators: { level: 2, xp: 0, newer } }]), SESSION).client);
     expect(list.map(n => n.levelAfter), JSON.stringify(newer)).toEqual([null]);
   }
-  expect((await readNotifications(api(serve([{ ...expedition(100), gladiators: snap(2, 0) }]), SESSION).client))[0].levelAfter).toBe(2);
+  expect((await readNotifications(api(serve([{ ...expedition(100), gladiators: snap(2, 0) }]), SESSION).client)).items[0].levelAfter).toBe(2);
   // An absent or malformed XP amount in a result stops the derivation there: the older results are not guessed either.
   const rows = [row(1, 'expedition', { xp: 100 }), { ...row(2, 'expedition', { xp: 1 }), summary: { ...summaryOf(2, 'expedition'), rewards: { ...rewards(), xp: 'lots' } } },
     row(3, 'expedition', { xp: 100 })].map(r => ({ ...r, gladiators: snap(2, 0) }));
-  const list = await readNotifications(api(serve(rows), SESSION).client);
+  const { items: list } = await readNotifications(api(serve(rows), SESSION).client);
   expect(list.map(n => n.activityId)).toEqual([uuid(1), uuid(3)]);
   expect(list.map(n => n.levelAfter)).toEqual([2, null]);
 });
@@ -128,17 +130,40 @@ test('shows only what it understands: a row of another kind or without a usable 
   const rows = [good, row(8, 'rest'), { ...row(7, 'arena'), summary: null }, { ...row(6, 'arena'), summary: 'text' }, { ...row(5, 'arena'), summary: { ...summaryOf(5, 'arena'), rewards: null } },
     { ...row(4, 'arena'), summary: { ...summaryOf(4, 'arena'), rewards: { ...rewards(), items: 'sword' } } }, { ...row(3, 'arena'), summary: { ...summaryOf(3, 'arena'), rewards: { ...rewards(), renown: -1 } } },
     { ...row(2, 'arena'), id: 7 }, { ...row(1, 'arena'), settled_at_ms: 'soon' }];
-  expect((await readNotifications(api(serve(rows), SESSION).client)).map(n => n.activityId)).toEqual([uuid(9)]);
+  expect((await readNotifications(api(serve(rows), SESSION).client)).items.map(n => n.activityId)).toEqual([uuid(9)]);
+});
+
+test('names the newest settled time of EVERY row fetched, so a newest row the list leaves out still moves the "seen" mark', async () => {
+  // The badge counts every completed result of the four kinds, but the list drops a row this client cannot read: the mark is sent up to
+  // the newest fetched row, not the newest one shown, or an unreadable newest row would keep the badge on for good.
+  const readable = row(5, 'training', { attributePoints: 1 });
+  const unreadable = { ...row(1, 'arena'), summary: { ...summaryOf(1, 'arena'), rewards: { ...rewards(), renown: -1 } } };
+  const read = await readNotifications(api(serve([unreadable, row(3, 'training', { attributePoints: 1 }), readable]), SESSION).client);
+  expect(read.items.map(n => n.activityId)).toEqual([uuid(3), uuid(5)]);
+  expect(read.newestSettledMs).toBe(SERVER_NOW - 1000);
+  // Every way a row can be left out counts: an unknown kind, no summary, a summary that is not an object, an id that is not text.
+  for (const dropped of [{ ...row(1, 'arena'), summary: null }, { ...row(1, 'arena'), summary: 'text' }, { ...row(1, 'rest') }, { ...row(1, 'arena'), id: 7 }]) {
+    const one = await readNotifications(api(serve([dropped, readable]), SESSION).client);
+    expect(one.items.map(n => n.activityId), JSON.stringify(dropped)).toEqual([uuid(5)]);
+    expect(one.newestSettledMs, JSON.stringify(dropped)).toBe(SERVER_NOW - 1000);
+  }
+  // A settled time that is not a number is no time at all: it never becomes the bound (text from a bigint column still does).
+  const text = await readNotifications(api(serve([{ ...row(1, 'arena'), settled_at_ms: 'soon' }, { ...readable, settled_at_ms: String(SERVER_NOW - 5000) }]), SESSION).client);
+  expect(text.newestSettledMs).toBe(SERVER_NOW - 5000);
+  expect((await readNotifications(api(serve([{ ...row(1, 'arena'), settled_at_ms: 'soon' }]), SESSION).client)).newestSettledMs).toBeNull();
+  // Like the list, the bound covers the 20 rows kept, never a 21st the server sent beyond the cap.
+  const many = [...Array.from({ length: 20 }, (_, i) => row(i + 10, 'training', { attributePoints: 1 })), row(1, 'training', { attributePoints: 1 })];
+  expect((await readNotifications(api(serve(many), SESSION).client)).newestSettledMs).toBe(SERVER_NOW - 10_000);
 });
 
 test('turns numbers from the database into numbers and caps the list at 20 even if the server sent more', async () => {
   const rows = Array.from({ length: 25 }, (_, i) => row(i + 1, 'training', { attributePoints: 1 }));
-  const list = await readNotifications(api(serve(rows), SESSION).client);
+  const { items: list } = await readNotifications(api(serve(rows), SESSION).client);
   expect(list).toHaveLength(20);
   expect(list[0].activityId).toBe(uuid(1));
   expect(list.every(n => typeof n.settledAtMs === 'number')).toBe(true);
   // A bigint sent as text (a driver option) still reads as a number.
-  const [read] = await readNotifications(api(serve([{ ...row(1, 'training', { attributePoints: 1 }), settled_at_ms: String(SERVER_NOW - 1000), slot_index: '399' }]), SESSION).client);
+  const { items: [read] } = await readNotifications(api(serve([{ ...row(1, 'training', { attributePoints: 1 }), settled_at_ms: String(SERVER_NOW - 1000), slot_index: '399' }]), SESSION).client);
   expect(read.settledAtMs).toBe(SERVER_NOW - 1000);
 });
 
@@ -155,8 +180,9 @@ test('the live gateway reads notifications for the signed-in owner only: a visit
   const { requests } = api(serve([row(1, 'training', { attributePoints: 1 })]), SESSION);
   const sent = vi.fn();
   vi.stubGlobal('fetch', sent);
-  const list = await createLiveGateway().notifications();
+  const { items: list, newestSettledMs } = await createLiveGateway().notifications();
   expect(list.map(n => n.activityId)).toEqual([uuid(1)]);
+  expect(newestSettledMs).toBe(SERVER_NOW - 1000);
   expect(requests.map(r => r.table)).toEqual(['world_revision', 'activities']);
   expect(sent).not.toHaveBeenCalled();
 });
@@ -199,7 +225,9 @@ test('a visitor\'s "seen up to" is refused locally and sends nothing', async () 
 
 test('the fixture preview lists sample notifications, newest first, and agrees with the owner\'s inbox', async () => {
   const gateway = createFixtureGateway();
-  const list = await gateway.notifications();
+  const { items: list, newestSettledMs } = await gateway.notifications();
+  // The mark's upper bound is the newest sample's time.
+  expect(newestSettledMs).toBe(list[0].settledAtMs);
   expect(list.length).toBeGreaterThan(2);
   expect(list.map(n => n.settledAtMs)).toEqual([...list.map(n => n.settledAtMs)].sort((a, b) => b - a));
   expect(new Set(list.map(n => n.activityId)).size).toBe(list.length);
@@ -219,7 +247,7 @@ test('the fixture preview lists sample notifications, newest first, and agrees w
   expect(inbox.newNotifications).toBeGreaterThan(0);
   // A copy each time: a caller that edits it changes nothing for the next.
   list[0].destination = 'Edited';
-  expect((await gateway.notifications())[0].destination).not.toBe('Edited');
+  expect((await gateway.notifications()).items[0].destination).not.toBe('Edited');
   // The preview takes no commands: "seen up to" is refused like every command there.
   expect(await gateway.command({ kind: 'see-notifications', operationId: 'd43f7844-52e0-4302-b8e4-740035047765', upToMs: 1 })).toEqual({ ok: false, code: 'unavailable' });
 });

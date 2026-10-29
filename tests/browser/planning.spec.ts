@@ -275,6 +275,70 @@ test('clears a points line when the build is reloaded after a conflict', async (
   await expect(build.getByText(/can take at most/)).toHaveCount(0);
 });
 
+/**
+ * The boundary applies the pending build with the panel open: the server's current build becomes it and the pending build goes, while the
+ * build version the commands carry stays (`apply_pending_build` does not bump it). The page learns on its next owner read.
+ */
+async function takeEffect(page: Page, flow: Awaited<ReturnType<typeof planningFlow>>) {
+  const state = flow.state();
+  state.currentBuild = structuredClone(state.pendingBuild!.build);
+  state.pendingBuild = null;
+  flow.publish();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+}
+
+test('raises an unsent lower edit to the new floor when a pending build takes effect under the open panel', async ({ page, context }) => {
+  const flow = await planningFlow(context, state => {
+    levelled(state);
+    state.buildVersion = 2;
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, allocations: { strength: 6, agility: 2, vitality: 1, endurance: 1, precision: 1 } },
+      effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
+  });
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  await expect(points(page, 'strength')).toHaveValue('6');
+  // An unsent edit back down to the current 4 (allowed while the pending build is not the current one).
+  await points(page, 'strength').fill('4');
+  await expect(points(page, 'strength')).toHaveValue('4');
+  await expect(build.getByText('3 of 12 left', { exact: true })).toBeVisible();
+  // The pending build takes effect: 6 is now the current build, so the floor is 6 and the draft cannot stay at 4.
+  await takeEffect(page, flow);
+  await expect(points(page, 'strength')).toHaveAttribute('min', '6');
+  await expect(points(page, 'strength')).toHaveValue('6');
+  await expect(build.getByText('1 of 12 left', { exact: true })).toBeVisible();
+  await expect(build.getByRole('heading', { name: 'Plan a build', exact: true })).toBeVisible();
+  // Queue build is accepted at once: the draft holds the new floor, and nothing says the build was reloaded.
+  await mine.getByLabel('Stance', { exact: true }).selectOption('defensive');
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  await expect(page.locator('.planning-form [role="alert"]')).toHaveCount(0);
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'berserker', stance: 'defensive',
+    allocation: { strength: 6, agility: 2, vitality: 1, endurance: 1, precision: 1 } });
+});
+
+test('takes the new class when a pending class change from before the release takes effect under the open panel', async ({ page, context }) => {
+  const flow = await planningFlow(context, state => {
+    state.buildVersion = 2;
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, classId: 'berserker' },
+      effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 100, reservedItemIds: [], operationId: randomUUID() };
+    state.reservedFees.money = 100;
+  });
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  // The form shows the current class (Guardian), never the pending one.
+  await expect(build.getByText('Class: Guardian', { exact: true })).toBeVisible();
+  await takeEffect(page, flow);
+  await expect(build.getByText('Class: Berserker', { exact: true })).toBeVisible();
+  await mine.getByLabel('Stance', { exact: true }).selectOption('offensive');
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  await expect(page.locator('.planning-form [role="alert"]')).toHaveCount(0);
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'berserker', stance: 'offensive' });
+});
+
 /** The select values a part offers (read from the page, apart from the panel's own lists). */
 const optionValues = (page: Page, phase: string) => page.getByLabel(`${phase} activity`).locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
 const saveDay = (page: Page) => page.getByRole('button', { name: 'Save schedule', exact: true });

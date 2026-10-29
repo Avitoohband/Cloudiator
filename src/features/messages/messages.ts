@@ -2,6 +2,7 @@
 // badge, which messages are unread, the tags and dates, and when a list the panel holds no longer agrees with the owner's inbox.
 // No markup anywhere: every title and text here is data, shown by the panel as plain text.
 import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
+import type { NotificationsRead } from '../../lib/api/reads';
 
 /**
  * What the messages button and panel need from the shell: the two lists, and the two marks a player's reading sends. `read` marks a
@@ -10,7 +11,8 @@ import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
  */
 export type MessagingActions = {
   load(): Promise<GameMessage[]>;
-  loadNotifications(): Promise<GameNotification[]>;
+  /** The results to show, and the newest settled time of every row read (the mark `seeNotifications` is sent up to). */
+  loadNotifications(): Promise<NotificationsRead>;
   read(messageId: number): Promise<void>;
   seeNotifications(upToMs: number): Promise<void>;
 };

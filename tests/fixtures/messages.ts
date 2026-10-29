@@ -17,7 +17,7 @@ export const FIXTURE_MESSAGES: readonly GameMessage[] = [
 
 /**
  * Sample notifications for the fixture preview, newest first, as `GameGateway.notifications()` lists them: an Arena victory, an
- * expedition (with a Rare item and extra items sold), a training and an expedition lost. Sample data for the preview, not any player's
+ * expedition (with a Rare item and gold for items that did not fit), a training and an expedition lost. Sample data for the preview, not any player's
  * results. The preview's gladiator is level 1 (`ownerFixture`, through ARENA_OWNER), and a result can claim a level-up only to a level
  * the gladiator has reached, so none does here (`levelAfter` is null throughout; the live Notifications tab's "Level up!" line is
  * tested with an owner whose level and XP prove it, tests/browser/messages.spec.ts).

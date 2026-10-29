@@ -31,3 +31,5 @@ whole-trip replay runs about 1¼ minutes (walking sped up, fights at real speed)
 later; (6) dungeons in the afternoon only; (7) a party that loses to the boss still gets paid for the rooms it cleared;
 (8) friends in a party may see each other's planned dungeon, only within the party (with invites, later). Next: Patch A (items
 2-8 + whole-trip replay, no migration) and Patch B (party dungeons MVP, M26), each with a spec and a plan, then build.
+
+9. **Arena replays, more comfortable to watch (Avi, 2026-10-29).** "there need to be more comfort way to see my arena replays." To design with a clickable mockup over the real replay screens (how players find their Arena replays, and the viewer itself); reuse Patch A's replay bar where it fits.

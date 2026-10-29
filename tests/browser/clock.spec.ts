@@ -1,14 +1,15 @@
 // Patch A item 7: one clock for every time of day. A live player's Schedule (the estimated next starts) and the Results
 // list (each row's settlement time) both follow the clock setting stored on the device (`cloudiator.clock.v1`), and a change
-// of it reaches them without a reload. With storage that throws, the page runs on the device's own choice. The menu that
-// changes the setting is Task 3's; here a stored value, and the `storage` event another tab would send, stand in for it.
+// of it reaches them without a reload. With storage that throws, the page runs on the device's own choice. The account menu
+// changes the setting (Task 3): its Clock switch is pressed here as a player does; a stored value, and the `storage` event another
+// tab would send, stand in for a change made elsewhere.
 import { randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type Page } from './fixtures';
+import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
 import type { ResultRow } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { openMenu } from './shell-helpers';
+import { cornerChip, openChipMenu, openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const KEY = 'cloudiator.clock.v1';
@@ -56,6 +57,101 @@ test.describe('the clock setting in a live camp', () => {
   /** What another tab does when it changes the setting: the stored value, then the `storage` event this page hears. */
   const otherTabSets = (page: Page, value: string) =>
     page.evaluate(([key, mode]) => { localStorage.setItem(key, mode); window.dispatchEvent(new StorageEvent('storage', { key, newValue: mode })); }, [KEY, value]);
+
+  /** The account menu's Clock group, and one of its two buttons. */
+  const clockGroup = (menu: Locator) => menu.getByRole('group', { name: 'Clock', exact: true });
+  const clockButton = (menu: Locator, label: '12-hour' | '24-hour') => clockGroup(menu).getByRole('button', { name: label, exact: true });
+  const expectStarts = async (page: Page, form: 'twelve' | 'twenty-four') => {
+    for (const index of [0, 1, 2]) {
+      if (form === 'twelve') await expect(starts(page).nth(index)).toHaveText(TWELVE);
+      else { await expect(starts(page).nth(index)).toHaveText(TWENTY_FOUR); await expect(starts(page).nth(index)).not.toHaveText(/[AP]M/); }
+    }
+  };
+
+  test('switches every time on the screen at once from the account menu, and remembers it on this device', async ({ page, context }, testInfo) => {
+    await player(context, null);
+    await openSchedule(page);
+    // The device (en-US) starts on the 12-hour clock.
+    await expectStarts(page, 'twelve');
+    let menu = await openChipMenu(page);
+    await expect(clockGroup(menu)).toContainText('Clock');
+    await expect(clockButton(menu, '12-hour')).toHaveAttribute('aria-pressed', 'true');
+    await expect(clockButton(menu, '24-hour')).toHaveAttribute('aria-pressed', 'false');
+    await reviewShot(page, testInfo, 'clockmenu-12');
+
+    // 24-hour: the estimated starts lose AM/PM at once, with no reload, and the menu stays open with the button pressed.
+    await clockButton(menu, '24-hour').click();
+    await expectStarts(page, 'twenty-four');
+    await expect(clockButton(menu, '24-hour')).toHaveAttribute('aria-pressed', 'true');
+    await expect(clockButton(menu, '12-hour')).toHaveAttribute('aria-pressed', 'false');
+    await expect(menu).toBeVisible();
+    await reviewShot(page, testInfo, 'clockmenu-24');
+    await reviewShot360(page, testInfo, 'clockmenu-24');
+    // The Results list follows too (opening it closes the menu, which a press elsewhere does).
+    expect(await resultTimes(page)).toEqual(RESULTS_24);
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), KEY)).toBe('24');
+
+    // A reload: still 24-hour, and the device holds it.
+    await openSchedule(page);
+    await expectStarts(page, 'twenty-four');
+    menu = await openChipMenu(page);
+    await expect(clockButton(menu, '24-hour')).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(key => localStorage.getItem(key), KEY)).toBe('24');
+
+    // 12-hour: AM/PM is back.
+    await clockButton(menu, '12-hour').click();
+    await expectStarts(page, 'twelve');
+    await expect(clockButton(menu, '12-hour')).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(key => localStorage.getItem(key), KEY)).toBe('12');
+    expect(await resultTimes(page)).toEqual(RESULTS_12);
+  });
+
+  test.describe('starts on the device hour cycle', () => {
+    test.describe('with en-GB', () => {
+      test.use({ locale: 'en-GB' });
+      test('24-hour is pressed, and the times are written that way', async ({ page, context }) => {
+        await player(context, null);
+        await openSchedule(page);
+        await expectStarts(page, 'twenty-four');
+        const menu = await openChipMenu(page);
+        await expect(clockButton(menu, '24-hour')).toHaveAttribute('aria-pressed', 'true');
+        await expect(clockButton(menu, '12-hour')).toHaveAttribute('aria-pressed', 'false');
+      });
+    });
+    test.describe('with en-US', () => {
+      test.use({ locale: 'en-US' });
+      test('12-hour is pressed, and the times are written that way', async ({ page, context }) => {
+        await player(context, null);
+        await openSchedule(page);
+        await expectStarts(page, 'twelve');
+        const menu = await openChipMenu(page);
+        await expect(clockButton(menu, '12-hour')).toHaveAttribute('aria-pressed', 'true');
+        await expect(clockButton(menu, '24-hour')).toHaveAttribute('aria-pressed', 'false');
+      });
+    });
+  });
+
+  test('keeps working when storage throws', async ({ page, context }) => {
+    await player(context, null);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    // Only this key is refused (the signed-in session lives in the same storage).
+    await context.addInitScript(key => {
+      const { getItem, setItem } = Storage.prototype;
+      Storage.prototype.getItem = function (name: string) { if (name === key) throw new Error('blocked'); return getItem.call(this, name); };
+      Storage.prototype.setItem = function (name: string, value: string) { if (name === key) throw new Error('blocked'); return setItem.call(this, name, value); };
+    }, KEY);
+    await openSchedule(page);
+    const menu = await openChipMenu(page);
+    await clockButton(menu, '24-hour').click();
+    await expectStarts(page, 'twenty-four');
+    await expect(clockButton(menu, '24-hour')).toHaveAttribute('aria-pressed', 'true');
+    await clockButton(menu, '12-hour').click();
+    await expectStarts(page, 'twelve');
+    await expect(clockButton(menu, '12-hour')).toHaveAttribute('aria-pressed', 'true');
+    await expect(cornerChip(page)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
 
   test('every time of day follows the stored clock setting', async ({ page, context }, testInfo) => {
     await player(context, '24');

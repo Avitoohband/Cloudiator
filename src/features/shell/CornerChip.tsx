@@ -1,7 +1,8 @@
 'use client';
 
 // The corner chip, top right. A player sees their name, stamina, gold, renown and the time to the next slot boundary
-// (on touch only the name and the countdown), and the chip opens a small menu with "Sign out". A visitor's chip starts
+// (on touch only the name and the countdown), and the chip opens a small menu: on touch the bar behind the name (the same
+// items in one row, the stamina line over its bar), then the Clock switch (12/24-hour, Patch A) and "Sign out". A visitor's chip starts
 // Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
 // gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text. A player also has the
 // messages button left of the pill (Task 6): the chip shows one popover at a time, the account menu or the messages panel.
@@ -11,9 +12,11 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { signOut, type SessionState } from '../../lib/api/session';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import type { DisplayClock } from '../../game/display-clock';
+import { saveClockMode, useClockMode } from '../../lib/clock-setting';
 import type { Viewer } from '../character/useGameState';
 import { MessagesButton } from '../messages/MessagesButton';
 import type { MessagingActions } from '../messages/messages';
+import { ClockSwitch } from './ClockSwitch';
 import type { MenuId } from './menus';
 import styles from './shell.module.css';
 
@@ -34,11 +37,11 @@ function useSlotCountdown(clock: DisplayClock) {
   return seconds;
 }
 
-function Countdown({ clock }: { clock: DisplayClock }) {
+function Countdown({ clock, testId = 'chip-countdown' }: { clock: DisplayClock; testId?: string }) {
   const seconds = useSlotCountdown(clock);
   const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   return <span title="Next slot starts in">
-    <span aria-hidden="true">⏱ </span><span data-testid="chip-countdown" aria-hidden="true">{text}</span>
+    <span aria-hidden="true">⏱ </span><span data-testid={testId} aria-hidden="true">{text}</span>
     <span className={styles.sr}>Next slot in {Math.ceil(seconds / 60)} min</span>
   </span>;
 }
@@ -68,6 +71,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   const messagesButton = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const messagesId = useId();
+  const staminaLineId = useId();
+  const clockMode = useClockMode();
   const signedIn = !fixture && session.status === 'signed-in';
   const account = viewer === 'player' || signedIn;
 
@@ -128,6 +133,20 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
       </div>
       {open && (
         <div id={menuId} className={styles.chipMenu} role="group" aria-label="Account">
+          {owner && <>
+            {/* The bar behind the name (touch layout only, as the chip's own bar is hidden there): the PC bar's items in its order. */}
+            <div className={styles.barRow}>
+              <span data-testid="bar-stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
+              <span data-testid="bar-money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
+              <span data-testid="bar-renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
+              <span data-testid="bar-countdown"><Countdown clock={clock} testId="bar-countdown-time" /></span>
+            </div>
+            <div className={styles.staminaLine}>
+              <span id={staminaLineId}>{`Stamina ${owner.stamina.current} of ${owner.stamina.maximum} · a Rest refills it`}</span>
+              <progress className={styles.staminaBar} aria-labelledby={staminaLineId} value={owner.stamina.current} max={owner.stamina.maximum} />
+            </div>
+          </>}
+          <ClockSwitch mode={clockMode} onChange={saveClockMode} />
           {signedIn ? <button type="button" onClick={() => {
             setSignOutError(false);
             void signOut().then(() => setPopover(null), () => setSignOutError(true));

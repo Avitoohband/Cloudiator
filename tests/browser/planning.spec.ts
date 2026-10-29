@@ -461,11 +461,24 @@ test('shows the class card between the class line and the activity, with bars on
     await expect(card.getByText('SUGGESTED SPLIT · OF EVERY 10', { exact: true })).toBeHidden();
     await expect(card.getByText('Vitality 5 · Strength 2 · Endurance 2 · Precision 1', { exact: true })).toBeHidden();
     expect(await card.locator('li').evaluateAll(rows => rows.filter(row => row.querySelector('i')).map(row => Math.round(parseFloat((row.querySelector('i') as HTMLElement).style.width))))).toEqual([100, 40, 40, 20, 0]);
+    // The mockup's rows: a 7 px bar and a 3 px gap, so each row is about 20 px high and its bar sits level with its label and number
+    // (the stamina bar's own rules once leaked onto these bars: 9 px high with margins, rows 35 px apart, bars above their labels).
+    const rows = await card.locator('li').filter({ has: page.getByTestId('split-points') }).evaluateAll(items => items.map(item => {
+      const row = item.getBoundingClientRect(), bar = item.querySelector('[aria-hidden="true"]')!.getBoundingClientRect();
+      return { height: Math.round(row.height), barHeight: Math.round(bar.height), centre: Math.abs((bar.top + bar.bottom) / 2 - (row.top + row.bottom) / 2) };
+    }));
+    expect(rows).toHaveLength(5);
+    for (const row of rows) { expect(row.height, `row ${JSON.stringify(rows)}`).toBeLessThan(24); expect(row.barHeight).toBe(7); expect(row.centre).toBeLessThan(2); }
     await expect(mine).toHaveCSS('opacity', '1');
     expect(await contrastIssues(mine), 'My gladiator with the class card').toEqual([]);
     await card.scrollIntoViewIfNeeded();
     await reviewShot(page, testInfo, 'class-card-summary');
   }
+  // The stamina bar keeps its own look (square ends, 9 px, no fill of its own): the card's bars must not style it.
+  const stamina = mine.locator('progress');
+  await stamina.scrollIntoViewIfNeeded();
+  expect(await stamina.evaluate(bar => { const style = getComputedStyle(bar); return { radius: style.borderTopLeftRadius, height: style.height, top: style.marginTop, bottom: style.marginBottom, background: style.backgroundColor }; }))
+    .toEqual({ radius: '0px', height: '9px', top: '7.2px', bottom: '16px', background: 'rgba(0, 0, 0, 0)' });
   // A phone: the chips and the one line (zeros left out), no bars, no meaning line. 390 × 844, then 360 × 740 with nothing spilling sideways.
   for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
     await page.setViewportSize(size);
@@ -497,6 +510,53 @@ test('keeps the keyboard focus on the split controls: Suggested hands it to Undo
   await page.keyboard.press('Enter');
   expect(await fieldValues(page)).toEqual(['2', '0', '5', '2', '1']);
   await expect(suggestButton(build)).toBeFocused();
+});
+
+// The split's line and its Undo belong to the draft they were made on (AGENTS.md: a flag that outlives a reload is scoped to the record version that set it).
+test('drops the split line and Undo when the build is reloaded in the background', async ({ page, context }) => {
+  const flow = await planningFlow(context, guardianWithThreeLeft);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  await suggestButton(build).click();
+  await expect(build.getByText(splitSentence, { exact: true })).toBeVisible();
+  await expect(undoSplit(build)).toBeVisible();
+  // Another session queued a build: the owner read brings a new build version, the draft is reloaded from it, and the line and Undo go with the old draft.
+  flow.state().buildVersion += 1;
+  flow.publish();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(build.getByText('3 of 13 left', { exact: true })).toBeVisible();
+  expect(await fieldValues(page)).toEqual(['2', '0', '5', '2', '1']);
+  await expect(build.getByText(splitSentence, { exact: true })).toHaveCount(0);
+  await expect(undoSplit(build)).toHaveCount(0);
+  await expect(suggestButton(build)).toBeVisible();
+  expect(flow.commands).toEqual([]);
+});
+
+test('drops the split line and Undo when a pending build takes effect under the open panel', async ({ page, context }) => {
+  // A pending build holds 2/0/6/2/1 (11 of 13): the form opens on it with 2 left, and Suggested gives them to Strength and Vitality.
+  const flow = await planningFlow(context, state => {
+    guardianWithThreeLeft(state);
+    state.buildVersion = 2;
+    state.pendingBuild = { build: { ...state.currentBuild, version: 2, allocations: { strength: 2, agility: 0, vitality: 6, endurance: 2, precision: 1 } },
+      effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
+  });
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  await expect(build.getByText('2 of 13 left', { exact: true })).toBeVisible();
+  await suggestButton(build).click();
+  expect(await fieldValues(page)).toEqual(['3', '0', '7', '2', '1']);
+  await expect(build.getByText('+1 Strength, +1 Vitality: the Guardian split.', { exact: true })).toBeVisible();
+  await expect(undoSplit(build)).toBeVisible();
+  // The boundary applies the pending build: the floor moves under the draft (the build version does not), and the old line and Undo go; the fields stay as typed.
+  await takeEffect(page, flow);
+  await expect(points(page, 'vitality')).toHaveAttribute('min', '6');
+  await expect(undoSplit(build)).toHaveCount(0);
+  await expect(build.getByText('+1 Strength, +1 Vitality: the Guardian split.', { exact: true })).toHaveCount(0);
+  expect(await fieldValues(page)).toEqual(['3', '0', '7', '2', '1']);
+  await expect(build.getByText('All 13 spent', { exact: true })).toBeVisible();
+  expect(flow.commands).toEqual([]);
 });
 
 // Guardian has the widest chips ("Vitality +5%" and "Endurance +5%" next to "Class: Guardian"); Duelist is the other class with two.

@@ -30,7 +30,7 @@ export function ClassCard({ classId }: { classId: ClassId }) {
       <ul className={`${styles.shares} ${styles.splitWide}`}>
         {shares.map(share => <li key={share.attribute}>
           <span>{title(share.attribute)}</span>
-          <span className={styles.bar} aria-hidden="true"><i style={{ width: `${(share.points / biggest) * 100}%` }} /></span>
+          <span className={styles.shareBar} aria-hidden="true"><i style={{ width: `${(share.points / biggest) * 100}%` }} /></span>
           <span className={styles.points} data-testid="split-points">{share.points}</span>
         </li>)}
       </ul>

@@ -58,7 +58,11 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const [draft, setDraft] = useState(() => draftFrom(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild));
   /** The short status line after a typed number was capped or raised, or the split was suggested; any other edit, and a reload of the build, clears it. */
   const [pointsNote, setPointsNote] = useState<PointsNote>(NO_NOTE);
-  /** The control a keyboard command hands the focus to once the one it came from has gone (Suggested leaves with the last point, Undo with the line). */
+  /**
+   * The control a keyboard command hands the focus to once the one it came from has gone (Suggested leaves with the last point, Undo with the
+   * line). Not `useOutcomeFocus`: nothing is sent here, so there is no outcome line to take the focus. Not `useFocusRescue` alone either: it
+   * would drop the focus on the menu panel (the nearest container), where the next step is the Undo or Suggested beside it.
+   */
   const [focusAfter, setFocusAfter] = useState<'undo' | 'suggest' | null>(null);
   const suggestButton = useRef<HTMLButtonElement>(null), undoButton = useRef<HTMLButtonElement>(null);
   /** What each points field held when it took the focus: the capped line says it differently when that was 0 (as in creation). */
@@ -87,6 +91,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     }
   }, [owner.buildVersion, owner.currentBuild, owner.pendingBuild]);
   // Set together with the draft that brings the control, so it commits with it: the focus is never asked for before the control is there.
+  // Whichever of this and the rescue observer runs first, the focus ends here: the rescue leaves a focus that is not on <body>.
   useEffect(() => {
     if (!focusAfter) return;
     (focusAfter === 'undo' ? undoButton : suggestButton).current?.focus();

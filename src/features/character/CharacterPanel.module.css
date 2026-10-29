@@ -71,7 +71,8 @@
 
 /* The class card (Patch A item 4): the class's bonuses and its suggested split, between the class line and the activity box. The
    chips are also used beside "Class: …" in Plan a build. On a phone the bars and the meaning give way to one line (.splitWide is
-   hidden, .splitNarrow shown, in the touch layout at the end of this file's rules). */
+   hidden, .splitNarrow shown, in the touch-layout media block that follows the card's rules). The share bar is .shareBar, not .bar:
+   .bar below is the stamina <progress>, and the two must not share a rule. */
 .classCard {
   min-width: 0;
   margin: 0 0 1rem;
@@ -135,14 +136,14 @@
   font-size: 0.78rem;
 }
 
-.bar {
+.shareBar {
   height: 7px;
   border-radius: 4px;
   background: #2a2f40;
   overflow: hidden;
 }
 
-.bar i {
+.shareBar i {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, #a87e3a, var(--gold));

@@ -78,6 +78,13 @@ export type LiveData = {
    * from `expeditionId`. Only a signed-in reader sees them; none by default.
    */
   notifications?: readonly LiveNotification[];
+  /**
+   * The owner's settled Arena and tournament bouts My bouts lists, as timelines (their stages, which the opponents' names are read from,
+   * and their owner summary), in any order. They are merged into `timelines`, and give the owner's `activities` rows the My bouts read
+   * selects (the owner's `gladiator_id`, a `slot_index` of `floor((settledAtMs - 1) / SLOT_MS)`, `starts_at_ms` and `resolved_kind`):
+   * one row per activity id. Only a signed-in reader with an owner state sees them; none by default.
+   */
+  bouts?: readonly RevealedTimeline[];
   /** The signed-in reader's owner state; null or absent is an account with no gladiator. */
   owner?: OwnerState | null;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
@@ -217,10 +224,8 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     if (reader !== null && ((rejecting && !renewed.has(bearerOf(request) ?? '')) || reader === INVALID_READER)) return json(route, { code: 'PGRST301', message: 'JWT could not be verified' }, 401);
     if (refused.has(table)) return json(route, { code: '42501', message: `permission denied for table ${table}`, details: null, hint: null }, 401);
     if (failing.has(table)) return json(route, { code: 'XX000', message: 'internal error', details: null, hint: null }, 500);
-    const source = tables({ world, owner, now: now(), reader, data })[table];
-    if (!source) throw new Error(`Unexpected live transport table ${table}`);
-    if (source.private && reader === null) return json(route, { code: '42501', message: `permission denied for table ${table}`, details: null, hint: null }, 401);
-    const rows = query(source.rows, url.searchParams);
+    const rows = liveRows(table, url.searchParams, { world, owner, now: now(), reader, data });
+    if (rows === 'refused') return json(route, { code: '42501', message: `permission denied for table ${table}`, details: null, hint: null }, 401);
     if ((request.headers().accept ?? '').includes('application/vnd.pgrst.object+json')) {
       return rows.length === 1 ? json(route, rows[0])
         : json(route, { code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned', details: `The result contains ${rows.length} rows`, hint: null }, 406);
@@ -321,9 +326,24 @@ function auth(route: Route, url: URL, reader: string | null, rejecting: boolean,
   throw new Error(`Unexpected live transport Auth request ${url.pathname}`);
 }
 
+/** What the transport's evaluator knows when it answers one read: the world, the owner, the server's now, the reader (a user id, null for a visitor) and the spec's data. */
+export type LiveState = { world: WorldSnapshot; owner: OwnerState | null; now: number; reader: string | null; data: LiveData };
+
+/**
+ * The rows the transport answers for one Data API read of `table` with `params`, as PostgREST would answer it: the reveal-time row
+ * filters applied at `now`, then the query's filters, order, limit and select. `'refused'` for an owner-only table and a visitor
+ * (`anon` has no grant). The routes use this, and unit tests run the app's real reads over it (tests/api/bouts-live-routes.test.ts).
+ */
+export function liveRows(table: string, params: URLSearchParams, state: LiveState): Row[] | 'refused' {
+  const source = tables(state)[table];
+  if (!source) throw new Error(`Unexpected live transport table ${table}`);
+  return source.private && state.reader === null ? 'refused' : query(source.rows, params);
+}
+
 /** The Data API objects the app reads, as rows, with their reveal-time row filters applied at the server time `now`. */
-function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; owner: OwnerState | null; now: number; reader: string | null; data: LiveData }): Record<string, Table> {
-  const timelines = Object.values(data.timelines ?? {});
+function tables({ world, owner, now, reader, data }: LiveState): Record<string, Table> {
+  // The owner's bouts are timelines too (their stages and summaries); one timeline per activity id, a bout replacing a timeline of the same id.
+  const timelines = [...new Map([...Object.values(data.timelines ?? {}), ...(data.bouts ?? [])].map(t => [t.activityId, t] as const)).values()];
   const actorOf = (activityId: string) => world.actors.find(a => a.activityId === activityId);
   const recent = new Map<string, Row>();
   for (const row of data.recent ?? []) {
@@ -388,17 +408,35 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
       published_at_ms: m.publishedAtMs })) },
     // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all.
     owner_state: { private: true, rows: reader !== null && owner ? [{ state: owner }] : [] },
-    // The timelines' owner summaries, and the owner's settled results as `readNotifications` selects them: the kind, the slot, the
-    // expedition asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the
-    // server's now (none here: every result a spec lists has been revealed).
-    activities: { private: true, rows: [
-      ...timelines.filter(t => t.summary).map(t => ({ id: t.activityId, status: 'completed', settled_at_ms: t.summary!.settledAtMs, summary: t.summary })),
-      ...(owner ? (data.notifications ?? []).map(n => ({ id: n.summary.activityId, slot_index: Math.floor(n.summary.settledAtMs / SLOT_MS), status: 'completed',
-        resolved_kind: n.summary.resolvedKind, settled_at_ms: n.summary.settledAtMs, summary: n.summary,
-        requested: n.expeditionId ? { expeditionId: n.expeditionId } : {},
-        gladiators: { level: owner.progression.level, xp: owner.progression.xp, newer: [{ count: 0 }] } })) : []),
-    ] },
+    // The timelines' owner summaries, the owner's settled results as `readNotifications` selects them (the kind, the slot, the expedition
+    // asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the server's now:
+    // none here, every result a spec lists has been revealed) and the owner's bouts as `readBouts` selects them.
+    activities: { private: true, rows: activityRows(timelines, owner, data) },
   };
+}
+
+/**
+ * The owner-only `activities` rows, one per activity id as the table has: a completed activity's summary from its timeline; for a
+ * signed-in owner the same activity as a notification adds its kind, slot, destination and gladiator, and as a bout the owner's
+ * `gladiator_id`, its `slot_index` (the slot it settled at the end of), the slot's `starts_at_ms` and its `resolved_kind`.
+ */
+function activityRows(timelines: readonly RevealedTimeline[], owner: OwnerState | null, data: LiveData): Row[] {
+  const rows = new Map<string, Row>();
+  const merge = (id: string, row: Row) => rows.set(id, { ...rows.get(id), ...row });
+  for (const t of timelines) if (t.summary) merge(t.activityId, { id: t.activityId, status: 'completed', settled_at_ms: t.summary.settledAtMs, summary: t.summary });
+  if (!owner) return [...rows.values()];
+  for (const n of data.notifications ?? []) {
+    merge(n.summary.activityId, { id: n.summary.activityId, slot_index: Math.floor(n.summary.settledAtMs / SLOT_MS), status: 'completed',
+      resolved_kind: n.summary.resolvedKind, settled_at_ms: n.summary.settledAtMs, summary: n.summary,
+      requested: n.expeditionId ? { expeditionId: n.expeditionId } : {},
+      gladiators: { level: owner.progression.level, xp: owner.progression.xp, newer: [{ count: 0 }] } });
+  }
+  for (const b of data.bouts ?? []) {
+    if (!b.summary) continue;
+    const slot = Math.floor((b.summary.settledAtMs - 1) / SLOT_MS);
+    merge(b.activityId, { gladiator_id: owner.gladiatorId, slot_index: slot, starts_at_ms: slot * SLOT_MS, resolved_kind: b.summary.resolvedKind });
+  }
+  return [...rows.values()];
 }
 
 /** Round r of R reveals `ceil(duration × r / (R + 1))` after the start (spec §8.4; written apart from the app's helper). */
@@ -461,24 +499,47 @@ function splitTopLevel(text: string): string[] {
   return parts;
 }
 
+/** A filter on a column, or on a JSON path into one (`summary->>result=eq.victory`, `stage->>kind=eq.bout`). */
 function condition(column: string, filter: string): Test {
   const dot = filter.indexOf('.');
-  const op = filter.slice(0, dot), value = filter.slice(dot + 1);
+  const op = filter.slice(0, dot), value = filter.slice(dot + 1), path = parsePath(column);
+  const left = (row: Row) => readPath(row, path);
   switch (op) {
-    case 'eq': return row => compare(row[column], value) === 0;
-    case 'neq': return row => compare(row[column], value) !== 0;
-    case 'gt': return row => compare(row[column], value) > 0;
-    case 'gte': return row => compare(row[column], value) >= 0;
-    case 'lt': return row => compare(row[column], value) < 0;
-    case 'lte': return row => compare(row[column], value) <= 0;
+    case 'eq': return row => compare(left(row), value) === 0;
+    case 'neq': return row => compare(left(row), value) !== 0;
+    case 'gt': return row => compare(left(row), value) > 0;
+    case 'gte': return row => compare(left(row), value) >= 0;
+    case 'lt': return row => compare(left(row), value) < 0;
+    case 'lte': return row => compare(left(row), value) <= 0;
     case 'in': {
       const values = splitTopLevel(value.replace(/^\(|\)$/g, '')).map(v => v.replace(/^"|"$/g, ''));
-      return row => values.some(v => compare(row[column], v) === 0);
+      return row => values.some(v => compare(left(row), v) === 0);
     }
-    case 'is': return row => (value === 'null' ? row[column] == null : String(row[column]) === value);
+    case 'is': return row => (value === 'null' ? left(row) == null : String(left(row)) === value);
     case 'not': { const inner = condition(column, value); return row => !inner(row); }
     default: throw new Error(`Unsupported PostgREST filter ${column}=${filter}`);
   }
+}
+
+/** A column, or a JSON path into one as PostgREST writes it: `->` keeps the JSON value, `->>` reads it as text; a number steps into an array. */
+type Path = { column: string; steps: { key: string; text: boolean }[] };
+function parsePath(expression: string): Path {
+  const [column, ...steps] = expression.split(/(->>?)/).reduce<string[][]>((acc, token) => {
+    if (token === '->' || token === '->>') acc.push([token]); else if (acc.length) acc[acc.length - 1].push(token); else acc.push([token]);
+    return acc;
+  }, []);
+  return { column: column[0], steps: steps.map(([arrow, key]) => ({ key, text: arrow === '->>' })) };
+}
+/** The value a row has at `path`: null where the path leads nowhere (or the JSON is null), text for a `->>` step. */
+function readPath(row: Row, { column, steps }: Path): unknown {
+  let value: unknown = row[column], text = false;
+  for (const step of steps) {
+    value = value !== null && typeof value === 'object' ? (value as Row)[step.key] : undefined;
+    text = step.text;
+  }
+  if (value === undefined) value = null;
+  if (text && value !== null) value = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  return value;
 }
 
 /** A column against a filter value: numbers numerically, everything else as text. */
@@ -494,25 +555,10 @@ function projection(select: string | null): (row: Row) => Row {
   const fields = splitTopLevel(select).map(item => {
     // An embedded resource (`gladiators(level,xp,newer:activities(count))`) is a field the row already carries under its name.
     const embedded = /^(?:[a-z_]+:)?([a-z_]+)\(/.exec(item);
-    if (embedded) return { name: embedded[1], column: embedded[1], path: [] as { key: string; text: boolean }[] };
+    if (embedded) return { name: embedded[1], path: { column: embedded[1], steps: [] } };
     const colon = item.indexOf(':');
-    const alias = colon < 0 ? null : item.slice(0, colon), expression = colon < 0 ? item : item.slice(colon + 1);
-    const [column, ...steps] = expression.split(/(->>?)/).reduce<string[][]>((acc, token) => {
-      if (token === '->' || token === '->>') acc.push([token]); else if (acc.length) acc[acc.length - 1].push(token); else acc.push([token]);
-      return acc;
-    }, []);
-    const path = steps.map(([arrow, key]) => ({ key, text: arrow === '->>' }));
-    return { name: alias ?? path.at(-1)?.key ?? column[0], column: column[0], path };
+    const alias = colon < 0 ? null : item.slice(0, colon), path = parsePath(colon < 0 ? item : item.slice(colon + 1));
+    return { name: alias ?? path.steps.at(-1)?.key ?? path.column, path };
   });
-  return row => Object.fromEntries(fields.map(({ name, column, path }) => {
-    let value: unknown = row[column];
-    let text = false;
-    for (const step of path) {
-      value = value !== null && typeof value === 'object' ? (value as Row)[step.key] : undefined;
-      text = step.text;
-    }
-    if (value === undefined) value = null;
-    if (text && value !== null) value = typeof value === 'object' ? JSON.stringify(value) : String(value);
-    return [name, value];
-  }));
+  return row => Object.fromEntries(fields.map(({ name, path }) => [name, readPath(row, path)]));
 }

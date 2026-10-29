@@ -1,6 +1,9 @@
+import type { RevealedTimeline } from '@contracts/events';
 import { validAppearance } from '@domain/appearance';
+import { RULES_V1 } from '@domain/rules-v1';
 import type { GameGateway } from './gateway';
-import { GatewayReadError, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead } from './reads';
+import { BOUTS_PAGE, GatewayReadError, boutOf, nextBoutsCursor, parseBoutsRead, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout } from './reads';
+import { replayKept } from '../replay-retention';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_FIXTURES, EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
@@ -12,6 +15,7 @@ import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
 import { FIXTURE_SEASONS } from '../../../tests/fixtures/seasons';
 import { RESTING_ACTOR, RESTING_OWNER, RESTING_PROFILE, restingActor } from '../../../tests/fixtures/resting';
 import { FIXTURE_INBOX, FIXTURE_MESSAGES, FIXTURE_NOTIFICATIONS } from '../../../tests/fixtures/messages';
+import { myBoutTimelines } from '../../../tests/fixtures/my-bouts';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
 /** Sample replays the fixture game page links to. */
@@ -41,6 +45,24 @@ const OWNER_ID = RESTING_OWNER.gladiatorId;
 const WOODLAND_REST = { gladiatorId: EXPEDITION_GLADIATORS.aster.id.toLowerCase(),
   tripEndMs: EXPEDITION_TIMELINES[EXPEDITION_FIXTURES.woodland.activityId].stages.at(-1)!.endsAtMs };
 
+/** The last bout stage of a fixture timeline, as the live read's names query gives it. */
+function lastBoutOf(timeline: RevealedTimeline): LastBout | null {
+  const stage = timeline.stages.filter(s => s.kind === 'bout' && s.battleLog).at(-1);
+  const log = stage?.battleLog;
+  return stage && log ? { label: stage.label, tieBreakReason: log.tieBreakReason, participants: log.participants.map(p => ({ id: p.id, gladiatorId: p.gladiatorId, name: p.name })) } : null;
+}
+/**
+ * The owner's bouts the preview lists (tests/fixtures/my-bouts.ts, out of the timelines above), newest first, built through the live read's own `boutOf` from each
+ * timeline's summary: a bout starts one slot before it settles, and its last bout's names are known only while its replay is kept at
+ * the fixture's server time, as the live read asks for them only then. `result` is what the live read's Won/Lost filter looks at.
+ */
+const FIXTURE_BOUTS = myBoutTimelines(FIXTURE_TIMELINES).map(timeline => {
+  const summary = timeline.summary!, slotMs = RULES_V1.clock.slotMs, slotIndex = Math.floor((summary.settledAtMs - 1) / slotMs);
+  const bout = boutOf({ activityId: timeline.activityId, gladiatorId: OWNER_ID, slotIndex, startsAtMs: summary.settledAtMs - slotMs,
+    kind: summary.resolvedKind, summary, lastBout: replayKept(summary.replayExpiry, worldFixture.serverNowMs) ? lastBoutOf(timeline) : null });
+  return { slotIndex, result: summary.result, bout };
+});
+
 /**
  * Pure local preview: no transport, auth session, storage, clock, or side effects. Commands are refused; the owner's
  * presence is answered (Task 23.9). `resting` (the game page's `?mode=fixture&as=resting`) previews the owner's gladiator
@@ -67,6 +89,14 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     messages: async () => structuredClone([...FIXTURE_MESSAGES]),
     // The sample notifications, newest first (a copy each time); no network.
     notifications: async () => ({ items: structuredClone([...FIXTURE_NOTIFICATIONS]), newestSettledMs: FIXTURE_NOTIFICATIONS.length ? Math.max(...FIXTURE_NOTIFICATIONS.map(n => n.settledAtMs)) : null }),
+    // The owner's own Arena and tournament bouts, newest first, paged and filtered as the live read does (a copy each time; no network):
+    // a malformed cursor or filter is `unavailable`, the cursor is the last fetched row's slot, and a well-formed one below every bout
+    // ends the list.
+    bouts: async (filter, cursor) => {
+      const options = parseBoutsRead(filter, cursor);
+      const fetched = FIXTURE_BOUTS.filter(row => (options.before === null || row.slotIndex < options.before) && (options.result === null || row.result === options.result)).slice(0, BOUTS_PAGE);
+      return structuredClone({ rows: fetched.flatMap(row => (row.bout ? [row.bout] : [])), nextCursor: nextBoutsCursor(fetched.length, fetched.at(-1)?.slotIndex) });
+    },
     // The fixture world's slot is published (Task 23.2's published slot, C5).
     world: async () => ({ ...structuredClone(world), publishedSlotIndex: worldFixture.slotIndex }),
     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex, publishedSlotIndex: worldFixture.slotIndex }),

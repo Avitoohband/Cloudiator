@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, vi } from 'vitest';
 import { createFixtureGateway, FIXTURE_ARENA } from '../../src/lib/api/fixture-gateway';
 
@@ -618,4 +619,81 @@ test('fixture preview: the next slot was a Rest only for the Woodland sample (it
     await expect(gateway.restAfter(aster, Number.NaN)).rejects.toMatchObject({ code: 'unavailable' });
     expect(fetchSpy).not.toHaveBeenCalled();
   } finally { vi.unstubAllGlobals(); }
+});
+
+test('fixture preview: my bouts are the owner’s eight Arena and tournament bouts, newest first, as the live read gives them', async () => {
+  const fetchSpy = vi.fn();
+  vi.stubGlobal('fetch', fetchSpy);
+  try {
+    const gateway = createFixtureGateway();
+    const page = await gateway.bouts('all');
+    expect(page.nextCursor).toBeNull();
+    // Varro, Cassia, two NPC bouts and Severus's tie-break (the five Arena samples), then the expired Arena bout and the two tournament runs.
+    // An expired replay names nobody, even though the fixture still holds its stages.
+    expect(page.rows.map(r => r.opponent?.name ?? null)).toEqual(['Varro', 'Cassia', 'Iron Warden', 'Bronze Sentinel', 'Severus', null, null, null]);
+    expect(page.rows.map(r => r.opponent?.npc ?? null)).toEqual([false, false, true, true, false, null, null, null]);
+    expect(page.rows.map(r => r.kind)).toEqual(['arena', 'arena', 'arena', 'arena', 'arena', 'arena', 'tournament', 'tournament']);
+    expect(page.rows.map(r => r.result)).toEqual(['victory', 'defeat', 'victory', 'defeat', 'victory', 'defeat', 'defeat', 'victory']);
+    expect(page.rows.map(r => r.renown)).toEqual([10, 2, 3, 0, 10, 2, 7, 60]);
+    expect(page.rows.map(r => r.ratingDelta)).toEqual([13, -13, null, null, 15, -9, -12, 16]);
+    expect(page.rows.map(r => r.tieBreak)).toEqual([false, false, false, false, true, false, false, false]);
+    expect(page.rows.map(r => r.round)).toEqual(Array(8).fill(null));
+    expect(page.rows.map(r => r.replayExpiry.state === 'available' && r.replayExpiry.expiresAtMs > 1_791_592_800_000)).toEqual([true, true, true, true, true, false, false, false]);
+    // When each was fought: an Arena bout at its minute 60, a tournament at its slot's start (UTC; Aster's day is the viewer's).
+    expect(page.rows.map(r => r.foughtAtMs)).toEqual([Date.UTC(2026, 9, 9, 23, 40), Date.UTC(2026, 9, 9, 22, 20), Date.UTC(2026, 9, 9, 21, 0), Date.UTC(2026, 9, 9, 19, 40),
+      Date.UTC(2026, 9, 9, 18, 20), Date.UTC(2026, 8, 30, 1, 0), Date.UTC(2026, 8, 26, 18, 40), Date.UTC(2026, 8, 23, 18, 40)]);
+    // Newest first by slot, one slot each, settled at the slot's end.
+    expect(page.rows.map(r => r.slotIndex)).toEqual([...page.rows.map(r => r.slotIndex)].sort((a, b) => b - a));
+    expect(new Set(page.rows.map(r => r.slotIndex)).size).toBe(8);
+    expect(page.rows.every(r => r.settledAtMs === (r.slotIndex + 1) * 4_800_000)).toBe(true);
+    expect(new Set(page.rows.map(r => r.activityId)).size).toBe(8);
+    // Won and Lost are four each, in the same order; the filter changes nothing else.
+    const won = await gateway.bouts('won'), lost = await gateway.bouts('lost');
+    expect(won.rows.map(r => r.opponent?.name ?? null)).toEqual(['Varro', 'Iron Warden', 'Severus', null]);
+    expect(won.rows.map(r => r.result)).toEqual(Array(4).fill('victory'));
+    expect(lost.rows.map(r => r.opponent?.name ?? null)).toEqual(['Cassia', 'Bronze Sentinel', null, null]);
+    expect(lost.rows.map(r => r.result)).toEqual(Array(4).fill('defeat'));
+    expect([won.nextCursor, lost.nextCursor]).toEqual([null, null]);
+    expect([...won.rows, ...lost.rows].map(r => r.activityId).sort()).toEqual(page.rows.map(r => r.activityId).sort());
+    // The live read's cursor rules: a slot index, the next page starting below it; a well-formed one below every bout ends the list.
+    expect((await gateway.bouts('all', String(page.rows[2].slotIndex))).rows.map(r => r.activityId)).toEqual(page.rows.slice(3).map(r => r.activityId));
+    expect((await gateway.bouts('lost', String(page.rows[2].slotIndex))).rows.map(r => r.opponent?.name ?? null)).toEqual(['Bronze Sentinel', null, null]);
+    expect(await gateway.bouts('all', '0')).toEqual({ rows: [], nextCursor: null });
+    for (const bad of ['x', '', '-1', '1.5', '01', 'lt.5']) await expect(gateway.bouts('all', bad), JSON.stringify(bad)).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(gateway.bouts('drawn' as never)).rejects.toMatchObject({ code: 'unavailable' });
+    // A copy each time: a caller that edits one changes nothing for the next, and no network is used.
+    page.rows[0].opponent!.name = 'Edited';
+    page.rows[0].replayExpiry = { state: 'expired' };
+    expect((await gateway.bouts('all')).rows[0]).toMatchObject({ opponent: { name: 'Varro' }, replayExpiry: { state: 'available' } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+test('fixture preview: the owner’s bouts are the fixtures’ own timelines, each holding the summary its row shows', async () => {
+  const { MY_BOUT_IDS, myBoutTimelines } = await import('../fixtures/my-bouts');
+  const { ARENA_TIMELINES, arenaActivityId } = await import('../fixtures/arena');
+  const { REPLAY_FIXTURES, REPLAY_TIMELINES } = await import('../fixtures/battles');
+  const { TOURNAMENT_OWNER_TIMELINES } = await import('../fixtures/tournaments');
+  const gateway = createFixtureGateway();
+  // The five credited Arena samples, the expired Arena bout and the two tournament runs, newest first; not the delayed bout (no summary),
+  // a spectator's side or the older replay samples.
+  expect(MY_BOUT_IDS).toEqual([...(['ownerHumanWin', 'ownerHumanLoss', 'ownerNpcWin', 'ownerNpcLoss', 'ownerTieBreak'] as const).map(arenaActivityId),
+    REPLAY_FIXTURES.expired.activityId, ...Object.keys(TOURNAMENT_OWNER_TIMELINES).sort((a, b) =>
+      TOURNAMENT_OWNER_TIMELINES[b].summary!.settledAtMs - TOURNAMENT_OWNER_TIMELINES[a].summary!.settledAtMs)]);
+  // The ids are built without JSON (browser specs use them), and name timelines the committed fixtures hold, each with its summary; a pool that lacks one is an error.
+  const MY_BOUT_TIMELINES = myBoutTimelines({ ...ARENA_TIMELINES, ...REPLAY_TIMELINES, ...TOURNAMENT_OWNER_TIMELINES });
+  expect(MY_BOUT_TIMELINES.map(t => t.activityId)).toEqual([...MY_BOUT_IDS]);
+  expect(MY_BOUT_TIMELINES.every(t => t.summary !== undefined)).toBe(true);
+  expect(() => myBoutTimelines({})).toThrow(/not in the pool/);
+  // A browser spec's loader cannot import JSON: the module reaches only the id modules and the contract types.
+  const imported = [...readFileSync('tests/fixtures/my-bouts.ts', 'utf8').matchAll(/^import[^;]*?from '([^']+)'/gm)].map(m => m[1]);
+  expect(imported.filter(from => !/(-ids\.ts|contracts\/events\.ts)$/.test(from))).toEqual([]);
+  expect(imported).toHaveLength(4);
+  expect(() => myBoutTimelines({ ...ARENA_TIMELINES, ...REPLAY_TIMELINES, ...TOURNAMENT_OWNER_TIMELINES, [MY_BOUT_IDS[0]]: { ...ARENA_TIMELINES[MY_BOUT_IDS[0]], summary: undefined } })).toThrow(/no summary/);
+  // Each row is its timeline's summary: the gateway's timeline read of the same id agrees with it.
+  const rows = (await gateway.bouts('all')).rows;
+  for (const [i, t] of MY_BOUT_TIMELINES.entries()) {
+    expect(rows[i].activityId).toBe(t.activityId);
+    expect((await gateway.timeline(t.activityId)).summary).toMatchObject({ result: rows[i].result, settledAtMs: rows[i].settledAtMs });
+  }
 });

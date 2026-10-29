@@ -4,14 +4,14 @@ import type { Appearance } from '@domain/appearance';
 import type { GameMessage, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readRestAfter, readSeasons, readStandingOf, readStandings,
-  readTournament, readTournamentLog, type NotificationsRead,
+  GatewayReadError, readBouts, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readRestAfter, readSeasons, readStandingOf, readStandings,
+  readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead,
 } from './reads';
 export { GatewayReadError, type NotificationsRead } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
- * tournament, tournament log, recent results) can be read without a session. `owner()`, `notifications()`, `command()` and
+ * tournament, tournament log, recent results) can be read without a session. `owner()`, `notifications()`, `bouts()`, `command()` and
  * `sendPresence()` require a signed-in account.
  */
 export interface GameGateway {
@@ -86,6 +86,14 @@ export interface GameGateway {
    * was none): the mark is sent up to it, so a result this client cannot show never keeps the badge on.
    */
   notifications(): Promise<NotificationsRead>;
+  /**
+   * One page (20) of the owner's own settled Arena and tournament bouts, newest first, for My bouts: each with its opponent (read only while
+   * its replay is kept), result, renown and rating change. `filter` asks the server for All, Won or Lost; `cursor` is a page's `nextCursor`
+   * (the slot index of the last bout fetched). Owner-only: it needs a signed-in account, and a bout appears only once it is revealed
+   * (settled at or before the server's now). A malformed cursor or filter is `unavailable`, without a request; a bout this client cannot
+   * show is left out.
+   */
+  bouts(filter: BoutFilter, cursor?: string): Promise<BoutsPage>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -226,6 +234,7 @@ export function createLiveGateway(): GameGateway {
     },
     owner: () => read(readOwner),
     notifications: () => read(readNotifications),
+    bouts: (filter, cursor) => read(client => readBouts(client, filter, cursor)),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),
     timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),
     profile: id => publicRead(client => readProfile(client, id)),

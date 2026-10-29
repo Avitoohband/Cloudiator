@@ -393,9 +393,11 @@ test.describe('the whole-trip replay', () => {
     await expect(watchWholeTrip(page)).toBeVisible();
     expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: idOf('woodland') });
     expect((await view.trip(page))!.mode).toBe('live');
+    await expect(watchWholeTrip(page)).toBeFocused();
     await page.goForward();
     await expect(replayBadge(page)).toBeVisible();
     expect(await view.trip(page)).toMatchObject({ mode: 'trip', chapter: 'leaving' });
+    await expect(playButton(page)).toBeFocused();
     // The same view all along: switching modes reads nothing again.
     expect(await page.evaluate(() => window.__cloudiatorExpedition!.reads())).toBe(reads);
     await expect(expeditionDialog(page)).toBeVisible();
@@ -430,11 +432,15 @@ test.describe('the whole-trip replay', () => {
   test('never shows how the trip ended while the replay is being prepared', async ({ page }) => {
     await page.addInitScript(() => {
       const seen: string[] = [];
-      (window as unknown as { __tripSpoilers: string[] }).__tripSpoilers = seen;
+      const phases: string[] = [];
+      Object.assign(window, { __tripSpoilers: seen, __tripPhases: phases });
       const check = () => {
         if (window.__cloudiatorExpedition?.trip()) return;
         const text = document.querySelector('main')?.textContent ?? '';
         for (const word of ['Defeated', 'Encounter 2: defeat', 'after a defeat', 'Arrive at camp', 'Processing results']) if (text.includes(word) && !seen.includes(word)) seen.push(word);
+        // The phase while it is prepared (fix round 2): the first chapter's, so the live region does not say one thing and then another.
+        const title = document.querySelector('[aria-label="Current stage"] strong')?.textContent;
+        if (title && !phases.includes(title)) phases.push(title);
       };
       new MutationObserver(check).observe(document, { subtree: true, childList: true, characterData: true });
     });
@@ -442,6 +448,8 @@ test.describe('the whole-trip replay', () => {
     await view.planned(page);
     await expect(replayBadge(page)).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __tripSpoilers: string[] }).__tripSpoilers)).toEqual([]);
+    expect(await page.evaluate(() => (window as unknown as { __tripPhases: string[] }).__tripPhases)).toEqual(['Leaving camp']);
+    await expect(phase(page)).toContainText('Through the gate and onto the Ruined Outpost.');
     // Once planned, the first chapter, not the end.
     expect(await view.trip(page)).toMatchObject({ mode: 'trip', chapter: 'leaving' });
     await expect(result(page)).toContainText('The result is known when the expedition returns at minute 80.');
@@ -461,6 +469,13 @@ test.describe('the whole-trip replay', () => {
     await expect(page.getByText('Preparing the whole trip…')).toHaveCount(0);
     await expect(marks(page)).toHaveCount(5);
     expect(await view.trip(page)).toBeNull();
+    // A fight's mark is not a way into a replay that cannot be shown: it adds no history entry (fix round 2).
+    const entries = await page.evaluate(() => history.length);
+    const fight = page.getByRole('list', { name: 'Trip marks' }).getByRole('button', { name: /Fight 1 · won/ });
+    if (await fight.count()) await fight.click();
+    await expect(marks(page).nth(1)).toHaveText(/Fight 1 · won/);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await expect(liveBadge(page)).toBeVisible();
   });
 
   test('keeps the focus on ⏮ and ⏭ at the ends, and leaves a focus elsewhere when the replay returns to live', async ({ page }) => {
@@ -484,14 +499,35 @@ test.describe('the whole-trip replay', () => {
     await view.hold(page, 'woodland', 30);
     await view.planned(page);
     await watchFromStart(page).click();
-    await view.seek(page, (await view.trip(page))!.capMs! - 400);
+    await view.seek(page, (await view.trip(page))!.capMs! - 3_000);
     await playButton(page).click();
     const watch = page.getByRole('link', { name: 'Watch the replay of encounter 1' });
     await watch.focus();
-    await expect(liveBadge(page)).toBeVisible({ timeout: 5_000 });
+    // Still replaying when the focus goes to the log (fix round 2: the check below is about the return to live).
+    expect(await view.trip(page)).toMatchObject({ mode: 'trip', playing: true });
+    await expect(liveBadge(page)).toBeVisible({ timeout: 8_000 });
     await page.waitForTimeout(300);
     await expect(watch).toBeFocused();
     expect(await focusedElement(page)).toContain('Watch the replay of encounter 1');
+    expect(await focusDrops(page)).toEqual([]);
+  });
+
+  // Fix round 2: a catch-up replay played up to now with ⏸ focused returns to live, and the focus goes to the live view's own
+  // button ("⏪ Watch from the start"), never to <body>.
+  test('gives the focus to Watch from the start when playing up to now returns to live', async ({ page }) => {
+    await watchFocus(page);
+    await view.open(page, view.page('woodland', '&minute=30'));
+    await view.hold(page, 'woodland', 30);
+    await view.planned(page);
+    await watchFromStart(page).click();
+    await view.seek(page, (await view.trip(page))!.capMs! - 1_500);
+    await playButton(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(pauseButton(page)).toBeFocused();
+    expect(await view.trip(page)).toMatchObject({ mode: 'trip', playing: true });
+    await expect(liveBadge(page)).toBeVisible({ timeout: 8_000 });
+    await expect(watchFromStart(page)).toBeFocused();
+    await page.waitForTimeout(300);
     expect(await focusDrops(page)).toEqual([]);
   });
 

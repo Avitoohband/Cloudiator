@@ -657,7 +657,9 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   const ownerMaximum = gain ? gain.maximum : null;
   const text = vignette
     ? campPhase(vignette.kind, expedition, state.outcome, vignette.kind === 'resting' && gain && gain.before < gain.maximum ? gain.maximum - gain.before : null)
-    : phaseText(shown, expedition);
+    // While the replay is prepared it shows the departure under the first chapter's words, so the live region says "Leaving camp"
+    // once, not the live departure's words and then those (fix round 2).
+    : tripMode && !frame ? campPhase('leaving', expedition, null, null) : phaseText(shown, expedition);
   const banner = vignette ? campBanner(vignette.kind, restEndMs, state.displayNowMs, clockMode, vignette.kind === 'resting' ? ownerMaximum : null, compact) : null;
   const health = healthText(shown);
   const progress = state.progress;
@@ -722,7 +724,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
             <span className={styles.position} style={{ left: `${100 * (progress?.fraction ?? 0)}%` }} />
           </div>
           {progress && <TripMarks marks={tripMarks(state, progress.startMs, clockMode)} fraction={progress.fraction}
-            onFight={fight => (state.replayExpired ? undefined : toTrip(`fight-${fight}`, true))} />}
+            onFight={tripRuledOut ? undefined : fight => toTrip(`fight-${fight}`, true)} />}
         </div>}
 
       <div className={styles.columns}>

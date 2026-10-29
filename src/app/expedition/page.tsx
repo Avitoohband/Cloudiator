@@ -4,7 +4,7 @@
 // expedition as a scene over itself, Task 13.8). It follows one expedition's revealed timeline and only reads; it never
 // sends commands. The page mounts the shared game state: its sync controller's revision re-reads the timeline (the
 // view has no poll of its own), and its world and owner name the gladiator. Fixture mode (?mode=fixture in a
-// fixture-enabled build) may add &minute=<0..90> to open the sample at that minute.
+// fixture-enabled build) may add &minute=<0..90> to open the sample at that minute. `&play=trip` opens the whole-trip replay.
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -15,7 +15,7 @@ import { expeditionQuery } from '../../features/character/expedition-query';
 
 function ExpeditionShell() {
   const search = useSearchParams();
-  const { requested, fixture, activityId, minute } = expeditionQuery(search, process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true');
+  const { requested, fixture, activityId, minute, play } = expeditionQuery(search, process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true');
   const [loaded, setLoaded] = useState<{ fixture: boolean; reads: GameGateway } | null>(null);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ function ExpeditionShell() {
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page" tabIndex={-1}>
       {!activityId ? <ExpeditionUnavailable fixture={fixture} reason="not-found" />
-        : reads && game.session.status !== 'loading' ? <ExpeditionView key={`${fixture}|${activityId}|${minute}|${reader}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute}
+        : reads && game.session.status !== 'loading' ? <ExpeditionView key={`${fixture}|${activityId}|${minute}|${play}|${reader}`} reads={reads} activityId={activityId} fixture={fixture} startMinute={minute} play={play}
           revision={game.revision} world={game.world} worldFailed={!game.world && game.syncError !== null} owner={game.owner} />
           : <p role="status">Loading the expedition…</p>}
     </main>

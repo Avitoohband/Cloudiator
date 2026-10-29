@@ -1,9 +1,10 @@
 import { validAppearance } from '@domain/appearance';
 import type { GameGateway } from './gateway';
-import { GatewayReadError, parseMarketRead, parseResultsCursor, parseStandingOf, parseStandingsRead } from './reads';
+import { GatewayReadError, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead } from './reads';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
-import { EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
+import { EXPEDITION_FIXTURES, EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
+import { EXPEDITION_GLADIATORS } from '../../../tests/fixtures/expedition-ids';
 import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_STANDINGS, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
 import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
 import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
@@ -33,6 +34,12 @@ const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARE
 const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS, RESTING_ACTOR] };
 const FIXTURE_PROFILES = { ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE };
 const OWNER_ID = RESTING_OWNER.gladiatorId;
+/**
+ * The one trip the preview says was followed by a Rest: the Woodland sample's gladiator (Aster) at the end of its trip. The
+ * Mountain and Outpost samples are followed by another expedition, and nobody else's trips are in the preview.
+ */
+const WOODLAND_REST = { gladiatorId: EXPEDITION_GLADIATORS.aster.id.toLowerCase(),
+  tripEndMs: EXPEDITION_TIMELINES[EXPEDITION_FIXTURES.woodland.activityId].stages.at(-1)!.endsAtMs };
 
 /**
  * Pure local preview: no transport, auth session, storage, clock, or side effects. Commands are refused; the owner's
@@ -68,6 +75,12 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
     // A replay's fighters' looks, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
     looks: async ids => new Map(world.actors.filter(a => ids.includes(a.gladiatorId)).map(a => [a.gladiatorId, validAppearance(a.appearance) ? a.appearance : null] as const)),
+    // Whether a trip's next slot was a Rest (no network): true only for the Woodland sample, and a malformed argument is `unavailable`,
+    // as the live read refuses it.
+    restAfter: async (gladiatorId, tripEndMs) => {
+      const next = parseRestAfter(gladiatorId, tripEndMs);
+      return next.gladiatorId === WOODLAND_REST.gladiatorId && tripEndMs === WOODLAND_REST.tripEndMs;
+    },
     profile: async id => (Object.hasOwn(profiles, id) ? structuredClone(profiles[id]) : unavailable()),
     // The seasons newest first: the current one (open) and the closed season before it, built with seasonAt.
     seasons: async () => structuredClone([...FIXTURE_SEASONS]),

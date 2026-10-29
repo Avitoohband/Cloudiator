@@ -1,11 +1,12 @@
 // Scenes over the camp in the address (plan Decision 4): a replay or an expedition opened over the camp is a history
-// entry on the camp's own route, `?view=replay&activity=<id>[&stage=<id>]` or `?view=expedition&activity=<id>`, so a
-// shared link opens it straight over the camp and the browser's Back closes it. The /replay/ and /expedition/ pages stay
-// as deep links. Nothing here touches the history; `useSceneHistory` does.
+// entry on the camp's own route, `?view=replay&activity=<id>[&stage=<id>]` or `?view=expedition&activity=<id>[&play=trip]`
+// (`play=trip` opens the expedition as the whole-trip replay, Patch A), so a shared link opens it straight over the camp
+// and the browser's Back closes it. The /replay/ and /expedition/ pages stay as deep links. Nothing here touches the
+// history; `useSceneHistory` does.
 import type { PublicActivitySummary } from '@contracts/events';
 import { isActivityId } from '../character/expedition-query';
 
-export type SceneView = { kind: 'replay'; activityId: string; stageId?: string } | { kind: 'expedition'; activityId: string };
+export type SceneView = { kind: 'replay'; activityId: string; stageId?: string } | { kind: 'expedition'; activityId: string; play?: 'trip' };
 /**
  * A scene the address names. As on the expedition page (`expeditionQuery`), its activity id must be UUID-shaped: a
  * malformed one (a mangled shared link) names no activity, so the scene says "not found" and reads nothing (final review
@@ -13,7 +14,7 @@ export type SceneView = { kind: 'replay'; activityId: string; stageId?: string }
  */
 export type SceneAddress = SceneView | { kind: SceneView['kind']; activityId: null };
 
-const SCENE_PARAMS = ['view', 'activity', 'stage'] as const;
+const SCENE_PARAMS = ['view', 'activity', 'stage', 'play'] as const;
 
 /** The scene an address names, or null. */
 export function sceneOf(search: Pick<URLSearchParams, 'get'>): SceneAddress | null {
@@ -21,9 +22,18 @@ export function sceneOf(search: Pick<URLSearchParams, 'get'>): SceneAddress | nu
   const activityId = search.get('activity');
   if (!activityId || (view !== 'replay' && view !== 'expedition')) return null;
   if (!isActivityId(activityId)) return { kind: view, activityId: null };
-  if (view === 'expedition') return { kind: 'expedition', activityId };
+  // Only `play=trip` names the whole-trip replay; any other value is ignored, so a mangled link still opens the live view.
+  if (view === 'expedition') return search.get('play') === 'trip' ? { kind: 'expedition', activityId, play: 'trip' } : { kind: 'expedition', activityId };
   const stageId = search.get('stage');
   return stageId ? { kind: 'replay', activityId, stageId } : { kind: 'replay', activityId };
+}
+
+/** What tells two scenes of one kind and activity apart: a replay's stage, an expedition's whole-trip `play` (undefined for none). */
+export const sceneDetail = (view: SceneAddress): string | undefined => (view.activityId === null ? undefined : view.kind === 'replay' ? view.stageId : view.play);
+
+/** Whether the scene the address shows (if any) is `view`, so that opening it again would add nothing. */
+export function sameScene(shown: SceneAddress | null, view: SceneView): boolean {
+  return !!shown && shown.kind === view.kind && shown.activityId === view.activityId && sceneDetail(shown) === sceneDetail(view);
 }
 
 /** `href` (an absolute address) with its scene replaced by `view`: the same route and options, as a path and search. */
@@ -33,6 +43,7 @@ export function sceneHref(href: string, view: SceneView): string {
   url.searchParams.set('view', view.kind);
   url.searchParams.set('activity', view.activityId);
   if (view.kind === 'replay' && view.stageId) url.searchParams.set('stage', view.stageId);
+  if (view.kind === 'expedition' && view.play === 'trip') url.searchParams.set('play', 'trip');
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -44,10 +55,10 @@ export function campHref(href: string): string {
 }
 
 /**
- * The scene a recent result opens: an expedition its expedition, an Arena or tournament bout its battle replay. Training
- * and Rest have no replay (Tasks 7, 9), so none.
+ * The scene a recent result opens: an expedition its whole-trip replay (Patch A), an Arena or tournament bout its battle
+ * replay. Training and Rest have no replay (Tasks 7, 9), so none.
  */
 export function sceneForResult(activityId: string, kind: PublicActivitySummary['resolvedKind']): SceneView | null {
-  if (kind === 'expedition') return { kind: 'expedition', activityId };
+  if (kind === 'expedition') return { kind: 'expedition', activityId, play: 'trip' };
   return kind === 'arena' || kind === 'tournament' ? { kind: 'replay', activityId } : null;
 }

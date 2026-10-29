@@ -141,7 +141,8 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await results.getByRole('button', { name: /^Replay: Aster returned victorious from an expedition/ }).first().click();
     const expedition = scene(page, 'Expedition');
     await expect(expedition).toBeVisible();
-    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland });
+    // A result opens the whole-trip replay (Patch A Task 8): its address carries `play=trip`, which the view acts on from Task 9.
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland, play: 'trip' });
     await expect(expedition.getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
     await expect(scene(page, 'Replay')).toHaveCount(0);
     // Over the camp the scene has no Camp link of its own, only Back to camp.
@@ -177,6 +178,31 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await page.keyboard.press('Escape');
     await expect(scene(page, 'Replay')).toHaveCount(0);
     expect(search(page)).toEqual({ mode: 'fixture' });
+  });
+
+  test('carries the whole-trip address (&play=trip) on an expedition scene and on its page, and ignores any other play', async ({ page }) => {
+    const woodland = EXPEDITION_FIXTURES.woodland.activityId;
+    // A shared link opens the expedition over the camp with its play kept in the address (the view acts on it from Task 9); Back to camp drops it.
+    await page.goto(`/game/?mode=fixture&view=expedition&activity=${woodland}&play=trip`);
+    await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland, play: 'trip' });
+    await campReady(page);
+    await backToCamp(page).click();
+    await expect(scene(page, 'Expedition')).toHaveCount(0);
+    expect(search(page)).toEqual({ mode: 'fixture' });
+    // The camp's own sample link is the live view of the same expedition: no play in its address.
+    await page.evaluate(id => window.__cloudiatorCamp!.emit('view-expedition', { activityId: id }), woodland);
+    await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland });
+    await backToCamp(page).click();
+    // Any other value is ignored: the scene opens, and a result's whole-trip replay is a different scene from the live one.
+    await page.goto(`/game/?mode=fixture&view=expedition&activity=${woodland}&play=fast`);
+    await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    // The deep link page takes the same address.
+    await page.goto(`/expedition/?mode=fixture&activity=${woodland}&play=trip`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
+    await page.goto(`/expedition/?mode=fixture&activity=${woodland}&play=fast`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
   });
 
   test('keeps /replay/ and /expedition/ deep links working', async ({ page }) => {

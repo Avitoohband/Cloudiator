@@ -7,7 +7,7 @@
 // below it, so "Back to camp" replaces its entry with the camp instead. Both read the address itself, so a request made
 // twice before the page has followed the first acts once (Task 23.5).
 import { useCallback, useEffect, useRef } from 'react';
-import { campHref, sceneHref, sceneOf, type SceneAddress, type SceneView } from './scene-url';
+import { campHref, sameScene, sceneHref, sceneOf, type SceneView } from './scene-url';
 
 /** Our mark on a scene's history entry: how many entries back the camp's entry is, or null when there is none. */
 const MARK = 'cloudiatorScene';
@@ -15,8 +15,6 @@ const markOf = (state: unknown): number | null => {
   const value = state && typeof state === 'object' ? (state as Record<string, unknown>)[MARK] : null;
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 };
-const stageOf = (view: SceneAddress) => (view.activityId !== null && view.kind === 'replay' ? view.stageId : undefined);
-const same = (a: SceneAddress | null, b: SceneView) => !!a && a.kind === b.kind && a.activityId === b.activityId && stageOf(a) === stageOf(b);
 /**
  * The scene the address names right now. `pushState` changes the address at once, while the router's search params (and
  * so the shell's `scene`) follow a render later: two requests in that gap (a double click, two bridge events) would each
@@ -36,7 +34,7 @@ export function useSceneHistory() {
 
   const open = useCallback((view: SceneView) => {
     const shown = addressed();
-    if (same(shown, view)) return;
+    if (sameScene(shown, view)) return;
     leaving.current = false;
     // From the camp, one entry above it; from a scene, one more than that scene (none above a scene opened by a link).
     const below = shown ? markOf(window.history.state) : 0;

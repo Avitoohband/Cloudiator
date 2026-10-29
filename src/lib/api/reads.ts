@@ -145,6 +145,29 @@ export async function readLooks(client: SupabaseClient, ids: readonly string[]):
   for (const row of rows) looks.set(row.gladiator_id, validAppearance(row.appearance) ? row.appearance : null);
   return looks;
 }
+/**
+ * The options of the next-slot Rest read, checked before any query is built (the fixture gateway applies the same rule): a
+ * gladiator id, which is returned lowercased, and a trip end that is a whole, non-negative time in milliseconds, so the next
+ * slot's window `[tripEndMs + slot, tripEndMs + 2 slots)` stays a safe integer; anything else is `unavailable`.
+ */
+export function parseRestAfter(gladiatorId: GladiatorId, tripEndMs: number): { gladiatorId: GladiatorId; fromMs: number; toMs: number } {
+  const slotMs = RULES_V1.clock.slotMs;
+  if (typeof gladiatorId !== 'string' || !GLADIATOR_ID.test(gladiatorId) || typeof tripEndMs !== 'number' || !Number.isSafeInteger(tripEndMs) || tripEndMs < 0
+    || !Number.isSafeInteger(tripEndMs + 2 * slotMs)) throw new GatewayReadError('unavailable');
+  return { gladiatorId: gladiatorId.toLowerCase() as GladiatorId, fromMs: tripEndMs + slotMs, toMs: tripEndMs + 2 * slotMs };
+}
+/**
+ * Whether the gladiator's next slot after a trip that ended at `tripEndMs` was a Rest: a public `recent_results` row (visitors
+ * read it as `anon`) revealed in that slot, `[tripEndMs + slot, tripEndMs + 2 slots)`, whose summary's `resolvedKind` is `rest`.
+ * The whole-trip replay ends with "Resting" only then. At most four rows are asked for and only their summaries cross; a row
+ * this client cannot read is not a Rest. A malformed gladiator id or trip end is `unavailable` before any request.
+ */
+export async function readRestAfter(client: SupabaseClient, gladiatorId: GladiatorId, tripEndMs: number): Promise<boolean> {
+  const next = parseRestAfter(gladiatorId, tripEndMs);
+  const rows = checked(await client.from('recent_results').select('summary').eq('gladiator_id', next.gladiatorId)
+    .gte('reveal_at_ms', next.fromMs).lt('reveal_at_ms', next.toMs).limit(4)) as unknown as { summary: unknown }[];
+  return rows.some(row => typeof row.summary === 'object' && row.summary !== null && (row.summary as { resolvedKind?: unknown }).resolvedKind === 'rest');
+}
 type OfferRow = { id: string; seller_gladiator_id: string; seller_name: string; item: MarketListing['item']; price: number; listed_at_ms: number; expires_at_ms: number };
 /**
  * One page of open fixed-price offers from the public `market_offers` projection, which visitors read as `anon` (its RLS

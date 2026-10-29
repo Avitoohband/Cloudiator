@@ -1,7 +1,8 @@
-// The /expedition/ page's query: ?activity=<id>[&mode=fixture[&minute=<0..90>]]. The activity id must be
+// The /expedition/ page's query: ?activity=<id>[&play=trip][&mode=fixture[&minute=<0..90>]]. The activity id must be
 // UUID-shaped, or the page shows "not available" without reading anything. Fixture mode needs a build with
 // fixtures enabled (next.config.ts forces the flag off in production exports), and the minute is read only
-// there: it sets the fixture preview's display clock and never grants live time or reward authority.
+// there: it sets the fixture preview's display clock and never grants live time or reward authority. `play=trip`
+// opens the whole-trip replay and grants nothing; any other value is ignored.
 export type ExpeditionQuery = {
   /** The URL asked for the fixture preview. */
   requested: boolean;
@@ -10,6 +11,8 @@ export type ExpeditionQuery = {
   activityId: string | null;
   /** Fixture preview only: open at this minute of the expedition. */
   minute: number | null;
+  /** `play=trip`: open the whole-trip replay instead of the live view. */
+  play: 'trip' | null;
 };
 
 const ACTIVITY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,5 +28,5 @@ export function expeditionQuery(params: { get(name: string): string | null }, fi
   const id = params.get('activity');
   const raw = fixture ? params.get('minute') : null;
   const minute = raw !== null && MINUTE.test(raw) && Number(raw) <= MAX_FIXTURE_MINUTE ? Number(raw) : null;
-  return { requested, fixture, activityId: id !== null && isActivityId(id) ? id : null, minute };
+  return { requested, fixture, activityId: id !== null && isActivityId(id) ? id : null, minute, play: params.get('play') === 'trip' ? 'trip' : null };
 }

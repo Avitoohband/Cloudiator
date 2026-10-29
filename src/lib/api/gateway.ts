@@ -4,8 +4,8 @@ import type { Appearance } from '@domain/appearance';
 import type { GameMessage, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTournament,
-  readTournamentLog, type NotificationsRead,
+  GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readRestAfter, readSeasons, readStandingOf, readStandings,
+  readTournament, readTournamentLog, type NotificationsRead,
 } from './reads';
 export { GatewayReadError, type NotificationsRead } from './reads';
 
@@ -64,6 +64,12 @@ export interface GameGateway {
    * treats a failure as the legacy look; the fixture preview answers from its own world, with no network.
    */
   looks(ids: readonly GladiatorId[]): Promise<Map<string, Appearance | null>>;
+  /**
+   * Whether the gladiator's next slot after a trip that ended at `tripEndMs` was a Rest, from the public results (`recent_results`,
+   * revealed in `[tripEndMs + slot, tripEndMs + 2 slots)`, a row whose `resolvedKind` is `rest`). The whole-trip replay has a
+   * "Resting" chapter only then. A malformed gladiator id or time is `unavailable`, without a request.
+   */
+  restAfter(gladiatorId: GladiatorId, tripEndMs: number): Promise<boolean>;
   /**
    * The newest 50 game messages (patch notes and admin notes), newest first, as plain text. They are public: a visitor reads
    * the same list, and a hidden message is not in it. Whether each is unread is the owner read's `inbox`, not this list. A row
@@ -225,6 +231,7 @@ export function createLiveGateway(): GameGateway {
     profile: id => publicRead(client => readProfile(client, id)),
     recent: cursor => publicRead(client => readRecent(client, cursor)),
     looks: ids => publicRead(client => readLooks(client, ids)),
+    restAfter: (gladiatorId, tripEndMs) => publicRead(client => readRestAfter(client, gladiatorId, tripEndMs)),
     messages: () => publicRead(readMessages),
     seasons: () => publicRead(readSeasons),
     standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),

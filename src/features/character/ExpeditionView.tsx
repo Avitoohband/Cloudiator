@@ -220,6 +220,8 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   fixture: boolean;
   /** Fixture preview only: open at this minute of the expedition, then run in real time. */
   startMinute?: number | null;
+  /** `'trip'`: the address asks for the whole-trip replay. Accepted and ignored until Patch A Task 9 (the view is remounted when it changes). */
+  play?: 'trip' | null;
   /** The shared world revision (`useGameState`): each change re-reads the timeline. */
   revision: string | null;
   /** The shared public world, for names, the look and whose expedition this is; null while it loads. */

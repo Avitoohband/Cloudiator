@@ -16,7 +16,7 @@ import type { GameUiState } from '../character/useGameState';
 import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
 import { ExpeditionUnavailable, ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
 import { appearancesOf } from '../../game/replay-looks';
-import type { SceneAddress, SceneView } from './scene-url';
+import { sceneDetail, type SceneAddress, type SceneView } from './scene-url';
 import styles from './shell.module.css';
 
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
@@ -57,7 +57,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
 
   // Another scene in the same dialog (an expedition's encounter replay, or Back and Forward between scenes) starts at its
   // top with the focus on Back to camp, as the first one did: the control that opened it is gone (fix round 1, M6).
-  const sceneKey = `${view.kind}|${view.activityId}|${view.activityId !== null && view.kind === 'replay' ? view.stageId ?? '' : ''}`;
+  const sceneKey = `${view.kind}|${view.activityId}|${sceneDetail(view) ?? ''}`;
   const shownKey = useRef(sceneKey);
   useLayoutEffect(() => {
     if (shownKey.current === sceneKey) return;
@@ -103,7 +103,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
               : <ActivityReplay key={viewKey} reads={reads} activityId={activityId} stageId={view.stageId ?? null} clock={clock} headingLevel={2}
                 viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} />
             : loading ? <p role="status">Loading the expedition…</p>
-              : <ExpeditionView key={viewKey} reads={reads} activityId={activityId} fixture={fixture} revision={state.revision} world={state.world}
+              : <ExpeditionView key={viewKey} reads={reads} activityId={activityId} fixture={fixture} play={view.play ?? null} revision={state.revision} world={state.world}
                 worldFailed={!state.world && state.syncError !== null} owner={player ? state.owner : null}
                 overCamp={{ onWatch: stageId => onWatch?.({ kind: 'replay', activityId, stageId }) }} />}
       </div>

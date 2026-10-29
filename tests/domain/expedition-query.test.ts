@@ -32,4 +32,17 @@ describe('expedition page query', () => {
     expect(query(`activity=${ID}&minute=39`).minute).toBeNull();
     expect(query(`mode=fixture&activity=${ID}&minute=39`, false).minute).toBeNull();
   });
+
+  it('reads &play=trip as the whole-trip replay and ignores any other value (Patch A Task 8)', () => {
+    expect(query(`activity=${ID}&play=trip`).play).toBe('trip');
+    // It names a replay of the trip, never fixture authority, so it reads the same with or without fixtures.
+    expect(query(`mode=fixture&activity=${ID}&play=trip`).play).toBe('trip');
+    expect(query(`mode=fixture&activity=${ID}&play=trip`, false).play).toBe('trip');
+    expect(query(`mode=fixture&activity=${ID}&minute=39&play=trip`)).toMatchObject({ minute: 39, play: 'trip' });
+    for (const bad of ['', 'fast', 'TRIP', 'trip ', ' trip', '1', 'trip,trip']) {
+      expect(query(`activity=${ID}&play=${encodeURIComponent(bad)}`).play, bad).toBeNull();
+    }
+    expect(query(`activity=${ID}`).play).toBeNull();
+    expect(query('').play).toBeNull();
+  });
 });

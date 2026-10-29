@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { createFixtureGateway, FIXTURE_ARENA } from '../../src/lib/api/fixture-gateway';
 
 test('fixture commands cannot mutate even the local owner preview', async () => {
@@ -595,4 +595,27 @@ test('fixture market pages open offers newest first, 50 at a time, and filters b
   // Fixture commands still never trade.
   expect(await gateway.command({ kind: 'buy-listing', operationId: 'd43f7844-52e0-4302-b8e4-740035047765', listingId: rows[0].listingId }))
     .toEqual({ ok: false, code: 'unavailable' });
+});
+
+test('fixture preview: the next slot was a Rest only for the Woodland sample (its gladiator at its trip end), with no network', async () => {
+  const { EXPEDITION_FIXTURES, EXPEDITION_TIMELINES } = await import('../fixtures/expeditions');
+  const { EXPEDITION_GLADIATORS } = await import('../fixtures/expedition-ids');
+  const fetchSpy = vi.fn();
+  vi.stubGlobal('fetch', fetchSpy);
+  try {
+    const gateway = createFixtureGateway();
+    const aster = EXPEDITION_GLADIATORS.aster.id, varro = EXPEDITION_GLADIATORS.varro.id;
+    const endOf = (key: keyof typeof EXPEDITION_FIXTURES) => EXPEDITION_TIMELINES[EXPEDITION_FIXTURES[key].activityId].stages.at(-1)!.endsAtMs;
+    expect(await gateway.restAfter(aster, endOf('woodland'))).toBe(true);
+    expect(await gateway.restAfter(aster.toUpperCase(), endOf('woodland'))).toBe(true);
+    // The Mountain sample is followed by an expedition, not a Rest; another gladiator or another time is no Rest either.
+    expect(await gateway.restAfter(aster, endOf('mountain'))).toBe(false);
+    expect(await gateway.restAfter(aster, endOf('outpost'))).toBe(false);
+    expect(await gateway.restAfter(varro, endOf('woodland'))).toBe(false);
+    expect(await gateway.restAfter(aster, endOf('woodland') + 1)).toBe(false);
+    // As the live read, a malformed argument is unavailable.
+    await expect(gateway.restAfter('not-an-id', endOf('woodland'))).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(gateway.restAfter(aster, Number.NaN)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  } finally { vi.unstubAllGlobals(); }
 });

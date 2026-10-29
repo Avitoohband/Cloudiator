@@ -31,7 +31,7 @@
 // a fade and the focus in it survive): CSS takes it out of the column into the top row when the chip leaves room for it beside
 // (`bannerPlace`, the chip's width measured, `data-stacked`); in a window where the column reaches over an open menu panel it waits for the
 // panel to close.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
@@ -61,14 +61,16 @@ import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
 import { useClockMode } from '../../lib/clock-setting';
+import { PATCH, noticeFor } from '../../lib/patch';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
+import { PatchNotice, reloadPage, useModalOpen } from './PatchNotice';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, type MenuId } from './menus';
-import { railReducer, type RailEvent, type RailState } from './rail-reveal';
+import { COMPACT_QUERY, railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
 import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
 import { useCampClicks } from './useCampClicks';
@@ -95,6 +97,14 @@ const NO_SAMPLES: Samples = { replays: [], expeditions: [], arena: [], tournamen
 const shown = (element: HTMLElement | null): element is HTMLElement => !!element && (typeof element.checkVisibility === 'function'
   ? element.checkVisibility({ visibilityProperty: true })
   : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
+
+/** The shell's touch layout (the phone's short notice), kept up to date. */
+const subscribeCompact = (onChange: () => void) => {
+  const query = window.matchMedia?.(COMPACT_QUERY);
+  query?.addEventListener('change', onChange);
+  return () => query?.removeEventListener('change', onChange);
+};
+const readCompact = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
 
 /** Whether a modal dialog is open (`:modal`, Safari 15.6+, within the project's Safari 16.4 floor). */
 const modalOpen = () => document.querySelector('dialog:modal') !== null;
@@ -316,6 +326,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const messaging = useMemo<MessagingActions | undefined>(() => reads ? {
     load: () => reads.messages(),
     loadNotifications: () => reads.notifications(),
+    loadPatches: beforeSortKey => reads.patches(beforeSortKey),
     read: async messageId => {
       const result = await reads.command({ kind: 'read-message', operationId: crypto.randomUUID(), messageId });
       if (!result.ok) throw new Error(result.code);
@@ -352,6 +363,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const lookOwner = owner?.gladiatorId ?? null;
   useEffect(() => { setLookOpen(false); }, [lookOwner]);
   const savedLook = lookSaved && lookSaved.gladiatorId === lookOwner ? lookSaved.text : null;
+
+  // "A new patch is out — reload" (Patch A, "Patch numbers and the changelog"): when the server's newest patch is ahead of this build. It
+  // waits while a scene or a modal dialog is open (the creation and change-look dialogs are named too, so it never shows for the moment
+  // before they open), and Later hides it for this page's life for that number; a newer number shows it again. Visitors see it too.
+  const modal = useModalOpen();
+  const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
+  const [patchLater, setPatchLater] = useState<string | null>(null);
+  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen, later: patchLater });
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
@@ -407,12 +426,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging}
-        onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
+        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>
         {arrivalSlot}
         <div className={styles.noticeList}>
+          <PatchNotice number={patchNotice} compact={compact} onReload={reloadPage} onLater={() => setPatchLater(patchNotice)} />
           {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
               signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
           {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))

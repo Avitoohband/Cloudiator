@@ -403,7 +403,8 @@ describe('game messages', () => {
     const dir = new URL('../../supabase/migrations/', import.meta.url);
     const files = readdirSync(dir).filter(name => name.endsWith('_messages.sql'));
     expect(files).toHaveLength(1);
-    expect(readdirSync(dir).filter(name => name.endsWith('.sql')).sort().at(-1)).toBe(files[0]);
+    // The 25th migration (it was the last until M26, the patch list, followed it).
+    expect(readdirSync(dir).filter(name => name.endsWith('.sql')).sort()[24]).toBe(files[0]);
     const m25 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');
     const source = readFileSync(new URL('../../supabase/sql/18-messages.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
     const at = (needle: string, from = 0) => { const i = m25.indexOf(needle, from); expect(i, needle).toBeGreaterThan(-1); return i; };

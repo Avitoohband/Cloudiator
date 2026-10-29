@@ -1,5 +1,81 @@
 # Local identity backend and migrations
 
+## Patch numbers (M26)
+
+M26 is Patch A's one database change (Patch A spec, "Patch numbers and the changelog"; plan
+`docs/superpowers/plans/2026-10-29-patch-a.md`, Task 11b). Its source for the patch list is `supabase/sql/19-patches.sql`, where the
+design notes are. Avi wants one database change per patch, so Task 11c (a richer profile card) adds its public profile columns to
+the same M26 from its own source.
+
+**What it changes** (from `19-patches.sql`):
+- **`public.patches`**: `number` (the primary key, `^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})(\.[1-9][0-9]{0,2})?$`), `sort_key` (generated
+  and stored, major × 1,000,000 + minor × 1,000 + third, unique), `title` (1–80 characters, not blank), `released_at_ms` (≥ 0) and
+  `message_id` (the patch note, null or unique, no foreign key: the database tests' reset truncates `game_messages` on its own, and
+  a message is hidden, never deleted).
+- **`public.patch_features`**: `patch` (referencing `patches(number)`), `position` (1–20) and `text` (1–240 characters, not blank),
+  keyed by `(patch, position)`.
+- Both tables: RLS on; everything revoked from `public`, `anon`, `authenticated` and `service_role`, then SELECT for the three API
+  roles; the policy `player_read` for `anon` and `authenticated` `using (true)`. They join the access matrix's `OPEN` list.
+- **`private.record_patch(number, title, features, message_id)`**: the operator's only (no client role and not `service_role`;
+  [runbook, "Recording a patch"](runbook.md#recording-a-patch)). It refuses with 23514 an empty list of features or one longer
+  than 20, a message that is not a visible patch note, and a number whose `sort_key` is not above every other patch's (checked
+  after its insert, so a repeated number is the key's 23505 first). The release time is `clock_timestamp()`.
+- **`public.world_revision`**: 15-release.sql's view with one more last column, `latest_patch` (the number with the highest
+  `sort_key`, null with no row). `create or replace` keeps its grants; the `with (security_invoker=true)` clause restates its
+  option.
+- **The seed**: 1.0 to 1.3.1, CHANGELOG.md's released sections word for word, at the spec's release times. Each note is found by
+  its kind and exact title, so production links notes 1–4; a local database has no notes and stores null.
+
+**Source iteration.** The psql fallback after the container label check (Git Bash:
+`docker exec -i supabase_db_Cloudiator psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < supabase/sql/19-patches.sql`).
+Task 11b applied it twice to the M01–M25 database (the second run is the reapplication). Every statement can be applied again:
+`create table if not exists`, `drop policy if exists` before each policy, `create or replace`, and the seed's `on conflict do
+nothing`.
+
+**Tests** (Task 11b, RED first; report `.superpowers/sdd/2026-10-29-patch-a/task-11b-report.md`):
+- `tests/db/patches.test.ts`: the seed equals CHANGELOG.md; recording as the operator, stamped now, shows on the anonymous revision
+  read; the refusals; operator-only (invoker, `search_path=""`, ACL `{postgres=X/postgres}`, 42501 as each API role); everyone
+  reads and nobody writes; the source's order. The M26 file test is written and skipped until M26 exists.
+- `tests/db/access-matrix.test.ts` (`OPEN` and the pinned `service_role` set), `tests/db/projections.test.ts` (the view's
+  columns), `tests/db/messages.test.ts` (M25 is the 25th migration, not the last).
+
+**Evidence on the source applied to M01–M25** (Task 11b, 2026-10-29):
+- Fingerprint (`scripts/schema-fingerprint.sql`): 1,210 lines before (M25's count), 1,238 after. The difference is 28 added lines
+  and 1 changed one. The added lines are the function, the 2 tables, their 8 columns and `world_revision.latest_patch`, 2 policies,
+  10 constraints and 4 indexes. The changed line is `world_revision`'s view hash; its ACL and options are unchanged.
+- Access audit (`scripts/access-audit.sql`): 648 rows (M25's 638 and 10 new rows: 6 relation grants and 4 policy rows), 0
+  finding rows.
+- `db lint --local --schema public,private`: no errors.
+- `npm run test:db`: `tests/db/patches.test.ts`, `access-matrix`, `visitor-access`, `projections`, `retention`, `hosted-checks` and
+  `messages` passed, with the Edge container's start time unchanged across each run.
+
+**Generation, completion and replay: not done yet.** The controller generates M26 once, after Task 11c's source is in place,
+following the M25 record above:
+1. On a clean M01–M25 reset with both sources applied once, `npx supabase db pull <name> --local --schema public,private --yes`.
+2. Unskip the M26 file test in `tests/db/patches.test.ts` (change `M26_SUFFIX` if the file has another name). Run it on the
+   as-generated draft and expect FAIL.
+3. Complete the draft from the source:
+   - a provenance header;
+   - each new table's revoke, after its RLS and before its first grant (a new table gets `service_role=Dxtm`);
+   - `record_patch`'s revoke;
+   - the source's `world_revision` statement (a dropped and re-created view would lose its grants);
+   - the source's text for the `between` CHECKs and the generated column (the M25 lesson);
+   - the seed (migra emits no data);
+   - `notify pgrst` last.
+4. Replay with `db reset --local --no-seed --yes`. The fingerprint must equal the source-applied one byte for byte, and again after
+   a second reset. Then the inspections, the access audit, `npm run test:db` under the DB-test rule, lint and the advisors.
+5. Update `tests/db/restore-hosted.test.ts` (26 migrations). Add the `rpc private.record_patch` anonymous probe
+   (`tests/browser/deployed-checks.ts`, PGRST106, private profile, null arguments; the probe test checks its signature against
+   the migrations). Then change the probe counts to 22 in `tests/deployed.test.ts` and the runbook.
+6. Record the generation, the completions and the replay evidence here.
+
+**Release** (spec "Release"):
+- **Order.** M26 first: the 1.4 client's revision read names `latest_patch`, so a 1.4 client could not read the camp on a
+  database without M26. Then the client. Once it is live, each after Avi's go: the patch note, then `record_patch('1.4', …)`. Recording
+  1.4 only after its client is live means a reload always brings 1.4.
+- **Locks.** Replacing `world_revision` takes an ACCESS EXCLUSIVE lock on the view until the commit, so revision reads wait for
+  that moment. The two new tables lock nothing else. No existing table is rewritten, and no row other than the seed is written.
+
 ## Game messages, notifications, the look change and fixed builds (M25)
 
 M25 is `supabase/migrations/20261028165017_messages.sql`, the SQL part of the next patch

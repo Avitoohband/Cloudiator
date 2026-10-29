@@ -11,6 +11,7 @@ import { applyXp } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
+import { patchSortKey, type PatchEntry } from '../patch';
 
 export class GatewayReadError extends Error {
   constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
@@ -25,11 +26,22 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   if (!row.state || typeof row.state !== 'object') throw new GatewayReadError('unavailable');
   return row.state;
 }
-export async function readRevision(client: SupabaseClient): Promise<RevisionState> {
-  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null}>(
-    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index').single());
+/**
+ * The revision read as this client reads it: the shared contract's `RevisionState` and the server's newest patch (`latest_patch`, M26;
+ * Patch A spec, "Patch numbers and the changelog"), null unless it is a well-formed patch number. A client-side type: the shared
+ * contracts under supabase/functions/_shared do not change, so the Edge functions need no deploy.
+ */
+export type RevisionRead = RevisionState & { latestPatch: string | null };
+export async function readRevision(client: SupabaseClient): Promise<RevisionRead> {
+  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null;latest_patch:unknown}>(
+    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index,latest_patch').single());
   return { revision: row.revision, serverNowMs: Number(row.server_now_ms), slotIndex: Number(row.slot_index),
-    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index) };
+    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index),
+    latestPatch: typeof row.latest_patch === 'string' && patchSortKey(row.latest_patch) !== null ? row.latest_patch : null };
+}
+/** A revision read as the world snapshot carries it: without the newest patch, which the sync keeps on its own. */
+export function revisionState({ latestPatch: _latest, ...state }: RevisionRead): RevisionState {
+  return state;
 }
 export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> {
   // A concurrent commit between pages must not be labeled with an earlier revision.
@@ -44,7 +56,7 @@ export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> 
       cursor = rows.at(-1)!.gladiator_id;
     }
     const after = await readRevision(client);
-    if (before.revision === after.revision) return { ...after, actors };
+    if (before.revision === after.revision) return { ...revisionState(after), actors };
   }
   throw new GatewayReadError('unavailable');
 }
@@ -230,6 +242,57 @@ export async function readMessages(client: SupabaseClient): Promise<GameMessage[
     messages.push({ id, kind: row.kind, title: row.title, preview: row.preview, body, action: row.action, publishedAtMs });
   }
   return messages;
+}
+/** A message as the panel shows it: a patch note carries its patch number, an admin note or a note without a patch row null. */
+export type ShownMessage = GameMessage & { patch: string | null };
+const PATCHES_PAGE = 20;
+type PatchRow = { number: unknown; sort_key: unknown; title: unknown; released_at_ms: unknown; message_id: unknown; patch_features: unknown };
+/** A whole number from the Data API: a bigint may arrive as text (a driver option). Null for anything else. */
+const wholeOf = (value: unknown): number | null => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+};
+/** One patch row, or null when any part of it is malformed (the list leaves it out). Its features in position order. */
+function patchEntry(row: PatchRow): PatchEntry | null {
+  const sortKey = wholeOf(row.sort_key), releasedAtMs = wholeOf(row.released_at_ms);
+  const messageId = row.message_id === null ? null : wholeOf(row.message_id);
+  if (typeof row.number !== 'string' || sortKey === null || sortKey !== patchSortKey(row.number) || typeof row.title !== 'string'
+    || releasedAtMs === null || (row.message_id !== null && messageId === null) || !Array.isArray(row.patch_features)) return null;
+  const features: { position: number; text: string }[] = [];
+  for (const feature of row.patch_features as unknown[]) {
+    const { position, text } = (typeof feature === 'object' && feature !== null ? feature : {}) as Record<string, unknown>;
+    const at = wholeOf(position);
+    if (at === null || typeof text !== 'string') return null;
+    features.push({ position: at, text });
+  }
+  return { number: row.number, sortKey, title: row.title, releasedAtMs, messageId, features: features.sort((a, b) => a.position - b.position).map(f => f.text) };
+}
+/**
+ * The server's patches with their features (public `patches`, M26), 20 at a time, newest first (`sort_key` descending), older than
+ * `beforeSortKey` when given (the next page). `more` says a next page exists (the read asks for 21 rows and keeps 20). A malformed row
+ * is left out rather than failing the list.
+ */
+export async function readPatches(client: SupabaseClient, beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }> {
+  let query = client.from('patches').select('number,sort_key,title,released_at_ms,message_id,patch_features(position,text)')
+    .order('sort_key', { ascending: false }).limit(PATCHES_PAGE + 1);
+  if (beforeSortKey !== undefined) query = query.lt('sort_key', beforeSortKey);
+  const rows = checked(await query) as unknown as PatchRow[];
+  const items = rows.slice(0, PATCHES_PAGE).map(patchEntry).filter((entry): entry is PatchEntry => entry !== null);
+  return { items, more: rows.length > PATCHES_PAGE };
+}
+/**
+ * The patch numbers of the given patch notes, by message id, in one small read (`message_id=in.(…)`); none is asked for an empty list.
+ * A note without a patch row is absent from the map, as is a malformed row.
+ */
+export async function readPatchNumbers(client: SupabaseClient, messageIds: readonly number[]): Promise<Map<number, string>> {
+  const numbers = new Map<number, string>();
+  if (messageIds.length === 0) return numbers;
+  const rows = checked(await client.from('patches').select('number,message_id').in('message_id', [...messageIds])) as unknown as { number: unknown; message_id: unknown }[];
+  for (const row of rows) {
+    const id = wholeOf(row.message_id);
+    if (id !== null && typeof row.number === 'string' && patchSortKey(row.number) !== null) numbers.set(id, row.number);
+  }
+  return numbers;
 }
 const NOTIFICATIONS_PAGE = 20;
 /** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */

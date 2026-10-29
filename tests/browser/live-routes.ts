@@ -9,6 +9,7 @@ import type { BrowserContext, Request, Route } from '@playwright/test';
 import type { ActivitySummary, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { GameMessage, MarketListing, OwnerState, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
+import type { PatchEntry } from '../../src/lib/patch';
 
 export const SUPABASE_URL = 'http://127.0.0.1:54321';
 /** The development server's test-only publishable key (playwright.config.ts); a visitor's request carries it as its bearer. */
@@ -72,6 +73,10 @@ export type LiveData = {
   market?: readonly MarketListing[];
   /** The visible game messages (the public `game_messages` table), in any order; none by default. */
   messages?: readonly GameMessage[];
+  /** The server's patches with their features (the public `patches` and `patch_features` tables, M26), in any order; none by default. */
+  patches?: readonly PatchEntry[];
+  /** The revision read's newest patch (`latest_patch`, M26); null (no patch recorded) by default. */
+  latestPatch?: string | null;
   /**
    * The owner's settled results the Notifications tab lists (the owner-only `activities` rows `readNotifications` reads), in any order.
    * The level each reached comes from the owner state's level and XP, as the real read derives it, and an expedition's destination
@@ -117,6 +122,10 @@ export type LiveTransport = {
   setMarket(offers: readonly MarketListing[]): void;
   /** Replaces the visible game messages (the operator posted or hid one). */
   setMessages(messages: readonly GameMessage[]): void;
+  /** Replaces the server's patches (the operator recorded one). */
+  setPatches(patches: readonly PatchEntry[]): void;
+  /** Replaces the newest patch the revision read names (a newer patch is out), or none with null. */
+  setLatestPatch(latest: string | null): void;
   /** Replaces the owner's settled results the Notifications tab lists (a result was credited). */
   setNotifications(notifications: readonly LiveNotification[]): void;
   /** Replaces the revision's published slot (a slot's publication), or restores the default with undefined. */
@@ -239,6 +248,8 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setTimelines: timelines => { data.timelines = timelines; },
     setMarket: offers => { data.market = offers; },
     setMessages: messages => { data.messages = messages; },
+    setPatches: patches => { data.patches = patches; },
+    setLatestPatch: latest => { data.latestPatch = latest; },
     setNotifications: notifications => { data.notifications = notifications; },
     setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
     delay: (table, ms) => { delays.set(table, ms); },
@@ -362,7 +373,7 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
     .map(([seasonId, archived]) => ({ seasonId, startsAtMs: 0, endsAtMs: RULES_V1.seasons.durationMs, closedAtMs: archived ? RULES_V1.seasons.durationMs : null }));
   return {
     world_revision: { rows: [{ revision: world.revision, server_now_ms: now, slot_index: Math.floor(now / SLOT_MS),
-      published_slot_index: data.publishedSlotIndex ? data.publishedSlotIndex(now) : Math.floor(now / SLOT_MS) }] },
+      published_slot_index: data.publishedSlotIndex ? data.publishedSlotIndex(now) : Math.floor(now / SLOT_MS), latest_patch: data.latestPatch ?? null }] },
     world_actor_reads: { rows: world.actors.map(actor => ({ gladiator_id: actor.gladiatorId, actor })) },
     // The projection keeps each award with its season index (a number); the read maps it to a PrestigeAward with a string season id.
     public_profile_reads: { rows: Object.entries(data.profiles ?? {}).map(([gladiator_id, profile]) => ({ gladiator_id,
@@ -386,6 +397,11 @@ function tables({ world, owner, now, reader, data }: { world: WorldSnapshot; own
     // Game messages (M25), readable by visitors too; the table's row security hides a hidden one, so the rows here are the visible ones.
     game_messages: { rows: (data.messages ?? []).map(m => ({ id: m.id, kind: m.kind, title: m.title, preview: m.preview, body: m.body, action: m.action,
       published_at_ms: m.publishedAtMs })) },
+    // The patch list (M26), readable by visitors too, each row with its features embedded as `patch_features(position,text)` selects them
+    // (stored last position first, as the server promises no order: the read sorts them).
+    patches: { rows: (data.patches ?? []).map(p => ({ number: p.number, sort_key: p.sortKey, title: p.title, released_at_ms: p.releasedAtMs, message_id: p.messageId,
+      patch_features: p.features.map((text, i) => ({ position: i + 1, text })).reverse() })) },
+    patch_features: { rows: (data.patches ?? []).flatMap(p => p.features.map((text, i) => ({ patch: p.number, position: i + 1, text }))) },
     // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all.
     owner_state: { private: true, rows: reader !== null && owner ? [{ state: owner }] : [] },
     // The timelines' owner summaries, and the owner's settled results as `readNotifications` selects them: the kind, the slot, the

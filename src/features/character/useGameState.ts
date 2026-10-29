@@ -19,6 +19,8 @@ export type GameUiState = {
   revision: string | null; slotIndex: number | null; clock: DisplayClock;
   /** The revision's published slot (Task 23.2, C5): the latest slot whose boundary is published; null before the first coordination. */
   publishedSlotIndex: number | null;
+  /** The server's newest patch from the latest revision read (Patch A, "Patch numbers and the changelog"); null when unknown. */
+  latestPatch: string | null;
   /** The owner's own gladiator rests at home in the shared world (its public actor's `resting`; Task 23.9 fix round 1). */
   ownResting: boolean;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
@@ -156,6 +158,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const revision = syncWorld?.revision ?? null;
   const slotIndex = syncWorld?.slotIndex ?? null;
   const publishedSlotIndex = syncWorld?.publishedSlotIndex ?? null;
+  const latestPatch = sync?.latestPatch ?? null;
 
   useEffect(() => {
     if (!gateway || account === null || clockOnly) return;
@@ -264,7 +267,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   else viewer = owner ? 'player' : read?.missing ? 'no-gladiator' : read?.failed ? 'unavailable' : 'loading';
 
   return {
-    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, ownResting, clock,
+    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, latestPatch, ownResting, clock,
     sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld,
   };
 }

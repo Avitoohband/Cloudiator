@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import { createFixtureGateway, FIXTURE_ARENA } from '../../src/lib/api/fixture-gateway';
+import { PATCH } from '../../src/lib/patch';
 
 test('fixture commands cannot mutate even the local owner preview', async () => {
   const gateway = createFixtureGateway();
@@ -71,7 +72,8 @@ test('fixture public actors omit private owner management state', async () => {
   const revision = await gateway.revision();
   // The fixture world's slot is published (Task 23.2's published slot; Task 23.4, C5).
   expect(world.publishedSlotIndex).toBe(world.slotIndex);
-  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex, publishedSlotIndex: world.slotIndex });
+  // The preview is up to date with this build's patch (Patch A, "Patch numbers and the changelog").
+  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex, publishedSlotIndex: world.slotIndex, latestPatch: PATCH });
 });
 
 test('unimplemented fixture reads reject explicitly as unavailable', async () => {

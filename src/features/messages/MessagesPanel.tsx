@@ -9,9 +9,14 @@
 //   the list cannot show included, so the badge always clears); the rows that were new when the panel opened keep their gold dot while it is open.
 // - The world revision does not carry either list, so each is read when its tab is first shown and again when the owner's `inbox`
 //   says it no longer agrees (a message was posted or hidden, a result was credited), once per change of the inbox.
+// - Patch numbers (Patch A, "Patch numbers and the changelog"): a patch note shows "Patch 1.3" after its tag, in the list and opened. The
+//   number is a button that opens Patch history (`PatchHistory`) here, at that patch; the account menu opens it too (`history`). In the list
+//   the row is a button already, so the number is a button beside it, drawn over the room the row keeps for it after the tag.
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { GameMessage, Inbox, MessageBlock } from '@contracts/reads';
-import { isNewNotification, isUnread, messageDate, messagesStale, notificationsStale, tagName, badgeText, type MessagingActions } from './messages';
+import type { Inbox, MessageBlock } from '@contracts/reads';
+import { PATCH } from '../../lib/patch';
+import { isNewNotification, isUnread, messageDate, messagesStale, notificationsStale, tagName, badgeText, type MessagingActions, type ShownMessage } from './messages';
+import { PatchHistory } from './PatchHistory';
 import { LookDisclaimer } from './LookDisclaimer';
 import { levelUpLine, notificationLines } from './notifications';
 import { useLoaded, useLoadedList } from './useLoadedList';
@@ -44,9 +49,18 @@ function Failed({ what, retry }: { what: string; retry(): void }) {
   </div>;
 }
 
-export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNotifications, changeLook, onClose }: MessagingActions & {
+/** A patch note's number: a button that opens Patch history at that patch. */
+function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
+  return <button type="button" className={styles.patchNumber} data-patch-number={patch} onClick={onOpen}>Patch {patch}</button>;
+}
+
+export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, latestPatch = null }: MessagingActions & {
   id: string;
   inbox: Inbox;
+  /** Opens the panel on Patch history, with that patch open (null: the newest). */
+  history?: { patch: string | null };
+  /** The server's newest patch (the sync's), for Patch history's "Patch 1.5 is out". */
+  latestPatch?: string | null;
   /** The Change look button: the panel closes (focus back on the Messages button) and the look dialog opens. */
   changeLook(): void;
   /** Closes the panel and returns the focus to the Messages button. */
@@ -55,13 +69,16 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
   const root = useRef<HTMLElement>(null);
   const ids = useId();
   // Open on what is new: Notifications when only results are, else Messages.
-  const [tab, setTab] = useState<Tab>(() => (inbox.unread === 0 && inbox.newNotifications > 0 ? 'notifications' : 'messages'));
+  // (Opened on Patch history, it stays on Messages beneath it: the results are marked seen only once their tab is shown.)
+  const [tab, setTab] = useState<Tab>(() => (!history && inbox.unread === 0 && inbox.newNotifications > 0 ? 'notifications' : 'messages'));
   const [visitedNotifications, setVisitedNotifications] = useState(tab === 'notifications');
   const [current, setCurrent] = useState<number | null>(null);
+  // Patch history over the list: the patch it opens at, and the note whose number opened it (Back to messages returns to its row).
+  const [patches, setPatches] = useState<{ patch: string | null; from: number | null } | null>(history ? { patch: history.patch, from: null } : null);
   // The time the account had seen results up to when the panel opened: the rows after it are marked new for as long as the panel is open.
   const [seenAtOpen] = useState(inbox.notificationsSeenMs);
 
-  const messages = useLoadedList<GameMessage>(load, true);
+  const messages = useLoadedList<ShownMessage>(load, true);
   const notes = useLoaded(loadNotifications, visitedNotifications);
   const noteItems = notes.value?.items ?? null;
 
@@ -86,7 +103,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
   const readAsked = useRef(new Set<number>());
   const rowToFocus = useRef<number | null>(null);
   const back = useRef<HTMLButtonElement>(null);
-  const open = (message: GameMessage) => {
+  const open = (message: ShownMessage) => {
     rowToFocus.current = message.id;
     setCurrent(message.id);
     if (isUnread(message, inbox) && !readAsked.current.has(message.id)) {
@@ -102,6 +119,25 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
     if (row !== null) root.current?.querySelector<HTMLElement>(`[data-message-row="${row}"]`)?.focus();
   }, [current]);
   const detail = current === null ? null : messages.items?.find(message => message.id === current) ?? null;
+  // Patch history: from a note's number (the note, open or in the list, is where Back to messages returns), and back to the list.
+  const showHistory = (patch: string, from: number) => { rowToFocus.current = null; setCurrent(null); setPatches({ patch, from }); };
+  const historyBack = useRef<number | 'tab' | null>(null);
+  const closeHistory = () => { historyBack.current = patches?.from ?? 'tab'; setPatches(null); };
+  useEffect(() => {
+    const target = historyBack.current;
+    if (patches !== null || target === null) return;
+    historyBack.current = null;
+    const row = target === 'tab' ? null : root.current?.querySelector<HTMLElement>(`[data-message-row="${target}"]`);
+    (row ?? root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus();
+  }, [patches]);
+  const readNote = (messageId: number) => {
+    const message = messages.items?.find(m => m.id === messageId);
+    if (!message) return;
+    setPatches(null);
+    setTab('messages');
+    open(message);
+  };
+  const noteIds = (messages.items ?? []).filter(m => m.kind === 'patch-notes').map(m => m.id);
   // A message the operator hid while it was open is gone from the list the next read brings: back to the list.
   useEffect(() => { if (current !== null && messages.items !== null && detail === null) setCurrent(null); }, [current, messages.items, detail]);
 
@@ -141,7 +177,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
   return (
     <section ref={root} id={id} className={styles.panel} aria-label="Messages" data-testid="messages-panel">
       <div className={styles.head}>
-        {detail ? <button ref={back} type="button" className={styles.back} onClick={() => setCurrent(null)}><Chevron />Back to messages</button>
+        {patches && !detail ? <button type="button" className={styles.back} onClick={closeHistory}><Chevron />Back to messages</button>
+          : detail ? <button ref={back} type="button" className={styles.back} onClick={() => setCurrent(null)}><Chevron />Back to messages</button>
           : <div role="tablist" aria-label="Messages and notifications" className={styles.tabs}>
             {tabs.map((t, index) => {
               const shown = badgeText(t.count);
@@ -157,8 +194,9 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
       <div className={styles.body}>
         {detail ? (
           <article className={styles.detail} aria-labelledby={`${ids}-title`}>
-            <span className={styles.rowTop}>
+            <span className={styles.rowTop} data-row-top="">
               <span className={`${styles.tag} ${styles[detail.kind === 'admin' ? 'admin' : 'patch']}`}>{tagName(detail.kind)}</span>
+              {detail.patch !== null && <PatchNumber patch={detail.patch} onOpen={() => showHistory(detail.patch!, detail.id)} />}
               <span className={styles.date}>{messageDate(detail.publishedAtMs)}</span>
             </span>
             <h3 id={`${ids}-title`} className={styles.detailTitle}>{detail.title}</h3>
@@ -168,6 +206,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
               <LookDisclaimer />
             </div>}
           </article>
+        ) : patches ? (
+          <PatchHistory load={loadPatches} build={PATCH} latest={latestPatch} open={patches.patch} notes={noteIds} onReadNote={readNote} />
         ) : tab === 'messages' ? (
           <div role="tabpanel" id={`${ids}-panel-messages`} aria-labelledby={tabId('messages')}>
             {messages.items === null ? (messages.failed ? <Failed what="Messages" retry={messages.reload} /> : <p role="status" className={styles.state}>Loading messages…</p>)
@@ -178,10 +218,11 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
                   <ul className={styles.list}>
                     {messages.items.map(message => {
                       const unread = isUnread(message, inbox);
-                      return <li key={message.id}>
+                      return <li key={message.id} className={styles.item}>
                         <button type="button" className={styles.row} data-message-row={message.id} data-unread={unread ? '' : undefined} onClick={() => open(message)}>
                           <span className={styles.rowTop}>
                             <span className={`${styles.tag} ${styles[message.kind === 'admin' ? 'admin' : 'patch']}`} data-message-tag>{tagName(message.kind)}</span>
+                            {message.patch !== null && <span className={`${styles.patchNumber} ${styles.room}`} aria-hidden="true">Patch {message.patch}</span>}
                             <span className={styles.date}>{messageDate(message.publishedAtMs)}</span>
                           </span>
                           <span className={styles.rowTitle}>
@@ -191,6 +232,10 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, read, seeNot
                           </span>
                           <span className={styles.preview}>{message.preview}</span>
                         </button>
+                        {message.patch !== null && <span className={styles.numberLine}>
+                          <span className={`${styles.tag} ${styles.patch} ${styles.room}`} aria-hidden="true">{tagName(message.kind)}</span>
+                          <PatchNumber patch={message.patch} onOpen={() => showHistory(message.patch!, message.id)} />
+                        </span>}
                       </li>;
                     })}
                   </ul>

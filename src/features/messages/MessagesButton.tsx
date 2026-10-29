@@ -5,15 +5,20 @@
 // says the real count ("Messages, 2 new"), it reports `aria-expanded`, and a polite status line announces a count that rises (a message
 // arrived, a result was credited) but not one that falls (the player read something). It opens the panel just after it in the document,
 // so the keyboard's next Tab enters it. Whether it is open, and the Escape and outside-press rules, belong to the corner chip, which
-// shows one popover at a time.
+// shows one popover at a time. The account menu's "Patch history ›" opens it on Patch history (`history`, Patch A).
 import { useEffect, useRef, useState, type Ref } from 'react';
 import type { Inbox } from '@contracts/reads';
 import { badgeText, buttonName, newCount, type MessagingActions } from './messages';
 import { MessagesPanel } from './MessagesPanel';
 import styles from './messages.module.css';
 
-export function MessagesButton({ inbox, load, loadNotifications, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef }: MessagingActions & {
+export function MessagesButton({ inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef, history,
+  latestPatch = null }: MessagingActions & {
   inbox: Inbox;
+  /** Opens the panel on Patch history, at that patch (the account menu's "Patch history ›"); absent opens the lists. */
+  history?: { patch: string | null };
+  /** The server's newest patch, for Patch history. */
+  latestPatch?: string | null;
   /** Opens the look dialog from the look note's Change look button (the panel closes first). */
   changeLook(): void;
   open: boolean;
@@ -42,7 +47,7 @@ export function MessagesButton({ inbox, load, loadNotifications, read, seeNotifi
       {shown && <span className={styles.badge} data-testid="messages-badge" aria-hidden="true">{shown}</span>}
     </button>
     <span role="status" className={styles.sr} data-testid="messages-live">{announcement}</span>
-    {open && <MessagesPanel id={panelId} inbox={inbox} load={load} loadNotifications={loadNotifications} read={read} seeNotifications={seeNotifications}
-      changeLook={changeLook} onClose={onClose} />}
+    {open && <MessagesPanel id={panelId} inbox={inbox} load={load} loadNotifications={loadNotifications} loadPatches={loadPatches} read={read}
+      seeNotifications={seeNotifications} changeLook={changeLook} onClose={onClose} history={history} latestPatch={latestPatch} />}
   </>;
 }

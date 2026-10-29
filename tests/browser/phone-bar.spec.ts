@@ -143,7 +143,7 @@ test.describe('the bar behind the name', () => {
       await expect(menu).toBeVisible();
       await expectNamedControls(menu, 'the bar behind the name');
       await expect(menu.getByRole('progressbar')).toHaveAccessibleName(STAMINA_LINE);
-      // Tab from the name: the 12-hour and 24-hour buttons, then Sign out (the order of the menu).
+      // Tab from the name: the 12-hour and 24-hour buttons, Patch history (the patch row, Task 11b), then Sign out (the order of the menu).
       await toggle.focus();
       await page.keyboard.press('Tab');
       await expect(menu.getByRole('button', { name: '12-hour', exact: true })).toBeFocused();
@@ -152,6 +152,9 @@ test.describe('the bar behind the name', () => {
       await expect(menu.getByRole('button', { name: '24-hour', exact: true })).toBeFocused();
       await page.keyboard.press('Space');
       await expect(menu.getByRole('button', { name: '24-hour', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await page.keyboard.press('Tab');
+      await expect(menu.getByRole('button', { name: /^Patch history/ })).toBeFocused();
+      expect(await contrastIssues(menu, { focusRing: true }), 'the bar behind the name, with a focus ring on Patch history').toEqual([]);
       await page.keyboard.press('Tab');
       await expect(menu.getByRole('button', { name: 'Sign out', exact: true })).toBeFocused();
       expect(await contrastIssues(menu, { focusRing: true }), 'the bar behind the name, with a focus ring on Sign out').toEqual([]);

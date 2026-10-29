@@ -2,7 +2,9 @@
 
 // The corner chip, top right. A player sees their name, stamina, gold, renown and the time to the next slot boundary
 // (on touch only the name and the countdown), and the chip opens a small menu: on touch the bar behind the name (the same
-// items in one row, the stamina line over its bar), then the Clock switch (12/24-hour, Patch A) and "Sign out". A visitor's chip starts
+// items in one row, the stamina line over its bar), then the Clock switch (12/24-hour, Patch A), the patch this build is ("Patch 1.4",
+// with "Patch history ›" for a player, and "Patch 1.5 is out" with Reload while the server is ahead; Patch A, "Patch numbers and the
+// changelog") and "Sign out". A visitor's chip starts
 // Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
 // gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text. A player also has the
 // messages button left of the pill (Task 6): the chip shows one popover at a time, the account menu or the messages panel.
@@ -13,10 +15,12 @@ import { signOut, type SessionState } from '../../lib/api/session';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import type { DisplayClock } from '../../game/display-clock';
 import { saveClockMode, useClockMode } from '../../lib/clock-setting';
+import { PATCH, isBehind } from '../../lib/patch';
 import type { Viewer } from '../character/useGameState';
 import { MessagesButton } from '../messages/MessagesButton';
 import type { MessagingActions } from '../messages/messages';
 import { ClockSwitch } from './ClockSwitch';
+import { reloadPage } from './PatchNotice';
 import type { MenuId } from './menus';
 import styles from './shell.module.css';
 
@@ -46,7 +50,7 @@ function Countdown({ clock, testId = 'chip-countdown' }: { clock: DisplayClock; 
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, onChangeLook, onOpenMenu, onCreate }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, latestPatch = null, onChangeLook, onOpenMenu, onCreate }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -55,6 +59,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   clock: DisplayClock;
   /** The messages button's lists and marks (the shell's); a player without it, or a visitor, has no messages button. */
   messaging?: MessagingActions;
+  /** The server's newest patch (the sync's): ahead of this build, the menu offers Reload. */
+  latestPatch?: string | null;
   /** Opens the change-look dialog from the look note's Change look button (the messages panel closes first; the shell owns the dialog). */
   onChangeLook(): void;
   onOpenMenu(id: MenuId): void;
@@ -63,6 +69,9 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
 }) {
   // One popover at a time: the account menu or the messages panel.
   const [popover, setPopover] = useState<'account' | 'messages' | null>(null);
+  // The messages panel opened from the account menu's "Patch history ›" opens on the history, and gives the focus back to the account
+  // button when it closes; opened from its own button, it opens on the lists and gives it back there.
+  const [history, setHistory] = useState<{ patch: string | null } | undefined>(undefined);
   const open = popover === 'account';
   const [signOutError, setSignOutError] = useState(false);
   const google = useGoogleSignIn();
@@ -79,20 +88,20 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   // Escape (before the shell's own handler, which then leaves an open panel alone) and a press elsewhere close it. While
   // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1). Escape and
   // the panel's own Close give the focus back to the button that opened it; a press elsewhere takes it where it went.
-  const closeMessages = () => { setPopover(null); messagesButton.current?.focus(); };
+  const closeMessages = () => { setPopover(null); (history ? toggle : messagesButton).current?.focus(); };
   useEffect(() => {
     if (popover === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || document.querySelector('dialog:modal')) return;
       event.preventDefault();
       setPopover(null);
-      (popover === 'messages' ? messagesButton : toggle).current?.focus();
+      (popover === 'messages' && !history ? messagesButton : toggle).current?.focus();
     };
     const onPress = (event: PointerEvent) => { if (!chip.current?.contains(event.target as Node)) setPopover(null); };
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPress, true);
     return () => { document.removeEventListener('keydown', onKey, true); document.removeEventListener('pointerdown', onPress, true); };
-  }, [popover]);
+  }, [popover, history]);
   // The messages button belongs to a player with a gladiator whose owner read carries an inbox.
   const inbox = owner?.inbox;
   const showMessages = !!(messaging && inbox);
@@ -118,8 +127,10 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
       <div className={styles.chipRow}>
         {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { setPopover(null); onCreate(); }}>Create your gladiator</button>}
         {messaging && inbox && <MessagesButton inbox={inbox} {...messaging} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
-          onToggle={() => setPopover(value => (value === 'messages' ? null : 'messages'))} onClose={closeMessages} buttonRef={messagesButton} />}
-        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setPopover(value => (value === 'account' ? null : 'account'))}>
+          onToggle={() => { setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); }} onClose={closeMessages} buttonRef={messagesButton}
+          history={history} latestPatch={latestPatch} />}
+        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId}
+          onClick={() => { setHistory(undefined); setPopover(value => (value === 'account' ? null : 'account')); }}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>
             <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
@@ -147,6 +158,17 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             </div>
           </>}
           <ClockSwitch mode={clockMode} onChange={saveClockMode} />
+          <div className={styles.patchRow} data-patch-row="">
+            <span>Patch <b>{PATCH}</b></span>
+            {/* An account without a gladiator has no messages panel, so no history to open. */}
+            {showMessages && <button type="button" className={styles.patchLink} onClick={() => { setHistory({ patch: null }); setPopover('messages'); }}>
+              Patch history<span aria-hidden="true"> ›</span>
+            </button>}
+          </div>
+          {isBehind(latestPatch) && <div className={styles.behindRow} data-patch-behind="">
+            <span>Patch {latestPatch} is out</span>
+            <button type="button" className={styles.reload} onClick={reloadPage}>Reload</button>
+          </div>}
           {signedIn ? <button type="button" onClick={() => {
             setSignOutError(false);
             void signOut().then(() => setPopover(null), () => setSignOutError(true));

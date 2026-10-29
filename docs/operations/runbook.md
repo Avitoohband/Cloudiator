@@ -257,6 +257,46 @@ corrected text as a new message.
 Locally (a preview with representative messages), the same statements run as the owner through the psql fallback after the
 container label check (ground rules above).
 
+## Recording a patch
+
+Every release records its patch on the server (M26; Patch A spec, "Patch numbers and the changelog"): the number, the title, the
+release time and the patch note, and each feature, as `docs/CHANGELOG.md`'s section says them **word for word**. The menu under a
+player's name shows the patch, Patch history lists them, and an open game whose build is behind the newest one offers a reload. A
+release with new features takes the next second number (1.5); a fix-only release from `release` the next third number (1.4.1).
+Every release gets a row, a fix too, with or without a patch note.
+
+Patches are recorded only by the database owner: `private.record_patch(number, title, features, message_id)` may be executed by no
+client role and not by `service_role`. On production it runs through the linked CLI, by Claude, **only after Avi's go in chat**,
+like any production write ([deployment.md](deployment.md), ground rules).
+
+**Never before the patch's client is live.** The open tabs learn the newest patch with their next revision read and offer a reload;
+recorded earlier, the reload would bring the old client, and the notice would stay. Record the patch after the client's Pages deploy
+is live and after its patch note is posted ("Posting a game message", which answers the note's id).
+
+1. Finalize the patch's section in `docs/CHANGELOG.md` (its date in the heading, the "Built" and "Planned" sub-headings removed, the
+   planned lines that did not ship taken out) and commit it with the release.
+2. Write the statement: `node scripts/patch-statement.mjs <number> --message <note id>` (`--message` left out for a patch without
+   a note). It reads the section from CHANGELOG.md, writes the one statement to `%TEMP%\cloudiator-patch-<number>.sql` (UTF-8
+   without a byte-order mark) and prints its path. It refuses a number with no section, a section still in progress and a text
+   holding `$t$` or `$f$` (the statement's own dollar quotes). Avi approves the statement with the patch note.
+3. After the linked-project check ([deployment.md](deployment.md), Part 2: `Get-Content -LiteralPath supabase\.temp\project-ref`
+   prints production's ref) and Avi's go:
+   `npx supabase db query --linked --project-ref <ref> --file $env:TEMP\cloudiator-patch-<number>.sql`
+   It answers the number. The release time is the database's at recording (`released_at_ms`, never back-dated). It refuses with
+   SQLSTATE 23514 an empty list of features or one longer than 20, a number that is not above every recorded one, and a message that
+   is not a visible patch note; a repeated number is 23505. The tables' constraints refuse a malformed number, a bad title (1-80
+   characters) and a bad feature (1-240 characters). A refusal stores nothing.
+4. Read back, read-only:
+   `npx supabase db query --linked --project-ref <ref> "select latest_patch from public.world_revision"` answers the new number (the
+   public revision read every client polls), and
+   `npx supabase db query --linked --project-ref <ref> "select number, title, released_at_ms, message_id from public.patches order by sort_key desc limit 3"`
+   shows the row.
+
+**A correction** (a typo in a title or a feature) is a plain owner `update` of `public.patches` or `public.patch_features`, written
+out and run the same way after Avi's go, with CHANGELOG.md corrected in the same commit. A patch is never deleted.
+
+Locally, the same statement runs as the owner through the psql fallback after the container label check (ground rules above).
+
 ## Secret rotation
 
 Names only; never print the values.
@@ -672,7 +712,7 @@ deployed evidence | desktop | securityHeaders | connect-src origin https://<proj
 deployed evidence | desktop | connectSrc | connect-src exactly 'self' https://<project>.supabase.co on 5 of 5 routes
 deployed evidence | desktop | compression | <n> of <n> responses br or gzip
 deployed evidence | desktop | cors | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 unauthenticated
-deployed evidence | desktop | anonDenied | 19 of 19 anonymous probes refused as expected
+deployed evidence | desktop | anonDenied | 21 of 21 anonymous probes refused as expected
 deployed evidence | desktop | authProvidersGoogleOnly | GET /auth/v1/settings 200; Google only, sign-up open
 deployed evidence | desktop | shippedAssetsClean | scanned <n> assets, <m> of them JavaScript; 0 problems
 ```
@@ -687,12 +727,13 @@ variable, a failed crawl) has no line, and its error names the cause. Copy the b
   `/_next/static/` chunk carry exactly what the generated `_headers` gives that path), `connectSrc` (exactly `'self'` and the
   project), `compression` (every route's HTML and crawled chunk `br` or `gzip`), `cors` (the command preflight from the site:
   204 or 200, exactly the site's grant, never `*`, `Access-Control-Max-Age: 7200`; from another origin 403 with no grant; the
-  worker without its secret 401 `unauthenticated`), `anonDenied` (19 anonymous probes from `tests/db/access-matrix.test.ts`
+  worker without its secret 401 `unauthenticated`), `anonDenied` (21 anonymous probes from `tests/db/access-matrix.test.ts`
   that change nothing even if granted: backend-only and owner RPCs with null arguments, empty inserts, an update and a delete
   filtered on `is.null` of a NOT NULL primary-key column, and the unexposed `private` schema, a table read and a call of the
-  STRICT `schedule_effective_slot` with null arguments; M25 added five of the 19: the RPCs `change_appearance`,
+  STRICT `schedule_effective_slot` with null arguments; M25 added five of them: the RPCs `change_appearance`,
   `read_message` and `see_notifications` with null arguments, an empty insert into `game_messages`, and `private.post_message`
-  through the unexposed `private` schema (so run the deployed checks only after M25 is on the project); no function that acts without arguments, such as `cleanup_tick`, is
+  through the unexposed `private` schema (so run the deployed checks only after M25 is on the project); M26 (patch numbers) added two:
+  empty inserts into `patches` and `patch_features` (so run them only after M26 is on the project); no function that acts without arguments, such as `cleanup_tick`, is
   called; `tests/deployed.test.ts` checks these rules against the migrations), `authProvidersGoogleOnly` (`/auth/v1/settings`: Google alone, sign-up open),
   `shippedAssetsClean` (the release scan's patterns, `scripts/release-scan.mjs`, over every asset the routes reference or load).
   Every page runs under the CSP-violation listener.

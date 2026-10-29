@@ -2,7 +2,9 @@
 // badge, which messages are unread, the tags and dates, and when a list the panel holds no longer agrees with the owner's inbox.
 // No markup anywhere: every title and text here is data, shown by the panel as plain text.
 import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
-import type { NotificationsRead } from '../../lib/api/reads';
+import type { NotificationsRead, ShownMessage } from '../../lib/api/reads';
+import type { PatchEntry } from '../../lib/patch';
+export type { ShownMessage } from '../../lib/api/reads';
 
 /**
  * What the messages button and panel need from the shell: the two lists, and the two marks a player's reading sends. `read` marks a
@@ -10,7 +12,10 @@ import type { NotificationsRead } from '../../lib/api/reads';
  * Both reject when the mark or the re-read fails, and the panel then asks again the next time the same thing happens.
  */
 export type MessagingActions = {
-  load(): Promise<GameMessage[]>;
+  /** The messages, each patch note with its patch number (null when it has none, or the numbers read failed). */
+  load(): Promise<ShownMessage[]>;
+  /** One page of Patch history: 20 patches, newest first, older than `beforeSortKey` when given; `more` when there are older ones. */
+  loadPatches(beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }>;
   /** The results to show, and the newest settled time of every row read (the mark `seeNotifications` is sent up to). */
   loadNotifications(): Promise<NotificationsRead>;
   read(messageId: number): Promise<void>;

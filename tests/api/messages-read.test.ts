@@ -76,12 +76,14 @@ test('a failed read is unavailable (the server error is not forwarded) and a ref
 });
 
 test.each([['a visitor', null], ['a signed-in reader', SESSION]])('the live gateway reads the messages for %s with no command and no private table', async (_who, session) => {
-  const { requests } = api(() => json([row(2), row(1)]), session);
+  // Then one public read of the notes' patch numbers (Patch A, "Patch numbers and the changelog"): message 2 is patch 1.2, message 1 has no
+  // patch row.
+  const { requests } = api(table => json(table === 'patches' ? [{ number: '1.2', message_id: 2 }] : [row(2), row(1)]), session);
   const sent = vi.fn();
   vi.stubGlobal('fetch', sent);
   const gateway = createLiveGateway();
-  expect(await gateway.messages()).toEqual([message(2), message(1)]);
-  expect(requests.map(r => r.table)).toEqual(['game_messages']);
+  expect(await gateway.messages()).toEqual([{ ...message(2), patch: '1.2' }, { ...message(1), patch: null }]);
+  expect(requests.map(r => r.table)).toEqual(['game_messages', 'patches']);
   expect(sent).not.toHaveBeenCalled();
 });
 

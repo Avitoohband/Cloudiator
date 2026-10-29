@@ -8,6 +8,7 @@ import { npcSaleValue, type Merchant } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
+import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { ShopPanel } from '../shops/ShopPanel';
@@ -46,6 +47,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const panelId = useId(), gearHeading = `${panelId}-gear`, previewNote = `${panelId}-preview`;
   /** The shared clock's time to the minute: the queued gear's effective time is shown against it, as the build panel does (Task 23.10). */
   const nowMs = useMinuteNow(clock);
+  const clockMode = useClockMode();
   // A trade sent by keyboard gives the focus to its outcome when its control leaves (the sold or discarded item); a pointer
   // trade moves nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
@@ -95,7 +97,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const worn = wornNow(owner), next = nextEquipment(owner), changed = changedSlots(owner);
   const pieceOf = (id: string | null) => owner.inventory.find(item => item.id === id);
   /** The queued build's effective time ('' when it cannot be shown: the words then say "the next slot"). */
-  const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs) : '';
+  const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
   const wearItem = (item: ItemInstance) => {
     const command = wearCommand(owner, item.id), state = wearState(owner, item);
     void send(command, command.kind === 'cancel-build' ? 'Back to your current gear. No gear change is queued.'

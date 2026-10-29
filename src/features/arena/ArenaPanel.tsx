@@ -21,6 +21,7 @@ import type { SceneBridge } from '../../game/bridge';
 import type { DisplayClock } from '../../game/display-clock';
 import { ARENA_RETRY_MS } from '../../game/arena-layout';
 import { ARENA_REVEAL_MS, arenaRevealMarks, renderArenaStage, type ArenaStageState } from '../../game/arena-stage';
+import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { NO_INJURY, NPC_DISCLOSURE, REVEAL_MINUTE, SLOT_MINUTES, arenaUnavailableText, className, creditedLines, phaseDetail, phaseTitle, replayHref, resultText } from './arena-text';
 import styles from './ArenaPanel.module.css';
@@ -61,9 +62,10 @@ export type ArenaCardModel = {
 export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: ArenaCardModel; onWatch(href: string): void; onClose?: () => void; headingRef?: Ref<HTMLHeadingElement> }) {
   const { state, owner, entrantName, opponent } = model;
   const titleId = useId();
-  // The reveal is shown as every slot time is, against the card's display time (Task 24.0b); one that cannot be shown
-  // (`slotTimeText` gives '') is left out.
-  const reveal = state.startMs === null ? null : slotTimeText(state.startMs + ARENA_REVEAL_MS, state.displayNowMs) || null;
+  const clockMode = useClockMode();
+  // The reveal is shown as every slot time is, against the card's display time and in the device's clock setting (Task 24.0b);
+  // one that cannot be shown (`slotTimeText` gives '') is left out.
+  const reveal = state.startMs === null ? null : slotTimeText(state.startMs + ARENA_REVEAL_MS, state.displayNowMs, clockMode) || null;
   const result = state.result && opponent ? resultText(state.result, { entrant: entrantName, opponent: opponent.name }) : null;
   // The replay opens once the bout has ended (Task 13.8 fix round 1): mid-bout the replay scene, which offers only ended
   // fights, would say "not available yet". The bout plays live in the camp's ring meanwhile.

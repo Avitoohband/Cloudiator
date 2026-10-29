@@ -6,7 +6,7 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
-import { expectTimeOnOneLine, slotTime } from './slot-time';
+import { expectTimeOnOneLine, slotTime, storeClock } from './slot-time';
 import { contrastIssues, focusDrops, focusedElement, watchFocus } from './a11y-helpers';
 
 async function planningFlow(context: BrowserContext, setup?: (state: OwnerState) => void) {
@@ -345,6 +345,8 @@ const saveDay = (page: Page) => page.getByRole('button', { name: 'Save schedule'
 const undoDay = (page: Page) => page.getByRole('button', { name: 'Undo changes', exact: true });
 
 test('offers Arena only in the evening and says why under the morning and the afternoon', async ({ page, context }) => {
+  // The tournament hour below is written in the 24-hour form; the 12-hour form is pinned in tests/domain/schedule-text.test.ts.
+  await storeClock(context, '24');
   await planningFlow(context);
   await page.goto('/game/');
   const schedule = await openMenu(page, 'Schedule');

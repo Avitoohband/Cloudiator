@@ -5,25 +5,32 @@ import type { ActivityChoice, LeagueId } from '@contracts/commands';
 import type { ActivitySummary } from '@contracts/events';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { ClockMode } from '../../lib/clock-setting';
+import { dayText, timeOfDay, utcClockText } from '../../lib/time-format';
 import {
   nextTournament, tournamentWindowAt, type BracketShape, type TournamentBoutState, type TournamentEntrantState, type TournamentRoundState,
   type TournamentStageState, type TournamentStatus,
 } from '../../game/tournament-stage';
 
-const FORMAT = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } as const;
+/** The zone's short name at `ms` (`GMT+1`, `GMT-4`, `GMT+5:30`) from Intl's offset; a zone at UTC+0 reads "UTC" (ICU writes "GMT" or "GMT+0"). */
+function zoneLabel(ms: number, timeZone?: string): string {
+  const label = new Intl.DateTimeFormat('en-GB', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(ms).find(part => part.type === 'timeZoneName')?.value ?? '';
+  return /^GMT(?:[+-]0+(?::00)?)?$/.test(label) ? 'UTC' : label;
+}
 
 /**
- * A tournament time in the viewer's zone (or `timeZone`, for tests and captures) and in UTC, e.g.
- * `{ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' }`. A zone at UTC+0 reads "UTC" (ICU writes "GMT" or "GMT+0").
+ * A tournament time in the viewer's zone (or `timeZone`, for tests and captures) and in UTC, the time of day written in the form
+ * `clock` asks for (the device's clock setting): `{ local: 'Wed 28 Oct, 7:40 PM GMT+1', utc: 'Wed 28 Oct, 6:40 PM UTC' }` or
+ * `{ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' }`. The day names are fixed English.
  */
-export function tournamentTimeText(ms: number, timeZone?: string): { local: string; utc: string } {
-  const local = new Intl.DateTimeFormat('en-GB', { ...FORMAT, timeZone, timeZoneName: 'shortOffset' }).format(ms).replace(/ GMT(?:[+-]0+(?::00)?)?$/, ' UTC');
-  const utc = new Intl.DateTimeFormat('en-GB', { ...FORMAT, timeZone: 'UTC', timeZoneName: 'short' }).format(ms);
+export function tournamentTimeText(ms: number, clock: ClockMode, timeZone?: string): { local: string; utc: string } {
+  const local = `${dayText(ms, timeZone)}, ${timeOfDay(ms, clock, timeZone)} ${zoneLabel(ms, timeZone)}`;
+  const utc = `${dayText(ms, 'UTC')}, ${timeOfDay(ms, clock, 'UTC')} UTC`;
   return { local, utc };
 }
 /** The local time with the UTC time in parentheses, or just the UTC time for a viewer at UTC+0. */
-export function timeWithUtc(ms: number, timeZone?: string): string {
-  const { local, utc } = tournamentTimeText(ms, timeZone);
+export function timeWithUtc(ms: number, clock: ClockMode, timeZone?: string): string {
+  const { local, utc } = tournamentTimeText(ms, clock, timeZone);
   return local === utc ? utc : `${local} (${utc})`;
 }
 
@@ -39,17 +46,16 @@ export function countdownText(ms: number): string {
   return `${days ? `${days} d ` : ''}${hours} h ${rest} min`;
 }
 
-const pad = (n: number) => String(n).padStart(2, '0');
-/** The fixed cutoff, the tournament's start (v1: 18:40 UTC). */
-export const CUTOFF_UTC = `${pad(RULES_V1.tournament.hourUtc)}:${pad(RULES_V1.tournament.minuteUtc)} UTC`;
+/** The fixed cutoff, the tournament's start (v1: 18:40 UTC), written in the form `clock` asks for: "6:40 PM UTC" or "18:40 UTC". */
+export const cutoffUtc = (clock: ClockMode): string => utcClockText(RULES_V1.tournament.hourUtc, RULES_V1.tournament.minuteUtc, clock);
 /** Stamina needed at the cutoff: the Arena activity and the tournament must both be affordable (Task 19 partition). */
 export const ENTRY_STAMINA = Math.max(RULES_V1.activityStamina.arena, RULES_V1.activityStamina.tournament);
 const DAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
 
-/** Spec §8.2 entry rules, as the registration section states them. */
-export const ENTRY_RULES: readonly string[] = [
-  `Entry needs automatic entry switched on, Arena scheduled for the evening (the tournament phase) and at least ${ENTRY_STAMINA} stamina at the cutoff, the tournament’s ${CUTOFF_UTC} start.`,
-  `Tournaments run on ${RULES_V1.tournament.utcWeekdays.map(d => DAYS[d]).join(' and ')} at ${CUTOFF_UTC} for one 80-minute evening slot. Entry works without an open browser.`,
+/** Spec §8.2 entry rules, as the registration section states them, the cutoff in the form `clock` asks for. */
+export const entryRules = (clock: ClockMode): readonly string[] => [
+  `Entry needs automatic entry switched on, Arena scheduled for the evening (the tournament phase) and at least ${ENTRY_STAMINA} stamina at the cutoff, the tournament’s ${cutoffUtc(clock)} start.`,
+  `Tournaments run on ${RULES_V1.tournament.utcWeekdays.map(d => DAYS[d]).join(' and ')} at ${cutoffUtc(clock)} for one 80-minute evening slot. Entry works without an open browser.`,
   'With automatic entry off, an Arena evening stays a normal Arena bout.',
   'A change made after a tournament’s cutoff applies from the next tournament.',
   `Each league holds its own bracket when at least ${RULES_V1.tournament.minimumEntrants} gladiators qualify; otherwise they fight regular Arena that slot.`,
@@ -57,10 +63,10 @@ export const ENTRY_RULES: readonly string[] = [
 ];
 
 /** Which tournament a registration change made now applies to; during a tournament, the next one. */
-export function registrationNote(displayNowMs: number, timeZone?: string): { fixed: string | null; applies: string } {
-  const next = timeWithUtc(nextTournament(displayNowMs).startsAtMs, timeZone);
+export function registrationNote(displayNowMs: number, clock: ClockMode, timeZone?: string): { fixed: string | null; applies: string } {
+  const next = timeWithUtc(nextTournament(displayNowMs).startsAtMs, clock, timeZone);
   return tournamentWindowAt(displayNowMs)
-    ? { fixed: `Entries for the tournament running now were fixed at its ${CUTOFF_UTC} cutoff.`, applies: `A change now applies from the next tournament, ${next}.` }
+    ? { fixed: `Entries for the tournament running now were fixed at its ${cutoffUtc(clock)} cutoff.`, applies: `A change now applies from the next tournament, ${next}.` }
     : { fixed: null, applies: `A change now applies to the next tournament, ${next}, if it is saved before that cutoff.` };
 }
 
@@ -87,13 +93,13 @@ export function statusText(status: TournamentStatus): string {
 }
 
 /** What the status means now. Never names a result. */
-export function statusDetail(state: TournamentStageState, timeZone?: string): string {
+export function statusDetail(state: TournamentStageState, clock: ClockMode, timeZone?: string): string {
   switch (state.status) {
-    case 'scheduled': return `Entrants and the bracket are published at the start, ${timeWithUtc(state.startsAtMs, timeZone)}.`;
+    case 'scheduled': return `Entrants and the bracket are published at the start, ${timeWithUtc(state.startsAtMs, clock, timeZone)}.`;
     case 'active': {
       const next = state.rounds.find(r => !r.due);
-      return next ? `Next reveal: ${next.label}, ${timeWithUtc(next.revealAtMs, timeZone)}.`
-        : `Every round is revealed. Placements settle at minute 80, ${timeWithUtc(state.endsAtMs, timeZone)}.`;
+      return next ? `Next reveal: ${next.label}, ${timeWithUtc(next.revealAtMs, clock, timeZone)}.`
+        : `Every round is revealed. Placements settle at minute 80, ${timeWithUtc(state.endsAtMs, clock, timeZone)}.`;
     }
     case 'processing': return !state.shape ? 'The bracket is not published yet. It appears here once the server records the entrants.'
       : state.displayNowMs >= state.endsAtMs ? 'Minute 80 has passed, but the placements are not published yet. Nothing is credited until the server records them.'
@@ -114,9 +120,9 @@ export function roundStatus(round: TournamentRoundState): string {
   if (!round.due || round.delayed) return 'Result preparing';
   return round.bouts.some(b => b.status === 'fighting') ? 'Bouts in progress' : 'Results revealed';
 }
-export function roundNote(round: TournamentRoundState, timeZone?: string): string | null {
-  if (!round.due) return `Revealed at ${timeWithUtc(round.revealAtMs, timeZone)}.`;
-  if (round.delayed) return `These results were due at ${timeWithUtc(round.revealAtMs, timeZone)} but are not published yet. They appear here as soon as they are revealed.`;
+export function roundNote(round: TournamentRoundState, clock: ClockMode, timeZone?: string): string | null {
+  if (!round.due) return `Revealed at ${timeWithUtc(round.revealAtMs, clock, timeZone)}.`;
+  if (round.delayed) return `These results were due at ${timeWithUtc(round.revealAtMs, clock, timeZone)} but are not published yet. They appear here as soon as they are revealed.`;
   return null;
 }
 
@@ -154,22 +160,22 @@ export function creditedText(summary: ActivitySummary): string {
 }
 
 /** The viewer's own place in the tournament now, or null without a bracket. */
-export function viewerText(state: TournamentStageState, hasViewer: boolean, timeZone?: string): string | null {
+export function viewerText(state: TournamentStageState, hasViewer: boolean, clock: ClockMode, timeZone?: string): string | null {
   if (!state.shape || !hasViewer) return null;
   const me = state.viewer.entrant;
   if (!me) return 'You are not entered in this tournament.';
   const label = (round: number) => state.rounds.find(r => r.round === round)?.label ?? `Round ${round}`;
   switch (me.role) {
     case 'fighting': return 'Your bout is being fought now.';
-    case 'spectating': return `You were eliminated in the ${label(me.eliminatedInRound!)}. You stay in the tournament as a spectator until it ends at ${timeWithUtc(state.endsAtMs, timeZone)}; this slot has no other activity for you.`;
+    case 'spectating': return `You were eliminated in the ${label(me.eliminatedInRound!)}. You stay in the tournament as a spectator until it ends at ${timeWithUtc(state.endsAtMs, clock, timeZone)}; this slot has no other activity for you.`;
     case 'champion': return 'You are the champion of this tournament!';
     default: {
       const due = state.rounds.filter(r => r.due);
       if (!due.length) {
         // A bye is public from the start: its receiver's first bout comes a round later.
         const bye = state.rounds[0].bouts.some(b => b.status === 'bye' && b.winnerId === me.gladiatorId);
-        return bye ? `You are entered with a bye in the ${state.rounds[0].label}. Your first bout is revealed at ${timeWithUtc(state.rounds[1].revealAtMs, timeZone)}.`
-          : `You are entered. Your first bout is revealed at ${timeWithUtc(state.rounds[0].revealAtMs, timeZone)}.`;
+        return bye ? `You are entered with a bye in the ${state.rounds[0].label}. Your first bout is revealed at ${timeWithUtc(state.rounds[1].revealAtMs, clock, timeZone)}.`
+          : `You are entered. Your first bout is revealed at ${timeWithUtc(state.rounds[0].revealAtMs, clock, timeZone)}.`;
       }
       // "You advance" only after a shown win or bye in every due round; the first due round without one holds the
       // viewer's unpublished (delayed) result. A waiting entrant has lost no shown bout.
@@ -177,7 +183,7 @@ export function viewerText(state: TournamentStageState, hasViewer: boolean, time
       if (open) return `Your ${open.label} result is not published yet. It appears here as soon as it is revealed.`;
       // A shown win in every round, the final included, makes the viewer the champion (above), so a round is still to come.
       const next = state.rounds.find(r => !r.due)!;
-      return `You advance. Your next bout is revealed at ${timeWithUtc(next.revealAtMs, timeZone)}.`;
+      return `You advance. Your next bout is revealed at ${timeWithUtc(next.revealAtMs, clock, timeZone)}.`;
     }
   }
 }

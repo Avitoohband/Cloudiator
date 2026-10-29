@@ -62,15 +62,19 @@ describe('next tournament and countdown', () => {
     const saturday = utc(2026, 10, 24);
     const afterSaturday = saturday + 80 * MIN;
     expect(nextTournament(afterSaturday)).toMatchObject({ startsAtMs: utc(2026, 10, 28), countdownMs: 3 * DAY + 22 * HOUR + 40 * MIN });
-    expect(tournamentTimeText(saturday, 'Europe/Berlin')).toEqual({ local: 'Sat 24 Oct, 20:40 GMT+2', utc: 'Sat 24 Oct, 18:40 UTC' });
-    expect(tournamentTimeText(utc(2026, 10, 28), 'Europe/Berlin')).toEqual({ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' });
+    expect(tournamentTimeText(saturday, '24', 'Europe/Berlin')).toEqual({ local: 'Sat 24 Oct, 20:40 GMT+2', utc: 'Sat 24 Oct, 18:40 UTC' });
+    expect(tournamentTimeText(utc(2026, 10, 28), '24', 'Europe/Berlin')).toEqual({ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' });
     // New York leaves daylight time on 2026-11-01.
-    expect(tournamentTimeText(utc(2026, 10, 31), 'America/New_York').local).toBe('Sat 31 Oct, 14:40 GMT-4');
-    expect(tournamentTimeText(utc(2026, 11, 4), 'America/New_York').local).toBe('Wed 4 Nov, 13:40 GMT-5');
+    expect(tournamentTimeText(utc(2026, 10, 31), '24', 'America/New_York').local).toBe('Sat 31 Oct, 14:40 GMT-4');
+    expect(tournamentTimeText(utc(2026, 11, 4), '24', 'America/New_York').local).toBe('Wed 4 Nov, 13:40 GMT-5');
     // A viewer ahead of UTC can see the next calendar day.
-    expect(tournamentTimeText(utc(2026, 10, 28), 'Pacific/Kiritimati').local).toBe('Thu 29 Oct, 08:40 GMT+14');
-    expect(tournamentTimeText(utc(2026, 10, 28), 'UTC')).toEqual({ local: 'Wed 28 Oct, 18:40 UTC', utc: 'Wed 28 Oct, 18:40 UTC' });
-    expect(tournamentTimeText(utc(2026, 10, 28), 'Europe/London').local).toBe('Wed 28 Oct, 18:40 UTC');
+    expect(tournamentTimeText(utc(2026, 10, 28), '24', 'Pacific/Kiritimati').local).toBe('Thu 29 Oct, 08:40 GMT+14');
+    expect(tournamentTimeText(utc(2026, 10, 28), '24', 'UTC')).toEqual({ local: 'Wed 28 Oct, 18:40 UTC', utc: 'Wed 28 Oct, 18:40 UTC' });
+    expect(tournamentTimeText(utc(2026, 10, 28), '24', 'Europe/London').local).toBe('Wed 28 Oct, 18:40 UTC');
+    // The 12-hour form changes the time of day only: the day, the offset and the daylight-saving shift are the same.
+    expect(tournamentTimeText(saturday, '12', 'Europe/Berlin')).toEqual({ local: 'Sat 24 Oct, 8:40\xA0PM GMT+2', utc: 'Sat 24 Oct, 6:40\xA0PM UTC' });
+    expect(tournamentTimeText(utc(2026, 10, 28), '12', 'Europe/Berlin').local).toBe('Wed 28 Oct, 7:40\xA0PM GMT+1');
+    expect(tournamentTimeText(utc(2026, 10, 28), '12', 'Pacific/Kiritimati').local).toBe('Thu 29 Oct, 8:40\xA0AM GMT+14');
   });
 
   it('writes the countdown in days, hours and minutes, with seconds in the last hour', () => {

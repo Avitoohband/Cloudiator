@@ -15,6 +15,7 @@ import type { PublicActivitySummary } from '@contracts/events';
 import type { ResultRow } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
+import { useClockMode } from '../../lib/clock-setting';
 import { RETENTION_TEXT, resultKind, resultLine, resultTime } from './result-text';
 import styles from './ResultsPanel.module.css';
 
@@ -86,6 +87,7 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
   timeZone?: string;
 }) {
   const titleId = useId();
+  const clockMode = useClockMode();
   const { rows, status } = model;
   return (
     <section className={styles.results} aria-labelledby={titleId}>
@@ -101,7 +103,7 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
                 <li key={row.summary.activityId} className={styles.row}>
                   <div className={styles.what}>
                     <p className={styles.line}>{line.text}{row.gladiatorId === viewerId && <span className={styles.you}>You</span>}</p>
-                    <p className={styles.when}>{resultKind(row)} · {resultTime(row.summary.settledAtMs, timeZone)}</p>
+                    <p className={styles.when}>{[resultKind(row), resultTime(row.summary.settledAtMs, clockMode, timeZone)].filter(Boolean).join(' · ')}</p>
                   </div>
                   {line.replay && (
                     <button type="button" className={styles.watch} aria-label={`Replay: ${line.text}`} onClick={() => onWatch(row.summary.activityId, row.summary.resolvedKind)}>Replay</button>

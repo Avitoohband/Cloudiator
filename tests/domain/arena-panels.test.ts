@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { LeagueId } from '@contracts/commands';
@@ -12,11 +12,17 @@ import { worldFixture } from '../fixtures/domain';
 import { FIXTURE_SEASONS } from '../fixtures/seasons';
 import { createFixtureGateway } from '@/lib/api/fixture-gateway';
 import { slotTimeText } from '@/features/schedule/slot-time';
+import { pinDeviceClock } from '../fixtures/clock';
 
 const MIN = 60_000;
 const NOW = worldFixture.serverNowMs;
 const SLOT_START = NOW - (NOW % ARENA_SLOT_MS);
 const noop = () => {};
+
+// Patch A, item 7: the times on these cards and season notes follow the clock setting. The device's is pinned to 24-hour (the
+// form these tests were written in) unless a case says otherwise.
+beforeEach(() => { pinDeviceClock('24'); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 function card(key: ArenaActivityKey, minute: number, overrides: Partial<ArenaCardModel> = {}): string {
   const { gladiator, slotsAgo, owner } = ARENA_ACTIVITIES[key];
@@ -121,12 +127,18 @@ describe('Arena card', () => {
       { entrantId: ARENA_GLADIATORS[gladiator].id, owner });
     expect(state.phase).toBe('warming-up');
     const view = (s: typeof state) => renderToStaticMarkup(createElement(ArenaCardView, { model: { state: s, owner, entrantName: 'Aster', opponent: null, fixture: true }, onWatch: noop }));
-    const reveal = slotTimeText(state.startMs! + 60 * MIN, state.displayNowMs);
+    pinDeviceClock('12');
+    const reveal = slotTimeText(state.startMs! + 60 * MIN, state.displayNowMs, '12');
     expect(reveal).not.toBe('');
     expect(view(state)).toContain(`until the bout is revealed at minute 60 (${reveal}). The warm-up grants no training.`);
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(text(view({ ...state, startMs: bad })), `start ${bad}`).toContain('until the bout is revealed at minute 60. The warm-up grants no training.');
     }
+    // The same card in the 24-hour form: the reveal time moves with the device's clock setting.
+    pinDeviceClock('24');
+    const revealed24 = slotTimeText(state.startMs! + 60 * MIN, state.displayNowMs, '24');
+    expect(revealed24).toMatch(/\d{2}:\d{2}$/);
+    expect(view(state)).toContain(`until the bout is revealed at minute 60 (${revealed24}). The warm-up grants no training.`);
   });
 
   it('renders names as text', () => {
@@ -255,6 +267,16 @@ describe('Arena standings', () => {
     expect(ending).toContain('Season 2 is ending');
     expect(ending).toContain('Ended Sat 24 Oct, 03:00 your time (00:00 UTC). Final standings and rewards appear once the server closes the season.');
     expect(ending).not.toContain('ends in');
+  });
+
+  it('writes the season end in 12-hour form when the clock setting asks for it, the countdown and the days unchanged', () => {
+    pinDeviceClock('12');
+    const html = text(view());
+    expect(html).toContain('Season 2 ends in 13 days 23 h');
+    expect(html).toContain('Sat 24 Oct, 3:00 AM your time (12:00 AM UTC). Ratings then restart at 1000; level, gear, gold and renown stay.');
+    const ending = text(view({ nowMs: FIXTURE_SEASONS[0].endsAtMs + 60_000 }));
+    expect(ending).toContain('Ended Sat 24 Oct, 3:00 AM your time (12:00 AM UTC). Final standings and rewards appear once the server closes the season.');
+    expect(text(view(archivedModel))).toContain('Ended Sat 26 Sep, 3:00 AM your time (12:00 AM UTC). Frozen at the close; medals show the season rewards.');
   });
 
   it('adds the season rank and human bouts to Your standing, with progress to five', () => {

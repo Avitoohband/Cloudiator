@@ -1,13 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { ResultRow, ResultsPage } from '@contracts/reads';
-import { resultLine } from '@/features/results/result-text';
+import { resultLine, resultTime } from '@/features/results/result-text';
 import { ResultsView, readResults, type ResultsModel } from '@/features/results/ResultsPanel';
 import { RESULTS_FIXTURE } from '../fixtures/results';
 import { worldFixture } from '../fixtures/domain';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
+import { pinDeviceClock } from '../fixtures/clock';
 
 const ASTER = '0d5f8471-d919-428f-9ab7-058c95821757';
 const DAY = 86_400_000;
@@ -81,8 +82,22 @@ describe('result lines', () => {
   });
 });
 
+// Patch A, item 7: a settlement time is the shared formatter's. The device's clock setting is pinned to 24-hour for the rows
+// below (the form these tests were written in); the 12-hour form follows each.
+describe("a result's time", () => {
+  const at1440 = Date.UTC(2026, 9, 10, 13, 40);
+  it('writes the day in fixed English and the time in the form the clock setting asks for', () => {
+    expect(resultTime(at1440, '24', 'Europe/London')).toBe('Sat 10 Oct, 14:40');
+    expect(resultTime(at1440, '12', 'Europe/London')).toBe('Sat 10 Oct, 2:40\xA0PM');
+    expect(resultTime(Date.UTC(2026, 9, 10, 0, 5), '12', 'UTC')).toBe('Sat 10 Oct, 12:05\xA0AM');
+    expect(resultTime(Date.UTC(2026, 8, 15, 3, 0), '24', 'UTC')).toBe('Tue 15 Sep, 03:00');
+  });
+});
+
 describe('Results', () => {
   const MINE = 'mine-0000';
+  beforeEach(() => { pinDeviceClock('24'); });
+  afterEach(() => { vi.restoreAllMocks(); });
   /** 120 results, a third of them the viewer's, newest first; the cursor is the next row's index. */
   const ROWS: ResultRow[] = Array.from({ length: 120 }, (_, i) => row(i % 4 === 0 ? 'training' : 'arena', 'victory', 'available', {
     name: i % 3 === 0 ? 'Mine' : `Other ${i}`, gladiatorId: i % 3 === 0 ? MINE : `other-${i}`, activityId: `activity-${String(i).padStart(3, '0')}`,
@@ -156,6 +171,15 @@ describe('Results', () => {
     expect(text(html)).toContain('Arena · Sat 10 Oct, 00:00');
     expect(text(html)).toContain('Training ·');
     expect(text(html)).toContain('Aster lost an Arena bout · replay no longer kept');
+  });
+
+  it("follows the clock setting: every row's settlement time moves with it", () => {
+    const rows = [row('arena', 'victory', 'available'), row('training', 'completed', 'expired', { activityId: 'training-1', settledAtMs: SETTLED + 15 * 3_600_000 })];
+    expect(text(view({ rows, nextCursor: null, status: 'ready' }))).toMatch(/Arena · Sat 10 Oct, 00:00.*Training · Sat 10 Oct, 15:00/);
+    pinDeviceClock('12');
+    const twelve = text(view({ rows, nextCursor: null, status: 'ready' }));
+    expect(twelve).toMatch(/Arena · Sat 10 Oct, 12:00 AM.*Training · Sat 10 Oct, 3:00 PM/);
+    expect(twelve).not.toMatch(/\d{2}:\d{2}(?! [AP]M)/);
   });
 
   it('explains retention in one plain line, and offers no replay once the server time passes the expiry (Task 22.5)', () => {

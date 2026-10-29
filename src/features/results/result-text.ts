@@ -4,7 +4,9 @@
 // and never say it is "no longer kept". Whether a replay is kept is decided by server time (Task 22.5, `replayKept`).
 import type { PublicActivitySummary } from '@contracts/events';
 import type { ResultRow } from '@contracts/reads';
+import type { ClockMode } from '../../lib/clock-setting';
 import { replayKept } from '../../lib/replay-retention';
+import { dayText, timeOfDay } from '../../lib/time-format';
 
 /** The Recent results panel's one line on retention (Task 22.5). */
 export const RETENTION_TEXT = 'Detailed replays are kept for 7 days. Results and credited rewards stay here for 90 days.';
@@ -39,8 +41,11 @@ export function resultLine(row: ResultRow, serverNowMs: number | null): { text: 
 /** The kind of activity, as the row's second line names it. */
 export const resultKind = (row: ResultRow) => KIND[row.summary.resolvedKind];
 
-const FORMAT = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } as const;
-/** When a result settled, in the viewer's time zone (or `timeZone`, for tests), e.g. "Sat 10 Oct, 14:40". */
-export function resultTime(ms: number, timeZone?: string): string {
-  return new Intl.DateTimeFormat('en-GB', { ...FORMAT, timeZone }).format(ms);
+/**
+ * When a result settled, in the viewer's time zone (or `timeZone`, for tests) and the form `clock` asks for (the device's clock
+ * setting): "Sat 10 Oct, 2:40 PM" or "Sat 10 Oct, 14:40". `''` for a time that cannot be shown.
+ */
+export function resultTime(ms: number, clock: ClockMode, timeZone?: string): string {
+  const day = dayText(ms, timeZone), time = timeOfDay(ms, clock, timeZone);
+  return day && time ? `${day}, ${time}` : '';
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { TournamentView } from '@contracts/reads';
@@ -8,9 +8,10 @@ import {
   RegistrationView, TournamentBracketView, TournamentCardNotice, TournamentNotice, TournamentPanel, TournamentScheduleView, readTournamentCard,
   type BracketModel, type RegistrationModel,
 } from '@/features/tournaments/TournamentPanel';
-import { viewerText } from '@/features/tournaments/tournament-text';
+import { cutoffUtc, entryRules, registrationNote, roundNote, statusDetail, timeWithUtc, tournamentTimeText, viewerText } from '@/features/tournaments/tournament-text';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
+import { pinDeviceClock } from '../fixtures/clock';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import {
   TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLE_KEYS, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, TOURNAMENTS, tournamentActivityId, tournamentAsOf, tournamentId,
@@ -22,6 +23,11 @@ const noop = () => {};
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, '\'').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 const ASTER = ARENA_GLADIATORS.aster.id;
+
+// Patch A, item 7: every time of day follows the clock setting. The device's setting is pinned to 24-hour (the form these tests
+// were written in) unless a case says otherwise.
+beforeEach(() => { pinDeviceClock('24'); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 function bracket(key: TournamentKey, minute: number, overrides: Partial<BracketModel> = {}, view: TournamentView = TOURNAMENT_VIEWS[key]): string {
   const state = renderTournament(view, TOURNAMENTS[key].startsAtMs + minute * MIN, { viewerId: ASTER });
@@ -85,6 +91,81 @@ describe('tournament schedule', () => {
   });
 });
 
+describe('tournament times follow the clock setting (Patch A, item 7)', () => {
+  const evening = Date.UTC(2026, 9, 28, 18, 40);
+  const nbsp = (value: string) => value.replaceAll(' PM', '\xA0PM').replaceAll(' AM', '\xA0AM');
+
+  it('writes the local and the UTC time in the zone\'s words, in 12-hour or 24-hour form', () => {
+    expect(tournamentTimeText(evening, '12', 'Europe/Paris')).toEqual({ local: nbsp('Wed 28 Oct, 7:40 PM GMT+1'), utc: nbsp('Wed 28 Oct, 6:40 PM UTC') });
+    expect(tournamentTimeText(evening, '24', 'Europe/Paris')).toEqual({ local: 'Wed 28 Oct, 19:40 GMT+1', utc: 'Wed 28 Oct, 18:40 UTC' });
+    expect(timeWithUtc(evening, '12', 'Europe/Paris')).toBe(nbsp('Wed 28 Oct, 7:40 PM GMT+1 (Wed 28 Oct, 6:40 PM UTC)'));
+    expect(timeWithUtc(evening, '24', 'Europe/Paris')).toBe('Wed 28 Oct, 19:40 GMT+1 (Wed 28 Oct, 18:40 UTC)');
+  });
+
+  it('reads a zone at UTC+0 as UTC, and says the time once', () => {
+    const winter = Date.UTC(2026, 10, 14, 18, 40);
+    expect(tournamentTimeText(winter, '12', 'Europe/London')).toEqual({ local: nbsp('Sat 14 Nov, 6:40 PM UTC'), utc: nbsp('Sat 14 Nov, 6:40 PM UTC') });
+    expect(timeWithUtc(winter, '12', 'Europe/London')).toBe(nbsp('Sat 14 Nov, 6:40 PM UTC'));
+    expect(timeWithUtc(winter, '24', 'UTC')).toBe('Sat 14 Nov, 18:40 UTC');
+  });
+
+  it('names the zone from its offset, half hours and negative offsets included', () => {
+    expect(tournamentTimeText(evening, '24', 'Asia/Kolkata').local).toBe('Thu 29 Oct, 00:10 GMT+5:30');
+    expect(tournamentTimeText(evening, '12', 'America/New_York').local).toBe(nbsp('Wed 28 Oct, 2:40 PM GMT-4'));
+  });
+
+  it('writes the fixed tournament hour in UTC in the same form, in the rules and the notes', () => {
+    expect(cutoffUtc('24')).toBe('18:40 UTC');
+    expect(cutoffUtc('12')).toBe('6:40\xA0PM UTC');
+    expect(entryRules('12')[0]).toContain('the tournament’s 6:40\xA0PM UTC start.');
+    expect(entryRules('12')[1]).toContain('Wednesdays and Saturdays at 6:40\xA0PM UTC for one 80-minute evening slot.');
+    expect(entryRules('24')[1]).toContain('Wednesdays and Saturdays at 18:40 UTC for one 80-minute evening slot.');
+    const during = TOURNAMENTS.opening.startsAtMs + 5 * MIN;
+    expect(registrationNote(during, '12', 'UTC')).toEqual({ fixed: 'Entries for the tournament running now were fixed at its 6:40\xA0PM UTC cutoff.',
+      applies: nbsp('A change now applies from the next tournament, Sat 10 Oct, 6:40 PM UTC.') });
+    expect(registrationNote(worldFixture.serverNowMs, '12', 'UTC').applies).toBe(nbsp('A change now applies to the next tournament, Sat 10 Oct, 6:40 PM UTC, if it is saved before that cutoff.'));
+  });
+
+  it('ends a saved message with the note on which tournament the change applies to, written as the page shows it now', () => {
+    const message = { kind: 'status' as const, text: 'Saved.', applies: true };
+    expect(text(registration(worldFixture.serverNowMs, { message })))
+      .toContain('Saved. A change now applies to the next tournament, Sat 10 Oct, 18:40 UTC, if it is saved before that cutoff.');
+    // The same message after the setting changes: its time moves with it, and a message without the note is unchanged.
+    pinDeviceClock('12');
+    expect(text(registration(worldFixture.serverNowMs, { message })))
+      .toContain('Saved. A change now applies to the next tournament, Sat 10 Oct, 6:40 PM UTC, if it is saved before that cutoff.');
+    expect(text(registration(worldFixture.serverNowMs, { message: { kind: 'status', text: 'Saved.' } }))).not.toContain('Saved. A change now applies');
+  });
+
+  it('writes a bracket\'s reveal times the same way', () => {
+    const state = renderTournament(TOURNAMENT_VIEWS.opening, TOURNAMENTS.opening.startsAtMs + 5 * MIN, { viewerId: ASTER });
+    expect(statusDetail(state, '12', 'UTC')).toContain('PM UTC');
+    expect(statusDetail(state, '24', 'UTC')).toMatch(/\d{2}:\d{2} UTC/);
+    expect(roundNote(state.rounds[1], '12', 'UTC')).toMatch(/\d{1,2}:\d{2}\xA0[AP]M UTC/);
+    expect(viewerText(state, true, '12', 'UTC')).toBe('You are entered. Your first bout is revealed at Wed 7 Oct, 7:00\xA0PM UTC.');
+  });
+
+  it('moves every time on the schedule, the registration and the panel\'s tag when the setting does', () => {
+    pinDeviceClock('12');
+    const schedule = text(renderToStaticMarkup(createElement(TournamentScheduleView, { now: worldFixture.serverNowMs, timeZone: 'Europe/Berlin' })));
+    expect(schedule).toContain('Next tournament Sat 10 Oct, 8:40 PM GMT+2 (Sat 10 Oct, 6:40 PM UTC) Starts in 18 h 0 min');
+    expect(schedule).toContain('Every Wednesday and Saturday at 6:40 PM UTC, for one 80-minute evening slot.');
+    expect(schedule).not.toMatch(/\d{2}:\d{2} UTC/);
+    const words = text(registration(worldFixture.serverNowMs));
+    expect(words).toContain('A change now applies to the next tournament, Sat 10 Oct, 6:40 PM UTC, if it is saved before that cutoff.');
+    expect(words).toContain('the tournament’s 6:40 PM UTC start.');
+    expect(words).not.toMatch(/\b\d{2}:\d{2} UTC/);
+    const clock = createDisplayClock(() => 0, () => TOURNAMENTS.completed.startsAtMs + 10 * MIN);
+    const panel = text(renderToStaticMarkup(createElement(TournamentPanel, { reads: null, owner: null, clock, fixture: false, syncError: null, viewer: 'visitor' })));
+    expect(panel).toContain('Wed & Sat · 6:40 PM UTC');
+    expect(panel).not.toMatch(/\b\d{2}:\d{2} UTC/);
+    pinDeviceClock('24');
+    const twentyFour = text(renderToStaticMarkup(createElement(TournamentPanel, { reads: null, owner: null, clock, fixture: false, syncError: null, viewer: 'visitor' })));
+    expect(twentyFour).toContain('Wed & Sat · 18:40 UTC');
+    expect(twentyFour).toContain('Every Wednesday and Saturday at 18:40 UTC, for one 80-minute evening slot.');
+  });
+});
+
 describe('tournament bracket', () => {
   it('shows entrants and the bracket shape at the start, with one Result preparing and no winner before round 1', () => {
     const html = bracket('opening', 5);
@@ -122,9 +203,9 @@ describe('tournament bracket', () => {
     expect(words).toContain('Your Quarterfinals result is not published yet. It appears here as soon as it is revealed.');
     expect(words).not.toContain('You advance');
     const own = (key: TournamentKey, minute: number, name: keyof typeof ARENA_GLADIATORS) =>
-      viewerText(renderTournament(TOURNAMENT_VIEWS[key], TOURNAMENTS[key].startsAtMs + minute * MIN, { viewerId: ARENA_GLADIATORS[name].id }), true, 'UTC');
+      viewerText(renderTournament(TOURNAMENT_VIEWS[key], TOURNAMENTS[key].startsAtMs + minute * MIN, { viewerId: ARENA_GLADIATORS[name].id }), true, '24', 'UTC');
     // A shown win or a bye in every due round: the viewer advances.
-    expect(own('completed', 30, 'varro')).toBe('You advance. Your next bout is revealed at Sat 26 Sept, 19:20 UTC.');
+    expect(own('completed', 30, 'varro')).toBe('You advance. Your next bout is revealed at Sat 26 Sep, 19:20 UTC.');
     expect(own('midway', 30, 'gallus')).toBe('You advance. Your next bout is revealed at Sat 3 Oct, 19:20 UTC.');
     // The mid-way final is due at minute 60 but unpublished: both finalists wait for it, and nobody advances.
     expect(own('midway', 65, 'decimus')).toBe('Your Final result is not published yet. It appears here as soon as it is revealed.');
@@ -133,7 +214,7 @@ describe('tournament bracket', () => {
     expect(own('completed', 20.1, 'varro')).toBe('Your bout is being fought now.');
     // A bye receiver knows from the start that its first bout comes in round 2.
     const bye = TOURNAMENT_VIEWS.midway.bracket!.slots.find((id, i, all) => id !== null && all[i ^ 1] === null)!;
-    expect(viewerText(renderTournament(TOURNAMENT_VIEWS.midway, TOURNAMENTS.midway.startsAtMs + 5 * MIN, { viewerId: bye }), true, 'UTC'))
+    expect(viewerText(renderTournament(TOURNAMENT_VIEWS.midway, TOURNAMENTS.midway.startsAtMs + 5 * MIN, { viewerId: bye }), true, '24', 'UTC'))
       .toBe('You are entered with a bye in the Quarterfinals. Your first bout is revealed at Sat 3 Oct, 19:20 UTC.');
   });
 
@@ -158,7 +239,7 @@ describe('tournament bracket', () => {
   it('shows the owner’s loss and spectating, and replays only completed bouts inline, never through /replay/', () => {
     const html = bracket('completed', 30, { round: 1 });
     const words = text(html);
-    expect(words).toContain('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sept, 20:00 UTC; this slot has no other activity for you.');
+    expect(words).toContain('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sep, 20:00 UTC; this slot has no other activity for you.');
     expect(count(html, '>Watch replay<')).toBe(4);
     expect(html).not.toMatch(/href="[^"]*replay/);
     expect(words).toMatch(/Eliminated in the Quarterfinals · spectating/);

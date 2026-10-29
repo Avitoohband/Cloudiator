@@ -93,31 +93,37 @@ describe('choiceLabel', () => {
 describe('choiceHint', () => {
   it('carries each activity\'s stamina cost from the rules (training, expedition, Arena)', () => {
     expect(RULES_V1.activityStamina).toMatchObject({ training: 20, expedition: 30, arena: 25, rest: 0 });
-    expect(choiceHint(TRAINING)).toContain(`Costs ${RULES_V1.activityStamina.training} stamina.`);
+    expect(choiceHint(TRAINING, '12')).toContain(`Costs ${RULES_V1.activityStamina.training} stamina.`);
     for (const expeditionId of ['woodland', 'outpost', 'mountain'] as const) {
-      expect(choiceHint({ kind: 'expedition', expeditionId })).toContain(`Costs ${RULES_V1.activityStamina.expedition} stamina.`);
+      expect(choiceHint({ kind: 'expedition', expeditionId }, '12')).toContain(`Costs ${RULES_V1.activityStamina.expedition} stamina.`);
     }
-    expect(choiceHint(ARENA)).toContain(`Costs ${RULES_V1.activityStamina.arena} stamina.`);
+    expect(choiceHint(ARENA, '12')).toContain(`Costs ${RULES_V1.activityStamina.arena} stamina.`);
   });
 
   it('says Rest costs nothing, and gives every activity its own words', () => {
     expect(RULES_V1.activityStamina.rest).toBe(0);
-    expect(choiceHint(REST)).toBe('Recovers stamina. Costs nothing.');
-    expect(new Set([TRAINING, REST, ARENA, WOODLAND].map(c => choiceHint(c))).size).toBe(4);
+    expect(choiceHint(REST, '12')).toBe('Recovers stamina. Costs nothing.');
+    expect(new Set([TRAINING, REST, ARENA, WOODLAND].map(c => choiceHint(c, '12'))).size).toBe(4);
   });
 
   it('describes the Arena bout and the tournament from the rules', () => {
-    expect(choiceHint(ARENA)).toBe('Bout revealed at minute 60, rewards at 80. Wed and Sat 18:40 UTC: the tournament. Costs 25 stamina.');
+    expect(choiceHint(ARENA, '24')).toBe('Bout revealed at minute 60, rewards at 80. Wed and Sat 18:40 UTC: the tournament. Costs 25 stamina.');
+    // The fixed tournament hour follows the clock setting (Patch A, item 7).
+    expect(choiceHint(ARENA, '12')).toBe('Bout revealed at minute 60, rewards at 80. Wed and Sat 6:40\xA0PM UTC: the tournament. Costs 25 stamina.');
+    expect(choiceHint({ kind: 'arena' }, '12')).toContain('Wed and Sat 6:40\xA0PM UTC: the tournament.');
+    // Only the Arena hint names a time: the others read the same in either mode.
+    for (const choice of [TRAINING, REST, WOODLAND]) expect(choiceHint(choice, '24')).toBe(choiceHint(choice, '12'));
   });
 
   it('follows the rules it is given rather than fixed numbers', () => {
     const changed = { ...RULES_V1, activityStamina: { ...RULES_V1.activityStamina, training: 7, expedition: 8, arena: 9, rest: 3 },
       arena: { ...RULES_V1.arena, revealAfterMs: 1_800_000 }, clock: { ...RULES_V1.clock, slotMs: 3_600_000 },
       tournament: { ...RULES_V1.tournament, utcWeekdays: [1, 5], hourUtc: 9, minuteUtc: 5 } } as unknown as Rules;
-    expect(choiceHint(TRAINING, changed)).toContain('Costs 7 stamina.');
-    expect(choiceHint(WOODLAND, changed)).toContain('Costs 8 stamina.');
-    expect(choiceHint(REST, changed)).toBe('Recovers stamina. Costs 3 stamina.');
-    expect(choiceHint(ARENA, changed)).toBe('Bout revealed at minute 30, rewards at 60. Mon and Fri 09:05 UTC: the tournament. Costs 9 stamina.');
+    expect(choiceHint(TRAINING, '12', changed)).toContain('Costs 7 stamina.');
+    expect(choiceHint(WOODLAND, '12', changed)).toContain('Costs 8 stamina.');
+    expect(choiceHint(REST, '12', changed)).toBe('Recovers stamina. Costs 3 stamina.');
+    expect(choiceHint(ARENA, '24', changed)).toBe('Bout revealed at minute 30, rewards at 60. Mon and Fri 09:05 UTC: the tournament. Costs 9 stamina.');
+    expect(choiceHint(ARENA, '12', changed)).toBe('Bout revealed at minute 30, rewards at 60. Mon and Fri 9:05\xA0AM UTC: the tournament. Costs 9 stamina.');
   });
 });
 
@@ -158,32 +164,46 @@ const DAY: Schedule = { morning: TRAINING, afternoon: WOODLAND, evening: ARENA }
 
 describe('runningNotice', () => {
   it('says the part is running, when it ends and that a change starts with its next occurrence', () => {
-    expect(plain(runningNotice({ phase: 'afternoon', endsAtMs: Date.UTC(2026, 6, 15, 2, 40) }, AFTERNOON_NEXT, NOW)))
+    expect(plain(runningNotice({ phase: 'afternoon', endsAtMs: Date.UTC(2026, 6, 15, 2, 40) }, AFTERNOON_NEXT, NOW, '12')))
       .toBe('Afternoon is running now (ends 10:40 PM). A change to the afternoon starts with the next afternoon, tomorrow 1:20 AM.');
   });
 
   it('puts "at" before a time of the same day, and leaves out a time that cannot be shown', () => {
     const early = Date.UTC(2026, 6, 14, 20, 0); // 4:00 PM, a slot start
-    expect(plain(runningNotice({ phase: 'morning', endsAtMs: early + SLOT }, early + 3 * SLOT, early)))
+    expect(plain(runningNotice({ phase: 'morning', endsAtMs: early + SLOT }, early + 3 * SLOT, early, '12')))
       .toBe('Morning is running now (ends 5:20 PM). A change to the morning starts with the next morning, at 8:00 PM.');
-    expect(runningNotice({ phase: 'evening', endsAtMs: NaN }, NaN, NOW)).toBe('Evening is running now. A change to the evening starts with the next evening.');
+    expect(runningNotice({ phase: 'evening', endsAtMs: NaN }, NaN, NOW, '12')).toBe('Evening is running now. A change to the evening starts with the next evening.');
+  });
+
+  it('writes its times in the 24-hour form when asked, "at" before a time of the same day included', () => {
+    expect(runningNotice({ phase: 'afternoon', endsAtMs: Date.UTC(2026, 6, 15, 2, 40) }, AFTERNOON_NEXT, NOW, '24'))
+      .toBe('Afternoon is running now (ends 22:40). A change to the afternoon starts with the next afternoon, tomorrow 01:20.');
+    const early = Date.UTC(2026, 6, 14, 20, 0);
+    expect(runningNotice({ phase: 'morning', endsAtMs: early + SLOT }, early + 3 * SLOT, early, '24'))
+      .toBe('Morning is running now (ends 17:20). A change to the morning starts with the next morning, at 20:00.');
   });
 });
 
 describe('savedSummary', () => {
   it('names a changed part with its activity and start time, and no part that did not change', () => {
     const value: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: part(MORNING_NEXT), afternoon: null, evening: null } };
-    expect(plain(savedSummary(value, DAY, NOW))).toBe('Saved. Morning: Training from tomorrow 12:00 AM.');
+    expect(plain(savedSummary(value, DAY, NOW, '12'))).toBe('Saved. Morning: Training from tomorrow 12:00 AM.');
   });
 
   it('says "after the running <part>" for a changed part that is running now', () => {
     const value: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: null, afternoon: part(AFTERNOON_NEXT), evening: null } };
-    expect(plain(savedSummary(value, DAY, NOW))).toBe('Saved. Afternoon: Expedition: Woodland Path from tomorrow 1:20 AM, after the running afternoon.');
+    expect(plain(savedSummary(value, DAY, NOW, '12'))).toBe('Saved. Afternoon: Expedition: Woodland Path from tomorrow 1:20 AM, after the running afternoon.');
+  });
+
+  it('writes the start times in the 24-hour form when asked', () => {
+    const value: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: part(MORNING_NEXT), afternoon: part(AFTERNOON_NEXT), evening: part(EVENING_NEXT) } };
+    expect(savedSummary(value, DAY, NOW, '24')).toBe('Saved. Morning: Training from tomorrow 00:00. '
+      + 'Afternoon: Expedition: Woodland Path from tomorrow 01:20, after the running afternoon. Evening: Arena from 22:40.');
   });
 
   it('names every changed part in day order, and only the running one gets the "after" words', () => {
     const value: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: part(MORNING_NEXT), afternoon: part(AFTERNOON_NEXT), evening: part(EVENING_NEXT) } };
-    expect(plain(savedSummary(value, DAY, NOW))).toBe('Saved. Morning: Training from tomorrow 12:00 AM. '
+    expect(plain(savedSummary(value, DAY, NOW, '12'))).toBe('Saved. Morning: Training from tomorrow 12:00 AM. '
       + 'Afternoon: Expedition: Woodland Path from tomorrow 1:20 AM, after the running afternoon. Evening: Arena from 10:40 PM.');
   });
 
@@ -191,23 +211,23 @@ describe('savedSummary', () => {
     const value: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: null, afternoon: part(AFTERNOON_NEXT), evening: null } };
     // The afternoon has ended by the time the line is read: it was running when saved, and the line says so still.
     const later = Date.UTC(2026, 6, 15, 3, 0);
-    expect(plain(savedSummary(value, DAY, later))).toContain(', after the running afternoon.');
+    expect(plain(savedSummary(value, DAY, later, '12'))).toContain(', after the running afternoon.');
     // Saved during the morning, read during the afternoon: not "running" in the line.
     const saved: DayScheduleValue = { ...value, receivedAtMs: Date.UTC(2026, 6, 15, 0, 30) };
-    expect(plain(savedSummary(saved, DAY, NOW))).not.toContain('running');
+    expect(plain(savedSummary(saved, DAY, NOW, '12'))).not.toContain('running');
   });
 
   it('leaves out the start time it cannot show, and says only "Saved." when nothing changed', () => {
     const noTime: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: { effectiveSlotIndex: 0, effectiveAtMs: NaN }, afternoon: null, evening: null } };
-    expect(savedSummary(noTime, DAY, NOW)).toBe('Saved. Morning: Training.');
+    expect(savedSummary(noTime, DAY, NOW, '12')).toBe('Saved. Morning: Training.');
     const none: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: null, afternoon: null, evening: null } };
-    expect(savedSummary(none, DAY, NOW)).toBe('Saved.');
+    expect(savedSummary(none, DAY, NOW, '12')).toBe('Saved.');
   });
 
   it('is a plain sentence that names parts as the phase words', () => {
     for (const phase of ['morning', 'afternoon', 'evening'] as Phase[]) {
       const value: DayScheduleValue = { version: 2, receivedAtMs: NOW, parts: { morning: null, afternoon: null, evening: null, [phase]: part(AFTERNOON_NEXT) } };
-      expect(savedSummary(value, DAY, NOW)).toMatch(new RegExp(`^Saved\\. ${phase[0].toUpperCase()}${phase.slice(1)}: `));
+      expect(savedSummary(value, DAY, NOW, '12')).toMatch(new RegExp(`^Saved\\. ${phase[0].toUpperCase()}${phase.slice(1)}: `));
     }
   });
 });

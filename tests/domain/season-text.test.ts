@@ -18,18 +18,31 @@ describe('season text', () => {
 
   it('gives the season end as a countdown, the viewer’s local time and the UTC time', () => {
     // The plan's example: 15 Nov 2026 is a Sunday (the brief's "Sat" was the mockup's sample weekday).
-    expect(seasonEnds(Date.UTC(2026, 10, 15, 17), Date.UTC(2026, 9, 18, 19), 'Asia/Jerusalem')).toEqual({ countdown: '27 days 22 h', local: 'Sun 15 Nov, 19:00', utc: '17:00 UTC' });
+    expect(seasonEnds(Date.UTC(2026, 10, 15, 17), Date.UTC(2026, 9, 18, 19), '24', 'Asia/Jerusalem')).toEqual({ countdown: '27 days 22 h', local: 'Sun 15 Nov, 19:00', utc: '17:00 UTC' });
     // Summer time in Jerusalem (UTC+3) before 25 Oct 2026.
-    expect(seasonEnds(Date.UTC(2026, 9, 18, 17), Date.UTC(2026, 9, 1), 'Asia/Jerusalem')).toMatchObject({ local: 'Sun 18 Oct, 20:00', utc: '17:00 UTC' });
-    expect(seasonEnds(Date.UTC(2026, 10, 15, 17), Date.UTC(2026, 9, 18, 19), 'UTC')).toMatchObject({ local: 'Sun 15 Nov, 17:00', utc: '17:00 UTC' });
+    expect(seasonEnds(Date.UTC(2026, 9, 18, 17), Date.UTC(2026, 9, 1), '24', 'Asia/Jerusalem')).toMatchObject({ local: 'Sun 18 Oct, 20:00', utc: '17:00 UTC' });
+    expect(seasonEnds(Date.UTC(2026, 10, 15, 17), Date.UTC(2026, 9, 18, 19), '24', 'UTC')).toMatchObject({ local: 'Sun 15 Nov, 17:00', utc: '17:00 UTC' });
     // When the local date is not the UTC date, the UTC time names its own day.
-    expect(seasonEnds(Date.UTC(2026, 9, 24, 0), 0, 'America/New_York')).toMatchObject({ local: 'Fri 23 Oct, 20:00', utc: 'Sat 24 Oct, 00:00 UTC' });
-    expect(seasonEnds(Date.UTC(2026, 9, 24, 0), 0, 'Asia/Jerusalem')).toMatchObject({ local: 'Sat 24 Oct, 03:00', utc: '00:00 UTC' });
+    expect(seasonEnds(Date.UTC(2026, 9, 24, 0), 0, '24', 'America/New_York')).toMatchObject({ local: 'Fri 23 Oct, 20:00', utc: 'Sat 24 Oct, 00:00 UTC' });
+    expect(seasonEnds(Date.UTC(2026, 9, 24, 0), 0, '24', 'Asia/Jerusalem')).toMatchObject({ local: 'Sat 24 Oct, 03:00', utc: '00:00 UTC' });
+  });
+
+  // Patch A, item 7: only the time parts follow the clock setting; the days, the zone and the UTC wording are today's.
+  it('writes the end time in 12-hour form when the clock setting asks for it', () => {
+    const end = Date.UTC(2026, 10, 15, 17);
+    expect(seasonEnds(end, Date.UTC(2026, 9, 18, 19), '12', 'Asia/Jerusalem')).toEqual({ countdown: '27 days 22 h', local: 'Sun 15 Nov, 7:00\xA0PM', utc: '5:00\xA0PM UTC' });
+    expect(seasonEnds(end, 0, '12', 'UTC').utc).toBe('5:00\xA0PM UTC');
+    expect(seasonEnds(end, 0, '12', 'UTC').local).toBe('Sun 15 Nov, 5:00\xA0PM');
+    // The UTC time still names its own day when it differs from the local one.
+    expect(seasonEnds(Date.UTC(2026, 9, 24, 0), 0, '12', 'America/New_York')).toMatchObject({ local: 'Fri 23 Oct, 8:00\xA0PM', utc: 'Sat 24 Oct, 12:00\xA0AM UTC' });
+    expect(seasonEnds(Date.UTC(2026, 9, 24, 0), 0, '12', 'Asia/Jerusalem')).toMatchObject({ local: 'Sat 24 Oct, 3:00\xA0AM', utc: '12:00\xA0AM UTC' });
+    // The countdown is a duration: the same in either mode.
+    expect(seasonEnds(end, end - 28 * DAY, '12', 'UTC').countdown).toBe(seasonEnds(end, end - 28 * DAY, '24', 'UTC').countdown);
   });
 
   it('counts down in days and hours, then hours and minutes, then minutes, and never below zero', () => {
     const end = Date.UTC(2026, 10, 15, 17);
-    const left = (ms: number) => seasonEnds(end, end - ms, 'UTC').countdown;
+    const left = (ms: number) => seasonEnds(end, end - ms, '24', 'UTC').countdown;
     expect(left(28 * DAY)).toBe('28 days 0 h');
     expect(left(DAY + 3 * HOUR + 59 * MIN)).toBe('1 day 3 h');
     expect(left(DAY)).toBe('1 day 0 h');

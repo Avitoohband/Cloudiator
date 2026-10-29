@@ -12,6 +12,7 @@ import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
+import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { activityStatus } from './activity-status';
 import type { Viewer } from './useGameState';
@@ -36,12 +37,13 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
 }) {
   const now = useNow(clock);
+  const clockMode = useClockMode();
   const headingId = useId();
   const staminaId = useId();
   const activity = owner.currentActivity;
-  const status = activityStatus(owner, slotIndex ?? 0, now, { resting });
+  const status = activityStatus(owner, slotIndex ?? 0, now, { resting, clock: clockMode });
   // The end is shown as every slot time is (Task 24.0b); one that cannot be shown (`slotTimeText` gives '') is left out.
-  const ends = status.endsAtMs === null ? '' : slotTimeText(status.endsAtMs, now);
+  const ends = status.endsAtMs === null ? '' : slotTimeText(status.endsAtMs, now, clockMode);
   return (
     <section className={styles.summary} aria-labelledby={headingId}>
       <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>

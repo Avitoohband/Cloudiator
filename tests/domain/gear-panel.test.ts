@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
@@ -8,6 +8,7 @@ import { slotTimeText } from '../../src/features/schedule/slot-time';
 import { createDisplayClock } from '../../src/game/display-clock';
 import type { GameGateway } from '../../src/lib/api/gateway';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
+import { pinDeviceClock } from '../fixtures/clock';
 
 // Launch feedback, note 9: the gear view as the Inventory panel lays it out, read from its static markup (what the browser spec
 // cannot reach: a preview with gear already queued, and a queued time that cannot be shown). The behaviour with a real page
@@ -47,6 +48,10 @@ function button(html: string, name: RegExp): string {
 const disabled = (tag: string) => / disabled(="")?[ >]/.test(tag);
 
 describe('the gear view in a preview', () => {
+  // Patch A, item 7: the device's clock setting is pinned to 12-hour (the form these tests were written in).
+  beforeEach(() => { pinDeviceClock('12'); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it('disables Wear, Undo and Cancel changes and says why in words', () => {
     const html = render(owner({ weapon: sword2 }), true);
     for (const name of [/^Wear Sword, level 1 common$/, /^Undo wearing Sword, level 1 uncommon$/, /^Wear Iron helmet/]) {
@@ -84,11 +89,21 @@ describe('the gear view', () => {
 
   it('shows the queued time on its badges and its note, against the shared clock', () => {
     const html = render(owner({ weapon: sword2 }));
-    const time = slotTimeText(NEXT * SLOT, NOW);
+    const time = slotTimeText(NEXT * SLOT, NOW, '12');
     expect(time).not.toBe('');
     expect(html).toContain(`Wears from ${time}</span>`);
     expect(html).toContain(`Off at ${time}</span>`);
     expect(html).toContain(`Gear changes start at the next slot, ${time}.`);
+  });
+
+  it('shows the queued time in the 24-hour form when the clock setting asks for it', () => {
+    pinDeviceClock('24');
+    const html = render(owner({ weapon: sword2 }));
+    const time = slotTimeText(NEXT * SLOT, NOW, '24');
+    expect(time).toMatch(/\d{2}:\d{2}$/);
+    expect(html).toContain(`Wears from ${time}</span>`);
+    expect(html).toContain(`Gear changes start at the next slot, ${time}.`);
+    expect(html).not.toMatch(/\d\s?[AP]M\b/);
   });
 
   it('words the badges and the note without a time when the effective slot cannot be shown', () => {

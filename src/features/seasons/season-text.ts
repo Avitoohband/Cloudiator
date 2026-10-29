@@ -4,6 +4,8 @@
 import type { LeagueId } from '@contracts/commands';
 import type { PrestigeAward, SeasonView, StandingRow } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { ClockMode } from '../../lib/clock-setting';
+import { dayText, timeOfDay } from '../../lib/time-format';
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -19,23 +21,6 @@ export function seasonName(seasonId: string): string {
   return /^\d{1,15}$/.test(seasonId) ? `Season ${Number(seasonId) + 1}` : 'Season';
 }
 
-type DateParts = { day: string; time: string };
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-/**
- * A time's day ("Sun 15 Nov") and 24-hour time ("19:00") in a time zone (the runtime's when undefined). Intl gives only the
- * zone's numeric calendar fields; the names are fixed here, since ICU versions abbreviate differently (en-GB "Sept").
- */
-function dateParts(ms: number, timeZone?: string): DateParts {
-  const parts = new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
-    .formatToParts(ms);
-  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find(p => p.type === type)?.value);
-  const [year, month, day] = [part('year'), part('month'), part('day')];
-  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return { day: `${WEEKDAYS[weekday]} ${day} ${MONTHS[month - 1]}`, time: `${pad(part('hour'))}:${pad(part('minute'))}` };
-}
-
 /** Time left until `endsAtMs`: days and hours, then hours and minutes, then minutes (at least 1 while any is left), else "0 min". */
 function countdown(leftMs: number): string {
   if (leftMs <= 0) return '0 min';
@@ -49,18 +34,20 @@ function countdown(leftMs: number): string {
 
 /**
  * When a season ends: the countdown from `nowMs` (the shared display clock's time), the end in the viewer's time zone
- * ("Sun 15 Nov, 19:00"; `timeZone` undefined is the runtime's zone) and in UTC ("17:00 UTC", with its own day when the
- * UTC date differs from the local one).
+ * ("Sun 15 Nov, 7:00 PM"; `timeZone` undefined is the runtime's zone) and in UTC ("5:00 PM UTC", with its own day when the
+ * UTC date differs from the local one). The times of day are written in the form `clock` asks for (the device's clock setting):
+ * "7:00 PM" and "5:00 PM UTC", or "19:00" and "17:00 UTC".
  */
-export function seasonEnds(endsAtMs: number, nowMs: number, timeZone?: string): { countdown: string; local: string; utc: string } {
-  const local = dateParts(endsAtMs, timeZone), utc = dateParts(endsAtMs, 'UTC');
-  return { countdown: countdown(endsAtMs - nowMs), local: `${local.day}, ${local.time}`, utc: utc.day === local.day ? `${utc.time} UTC` : `${utc.day}, ${utc.time} UTC` };
+export function seasonEnds(endsAtMs: number, nowMs: number, clock: ClockMode, timeZone?: string): { countdown: string; local: string; utc: string } {
+  const localDay = dayText(endsAtMs, timeZone), utcDay = dayText(endsAtMs, 'UTC');
+  const utcTime = `${timeOfDay(endsAtMs, clock, 'UTC')} UTC`;
+  return { countdown: countdown(endsAtMs - nowMs), local: `${localDay}, ${timeOfDay(endsAtMs, clock, timeZone)}`, utc: utcDay === localDay ? utcTime : `${utcDay}, ${utcTime}` };
 }
 
 /** The picker's label: "Season 2 · current" for the open season, "Season 1 · ended Sun 18 Oct" (local date) for a closed one. */
 export function seasonLabel(season: SeasonView, timeZone?: string): string {
   const name = seasonName(season.seasonId);
-  return season.closedAtMs === null ? `${name} · current` : `${name} · ended ${dateParts(season.endsAtMs, timeZone).day}`;
+  return season.closedAtMs === null ? `${name} · current` : `${name} · ended ${dayText(season.endsAtMs, timeZone)}`;
 }
 
 /** An award's badge chip: "🥇 Season 1 · Silver". */

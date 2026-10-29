@@ -7,6 +7,7 @@ import { nextPhaseStart } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
+import { useClockMode } from '../../lib/clock-setting';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { PHASES, arenaNote, choiceHint, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from './schedule-text';
 import { slotTimeText } from './slot-time';
@@ -45,6 +46,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   const panelId = useId(), outcomeId = `${panelId}-outcome`, noteId = `${panelId}-note`;
   /** The shared clock's time to the minute, the "now" every time on this panel is shown against. */
   const nowMs = useMinuteNow(clock);
+  const clockMode = useClockMode();
   // A save sent by keyboard whose button lost the focus gives it to the outcome, never to <body>; a pointer save moves
   // nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
@@ -119,14 +121,14 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   const running = slot === null ? null : runningPart(slotStart);
   /** A phase's estimated next start, left out until mounted or when its time cannot be shown (`slotTimeText` gives ''). */
   const estimate = (phase: Phase) => {
-    const time = slot === null ? '' : slotTimeText(nextPhaseStart(phase, slotStart), nowMs);
+    const time = slot === null ? '' : slotTimeText(nextPhaseStart(phase, slotStart), nowMs, clockMode);
     return time ? <p>Estimated next start: {time}</p> : null;
   };
   const level = owner.progression.level, locked = lockedChoices(level);
   return <div className="planning-form">
     <h2>Repeating schedule</h2>
     <p className="muted">Edits apply to the next occurrence that has not started. Your current activity continues.</p>
-    {running && <p role="note" className="schedule-running">{runningNotice(running, nextPhaseStart(running.phase, slotStart), nowMs)}</p>}
+    {running && <p role="note" className="schedule-running">{runningNotice(running, nextPhaseStart(running.phase, slotStart), nowMs, clockMode)}</p>}
     <div className="schedule-grid">{PHASES.map((phase, index) => {
       const isRunning = running?.phase === phase;
       const note = arenaNote(phase);
@@ -142,12 +144,12 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
           {options.map(({ choice, shut }) => <option key={choiceKey(choice)} value={choiceKey(choice)} disabled={shut}>{optionLabel(choice)}</option>)}
         </select>
         {note && <p id={noteLine} className="slot-note">{note}</p>}
-        <p id={hintLine} className="slot-hint">{choiceHint(draft[phase])}</p>
+        <p id={hintLine} className="slot-hint">{choiceHint(draft[phase], clockMode)}</p>
         {estimate(phase)}
       </article>;
     })}</div>
     {dirty && <p className="schedule-unsaved">Unsaved changes: {changed.join(', ')}.</p>}
-    {message && <p ref={outcome} id={outcomeId} role="status" className="schedule-saved" tabIndex={-1} {...target}>{savedSummary(message.value, message.day, nowMs)}</p>}
+    {message && <p ref={outcome} id={outcomeId} role="status" className="schedule-saved" tabIndex={-1} {...target}>{savedSummary(message.value, message.day, nowMs, clockMode)}</p>}
     {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
     <div className="schedule-actions">
       {/* Save stays focusable while the day is sent (aria-disabled; save() ignores a press then): Chrome drops the focus of a

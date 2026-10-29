@@ -1,5 +1,6 @@
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { ClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 
 export type ActivityStatus = 'scheduled' | 'in-progress' | 'processing' | 'preparing' | 'completed' | 'resting';
@@ -7,14 +8,15 @@ export type ActivityStatus = 'scheduled' | 'in-progress' | 'processing' | 'prepa
 /**
  * The owner's own words for its gladiator resting at home (Task 23.9 and its fix round 1): the slot whose boundary returns
  * it (`OwnerState.restingUntilSlot`), its start in the viewer's local time as every slot time is shown (`slotTimeText` against
- * the display time `nowMs`, Task 23.10); or, before that is known (the presence not yet answered), only that it rests, which
- * needs no time. My gladiator, the owner's own Gladiators row and its own profile card all say this, never the public "back
- * when {name}'s owner returns." A time that cannot be shown (`slotTimeText` gives '') also leaves "Resting at home.".
+ * the display time `nowMs`, Task 23.10, in the form `clock` asks for: the device's clock setting, Patch A item 7); or, before
+ * that is known (the presence not yet answered), only that it rests, which needs no time. My gladiator, the owner's own
+ * Gladiators row and its own profile card all say this, never the public "back when {name}'s owner returns." A time that
+ * cannot be shown (`slotTimeText` gives '') also leaves "Resting at home.".
  */
 export function ownRestingText(restingUntilSlot: null): string;
-export function ownRestingText(restingUntilSlot: number | null, nowMs: number): string;
-export function ownRestingText(restingUntilSlot: number | null, nowMs = 0): string {
-  const time = restingUntilSlot === null ? '' : slotTimeText(restingUntilSlot * SLOT_MS, nowMs);
+export function ownRestingText(restingUntilSlot: number | null, nowMs: number, clock: ClockMode): string;
+export function ownRestingText(restingUntilSlot: number | null, nowMs = 0, clock?: ClockMode): string {
+  const time = restingUntilSlot === null || !clock ? '' : slotTimeText(restingUntilSlot * SLOT_MS, nowMs, clock);
   return time ? `Resting at home: back on your schedule at ${time}` : 'Resting at home.';
 }
 
@@ -39,11 +41,11 @@ const SLOT_MS = RULES_V1.clock.slotMs;
  * and while the current slot is still its resting slot, it reads "Resting at home." rather than a preparation.
  */
 export function activityStatus(owner: Pick<OwnerState, 'currentActivity' | 'processedSlotIndex'> & Partial<Pick<OwnerState, 'restingUntilSlot'>>, slotIndex: number,
-  nowMs: number, options: { resting?: boolean } = {}): { status: ActivityStatus; label: string; endsAtMs: number | null } {
+  nowMs: number, options: { resting?: boolean; clock: ClockMode }): { status: ActivityStatus; label: string; endsAtMs: number | null } {
   const activity = owner.currentActivity;
   const current = Math.max(slotIndex, Math.floor(nowMs / SLOT_MS));
   const back = owner.restingUntilSlot ?? null;
-  if (back !== null && current < back) return { status: 'resting', label: ownRestingText(back, nowMs), endsAtMs: null };
+  if (back !== null && current < back) return { status: 'resting', label: ownRestingText(back, nowMs, options.clock), endsAtMs: null };
   const behind = owner.processedSlotIndex < current;
   if (options.resting && !activity && back === null && !behind) return { status: 'resting', label: ownRestingText(null), endsAtMs: null };
   if (!activity) return { ...PREPARING };

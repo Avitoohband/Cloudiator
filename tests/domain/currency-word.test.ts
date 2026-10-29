@@ -45,9 +45,9 @@ describe('the currency is called gold', () => {
 
   it('says gold in the schedule hint of every activity', () => {
     for (const choice of [{ kind: 'training' }, { kind: 'rest' }, { kind: 'arena' }, { kind: 'expedition', expeditionId: 'woodland' }] as const) {
-      expect(choiceHint(choice), choice.kind).not.toMatch(MONEY);
+      expect(choiceHint(choice, '12'), choice.kind).not.toMatch(MONEY);
     }
-    expect(choiceHint({ kind: 'expedition', expeditionId: 'woodland' })).toMatch(/^Gathers loot and gold over the slot\./);
+    expect(choiceHint({ kind: 'expedition', expeditionId: 'woodland' }, '12')).toMatch(/^Gathers loot and gold over the slot\./);
   });
 
   it('says gold in the credited placement of a tournament', () => {

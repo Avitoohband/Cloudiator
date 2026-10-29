@@ -8,6 +8,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { TOURNAMENTS, tournamentAsOf } from '../fixtures/tournament-ids';
 import { SLOT_MS, emptyWorld, routeLiveReads } from './live-routes';
 import { closeMenu, expectOwnerShown, openMenu } from './shell-helpers';
+import { storeClock } from './slot-time';
 
 // Task 22.5 (Review Focus 4): a replay older than seven days shows its summary with "no longer kept" everywhere: Recent
 // results, Arena, expeditions and tournaments. The client decides by server time (the revision and timeline reads and the
@@ -58,6 +59,9 @@ function publicBout(endMs: number, replayExpiry: PublicActivitySummary['replayEx
     completion: { activityId, resolvedKind: 'arena', result: 'victory', success: true, settledAtMs: endMs, replayExpiry },
   };
 }
+
+// The expected times below are written in the 24-hour form (Patch A item 7: the clock setting decides, and the browser's own locale is 12-hour).
+test.beforeEach(({ context }) => storeClock(context, '24'));
 
 test.describe('replays older than seven days in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview, which production exports never include.');

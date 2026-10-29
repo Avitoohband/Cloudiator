@@ -49,6 +49,7 @@ import type { MessagingActions } from '../messages/messages';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
+import { useClockMode } from '../../lib/clock-setting';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
@@ -198,6 +199,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const knownLooks = useMemo(() => appearancesOf(world?.actors), [world]);
   // The display time the owner's resting line shows its return against (Task 23.10): it follows the shared clock by the minute.
   const nowMs = useMinuteNow(clock);
+  const clockMode = useClockMode();
   const menus = menusFor(viewer);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
@@ -347,7 +349,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const ownerId = owner?.gladiatorId ?? null;
   // The owner's own words while its gladiator rests at home (Task 23.9 fix round 1): when it is back on its schedule once
   // that is known (a short time, Task 23.10), else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
-  const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot, nowMs) : null;
+  const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot, nowMs, clockMode) : null;
   const content = (id: MenuId) => {
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}

@@ -7,6 +7,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
 import { expectOwnerShown, menuDialog, openMenu } from './shell-helpers';
+import { storeClock } from './slot-time';
 import { watchSyncPoll } from './sync-poll';
 
 // Task 21.4 (plan Decision 8, the approved mockup): seasons inside Arena standings. A season picker, the current season's
@@ -50,6 +51,9 @@ async function shot(page: Page, testInfo: TestInfo, name: string, align: { top?:
   await align.bottom?.evaluate(el => el.scrollIntoView({ block: 'end' }));
   await page.screenshot({ path: testInfo.outputPath(`seasons-${testInfo.project.name}-${name}.png`) });
 }
+
+// The expected times below are written in the 24-hour form (Patch A item 7: the clock setting decides, and the browser's own locale is 12-hour).
+test.beforeEach(({ context }) => storeClock(context, '24'));
 
 test.describe('seasons in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');

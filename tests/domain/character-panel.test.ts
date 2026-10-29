@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { OwnerState } from '@contracts/reads';
@@ -7,6 +7,7 @@ import { createDisplayClock } from '@/game/display-clock';
 import { CharacterPanel } from '@/features/character/CharacterPanel';
 import { slotTimeText } from '@/features/schedule/slot-time';
 import { ownerFixture } from '../fixtures/domain';
+import { pinDeviceClock } from '../fixtures/clock';
 
 const SLOT_MS = 4_800_000;
 const SLOT = 373_248;
@@ -27,18 +28,34 @@ function panel(owner: OwnerState, nowMs: number, slotIndex = SLOT, resting = fal
 const statusLine = (line: string) => new RegExp(`role="status"[^>]*>${line.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}<`);
 
 describe('My gladiator', () => {
+  // Patch A, item 7: the device's clock setting is pinned to 12-hour (the form these tests were written in).
+  beforeEach(() => { pinDeviceClock('12'); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   // Task 24.0b (Avi, 2026-10-20): the activity's end is shown as every slot time is (`slotTimeText` against the display time
   // the panel is at, Task 23.10), never in the fixed two-digit form (`04:20 AM`).
   it('ends the activity line with its end time in the short slot-time style', () => {
     const nowMs = SLOT * SLOT_MS + 40 * 60_000;
     const owner: OwnerState = { ...structuredClone(ownerFixture), processedSlotIndex: SLOT };
     const end = owner.currentActivity!.endsAtMs;
-    expect(panel(owner, nowMs)).toMatch(statusLine(`In progress · ends ${slotTimeText(end, nowMs)}`));
+    expect(panel(owner, nowMs)).toMatch(statusLine(`In progress · ends ${slotTimeText(end, nowMs, '12')}`));
     // A later day says which: here the short weekday (two days ahead), where the fixed form gave the time alone.
     const later = nowMs + 2 * 86_400_000;
     const scheduled: OwnerState = { ...owner, currentActivity: { ...owner.currentActivity!, startsAtMs: nowMs + 60_000, endsAtMs: later } };
-    expect(panel(scheduled, nowMs)).toMatch(statusLine(`Scheduled · ends ${slotTimeText(later, nowMs)}`));
-    expect(slotTimeText(later, nowMs)).toMatch(/^\p{L}+ /u);
+    expect(panel(scheduled, nowMs)).toMatch(statusLine(`Scheduled · ends ${slotTimeText(later, nowMs, '12')}`));
+    expect(slotTimeText(later, nowMs, '12')).toMatch(/^\p{L}+ /u);
+  });
+
+  it('writes the end and the resting time in the 24-hour form when the clock setting asks for it', () => {
+    pinDeviceClock('24');
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    const owner: OwnerState = { ...structuredClone(ownerFixture), processedSlotIndex: SLOT };
+    const end = owner.currentActivity!.endsAtMs;
+    expect(slotTimeText(end, nowMs, '24')).toMatch(/^\d{2}:\d{2}$/);
+    expect(panel(owner, nowMs)).toMatch(statusLine(`In progress · ends ${slotTimeText(end, nowMs, '24')}`));
+    const resting: OwnerState = { ...structuredClone(ownerFixture), currentActivity: null, processedSlotIndex: SLOT, restingUntilSlot: SLOT + 1 };
+    expect(panel(resting, nowMs)).toMatch(statusLine(`Resting at home: back on your schedule at ${slotTimeText((SLOT + 1) * SLOT_MS, nowMs, '24')}`));
+    expect(text(panel(resting, nowMs))).not.toMatch(/\d\s?[AP]M\b/);
   });
 
   // An end that cannot be shown (`slotTimeText` gives '' for a value that is not a finite number) leaves the suffix out,
@@ -60,7 +77,7 @@ describe('My gladiator', () => {
     const boundary = (SLOT + 1) * SLOT_MS;
     // {time} is shown against the display time the panel is at (Task 23.10).
     const nowMs = SLOT * SLOT_MS + 40 * 60_000;
-    const line = `Resting at home: back on your schedule at ${slotTimeText(boundary, nowMs)}`;
+    const line = `Resting at home: back on your schedule at ${slotTimeText(boundary, nowMs, '12')}`;
     const resting = panel(owner, nowMs);
     expect(text(resting)).toContain(text(line)); // (`text` reads the time's no-break space as an ordinary one)
     // It is the activity line itself (a status), and nothing says the gladiator has an activity.

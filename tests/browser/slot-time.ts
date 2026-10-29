@@ -1,4 +1,13 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
+
+/**
+ * Stores the clock setting (`cloudiator.clock.v1`, Patch A item 7) in the device's storage before every page load of `context`. A spec that
+ * writes its expected times out in one form stores that form, whatever hour cycle the browser's own locale has; the specs that work their
+ * expected times out in the page (`slotTime` below) leave the setting alone, so the page starts on the device's own choice.
+ */
+export async function storeClock(context: BrowserContext, mode: '12' | '24') {
+  await context.addInitScript(([key, value]) => localStorage.setItem(key, value), ['cloudiator.clock.v1', mode]);
+}
 
 /**
  * The text a slot time shows (Task 23.10), worked out in the page, in its own locale and time zone, apart from the code under

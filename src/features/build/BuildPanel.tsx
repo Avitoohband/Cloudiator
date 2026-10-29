@@ -11,6 +11,7 @@ import { deriveStats, preserveStamina } from '@domain/stats';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { cappedNote, pointsLeft, raisedNote, setPoints } from '../character/creation-points';
+import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
@@ -45,6 +46,7 @@ function BuildSummary({ build, inventory }: { build: BuildView; inventory: ItemI
 export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock }) {
   /** The shared display clock's time to the minute: the pending build's effective time is shown against it (Task 23.10). */
   const nowMs = useMinuteNow(clock);
+  const clockMode = useClockMode();
   const [draft, setDraft] = useState(() => draftFrom(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild));
   /** The short status line after a typed number was capped or raised; any other edit, and a reload of the build, clears it. */
   const [pointsNote, setPointsNote] = useState('');
@@ -89,7 +91,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const weapon = owner.inventory.find(item => item.id === draft.equipment.weapon);
   const twoHands = weapon ? CATALOG_V1.items[weapon.catalogId]?.hands === 2 : false;
   /** The pending build's effective time, or '' when it cannot be shown: its line is then left out. */
-  const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs) : '';
+  const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
   function update(next: BuildInput, note = '') { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote(note); }
   /**
    * A typed or stepped number for one attribute: raised to the current build's value when below it, capped at what is left when

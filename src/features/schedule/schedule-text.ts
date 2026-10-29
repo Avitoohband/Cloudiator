@@ -8,6 +8,8 @@ import { slotAt } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
 import { choiceAllowedInPhase } from '@domain/schedule-choice';
 import type { Rules } from '@domain/types';
+import type { ClockMode } from '../../lib/clock-setting';
+import { utcClockText } from '../../lib/time-format';
 import { slotTimeText } from './slot-time';
 
 /** The parts of the day, in order. */
@@ -20,7 +22,6 @@ const EXPEDITIONS = Object.keys(CATALOG_V1.expeditions) as ExpeditionId[];
 const requiredLevel = (id: ExpeditionId) => CATALOG_V1.expeditions[id].requiredLevel;
 const expeditionChoice = (expeditionId: ExpeditionId): ActivityChoice => ({ kind: 'expedition', expeditionId });
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-const pad = (n: number) => String(n).padStart(2, '0');
 
 /**
  * What a part's select offers a player of `level`: training, rest, Arena only where `rules` allow it (the evening in v1), then
@@ -62,9 +63,10 @@ const staminaText = (cost: number) => cost === 0 ? 'Costs nothing.' : `Costs ${c
 /**
  * One line about a choice, under its select: what it does and what it costs in stamina. Arena also says when its bout is
  * revealed and rewarded within the slot, and that the Wednesday and Saturday evening at the tournament's hour is the tournament.
- * All numbers are `rules`'s: the stamina costs, the reveal minute, the slot's length, the tournament's days and hour (UTC).
+ * All numbers are `rules`'s: the stamina costs, the reveal minute, the slot's length, the tournament's days and hour (UTC); the
+ * hour is written in the form `clock` asks for (the device's clock setting): "6:40 PM UTC" or "18:40 UTC".
  */
-export function choiceHint(choice: ActivityChoice, rules: Rules = RULES_V1): string {
+export function choiceHint(choice: ActivityChoice, clock: ClockMode, rules: Rules = RULES_V1): string {
   const cost = staminaText(rules.activityStamina[choice.kind]);
   switch (choice.kind) {
     case 'training': return `Practice yard: builds experience. ${cost}`;
@@ -74,7 +76,7 @@ export function choiceHint(choice: ActivityChoice, rules: Rules = RULES_V1): str
       const { utcWeekdays, hourUtc, minuteUtc } = rules.tournament;
       const days = utcWeekdays.map(day => WEEKDAYS[day]).join(' and ');
       return `Bout revealed at minute ${rules.arena.revealAfterMs / MINUTE_MS}, rewards at ${rules.clock.slotMs / MINUTE_MS}. `
-        + `${days} ${pad(hourUtc)}:${pad(minuteUtc)} UTC: the tournament. ${cost}`;
+        + `${days} ${utcClockText(hourUtc, minuteUtc, clock)}: the tournament. ${cost}`;
     }
   }
 }
@@ -93,11 +95,12 @@ const atTime = (time: string) => /^\d/.test(time) ? `at ${time}` : time;
 
 /**
  * The notice over the schedule while a part is running: which, when it ends, and that a change to it starts with its next
- * occurrence (`nextStartMs`). Times are `slotTimeText`'s against `nowMs`; a time that cannot be shown is left out.
+ * occurrence (`nextStartMs`). Times are `slotTimeText`'s against `nowMs`, in the form `clock` asks for; a time that cannot be shown
+ * is left out.
  */
-export function runningNotice(running: { phase: Phase; endsAtMs: number }, nextStartMs: number, nowMs: number): string {
+export function runningNotice(running: { phase: Phase; endsAtMs: number }, nextStartMs: number, nowMs: number, clock: ClockMode): string {
   const { phase } = running;
-  const ends = slotTimeText(running.endsAtMs, nowMs), next = slotTimeText(nextStartMs, nowMs);
+  const ends = slotTimeText(running.endsAtMs, nowMs, clock), next = slotTimeText(nextStartMs, nowMs, clock);
   return `${capital(phase)} is running now${ends ? ` (ends ${ends})` : ''}. A change to the ${phase} starts with the next ${phase}${next ? `, ${atTime(next)}` : ''}.`;
 }
 
@@ -106,15 +109,15 @@ export function runningNotice(running: { phase: Phase; endsAtMs: number }, nextS
  * `choices` (the day that was saved) and the time its change starts, e.g. "Saved. Morning: Training from 6:00 PM. Afternoon:
  * Expedition: Woodland Path from 7:20 PM, after the running afternoon." A part is "running" if it was when the server received
  * the save (`value.receivedAtMs`), not by the clock now; parts that did not change are not named. `nowMs` is the display time
- * the start times are shown against.
+ * the start times are shown against, in the form `clock` asks for.
  */
-export function savedSummary(value: DayScheduleValue, choices: Schedule, nowMs: number): string {
+export function savedSummary(value: DayScheduleValue, choices: Schedule, nowMs: number, clock: ClockMode): string {
   const received = value.receivedAtMs;
   const running = Number.isFinite(received) && received >= 0 ? runningPart(received).phase : null;
   const named = PHASES.flatMap(phase => {
     const changed = value.parts?.[phase];
     if (!changed) return [];
-    const time = slotTimeText(changed.effectiveAtMs, nowMs);
+    const time = slotTimeText(changed.effectiveAtMs, nowMs, clock);
     return [`${capital(phase)}: ${choiceLabel(choices[phase])}${time ? ` from ${time}` : ''}${running === phase ? `, after the running ${phase}` : ''}.`];
   });
   return ['Saved.', ...named].join(' ');

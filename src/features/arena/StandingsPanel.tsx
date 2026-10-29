@@ -16,6 +16,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { GladiatorId, LeagueId } from '@contracts/commands';
 import type { OwnerState, SeasonView, StandingRow, StandingsPage } from '@contracts/reads';
 import type { DisplayClock } from '../../game/display-clock';
+import { useClockMode, type ClockMode } from '../../lib/clock-setting';
 import { RULES_V1 } from '@domain/rules-v1';
 import { leagueName, leagueRules } from './arena-text';
 import { ELIGIBLE_NOTE, medalOf, placeParts, promotionNote, qualifyText, seasonEnds, seasonLabel, seasonName } from '../seasons/season-text';
@@ -106,10 +107,10 @@ function MedalPill({ place }: { place: 1 | 2 | 3 }) {
 }
 
 /** The current season's card: countdown, end time (local and UTC), prizes and the rule. */
-function CurrentSeason({ season, nowMs, timeZone }: { season: SeasonView; nowMs: number; timeZone?: string }) {
+function CurrentSeason({ season, nowMs, clockMode, timeZone }: { season: SeasonView; nowMs: number; clockMode: ClockMode; timeZone?: string }) {
   const titleId = useId();
   const name = seasonName(season.seasonId);
-  const ends = seasonEnds(season.endsAtMs, nowMs, timeZone);
+  const ends = seasonEnds(season.endsAtMs, nowMs, clockMode, timeZone);
   const over = nowMs >= season.endsAtMs;
   const { minimumHumanBouts, placements } = RULES_V1.seasons;
   return (
@@ -132,9 +133,9 @@ function CurrentSeason({ season, nowMs, timeZone }: { season: SeasonView; nowMs:
 }
 
 /** A finished season's card: frozen at the close, with its end in local time and UTC. */
-function FinalSeason({ season, timeZone }: { season: SeasonView; timeZone?: string }) {
+function FinalSeason({ season, clockMode, timeZone }: { season: SeasonView; clockMode: ClockMode; timeZone?: string }) {
   const titleId = useId();
-  const ends = seasonEnds(season.endsAtMs, season.endsAtMs, timeZone);
+  const ends = seasonEnds(season.endsAtMs, season.endsAtMs, clockMode, timeZone);
   return (
     <section className={styles.season} aria-labelledby={titleId}>
       <h3 id={titleId}>{seasonName(season.seasonId)} final standings</h3>
@@ -157,6 +158,7 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
   const ownId = useId();
   const tableId = useId();
   const pickerId = useId();
+  const clockMode = useClockMode();
   const { league, rows, own, seasons, archived } = model;
   const failed = model.status === 'failed';
   const season = model.seasonId ? seasons.find(s => s.seasonId === model.seasonId) ?? null : null;
@@ -182,7 +184,7 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
         </div>
       )}
 
-      {season && (archived ? <FinalSeason season={season} timeZone={timeZone} /> : <CurrentSeason season={season} nowMs={model.nowMs} timeZone={timeZone} />)}
+      {season && (archived ? <FinalSeason season={season} clockMode={clockMode} timeZone={timeZone} /> : <CurrentSeason season={season} nowMs={model.nowMs} clockMode={clockMode} timeZone={timeZone} />)}
 
       {own && !archived && (
         <section className={styles.own} aria-labelledby={ownId}>

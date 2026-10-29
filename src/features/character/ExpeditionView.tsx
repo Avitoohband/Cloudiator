@@ -32,6 +32,7 @@ import { ExpeditionViewport } from '../../game/ExpeditionViewport';
 import { createSceneBridge } from '../../game/bridge';
 import { lookFor } from '../../game/actors';
 import { prefersReducedMotion } from '../../game/webgl';
+import { useClockMode, type ClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import styles from './ExpeditionView.module.css';
 
@@ -69,11 +70,12 @@ const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
  * A stage's start in the activity log, shown as every slot time is (`slotTimeText` against the view's display time; Task
- * 24.0c, after Avi's 2026-10-20 decision for the activity end times): `4:20 AM`, or with the day once the display time is on
- * another local day. A start that cannot be shown (`slotTimeText` gives '') leaves the time out.
+ * 24.0c, after Avi's 2026-10-20 decision for the activity end times): `4:20 AM` or `04:20` as the device's clock setting
+ * (`clock`) asks, with the day once the display time is on another local day. A start that cannot be shown (`slotTimeText`
+ * gives '') leaves the time out.
  */
-export function StageStart({ startedAtMs, nowMs }: { startedAtMs: number; nowMs: number }) {
-  const text = slotTimeText(startedAtMs, nowMs);
+export function StageStart({ startedAtMs, nowMs, clock }: { startedAtMs: number; nowMs: number; clock: ClockMode }) {
+  const text = slotTimeText(startedAtMs, nowMs, clock);
   return text ? <time dateTime={new Date(startedAtMs).toISOString()}>{text}</time> : null;
 }
 
@@ -249,6 +251,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   const titleId = useId();
   const resultId = useId();
   const logId = useId();
+  const clockMode = useClockMode();
 
   // A new shared revision (never the first one the view sees: the entry read is fresh) may carry a published stage or
   // the owner's settled summary.
@@ -425,7 +428,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
           <Section id={logId}>Activity log</Section>
           <ol className={styles.log} aria-label="Activity log">
             {state.stages.map(stage => <li key={stage.id} aria-current={stage.id === state.current?.id ? 'step' : undefined} className={stage.id === state.current?.id ? styles.current : undefined}>
-              <StageStart startedAtMs={stage.startedAtMs} nowMs={state.displayNowMs} />
+              <StageStart startedAtMs={stage.startedAtMs} nowMs={state.displayNowMs} clock={clockMode} />
               <span className={styles.logLabel}>{stage.label}</span>
               {stage.inProgress && <span className={styles.badge}>in progress</span>}
               {stage.replay && (overCamp

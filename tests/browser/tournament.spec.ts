@@ -9,6 +9,7 @@ import { largeTournament, tournamentCampActors } from '../fixtures/tournament-bu
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
 import { closeMenu, expectOwnerShown, openMenu } from './shell-helpers';
+import { storeClock } from './slot-time';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
@@ -57,6 +58,9 @@ const tournamentFlow = {
   visibleWinnerIds: (page: Page) => page.locator('[data-winner-id]:visible').evaluateAll(els => [...new Set(els.map(e => e.getAttribute('data-winner-id')!))]),
 };
 
+// The expected times below are written in the 24-hour form (Patch A item 7: the clock setting decides, and the browser's own locale is 12-hour).
+test.beforeEach(({ context }) => storeClock(context, '24'));
+
 test('the request guard accepts the test origin on any dev port and still flags Supabase', () => {
   for (const origin of ['http://127.0.0.1:3100', 'http://127.0.0.1:3200', 'http://127.0.0.1:4173']) {
     const handlers: ((request: { url(): string }) => void)[] = [];
@@ -102,7 +106,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(card(page)).toContainText('Your bout is being fought now.');
     await tournamentFlow.openAtMinute(page, 'completed', 30);
     expect((await tournamentFlow.visibleWinnerIds(page)).sort()).toEqual(VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.revealedResult!.winnerId).sort());
-    await expect(card(page)).toContainText('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sept, 20:00 UTC; this slot has no other activity for you.');
+    await expect(card(page)).toContainText('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sep, 20:00 UTC; this slot has no other activity for you.');
     const aster = card(page).getByRole('region', { name: 'Entrants' }).getByRole('listitem').filter({ hasText: 'Aster' });
     await expect(aster).toContainText('Eliminated in the Quarterfinals · spectating');
     // The semifinals are not revealed yet: their sides are the winners already shown, their results preparing.
@@ -244,7 +248,7 @@ test.describe('tournament registration and brackets', () => {
     const shows: [TournamentKey, string, string][] = [
       ['opening', 'In progress', 'You are entered. Your first bout is revealed at Wed 7 Oct, 19:00 UTC.'],
       ['midway', 'In progress', 'Next reveal: Final, Sat 3 Oct, 19:40 UTC.'],
-      ['late', 'In progress', 'Every round is revealed. Placements settle at minute 80, Wed 30 Sept, 20:00 UTC.'],
+      ['late', 'In progress', 'Every round is revealed. Placements settle at minute 80, Wed 30 Sep, 20:00 UTC.'],
       ['completed', 'Completed', 'Your placement: 5th. Credited: +7 renown.'],
       ['pair', 'Completed', 'You are the champion of this tournament!'],
       ['insufficient', 'Not held: too few entrants', 'that entrant fought regular Arena this slot'],

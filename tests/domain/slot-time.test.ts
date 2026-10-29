@@ -2,20 +2,23 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { slotTimeText } from '../../src/features/schedule/slot-time';
+import { pinDeviceClock } from '../fixtures/clock';
 import { BuildPanel } from '../../src/features/build/BuildPanel';
 import { createDisplayClock } from '../../src/game/display-clock';
 import type { GameGateway } from '../../src/lib/api/gateway';
 import { ownerFixture } from '../fixtures/domain';
 
-// Task 23.10: a slot boundary's time, short, in the viewer's locale and zone. The zone is pinned to New York (the process's
-// own, restored afterwards) and the locale to en-US (the formatter is handed it only where the code names none), so no
-// assertion depends on the host. July 2026 is far from any daylight-saving change; the change itself is tested below.
+// Task 23.10: a slot boundary's time, short, in the viewer's zone. The zone is pinned to New York (the process's own,
+// restored afterwards) and the locale to en-US (the formatter is handed it only where the code names none: the day's words),
+// so no assertion depends on the host. July 2026 is far from any daylight-saving change; the change itself is tested below.
+// Patch A, item 7: the time of day itself is the shared formatter's, in the 12-hour or 24-hour form the device's clock setting
+// asks for (`'12'` below unless a case says otherwise); the 24-hour cases follow the 12-hour ones.
 const RealFormat = Intl.DateTimeFormat;
 const zone = process.env.TZ;
 const NBSP = '\xA0';
 /** Whitespace a line may break at: all of it but the no-break space. */
 const BREAKABLE = /[^\S\xA0]/;
-let locales: unknown[] = [];
+let calls: { locale: unknown; options?: Intl.DateTimeFormatOptions }[] = [];
 /** The locale handed to the formatter where the code names none. */
 let pinned = 'en-US';
 
@@ -27,10 +30,11 @@ beforeAll(() => {
 });
 afterAll(() => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });
 beforeEach(() => {
-  locales = [];
+  calls = [];
   pinned = 'en-US';
+  pinDeviceClock('12');
   vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (this: unknown, locale?: string | string[], options?: Intl.DateTimeFormatOptions) {
-    locales.push(locale);
+    calls.push({ locale, options });
     return new RealFormat(locale ?? pinned, options);
   } as unknown as typeof Intl.DateTimeFormat);
 });
@@ -40,7 +44,9 @@ afterEach(() => { vi.restoreAllMocks(); });
 const at = (day: number, hour: number, minute: number, second = 0, month = 6) => new Date(2026, month, day, hour, minute, second).getTime();
 const NOW = at(14, 4, 0);
 /** The text with its no-break spaces read as ordinary ones, for the cases about the wording (the cases about those spaces follow). */
-const plain = (ms: number, now: number) => slotTimeText(ms, now).replaceAll(NBSP, ' ');
+const plain = (ms: number, now: number) => slotTimeText(ms, now, '12').replaceAll(NBSP, ' ');
+/** The same in the 24-hour form. */
+const plain24 = (ms: number, now: number) => slotTimeText(ms, now, '24');
 
 describe('slotTimeText', () => {
   it('shows only the hour and minute for a time on the same local day', () => {
@@ -108,7 +114,7 @@ describe('slotTimeText', () => {
       ['a month and day', at(25, 4, 20), 'Jul 25, '],
     ];
     for (const [form, ms, before] of forms) {
-      const text = slotTimeText(ms, NOW);
+      const text = slotTimeText(ms, NOW, '12');
       expect(text, form).toBe(`${before}4:20${NBSP}AM`);
       // The time part holds no ordinary space or other breakable whitespace; what comes before it ends in an ordinary space.
       expect(text.slice(before.length), form).not.toMatch(BREAKABLE);
@@ -116,24 +122,57 @@ describe('slotTimeText', () => {
     }
     // The same through the afternoon and the end of the day, and at noon and midnight.
     for (const [hour, minute, time] of [[12, 0, '12:00'], [16, 5, '4:05'], [23, 59, '11:59'], [0, 0, '12:00']] as const) {
-      expect(slotTimeText(at(14, hour, minute), NOW)).toMatch(new RegExp(`^${time}${NBSP}[AP]M$`));
+      expect(slotTimeText(at(14, hour, minute), NOW, '12')).toMatch(new RegExp(`^${time}${NBSP}[AP]M$`));
     }
   });
 
-  it('keeps the time together in a locale that puts its day period first', () => {
-    pinned = 'ko-KR';
-    const text = slotTimeText(at(14, 16, 20), NOW);
-    expect(text).toBe(`오후${NBSP}4:20`);
-    expect(text).not.toMatch(BREAKABLE);
+  it('writes the same time in a locale that puts its day period first or writes another script', () => {
+    // The time of day is the shared formatter's, upper-case AM and PM whatever the locale; the day's words are the locale's.
+    for (const locale of ['ko-KR', 'ar-EG', 'de-DE']) {
+      pinned = locale;
+      expect(slotTimeText(at(14, 16, 20), NOW, '12'), locale).toBe(`4:20${NBSP}PM`);
+      expect(slotTimeText(at(14, 16, 20), NOW, '24'), locale).toBe('16:20');
+      expect(slotTimeText(at(17, 16, 20), NOW, '12'), locale).toMatch(new RegExp(`^\\S+ 4:20${NBSP}PM$`));
+    }
   });
 
-  it('formats in the viewer\'s own locale: the locale is never named', () => {
-    slotTimeText(at(14, 4, 20), NOW);
-    slotTimeText(at(15, 4, 20), NOW);
-    slotTimeText(at(17, 4, 20), NOW);
-    slotTimeText(at(25, 4, 20), NOW);
-    expect(locales.length).toBeGreaterThanOrEqual(4);
-    expect(locales.every(locale => locale === undefined)).toBe(true);
+  it("names the viewer's own locale for the day's words: the locale is never named there", () => {
+    slotTimeText(at(14, 4, 20), NOW, '12');
+    slotTimeText(at(15, 4, 20), NOW, '12');
+    slotTimeText(at(17, 4, 20), NOW, '12');
+    slotTimeText(at(25, 4, 20), NOW, '12');
+    const day = calls.filter(call => call.options?.weekday === 'short' || call.options?.month === 'short');
+    expect(day.length).toBeGreaterThanOrEqual(2);
+    expect(day.every(call => call.locale === undefined)).toBe(true);
+  });
+
+  describe('in the 24-hour form', () => {
+    it('writes two-digit hours, with the same day wording', () => {
+      expect(plain24(at(14, 4, 20), NOW)).toBe('04:20');
+      expect(plain24(at(14, 23, 59), NOW)).toBe('23:59');
+      expect(plain24(at(14, 12, 0), NOW)).toBe('12:00');
+      expect(plain24(at(14, 0, 0), NOW)).toBe('00:00');
+      expect(plain24(at(15, 1, 20), NOW)).toBe('tomorrow 01:20');
+      expect(plain24(at(15, 0, 1), at(14, 23, 59))).toBe('tomorrow 00:01');
+      expect(plain24(at(18, 4, 20), NOW)).toBe('Sat 04:20');
+      expect(plain24(at(20, 23, 59), at(14, 0, 0))).toBe('Mon 23:59');
+      expect(plain24(at(25, 4, 20), NOW)).toBe('Jul 25, 04:20');
+      expect(plain24(at(13, 16, 20), NOW)).toBe('Jul 13, 16:20');
+    });
+
+    it('has no space inside the time, and a space to break at before it', () => {
+      for (const ms of [at(14, 4, 20), at(15, 4, 20), at(17, 4, 20), at(25, 4, 20)]) {
+        const text = slotTimeText(ms, NOW, '24');
+        expect(text).toMatch(/(^|\s)\d{2}:\d{2}$/);
+        expect(text).not.toContain(NBSP);
+      }
+    });
+
+    it('is the same wording as the 12-hour form but for the time itself', () => {
+      for (const ms of [at(14, 16, 20), at(15, 16, 20), at(18, 16, 20), at(25, 16, 20), at(13, 16, 20)]) {
+        expect(slotTimeText(ms, NOW, '24').replace(/\d{2}:\d{2}$/, ''), String(ms)).toBe(slotTimeText(ms, NOW, '12').replace(/\d{1,2}:\d{2}\xA0[AP]M$/, ''));
+      }
+    });
   });
 
   // Final review Minor 4: a time that is not a finite number (a value missing from a read, a broken display clock) shows
@@ -142,8 +181,9 @@ describe('slotTimeText', () => {
   it('shows nothing for a time or a display time that is not a finite number', () => {
     const missing = undefined as unknown as number, nothing = null as unknown as number;
     for (const bad of [NaN, Infinity, -Infinity, missing, nothing, missing * 4_800_000, Number(missing)]) {
-      expect(slotTimeText(bad, NOW), `time ${bad}`).toBe('');
-      expect(slotTimeText(at(14, 4, 20), bad), `display time ${bad}`).toBe('');
+      expect(slotTimeText(bad, NOW, '12'), `time ${bad}`).toBe('');
+      expect(slotTimeText(at(14, 4, 20), bad, '12'), `display time ${bad}`).toBe('');
+      expect(slotTimeText(bad, NOW, '24'), `24-hour time ${bad}`).toBe('');
     }
   });
 });
@@ -161,7 +201,7 @@ describe('slot time callers', () => {
       gateway: {} as GameGateway, refresh: async () => {}, clock,
     })).replaceAll('<!-- -->', '');
     const next = Math.floor(NOW / 4_800_000) + 1;
-    expect(render(next)).toContain(`<p>Effective ${slotTimeText(next * 4_800_000, NOW)}</p>`);
+    expect(render(next)).toContain(`<p>Effective ${slotTimeText(next * 4_800_000, NOW, '12')}</p>`);
     for (const bad of [NaN, undefined as unknown as number]) {
       const html = render(bad);
       expect(html, String(bad)).toContain('Pending build');

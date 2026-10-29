@@ -43,11 +43,12 @@ import {
   TOURNAMENT_PREPARE_FAST_MS, latestTournament, nextTournament, preparingRetryDelay, processingRetryDelay, renderTournament, tournamentPreparing,
   tournamentRevealMarks, tournamentWindowAt, withTournamentLogs, type TournamentBoutState, type TournamentStageState,
 } from '../../game/tournament-stage';
+import { useClockMode } from '../../lib/clock-setting';
 import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
 import {
-  ENTRY_RULES, ENTRY_STAMINA, countdownText, creditedText, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
+  ENTRY_STAMINA, countdownText, creditedText, cutoffUtc, entryRules, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
   roundStatus, shapeText, statusDetail, statusText, timeWithUtc, victoryText, viewerText,
 } from './tournament-text';
 import styles from './TournamentPanel.module.css';
@@ -85,16 +86,17 @@ const RETRY_MS = 30_000;
 
 /** The next tournament and its countdown, or the one running now and then the next. */
 export function TournamentScheduleView({ now, timeZone }: { now: number; timeZone?: string }) {
+  const clockMode = useClockMode();
   const running = tournamentWindowAt(now);
   const next = nextTournament(now);
   return (
     <section className={styles.schedule} aria-label="Tournament schedule">
-      {running && <p className={styles.running}>A tournament is running now: it started {timeWithUtc(running.startsAtMs, timeZone)} and settles at minute 80.</p>}
+      {running && <p className={styles.running}>A tournament is running now: it started {timeWithUtc(running.startsAtMs, clockMode, timeZone)} and settles at minute 80.</p>}
       <dl>
-        <div><dt>Next tournament</dt><dd>{timeWithUtc(next.startsAtMs, timeZone)}</dd></div>
+        <div><dt>Next tournament</dt><dd>{timeWithUtc(next.startsAtMs, clockMode, timeZone)}</dd></div>
         <div><dt>Starts in</dt><dd className={styles.countdown}>{countdownText(next.countdownMs)}</dd></div>
       </dl>
-      <p className="muted">Every Wednesday and Saturday at 18:40 UTC, for one 80-minute evening slot. Times show in your time zone; daylight saving never moves the UTC time.</p>
+      <p className="muted">Every Wednesday and Saturday at {cutoffUtc(clockMode)}, for one 80-minute evening slot. Times show in your time zone; daylight saving never moves the UTC time.</p>
     </section>
   );
 }
@@ -103,7 +105,8 @@ export type RegistrationModel = {
   /** The owner's saved setting; null without a gladiator. */
   optIn: boolean | null;
   busy: boolean;
-  message: { kind: 'status' | 'alert'; text: string } | null;
+  /** `applies` ends the message with the note on which tournament a change applies to, which is written as the page shows it (the clock setting can change). */
+  message: { kind: 'status' | 'alert'; text: string; applies?: boolean } | null;
   displayNowMs: number;
   timeZone?: string;
   owner: { evening: OwnerState['schedule']['evening']; stamina: number } | null;
@@ -112,7 +115,8 @@ export type RegistrationModel = {
 /** The automatic-entry checkbox, the rules and the owner's own checklist. The box always shows the saved setting. */
 export function RegistrationView({ model, onToggle }: { model: RegistrationModel; onToggle(): void }) {
   const titleId = useId();
-  const note = registrationNote(model.displayNowMs, model.timeZone);
+  const clockMode = useClockMode();
+  const note = registrationNote(model.displayNowMs, clockMode, model.timeZone);
   return (
     <section className={styles.registration} aria-labelledby={titleId}>
       <h3 id={titleId}>Registration</h3>
@@ -123,7 +127,7 @@ export function RegistrationView({ model, onToggle }: { model: RegistrationModel
       {model.optIn === null && <p className="muted">Create a gladiator to register for tournaments.</p>}
       {note.fixed && <p className={styles.late}>{note.fixed}</p>}
       <p className="muted">{note.applies}</p>
-      {model.message && <p role={model.message.kind} className={model.message.kind === 'alert' ? styles.alert : styles.message}>{model.message.text}</p>}
+      {model.message && <p role={model.message.kind} className={model.message.kind === 'alert' ? styles.alert : styles.message}>{model.message.applies ? `${model.message.text} ${note.applies}` : model.message.text}</p>}
       {model.owner && model.optIn !== null && (
         <dl className={styles.checklist} aria-label="Your entry checklist">
           <div><dt>Automatic entry</dt><dd>{model.optIn ? 'On' : 'Off'}</dd></div>
@@ -131,7 +135,7 @@ export function RegistrationView({ model, onToggle }: { model: RegistrationModel
           <div><dt>Stamina now</dt><dd>{model.owner.stamina} ({ENTRY_STAMINA} needed at the cutoff)</dd></div>
         </dl>
       )}
-      <ul className={styles.rules}>{ENTRY_RULES.map(rule => <li key={rule}>{rule}</li>)}</ul>
+      <ul className={styles.rules}>{entryRules(clockMode).map(rule => <li key={rule}>{rule}</li>)}</ul>
     </section>
   );
 }
@@ -185,12 +189,13 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, 
   onRetryReplay?: () => void;
 }) {
   const { state, timeZone } = model;
+  const clockMode = useClockMode();
   const titleId = useId();
   const tabsId = useId();
   const replayId = useId();
   const round = state.rounds.find(r => r.round === model.round) ?? state.rounds[0] ?? null;
   const champion = state.entrants.find(e => e.gladiatorId === state.championId) ?? null;
-  const own = viewerText(state, !!model.viewerId, timeZone);
+  const own = viewerText(state, !!model.viewerId, clockMode, timeZone);
   const replay = model.replayBoutId ? state.rounds.flatMap(r => r.bouts).find(b => b.id === model.replayBoutId && b.status === 'decided') ?? null : null;
   const replayRound = replay ? state.rounds.find(r => r.round === replay.round)! : null;
   const kept = tournamentReplayKept(state.endsAtMs, state.displayNowMs);
@@ -209,11 +214,11 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, 
   return (
     <article className={styles.card} aria-labelledby={titleId} data-status={state.status}>
       <header className={styles.header}>
-        <p className="eyebrow">{leagueName(state.league)} league · {timeWithUtc(state.startsAtMs, timeZone)}</p>
+        <p className="eyebrow">{leagueName(state.league)} league · {timeWithUtc(state.startsAtMs, clockMode, timeZone)}</p>
         <h4 id={titleId}>{leagueName(state.league)} tournament</h4>
       </header>
       <p className={styles.status} role="status">{statusText(state.status)}</p>
-      <p className={styles.detail}>{statusDetail(state, timeZone)}</p>
+      <p className={styles.detail}>{statusDetail(state, clockMode, timeZone)}</p>
       {own && <p className={styles.own}>{own}</p>}
       {state.viewer.placement && (
         <p className={styles.own}>Your placement: {ordinal(state.viewer.placement.place)}.{model.credited ? ` Credited: ${creditedText(model.credited)}.` : ''}</p>
@@ -243,7 +248,7 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, 
           </div>
           <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${round.round}`} className={styles.panel}>
             <p className={styles.roundStatus}>{roundStatus(round)}</p>
-            {roundNote(round, timeZone) && <p className="muted">{roundNote(round, timeZone)}</p>}
+            {roundNote(round, clockMode, timeZone) && <p className="muted">{roundNote(round, clockMode, timeZone)}</p>}
             {!kept && <p className="muted">{REPLAYS_GONE}</p>}
             <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} />)}</ul>
           </div>
@@ -573,6 +578,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   const titleId = useId();
   const bracketsId = useId();
   const samplesId = useId();
+  const clockMode = useClockMode();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => clock.subscribe(() => setTime(readClock(clock))), [clock]);
@@ -610,7 +616,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
       if (result.ok) {
         attempt.current = null;
         await refresh?.();
-        if (mounted.current) setMessage({ kind: 'status', text: `Saved. ${registrationNote(clock.now()).applies}` });
+        if (mounted.current) setMessage({ kind: 'status', text: 'Saved.', applies: true });
         return;
       }
       if (!['processing', 'unavailable', 'rate-limited'].includes(result.code)) attempt.current = null;
@@ -641,7 +647,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
     <section className={styles.tournaments} aria-labelledby={titleId}>
       <div className="section-title">
         <div><p className="eyebrow">TOURNAMENTS</p><h2 id={titleId}>Tournaments</h2></div>
-        <span className="tag">Wed &amp; Sat · 18:40 UTC</span>
+        <span className="tag">Wed &amp; Sat · {cutoffUtc(clockMode)}</span>
       </div>
       <TournamentScheduleView now={now} />
       {viewer === 'player' && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now,

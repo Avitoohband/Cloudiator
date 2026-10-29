@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { StageStart } from '@/features/character/ExpeditionView';
 import { slotTimeText } from '@/features/schedule/slot-time';
+import type { ClockMode } from '@/lib/clock-setting';
 
 // Task 24.0c (consistent with Avi's 2026-10-20 decision, plan question 14): each stage's start in the expedition's activity log
 // is shown as every slot time is (`slotTimeText` against the view's own display time, Task 23.10), never in the fixed 'en'
@@ -23,21 +24,31 @@ afterAll(() => { if (zone === undefined) delete process.env.TZ; else process.env
 
 /** A local wall-clock time (the viewer's time zone, as the view shows it). */
 const local = (day: number, hour: number, minute: number) => new Date(2026, 9, day, hour, minute).getTime();
-const render = (startedAtMs: number, nowMs: number) => renderToStaticMarkup(createElement(StageStart, { startedAtMs, nowMs }));
+const render = (startedAtMs: number, nowMs: number, clock: ClockMode = '12') => renderToStaticMarkup(createElement(StageStart, { startedAtMs, nowMs, clock }));
 
 describe('a stage start in the expedition activity log', () => {
   it('is the short slot time against the display time, with its exact instant as the machine-readable time', () => {
     const start = local(20, 4, 20), now = local(20, 4, 47);
-    expect(render(start, now)).toBe(`<time dateTime="${new Date(start).toISOString()}">${slotTimeText(start, now)}</time>`);
-    expect(slotTimeText(start, now)).toMatch(/^4:20\sAM$/);
+    expect(render(start, now)).toBe(`<time dateTime="${new Date(start).toISOString()}">${slotTimeText(start, now, '12')}</time>`);
+    expect(slotTimeText(start, now, '12')).toMatch(/^4:20\sAM$/);
     // The shown text only (the markup's `dateTime` is the instant in UTC, which holds the digits in some zones): not `04:20 AM`.
     const shown = render(start, now).replace(/<[^>]*>/g, '');
-    expect(shown).toBe(slotTimeText(start, now));
+    expect(shown).toBe(slotTimeText(start, now, '12'));
     expect(shown).not.toContain('04:20');
     // An expedition that set out before local midnight names that day once the display time is past it.
     const evening = local(19, 23, 50), afterMidnight = local(20, 0, 30);
-    expect(render(evening, afterMidnight)).toContain(`>${slotTimeText(evening, afterMidnight)}<`);
-    expect(slotTimeText(evening, afterMidnight)).toMatch(/^\p{L}+ 19, 11:50\sPM$/u);
+    expect(render(evening, afterMidnight)).toContain(`>${slotTimeText(evening, afterMidnight, '12')}<`);
+    expect(slotTimeText(evening, afterMidnight, '12')).toMatch(/^\p{L}+ 19, 11:50\sPM$/u);
+  });
+
+  // Patch A, item 7: the clock setting decides the form of the time; the day words and the instant are unchanged.
+  it('is written in the 24-hour form when the clock setting asks for it', () => {
+    const start = local(20, 4, 20), now = local(20, 4, 47);
+    expect(render(start, now, '24')).toBe(`<time dateTime="${new Date(start).toISOString()}">04:20</time>`);
+    expect(render(start, now, '24')).toBe(`<time dateTime="${new Date(start).toISOString()}">${slotTimeText(start, now, '24')}</time>`);
+    const evening = local(19, 23, 50), afterMidnight = local(20, 0, 30);
+    expect(render(evening, afterMidnight, '24').replace(/<[^>]*>/g, '')).toMatch(/^\p{L}+ 19, 23:50$/u);
+    expect(render(local(20, 4, 20), Number.NaN, '24')).toBe('');
   });
 
   it('leaves the time out when the start or the display time is not a finite number', () => {

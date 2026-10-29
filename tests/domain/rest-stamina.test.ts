@@ -18,9 +18,9 @@ const evening = EVENING_SLOT * SLOT + 25 * 60_000;
 const BASE: ActivityCosts = { training: 20, expedition: 30, arena: 25, tournament: 25, rest: 0 };
 const day: Schedule = { morning: { kind: 'training' }, afternoon: { kind: 'expedition', expeditionId: 'woodland' }, evening: { kind: 'rest' } };
 
-/** An owner at `stamina` (of 104) whose current activity is `kind`, in the slot `slot` (the one already paid). */
-function owner(stamina: number, kind: 'training' | 'rest' | 'expedition' = 'training', slot = MORNING_SLOT): Pick<OwnerState, 'stamina' | 'currentActivity' | 'pendingBuild'> {
-  return { stamina: { current: stamina, maximum: 104 }, pendingBuild: null,
+/** An owner at `stamina` (of 104) whose current activity is `kind`, in the slot `slot` (the one already paid and processed). */
+function owner(stamina: number, kind: 'training' | 'rest' | 'expedition' = 'training', slot = MORNING_SLOT): Pick<OwnerState, 'stamina' | 'currentActivity' | 'pendingBuild' | 'processedSlotIndex'> {
+  return { stamina: { current: stamina, maximum: 104 }, pendingBuild: null, processedSlotIndex: slot,
     currentActivity: { id: '9fce3cd5-e831-4a66-8ca1-16b4576b1499', kind, status: 'active', startsAtMs: slot * SLOT, endsAtMs: (slot + 1) * SLOT, label: 'Running' } };
 }
 const pendingAt = (effectiveSlotIndex: number): NonNullable<OwnerState['pendingBuild']> =>
@@ -133,6 +133,32 @@ describe('projectRest', () => {
     for (const nowMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
       expect(projectRest({ phase: 'evening', nowMs, owner: owner(74, 'training'), day, costs: BASE }), String(nowMs)).toBeNull();
     }
+  });
+});
+
+// The server debits a slot's activity (and refills a Rest) in one transaction at the boundary, and sets `processedSlotIndex` to that slot in
+// it; the display clock moves to the slot at the cutoff, about one to two and a half minutes earlier. Until the owner read says the slot is
+// processed, its stamina is not the running part's paid stamina, so no exact number is told (the same `behind` test as `activityStatus`).
+describe('a slot the server has not processed yet', () => {
+  const wait = (processedSlotIndex: number) => ({ ...owner(74, 'training'), processedSlotIndex });
+  it('gives no number while the slot the clock is in is not processed, and the number once it is', () => {
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT - 1), day, costs: BASE })).toBeNull();
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT), day, costs: BASE })).toEqual({ before: 44, maximum: 104 });
+    expect(restHint(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT - 1), day, costs: BASE }))).toBe('Refills stamina to full. Costs nothing.');
+  });
+  it('is behind by any number of slots, and never when the server is ahead of the clock', () => {
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT - 40), day, costs: BASE })).toBeNull();
+    // A display clock that lags the server (held or not yet synced) is not a slot waiting to be processed.
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT + 1), day, costs: BASE })).toEqual({ before: 44, maximum: 104 });
+  });
+  it('follows the clock into the next slot: the afternoon reads nothing until the owner read has caught up', () => {
+    const afternoon = AFTERNOON_SLOT * SLOT + 25 * 60_000;
+    expect(projectRest({ phase: 'evening', nowMs: afternoon, owner: owner(74, 'training', MORNING_SLOT), day, costs: BASE })).toBeNull();
+    expect(projectRest({ phase: 'evening', nowMs: afternoon, owner: owner(44, 'expedition', AFTERNOON_SLOT), day, costs: BASE })).toEqual({ before: 44, maximum: 104 });
+  });
+  it('says nothing of the running Rest refill either', () => {
+    // A running Rest refills at the boundary that ends it; before that boundary is processed the clock is already in the next slot.
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: { ...owner(50, 'rest', MORNING_SLOT - 1) }, day, costs: BASE })).toBeNull();
   });
 });
 

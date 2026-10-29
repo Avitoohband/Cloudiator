@@ -1,5 +1,6 @@
 // What a Rest gives back (Patch A item 6). The rule is the server's: a Rest refills stamina to the maximum when its slot ends, and an
-// activity is paid when its slot starts (`private.boundary_publish`: the debit, then "active"). So a Rest's gain is the maximum minus the
+// activity is paid when the boundary into its slot is processed (`private.boundary_start`: the debit, "active" and `processedSlotIndex`, in one
+// transaction, one to two and a half minutes after the slot's cutoff). So a Rest's gain is the maximum minus the
 // stamina it finds, which the Schedule projects from the owner's stamina and the draft day, and My gladiator reads from the stamina now.
 // Pure, so the panels only lay the words out. The costs come from `RULES_V1` and the current build's overload through `activityCost`,
 // as the server's boundary (`prepareActivityV1`) works them out; nothing here restates a number.
@@ -52,10 +53,11 @@ export function activityCosts(owner: Pick<OwnerState, 'currentBuild' | 'inventor
  * - Start from `owner.stamina.current`, or from the maximum when the running activity is a Rest (it refills when its slot ends).
  * - A Rest sets the maximum; any other part subtracts its cost (`costs[kind]`: Arena's for the evening, which a tournament costs the
  *   same), or, when that is more than what is left, becomes a Rest (the boundary's "Resting (not enough stamina)") and refills to the maximum.
- * - Null when `costs` is null, a time or stamina is not a usable number, or the owner's pending build takes effect at or before the
- *   Rest's slot (the walk would cost the new build's parts, and the Rest would refill its maximum).
+ * - Null when `costs` is null, a time or stamina is not a usable number, the owner's pending build takes effect at or before the
+ *   Rest's slot (the walk would cost the new build's parts, and the Rest would refill its maximum), or the slot the clock is in is not
+ *   processed yet (`owner.processedSlotIndex` is before it: the stamina read does not include its debit or refill).
  */
-export function projectRest(input: { phase: Phase; nowMs: number; owner: Pick<OwnerState, 'stamina' | 'currentActivity' | 'pendingBuild'>; day: Schedule; costs: ActivityCosts | null }): RestGain {
+export function projectRest(input: { phase: Phase; nowMs: number; owner: Pick<OwnerState, 'stamina' | 'currentActivity' | 'pendingBuild' | 'processedSlotIndex'>; day: Schedule; costs: ActivityCosts | null }): RestGain {
   const { phase, nowMs, owner, day, costs } = input;
   if (!costs || !known(owner) || !usable(nowMs)) return null;
   let running: number, target: number;
@@ -64,6 +66,11 @@ export function projectRest(input: { phase: Phase; nowMs: number; owner: Pick<Ow
     target = nextPhaseStart(phase, Math.floor(nowMs)) / SLOT_MS;
   } catch { return null; }
   if (owner.pendingBuild && owner.pendingBuild.effectiveSlotIndex <= target) return null;
+  // The clock moves into a slot at its cutoff, but the server debits that slot's activity (and refills a Rest) only when it processes the
+  // boundary, one to two and a half minutes later, setting `processedSlotIndex` in the same transaction. Until the owner read says so, its
+  // stamina is not the running part's paid stamina, and no exact number can be told (`activityStatus`'s `behind` test; `<`, so a clock that
+  // lags the server is not a slot waiting to be processed).
+  if (owner.processedSlotIndex < running) return null;
   const { maximum } = owner.stamina;
   let stamina = owner.currentActivity?.kind === 'rest' ? maximum : owner.stamina.current;
   for (let index = running + 1; index < target; index++) {

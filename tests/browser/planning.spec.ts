@@ -384,8 +384,10 @@ test.describe('what a Rest gives back', () => {
     state.currentActivity = { ...state.currentActivity!, kind: 'training', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
     more?.(state);
   };
-  async function openAtMorning(page: Page, context: BrowserContext, stamina: number, more?: (state: OwnerState) => void) {
+  /** Opens the Schedule with the clock held in the morning; `processedSlotIndex` is the slot the owner read says the server has processed (the real current one when left out). */
+  async function openAtMorning(page: Page, context: BrowserContext, stamina: number, more?: (state: OwnerState) => void, processedSlotIndex?: number) {
     const flow = await planningFlow(context, rester(stamina, more));
+    if (processedSlotIndex !== undefined) flow.state().processedSlotIndex = processedSlotIndex;
     await page.goto('/game/');
     const schedule = await openMenu(page, 'Schedule');
     await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
@@ -471,6 +473,24 @@ test.describe('what a Rest gives back', () => {
     await page.getByLabel('afternoon activity').selectOption('rest');
     await expect(hintOf(page, 'afternoon')).toHaveText('Refills stamina to full: +30 (74 → 104). Costs nothing.');
     await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
+  });
+
+  // The server debits a slot's activity at its boundary, in the same transaction that sets `processedSlotIndex`; the clock moves to the slot at
+  // the cutoff, a minute or two earlier. Until the owner read says the slot is processed, the stamina it shows is not the paid one.
+  test('gives no number while the slot the clock is in is not processed yet, and the number once the owner read says it is', async ({ page, context }) => {
+    const { flow } = await openAtMorning(page, context, 74, undefined, MORNING_SLOT - 1);
+    await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
+    // The other choices keep their own hints, and a draft Rest has no number either.
+    await expect(hintOf(page, 'morning')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+    await page.getByLabel('afternoon activity').selectOption('rest');
+    await expect(hintOf(page, 'afternoon')).toHaveText(NO_NUMBER);
+    await page.getByLabel('afternoon activity').selectOption('training');
+    // The boundary is processed: the background owner read brings processedSlotIndex (and, in the real world, the paid stamina) and the number comes by itself.
+    flow.state().processedSlotIndex = MORNING_SLOT;
+    flow.publish();
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +50 (54 → 104). Costs nothing.');
+    expect(flow.commands).toEqual([]);
   });
 
   test('gives its number to a Rest that comes before the pending build takes effect', async ({ page, context }) => {

@@ -72,7 +72,8 @@ import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
-import { PatchNotice, reloadPage, useModalOpen } from './PatchNotice';
+import { PatchNotice, reloadPage } from './PatchNotice';
+import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, type MenuId } from './menus';
 import { COMPACT_QUERY, railReducer, type RailEvent, type RailState } from './rail-reveal';
@@ -113,8 +114,6 @@ const subscribeCompact = (onChange: () => void) => {
 };
 const readCompact = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
 
-/** Whether a modal dialog is open (`:modal`, Safari 15.6+, within the project's Safari 16.4 floor). */
-const modalOpen = () => document.querySelector('dialog:modal') !== null;
 /** Gives the keyboard back to the camp view (the menus hand the view to the camp). */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 /**

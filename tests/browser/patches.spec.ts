@@ -54,16 +54,19 @@ const disclosure = (panel: Locator, number: string) => panel.getByRole('button',
 const notice = (page: Page) => page.getByRole('status').filter({ hasText: /patch is out|is out/i }).filter({ has: page.getByRole('button', { name: 'Reload', exact: true }) });
 /**
  * The server records a newer patch; the page reads it with its next revision read (a window focus starts one). The camp's world is
- * loaded first, so no refresh is in flight: a focus during one joins it, and its revision read was sent before the change.
+ * loaded first, so no refresh is in flight: a focus during one joins it, and its revision read was sent before the change. It returns
+ * once that read has landed in the sync (the shell's test hook counts the refreshes that land) and the shell has rendered its patch (11b
+ * review: a fixed wait could pass before the read landed, which a case that expects no change would not notice).
  */
 async function serverHas(page: Page, live: LiveTransport, latest: string | null) {
   await page.waitForFunction(() => window.__cloudiatorCamp?.world()?.revision === 'patches-1', null, { timeout: 45_000 });
   live.setLatestPatch(latest);
-  const before = live.count('world_revision');
+  const landed = await page.evaluate(() => window.__cloudiatorShell!.syncs());
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect.poll(() => live.count('world_revision')).toBeGreaterThan(before);
-  // The read has landed once a second focus read is not needed: give React its render.
-  await page.waitForTimeout(300);
+  await page.waitForFunction(([before, patch]) => window.__cloudiatorShell!.syncs() > (before as number) && window.__cloudiatorShell!.latestPatch() === patch,
+    [landed, latest] as const, { timeout: 15_000 });
+  // And one more frame for the commit's effects.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 async function openHistoryFromMenu(page: Page) {
   const menu = await openChipMenu(page);
@@ -248,8 +251,9 @@ test.describe('patch numbers in live mode', () => {
     await expect(notice(page)).toBeVisible();
     const menu = await openChipMenu(page);
     const behind = menu.locator('[data-patch-behind]');
-    // The open menu offers Reload itself: the notice under it steps aside (the menu's glass would show it through).
+    // The open menu offers Reload itself: the notice under it steps aside (the menu's glass would show it through), its controls with it.
     await expect(notice(page)).toHaveCount(0);
+    await expect(page.locator('[data-patch-notice] button').first()).toBeHidden();
     await expect(behind).toContainText('Patch 1.5 is out');
     await expect(behind.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
     await expectNamedControls(menu, 'the account menu while behind');
@@ -268,6 +272,26 @@ test.describe('patch numbers in live mode', () => {
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
     await expect(notice(page)).toBeVisible();
+  });
+
+  test('announces a patch that comes out while the menu is open, without drawing the notice over it', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const live = await player(page);
+    await openLive(page);
+    const menu = await openChipMenu(page);
+    await serverHas(page, live, '1.5');
+    await expect(menu.locator('[data-patch-behind]')).toContainText('Patch 1.5 is out');
+    // The live region holds the words (a screen reader hears them now), drawn nowhere and with no control to reach under the menu.
+    const region = page.getByRole('status').filter({ hasText: 'Patch 1.5' });
+    await expect(region).toHaveCount(1);
+    const box = (await region.boundingBox())!;
+    expect(box.width * box.height).toBeLessThanOrEqual(1);
+    await expect(page.locator('[data-patch-notice] button')).toHaveCount(2);
+    for (const button of await page.locator('[data-patch-notice] button').all()) await expect(button).toBeHidden();
+    // Closed, the notice shows with its controls.
+    await chipToggle(page).click();
+    await expect(notice(page)).toBeVisible();
+    expect((await notice(page).boundingBox())!.width).toBeGreaterThan(100);
   });
 
   test('reads older patches 20 at a time', async ({ page }) => {

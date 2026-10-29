@@ -56,7 +56,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const draftVersion = useRef(owner.buildVersion);
   /** The class and points the draft's floor was taken from (`fixedKey`): the current build moves without a new build version when the boundary applies a pending build. */
   const draftFloor = useRef(fixedKey(owner.currentBuild));
-  const reviewId = useId();
+  const reviewId = useId(), respecId = useId();
   // A command sent by keyboard whose control went away (Cancel pending build removes its section) gives the focus to its
   // outcome, never to <body>; a pointer command moves nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
@@ -94,7 +94,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   function update(next: BuildInput, note = '') { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote(note); }
   /**
    * A typed or stepped number for one attribute: raised to the current build's value when below it, capped at what is left when
-   * above, with a status line saying which. Only typing can go below (− stops at the floor); +5 may ask past the cap, but lands on
+   * above, with a status line saying which. Only typing can go below (the build step has no −); +5 may ask past the cap, but lands on
    * it with no line (the counter says it, points hotfix 2026-10-29). So a line comes after typing, when the field has had the
    * focus and `heldAtFocus` holds what it started from.
    */
@@ -145,10 +145,12 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       <fieldset disabled={busy}><legend>Attribute points · {owner.progression.earnedAttributePoints} earned</legend>
         <p className="build-counter" role="status" data-done={left === 0}>{left === 0 ? `All ${earned} spent` : `${left} of ${earned} left`}</p>
         <div className="build-points">{attributes.map(key => { const floor = owner.currentBuild.allocations[key], value = draft.allocation[key];
-          return <PointsStepper key={key} label={key} name={title(key)} value={value} floor={floor} cap={Math.max(floor, value + left)} fieldProps={reviewed(pointsInvalid(key))}
+          return <PointsStepper key={key} label={key} name={title(key)} value={value} floor={floor} cap={Math.max(floor, value + left)} minus={false} fieldProps={reviewed(pointsInvalid(key))}
             onFocus={() => { heldAtFocus.current[key] = value; }} onChange={(wanted, source) => changePoints(key, wanted, source)} />; })}</div>
         <p className="build-points-note" role="status">{pointsNote}</p>
         <p>{POINTS_NOTE}</p>
+        {/* Respec, a paid option to come (Avi, change round 1): shown gray and aria-disabled with the line that says so; it does nothing. */}
+        <div className="build-respec"><button type="button" aria-disabled="true" aria-describedby={respecId}>Respec</button><span id={respecId}>Coming later as a paid option</span></div>
       </fieldset>
       <fieldset disabled={busy}><legend>Equipment</legend>
         {slots.map(slot => <label key={slot}>{slot}<select value={draft.equipment[slot] ?? ''} disabled={slot === 'offHand' && twoHands} {...reviewed(equipmentInvalid)} onChange={e => {

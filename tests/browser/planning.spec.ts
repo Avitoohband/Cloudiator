@@ -236,7 +236,6 @@ test('types over a build point after a tap or click, waits for Tab out of range,
   const lines = build.getByText(/can take at most|can't go below|No points left/);
   const add = build.getByRole('button', { name: 'Add a point to Strength', exact: true });
   const addFive = build.getByRole('button', { name: 'Add 5 points to Strength', exact: true });
-  const remove = build.getByRole('button', { name: 'Remove a point from Strength', exact: true });
   await expect(counter).toHaveText('3 of 12 left');
   // 1. The tap (or click) selects the 4, so the 5 replaces it and is applied at once.
   await press(testInfo, strength);
@@ -289,14 +288,14 @@ test('types over a build point after a tap or click, waits for Tab out of range,
   await expect(build.getByRole('button', { name: 'Add 5 points to Agility', exact: true })).toHaveAttribute('aria-disabled', 'true');
   await addFive.click({ force: true });
   await expect(strength).toHaveValue('7');
-  // 6. − takes them back down to the saved 4, and stops there.
-  await expect(remove).not.toHaveAttribute('aria-disabled', 'true');
-  for (let i = 0; i < 3; i++) await remove.click();
+  // 6. No − in the build step: points can't be taken back, respec comes later as a paid option (Avi, change round 1). Typing still
+  // fixes an unqueued +5, down to the saved 4.
+  await expect(build.getByRole('button', { name: /^Remove a point from/ })).toHaveCount(0);
+  await strength.fill('4');
+  await page.keyboard.press('Tab');
   await expect(strength).toHaveValue('4');
   await expect(counter).toHaveText('3 of 12 left');
-  await expect(remove).toHaveAttribute('aria-disabled', 'true');
-  await remove.click({ force: true });
-  await expect(strength).toHaveValue('4');
+  await expect(lines).toHaveCount(0);
   await expect(add).not.toHaveAttribute('aria-disabled', 'true');
   // Enter commits a waiting number and does not queue the build; ArrowUp still steps.
   await strength.fill('99');
@@ -345,9 +344,48 @@ test('fits the build points on a 360 x 740 phone: no sideways scroll, 44 px cont
   await reviewShot(page, testInfo, 'points-build-wide');
   await page.setViewportSize({ width: 360, height: 740 });
   await page.waitForTimeout(500);
-  await expectPointsFit(page, group, ['strength', 'agility', 'vitality', 'endurance', 'precision'], ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision']);
+  await expectPointsFit(page, group, ['strength', 'agility', 'vitality', 'endurance', 'precision'], ['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision'], { minus: false });
+  // The field, +1 and +5 for each attribute, then Respec; it too fits the phone and is a 44 px target.
+  expect(await group.locator('button, input').count()).toBe(5 * 3 + 1);
+  const respec = (await group.getByRole('button', { name: 'Respec', exact: true }).boundingBox())!, area = (await group.boundingBox())!;
+  expect(respec.x >= area.x && respec.x + respec.width <= area.x + area.width && respec.height >= 44 && respec.width >= 44, JSON.stringify(respec)).toBe(true);
   await group.scrollIntoViewIfNeeded();
   await reviewShot(page, testInfo, 'points-build-360');
+  await group.getByRole('button', { name: 'Respec', exact: true }).scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'points-build-360-respec');
+});
+
+test('shows Respec as a paid option to come: gray, aria-disabled, described, and pressing it does nothing', async ({ page, context }) => {
+  // Avi, change round 1 (2026-10-29): "No option for take back points for now, only respec the future with real money. So you can add
+  // a respec button in gray or something, like it's disabled, so people will know that it is a feature that should come in the future."
+  const flow = await planningFlow(context, levelled);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  const group = build.getByRole('group', { name: /^Attribute points/ });
+  const respec = group.getByRole('button', { name: 'Respec', exact: true });
+  await expect(respec).toBeVisible();
+  await expect(respec).toHaveText('Respec');
+  await expect(respec).toHaveAttribute('aria-disabled', 'true');
+  expect(await respec.evaluate(el => (el as HTMLButtonElement).disabled), 'focusable, not disabled').toBe(false);
+  await expect(respec).toHaveAccessibleDescription('Coming later as a paid option');
+  await expect(group.getByText('Coming later as a paid option', { exact: true })).toBeVisible();
+  expect(await respec.evaluate(el => getComputedStyle(el).cursor)).toBe('not-allowed');
+  const box = (await respec.boundingBox())!;
+  expect(box.width >= 44 && box.height >= 44, JSON.stringify(box)).toBe(true);
+  // Pressing it, by pointer or by keyboard, sends nothing and changes nothing on the form.
+  const form = () => build.evaluate(el => `${(el as HTMLElement).innerText}|${[...el.querySelectorAll('input, select')].map(field => (field as HTMLInputElement).value).join(',')}`);
+  const before = await form();
+  await respec.click({ force: true });
+  await respec.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(500);
+  await expect(respec).toBeFocused();
+  expect(await form()).toBe(before);
+  await expect(build.getByRole('status').filter({ hasText: /can take at most|can't go below|No points left|Build queued/ })).toHaveCount(0);
+  await expect(build.getByRole('alert')).toHaveCount(0);
+  expect(flow.commands).toHaveLength(0);
 });
 
 test('counts the pending build against the points earned, and can still cancel it', async ({ page, context }) => {

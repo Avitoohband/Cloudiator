@@ -206,9 +206,10 @@ export const noHorizontalScroll = (page: Page) => page.evaluate(() => document.d
 /**
  * The attribute points fit the screen (points hotfix, 2026-10-29): no sideways scroll, and each row (its label, its field and its
  * −, +1 and +5) lies whole inside `group`, below the row before it, with every button at least 44 x 44 px. `fields` are the
- * fields' accessible names and `names` the title-case names the buttons use, in the same order.
+ * fields' accessible names and `names` the title-case names the buttons use, in the same order. `minus: false` is the build step,
+ * which has no − (points can't be taken back, Avi's change round 1).
  */
-export async function expectPointsFit(page: Page, group: Locator, fields: string[], names: string[]) {
+export async function expectPointsFit(page: Page, group: Locator, fields: string[], names: string[], { minus = true } = {}) {
   expect(await noHorizontalScroll(page), 'the page does not scroll sideways').toBe(true);
   const area = (await group.boundingBox())!;
   const inside = (box: { x: number; width: number }, what: string) => {
@@ -218,7 +219,8 @@ export async function expectPointsFit(page: Page, group: Locator, fields: string
   let above = -Infinity;
   for (const [index, name] of names.entries()) {
     const field = group.getByRole('spinbutton', { name: fields[index], exact: true });
-    const buttons = ['Remove a point from', 'Add a point to', 'Add 5 points to'].map(verb => group.getByRole('button', { name: `${verb} ${name}`, exact: true }));
+    const verbs = [...(minus ? ['Remove a point from'] : []), 'Add a point to', 'Add 5 points to'];
+    const buttons = verbs.map(verb => group.getByRole('button', { name: `${verb} ${name}`, exact: true }));
     let top = Infinity, bottom = -Infinity;
     const label = await field.evaluate(el => {
       const label = (el as HTMLInputElement).labels?.[0];
@@ -233,7 +235,7 @@ export async function expectPointsFit(page: Page, group: Locator, fields: string
     for (const [i, control] of [field, ...buttons].entries()) {
       await expect(control).toBeVisible();
       const box = (await control.boundingBox())!;
-      const what = i === 0 ? `${name}'s field` : `${name}'s ${['−', '+1', '+5'][i - 1]}`;
+      const what = i === 0 ? `${name}'s field` : `${name}'s ${verbs[i - 1]}`;
       inside(box, what);
       expect(box.height, `${what} is 44 px tall`).toBeGreaterThanOrEqual(44 - 0.5);
       if (i > 0) expect(box.width, `${what} is 44 px wide`).toBeGreaterThanOrEqual(44 - 0.5);

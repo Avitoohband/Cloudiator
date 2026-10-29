@@ -97,6 +97,10 @@ main[tabindex="-1"]:focus { outline: none; }
 /* The build step's points: one row per attribute (PointsStepper), as in the creation dialog (points hotfix, 2026-10-29). */
 .build-points { display: grid; }
 .build-points > div { padding: .5rem 0; border-top: 1px solid var(--line); }
+/* Respec, a paid option to come (Avi, change round 1): gray like an unavailable stepper (6:1 on its fill), focusable, no hover. */
+.build-respec { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin: .75rem 0 0; }
+.planning-form .build-respec button { min-width: 44px; border: 1px dashed var(--field-line); border-radius: 8px; background: #111b2d; color: #8d99b0; font-weight: 700; cursor: not-allowed; }
+.build-respec span { color: var(--muted); font-size: .8rem; }
 /* The build step's points counter and status line (2026-10-28), as the creation dialog's (CreateCharacter.module.css .counter, .capped). */
 .build-counter { display: inline-block; margin: 0 0 .5rem; padding: .3rem .8rem; border: 1px solid var(--gold); border-radius: 999px; background: #3a3020; color: var(--gold); font-size: .9rem; font-weight: 800; white-space: nowrap; }
 .build-counter[data-done="true"] { border-color: #4fb58a; background: #1f4a3a; color: #9be3c0; }

@@ -2,8 +2,9 @@
 
 // One attribute's points, in the creation dialog and the build step alike (points hotfix, Avi, 2026-10-29): "People can't add
 // points. When they write any number, it automatically reset to max. They should have like +1 or +5 point they can add."
-// The row is the attribute's name (and a hint), then − | the number | +1 | +5. The control only reports the number wanted; the
-// panel's own `changePoints` clamps it and says why (`setPoints`, `cappedNote`, `raisedNote`).
+// The row is the attribute's name (and a hint), then − | the number | +1 | +5; the build step leaves out − (`minus={false}`): points
+// can't be taken back there, and respec comes later as a paid option (Avi, change round 1). The control only reports the number
+// wanted; the panel's own `changePoints` clamps it and says why (`setPoints`, `cappedNote`, `raisedNote`).
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { committedPoints, typedPoints } from './points-field';
 import styles from './PointsStepper.module.css';
@@ -11,7 +12,7 @@ import styles from './PointsStepper.module.css';
 /** Where a wanted number came from: the field (typed, or stepped with the arrow keys) or one of the −, +1 and +5 buttons. */
 export type PointsSource = 'field' | 'button';
 
-export function PointsStepper({ id, label, hint, name, value, floor, cap, onChange, onFocus, before, after, className, fieldProps }: {
+export function PointsStepper({ id, label, hint, name, value, floor, cap, minus = true, onChange, onFocus, before, after, className, fieldProps }: {
   /** The number field's id (its label points at it); a generated one when left out. */
   id?: string;
   /** The label's content, which names the number field. */
@@ -25,6 +26,8 @@ export function PointsStepper({ id, label, hint, name, value, floor, cap, onChan
   floor: number;
   /** The most it can take now: its own points plus the points left. */
   cap: number;
+  /** Whether the row has a − button (the creation dialog); the build step has none. Typing still goes down to `floor`. */
+  minus?: boolean;
   /** A wanted number: the panel clamps it (a button stops at its limit, but +5 may ask past the cap). */
   onChange(wanted: number, source: PointsSource): void;
   /** The field took the focus (the panels keep what it held then for the capped line). */
@@ -61,7 +64,7 @@ export function PointsStepper({ id, label, hint, name, value, floor, cap, onChan
     <div className={styles.name}><label htmlFor={fieldId} className={styles.label}>{label}</label>{hint}</div>
     <div className={styles.controls}>
       {before}
-      <button type="button" className={styles.step} aria-label={`Remove a point from ${name}`} aria-disabled={atFloor || undefined} onClick={step(-1, atFloor)}>−</button>
+      {minus && <button type="button" className={styles.step} aria-label={`Remove a point from ${name}`} aria-disabled={atFloor || undefined} onClick={step(-1, atFloor)}>−</button>}
       <input id={fieldId} className={styles.value} type="number" inputMode="numeric" min={floor} max={cap} step="1" value={waiting ?? value} {...fieldProps}
         // The focus selects the whole value, so the first digit typed replaces it (a phone types after the digits already there).
         onMouseDown={event => { pressed.current = document.activeElement !== event.currentTarget; }}

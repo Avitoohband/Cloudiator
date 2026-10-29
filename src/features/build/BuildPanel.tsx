@@ -11,7 +11,7 @@ import { deriveStats, preserveStamina } from '@domain/stats';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { cappedNote, pointsLeft, raisedNote, setPoints } from '../character/creation-points';
-import { PointsStepper, type PointsSource } from '../character/PointsStepper';
+import { PointsStepper, usePressHold, type PointsSource } from '../character/PointsStepper';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
@@ -57,6 +57,8 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   /** The class and points the draft's floor was taken from (`fixedKey`): the current build moves without a new build version when the boundary applies a pending build. */
   const draftFloor = useRef(fixedKey(owner.currentBuild));
   const reviewId = useId(), respecId = useId();
+  /** A blur that corrects a typed number holds back the Queue build or +1/+5 press that caused it (fix round 2). */
+  const pressHold = usePressHold();
   // A command sent by keyboard whose control went away (Cancel pending build removes its section) gives the focus to its
   // outcome, never to <body>; a pointer command moves nothing (Task 23.5, `useOutcomeFocus`).
   const { outcome, begin, end, target } = useOutcomeFocus(busy);
@@ -126,7 +128,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     } catch { if (mounted.current) setError('This change could not be confirmed. Retry to confirm the same request.'); }
     finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
-  function submit(event: FormEvent) { event.preventDefault(); void send('queue-build'); }
+  function submit(event: FormEvent) { event.preventDefault(); if (!pressHold.take()) void send('queue-build'); }
   return <div className="planning-form">
     <div className="build-comparison">
       <section data-testid="current-build"><h2>Current build</h2><BuildSummary build={owner.currentBuild} inventory={owner.inventory} /></section>
@@ -145,7 +147,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       <fieldset disabled={busy}><legend>Attribute points · {owner.progression.earnedAttributePoints} earned</legend>
         <p className="build-counter" role="status" data-done={left === 0}>{left === 0 ? `All ${earned} spent` : `${left} of ${earned} left`}</p>
         <div className="build-points">{attributes.map(key => { const floor = owner.currentBuild.allocations[key], value = draft.allocation[key];
-          return <PointsStepper key={key} label={key} name={title(key)} value={value} floor={floor} cap={Math.max(floor, value + left)} minus={false} fieldProps={reviewed(pointsInvalid(key))}
+          return <PointsStepper key={key} label={key} name={title(key)} value={value} floor={floor} cap={Math.max(floor, value + left)} minus={false} hold={pressHold} fieldProps={reviewed(pointsInvalid(key))}
             onFocus={() => { heldAtFocus.current[key] = value; }} onChange={(wanted, source) => changePoints(key, wanted, source)} />; })}</div>
         <p className="build-points-note" role="status">{pointsNote}</p>
         <p>{POINTS_NOTE}</p>

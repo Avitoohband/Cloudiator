@@ -39,8 +39,10 @@
   }
 }
 
+/* manipulation: fast +1 taps never double-tap-zoom on iOS (fix round 2). */
 .controls .step {
   flex: none;
+  touch-action: manipulation;
   width: 44px;
   height: 44px;
   min-height: 44px;
@@ -80,6 +82,8 @@
   background: #111b2d;
   color: var(--ink);
   font: inherit;
+  /* 16 px or more, or iOS zooms into the field when it takes the focus (fix round 2); the creation dialog's text is 14 px. */
+  font-size: 16px;
   text-align: center;
   -moz-appearance: textfield;
   appearance: textfield;

@@ -239,6 +239,11 @@ export async function expectPointsFit(page: Page, group: Locator, fields: string
       inside(box, what);
       expect(box.height, `${what} is 44 px tall`).toBeGreaterThanOrEqual(44 - 0.5);
       if (i > 0) expect(box.width, `${what} is 44 px wide`).toBeGreaterThanOrEqual(44 - 0.5);
+      // Phone polish (fix round 2): iOS zooms into a field under 16 px when it takes the focus, and double-tap-zooms on fast taps
+      // of a button without `touch-action: manipulation`.
+      const style = await control.evaluate(el => ({ fontSize: parseFloat(getComputedStyle(el).fontSize), touchAction: getComputedStyle(el).touchAction }));
+      if (i === 0) expect(style.fontSize, `${what}'s text is at least 16 px`).toBeGreaterThanOrEqual(16);
+      else expect(style.touchAction, `${what} takes fast taps`).toBe('manipulation');
       top = Math.min(top, box.y);
       bottom = Math.max(bottom, box.y + box.height);
     }

@@ -562,6 +562,57 @@ test('types over a creation point after a tap or click, waits for Enter or Tab o
   expect(flow.commands).toHaveLength(0);
 });
 
+test('skips the Create or stepper press that corrected a waiting number, so its line is read first', async ({ page, context }, testInfo) => {
+  // Fix round 2 (review Minor 1): the press that took the focus from a field whose waiting number was then corrected is skipped
+  // once; the next press acts.
+  const flow = await identityFlow(context);
+  await page.goto('/game/');
+  await flow.signIn(page);
+  const dialog = creationDialog(page);
+  await expect(dialog).toBeVisible();
+  const counter = dialog.getByRole('status').filter({ hasText: /of 10 left|All 10 spent/ });
+  const capped = dialog.getByRole('status').filter({ hasText: /points? left, so|No points left|can take at most/ });
+  const strength = dialog.getByLabel('Strength points'), agility = dialog.getByLabel('Agility points');
+  const button = (verb: string, name: string) => dialog.getByRole('button', { name: `${verb} ${name}`, exact: true });
+  const tap = (locator: ReturnType<typeof button>) => testInfo.project.name === 'mobile' ? locator.tap() : locator.click();
+  for (let i = 0; i < 3; i++) await button('Add a point to', 'Agility').click();
+  await expect(counter).toHaveText('7 of 10 left');
+  // 9 with 7 left, then +5: Strength is capped at 7 with its line (the press lands at the cap).
+  await (testInfo.project.name === 'mobile' ? strength.tap() : strength.click());
+  await page.keyboard.type('9');
+  await tap(button('Add 5 points to', 'Strength'));
+  await expect(strength).toHaveValue('7');
+  await expect(capped).toHaveText('Only 7 points left, so Strength was set to 7.');
+  await expect(counter).toHaveText('All 10 spent');
+  // 9 again, then − on Agility: the cap and its line come first and the − is skipped; the next − acts.
+  await (testInfo.project.name === 'mobile' ? strength.tap() : strength.click());
+  await page.keyboard.type('9');
+  await tap(button('Remove a point from', 'Agility'));
+  await expect(strength).toHaveValue('7');
+  await expect(capped).toHaveText('No points left to add, so Strength stays at 7.');
+  await page.waitForTimeout(300);
+  await expect(agility).toHaveValue('3');
+  await tap(button('Remove a point from', 'Agility'));
+  await expect(agility).toHaveValue('2');
+  await expect(capped).toHaveCount(0);
+  // Create: with every point spent, 9 over Strength's 5, then Create: the line first and nothing sent; the next Create sends.
+  await dialog.getByRole('button', { name: 'Suggested for Berserker', exact: true }).click();
+  await dialog.getByLabel('Gladiator name').fill('Patient Fighter');
+  const create = dialog.getByRole('button', { name: 'Create gladiator', exact: true });
+  await expect(create).toBeEnabled();
+  await (testInfo.project.name === 'mobile' ? strength.tap() : strength.click());
+  await page.keyboard.type('9');
+  await (testInfo.project.name === 'mobile' ? create.tap() : create.click());
+  await expect(strength).toHaveValue('5');
+  await expect(capped).toHaveText('No points left to add, so Strength stays at 5.');
+  await page.waitForTimeout(500);
+  expect(flow.commands).toHaveLength(0);
+  await (testInfo.project.name === 'mobile' ? create.tap() : create.click());
+  await expect(page.getByRole('heading', { name: 'Patient Fighter', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.commands[0]).toMatchObject({ name: 'Patient Fighter', allocation: { strength: 5, agility: 1, vitality: 2, endurance: 1, precision: 1 } });
+});
+
 test('fits the creation points on a 360 x 740 phone: no sideways scroll, 44 px controls, five whole rows', async ({ page, context }, testInfo) => {
   const flow = await identityFlow(context);
   await page.goto('/game/');

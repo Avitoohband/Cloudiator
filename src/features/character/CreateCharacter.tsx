@@ -23,7 +23,7 @@ import {
 } from './creation-points';
 import { LookPicker } from './LookPicker';
 import { lookFromDraft, lookRandom } from './look-picker';
-import { PointsStepper, type PointsSource } from './PointsStepper';
+import { PointsStepper, usePressHold, type PointsSource } from './PointsStepper';
 import styles from './CreateCharacter.module.css';
 
 const classes = ['berserker', 'guardian', 'duelist'] as const;
@@ -114,6 +114,8 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   const [capped, setCapped] = useState('');
   /** What each points field held when it took the focus: the capped line says it differently when that was 0 (ruling R10). */
   const heldAtFocus = useRef<Partial<Record<keyof Attributes, number>>>({});
+  /** A blur that corrects a typed number holds back the Create or −/+1/+5 press that caused it (fix round 2). */
+  const pressHold = usePressHold();
   const [busy, setBusy] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const sending = useRef(false);
@@ -164,7 +166,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (sending.current || !accountId || !ready) return;
+    if (pressHold.take() || sending.current || !accountId || !ready) return;
     const name = draft.name.trim();
     if (!/^[A-Za-z0-9 _-]{3,20}$/.test(name)) { setError(NAME_RULE); return; }
     if (!preview) { setError(POINTS_RULE); return; }
@@ -240,7 +242,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
           </div>
           {ATTRIBUTE_KEYS.map(key => {
             const value = draft.allocation[key], name = title(key);
-            return <PointsStepper key={key} id={`points-${key}`} className={styles.row} name={name} value={value} floor={0} cap={value + left}
+            return <PointsStepper key={key} id={`points-${key}`} className={styles.row} name={name} value={value} floor={0} cap={value + left} hold={pressHold}
               label={<>{name}<span className={styles.sr}> points</span></>}
               hint={<span id={`${rowsId}-${key}`} className={styles.hint}>{ATTRIBUTE_HINTS[key]}</span>}
               before={<span className={styles.base} aria-hidden="true">{base} +</span>}

@@ -8,6 +8,7 @@ import { decodePng } from '../../assets/source/tools/png.mjs';
 import { EXPEDITION_FIXTURES, type ExpeditionFixtureKey } from '../fixtures/expedition-ids';
 import { renderExpeditionStage } from '../../src/game/expedition-stage';
 import { gladiatorPose, journeyMap } from '../../src/game/expedition-path';
+import { frameIndex } from '../../src/game/battle-stage';
 import { worldToScreen } from '../../src/game/iso';
 import { drawSlices, hidesActor } from '../../src/game/depth';
 import type { MapData } from '../../src/game/assets';
@@ -826,6 +827,30 @@ test.describe('followable expedition scenes', () => {
     expect((await page.evaluate(() => window.__cloudiatorExpeditionScene!.props())).find(p => p.id === oak.id)!.alpha).toBeLessThan(1);
     await expeditionFlow.settle(page);
     await page.screenshot({ path: testInfo.outputPath('expedition-woodland-arrival-behind-oak.png') });
+  });
+
+  test('draws the search cycle: its own crouch and look frames, its turns and its steps around the spot', async ({ page }) => {
+    // Avi, 2026-10-29: searching read as squats. Over one cycle pair (about 30 s) at the second search spot, the scene
+    // draws each crouch and look on the pose's own timing, mirrored for sw, and walks the steps around the spot.
+    const journey = journeyMap(MAPS.woodland);
+    const search = manifest.animations[manifest.actors.gladiator.animations.search.se];
+    const base = startOf('woodland') + 30 * MIN;
+    await expeditionFlow.open(page, 'woodland', 30);
+    await expeditionFlow.sceneReady(page);
+    const seen = new Set<string>();
+    for (let ms = 0; ms < 32_000; ms += 500) {
+      await expeditionFlow.holdAt(page, base + ms);
+      const d = await expeditionFlow.scene(page);
+      const route = renderExpeditionStage(TIMELINES.woodland, d.displayNowMs!).route!;
+      expect(route).toMatchObject({ to: 'search-2', then: 'search' });
+      const pose = gladiatorPose(journey, route, SPEED);
+      expect(d.gladiator, `${ms} ms`).toMatchObject({ x: pose.x, y: pose.y, action: pose.action, scaleX: pose.facing === 'sw' || pose.facing === 'nw' ? -1 : 1 });
+      if (pose.action !== 'search') { seen.add('walk'); continue; }
+      const frame = frameIndex(search, pose.animMs!);
+      expect(d.gladiator!.frames[0].replace(/^[^/]+\//, 'body/'), `${ms} ms`).toBe(search.frames[frame]);
+      seen.add(`${pose.facing} ${frame < 2 ? 'crouch' : 'look'}`);
+    }
+    expect([...seen].sort()).toEqual(['se crouch', 'se look', 'sw crouch', 'sw look', 'walk']);
   });
 
   test('draws all three environments with their creatures', async ({ page }, testInfo) => {

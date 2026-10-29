@@ -484,7 +484,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
           const back = pose.facing === 'ne' || pose.facing === 'nw';
           const key = back && dirs.ne ? dirs.ne : dirs.se;
           const anim = manifest.animations[key];
-          const name = anim.frames[frameIndex(anim, now)];
+          // The search cycle times its own crouch and look (expedition-path SEARCH_PATTERN); other loops run on the clock.
+          const name = anim.frames[frameIndex(anim, pose.animMs ?? now)];
           this.setHeroFrames(key, hero.layers.map(l => name.replace(/^body\//, `${l.id}/`)), pose.facing === 'sw' || pose.facing === 'nw');
           hero.container.setPosition(feet.x, feet.y).setDepth(feet.y);
         }

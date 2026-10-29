@@ -79,8 +79,11 @@ export const GLADIATOR_ACTIONS = {
       { weapon: 'none', offhand: 'none', rotate: -90, face: 'closed', breath: 1, nearLeg: [0, 0], farLeg: [6, -4], nearArm: [12, 10], farArm: [8, 12] },
     ],
   },
+  // Avi, 2026-10-29: the 1.3 s loop read as squats. Crouch and look at the ground (settle, then hold), then stand and
+  // shade the eyes (settle, then hold), about 2.5 s each; the expedition's search cycle (src/game/expedition-path.ts)
+  // starts every crouch and look on these frames.
   search: {
-    loop: true, views: ['front'], durations: [300, 260, 360, 360],
+    loop: true, views: ['front'], durations: [400, 2100, 400, 2100],
     frames: [
       { ...rest, nearLeg: [55, -95], farLeg: [18, -70], lean: 3, head: [1, 1], nearArm: [35, 0], farArm: [20, 30] },
       { ...rest, nearLeg: [55, -95], farLeg: [18, -70], lean: 4, head: [1, 1.5], nearArm: [52, -10], farArm: [22, 30] },

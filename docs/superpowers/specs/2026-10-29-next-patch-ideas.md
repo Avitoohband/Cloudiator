@@ -51,3 +51,7 @@ More ideas from Avi, 2026-10-29 (collected, not yet designed):
 Bug from Avi, 2026-10-29 (production, phone): the attribute points can't be added. Typing any number resets it to the
 most. Wanted: +1 and +5 beside each attribute (wrapping to a second row on a phone if needed), and typing still possible.
 Being fixed as a hotfix from the release branch (`claude/points-hotfix`).
+
+Avi, 2026-10-29: the Arena-replay spec and plan (`docs/superpowers/specs/2026-10-29-arena-replays-design.md`,
+`docs/superpowers/plans/2026-10-29-arena-replays.md`) are approved ("Ok"). It ships as patch 1.5, after Patch A (1.4) and
+before Party dungeons (1.6).

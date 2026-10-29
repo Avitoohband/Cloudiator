@@ -161,6 +161,26 @@ export const isFinal = (stage: RevealedStage) => stage.kind === 'settlement' || 
 const point = (name: string) => name as JourneyPoint;
 const segmentOf = (from: JourneyPoint) => Math.max(0, JOURNEY.indexOf(from as (typeof JOURNEY)[number]));
 
+/** A leg the journey walks: the gladiator sets off from `from` for `to` at `atMs` (display time). */
+export type StageWalk = { readonly atMs: number; readonly from: JourneyPoint; readonly to: JourneyPoint };
+
+/**
+ * The legs of a stage that is not an encounter, after `n` encounters (`last` the latest of them, if any): where the gladiator is
+ * (`here`), when it sets off (`leave`: the fighters finish their result poses before the gladiator moves on), the leg to the
+ * next search spot (`search`, from `leave`) and the leg from that spot to the next encounter spot or the route's end
+ * (`approach`, from `stage.endsAtMs - EXPEDITION_APPROACH_MS`, never before `leave`). `journeyAt` follows these legs and
+ * `stageWalks` lists them, so the rule lives here once and the two cannot drift.
+ */
+function legsOf(stage: RevealedStage, last: RevealedStage | undefined, n: number) {
+  const here = point(n ? `encounter-${n}` : 'start');
+  const leave = last ? last.endsAtMs + REPLAY_OUTRO_MS : stage.startedAtMs;
+  const spot = point(`search-${n + 1}`);
+  const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
+  const search: StageWalk = { atMs: leave, from: here, to: spot };
+  const approach: StageWalk = { atMs: Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS), from: spot, to: next };
+  return { here, leave, search, approach };
+}
+
 /**
  * The gladiator's movement during the current stage. Departing, exploring after a won encounter and
  * travelling home after the last one all follow one pattern: finish the result poses at the encounter,
@@ -175,9 +195,7 @@ function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToC
     ({ segment: segmentOf(from), from, to, walkedMs: Math.max(0, t - since), then });
   const last = [...upToCurrent].reverse().find(s => s.kind === 'encounter');
   const n = last ? encounterOf.get(last)! : 0;
-  const here: JourneyPoint = n ? point(`encounter-${n}`) : 'start';
-  // The fighters finish their result poses before the gladiator moves on.
-  const leave = last ? last.endsAtMs + REPLAY_OUTRO_MS : stage.startedAtMs;
+  const { here, leave, search, approach } = legsOf(stage, last, n);
   if (current.final) {
     if (!failed) return go('end', 'end', stage.startedAtMs, 'leave');
     // It has rested at the safe point since the walk back that began after its defeat (or with the return stage).
@@ -187,14 +205,10 @@ function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToC
   if (stage === last) return go(here, here, stage.startedAtMs, 'fight');
   if (last && t < leave) return go(here, here, last.startedAtMs, 'fight');
   if (stage.kind === 'return') return go(here, 'safe', leave, 'rest');
-  const spot = point(`search-${n + 1}`);
-  const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
-  const approach = Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS);
-  return t < approach ? { ...go(here, spot, leave, 'search'), untilMs: approach - leave } : go(spot, next, approach, 'wait');
+  return t < approach.atMs
+    ? { ...go(search.from, search.to, search.atMs, 'search'), untilMs: approach.atMs - search.atMs }
+    : go(approach.from, approach.to, approach.atMs, 'wait');
 }
-
-/** A leg the journey walks: the gladiator sets off from `from` for `to` at `atMs` (display time). */
-export type StageWalk = { readonly atMs: number; readonly from: JourneyPoint; readonly to: JourneyPoint };
 
 /**
  * Every leg `journeyAt` walks over the whole timeline, in order: from each exploring, travelling or returning stage, the leg
@@ -215,18 +229,13 @@ export function stageWalks(timeline: RevealedTimeline): StageWalk[] {
   stages.forEach((stage, i) => {
     if (stage.kind === 'encounter') { last = stage; encounters += 1; return; }
     if (isFinal(stage)) return;
-    const n = Math.min(encounters, EXPEDITION_ENCOUNTERS);
-    const here = point(n ? `encounter-${n}` : 'start');
-    // The fighters finish their result poses before the gladiator moves on (journeyAt's `leave`).
-    const leave = last ? last.endsAtMs + REPLAY_OUTRO_MS : stage.startedAtMs;
+    // The same legs as `journeyAt` follows (`legsOf`).
+    const { here, leave, search, approach } = legsOf(stage, last, Math.min(encounters, EXPEDITION_ENCOUNTERS));
     if (stage.kind === 'return') { walks.push({ atMs: leave, from: here, to: 'safe' }); return; }
-    const spot = point(`search-${n + 1}`);
-    const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
-    const approach = Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS);
     // The stage is current until the next one starts; a leg that no display time reaches while it is current is not walked.
     const until = stages[i + 1]?.startedAtMs ?? Infinity;
-    if (leave < Math.min(approach, until)) walks.push({ atMs: leave, from: here, to: spot });
-    if (approach < until) walks.push({ atMs: approach, from: spot, to: next });
+    if (leave < Math.min(approach.atMs, until)) walks.push(search);
+    if (approach.atMs < until) walks.push(approach);
   });
   return walks;
 }

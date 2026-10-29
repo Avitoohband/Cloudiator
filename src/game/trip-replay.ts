@@ -3,8 +3,10 @@
 // at its real speed with its result poses, every walk between spots at x8, and only the searching and waiting around the walks
 // compressed (x150 for the stretch they sit in, shared out in proportion to their length). The plan cuts the trip into
 // chapters, and maps a replay position (ms into the replay) to the display time the expedition scene draws, and back.
-// It reads a revealed timeline and says nothing the timeline does not hold: a fight not yet revealed is an empty chapter, and
-// so is everything after it. No Phaser, React, clock or randomness is used, so the same inputs always give the same plan.
+// It reads a revealed timeline at the viewer's display clock (`nowMs`, always given) and says nothing the clock has not
+// revealed: a stage that is not revealed yet is not read, a fight not yet revealed is an empty chapter and so is everything after
+// it, and a fight still being fought is not decided, whatever its log says. It never reads the real clock and uses no Phaser,
+// React or randomness, so the same inputs always give the same plan.
 import type { RevealedTimeline } from '@contracts/events';
 import { ENCOUNTER_INTERVAL_MS, EXPEDITION_ENCOUNTERS, EXPEDITION_MS, encounterOutcome, isFinal, stageWalks, type JourneyPoint, type StageWalk } from './expedition-stage';
 import { REPLAY_OUTRO_MS } from './replay';
@@ -48,23 +50,26 @@ export type TripPlanOptions = {
   /** The gladiator's next activity really was a Rest: the replay ends with it. */
   resting: boolean;
   /**
-   * A trip still running: the display time of the viewer. A fight that has not ended by then is not decided yet, however
-   * much its log says, so it is a fight with the rest to come, not a defeat. Without it every fight in the timeline counts.
+   * The viewer's display clock (estimated server time), required: a finished trip passes it too, with the same result. The
+   * plan reads only the stages revealed by then (`revealedAtMs <= nowMs`, as `renderExpeditionStage` does, so an uncut timeline
+   * plans like a cut one), and a fight that has not ended by then is not decided yet, however much its log says: it is a fight
+   * with the rest to come, not a defeat, so the chapters do not give away the result of a fight being fought. A clock that is
+   * not a number reveals nothing (no plan).
    */
-  nowMs?: number;
+  nowMs: number;
 };
 
 const finite = (ms: number) => (Number.isFinite(ms) && ms > 0 ? ms : 0);
 
 export function planTrip(timeline: RevealedTimeline, options: TripPlanOptions): TripPlan | null {
-  const { stages } = timeline;
+  const { nowMs } = options;
+  const stages = timeline.stages.filter(stage => stage.revealedAtMs <= nowMs);
   const departure = stages.find(stage => stage.kind === 'depart');
   if (!departure) return null;
-  const nowMs = options.nowMs ?? Infinity;
   const departureMs = departure.startedAtMs;
   const endMs = departureMs + EXPEDITION_MS;
   const fights = stages.filter(stage => stage.kind === 'encounter').slice(0, EXPEDITION_ENCOUNTERS);
-  const walks = stageWalks(timeline);
+  const walks = stageWalks({ ...timeline, stages });
   /** The display time fight `n` is due at, when its stage is not revealed. */
   const dueAt = (n: number) => departureMs + n * ENCOUNTER_INTERVAL_MS;
   const startOf = (n: number) => fights[n - 1]?.startedAtMs ?? dueAt(n);
@@ -186,8 +191,11 @@ export function tripFrame(plan: TripPlan, positionMs: number): TripFrame {
   const index = chapterAt(plan, position);
   const chapter = plan.chapters[index];
   if (chapter.vignette) {
-    const durationMs = chapter.endMs - chapter.startMs;
-    return { chapter, index, displayMs: chapter.displayFromMs, vignette: { kind: chapter.vignette, elapsedMs: within(position - chapter.startMs, 0, durationMs), durationMs } };
+    // The exact length of the camp chapter, not the difference of two replay times, which carries the sum of every chapter
+    // before it (6000.000000000007 ms for a Rest after a long trip).
+    const durationMs = chapter.vignette === 'resting' ? TRIP_PACE.restMs : TRIP_PACE.campMs;
+    const elapsedMs = position >= chapter.endMs ? durationMs : within(position - chapter.startMs, 0, durationMs);
+    return { chapter, index, displayMs: chapter.displayFromMs, vignette: { kind: chapter.vignette, elapsedMs, durationMs } };
   }
   // The last piece that has started: its display time at this position, never past its end.
   let displayMs = plan.pieces[0]?.fromMs ?? chapter.displayFromMs;
@@ -217,12 +225,12 @@ export function tripPositionOf(plan: TripPlan, displayMs: number): number {
 
 /**
  * The index of the first chapter a running trip does not let the replay reach: the first that starts after `capMs` (the
- * position of the display time now, `tripPositionOf`), or whose stage the timeline does not hold yet. `chapters.length` when
- * nothing is locked (`capMs` null, a finished trip).
+ * position of the display time now, `tripPositionOf`), or whose stage the timeline does not hold yet. A chapter that is not
+ * revealed is locked with or without a cap (a trip past minute 80 whose fight never came has nothing to play there).
+ * `chapters.length` when nothing is locked (a finished trip, with no cap).
  */
 export function firstLocked(plan: TripPlan, capMs: number | null): number {
-  if (capMs === null) return plan.chapters.length;
-  const index = plan.chapters.findIndex(chapter => chapter.startMs > capMs || !chapter.revealed);
+  const index = plan.chapters.findIndex(chapter => !chapter.revealed || (capMs !== null && chapter.startMs > capMs));
   return index < 0 ? plan.chapters.length : index;
 }
 

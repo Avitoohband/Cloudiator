@@ -33,7 +33,11 @@ const cutAt = (t: RevealedTimeline, ms: number): RevealedTimeline => {
   return { ...rest, serverNowMs: ms, visibleThroughMs: ms, stages: t.stages.filter(s => s.revealedAtMs <= ms) };
 };
 const cut = (key: ExpeditionFixtureKey, minute: number) => cutAt(TIMELINES[key], startOf(key) + minute * MIN);
-const trip = (key: ExpeditionFixtureKey, resting = false) => planTrip(TIMELINES[key], { walkMs: walkOf(key), resting })!;
+/** The display clock of a view at a minute of the trip. */
+const clockAt = (key: ExpeditionFixtureKey, minute: number) => startOf(key) + minute * MIN;
+/** The display clock of a view after the arrival (minute 81): nothing of the trip is still being fought. */
+const over = (t: RevealedTimeline) => t.stages[0].startedAtMs + 81 * MIN;
+const trip = (key: ExpeditionFixtureKey, resting = false) => planTrip(TIMELINES[key], { walkMs: walkOf(key), resting, nowMs: over(TIMELINES[key]) })!;
 function deepFreeze<V>(value: V): V {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const v of Object.values(value)) deepFreeze(v); }
   return value;
@@ -41,7 +45,7 @@ function deepFreeze<V>(value: V): V {
 
 describe('the whole-trip plan', () => {
   it('plans a settled Woodland success as eight chapters of about 1¼ minutes', () => {
-    const plan = planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: true })!;
+    const plan = planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: true, nowMs: over(TIMELINES.woodland) })!;
     expect(plan.chapters.map(c => c.label)).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp', 'Resting']);
     expect(plan.chapters.map(c => c.id)).toEqual(['leaving', 'trail', 'fight-1', 'fight-2', 'fight-3', 'heading-home', 'back', 'resting']);
     expect(plan.totalMs).toBeGreaterThan(60_000); expect(plan.totalMs).toBeLessThan(90_000);
@@ -73,15 +77,15 @@ describe('the whole-trip plan', () => {
   });
 
   it('ends at the gate without a known rest', () => {
-    expect(planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: false })!.chapters.at(-1)!.label).toBe('Back in camp');
+    expect(planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: false, nowMs: over(TIMELINES.woodland) })!.chapters.at(-1)!.label).toBe('Back in camp');
   });
 
   it('marks a lost fight and puts the safe point in place of the fights left', () => {
-    expect(planTrip(TIMELINES.outpost, { walkMs: walk('outpost'), resting: false })!.chapters.map(c => c.label))
+    expect(planTrip(TIMELINES.outpost, { walkMs: walk('outpost'), resting: false, nowMs: over(TIMELINES.outpost) })!.chapters.map(c => c.label))
       .toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2 ✗', 'Safe point', 'Back in camp']);
     expect(labels(trip('mountain', true))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3 ✗', 'Safe point', 'Back in camp', 'Resting']);
-    expect(labels(planTrip(TIMELINES.spectator, { walkMs: walk('outpost'), resting: false }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1 ✗', 'Safe point', 'Back in camp']);
-    expect(labels(planTrip(TIMELINES.tiebreak, { walkMs: walk('mountain'), resting: false }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2 ✗', 'Safe point', 'Back in camp']);
+    expect(labels(planTrip(TIMELINES.spectator, { walkMs: walk('outpost'), resting: false, nowMs: over(TIMELINES.spectator) }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1 ✗', 'Safe point', 'Back in camp']);
+    expect(labels(planTrip(TIMELINES.tiebreak, { walkMs: walk('mountain'), resting: false, nowMs: over(TIMELINES.tiebreak) }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2 ✗', 'Safe point', 'Back in camp']);
     // The ids stay by fight number, whatever the outcome.
     expect(trip('outpost').chapters.map(c => c.id)).toEqual(['leaving', 'trail', 'fight-1', 'fight-2', 'safe-point', 'back']);
     // A lost fight ends with its result poses; the safe point runs from there to the end of the slot.
@@ -95,18 +99,18 @@ describe('the whole-trip plan', () => {
 
   it('tells a won fight from a lost one by the logged winner, or without logs by the stage after it', () => {
     // Zero-HP tie-break win (Task 9): still a win. Pruned logs: the published labels and stages decide.
-    expect(labels(planTrip(TIMELINES.laststand, { walkMs: walk('mountain'), resting: false }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
-    expect(labels(planTrip(TIMELINES.expired, { walkMs: walk('woodland'), resting: false }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
+    expect(labels(planTrip(TIMELINES.laststand, { walkMs: walk('mountain'), resting: false, nowMs: over(TIMELINES.laststand) }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
+    expect(labels(planTrip(TIMELINES.expired, { walkMs: walk('woodland'), resting: false, nowMs: over(TIMELINES.expired) }))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
   });
 
   it('has no plan without a departure', () => {
-    expect(planTrip({ ...TIMELINES.woodland, stages: [] }, { walkMs: walk('woodland'), resting: true })).toBeNull();
-    expect(planTrip({ ...TIMELINES.woodland, stages: TIMELINES.woodland.stages.slice(1) }, { walkMs: walk('woodland'), resting: true })).toBeNull();
+    expect(planTrip({ ...TIMELINES.woodland, stages: [] }, { walkMs: walk('woodland'), resting: true, nowMs: over(TIMELINES.woodland) })).toBeNull();
+    expect(planTrip({ ...TIMELINES.woodland, stages: TIMELINES.woodland.stages.slice(1) }, { walkMs: walk('woodland'), resting: true, nowMs: over(TIMELINES.woodland) })).toBeNull();
   });
 
   it('does not change what it is given and always plans the same', () => {
     const t = deepFreeze(structuredClone(TIMELINES.woodland));
-    const options = { walkMs: walk('woodland'), resting: true };
+    const options = { walkMs: walk('woodland'), resting: true, nowMs: over(TIMELINES.woodland) };
     expect(planTrip(t, options)).toEqual(planTrip(t, options));
     expect(planTrip(t, options)).toEqual(planTrip(TIMELINES.woodland, options));
   });
@@ -194,7 +198,7 @@ describe('replay time and display time', () => {
 
   it('gives a stretch whose walks use up its budget no time for the searching and waiting', () => {
     // A 15-minute walk takes 112.5 s at x8, far over the 8 s of a 20-minute stretch; the second leg is a short one.
-    const slow = planTrip(TIMELINES.woodland, { walkMs: from => (from === 'start' ? 15 * MIN : 20_000), resting: false })!;
+    const slow = planTrip(TIMELINES.woodland, { walkMs: from => (from === 'start' ? 15 * MIN : 20_000), resting: false, nowMs: over(TIMELINES.woodland) })!;
     const [first, second] = stageWalks(TIMELINES.woodland);
     expect(length(slow, 'trail')).toBe(112_500 + 2_500);
     // The display time of the search in between is skipped: the same replay position all through it.
@@ -278,13 +282,13 @@ describe('replay time and display time', () => {
 describe('a trip still running', () => {
   it('locks the chapters after now in a running trip', () => {
     const at30 = cut('woodland', 30);   // stages revealed by minute 30, no summary
-    const plan = planTrip(at30, { walkMs: walk('woodland'), resting: false })!;
+    const plan = planTrip(at30, { walkMs: walk('woodland'), resting: false, nowMs: at30.serverNowMs })!;
     expect(plan.chapters.map(c => c.label)).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
     expect(plan.chapters[firstLocked(plan, tripPositionOf(plan, startOf('woodland') + 30 * MIN))].id).toBe('fight-2');
   });
 
   it('plans the fights not yet revealed as empty chapters at their minute, and what follows them too', () => {
-    const plan = planTrip(cut('woodland', 30), { walkMs: walk('woodland'), resting: true })!;
+    const plan = planTrip(cut('woodland', 30), { walkMs: walk('woodland'), resting: true, nowMs: clockAt('woodland', 30) })!;
     const s = startOf('woodland');
     const byId = (id: TripChapterId) => plan.chapters.find(c => c.id === id)!;
     expect(plan.chapters.map(c => [c.id, c.revealed])).toEqual([
@@ -302,8 +306,8 @@ describe('a trip still running', () => {
   });
 
   it('does not move the chapters it already has when the next fight is revealed', () => {
-    const before = planTrip(cut('woodland', 39.9), { walkMs: walk('woodland'), resting: false })!;
-    const after = planTrip(cut('woodland', 41), { walkMs: walk('woodland'), resting: false })!;
+    const before = planTrip(cut('woodland', 39.9), { walkMs: walk('woodland'), resting: false, nowMs: clockAt('woodland', 39.9) })!;
+    const after = planTrip(cut('woodland', 41), { walkMs: walk('woodland'), resting: false, nowMs: clockAt('woodland', 41) })!;
     expect(after.chapters.map(c => c.label)).toEqual(before.chapters.map(c => c.label));
     for (const id of ['leaving', 'trail', 'fight-1'] as const) {
       const a = before.chapters.find(c => c.id === id)!, b = after.chapters.find(c => c.id === id)!;
@@ -320,19 +324,19 @@ describe('a trip still running', () => {
   });
 
   it('keeps the camp chapters of a running trip apart from the real ones: no Resting before the trip ends', () => {
-    const plan = planTrip(cut('woodland', 79), { walkMs: walk('woodland'), resting: true })!;
+    const plan = planTrip(cut('woodland', 79), { walkMs: walk('woodland'), resting: true, nowMs: clockAt('woodland', 79) })!;
     expect(plan.chapters.map(c => [c.id, c.revealed])).toEqual([
       ['leaving', true], ['trail', true], ['fight-1', true], ['fight-2', true], ['fight-3', true], ['heading-home', true], ['back', false],
     ]);
     // At minute 80 the arrival is revealed: the gate is there, and the Rest the caller knows of.
-    const arrived = planTrip(cut('woodland', 80), { walkMs: walk('woodland'), resting: true })!;
+    const arrived = planTrip(cut('woodland', 80), { walkMs: walk('woodland'), resting: true, nowMs: clockAt('woodland', 80) })!;
     expect(arrived.chapters.at(-2)).toMatchObject({ id: 'back', revealed: true });
     expect(arrived.chapters.at(-1)).toMatchObject({ id: 'resting', revealed: true });
   });
 
   it('keeps a stage that is not published although its minute has come locked', () => {
     // Worker delay (the `delayed` fixture): minute 45 and fight 2 is still missing.
-    const plan = planTrip(cut('delayed', 45), { walkMs: walk('woodland'), resting: false })!;
+    const plan = planTrip(cut('delayed', 45), { walkMs: walk('woodland'), resting: false, nowMs: clockAt('delayed', 45) })!;
     expect(plan.chapters.map(c => [c.id, c.revealed])).toEqual([
       ['leaving', true], ['trail', true], ['fight-1', true], ['fight-2', false], ['fight-3', false], ['heading-home', false], ['back', false],
     ]);
@@ -346,25 +350,59 @@ describe('a trip still running', () => {
   it('plans a defeat in a running trip as soon as it is decided, and not while the fight is on', () => {
     const lost = encounters('outpost')[1];
     const walkMs = walk('outpost');
-    const mid = planTrip(cutAt(TIMELINES.outpost, lost.startedAtMs + 3_000), { walkMs, resting: false, nowMs: lost.startedAtMs + 3_000 })!;
-    // The log of a fight being fought is known, its end is not shown: it is a fight, with the rest to come.
+    const planAt = (ms: number) => planTrip(cutAt(TIMELINES.outpost, ms), { walkMs, resting: false, nowMs: ms })!;
+    // 1 s into the lost fight: its log is known, its end is not shown. No cross, no safe point, nothing decided after it.
+    const mid = planAt(lost.startedAtMs + 1_000);
+    expect(labels(mid)).not.toContain('Fight 2 ✗');
+    expect(labels(mid)).not.toContain('Safe point');
     expect(labels(mid)).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
+    // What follows the fight is only a locked, empty placeholder, as in any running trip.
     expect(mid.chapters.map(c => c.revealed)).toEqual([true, true, true, true, false, false, false]);
-    const done = planTrip(cutAt(TIMELINES.outpost, lost.endsAtMs), { walkMs, resting: false, nowMs: lost.endsAtMs })!;
+    for (const c of mid.chapters.slice(4)) expect(c.endMs - c.startMs, c.id).toBe(0);
+    expect(mid.chapters[3]).toMatchObject({ id: 'fight-2', displayFromMs: lost.startedAtMs, displayToMs: startOf('outpost') + 60 * MIN });
+    // At the end of the fight the defeat shows, with the safe point.
+    const done = planAt(lost.endsAtMs);
     expect(labels(done)).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2 ✗', 'Safe point', 'Back in camp']);
     expect(done.chapters.map(c => c.revealed)).toEqual([true, true, true, true, true, false]);
-    // Without a time of its own the plan reads the logged winner, as the finished trip does.
-    expect(labels(planTrip(cutAt(TIMELINES.outpost, lost.startedAtMs + 3_000), { walkMs, resting: false }))).toContain('Fight 2 ✗');
+    // One millisecond before it ends it is still undecided.
+    expect(labels(planAt(lost.endsAtMs - 1))).not.toContain('Fight 2 ✗');
     // The position inside the fight is the same display time in both.
-    const p = tripPositionOf(mid, lost.startedAtMs + 3_000);
-    expect(tripFrame(done, p).displayMs).toBe(lost.startedAtMs + 3_000);
-    expect(tripFrame(mid, p).displayMs).toBe(lost.startedAtMs + 3_000);
-    // The last fight too: its chapter is the same, what follows it changes.
+    const p = tripPositionOf(mid, lost.startedAtMs + 1_000);
+    expect(tripFrame(done, p).displayMs).toBe(lost.startedAtMs + 1_000);
+    expect(tripFrame(mid, p).displayMs).toBe(lost.startedAtMs + 1_000);
+    // The same for the last fight: lost, the safe point; won, the way home. Neither while it is being fought.
     const third = encounters('mountain')[2];
-    const mountain = walk('mountain');
-    const live = planTrip(cutAt(TIMELINES.mountain, third.startedAtMs + 2_000), { walkMs: mountain, resting: false, nowMs: third.startedAtMs + 2_000 })!;
-    expect(labels(live)).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
-    expect(labels(planTrip(cutAt(TIMELINES.mountain, third.endsAtMs), { walkMs: mountain, resting: false, nowMs: third.endsAtMs }))).toContain('Safe point');
+    const mountain = (ms: number) => planTrip(cutAt(TIMELINES.mountain, ms), { walkMs: walk('mountain'), resting: false, nowMs: ms })!;
+    expect(labels(mountain(third.startedAtMs + 1_000))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3', 'Heading home', 'Back in camp']);
+    expect(labels(mountain(third.endsAtMs))).toEqual(['Leaving camp', 'On the trail', 'Fight 1', 'Fight 2', 'Fight 3 ✗', 'Safe point', 'Back in camp']);
+    const won = encounters('woodland')[2];
+    const woodland = (ms: number) => planTrip(cutAt(TIMELINES.woodland, ms), { walkMs: walk('woodland'), resting: false, nowMs: ms })!;
+    const fighting = woodland(won.startedAtMs + 1_000);
+    expect(fighting.chapters.find(c => c.id === 'heading-home')).toMatchObject({ revealed: false, startMs: fighting.totalMs, endMs: fighting.totalMs });
+    const decided = woodland(won.endsAtMs).chapters.find(c => c.id === 'heading-home')!;
+    expect(decided.revealed).toBe(true);
+    expect(decided.endMs).toBeGreaterThan(decided.startMs);
+  });
+
+  it('asks for the display clock, and shows nothing of a trip it is not given one for', () => {
+    // The clock is how the plan knows which stages and which results are not to be shown yet: there is no safe default.
+    // @ts-expect-error `nowMs` is required
+    const plan = planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: true });
+    expect(plan).toBeNull();
+  });
+
+  it('reads only the stages the display clock has revealed, so an uncut timeline plans the same as a cut one', () => {
+    // The fixture gateway returns every stage of a trip, future ones too; the plan must not show them.
+    for (const minute of [10, 30, 39.9, 41, 65, 79]) {
+      const raw = planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: true, nowMs: clockAt('woodland', minute) })!;
+      const cutOne = planTrip(cut('woodland', minute), { walkMs: walk('woodland'), resting: true, nowMs: clockAt('woodland', minute) })!;
+      expect(raw, `minute ${minute}`).toEqual(cutOne);
+    }
+    expect(planTrip(TIMELINES.woodland, { walkMs: walk('woodland'), resting: true, nowMs: startOf('woodland') - 1 })).toBeNull();
+    // After a defeat the arrival and the rest are not there either until their time.
+    const lost = encounters('outpost')[1];
+    const early = planTrip(TIMELINES.outpost, { walkMs: walk('outpost'), resting: true, nowMs: lost.endsAtMs + 5_000 })!;
+    expect(early.chapters.map(c => [c.id, c.revealed])).toEqual([['leaving', true], ['trail', true], ['fight-1', true], ['fight-2', true], ['safe-point', true], ['back', false]]);
   });
 
   it('finds the first locked chapter: the first that starts after the cap, or none without one', () => {
@@ -377,6 +415,64 @@ describe('a trip still running', () => {
     expect(firstLocked(plan, 0)).toBe(1);
     expect(firstLocked(plan, plan.totalMs)).toBe(plan.chapters.length);
     expect(firstLocked(plan, -1)).toBe(0);
+  });
+
+  it('keeps a chapter that never arrived locked even with no cap: a trip past minute 80 whose fight did not come', () => {
+    // The worker is late (the `delayed` fixture): minute 90 and fight 2 is still missing. There is no cap, but nothing to play there.
+    const plan = planTrip(cut('delayed', 90), { walkMs: walk('woodland'), resting: false, nowMs: clockAt('delayed', 90) })!;
+    expect(plan.chapters.map(c => [c.id, c.revealed])).toEqual([
+      ['leaving', true], ['trail', true], ['fight-1', true], ['fight-2', false], ['fight-3', false], ['heading-home', false], ['back', false],
+    ]);
+    expect(plan.chapters[firstLocked(plan, null)].id).toBe('fight-2');
+    // A cap does not unlock it either, and a finished trip has nothing locked.
+    expect(plan.chapters[firstLocked(plan, plan.totalMs)].id).toBe('fight-2');
+    for (const key of KEYS.filter(k => k !== 'delayed')) expect(firstLocked(trip(key, true), null), key).toBe(trip(key, true).chapters.length);
+  });
+});
+
+describe('lengths and guards', () => {
+  it('gives every camp vignette its exact length, whatever the sum of the chapters before it', () => {
+    const lengths = { leaving: TRIP_PACE.campMs, back: TRIP_PACE.campMs, resting: TRIP_PACE.restMs } as const;
+    for (const key of KEYS.filter(k => k !== 'delayed')) {
+      const plan = trip(key, true);
+      const camps = plan.chapters.filter(c => c.vignette);
+      expect(camps.map(c => c.id), key).toEqual(['leaving', 'back', 'resting']);
+      for (const c of camps) {
+        const kind = c.vignette!;
+        // Anywhere in it, and at its very end, which is also the end of the replay for the last one.
+        for (const at of [c.startMs, c.startMs + 1, (c.startMs + c.endMs) / 2, c.endMs - 0.001]) {
+          expect(tripFrame(plan, at).vignette, `${key} ${kind} at ${at}`).toMatchObject({ kind, durationMs: lengths[kind] });
+        }
+        expect(tripFrame(plan, c.startMs).vignette!.elapsedMs, `${key} ${kind}`).toBe(0);
+      }
+      expect(tripFrame(plan, plan.totalMs).vignette, key).toEqual({ kind: 'resting', elapsedMs: TRIP_PACE.restMs, durationMs: TRIP_PACE.restMs });
+      const gate = trip(key, false);
+      expect(tripFrame(gate, gate.totalMs).vignette, key).toEqual({ kind: 'back', elapsedMs: TRIP_PACE.campMs, durationMs: TRIP_PACE.campMs });
+    }
+  });
+
+  it('treats a walking time that is not a positive number as no walk', () => {
+    const none = planTrip(TIMELINES.woodland, { walkMs: () => 0, resting: true, nowMs: over(TIMELINES.woodland) })!;
+    for (const bad of [Number.NaN, Infinity, -Infinity, -5_000, 0]) {
+      const plan = planTrip(TIMELINES.woodland, { walkMs: () => bad, resting: true, nowMs: over(TIMELINES.woodland) })!;
+      expect(plan, `${bad}`).toEqual(none);
+      expect(Number.isFinite(plan.totalMs), `${bad}`).toBe(true);
+      // No walk to play at x8: the trail is its 8 s of searching and waiting alone.
+      expect(length(plan, 'trail'), `${bad}`).toBeCloseTo(8_000, 6);
+      for (let ms = 0; ms <= plan.totalMs; ms += 500) expect(Number.isFinite(tripFrame(plan, ms).displayMs), `${bad} at ${ms}`).toBe(true);
+    }
+    // And one bad leg does not spoil the others.
+    const some = planTrip(TIMELINES.woodland, { walkMs: (from, to) => (from === 'start' ? Number.NaN : walk('woodland')(from, to)), resting: true, nowMs: over(TIMELINES.woodland) })!;
+    expect(Number.isFinite(some.totalMs)).toBe(true);
+    expect(length(some, 'trail')).toBeCloseTo(8_000, 6);
+  });
+
+  it('holds the first moment for a position or a display time that is not a number', () => {
+    const plan = trip('woodland', true);
+    expect(tripPositionOf(plan, Number.NaN)).toBe(5_000);
+    expect(tripFrame(plan, Number.NaN)).toMatchObject({ index: 0, vignette: { kind: 'leaving', elapsedMs: 0 } });
+    expect(tripPositionOf(plan, Number.NEGATIVE_INFINITY)).toBe(5_000);
+    expect(tripPositionOf(plan, Number.POSITIVE_INFINITY)).toBe(plan.chapters.find(c => c.id === 'back')!.startMs);
   });
 });
 

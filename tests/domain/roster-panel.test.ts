@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import { RosterPanel, type Roster } from '@/features/character/RosterPanel';
+import { countLine, matchLine, playerCounts } from '@/features/character/actor-text';
 import { createSceneBridge } from '@/game/bridge';
 import { worldFixture } from '../fixtures/domain';
 
@@ -109,5 +110,27 @@ describe('Gladiators', () => {
   it('opens each gladiator’s profile card from its name (the keyboard path of a camp click)', () => {
     const html = panel();
     for (const name of ['Aster', 'Brutus', 'Corvina']) expect(html).toContain(`aria-label="Profile: ${name}"`);
+  });
+});
+
+// Patch A item 8: a line over the Gladiators list says how many players there are and where they are now.
+describe('players count', () => {
+  const four = [actor('Aster', 'training'), actor('Brutus', 'orientation'), actor('Corvina', 'expedition:woodland'), { ...actor('Otho', 'camp'), resting: true }];
+  it('counts every gladiator and where they are now', () => {
+    expect(playerCounts(four)).toEqual({ total: 4, inCamp: 2, away: 1, resting: 1 });
+    expect(countLine(playerCounts(four), false)).toEqual(['4 players', ' · 2 in camp · 1 on an expedition · 1 resting at home']);
+    expect(countLine({ total: 50, inCamp: 43, away: 6, resting: 1 }, false)).toEqual(['50 players', ' · 43 in camp · 6 on expeditions · 1 resting at home']);
+    expect(countLine({ total: 50, inCamp: 43, away: 6, resting: 1 }, true)).toEqual(['50 players', ' · 43 in camp · 6 away · 1 resting at home']);
+  });
+  it('leaves out a zero part, never the total', () => {
+    expect(countLine({ total: 1, inCamp: 1, away: 0, resting: 0 }, false)).toEqual(['1 player', ' · 1 in camp']);
+    expect(countLine({ total: 2, inCamp: 0, away: 2, resting: 0 }, true)).toEqual(['2 players', ' · 2 away']);
+  });
+  it('says how many match a filter', () => {
+    expect(matchLine(4, 50, 'ar')).toEqual(['4 of 50 players', ' match “ar”']);
+  });
+  it('shows the count over the list, and no count while the world loads', () => {
+    expect(panel()).toContain('data-testid="players-count"');
+    expect(panel({ world: null })).not.toContain('players-count');
   });
 });

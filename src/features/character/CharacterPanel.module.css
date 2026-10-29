@@ -155,6 +155,40 @@
   margin: 0 0 0.75rem;
 }
 
+/* The players count over the Gladiators list (Patch A item 8): the total in gold, where they are in the muted colour. The
+   phone's touch layout says "away" (.narrow) where the desktop says "on expeditions" (.wide). */
+.count {
+  margin: 0 0 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ffffff1a;
+  border-radius: 8px;
+  background: #ffffff0a;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.count b {
+  color: var(--gold);
+}
+
+.count span {
+  color: var(--muted);
+}
+
+.narrow {
+  display: none;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .wide {
+    display: none;
+  }
+
+  .narrow {
+    display: inline;
+  }
+}
+
 .list {
   list-style: none;
   margin: 0;

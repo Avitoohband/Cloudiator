@@ -23,6 +23,39 @@ export const placeOf = (actor: Pick<PublicActor, 'location' | 'name' | 'resting'
   : isAway(actor) ? 'On an expedition' : PLACE[actor.location] ?? 'At camp');
 /** "Guardian · Level 1 · Bronze league". */
 export const classLine = (actor: Pick<PublicActor, 'classId' | 'level' | 'league'>) => `${title(actor.classId)} · Level ${actor.level} · ${title(actor.league)} league`;
+/** How many gladiators there are and where they are now (Patch A item 8): every gladiator counts, those resting at home too. */
+export type PlayerCounts = { total: number; inCamp: number; away: number; resting: number };
+
+/** Counts the world's gladiators: away on an expedition; resting at home (and not away); the rest are in the camp. */
+export function playerCounts(actors: readonly Pick<PublicActor, 'location' | 'resting'>[]): PlayerCounts {
+  let away = 0;
+  let resting = 0;
+  for (const actor of actors) {
+    if (isAway(actor)) away += 1;
+    else if (actor.resting) resting += 1;
+  }
+  return { total: actors.length, inCamp: actors.length - away - resting, away, resting };
+}
+
+/**
+ * The line over the Gladiators list: ["50 players", " · 43 in camp · 6 on expeditions · 1 resting at home"]. The first part
+ * is shown bold. A part with a zero count is left out, never the total; `compact` (the phone) says "away" for "on an
+ * expedition(s)".
+ */
+export function countLine(counts: PlayerCounts, compact: boolean): [lead: string, rest: string] {
+  const parts = [
+    counts.inCamp > 0 ? `${counts.inCamp} in camp` : '',
+    counts.away > 0 ? `${counts.away} ${compact ? 'away' : counts.away === 1 ? 'on an expedition' : 'on expeditions'}` : '',
+    counts.resting > 0 ? `${counts.resting} resting at home` : '',
+  ].filter(Boolean);
+  return [`${counts.total} ${counts.total === 1 ? 'player' : 'players'}`, parts.map(part => ` · ${part}`).join('')];
+}
+
+/** The line while a name is typed in the filter and matches someone: ["4 of 50 players", " match “ar”"]. */
+export function matchLine(shown: number, total: number, query: string): [lead: string, rest: string] {
+  return [`${shown} of ${total} ${total === 1 ? 'player' : 'players'}`, ` match “${query}”`];
+}
+
 /** The equipped gear the world shows, e.g. "Sword, shield, helmet". */
 export function gearText(silhouettes: readonly EquipmentSilhouette[]): string {
   const names = silhouettes.map(s => GEAR[s] ?? s);

@@ -12,7 +12,7 @@
 import { useId, useState } from 'react';
 import type { WorldSnapshot } from '@contracts/reads';
 import type { SceneBridge } from '../../game/bridge';
-import { classLine, isAway, placeOf, restingText } from './actor-text';
+import { classLine, countLine, isAway, matchLine, placeOf, playerCounts, restingText } from './actor-text';
 import { ownRestingText } from './activity-status';
 import styles from './CharacterPanel.module.css';
 
@@ -52,6 +52,11 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
   const ownerAway = ownerId !== null && !reason && (ownResting || !inCamp.has(ownerId));
   const mineDisabled = !!reason || ownerAway;
   const mineDescribedBy = reason ? reasonId : ownerAway ? awayId : undefined;
+  // The line over the list (Patch A item 8): how many players there are and where, or how many match the filter. Counted from
+  // the whole world on every render, so each world read refreshes it. Zero matches keep the "No gladiator matches" line instead.
+  const counts = playerCounts(world?.actors ?? []);
+  const [countLead, countWide] = query && actors.length > 0 ? matchLine(actors.length, counts.total, filter.trim()) : countLine(counts, false);
+  const countNarrow = query && actors.length > 0 ? countWide : countLine(counts, true)[1];
   return (
     <section aria-label="Gladiators in the world">
       {reason && <p id={reasonId} className={styles.reason}>{reason}</p>}
@@ -66,6 +71,15 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
       <label className={styles.filter}>Filter by name
         <input type="search" value={filter} onChange={event => setFilter(event.target.value)} autoComplete="off" spellCheck={false} />
       </label>
+      {world && actors.length > 0 && (
+        <p className={styles.count} data-testid="players-count">
+          <b>{countLead}</b>
+          {countWide === countNarrow ? <span>{countWide}</span> : <>
+            <span className={styles.wide}>{countWide}</span>
+            <span className={styles.narrow}>{countNarrow}</span>
+          </>}
+        </p>
+      )}
       {actors.length === 0 ? <p className="muted">{world ? `No gladiator matches “${filter.trim()}”.` : 'The world is still loading.'}</p> : (
         <ul className={styles.list} aria-label="Gladiators">
           {actors.map(actor => {

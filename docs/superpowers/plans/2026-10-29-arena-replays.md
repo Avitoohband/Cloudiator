@@ -91,7 +91,7 @@ sample's decided bouts are QF 1–4, SF 1, SF 2 and the Final (Severus vs Varro)
 ### Task 1: One replay bar for the trip and the bouts
 
 **Files:**
-- Create: `src/features/replay/ReplayBar.tsx`, `src/features/replay/ReplayBar.module.css`
+- Exists already (Patch A Task 9 built it with this exact signature, f441348): `src/features/replay/ReplayBar.tsx`, `src/features/replay/ReplayBar.module.css`; this task checks it against the rules below and fills any gap
 - Modify: `src/features/character/TripBar.tsx` (renders `ReplayBar`; its own props and behaviour unchanged), the stylesheet that
   holds Patch A's bar rules (Patch A's Task 9 put them in `ExpeditionView.module.css` or beside `TripBar.tsx`; they move to
   `ReplayBar.module.css` unchanged)
@@ -123,7 +123,7 @@ export function ReplayBar(props: {
 - Rendering: icon buttons ⏮ ▶/⏸ ⏭ carry `aria-label` (the step's `name`; "Play" or "Pause"), `title` `"{name} ({shortcut})"`
   and `aria-keyshortcuts` when a shortcut is given; ▶/⏸ is gold. Chapters are buttons with `aria-current="step"` on the current
   one, disabled with their `title`; in the touch layout they are hidden and one line `"{current + 1} / {count} · {label}"`
-  shows instead (Patch A's phone form). Desktop: one row `⏮ ▶ ⏭ track time tail`, chapters on a row below. Touch layout with a
+  shows instead (Patch A's phone form). Desktop: one row `⏮ ▶ ⏭ track time tail`, chapters on a row below; without a track (the trip) the chapters sit in that row in the track's place, as Patch A's approved mockup shows. Touch layout with a
   track: two rows, `track time`, then `⏮ ▶ ⏭ … tail` (at most 100 px); without a track, Patch A's phone row.
 
 - [ ] **Step 1: Write the failing test** `tests/domain/replay-bar.test.ts` (renderToStaticMarkup):

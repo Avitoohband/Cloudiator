@@ -9,6 +9,7 @@ The release moves the section to released (its date in the heading, the "Built"/
 records it on the server. A fix-only release from `release` takes the next third number (1.3.1). After a video is made, add
 its row to "Videos". Bullets are plain text, one line each, at most 240 characters, no Markdown inside them: players read
 them as they are.
+That task also adds its row to [FEATURES.md](FEATURES.md); after a video is made, fill in its "Shown in video" column there.
 
 ## Videos
 

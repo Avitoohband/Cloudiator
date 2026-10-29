@@ -29,7 +29,7 @@ Built, waiting for the release:
 - 1.4 · On an expedition, the gladiator searches slowly around each spot and looks around, instead of squatting.
 - 1.4 · The live expedition view shows LIVE, the minute and named marks; "Watch from the start" replays what you missed.
 - 1.4 · Replay a whole trip in about a minute and a quarter: out through the camp gate, the fights, home, and to bed when
-  a Rest follows (the gate and bed scenes are still being built).
+  a Rest follows.
 - 1.4 · A replay names and draws your gladiator from its first moment, not only from its first fight.
 
 Still being built:
@@ -135,7 +135,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Waiting monsters | Each monster waits at its spot, named over its head, until its fight; a beaten one fades away. | 1.1 | Live | Expedition page, `<Woodland trip>`, `&minute=18`, then the fight at 20 | Looks update |
 | A real search | The gladiator searches slowly around each spot: crouching, shading its eyes and looking around. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&minute=10`; one search lasts about 15 s | — |
 | LIVE with named marks | The live view shows LIVE and the minute, and names each mark: leaving camp, each fight, the way back. "Watch from the start" replays what you missed, never past now. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&minute=30` → ⏪ | — |
-| Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; its camp scenes (gate, bed) are still being built | — (named as coming in Looks update) |
+| Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
 | Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | In 1.4 | The first seconds of any whole-trip replay | — |
 | Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | Still being built: the camp during your own trip (test player) | — |
 | Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.6 | Planned 1.6 | Not built | — |
@@ -238,7 +238,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 ## Best moments to film
 
 1. **The whole-trip replay** (1.4). Expedition page, `<Woodland trip>`, `&play=trip`, then ▶: a whole trip in about a
-   minute and a quarter; ⏭ jumps chapter to chapter for a short cut. Its gate and bed scenes are still being built.
+   minute and a quarter; ⏭ jumps chapter to chapter for a short cut.
 2. **A fight up close** (1.0). Replay page, `<Aster vs Varro>`: health bars and every blow; `<Tie-break bout>` for a finish
    decided by a tie-break.
 3. **The camp at night** (1.0). The live game in an evening part: blue light and lit torches; pan slowly across the camp.

@@ -38,3 +38,16 @@ Avi, 2026-10-29, after the Arena-replay mockup (`.superpowers/design/2026-10-29-
 screenshots): (1) "My bouts" rows show Won/Lost and the rating change (no spoiler hiding); (2) a replay ends on the result
 card with Watch again / Next bout / Back (no autoplay); (3) build it as a small patch right after Patch A, reusing Patch A's
 replay bar, before Patch B. Next: spec and plan for that patch.
+
+More ideas from Avi, 2026-10-29 (collected, not yet designed):
+
+10. **A rotating schedule.** "an option to form a dynamic schedule. Like 3 days different schedule routine": a routine of
+    several different days (for example 3) that repeats, instead of one day's plan.
+11. **Undo a purchase.** "an undo button for buying things": take back a purchase just made (shops; the market needs care,
+    since another player was paid).
+12. **How many I already have.** "if I have an item that is showing in the market or shops, show how much I currently have
+    from the same item": the owned count beside each market and shop listing.
+
+Bug from Avi, 2026-10-29 (production, phone): the attribute points can't be added. Typing any number resets it to the
+most. Wanted: +1 and +5 beside each attribute (wrapping to a second row on a phone if needed), and typing still possible.
+Being fixed as a hotfix from the release branch (`claude/points-hotfix`).

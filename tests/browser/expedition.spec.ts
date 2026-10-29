@@ -8,6 +8,7 @@ import { decodePng } from '../../assets/source/tools/png.mjs';
 import { EXPEDITION_FIXTURES, type ExpeditionFixtureKey } from '../fixtures/expedition-ids';
 import { renderExpeditionStage } from '../../src/game/expedition-stage';
 import { gladiatorPose, journeyMap } from '../../src/game/expedition-path';
+import { frameIndex } from '../../src/game/battle-stage';
 import { worldToScreen } from '../../src/game/iso';
 import { drawSlices, hidesActor } from '../../src/game/depth';
 import type { MapData } from '../../src/game/assets';
@@ -826,6 +827,83 @@ test.describe('followable expedition scenes', () => {
     expect((await page.evaluate(() => window.__cloudiatorExpeditionScene!.props())).find(p => p.id === oak.id)!.alpha).toBeLessThan(1);
     await expeditionFlow.settle(page);
     await page.screenshot({ path: testInfo.outputPath('expedition-woodland-arrival-behind-oak.png') });
+  });
+
+  test('draws the search cycle: its own crouch and look frames, its turns and its steps around the spot', async ({ page }) => {
+    // Avi, 2026-10-29: searching read as squats. Over one cycle pair (about 30 s) at the second search spot, the scene
+    // draws each crouch and look on the pose's own timing, mirrored for sw, and walks the steps around the spot.
+    const journey = journeyMap(MAPS.woodland);
+    const search = manifest.animations[manifest.actors.gladiator.animations.search.se];
+    const base = startOf('woodland') + 30 * MIN;
+    await expeditionFlow.open(page, 'woodland', 30);
+    await expeditionFlow.sceneReady(page);
+    const seen = new Set<string>();
+    for (let ms = 0; ms < 32_000; ms += 500) {
+      await expeditionFlow.holdAt(page, base + ms);
+      const d = await expeditionFlow.scene(page);
+      const route = renderExpeditionStage(TIMELINES.woodland, d.displayNowMs!).route!;
+      expect(route).toMatchObject({ to: 'search-2', then: 'search' });
+      const pose = gladiatorPose(journey, route, SPEED);
+      expect(d.gladiator, `${ms} ms`).toMatchObject({ x: pose.x, y: pose.y, action: pose.action, scaleX: pose.facing === 'sw' || pose.facing === 'nw' ? -1 : 1 });
+      if (pose.action !== 'search') { seen.add('walk'); continue; }
+      const frame = frameIndex(search, pose.animMs!);
+      expect(d.gladiator!.frames[0].replace(/^[^/]+\//, 'body/'), `${ms} ms`).toBe(search.frames[frame]);
+      seen.add(`${pose.facing} ${frame < 2 ? 'crouch' : 'look'}`);
+    }
+    expect([...seen].sort()).toEqual(['se crouch', 'se look', 'sw crouch', 'sw look', 'walk']);
+  });
+
+  test('keeps a following camera on the search spot while the gladiator steps around it', async ({ page }) => {
+    // Review fix round 1: the camera panned about a tile on every step, every few seconds for the whole search.
+    const journey = journeyMap(MAPS.woodland);
+    const spot = journey.points['search-2'];
+    const base = startOf('woodland') + 30 * MIN;
+    const poseAt = (ms: number) => gladiatorPose(journey, renderExpeditionStage(TIMELINES.woodland, base + ms).route!, SPEED);
+    const off = (ms: number) => Math.hypot(poseAt(ms).x - spot.x - 0.5, poseAt(ms).y - spot.y - 0.5);
+    const times = Array.from({ length: 128 }, (_, i) => i * 250);
+    const onSpot = times.find(ms => !poseAt(ms).walking && off(ms) === 0)!;
+    const stepping = times.find(ms => poseAt(ms).walking && off(ms) > 0.4)!;
+    const away = times.find(ms => !poseAt(ms).walking && off(ms) > 0.5)!;
+    expect([onSpot, stepping, away].every(ms => ms !== undefined)).toBe(true);
+    await expeditionFlow.open(page, 'woodland', 30);
+    await expeditionFlow.sceneReady(page);
+    await expeditionFlow.holdAt(page, base + onSpot);
+    await expeditionFlow.settle(page);
+    const still = (await expeditionFlow.scene(page)).camera;
+    const feet = worldToScreen(spot.x + 0.5, spot.y + 0.5);
+    expect(Math.hypot(still.centerX - feet.x, still.centerY - (feet.y - 24))).toBeLessThan(2);
+    for (const ms of [stepping, away]) {
+      await expeditionFlow.holdAt(page, base + ms);
+      // A camera gliding after the gladiator would cover most of the step in this time.
+      await page.waitForTimeout(600);
+      const d = await expeditionFlow.scene(page);
+      expect(Math.hypot(d.gladiator!.x - spot.x - 0.5, d.gladiator!.y - spot.y - 0.5), `${ms} ms`).toBeGreaterThan(0.4);
+      expect(d.camera.centerX, `${ms} ms`).toBeCloseTo(still.centerX, 1);
+      expect(d.camera.centerY, `${ms} ms`).toBeCloseTo(still.centerY, 1);
+    }
+  });
+
+  test('searches on the spot with reduced motion: crouch, look and turn, but no steps', async ({ page }) => {
+    // Review fix round 1: with reduced motion the camera snapped to every step of the search cycle.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const journey = journeyMap(MAPS.woodland);
+    const spot = journey.points['search-2'];
+    const search = manifest.animations[manifest.actors.gladiator.animations.search.se];
+    const base = startOf('woodland') + 30 * MIN;
+    await expeditionFlow.open(page, 'woodland', 30);
+    await expeditionFlow.sceneReady(page);
+    expect((await expeditionFlow.scene(page)).reducedMotion).toBe(true);
+    const seen = new Set<string>();
+    for (let ms = 0; ms < 32_000; ms += 1_000) {
+      await expeditionFlow.holdAt(page, base + ms);
+      const d = await expeditionFlow.scene(page);
+      const pose = gladiatorPose(journey, renderExpeditionStage(TIMELINES.woodland, d.displayNowMs!).route!, SPEED, { wander: false });
+      expect(d.gladiator, `${ms} ms`).toMatchObject({ x: spot.x + 0.5, y: spot.y + 0.5, action: 'search', walking: false, facing: pose.facing });
+      const frame = frameIndex(search, pose.animMs!);
+      expect(d.gladiator!.frames[0].replace(/^[^/]+\//, 'body/'), `${ms} ms`).toBe(search.frames[frame]);
+      seen.add(`${pose.facing} ${frame < 2 ? 'crouch' : 'look'}`);
+    }
+    expect([...seen].sort()).toEqual(['se crouch', 'se look', 'sw crouch', 'sw look']);
   });
 
   test('draws all three environments with their creatures', async ({ page }, testInfo) => {

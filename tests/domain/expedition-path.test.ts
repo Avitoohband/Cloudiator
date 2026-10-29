@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { loadAssetManifest, type MapData } from '@/game/assets';
+import { loadAssetManifest, type MapData, type TilePoint } from '@/game/assets';
 import { EXPEDITION_APPROACH_MS, JOURNEY, renderExpeditionStage, type JourneyPoint, type RouteProgress } from '@/game/expedition-stage';
 import { REPLAY_OUTRO_MS } from '@/game/replay';
 import { pathLength } from '@/game/paths';
-import { REST_PATTERN, gladiatorPose, journeyMap, legPath } from '@/game/expedition-path';
+import { REST_PATTERN, SEARCH_PATTERN, gladiatorPose, journeyMap, legPath, wanderPoints, type GladiatorPose, type JourneyMap } from '@/game/expedition-path';
+import { frameIndex } from '@/game/battle-stage';
 import { EXPEDITION_FIXTURES, EXPEDITION_FIXTURE_TIMELINES as T } from '../fixtures/expeditions';
 
 const manifest = loadAssetManifest();
@@ -62,7 +63,9 @@ describe('expedition journey on the map', () => {
     const mid = gladiatorPose(j, route('start', 'search-1', 1500, 'search'), SPEED);
     expect(mid.action).toBe('walk');
     expect(Math.hypot(mid.x - start.x, mid.y - start.y)).toBeGreaterThan(1);
-    const searching = gladiatorPose(j, route('start', 'search-1', 5 * 60_000, 'search'), SPEED);
+    // On arrival it starts searching at the spot, facing se (the search cycle is covered below).
+    const reach = (pathLength(legPath(j, 'start', 'search-1')!) / SPEED) * 1000;
+    const searching = gladiatorPose(j, route('start', 'search-1', reach + 1_000, 'search'), SPEED);
     expect(searching).toMatchObject({ x: j.points['search-1'].x + 0.5, y: j.points['search-1'].y + 0.5, action: 'search', walking: false, facing: 'se' });
     expect(gladiatorPose(j, route('search-1', 'encounter-1', 60_000, 'wait'), SPEED)).toMatchObject({ action: 'idle', facing: j.encounters[0].facing, x: j.encounters[0].gladiator.x + 0.5 });
     expect(gladiatorPose(j, route('encounter-1', 'encounter-1', 3_000, 'fight'), SPEED)).toMatchObject({ action: 'fight', walking: false, x: j.encounters[0].gladiator.x + 0.5, y: j.encounters[0].gladiator.y + 0.5 });
@@ -99,6 +102,221 @@ describe('expedition journey on the map', () => {
       for (const stage of t.stages.filter(s => s.kind === 'encounter')) {
         const state = renderExpeditionStage(t, stage.endsAtMs + REPLAY_OUTRO_MS - 1);
         expect(gladiatorPose(j, state.route!, SPEED).action, key).toBe('fight');
+      }
+    }
+  });
+});
+
+// Searching at a spot (Avi, 2026-10-29: "Slow + look around"): the leg in, the spot and the leg after the search.
+const SEARCHES: [JourneyPoint, JourneyPoint, JourneyPoint][] = [
+  ['start', 'search-1', 'encounter-1'], ['encounter-1', 'search-2', 'encounter-2'],
+  ['encounter-2', 'search-3', 'encounter-3'], ['encounter-3', 'search-4', 'end'],
+];
+const SEARCH_ANIM = manifest.animations[manifest.actors.gladiator.animations.search.se];
+/** Crouching and looking at the ground (frames 0-1) or standing and looking around (frames 2-3), as the scene draws the pose. */
+const searchLook = (pose: GladiatorPose) => (frameIndex(SEARCH_ANIM, pose.animMs!) < 2 ? 'crouch' : 'look');
+/** The search route `restMs` after arriving at the spot; the search ends `untilMs` after arriving (if given). */
+const searchAt = (j: JourneyMap, from: JourneyPoint, spot: JourneyPoint, restMs: number, untilMs?: number): RouteProgress => {
+  const reach = (pathLength(legPath(j, from, spot)!) / SPEED) * 1000;
+  return { ...route(from, spot, reach + restMs, 'search'), ...(untilMs === undefined ? {} : { untilMs: reach + untilMs }) };
+};
+const off = (pose: { x: number; y: number }, p: TilePoint) => Math.hypot(pose.x - (p.x + 0.5), pose.y - (p.y + 0.5));
+const STEP_MS = 50;
+/**
+ * Poses sampled every STEP_MS around a spot: walkable, within 1.5 tiles of it, never faster than walking (no jump), and
+ * searching whenever it stands, facing se or sw (the search art has only front frames).
+ */
+const expectAround = (map: MapData, centre: TilePoint, poses: GladiatorPose[], label: string) => poses.forEach((p, i) => {
+  const at = `${label} at ${i * STEP_MS} ms`;
+  expect(walkable(map, p.x, p.y), at).toBe(true);
+  expect(off(p, centre), at).toBeLessThanOrEqual(1.5 + 1e-9);
+  if (i) expect(Math.hypot(p.x - poses[i - 1].x, p.y - poses[i - 1].y), at).toBeLessThanOrEqual((SPEED * STEP_MS) / 1000 + 1e-9);
+  if (p.walking) expect(p.action, at).toBe('walk');
+  else {
+    expect(p.action, at).toBe('search');
+    expect(['se', 'sw'], at).toContain(p.facing);
+  }
+});
+
+describe('searching around a spot (Avi, 2026-10-29: slower, looking around)', () => {
+  it('times the search cycle by the manifest search loop: a crouch, then a look, about 2.5 s each', () => {
+    const d = SEARCH_ANIM.durationsMs;
+    expect(d).toHaveLength(4);
+    expect(d[0] + d[1]).toBe(SEARCH_PATTERN.crouchMs);
+    expect(d[2] + d[3]).toBe(SEARCH_PATTERN.lookMs);
+    expect(SEARCH_PATTERN.crouchMs).toBeGreaterThanOrEqual(2_000);
+    expect(SEARCH_PATTERN.lookMs).toBeGreaterThanOrEqual(2_000);
+  });
+
+  it('crouches and looks at the spot, turns, and walks a few steps to a walkable point nearby', () => {
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot] of SEARCHES) {
+        const centre = j.points[spot];
+        const label = `${map.id} ${spot}`;
+        const poses = Array.from({ length: 40_000 / STEP_MS }, (_, i) => gladiatorPose(j, searchAt(j, from, spot, i * STEP_MS), SPEED));
+        // It arrives and crouches at the spot, looking at the ground, for about 2.5 s, then stands and looks.
+        expect(poses[0], label).toMatchObject({ x: centre.x + 0.5, y: centre.y + 0.5, action: 'search', walking: false, facing: 'se' });
+        const stood = poses.findIndex(p => p.action !== 'search' || off(p, centre) > 0 || searchLook(p) !== 'crouch');
+        expect(stood * STEP_MS, label).toBeGreaterThanOrEqual(2_000);
+        expect(poses[stood], label).toMatchObject({ x: centre.x + 0.5, y: centre.y + 0.5, action: 'search', walking: false });
+        expect(searchLook(poses[stood]), label).toBe('look');
+        // A turn: the facing changes while it stands still.
+        const turn = poses.findIndex((p, i) => i > 0 && !p.walking && !poses[i - 1].walking && p.x === poses[i - 1].x && p.y === poses[i - 1].y && p.facing !== poses[i - 1].facing);
+        expect(turn, label).toBeGreaterThan(0);
+        // Steps: it walks, with the walk animation, to a point within 1.5 tiles and searches there.
+        expect(poses.some(p => p.walking && p.action === 'walk'), label).toBe(true);
+        expect(poses.some(p => !p.walking && off(p, centre) > 0.5), label).toBe(true);
+        expectAround(map, centre, poses, label);
+        // A cycle of about 12 to 16 s: it sets off from the spot at least twice in 40 s, never before its first search.
+        const departures = poses.flatMap((p, i) => (i && p.walking && !poses[i - 1].walking && off(poses[i - 1], centre) === 0 ? [i * STEP_MS] : []));
+        expect(departures.length, label).toBeGreaterThanOrEqual(2);
+        expect(departures[0], label).toBeGreaterThanOrEqual(SEARCH_PATTERN.crouchMs + SEARCH_PATTERN.lookMs);
+        expect(departures[1] - departures[0], label).toBeGreaterThanOrEqual(12_000);
+        expect(departures[1] - departures[0], label).toBeLessThanOrEqual(16_000);
+      }
+    }
+  });
+
+  it('gives the same pose for the same route progress, whatever was asked before', () => {
+    const times = Array.from({ length: 240 }, (_, i) => (i * 7_919) % 61_000);
+    for (const map of maps) {
+      for (const [from, spot] of SEARCHES) {
+        const a = journeyMap(map);
+        const b = journeyMap(map);
+        const forward = times.map(ms => gladiatorPose(a, searchAt(a, from, spot, ms, 45_000), SPEED));
+        const backward = [...times].reverse().map(ms => gladiatorPose(b, searchAt(b, from, spot, ms, 45_000), SPEED)).reverse();
+        expect(backward, `${map.id} ${spot}`).toEqual(forward);
+        expect(times.map(ms => gladiatorPose(a, searchAt(a, from, spot, ms, 45_000), SPEED)), `${map.id} ${spot}`).toEqual(forward);
+      }
+    }
+  });
+
+  it('is back at the spot when the search ends, where the next leg starts', () => {
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot, next] of SEARCHES) {
+        const centre = j.points[spot];
+        const start = gladiatorPose(j, route(spot, next, 0, 'wait'), SPEED);
+        expect([start.x, start.y]).toEqual([centre.x + 0.5, centre.y + 0.5]);
+        // A search that ends at any moment of its first cycles (it searches from 0 ms, on arrival).
+        for (let until = 1; until <= 45_000; until += 97) {
+          const last = gladiatorPose(j, searchAt(j, from, spot, until - 1, until), SPEED);
+          expect([last.x, last.y], `${map.id} ${spot}, a search of ${until} ms`).toEqual([start.x, start.y]);
+        }
+      }
+    }
+  });
+
+  it('never jumps when the search ends partway through a cycle: it walks back, then searches on the spot', () => {
+    // Searches that end in the second cycle (20 s) or the third (31 s): the step-by-step sweep runs on into the final
+    // cycle, which is spent on the spot, so a jump back onto the spot fails here (review fix round 1, Minor 1).
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot] of SEARCHES) {
+        const centre = j.points[spot];
+        for (const until of [20_000, 31_000]) {
+          const label = `${map.id} ${spot}, a search of ${until} ms`;
+          const poses = Array.from({ length: until / STEP_MS }, (_, i) => gladiatorPose(j, searchAt(j, from, spot, i * STEP_MS, until), SPEED));
+          expectAround(map, centre, poses, label);
+          expect(poses.some(p => p.walking), label).toBe(true);
+          expect(poses.at(-1), label).toMatchObject({ x: centre.x + 0.5, y: centre.y + 0.5, action: 'search', walking: false });
+        }
+      }
+    }
+  });
+
+  it('searches on the spot with wander: false: crouch, look and turn, but no steps', () => {
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot, next] of SEARCHES) {
+        const centre = j.points[spot];
+        for (const until of [undefined, 20_000]) {
+          const label = `${map.id} ${spot}, until ${until}`;
+          const poses = Array.from({ length: 40_000 / STEP_MS }, (_, i) => gladiatorPose(j, searchAt(j, from, spot, i * STEP_MS, until), SPEED, { wander: false }));
+          for (const p of poses) expect(p, label).toMatchObject({ x: centre.x + 0.5, y: centre.y + 0.5, action: 'search', walking: false });
+          expect(poses[0], label).toMatchObject({ facing: 'se' });
+          expect(searchLook(poses[0]), label).toBe('crouch');
+          expect(new Set(poses.map(searchLook)), label).toEqual(new Set(['crouch', 'look']));
+          expect(new Set(poses.map(p => p.facing)), label).toEqual(new Set(['se', 'sw']));
+        }
+        // Only the search changes: the walk to the spot and the leg after it are as before.
+        for (const r of [route(from, spot, 1_500, 'search'), route(spot, next, 1_000, 'wait'), route(spot, next, 10 * 60_000, 'wait')]) {
+          expect(gladiatorPose(j, r, SPEED, { wander: false }), `${map.id} ${spot}`).toEqual(gladiatorPose(j, r, SPEED));
+        }
+      }
+    }
+  });
+
+  it('points a following camera at the search spot while it searches, and at the gladiator on the legs', () => {
+    for (const map of maps) {
+      const j = journeyMap(map);
+      for (const [from, spot, next] of SEARCHES) {
+        const centre = { x: j.points[spot].x + 0.5, y: j.points[spot].y + 0.5 };
+        for (const wander of [true, false]) {
+          for (let ms = 0; ms < 40_000; ms += 250) {
+            expect(gladiatorPose(j, searchAt(j, from, spot, ms, 31_000), SPEED, { wander }).follow, `${map.id} ${spot} at ${ms} ms`).toEqual(centre);
+          }
+        }
+        // On the legs it follows the gladiator itself. The leg after the search starts on the spot, so there is no jump.
+        expect(gladiatorPose(j, route(from, spot, 1_500, 'search'), SPEED).follow).toBeUndefined();
+        expect(gladiatorPose(j, route(spot, next, 0, 'wait'), SPEED)).toMatchObject(centre);
+        expect(gladiatorPose(j, route(spot, next, 0, 'wait'), SPEED).follow).toBeUndefined();
+      }
+    }
+  });
+
+  it('starts the next leg of every fixture run where its search ended', () => {
+    let searches = 0;
+    for (const [key, t] of Object.entries(T)) {
+      const map = maps.find(m => m.id === EXPEDITION_FIXTURES[key as keyof typeof T].expedition)!;
+      const j = journeyMap(map);
+      for (const stage of t.stages) {
+        const approach = stage.endsAtMs - EXPEDITION_APPROACH_MS;
+        const before = renderExpeditionStage(t, approach - 1).route;
+        const after = renderExpeditionStage(t, approach).route;
+        if (before?.then !== 'search' || after?.then !== 'wait') continue;
+        searches += 1;
+        const a = gladiatorPose(j, before, SPEED);
+        const b = gladiatorPose(j, after, SPEED);
+        expect(Math.hypot(a.x - b.x, a.y - b.y), `${key} ${stage.id}`).toBeLessThanOrEqual(SPEED / 1000 + 1e-9);
+      }
+    }
+    expect(searches).toBeGreaterThan(0);
+  });
+
+  it('wanders only to walkable points near the spot, never onto a prop, an encounter spot or another leg\'s route', () => {
+    const legs: [JourneyPoint, JourneyPoint][] = [
+      ...JOURNEY.slice(1).map((to, i): [JourneyPoint, JourneyPoint] => [JOURNEY[i], to]),
+      ...[1, 2, 3].map((n): [JourneyPoint, JourneyPoint] => [`encounter-${n}` as JourneyPoint, 'safe']),
+    ];
+    for (const map of maps) {
+      const j = journeyMap(map);
+      const props = new Set(map.props.flatMap(p => Array.from({ length: p.w * p.d }, (_, i) => `${p.x + (i % p.w)},${p.y + Math.floor(i / p.w)}`)));
+      const encounters = new Set(j.encounters.flatMap(e => [`${e.gladiator.x},${e.gladiator.y}`, `${e.enemy.x},${e.enemy.y}`]));
+      for (const [, spot] of SEARCHES) {
+        const centre = j.points[spot];
+        const otherLegs = new Set(legs.filter(([a, b]) => a !== spot && b !== spot).flatMap(([a, b]) => legPath(j, a, b)!.map(p => `${p.x},${p.y}`)));
+        const points = wanderPoints(j, spot);
+        // Two points, one on either side of the spot on screen, computed once per journey map and spot.
+        expect(points.length, `${map.id} ${spot}`).toBe(2);
+        expect(new Set(points.map(w => Math.sign(w.point.x - centre.x - (w.point.y - centre.y)))), `${map.id} ${spot}`).toEqual(new Set([-1, 1]));
+        expect(wanderPoints(j, spot)).toBe(points);
+        for (const w of points) {
+          const at = `${map.id} ${spot} ${w.point.x},${w.point.y}`;
+          const k = `${w.point.x},${w.point.y}`;
+          expect(map.walkable[w.point.y][w.point.x], at).toBe('1');
+          expect(props.has(k), at).toBe(false);
+          expect(encounters.has(k), at).toBe(false);
+          expect(otherLegs.has(k), at).toBe(false);
+          expect(Object.values(j.points).some(p => p.x === w.point.x && p.y === w.point.y), at).toBe(false);
+          expect(Math.hypot(w.point.x - centre.x, w.point.y - centre.y), at).toBeLessThanOrEqual(1.5);
+          expect(w.out[0], at).toEqual(centre);
+          expect(w.out.at(-1), at).toEqual(w.point);
+          expect(w.back, at).toEqual([...w.out].reverse());
+          expect(pathLength(w.out), at).toBeLessThanOrEqual(1.5);
+          for (const p of w.out) expect(map.walkable[p.y][p.x], at).toBe('1');
+        }
       }
     }
   });

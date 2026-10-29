@@ -38,6 +38,12 @@ export type RouteProgress = {
   readonly walkedMs: number;
   readonly then: 'search' | 'wait' | 'fight' | 'rest' | 'leave';
   /**
+   * Searching only: the `walkedMs` at which the search ends and the gladiator sets off from its search spot for the next
+   * leg (the approach). Its search cycle walks a few steps around the spot and is back on the spot by then, so the next
+   * leg starts where it stands (Avi, 2026-10-29).
+   */
+  readonly untilMs?: number;
+  /**
    * Leaving after a defeat only: the rest route it was on at the safe point (at the same display time). The gladiator
    * keeps that rest pose while the scene fades it out, instead of standing up first (Task 15 review round 2 Minor 2).
    */
@@ -170,7 +176,7 @@ function journeyAt(t: number, stage: RevealedStage, current: VisibleStage, upToC
   const spot = point(`search-${n + 1}`);
   const next = point(n >= EXPEDITION_ENCOUNTERS ? 'end' : `encounter-${n + 1}`);
   const approach = Math.max(leave, stage.endsAtMs - EXPEDITION_APPROACH_MS);
-  return t < approach ? go(here, spot, leave, 'search') : go(spot, next, approach, 'wait');
+  return t < approach ? { ...go(here, spot, leave, 'search'), untilMs: approach - leave } : go(spot, next, approach, 'wait');
 }
 
 export function renderExpeditionStage(timeline: RevealedTimeline, displayNowMs: number): ExpeditionSceneState {

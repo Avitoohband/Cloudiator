@@ -459,7 +459,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       }
       this.updateWaiters(state, now);
       const route = state?.route ?? null;
-      const pose = route ? gladiatorPose(journey, route, speed) : null;
+      // Reduced motion keeps a search on the spot: no steps for the camera to snap to.
+      const pose = route ? gladiatorPose(journey, route, speed, { wander: !reducedMotion }) : null;
       last.pose = pose;
       // Back at camp: the gladiator leaves the scene where it waited or rested, fading out.
       const returned = route?.then === 'leave';
@@ -484,12 +485,14 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
           const back = pose.facing === 'ne' || pose.facing === 'nw';
           const key = back && dirs.ne ? dirs.ne : dirs.se;
           const anim = manifest.animations[key];
-          const name = anim.frames[frameIndex(anim, now)];
+          // The search cycle times its own crouch and look (expedition-path SEARCH_PATTERN); other loops run on the clock.
+          const name = anim.frames[frameIndex(anim, pose.animMs ?? now)];
           this.setHeroFrames(key, hero.layers.map(l => name.replace(/^body\//, `${l.id}/`)), pose.facing === 'sw' || pose.facing === 'nw');
           hero.container.setPosition(feet.x, feet.y).setDepth(feet.y);
         }
         hero.label.setText(look.name).setPosition(hero.container.x, feet.y - 46);
-        if (following) this.follow(feet, snap);
+        // While searching, a following camera holds on the search spot instead of swaying with every step.
+        if (following) this.follow(pose.follow ? worldToScreen(pose.follow.x, pose.follow.y) : feet, snap);
       }
       this.placeWaiterLabels();
       // Props fade only for a gladiator still in the scene.

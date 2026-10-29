@@ -191,6 +191,15 @@ describe('gladiator animation package', () => {
     });
   });
 
+  it('holds the expedition search slowly: a short settle and a long hold for the crouch and for the look', () => {
+    // Avi, 2026-10-29: the 1.3 s loop read as squats. About 2.5 s crouching and looking at the ground, then about 2.5 s
+    // standing and shading the eyes; src/game/expedition-path.ts times its search cycle by these frames.
+    const search = manifest.animations[gladiator.animations.search.se];
+    expect(search.durationsMs).toEqual([400, 2100, 400, 2100]);
+    expect(GLADIATOR_ACTIONS.search.durations).toEqual(search.durationsMs);
+    expect(search.loop).toBe(true);
+  });
+
   it('layers four weapon silhouettes, a shield, two armors and head gear over one reusable body', () => {
     expect(gladiator.layers.map(l => l.id)).toEqual(expect.arrayContaining([
       'body', 'body-female', 'cloth', 'cloth-female', 'hair', 'hair-long', 'hair-ponytail',

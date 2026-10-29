@@ -87,3 +87,9 @@ More from Avi, 2026-10-29:
     high level gladitor, or monster. big prises at the end, those dungeos are super hard and not for early game at all."
     Different from 1.6's party dungeons (3 rooms and a boss in one afternoon): a multi-day delve of many stages, mini bosses
     every few stages, a final boss, big prizes, endgame only. Goes into the PvE part of the economy pass, then its own design.
+
+26. **Titles a gladiator wears (Avi, 2026-10-30).** "I want to add titles that gladiator wear and it shows something. From
+    tournaments. Dungeons, number of expeditions, number of training and more. A unique title for the first batch of players
+    that they are the test group." Earned titles (tournament wins, dungeon clears, expedition and Training counts, and more);
+    a gladiator wears one, shown with its name; a unique founders' title for the first batch of players (the test group).
+    Today only the season "champion" title exists (prestige, Task 21).

@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from './fixtures';
+import { test, expect, type BrowserContext, type Locator, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
@@ -339,6 +339,202 @@ test('takes the new class when a pending class change from before the release ta
   await expect(page.locator('.planning-form [role="alert"]')).toHaveCount(0);
   expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'berserker', stance: 'offensive' });
 });
+
+// ---- Class bonuses and the suggested split (Patch A item 4) ---------------------------------------------------------------------
+
+/** A Guardian with 13 points earned and 10 spent the class's way (2/0/5/2/1): 3 are left. */
+const guardianWithThreeLeft = (state: OwnerState) => {
+  state.currentBuild = { ...state.currentBuild, classId: 'guardian', allocations: { strength: 2, agility: 0, vitality: 5, endurance: 2, precision: 1 } };
+  state.progression = { ...state.progression, level: 2, earnedAttributePoints: 13, unspentAttributePoints: 3 };
+};
+const fieldValues = async (page: Page) => Promise.all((['strength', 'agility', 'vitality', 'endurance', 'precision'] as const).map(name => points(page, name).inputValue()));
+const suggestButton = (build: Locator) => build.getByRole('button', { name: /^Suggested for /});
+const undoSplit = (build: Locator) => build.getByRole('button', { name: 'Undo', exact: true });
+const splitSentence = '+1 Strength, +1 Vitality, +1 Endurance: the Guardian split.';
+
+test('spends the points left the class way with Suggested, and Undo puts them back', async ({ page, context }, testInfo) => {
+  const flow = await planningFlow(context, guardianWithThreeLeft);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  // The class's bonuses sit beside "Class: Guardian" in Plan a build.
+  const classLine = build.getByText('Class: Guardian', { exact: true });
+  const vitality = build.getByText('Vitality +5%', { exact: true }), endurance = build.getByText('Endurance +5%', { exact: true });
+  await expect(vitality).toBeVisible();
+  await expect(endurance).toBeVisible();
+  const inRow = async (chip: Locator) => {
+    const [text, box] = await Promise.all([classLine.boundingBox(), chip.boundingBox()]);
+    return text!.y < box!.y + box!.height && box!.y < text!.y + text!.height;
+  };
+  if (testInfo.project.name === 'desktop') expect(await inRow(vitality), 'Vitality +5% is on the class line').toBe(true);
+  await expect(build.locator('.build-class')).toContainText(/^Class: GuardianVitality \+5%Endurance \+5%$/);
+  // 3 of 13 are left, and the button is beside the counter.
+  await expect(build.getByText('3 of 13 left', { exact: true })).toBeVisible();
+  expect(await fieldValues(page)).toEqual(['2', '0', '5', '2', '1']);
+  await expect(suggestButton(build)).toHaveText('Suggested for Guardian');
+  await expect(suggestButton(build)).toBeVisible();
+  await expect(undoSplit(build)).toHaveCount(0);
+  await suggestButton(build).scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'split-plan-before');
+  // Suggested: +1 Strength, +1 Vitality, +1 Endurance (the largest remainders), all 13 spent, a line that says so, and Undo.
+  await suggestButton(build).click();
+  expect(await fieldValues(page)).toEqual(['3', '0', '6', '3', '1']);
+  await expect(build.getByText('All 13 spent', { exact: true })).toBeVisible();
+  await expect(build.getByText(splitSentence, { exact: true })).toBeVisible();
+  await expect(build.getByRole('status').filter({ hasText: splitSentence })).toHaveCount(1);
+  await expect(suggestButton(build)).toHaveCount(0);
+  await expect(undoSplit(build)).toBeVisible();
+  await undoSplit(build).scrollIntoViewIfNeeded();
+  await reviewShot(page, testInfo, 'split-plan-after');
+  // Nothing is saved: no command goes out before Queue build.
+  expect(flow.commands).toEqual([]);
+  // Undo puts the fields back, and the counter, and takes the line and itself away.
+  await undoSplit(build).click();
+  expect(await fieldValues(page)).toEqual(['2', '0', '5', '2', '1']);
+  await expect(build.getByText('3 of 13 left', { exact: true })).toBeVisible();
+  await expect(build.getByText(splitSentence, { exact: true })).toHaveCount(0);
+  await expect(undoSplit(build)).toHaveCount(0);
+  await expect(suggestButton(build)).toBeVisible();
+  expect(flow.commands).toEqual([]);
+  // Any other edit takes the line and Undo away too: the fields are then what the player typed, not a suggestion to undo.
+  await suggestButton(build).click();
+  await expect(undoSplit(build)).toBeVisible();
+  await points(page, 'strength').fill('2');
+  await expect(undoSplit(build)).toHaveCount(0);
+  await expect(build.getByText(splitSentence, { exact: true })).toHaveCount(0);
+  expect(await fieldValues(page)).toEqual(['2', '0', '6', '3', '1']);
+  // A point given back brings the button back (with nothing left it is absent). One left goes to the biggest share, Vitality: it adds to what is there.
+  await expect(build.getByText('1 of 13 left', { exact: true })).toBeVisible();
+  await suggestButton(build).click();
+  expect(await fieldValues(page)).toEqual(['2', '0', '7', '3', '1']);
+  await expect(build.getByText('+1 Vitality: the Guardian split.', { exact: true })).toBeVisible();
+  await undoSplit(build).click();
+  expect(await fieldValues(page)).toEqual(['2', '0', '6', '3', '1']);
+  // Queue build sends what the fields hold, as always, after the suggestion.
+  await points(page, 'vitality').fill('5');
+  await points(page, 'endurance').fill('2');
+  await expect(build.getByText('3 of 13 left', { exact: true })).toBeVisible();
+  await suggestButton(build).click();
+  expect(await fieldValues(page)).toEqual(['3', '0', '6', '3', '1']);
+  await page.getByRole('button', { name: 'Queue build' }).click();
+  await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'guardian', allocation: { strength: 3, agility: 0, vitality: 6, endurance: 3, precision: 1 } });
+  // The queued build is the new draft: the suggestion's line and its Undo went with the old one (Undo must not put back fields the server now holds).
+  await expect(undoSplit(build)).toHaveCount(0);
+  await expect(build.getByText(splitSentence, { exact: true })).toHaveCount(0);
+  expect(await fieldValues(page)).toEqual(['3', '0', '6', '3', '1']);
+  // My gladiator: the class card (bars on a desktop) and, at 390 × 844, the one-line split and no bars.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const phone = await openMenu(page, 'My gladiator');
+  const phoneCard = phone.getByTestId('class-card');
+  await phoneCard.scrollIntoViewIfNeeded();
+  await expect(phoneCard.getByText('GUARDIAN BONUSES', { exact: true })).toBeVisible();
+  await expect(phoneCard.getByText('Vitality +5%', { exact: true })).toBeVisible();
+  await expect(phoneCard.getByText('SUGGESTED SPLIT · OF EVERY 10', { exact: true })).toBeVisible();
+  await expect(phoneCard.getByText('Vitality 5 · Strength 2 · Endurance 2 · Precision 1', { exact: true })).toBeVisible();
+  await expect(phoneCard.getByTestId('split-points').first()).toBeHidden();
+  await expect(phoneCard.getByText('SUGGESTED SPLIT · OF EVERY 10 POINTS', { exact: true })).toBeHidden();
+  await expect(phoneCard.getByText('From points and gear alike: more health and more stamina.', { exact: true })).toBeHidden();
+  expect(await noHorizontalScroll(page)).toBe(true);
+});
+
+test('shows the class card between the class line and the activity, with bars on a desktop and one line on a phone', async ({ page, context }, testInfo) => {
+  await planningFlow(context, guardianWithThreeLeft);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const card = mine.getByTestId('class-card');
+  const phoneLayout = await page.evaluate(() => matchMedia('(hover: none), (max-width: 480px)').matches);
+  // Between the class line and the activity box, in that order.
+  const [classLine, cardBox, activity] = await Promise.all([mine.getByText(/^Guardian · Level 2/).boundingBox(), card.boundingBox(),
+    mine.getByText(/^CURRENT ACTIVITY$/).boundingBox()]);
+  expect(classLine!.y + classLine!.height).toBeLessThanOrEqual(cardBox!.y + 1);
+  expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(activity!.y + 1);
+  await expect(card.getByText('GUARDIAN BONUSES', { exact: true })).toBeVisible();
+  await expect(card.getByTestId('class-bonus')).toHaveText(['Vitality +5%', 'Endurance +5%']);
+  if (!phoneLayout) {
+    // Desktop: the meaning line, "SUGGESTED SPLIT · OF EVERY 10 POINTS" and one bar per attribute, largest share first; no one-line form.
+    await expect(card.getByText('From points and gear alike: more health and more stamina.', { exact: true })).toBeVisible();
+    await expect(card.getByText('SUGGESTED SPLIT · OF EVERY 10 POINTS', { exact: true })).toBeVisible();
+    await expect(card.getByTestId('split-points')).toHaveText(['5', '2', '2', '1', '0']);
+    await expect(card.getByTestId('split-points').first()).toBeVisible();
+    await expect(card.getByText('SUGGESTED SPLIT · OF EVERY 10', { exact: true })).toBeHidden();
+    await expect(card.getByText('Vitality 5 · Strength 2 · Endurance 2 · Precision 1', { exact: true })).toBeHidden();
+    expect(await card.locator('li').evaluateAll(rows => rows.filter(row => row.querySelector('i')).map(row => Math.round(parseFloat((row.querySelector('i') as HTMLElement).style.width))))).toEqual([100, 40, 40, 20, 0]);
+    await expect(mine).toHaveCSS('opacity', '1');
+    expect(await contrastIssues(mine), 'My gladiator with the class card').toEqual([]);
+    await card.scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, 'class-card-summary');
+  }
+  // A phone: the chips and the one line (zeros left out), no bars, no meaning line. 390 × 844, then 360 × 740 with nothing spilling sideways.
+  for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
+    await page.setViewportSize(size);
+    const sheet = await openMenu(page, 'My gladiator');
+    const phoneCard = sheet.getByTestId('class-card');
+    await phoneCard.scrollIntoViewIfNeeded();
+    await expect(phoneCard.getByText('Vitality 5 · Strength 2 · Endurance 2 · Precision 1', { exact: true })).toBeVisible();
+    await expect(phoneCard.getByText('SUGGESTED SPLIT · OF EVERY 10', { exact: true })).toBeVisible();
+    await expect(phoneCard.getByTestId('split-points').first()).toBeHidden();
+    expect(await noHorizontalScroll(page), `no sideways scroll at ${size.width}`).toBe(true);
+    expect(await phoneCard.evaluate(element => element.scrollWidth <= element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth), `the card fits at ${size.width}`).toBe(true);
+    await expect(sheet).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
+    expect(await contrastIssues(sheet), `My gladiator with the class card at ${size.width}`).toEqual([]);
+    await reviewShot(page, testInfo, `class-card-phone${size.width}`);
+  }
+});
+
+test('keeps the keyboard focus on the split controls: Suggested hands it to Undo, and Undo hands it back', async ({ page, context }) => {
+  await planningFlow(context, guardianWithThreeLeft);
+  await page.goto('/game/');
+  const mine = await openMenu(page, 'My gladiator');
+  const build = mine.locator('.planning-form');
+  await points(page, 'strength').focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(suggestButton(build)).toBeFocused();
+  await page.keyboard.press('Enter');
+  expect(await fieldValues(page)).toEqual(['3', '0', '6', '3', '1']);
+  await expect(undoSplit(build)).toBeFocused();
+  await page.keyboard.press('Enter');
+  expect(await fieldValues(page)).toEqual(['2', '0', '5', '2', '1']);
+  await expect(suggestButton(build)).toBeFocused();
+});
+
+// Guardian has the widest chips ("Vitality +5%" and "Endurance +5%" next to "Class: Guardian"); Duelist is the other class with two.
+for (const { classId, name, chips, builds, sentence } of [
+  { classId: 'guardian', name: 'Guardian', chips: ['Vitality +5%', 'Endurance +5%'], builds: { strength: 2, agility: 0, vitality: 5, endurance: 2, precision: 1 }, sentence: splitSentence },
+  { classId: 'duelist', name: 'Duelist', chips: ['Agility +5%', 'Precision +5%'], builds: { strength: 2, agility: 4, vitality: 0, endurance: 0, precision: 4 }, sentence: '+1 Strength, +1 Agility, +1 Precision: the Duelist split.' },
+] as const) {
+  test(`fits the ${name}'s Build panel at 360 × 740: the chips wrap, the Suggested and Undo buttons are 44 px high, and nothing scrolls sideways`, async ({ page, context }, testInfo) => {
+    await planningFlow(context, state => { guardianWithThreeLeft(state); state.currentBuild = { ...state.currentBuild, classId, allocations: { ...builds } }; });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto('/game/');
+    const mine = await openMenu(page, 'My gladiator');
+    const build = mine.locator('.planning-form');
+    await expect(build.getByText(`Class: ${name}`, { exact: true })).toBeVisible();
+    for (const chip of chips) await expect(build.getByText(chip, { exact: true })).toBeVisible();
+    await suggestButton(build).scrollIntoViewIfNeeded();
+    await expect(suggestButton(build)).toHaveText(`Suggested for ${name}`);
+    const inside = (locator: Locator) => locator.evaluate(element => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.right <= window.innerWidth; });
+    for (const chip of [...chips.map(chip => build.getByText(chip, { exact: true })), suggestButton(build)]) expect(await inside(chip)).toBe(true);
+    expect((await suggestButton(build).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await build.getByText(`Class: ${name}`, { exact: true }).scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, `split-plan-${classId}-360-class`);
+    await suggestButton(build).scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, `split-plan-${classId}-360-before`);
+    await suggestButton(build).click();
+    await expect(undoSplit(build)).toBeVisible();
+    await expect(build.getByText(sentence, { exact: true })).toBeVisible();
+    expect((await undoSplit(build).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await inside(undoSplit(build))).toBe(true);
+    expect(await inside(build.getByText(sentence, { exact: true }))).toBe(true);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await expect(mine).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
+    expect(await contrastIssues(mine), 'the Build panel with Suggested and Undo').toEqual([]);
+    await undoSplit(build).scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, `split-plan-${classId}-360-after`);
+  });
+}
 
 /** The select values a part offers (read from the page, apart from the panel's own lists). */
 const optionValues = (page: Page, phase: string) => page.getByLabel(`${phase} activity`).locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));

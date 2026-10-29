@@ -101,6 +101,16 @@ main[tabindex="-1"]:focus { outline: none; }
 .build-counter[data-done="true"] { border-color: #4fb58a; background: #1f4a3a; color: #9be3c0; }
 .build-points-note { margin: .5rem 0 0; color: var(--gold); font-size: .8rem; }
 .build-points-note:empty { margin: 0; }
+/* Patch A item 4: the class's bonus chips beside "Class: …", "Suggested for {class}" beside the counter, and Undo beside the status line.
+   The chips and the line wrap rather than overflow (the narrowest sheet is 360px); the buttons are 44px high (.planning-form button). */
+.build-class { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin: 0 0 1rem; }
+.build-class p { margin: 0; }
+.build-counter-row { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; margin: 0 0 .5rem; }
+.build-counter-row .build-counter { margin: 0; }
+.build-points-status { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; }
+.build-points-status:has(.build-undo) { margin-bottom: .5rem; }
+.build-suggest, .build-undo { color: var(--ink); background: #ffffff12; border: 1px solid #ffffff2a; border-radius: 8px; font-size: .8rem; font-weight: 600; }
+.build-suggest:hover, .build-undo:hover { background: #ffffff1f; }
 .back-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .9rem; color: var(--gold); border: 1px solid #6b5a3a; font-size: .85rem; font-weight: 700; }
 .replay-page { max-width: 1008px; margin: auto; padding: 1.5rem 1.5rem 2rem; }
 .sample-replays { border-top: 1px solid var(--line); margin-top: 1.25rem; padding-top: 1rem; }

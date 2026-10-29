@@ -17,6 +17,7 @@ import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
 import { slotTimeText } from '../schedule/slot-time';
 import { activityStatus } from './activity-status';
+import { ClassCard } from './ClassCard';
 import type { Viewer } from './useGameState';
 import styles from './CharacterPanel.module.css';
 
@@ -60,6 +61,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
           <button type="button" onClick={onRetry}>Retry</button>
         </div>
       )}
+      <ClassCard classId={owner.currentBuild.classId} />
       <div className={styles.activity}>
         <span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span>
         {activity && <p>{activity.label}</p>}

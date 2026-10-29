@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import type { Attributes, EquipmentSlot, GameCommand, Stance } from '@contracts/commands';
 import type { BuildView, ItemInstance, OwnerState } from '@contracts/reads';
 import type { BuildInput } from '@domain/types';
@@ -10,6 +10,8 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { deriveStats, preserveStamina } from '@domain/stats';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
+import { splitNote, suggestedSplit } from '../character/class-bonus';
+import { ClassChips } from '../character/ClassCard';
 import { cappedNote, pointsLeft, raisedNote, setPoints } from '../character/creation-points';
 import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
@@ -33,6 +35,12 @@ const draftFrom = (build: BuildView, current: BuildView): BuildInput => {
 };
 /** The note under the points: what they cost, what can no longer be done, and what comes later (the spec's copy). */
 const POINTS_NOTE = "Adding points is free. Points can't be taken back once this build takes effect, and your class is fixed. Respec and class changes will come later as paid options.";
+/**
+ * The status line under the points: what a typed number was capped or raised to, or what "Suggested for {class}" added (`undo` is
+ * the allocation from before it, which Undo puts back). Any other edit, and a reload of the build, clears both.
+ */
+type PointsNote = { text: string; undo: Attributes | null };
+const NO_NOTE: PointsNote = { text: '', undo: null };
 /** Which fields a build validation reason names (Task 23.5): the attribute points, or the equipment. */
 const EQUIPMENT_REASONS = new Set(['item', 'slot', 'level', 'reserved', 'two-handed']);
 /** An attribute value the build rules accept: a whole number from 0 to the cap (`validateBuild`'s bounded integer). */
@@ -48,8 +56,11 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const nowMs = useMinuteNow(clock);
   const clockMode = useClockMode();
   const [draft, setDraft] = useState(() => draftFrom(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild));
-  /** The short status line after a typed number was capped or raised; any other edit, and a reload of the build, clears it. */
-  const [pointsNote, setPointsNote] = useState('');
+  /** The short status line after a typed number was capped or raised, or the split was suggested; any other edit, and a reload of the build, clears it. */
+  const [pointsNote, setPointsNote] = useState<PointsNote>(NO_NOTE);
+  /** The control a keyboard command hands the focus to once the one it came from has gone (Suggested leaves with the last point, Undo with the line). */
+  const [focusAfter, setFocusAfter] = useState<'undo' | 'suggest' | null>(null);
+  const suggestButton = useRef<HTMLButtonElement>(null), undoButton = useRef<HTMLButtonElement>(null);
   /** What each points field held when it took the focus: the capped line says it differently when that was 0 (as in creation). */
   const heldAtFocus = useRef<Partial<Record<keyof Attributes, number>>>({});
   const [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
@@ -66,15 +77,21 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     const floor = fixedKey(owner.currentBuild);
     if (draftVersion.current !== owner.buildVersion) {
       draftVersion.current = owner.buildVersion; draftFloor.current = floor;
-      setDraft(draftFrom(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild)); attempt.current = null; setPointsNote('');
+      setDraft(draftFrom(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild)); attempt.current = null; setPointsNote(NO_NOTE);
     } else if (draftFloor.current !== floor) {
       // The boundary applied the pending build under the open form: the current build (so the class and the floor of every attribute) moved
       // while the build version did not. Compared by content, since every owner read brings a new object. The draft keeps its unsent edits
       // but is raised to the new floor, so it can never hold a class or a point the server would refuse (and Queue build is never stuck).
       draftFloor.current = floor;
-      setDraft(previous => refloored(previous, owner.currentBuild)); attempt.current = null; setPointsNote('');
+      setDraft(previous => refloored(previous, owner.currentBuild)); attempt.current = null; setPointsNote(NO_NOTE);
     }
   }, [owner.buildVersion, owner.currentBuild, owner.pendingBuild]);
+  // Set together with the draft that brings the control, so it commits with it: the focus is never asked for before the control is there.
+  useEffect(() => {
+    if (!focusAfter) return;
+    (focusAfter === 'undo' ? undoButton : suggestButton).current?.focus();
+    setFocusAfter(null);
+  }, [focusAfter]);
   const valid = validateBuild(draft, owner.inventory, owner.progression.earnedAttributePoints, owner.progression.level);
   // The review message names its fields: they are marked invalid and described by it (Task 23.5). More points than earned
   // marks every attribute; an attribute that is not a whole number in range (`invalid-input`) marks that one alone, or every
@@ -92,7 +109,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const twoHands = weapon ? CATALOG_V1.items[weapon.catalogId]?.hands === 2 : false;
   /** The pending build's effective time, or '' when it cannot be shown: its line is then left out. */
   const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
-  function update(next: BuildInput, note = '') { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote(note); }
+  function update(next: BuildInput, note = '', undo: Attributes | null = null) { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote({ text: note, undo }); }
   /**
    * A typed or stepped number for one attribute: raised to the current build's value when below it, capped at what is left when
    * above, with a status line saying which. Only typing can pass either limit (the stepper stops at both), so the field has the
@@ -103,6 +120,20 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     const result = setPoints(draft.allocation, key, wanted, earned, floor);
     update({ ...draft, allocation: result.allocation }, result.raised ? raisedNote(title(key), floor)
       : result.capped ? cappedNote(title(key), left, left + held, heldAtFocus.current[key] ?? held) : '');
+  }
+  /**
+   * "Suggested for {class}": the points left go on the attributes the class's way (only adds, only the points left). Nothing is sent: it
+   * is a draft edit like any other, and Undo puts the fields back. By keyboard the focus moves to Undo, since this button leaves with the last point.
+   */
+  function suggest(event: MouseEvent<HTMLButtonElement>) {
+    const after = suggestedSplit(draft.allocation, left, draft.classId);
+    if (event.currentTarget.matches(':focus-visible')) setFocusAfter('undo');
+    update({ ...draft, allocation: after }, splitNote(draft.allocation, after, draft.classId), draft.allocation);
+  }
+  function undoSuggestion(event: MouseEvent<HTMLButtonElement>) {
+    if (!pointsNote.undo) return;
+    if (event.currentTarget.matches(':focus-visible')) setFocusAfter('suggest');
+    update({ ...draft, allocation: pointsNote.undo });
   }
   async function send(kind: BuildCommand['kind']) {
     if (sending.current || (kind === 'queue-build' && !valid.ok)) return;
@@ -139,14 +170,20 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
     <form onSubmit={submit}>
       <h3>{owner.pendingBuild ? 'Revise pending build' : 'Plan a build'}</h3>
       <fieldset disabled={busy}><legend>Class and stance</legend>
-        <p>Class: {title(draft.classId)}</p>
+        <div className="build-class"><p>Class: {title(draft.classId)}</p><ClassChips classId={draft.classId} /></div>
         <label htmlFor="build-stance">Stance</label><select id="build-stance" value={draft.stance} onChange={e => update({ ...draft, stance: e.target.value as Stance })}>{Object.keys(RULES_V1.stances).map(value => <option key={value}>{value}</option>)}</select>
       </fieldset>
       <fieldset disabled={busy}><legend>Attribute points · {owner.progression.earnedAttributePoints} earned</legend>
-        <p className="build-counter" role="status" data-done={left === 0}>{left === 0 ? `All ${earned} spent` : `${left} of ${earned} left`}</p>
+        <div className="build-counter-row">
+          <p className="build-counter" role="status" data-done={left === 0}>{left === 0 ? `All ${earned} spent` : `${left} of ${earned} left`}</p>
+          {left > 0 && <button type="button" ref={suggestButton} className="build-suggest" onClick={suggest}>Suggested for {title(draft.classId)}</button>}
+        </div>
         <div className="build-points">{attributes.map(key => <label key={key}>{key}<input type="number" min={owner.currentBuild.allocations[key]} max={draft.allocation[key] + left} step="1" value={draft.allocation[key]} {...reviewed(pointsInvalid(key))}
           onFocus={() => { heldAtFocus.current[key] = draft.allocation[key]; }} onChange={e => changePoints(key, Number(e.target.value))} /></label>)}</div>
-        <p className="build-points-note" role="status">{pointsNote}</p>
+        <div className="build-points-status">
+          <p className="build-points-note" role="status">{pointsNote.text}</p>
+          {pointsNote.undo && <button type="button" ref={undoButton} className="build-undo" onClick={undoSuggestion}>Undo</button>}
+        </div>
         <p>{POINTS_NOTE}</p>
       </fieldset>
       <fieldset disabled={busy}><legend>Equipment</legend>

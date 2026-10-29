@@ -15,12 +15,12 @@ const noop = () => {};
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, '\'').replace(/\s+/g, ' ');
 
 /** The My gladiator panel of a player at display time `nowMs` (the shared clock held there). */
-function panel(owner: OwnerState, nowMs: number, slotIndex = SLOT, resting = false) {
+function panel(owner: OwnerState, nowMs: number, slotIndex = SLOT, resting = false, fixture = true) {
   const clock = createDisplayClock();
   clock.freeze(nowMs);
   return renderToStaticMarkup(createElement(CharacterPanel, {
     viewer: 'player', session: { status: 'signed-in', userId: 'account', expiresAtMs: null }, owner, ownerError: null, slotIndex, clock,
-    gateway: {} as GameGateway, fixture: true, previewFailed: false, refreshOwner: async () => {}, onCreate: noop, resting,
+    gateway: {} as GameGateway, fixture, previewFailed: false, refreshOwner: async () => {}, onCreate: noop, resting,
   }));
 }
 
@@ -134,6 +134,98 @@ describe('My gladiator', () => {
       expect(line(panel(owner, later))).toBeUndefined();
       // Resting at home with no activity (Task 23.8) is not a Rest activity.
       expect(line(panel({ ...owner, currentActivity: null, restingUntilSlot: SLOT + 1 }, nowMs))).toBeUndefined();
+    });
+  });
+
+  // Patch A item 4: between the class line and the activity box, a card names the class's bonuses and its suggested split.
+  describe('the class card', () => {
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    /** Where each of `parts` first appears after the one before it: -1 when one is missing, so a wrong order fails too. */
+    const inOrder = (haystack: string, parts: string[]) => {
+      let from = 0;
+      return parts.map(part => { const at = haystack.indexOf(part, from); if (at >= 0) from = at + part.length; return at; });
+    };
+
+    /** The chips of the card itself (the build planner below it shows the same ones beside "Class: …"). */
+    const chips = (html: string) => [...html.split('class="planning-form"')[0].matchAll(/data-testid="class-bonus"[^>]*>([^<]*)</g)].map(match => match[1]);
+
+    it('shows the class bonuses and the suggested split under the class line', () => {
+      const html = panel(structuredClone(ownerFixture), nowMs, SLOT, false, false); // a Guardian, as a player sees it (not the fixture preview)
+      const words = text(html);
+      const at = inOrder(words, ['Guardian · Level 1', 'GUARDIAN BONUSES', 'Vitality +5%', 'Endurance +5%',
+        'From points and gear alike: more health and more stamina.', 'SUGGESTED SPLIT · OF EVERY 10 POINTS', 'Vitality 5', 'Strength 2', 'Endurance 2',
+        'Precision 1', 'Agility 0', 'SUGGESTED SPLIT · OF EVERY 10', 'Vitality 5 · Strength 2 · Endurance 2 · Precision 1', 'CURRENT ACTIVITY']);
+      expect(at.every(position => position >= 0), `positions ${at}`).toBe(true);
+      // The bars' numbers, in order (largest share first, ties in attribute order, zeros kept), each in its own element.
+      const numbers = [...html.matchAll(/data-testid="split-points"[^>]*>(\d+)</g)].map(match => Number(match[1]));
+      expect(numbers).toEqual([5, 2, 2, 1, 0]);
+      expect(chips(html)).toEqual(['Vitality +5%', 'Endurance +5%']);
+      // The phone's one line leaves the zero out, and says nothing of Agility.
+      expect(/Vitality <b>5<\/b> · Strength <b>2<\/b> · Endurance <b>2<\/b> · Precision <b>1<\/b>/.test(html)).toBe(true);
+      expect(words).not.toContain('Agility 0 ·');
+    });
+
+    it('names the card after the class, and takes the chips and the meaning from it', () => {
+      const duelist = structuredClone(ownerFixture);
+      duelist.currentBuild = { ...duelist.currentBuild, classId: 'duelist' };
+      const words = text(panel(duelist, nowMs, SLOT, false, false));
+      expect(inOrder(words, ['DUELIST BONUSES', 'Agility +5%', 'Precision +5%', 'From points and gear alike: faster, and hits more often.',
+        'Agility 4', 'Precision 4', 'Strength 2', 'Vitality 0', 'Endurance 0', 'Agility 4 · Precision 4 · Strength 2', 'CURRENT ACTIVITY']).every(position => position >= 0)).toBe(true);
+      const berserker = structuredClone(ownerFixture);
+      berserker.currentBuild = { ...berserker.currentBuild, classId: 'berserker' };
+      const strong = text(panel(berserker, nowMs, SLOT, false, false));
+      expect(strong).toContain('BERSERKER BONUSES Strength +10%');
+      expect(chips(panel(berserker, nowMs, SLOT, false, false))).toEqual(['Strength +10%']);
+      expect(strong).toContain('From points and gear alike: every hit lands harder.');
+      // Not a visitor's or a stranger's view: the card is the owner's panel, so a panel with no gladiator has none.
+      const joining = renderToStaticMarkup(createElement(CharacterPanel, {
+        viewer: 'visitor', session: { status: 'signed-out', userId: null, expiresAtMs: null }, owner: null, ownerError: null, slotIndex: null, clock: createDisplayClock(),
+        gateway: {} as GameGateway, fixture: false, previewFailed: false, refreshOwner: async () => {}, onCreate: noop,
+      }));
+      expect(text(joining)).not.toContain('BONUSES');
+    });
+
+    it('shows the card in the fixture preview too, above its sample activity', () => {
+      expect(inOrder(text(panel(structuredClone(ownerFixture), nowMs)), ['GUARDIAN BONUSES', 'Vitality +5%', 'SAMPLE ACTIVITY']).every(position => position >= 0)).toBe(true);
+    });
+
+    it('shows the card while the last loaded details are kept after a failed refresh', () => {
+      const clock = createDisplayClock();
+      clock.freeze(nowMs);
+      const html = renderToStaticMarkup(createElement(CharacterPanel, {
+        viewer: 'player', session: { status: 'signed-in', userId: 'account', expiresAtMs: null }, owner: structuredClone(ownerFixture), ownerError: 'unavailable',
+        slotIndex: SLOT, clock, gateway: {} as GameGateway, fixture: false, previewFailed: false, refreshOwner: async () => {}, onCreate: noop,
+      }));
+      expect(inOrder(text(html), ['could not be refreshed', 'GUARDIAN BONUSES', 'CURRENT ACTIVITY']).every(position => position >= 0)).toBe(true);
+    });
+  });
+
+  // Patch A item 4, "Plan a build": the same chips beside the class, and the Suggested button only while points are left.
+  describe('the build planner', () => {
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    const planner = (earned: number) => {
+      const owner = structuredClone(ownerFixture);
+      owner.progression = { ...owner.progression, earnedAttributePoints: earned };
+      const clock = createDisplayClock();
+      clock.freeze(nowMs);
+      return renderToStaticMarkup(createElement(CharacterPanel, {
+        viewer: 'player', session: { status: 'signed-in', userId: 'account', expiresAtMs: null }, owner, ownerError: null, slotIndex: SLOT, clock,
+        gateway: {} as GameGateway, fixture: false, previewFailed: false, refreshOwner: async () => {}, onCreate: noop,
+      }));
+    };
+
+    it('puts the class bonuses beside the class, and offers Suggested while points are left', () => {
+      const html = planner(13);
+      const form = html.slice(html.indexOf('class="planning-form"'));
+      expect(text(form)).toMatch(/Class: Guardian\s+Vitality \+5%\s+Endurance \+5%/);
+      expect(text(form)).toContain('3 of 13 left Suggested for Guardian');
+      expect(form).toMatch(/<button[^>]*type="button"[^>]*>Suggested for Guardian<\/button>/);
+    });
+
+    it('has no Suggested button with no points left', () => {
+      const html = planner(10);
+      expect(text(html)).toContain('All 10 spent');
+      expect(text(html)).not.toContain('Suggested for');
     });
   });
 

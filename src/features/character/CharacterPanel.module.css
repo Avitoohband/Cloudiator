@@ -69,6 +69,114 @@
   color: #9fe0c3;
 }
 
+/* The class card (Patch A item 4): the class's bonuses and its suggested split, between the class line and the activity box. The
+   chips are also used beside "Class: …" in Plan a build. On a phone the bars and the meaning give way to one line (.splitWide is
+   hidden, .splitNarrow shown, in the touch layout at the end of this file's rules). */
+.classCard {
+  min-width: 0;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #4a3f2a;
+  border-left: 3px solid var(--gold);
+  background: #171521;
+}
+
+.classCard p {
+  margin: 0;
+}
+
+.classCard .cardEyebrow {
+  margin: 0 0 0.3rem;
+}
+
+.classCard .splitEyebrow {
+  margin-top: 0.65rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 0.1rem 0.6rem;
+  border: 1px solid #88683d;
+  border-radius: 999px;
+  background: #473623eb;
+  color: #ffe1a3;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.classCard .meaning {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.shares {
+  display: grid;
+  gap: 3px;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shares li {
+  display: grid;
+  grid-template-columns: 4.7rem minmax(0, 1fr) 1.1rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.bar {
+  height: 7px;
+  border-radius: 4px;
+  background: #2a2f40;
+  overflow: hidden;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a87e3a, var(--gold));
+}
+
+.points {
+  text-align: right;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.classCard .splitLine {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.splitLine b {
+  color: var(--gold);
+}
+
+.splitNarrow {
+  display: none;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .splitWide {
+    display: none;
+  }
+
+  .splitNarrow {
+    display: block;
+  }
+}
+
 .stamina {
   display: flex;
   justify-content: space-between;

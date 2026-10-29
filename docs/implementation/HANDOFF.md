@@ -211,7 +211,7 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - **24.8:** Avi's real journey on desktop and phone, two accounts, one trade (`b826947`).
 - **Launch feedback (M23, release `1724a79`, evidence `84f2d44`):** Avi's ten notes from testing production: clearer starting points with reset and class suggestions, the whole day saved at once, Arena only in the evening, tournaments in the Wednesday and Saturday evening slot, worn gear shown and swapped from the inventory, a 1-gold minimum fee ([design](../superpowers/specs/2026-10-25-launch-feedback-design.md)).
 - **Waiting monsters (release `84f2d44`, evidence `6d6290a`):** each expedition monster waits at its spot until its fight (client only).
-- **Gladiator appearance (M24, release `86af8c8`, evidence `35bbf56`):** a look chosen at creation, drawn in every scene ([design](../superpowers/specs/2026-10-26-gladiator-appearance-design.md)). The previous atlas images stay at their old paths for open tabs; delete them (`assets/source/retained.mjs` and its 2 tests) in the next art-changing release.
+- **Gladiator appearance (M24, release `86af8c8`, evidence `35bbf56`):** a look chosen at creation, drawn in every scene ([design](../superpowers/specs/2026-10-26-gladiator-appearance-design.md)). The previous atlas images stayed at their old paths for open tabs; they were deleted (`assets/source/retained.mjs` and its 2 tests) in the next art release, the bigger camp beds (Task 7c, 2026-10-29).
 - **24.9 budgets (`ba5608e`), 24.10 recovery checks (`8b4cb27`), 24.11 mobile frame rate (`7d87fe4`, 60 fps on an Adreno 740 phone).**
 - **Keyboard focus while commands are pending (release `1b57ba5`, evidence `f376b20`, test `a8db1f1`).**
 - **24.12 (this record):** the bench project, its Google client and domain, and the Pages preview settings are gone; the bench worktree is removed.
@@ -220,7 +220,7 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - **The hosted export (24.10)** has not run: every bench password Avi entered was rejected (the dashboard reset never saved). The first production weekly export is its first hosted test ([runbook, "Export"](../operations/runbook.md#export)); download production's own CA first.
 - **The `bench` branch** is still on GitHub (deleting it needs Avi's yes); the bench alias still serves its last build with no backend (a Cloudflare deployment deletion, Avi's).
 - **Google consent screen** in Testing: publishing needs a privacy page.
-- **Database size:** re-read around 2026-11-08 (24.9 projection). Delete the retained old atlas images in the next art release.
+- **Database size:** re-read around 2026-11-08 (24.9 projection).
 - **Next feature:** game messages with patch notes and a free, unlimited look change ([design](../superpowers/specs/2026-10-27-game-messages-design.md), mockup approved by Avi on 2026-10-27).
 
 **Operating rules learned in Task 24** (also in `AGENTS.md` and the operations docs): production writes need Avi's go in chat each time; run the deployed checks about 2 minutes after a Pages build goes live; `functions deploy` uses Docker bundling (`--use-api` fails on the import map); pass `--agent no` to any parsed `db query --output-format json`; never print keys, passwords or connection strings.

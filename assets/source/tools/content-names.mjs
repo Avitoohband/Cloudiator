@@ -31,30 +31,23 @@ export function isVersionOf(path, file) {
 }
 
 /**
- * What `--check` refuses, in order: each output that is missing or not byte-identical (`missing`, `stale`), each retained
- * image that is missing or not its recorded bytes (`retained-missing`, `retained-changed`), and each other file present
- * (`orphan`), such as a content-addressed image the generators no longer write. `allowed` files (hand-written) are accepted
- * as they are.
+ * What `--check` refuses, in order: each output that is missing or not byte-identical (`missing`, `stale`), and each other
+ * file present (`orphan`), such as a content-addressed image the generators no longer write, or an atlas image at an old
+ * unhashed path. `allowed` files (hand-written) are accepted as they are.
  * @param {{
- *   outputs: Map<string, Uint8Array>, present: string[], allowed: string[],
- *   retained: { file: string, sha256: string }[], read: (file: string) => Uint8Array | null,
+ *   outputs: Map<string, Uint8Array>, present: string[], allowed: string[], read: (file: string) => Uint8Array | null,
  * }} input
- * @returns {{ file: string, problem: 'missing' | 'stale' | 'retained-missing' | 'retained-changed' | 'orphan' }[]}
+ * @returns {{ file: string, problem: 'missing' | 'stale' | 'orphan' }[]}
  */
-export function auditFiles({ outputs, present, allowed, retained, read }) {
-  /** @type {{ file: string, problem: 'missing' | 'stale' | 'retained-missing' | 'retained-changed' | 'orphan' }[]} */
+export function auditFiles({ outputs, present, allowed, read }) {
+  /** @type {{ file: string, problem: 'missing' | 'stale' | 'orphan' }[]} */
   const problems = [];
   for (const [file, bytes] of outputs) {
     const committed = read(file);
     if (!committed) problems.push({ file, problem: 'missing' });
     else if (!Buffer.from(committed).equals(Buffer.from(bytes))) problems.push({ file, problem: 'stale' });
   }
-  for (const { file, sha256: expected } of retained) {
-    const committed = read(file);
-    if (!committed) problems.push({ file, problem: 'retained-missing' });
-    else if (sha256(committed) !== expected) problems.push({ file, problem: 'retained-changed' });
-  }
-  const known = new Set([...outputs.keys(), ...allowed, ...retained.map(r => r.file)]);
+  const known = new Set([...outputs.keys(), ...allowed]);
   for (const file of present) if (!known.has(file)) problems.push({ file, problem: 'orphan' });
   return problems;
 }

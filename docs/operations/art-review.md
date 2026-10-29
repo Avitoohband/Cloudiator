@@ -180,6 +180,27 @@ the leather chest piece. The checkpoint sheets are written by `node assets/sourc
 to `node_modules/.cache/appearance-sheets/` (not committed). They show male and female with each hair style, idle and
 walk, at 1× and 4×, in three colour sets, plus armour alignment.
 
+## Camp beds (2026-10-29)
+
+Punchy's request ("it is too tiny for the gladiators"), designed as a mockup over a real camp screenshot and approved by Avi
+on 2026-10-28. The 12 one-tile bedrolls (34×24 px) became low wooden cots two tiles long (footprint 2 × 1, 75×52 px): a plank
+headboard at the head end, a cream mattress and pillow, a turned-down white sheet, and a teal or crimson blanket with a gold
+band that hangs over the near side and the foot. `props.mjs` draws them (`bedroll`, frames `bedroll-teal` and `bedroll-crimson`
+keep their names); `maps.mjs` places them.
+
+| Check | Result |
+| --- | --- |
+| Layout | 12 beds in two blocks of six beside the tents, anchors x 14, 16, 18 by y 35, 36 and y 39, 40. Aisles at y 34, y 37-38 and y 41. Teal and crimson alternate in a checkerboard. |
+| Sleeping | Each sleep station is its bed's head tile, facing se. The sleep pose is unchanged (rotated -90): the sleeper lies with the head on the pillow. 12 sleep, 8 sit and 6 eat stations, as before. |
+| Depth | Still a walkable `floor` prop: it blocks no tile and draws under every actor, so no slicing is needed. |
+| Overlap and routes | No bed overlaps another bed or any prop. No bed tile is a path node or on a path edge, and none is a sand-lane tile; the east beds' foot tile (x 19) is a grass-to-lane edge tile, as in the mockup. All 12 stations are reachable from the `rest` path node with the game's own pathfinder. `tests/assets/camp-beds.test.ts` checks all of this. |
+| Overflow | `layoutCamp` still places 50 gladiators in the resting quarters on unique walkable tiles (`tests/domain/scene-layout.test.ts`). |
+| Review sheets | `map-camp.png` and `depth-probe-camp.png` were regenerated; no other sheet changed. |
+
+The camp props atlas was re-packed, so its content-named image changed (`props.b664d8dc84.png` to `props.b2b178ef35.png`). In
+the same release the atlas images kept at their old unhashed paths for open tabs (release `84f2d44`) were deleted
+(`assets/source/README.md`, "Atlas image names").
+
 ## Known limitations
 
 - Skin variety comes from a multiply tint over one light base body (five tones at runtime).

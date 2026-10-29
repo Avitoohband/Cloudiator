@@ -2,8 +2,8 @@
 // Regenerates every shipped art file under public/assets from the generators in this folder.
 //   node assets/source/build-assets.mjs          write files
 //   node assets/source/build-assets.mjs --check  verify committed files are byte-identical
-// Atlas images are named by their content (`actors/gladiators.<hash>.png`); the images in retained.mjs stay at their old paths
-// for the tabs a release leaves open (README "Atlas image names").
+// Atlas images are named by their content (`actors/gladiators.<hash>.png`), and an image whose art changed is replaced by its
+// new version (README "Atlas image names").
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, sep } from 'node:path';
@@ -22,7 +22,6 @@ import { CLOSEUP, CLOSEUP_THEMES, renderCloseups } from './generators/closeups.m
 import { ATTACK_VARIANTS, CREATURE_ACTIONS, REQUIRED_ACTIONS, WALK_TILES_PER_SECOND } from './generators/poses.mjs';
 import { ANCHOR } from './generators/rig.mjs';
 import { auditFiles, contentName, isVersionOf } from './tools/content-names.mjs';
-import { RETAINED_FOR_OPEN_TABS, RETAINED_RELEASE } from './retained.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..');
@@ -66,8 +65,6 @@ function emitAtlasImage(path, sheet, generator, inputs = []) {
 
 const atlases = {};
 const animations = {};
-/** The generator of each atlas, for the provenance of its retained image. */
-const atlasGenerators = {};
 /**
  * Packs one atlas: its image under its content-addressed name (`path` is that name without the hash), and its frame table at
  * `path` with `.json`, which names the image. The table is bundled into the client (src/game/assets.ts), so its name is fixed.
@@ -80,7 +77,6 @@ function addAtlas(key, path, frames, kind, generator, opts, inputs = []) {
   const data = path.replace(/\.png$/, '.json');
   emitJson(data, json, generator, inputs);
   atlases[key] = { image, data, width: sheet.width, height: sheet.height, kind };
-  atlasGenerators[key] = generator;
 }
 const actorFrames = list => list.map(f => ({ ...f, anchorX: ANCHOR.x, anchorY: ANCHOR.y }));
 const propFrames = list => list.map(({ name, canvas, anchorX, anchorY, ...meta }) => ({ name, canvas, anchorX, anchorY, meta }));
@@ -138,10 +134,6 @@ const actionMap = (prefix, actions, ne) => Object.fromEntries(actions.map(a => [
   se: `${prefix}/${a}/se`, ...(ne.includes(a) ? { ne: `${prefix}/${a}/ne` } : {}),
 }]));
 const HAND_WRITTEN = ['gallery.html'];
-for (const r of RETAINED_FOR_OPEN_TABS) {
-  if (!atlasGenerators[r.atlas]) throw new Error(`retained.mjs names an unknown atlas ${r.atlas}`);
-  if (files.has(r.file)) throw new Error(`retained.mjs names ${r.file}, which the generators write`);
-}
 const provenance = [
   ...[...files.entries()].map(([file, { bytes, generator, inputs }]) => ({
     file, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length,
@@ -151,11 +143,6 @@ const provenance = [
     const bytes = readFileSync(join(OUT, file));
     return { file, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, source: 'hand-written inspection tool', generator: 'assets/source/README.md', inputs: [], command: 'none (edit directly)', license: LICENSE };
   }),
-  // Never rewritten: the bytes the release had, as retained.mjs records them (`--check` compares the files with these hashes).
-  ...RETAINED_FOR_OPEN_TABS.map(r => ({
-    file: r.file, sha256: r.sha256, bytes: r.bytes, source: `retained for open tabs: the atlas image of release ${RETAINED_RELEASE}`,
-    generator: atlasGenerators[r.atlas], inputs: [src('retained.mjs')], command: 'none (kept in place for one release; see assets/source/README.md)', license: LICENSE,
-  })),
 ].sort((a, b) => a.file.localeCompare(b.file));
 
 const manifest = {
@@ -227,31 +214,21 @@ const audit = () => auditFiles({
   outputs: new Map([...outputs].map(([path, bytes]) => [repo(path), bytes])),
   present: listFiles(OUT).map(repo),
   allowed: [...HAND_WRITTEN, '.gitattributes'].map(assetFile),
-  retained: RETAINED_FOR_OPEN_TABS.map(r => ({ file: assetFile(r.file), sha256: r.sha256 })),
   read: file => (existsSync(join(ROOT, file)) ? readFileSync(join(ROOT, file)) : null),
 });
-const RETAINED_HELP = `A retained image must hold the release's bytes: git show ${RETAINED_RELEASE}:public/assets/<file> > public/assets/<file>`;
 const explain = ({ file, problem }) => ({
   missing: file, stale: file, orphan: `${file} (orphan: not produced by the generators)`,
-  'retained-missing': `${file} (retained for open tabs: missing)`,
-  'retained-changed': `${file} (retained for open tabs: not the bytes of release ${RETAINED_RELEASE})`,
 })[problem];
 if (CHECK) {
   const problems = audit();
   if (problems.length) {
-    console.error(`Generated assets are stale or missing:\n  ${problems.map(explain).join('\n  ')}\nRun: node assets/source/build-assets.mjs`
-      + (problems.some(p => p.problem.startsWith('retained')) ? `\n${RETAINED_HELP}` : ''));
+    console.error(`Generated assets are stale or missing:\n  ${problems.map(explain).join('\n  ')}\nRun: node assets/source/build-assets.mjs`);
     process.exit(1);
   }
-  console.log(`assets up to date (${outputs.size} files, ${RETAINED_FOR_OPEN_TABS.length} retained for open tabs)`);
+  console.log(`assets up to date (${outputs.size} files)`);
 } else {
   for (const [path, bytes] of outputs) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes); }
   // An atlas image whose art changed leaves its previous content-addressed version behind, which is not shipped again.
   for (const file of superseded) { rmSync(join(OUT, file)); console.log(`removed superseded ${file}`); }
   console.log(`wrote ${outputs.size} files`);
-  const retained = audit().filter(p => p.problem.startsWith('retained'));
-  if (retained.length) {
-    console.error(`Retained images are wrong:\n  ${retained.map(explain).join('\n  ')}\n${RETAINED_HELP}`);
-    process.exit(1);
-  }
 }

@@ -217,7 +217,10 @@ export function buildCamp(propMeta) {
   const rest = [];
   b.place('tent-large', 15, 31);
   b.place('tent-small', 19, 31);
-  [[15, 35], [17, 35], [19, 35], [15, 37], [17, 37], [19, 37], [15, 39], [17, 39], [19, 39], [15, 41], [17, 41], [19, 41]].forEach(([x, y], i) => {
+  // Beds are 2 x 1 cots along x (Punchy's request): two blocks of six (two rows side by side, three beds end to end) at
+  // x 14-19, y 35-36 and y 39-40, with aisles at y 34 (in front of the tents), y 37-38 (between the blocks) and y 41. The
+  // sleeper lies on the bed's first (head) tile, which is the sleep station. A bed is a walkable floor prop.
+  [[14, 35], [16, 35], [18, 35], [14, 36], [16, 36], [18, 36], [14, 39], [16, 39], [18, 39], [14, 40], [16, 40], [18, 40]].forEach(([x, y], i) => {
     b.place(i % 2 ? 'bedroll-crimson' : 'bedroll-teal', x, y);
     rest.push({ id: `sleep-${i}`, kind: 'sleep', x, y, facing: 'se' });
   });

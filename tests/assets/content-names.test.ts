@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { auditFiles, contentName, isVersionOf } from '../../assets/source/tools/content-names.mjs';
 
 // Final review F1 (2026-10-26): atlas images are named by their content, and `build-assets.mjs --check` refuses anything it
-// would not write, a stale content-addressed image included, while it accepts the images retained for open tabs.
+// would not write, a stale content-addressed image or an atlas image at an old unhashed path included.
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 describe('content-addressed atlas image names', () => {
@@ -26,17 +26,16 @@ describe('content-addressed atlas image names', () => {
 });
 
 describe('the --check audit', () => {
-  const current = Buffer.from('current'), old = Buffer.from('old');
+  const current = Buffer.from('current');
   const image = contentName('actors/gladiators.png', current);
   const disk = (files: Record<string, Buffer>) => ({ present: Object.keys(files), read: (file: string) => files[file] ?? null });
   const base = {
     outputs: new Map([[image, current], ['actors/gladiators.json', Buffer.from('{}')]]),
     allowed: ['gallery.html'],
-    retained: [{ file: 'actors/gladiators.png', sha256: sha(old) }],
   };
-  const good = { [image]: current, 'actors/gladiators.json': Buffer.from('{}'), 'gallery.html': Buffer.from('<p>'), 'actors/gladiators.png': old };
+  const good = { [image]: current, 'actors/gladiators.json': Buffer.from('{}'), 'gallery.html': Buffer.from('<p>') };
 
-  it('passes when every output is identical and every retained image is its recorded bytes', () => {
+  it('passes when every output is identical and nothing else is present', () => {
     expect(auditFiles({ ...base, ...disk(good) })).toEqual([]);
   });
 
@@ -51,9 +50,7 @@ describe('the --check audit', () => {
     expect(auditFiles({ ...base, ...disk(withoutImage) })).toEqual([{ file: image, problem: 'missing' }]);
   });
 
-  it('refuses a retained image that is missing or not its recorded bytes', () => {
-    expect(auditFiles({ ...base, ...disk({ ...good, 'actors/gladiators.png': current }) })).toEqual([{ file: 'actors/gladiators.png', problem: 'retained-changed' }]);
-    const { 'actors/gladiators.png': _gone, ...withoutRetained } = good;
-    expect(auditFiles({ ...base, ...disk(withoutRetained) })).toEqual([{ file: 'actors/gladiators.png', problem: 'retained-missing' }]);
+  it('refuses an atlas image left at its old unhashed path as an orphan', () => {
+    expect(auditFiles({ ...base, ...disk({ ...good, 'actors/gladiators.png': Buffer.from('old') }) })).toEqual([{ file: 'actors/gladiators.png', problem: 'orphan' }]);
   });
 });

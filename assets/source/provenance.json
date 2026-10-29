@@ -50,18 +50,6 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "actors/creatures.png",
-      "sha256": "7fb9aafcfbc924f5066edbe8c38e4d084eee21fb76aec00a2a61b7ff7e38997a",
-      "bytes": 46790,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/creatures.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
       "file": "actors/gladiators.95b93b356d.png",
       "sha256": "95b93b356d5ebb4189df992d5991e27eb668f2a09014739c6ff725583b79c6ff",
       "bytes": 171813,
@@ -101,18 +89,6 @@
         "assets/source/tools/random.mjs"
       ],
       "command": "node assets/source/build-assets.mjs",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
-      "file": "actors/gladiators.png",
-      "sha256": "9f4d3fdfb9ef429548dd7bd06d7eef4cd8c607430ee4b2828d6c32e4fee54450",
-      "bytes": 133315,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/gladiator.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
@@ -158,18 +134,6 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "actors/npcs.png",
-      "sha256": "8a1df614771d2b7e10c9267a5d8d91e3f4807372a17086db35ccc08cec6082a4",
-      "bytes": 36185,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/npcs.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
       "file": "battle/closeups.41cd16a63b.png",
       "sha256": "41cd16a63b8fec474259034664db69582da7e29f6294b500f526eed7f88e146a",
       "bytes": 20075,
@@ -206,20 +170,8 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "battle/closeups.png",
-      "sha256": "41cd16a63b8fec474259034664db69582da7e29f6294b500f526eed7f88e146a",
-      "bytes": 20075,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/closeups.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
       "file": "camp/map.json",
-      "sha256": "979d02e6f2557772f7e73bdc8c8431609abb91f8909985b1f6b698db1ad683a6",
+      "sha256": "3094df2b28f6a06b9d8e1ac55baa1b5246e4b09445b9e42f699b5397c0dbdb66",
       "bytes": 105226,
       "source": "generated",
       "generator": "assets/source/generators/maps.mjs",
@@ -239,9 +191,9 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "camp/props.b664d8dc84.png",
-      "sha256": "b664d8dc84c2b5bf27f7d0a9746d99ddefdcc6c5ef4a57539411f1fe75dcf09a",
-      "bytes": 29826,
+      "file": "camp/props.b2b178ef35.png",
+      "sha256": "b2b178ef35165fbc9060971260a48b36f1e21c0e1d25fe0575930090bc14ed2b",
+      "bytes": 29721,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
       "inputs": [
@@ -258,8 +210,8 @@
     },
     {
       "file": "camp/props.json",
-      "sha256": "98fab23e7f2841a7ccc38156c933ef3cd8f053fcd86f1013a2c3552c1c72e9a2",
-      "bytes": 21866,
+      "sha256": "df207616073ceea9ad943d6163d1bf74bc0f64d6dd6a084736f2f056197cf599",
+      "bytes": 21900,
       "source": "generated",
       "generator": "assets/source/generators/props.mjs",
       "inputs": [
@@ -272,18 +224,6 @@
         "assets/source/tools/random.mjs"
       ],
       "command": "node assets/source/build-assets.mjs",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
-      "file": "camp/props.png",
-      "sha256": "b664d8dc84c2b5bf27f7d0a9746d99ddefdcc6c5ef4a57539411f1fe75dcf09a",
-      "bytes": 29826,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/props.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
@@ -323,18 +263,6 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "camp/tiles.png",
-      "sha256": "ceaf9f6a979fedce18a3fd43d2bd0d28a03074a69ff9a010faecf1d83127c34b",
-      "bytes": 11472,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/tiles.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
       "file": "effects/combat.24a3bf1210.png",
       "sha256": "24a3bf121083d7be89c13c68388f097dd9063633b9e7624c0ef2dbce740f7a42",
       "bytes": 2602,
@@ -368,18 +296,6 @@
         "assets/source/tools/random.mjs"
       ],
       "command": "node assets/source/build-assets.mjs",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
-      "file": "effects/combat.png",
-      "sha256": "24a3bf121083d7be89c13c68388f097dd9063633b9e7624c0ef2dbce740f7a42",
-      "bytes": 2602,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/effects.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
@@ -442,18 +358,6 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "expeditions/mountain.png",
-      "sha256": "d337f3b45455ca043662023eb8a43849ecdb01482890a0c0a4f142a4521e5c82",
-      "bytes": 14252,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/props.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
       "file": "expeditions/outpost-map.json",
       "sha256": "08abf8d2972c193122c671422a4078d79252c83e09efaacc636545de469b485d",
       "bytes": 46566,
@@ -510,18 +414,6 @@
         "assets/source/tools/random.mjs"
       ],
       "command": "node assets/source/build-assets.mjs",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
-      "file": "expeditions/outpost.png",
-      "sha256": "77e64f01c5d176f743f4b06eab750f74acf11343088f0043689a83e94b22fb51",
-      "bytes": 13877,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/props.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
@@ -584,18 +476,6 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "expeditions/woodland.png",
-      "sha256": "12029727ada5adb9cb0dc28b7d28cd5858d49ad4492c97dc60dc8ecea65c44fb",
-      "bytes": 16685,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/props.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
       "file": "gallery.html",
       "sha256": "75fa262ad2db6ea7ad0c36877e1cf0a8e47651d3e8639df1faeafd1c6196235e",
       "bytes": 14992,
@@ -639,18 +519,6 @@
         "assets/source/tools/random.mjs"
       ],
       "command": "node assets/source/build-assets.mjs",
-      "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
-    },
-    {
-      "file": "ui/icons.png",
-      "sha256": "d5a35f5d74c5af72d9049d3afc5281ac2fd6d43c6be59a1aef5d0810ee5c8620",
-      "bytes": 2559,
-      "source": "retained for open tabs: the atlas image of release 84f2d44",
-      "generator": "assets/source/generators/effects.mjs",
-      "inputs": [
-        "assets/source/retained.mjs"
-      ],
-      "command": "none (kept in place for one release; see assets/source/README.md)",
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     }
   ]

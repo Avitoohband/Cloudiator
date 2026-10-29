@@ -16,7 +16,7 @@ was replaced by this route on purpose. Task 11 records this as an approved devia
 | Command | Effect |
 | --- | --- |
 | `node assets/source/build-assets.mjs` | Rebuild every file in `public/assets` plus `provenance.json`, and remove an atlas image's superseded content-addressed versions. |
-| `node assets/source/build-assets.mjs --check` | Fail if any committed file differs from a fresh build, if a retained image is not its recorded bytes, or if an orphan file (a stale content-addressed image included) sits in `public/assets`. `tests/assets` runs this check. |
+| `node assets/source/build-assets.mjs --check` | Fail if any committed file differs from a fresh build, or if an orphan file (a stale content-addressed image, or an atlas image at an old unhashed path) sits in `public/assets`. `tests/assets` runs this check. |
 | `node assets/source/tools/review-sheets.mjs` | Rewrite the review images in `docs/operations/art-review/`. |
 | `node assets/source/tools/review-sheets.mjs --appearance [dir]` | Write only the appearance sheets (male and female bodies with each hair style, idle and walk, 1× and 4×, three colour sets, armour alignment) to `dir`, by default `node_modules/.cache/appearance-sheets/` (not committed). |
 | `node assets/source/tools/render-map.mjs <map> <out.png> [scale] [--actors]` | Render one map offline. |
@@ -41,13 +41,14 @@ changed art has a new address. When art changes, the build writes the new image 
 tab then cannot find its image, and shows the scene's "art could not load" notice (as for any failed image load) instead of
 scrambled gladiators.
 
-**Retained for open tabs, for one release.** Release `84f2d44`, which was serving players when images were first named by
-content, fetches the old unhashed paths (`actors/gladiators.png`). Those files stay in `public/assets` with that release's bytes,
-as `retained.mjs` lists them with their sha256. The build never writes them and records their provenance as
-`retained for open tabs`. `--check` and `tests/assets/manifest.test.ts` accept only those bytes, and the test compares them
-with `git show 84f2d44:public/assets/<file>` when the clone holds that commit. **Delete the retained files, their
-`retained.mjs` entries and the two retained-image tests in the next release that changes art.** By then no open tab runs
-`84f2d44`.
+**Nothing is retained for open tabs.** The atlas images of release `84f2d44`, which was serving players when images were
+first named by content, stayed at their old unhashed paths (`actors/gladiators.png`) for one release, listed in `retained.mjs`
+with their sha256. They were deleted, with `retained.mjs`, its provenance records and the two retained-image tests, in the next
+release that changed art: the bigger camp beds (Task 7c, 2026-10-29). A tab left open on a release that old now shows the
+scene's "art could not load" notice until it is reloaded, like a tab left open across any later art change. `--check` and
+`tests/assets/manifest.test.ts` now refuse any atlas image that is not a manifest atlas's current content-named version. To
+keep an old release's images for its open tabs again, restore a `retained.mjs` list and its `--check` handling from git history
+(`git show 8ed0697:assets/source/retained.mjs`), and delete them in the next art release.
 
 ## Layout
 

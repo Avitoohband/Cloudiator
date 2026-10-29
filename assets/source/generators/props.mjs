@@ -118,13 +118,53 @@ function tentSmall(variant = 'teal') {
   return finish(P, { occludes: true });
 }
 
+/**
+ * Camp bed (Punchy's request, approved by Avi on 2026-10-28): a low wooden cot two tiles long along x (footprint 2 x 1).
+ * The plank headboard and the pillow are at the north-west end, over the footprint's first tile where the sleeper lies with
+ * its head to the left. A cream mattress carries a turned-down white sheet and a blanket in the bed's colour with a gold
+ * band, which hangs over the near side and the foot. u runs along the bed (0 to 2) and v across it (0 to 1).
+ */
 function bedroll(color = 'teal') {
-  const P = proto(1, 1, 8);
+  const P = proto(2, 1, 24);
   const { c, m, g } = P;
-  const ctr = g(0.5, 0.5);
-  c.stamp(m().rect(ctr[0] - 15, ctr[1] - 4, 30, 9), shade('canvas1', 'canvas2', 'canvas3'));
-  c.stamp(m().rect(ctr[0] - 6, ctr[1] - 4, 21, 9), shade(`${color}1`, `${color}2`, `${color}3`));
-  c.stamp(m().ellipse(ctr[0] - 11, ctr[1], 4, 3), shade('white', 'canvas1', 'canvas2'));
+  // the frame's extent: it stops a little short of the footprint's edges, and the blanket hangs just past the foot
+  const [u0, u1, v0, v1] = [0.04, 1.56, 0.14, 0.86];
+  const LEG = 2;
+  const RAIL = 3;
+  const MAT = 2;
+  const TOP = LEG + RAIL; // top of the frame
+  const bedTop = TOP + MAT;
+  /** A horizontal rectangle over u in [a, b] and v in [va, vb], `h` pixels above the ground. */
+  const quad = (a, va, b, vb, h) => [up(g(a, va), h), up(g(b, va), h), up(g(b, vb), h), up(g(a, vb), h)];
+  // shade under the cot, then the legs that show below the rail
+  c.paint(m().polygon(quad(u0 + 0.06, v0 + 0.06, u1 + 0.02, v1 + 0.02, 0)), 'shadow');
+  for (const [u, v] of [[u1 - 0.05, v0 + 0.05], [u0 + 0.05, v1 - 0.05], [u1 - 0.05, v1 - 0.05]]) {
+    const p = g(u, v);
+    c.stamp(m().rect(p[0] - 1, p[1] - TOP, 2, TOP + 1), 'wood3');
+  }
+  // side rails and foot rail
+  box(P, up(g(u0, v0), LEG), u1 - u0, v1 - v0, RAIL, { left: shade('wood1', 'wood2', 'wood3'), right: shade('wood2', 'wood3', 'wood4'), top: 'wood2' });
+  // headboard: a plank panel across the head end, seen from the foot of the bed (a pitch of 99 draws it as one smooth panel)
+  box(P, up(g(u0, v0), LEG), 0.1, v1 - v0, RAIL + 8, { left: 'wood3', right: planks('wood1', 'wood2', 'wood3', 99), top: 'wood1' });
+  // mattress
+  box(P, up(g(u0 + 0.1, v0 + 0.04), TOP), u1 - u0 - 0.13, v1 - v0 - 0.08, MAT, { left: shade('canvas2', 'canvas2', 'canvas3'), right: 'canvas3', top: shade('canvas1', 'canvas1', 'canvas2') });
+  // pillow at the head end
+  c.stamp(m().polygon(quad(u0 + 0.13, v0 + 0.08, u0 + 0.4, v1 - 0.07, bedTop + 2)).polygon(quad(u0 + 0.13, v0 + 0.08, u0 + 0.4, v1 - 0.07, bedTop)), shade('white', 'canvas1', 'canvas2'));
+  // blanket: over the top, hanging over the near side (v = ve) and the foot (u = ue)
+  const ub = u0 + 0.56;
+  const ue = u1 + 0.02;
+  const vb = v0 + 0.02;
+  const ve = v1 + 0.03;
+  /** The near side of the blanket between u = a and u = b, hanging from the top of the bed down to just above the rail's foot. */
+  const near = (a, b) => [up(g(a, ve), bedTop + 1), up(g(b, ve), bedTop + 1), up(g(b, ve), TOP - 1), up(g(a, ve), TOP - 1)];
+  const foot = [up(g(ue, vb), bedTop + 1), up(g(ue, ve), bedTop + 1), up(g(ue, ve), TOP - 1), up(g(ue, vb), TOP - 1)];
+  const blanket = m().polygon(quad(ub, vb, ue, ve, bedTop + 1)).polygon(near(ub, ue)).polygon(foot);
+  c.stamp(blanket, shade(`${color}1`, `${color}2`, `${color}3`));
+  /** A band across the blanket between u = a and u = b, over the top and down the near side. */
+  const band = (a, b) => m().polygon(quad(a, vb, b, ve, bedTop + 1)).polygon(near(a, b)).intersect(blanket);
+  // turned-down sheet at the blanket's head edge, and a woven band near the foot
+  c.paint(band(ub, ub + 0.09), 'canvas1');
+  c.paint(band(ue - 0.27, ue - 0.21), 'gold2');
   return finish(P, { walkable: true, layer: 'floor', sortY: 0 });
 }
 

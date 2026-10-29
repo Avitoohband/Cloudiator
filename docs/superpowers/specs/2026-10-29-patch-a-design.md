@@ -11,6 +11,8 @@ ignored by git, so **this spec carries the approved copy word for word**) and an
 The mockups are the approved UI: where this spec quotes copy, layout or behaviour, it is the mockup's. Decisions are marked
 **Avi**, **Claude's call** (stated in the design draft or the mockup notes and approved with them) or **Planner's call**
 (made while writing this spec, for a case the mockups do not show; Avi can overrule any of them).
+An **Implementer's call** is the same kind of decision, made while building a task (its report names it), for a case neither the mockups nor
+this spec show.
 
 ## Intent
 
@@ -20,7 +22,8 @@ bonuses vanish after creation; a phone hides stamina and gold behind nothing; a 
 mixes "12:40 PM" (My gladiator, Schedule) with "Sat 10 Oct, 03:00" (Results) in one session; and the Gladiators menu does not
 say how many players there are. Patch A fixes all of these in the client only: **no migration, no Edge change, no new
 command**. (Added 2026-10-29: Avi's patch numbers ship in Patch A too, with one small migration, M26; see the last section,
-"Patch numbers and the changelog". Still no Edge change and no new command.)
+"Patch numbers and the changelog". Still no Edge change and no new command. Also added 2026-10-29: a richer profile card,
+whose public data joins M26; see "A richer profile card", after it.)
 
 ## Goals
 
@@ -246,6 +249,8 @@ command**. (Added 2026-10-29: Avi's patch numbers ship in Patch A too, with one 
 | "players" wording; everyone counts | Claude's call |
 | Banner hidden under a scene; newest first; welcome before others; newcomer listed once | Planner's call |
 | Away sub-line from minute 60 or after a defeat; defeat sub-line "No rewards · all gear kept"; close per activity | Planner's call |
+| Phone words of the away button's back state: "{name} · back from {expedition}", "▶ Replay", after a defeat "{name} · back after a defeat" (the mockup shows the running state only) | Implementer's call |
+| The away button moves to the right of an open desktop menu panel (left edge 458 px, as the arrival banner's slot keeps clear) and hides below 830 px while a panel is open; on a phone it also hides under a profile card | Implementer's call |
 | Mark wording for lost, in-progress, unreplayable and unfought fights; Watch the whole trip on a finished live view | Planner's call |
 | Walks at ×8 inside the ×150 budget; Result card shown from "Back in camp"; defeat phase text | Planner's call |
 | No-number line on My gladiator; tournament wording kept apart from its time parts | Planner's call |
@@ -266,7 +271,8 @@ command**. (Added 2026-10-29: Avi's patch numbers ship in Patch A too, with one 
 - Next.js 16.4.3 static client; read the relevant guide in `node_modules/next/dist/docs/` before writing code (AGENTS.md).
 - No migration, no Edge function change, no new command, no package download. The new reads are public projections that
   exist today (`recent_results`) and the owner's notifications read. Exception (Avi, 2026-10-29): one migration, M26, for
-  the patch list ("Patch numbers and the changelog"); still no Edge change and no new command.
+  the patch list ("Patch numbers and the changelog"); still no Edge change and no new command. M26 also carries the richer
+  profile card's public data (the last section, "A richer profile card"), once Avi approves that card.
 - localStorage only for these per-device conveniences, every access in try/catch, the page correct without it.
 - One formatter module for every time of day; a test fails on any other `hourCycle`, `hour12` or hour-bearing
   `Intl.DateTimeFormat` in `src/`.
@@ -469,3 +475,167 @@ with no Markdown: players read them as they are.
 | Patch history inside the messages panel, opened from the menu and a note's number | Claude's call |
 | The notice in the notice column; hidden under scenes and dialogs; × for the page's life only; visitors see it | Claude's call |
 | `PATCH` pinned to CHANGELOG.md's top section; the statement built from CHANGELOG.md | Claude's call |
+
+## A richer profile card (Avi, 2026-10-29)
+
+Avi, added to this patch: "add easier way to see other players details. in the Gladiators menu, when clicking on the
+gladiator name, a small window pop with the gladiator appearance, stats gear, attributes, class and data".
+
+The name already opens a small card (Task 13.7: name, class line, prestige, Now, Rating, a line of gear silhouettes, Follow
+and Watch bout). **This section keeps that card, its entry points and its behaviour, and fills it in sections.** Everything
+below is **Claude's call** (design pass, 2026-10-29) unless marked **Avi**. It is shown in the clickable mockup
+`.superpowers/design/2026-10-29-profile-card/mockups.html`, drawn over real screenshots of the fixture preview at `8f50177`;
+its portraits are drawn by the game's look code and its stats are computed by `deriveStats` and `makeFighter` (git-ignored).
+**Avi has not looked at that mockup yet.** By his rule, the copy, the layout and the data made public below are a draft
+until he approves it in chat; Task 11c waits for that approval.
+
+### What the card shows
+
+In this order (the copy is word for word; `{…}` is a value):
+
+1. **The head.**
+   - The **look**: a portrait of the gladiator as the camp draws it, gear included (`lookFor(actor.appearance,
+     actor.gladiatorId, actor.equipmentSilhouettes)`, so the legacy look too). It is drawn as the creation preview draws its
+     look: a DOM sprite of the gladiator atlas, the idle loop facing south-east (a still frame under reduced motion), on the
+     preview's green ground, at scale 2. It is 104 × 124 px on a desktop and 80 × 104 in the touch layout. It is decorative
+     (`aria-hidden`): the name and class line say who it is.
+   - Beside it, as today: "YOUR GLADIATOR" on the viewer's own card, the name, the latest champion title and the class line
+     ("Guardian · Level 6 · Silver league"). Then the **class's bonus chips** (Task 5's `ClassChips`: "Vitality +5%"
+     "Endurance +5%") and the season badges.
+2. **"ATTRIBUTES · {n} POINTS"**: Strength, Agility, Vitality, Endurance and Precision, in that order. Each has a bar scaled to
+   the largest (at least 1) and its points in the **current build** (the number Plan a build shows); `n` is their sum. An
+   attribute the class raises shows its bonus after its name ("Vitality +5%", from `classBonuses`). Each attribute also
+   starts at 5, and the class bonus multiplies the total; the stats include both.
+3. **"STATS · {STANCE} STANCE"** ("STATS · DEFENSIVE STANCE"): five rows computed in the browser from the published build with
+   the shared rules (`deriveStats`, `makeFighter(snapshot, 'expedition', RULES_V1)` and `criticalProbability`), so they are what
+   a fight uses:
+   - "Health" "{maxHealth}" ("197").
+   - "Damage" "{n} a hit" ("15 a hit"): a hit that is not critical, on a target with no armor and a balanced stance. It is
+     base damage × efficiency × the stance's outgoing factor, rounded half up.
+   - "Speed" "every {s} s" ("every 1.13 s"): the attack interval in seconds, rounded half up to hundredths, with trailing
+     zeros dropped (1296 ms is "every 1.3 s", 935 ms "every 0.94 s").
+   - "Armor" "{armor} · blocks {p}%" ("12.3 · blocks 25%"): the armor to one decimal (a trailing ".0" dropped) and the share of
+     a hit it blocks (2% a point, at most 70%), rounded. No armor says "None".
+   - "Critical" "{p}% of hits" ("7% of hits").
+
+   When the gear outweighs the load capacity, one line follows: "Overloaded: load {load} of {capacity}, fighting at {e}%"
+   ("Overloaded: load 29 of 20.5, fighting at 79%"). The numbers are an expedition's: the Arena's +10% on renown gear is not
+   added. **No stamina**: stamina stays the owner's own (an existing rule, pinned by the card tests' private-words check).
+4. **"GEAR"**: "Weapon", "Off-hand", "Head", "Body" and "Feet" (the Inventory's `SLOT_LABELS`).
+   - Each worn item shows its name and " · Level {tier} · {rarity}", as the Inventory says it ("Spear · Level 5 ·
+     uncommon"). The name is in its rarity's colour (common #d6d1c3, uncommon #93d68b, rare #86b6ff); the word says it too.
+   - An empty slot says "Empty". The off-hand under a two-handed weapon says "Two-handed weapon". With nothing worn, the
+     section is one line: "Nothing worn yet.". An item the catalog does not know is named "Unknown item".
+5. **"RECORD"** (the "data"):
+   - "Now", as today (the owner's own resting line on its own card).
+   - "Rating", as today ("Loading…", "Not available").
+   - "Arena record" "{wins}–{losses} · all seasons" ("9–5 · all seasons"; "No bouts yet" at 0–0): the bouts against players
+     over every season and league, counted as the standings count them.
+   - "This season" "{wins}–{losses}", only when a standings row opened the card: that row's record. Today's card shows it as
+     "Rating · record"; that combined row goes.
+   - "In camp since" "{date} · {days}" ("2 Oct · 8 days"; "today", "1 day"): the day the gladiator was made, in the viewer's
+     time zone, with `src/lib/time-format.ts`'s fixed month names (a new date-only `dateText`; no time of day). The year is
+     added when it is not the current one ("2 Oct 2025 · 392 days").
+6. On the viewer's own card, under Record: "Other players see this card too."
+7. The actions, unchanged: My gladiator and Schedule (own card), Follow and Watch bout.
+
+**States.**
+- The card opens at once from the camp's world actor: the head, the chips, Now, and under GEAR today's "Equipped" line
+  (`gearText`). ATTRIBUTES and STATS say "Loading…", and Rating "Loading…", until the one profile read arrives.
+- If that read fails, ATTRIBUTES, STATS and Rating say "Not available", and GEAR keeps the "Equipped" line. A profile without
+  a usable build (null or malformed) does the same for ATTRIBUTES and STATS.
+- A gladiator outside the world (a standings row) shows its name and record until the profile arrives, as today.
+
+### Where it opens, and how it sits
+
+- **Every existing entry, unchanged:** a name in the Gladiators list (`RosterPanel`, "Profile: {name}"), a click on a
+  gladiator in the camp, and a name in the Arena standings. Visitors see the same card. Escape, ×, a click on the camp and a
+  scene opening close it, and the focus rules are today's.
+- **Desktop:** 520 px wide. The head runs across the top, then two columns (ATTRIBUTES beside STATS, GEAR beside RECORD), and
+  the actions sit at the foot. It is about 540 px tall with everything (541 px for the mockup's Xanthe). `placeCard` places it
+  as today: beside the click, or beside the menus at (458, 64) from a list row. In a short window it scrolls (`max-height:
+  calc(100% - 76px)`).
+- **Touch layout** (`@media (hover: none), (max-width: 480px)`): today's sheet (10 px from each side, 76 px above the bottom,
+  at most the view less 140 px), one column in the same order, with STATS as two-column tiles. The sheet's body scrolls and the
+  action row stays pinned at its foot, with 44 px targets; no sideways scroll at 360 × 740.
+- **The card is nearly opaque** (background alpha 0.96 instead of 0.86): today a phone shows the list through the sheet.
+
+### What becomes public (Avi's request)
+
+Avi asked to see other players' details. So **a gladiator's current build and the gear it wears become public: in this game
+they are not private secrets** (anyone watching a bout already sees the gear). Newly public, through the profile read only:
+
+- the **current** build's stance and five attribute points;
+- each equipped item's catalog id and version, level (tier), rarity and stats (the fields a market listing already shows);
+- the Arena record summed over every season and league (each league-season row is already public, in the standings);
+- the time the gladiator was made (today public only while it is new, as its arrival's start time).
+
+**Still private:** a queued (pending) build until it takes effect at its boundary; unspent and earned points; XP; stamina;
+gold; renown; the inventory and its other items; the schedule; and every item's id, owner, origin, binding and reservation.
+The stats add nothing new: the browser computes them from the build.
+
+### Server: in M26, from `supabase/sql/20-profile-card.sql`
+
+- **`public.public_profiles`** gains two nullable columns with no default and no CHECK (like its other projection columns):
+  `build jsonb` and `joined_at_ms bigint`. A nullable column without a default does not rewrite the table.
+- **`private.project_character`** (17-appearance.sql's projector) is restated unchanged except its `public_profiles` upsert.
+  That upsert also writes the two columns, in its insert, its update and its is-distinct check:
+  - `build`: `{"stance": …, "allocations": {…}, "equipment": {"weapon": …, "offHand": …, "head": …, "body": …, "feet": …}}`
+    from `builds.current_build`. Each slot is the equipped item's `{"catalogId", "catalogVersion", "tier", "rarity",
+    "stats"}`, picked from that gladiator's `item_instances.item` with the slot's id, or null. Never the raw item JSON (it
+    holds `ownerId`, `id`, `origin`, `binding` and `reservation`), and never `pending_build`.
+  - `joined_at_ms`: `gladiators.created_at_ms`.
+
+  Its triggers are today's: a build taking effect, or a change to the gladiator's items, re-projects it, and an unchanged
+  profile is not written (the is-distinct check).
+- **`public.public_profile_reads`** is restated with `create or replace` (same columns, `security_invoker=true` kept, grants
+  restated). Its `profile` object adds:
+  - `build` (`p.build`) and `joinedAtMs` (`p.joined_at_ms`);
+  - `arenaRecord`, `{"wins", "losses"}` summed from `public.arena_standings` for that gladiator (0 and 0 without rows). The
+    invoker reads `arena_standings`, which anon and authenticated already read.
+- **Backfill:** `select public.refresh_projections();` in the migration, so every profile carries its build at once.
+- **Access:** no new relation, column grant, function grant or policy. `public_profiles`' table-level SELECT covers the new
+  columns, so the access matrix's lines and the `OPEN` list are unchanged. The anonymous probes gain nothing (nothing new can
+  be written). The projection tests' forbidden keys (`ownerId`, `inventory`, `pendingBuild`, …) must stay absent from the
+  profile, and a visitor's profile must equal a signed-in player's (both pinned in Task 11c).
+- **Not in the world read** (Claude's call): every client polls the world every 30 s for every gladiator. The card's data is
+  read only when a card opens, with the same one profile request as today.
+- **Item stats are published, not looked up** (Claude's call): an item keeps the stats it was made with. Publishing them lets
+  the browser run `deriveStats` on exactly the server's inputs, as the owner's build planner does with its own inventory.
+- **Why it joins M26, and why that is safe:** one migration per patch. M26 already ships before the client (Release), and the
+  1.4 client is the first to read the new keys; an older client ignores them inside the `profile` JSON. There are two costs:
+  - M26 restates `private.project_character`. The M24 lesson applies: the replayed body must equal the source's, which the
+    schema fingerprint checks.
+  - Task 11b's M26 generation waits for this source. **If Avi has not approved the card when M26 is generated, M26 is
+    `19-patches.sql` alone**, and the card waits for the next patch's migration.
+- **Locks and cost:** adding the columns and replacing the view take brief ACCESS EXCLUSIVE locks; profile reads wait for the
+  commit. One profile row grows by about 0.6 KB and one profile read by about 1 KB; no budget changes.
+
+### Client
+
+- **Reads** (`src/lib/api/reads.ts`; the shared contracts under `supabase/functions/_shared` stay unchanged, as with Task 11b's
+  `RevisionRead`): `ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord:
+  ArenaRecord | null }`. `readProfile` checks each new key and maps a malformed one to null (a malformed slot makes the whole
+  build null). `GameGateway.profile` answers a `ProfileRead`.
+- **Fixture:** the fixture gateway's profiles get sample builds. The owner's is its current build; the Arena gladiators' match
+  their silhouettes.
+- **The look:** the creation preview's sprite code serves both. `previewLayers` is built on a new `actorLayers(appearance,
+  gladiatorId, silhouettes)`, `layerStyle` takes a scale, and a new `ActorPortrait` shares `LookPreview`'s atlas load.
+- **Patch note:** at release, one more bullet for Avi's wording: "Click a gladiator's name to see their look, class bonuses,
+  attributes, stats, gear and Arena record." It is not yet in the "Patch note draft" above.
+
+### Decisions
+
+| Decision | Who |
+| --- | --- |
+| Other players' look, stats, gear, attributes, class and data, in a small window from a name in the Gladiators list | Avi |
+| The current build and its equipped items become public: they are not secrets in this game | Avi (his request; confirm with the mockup) |
+| Keep today's card and every entry point; fill it in sections; 520 px in two columns; the phone sheet scrolls with its actions pinned | Claude's call |
+| The portrait drawn with the camp's gear, by the creation preview's sprite code, at scale 2 | Claude's call |
+| Attributes as the build's points with the class bonus marked; five stats, an expedition's, never stamina | Claude's call |
+| Gear in the Inventory's words; rarity colours; "Nothing worn yet." | Claude's call |
+| The Arena record over every season and league, against players; "This season" only from a standings row | Claude's call |
+| "In camp since" from the creation time, date only | Claude's call |
+| The current build only, never a queued one; the own card says others see it | Claude's call (a question to Avi in the mockup) |
+| The data in `public_profiles` and the profile read, joining M26; stats computed in the browser; item stats published | Claude's call |
+| The card nearly opaque (0.96) | Claude's call |

@@ -186,8 +186,11 @@ export function tripBoundary(timeline: RevealedTimeline, nowMs: number): number 
   return at;
 }
 
-/** What the scene of a camp chapter draws: which one, how far into it, and how long it lasts (replay ms). */
-export type TripVignette = { kind: 'leaving' | 'back' | 'resting'; elapsedMs: number; durationMs: number };
+/**
+ * What the scene of a camp chapter draws: which one, how far into it, and how long it lasts (replay ms), and the display time the
+ * chapter shows (the departure, or the end of the slot: the light of its time of day).
+ */
+export type TripVignette = { kind: 'leaving' | 'back' | 'resting'; elapsedMs: number; durationMs: number; displayMs: number };
 /** The chapter at a replay position and the display time the expedition scene draws there (the camp's vignettes draw none). */
 export type TripFrame = { chapter: TripChapter; index: number; displayMs: number; vignette: TripVignette | null };
 
@@ -211,7 +214,7 @@ export function tripFrame(plan: TripPlan, positionMs: number): TripFrame {
     // before it (6000.000000000007 ms for a Rest after a long trip).
     const durationMs = chapter.vignette === 'resting' ? TRIP_PACE.restMs : TRIP_PACE.campMs;
     const elapsedMs = position >= chapter.endMs ? durationMs : within(position - chapter.startMs, 0, durationMs);
-    return { chapter, index, displayMs: chapter.displayFromMs, vignette: { kind: chapter.vignette, elapsedMs, durationMs } };
+    return { chapter, index, displayMs: chapter.displayFromMs, vignette: { kind: chapter.vignette, elapsedMs, durationMs, displayMs: chapter.displayFromMs } };
   }
   // The last piece that has started: its display time at this position, never past its end.
   let displayMs = plan.pieces[0]?.fromMs ?? chapter.displayFromMs;

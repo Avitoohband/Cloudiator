@@ -6,10 +6,11 @@
 // Each encounter's creature waits idling at its spot, named like the gladiator, until its fight
 // (src/game/expedition-creatures.ts): a creature the gladiator beat fades after the fight, one that won stays
 // idling at its spot.
-// It never reveals a stage, simulates a fight or settles anything. The map follows the camp's
-// conventions: baked ground, depth-sliced props (src/game/depth.ts) and buildings that fade while their
-// opaque pixels hide the gladiator. A hidden tab draws nothing; on return the scene shows the current
-// display time directly.
+// It never reveals a stage, simulates a fight or settles anything. The map and the camera are the shared map layer
+// (src/game/map-layer.ts, Patch A Task 10): baked ground, depth-sliced props (src/game/depth.ts) and buildings that fade while
+// their opaque pixels hide the gladiator. A hidden tab draws nothing; on return the scene shows the current display time
+// directly. In the whole-trip replay the same Phaser game also holds the camp's scene (src/game/trip-camp-scene.ts): this scene
+// sleeps while the camp's bookends play, and its bridge zoom and pan wait until it wakes.
 import type * as PhaserNS from 'phaser';
 import type { AnimationDef, AssetManifest, Direction, MapData } from './assets';
 import type { SceneBridge } from './bridge';
@@ -18,14 +19,12 @@ import { REPLAY_OUTRO_MS, createReplayController, type ReplayController } from '
 import { frameIndex, planStage, stageAt, type LabelPose, type StageLayout, type StagePlan } from './battle-stage';
 import { gladiatorPose, journeyMap, type GladiatorPose } from './expedition-path';
 import { clearOfLabel, creatureMode, fightCreatureAlpha, type LabelBox } from './expedition-creatures';
-import { ZOOM_STEP, clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
-import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
-import { drawSlices, hidesActor, type PlacedImage } from './depth';
-import { lightingAt } from './lighting';
+import { ZOOM_STEP } from './camera';
+import { worldToScreen, type Rect } from './iso';
+import { NAME_LABEL_DEPTH, NAME_LABEL_STYLE, createMapCamera, createMapLayer, type MapCamera, type MapLayer, type MapPropDebug } from './map-layer';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
-type Image = PhaserNS.GameObjects.Image;
 type Container = PhaserNS.GameObjects.Container;
 type Text = PhaserNS.GameObjects.Text;
 
@@ -80,7 +79,7 @@ export type ExpeditionDebugState = {
   labels: { text: string; x: number; y: number }[];
   faded: string[];
 };
-export type ExpeditionPropDebug = { id: string; frame: string; x: number; y: number; occludes: boolean; alpha: number; slices: { left: number; width: number; depth: number }[] };
+export type ExpeditionPropDebug = MapPropDebug;
 
 export type ExpeditionSceneHandle = {
   setReducedMotion(reduced: boolean): void;
@@ -94,30 +93,18 @@ export type ExpeditionSceneHandle = {
 const BG = 0x1f3326;
 /** Opening and reset zoom: one actor fills more of the view than in the busy camp. */
 const DEFAULT_ZOOM = ZOOM_STEP ** 2;
-const FADED_ALPHA = 0.45;
 /** A waiting creature's depth offset: the fight draws its right-hand fighter at rest at `y + (10 + 1) / 100` (battle-stage). */
 const WAITING_DEPTH = 0.11;
 /** Waiting creatures breathe out of step: each encounter's idle loop is offset by this much per encounter. */
 const WAITING_STAGGER_MS = 370;
-/** The name over an actor, the gladiator's or a waiting creature's: one style, so the two cannot drift apart. */
-const NAME_LABEL_STYLE: PhaserNS.Types.GameObjects.Text.TextStyle = { fontFamily: 'monospace', fontSize: '10px', color: '#f4e8cb', stroke: '#1a1423', strokeThickness: 3 };
-const NAME_LABEL_DEPTH = 2_000_002;
 /** A creature's name sits this far above the top of its art. */
 const NAME_LABEL_GAP = 2;
 /** Back at camp, the gladiator fades out of the scene over this long (at once with reduced motion). */
 const HERO_LEAVE_MS = 1500;
-const WHEEL_STEP = 100;
-const WHEEL_LINE = 40;
-const WHEEL_IDLE_MS = 250;
-const DRAG_THRESHOLD = 6;
 const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', critical: '#ffe48f', guard: '#8edcf4', miss: '#d4d4d8' };
 /** Damage labels rise from just above the gladiator's name label (46 px over the feet), never over it. */
 const LABEL_LIFT = 14;
 
-type PropGroup = Omit<PlacedImage, 'slices'> & {
-  id: string; frame: string; x: number; y: number; occludes: boolean; images: Image[];
-  slices: { x0: number; x1: number; depth: number; left: number; width: number }[];
-};
 type BattleView = { battleId: string; plan: StagePlan; controller: ReplayController };
 /** An encounter's creature idling at its spot; one sprite per encounter, built once and only shown or hidden. */
 type Waiter = { encounter: number; creatureId: string; sprite: Sprite; anim: AnimationDef; index: number;
@@ -139,8 +126,6 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   if (!found?.expedition) throw new Error(`No expedition map for ${deps.environment}`);
   const map: MapData = found;
   const journey = journeyMap(map);
-  const tileBounds = mapScreenBounds(map.width, map.height);
-  const bounds: Rect = { x: tileBounds.x, y: tileBounds.y - 96, width: tileBounds.width, height: tileBounds.height + 96 };
   const gladiator = manifest.actors.gladiator;
   const speed = gladiator.walk.tilesPerSecond;
 
@@ -148,16 +133,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   let disposed = false;
   let failed = false;
   let reducedMotion = !!deps.reducedMotion;
-  let following = true;
   let look = deps.look;
-  let view: ViewState = { centerX: 0, centerY: tileBounds.height / 2, zoom: DEFAULT_ZOOM, viewWidth: 800, viewHeight: 600 };
-  let groundChunks: { rt: PhaserNS.GameObjects.RenderTexture; left: number; top: number; tiles: { frame: string; left: number; top: number }[] }[] = [];
-  const propGroups: PropGroup[] = [];
-  const faded = new Set<PropGroup>();
-  const alphaMasks = new Map<string, { width: number; alpha: Uint8Array }>();
-  const animatedProps: { image: Image; anim: AnimationDef; index: number }[] = [];
-  const lights: { image: Image; seed: number }[] = [];
-  let overlay: PhaserNS.GameObjects.Rectangle | null = null;
+  let layer: MapLayer | null = null;
   let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text } | null = null;
   let creature: { container: Container; sprite: Sprite; creatureId: string } | null = null;
   const waiters: Waiter[] = [];
@@ -179,7 +156,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       // Game.destroy emits DESTROY (never SHUTDOWN); the host also calls dispose() directly.
       this.events.once(P.Scenes.Events.DESTROY, dispose);
       // Render textures come back empty after a WebGL context restore; repaint the baked ground.
-      const repaint = () => this.paintGround();
+      const repaint = () => layer?.paint();
       this.renderer.on(P.Renderer.Events.RESTORE_WEBGL, repaint);
       this.events.once(P.Scenes.Events.DESTROY, () => this.renderer.off(P.Renderer.Events.RESTORE_WEBGL, repaint));
     }
@@ -197,17 +174,10 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       if (failed) return;
       try {
         this.cameras.main.setBackgroundColor(BG);
-        this.buildGround();
-        this.buildProps();
-        this.buildLights();
-        overlay = this.add.rectangle(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width + 8000, bounds.height + 8000, 0xffffff, 0).setDepth(2_000_000);
+        layer = createMapLayer(P, this, manifest, map);
         this.buildHero();
         this.buildWaiters();
-        this.setupInput();
-        this.scale.on(P.Scale.Events.RESIZE, () => this.syncCamera());
-        const start = worldToScreen(journey.points.start.x + 0.5, journey.points.start.y + 0.5);
-        view = { ...view, centerX: start.x, centerY: start.y - 24 };
-        this.syncCamera();
+        camera.start(worldToScreen(journey.points.start.x + 0.5, journey.points.start.y + 0.5));
         ready = true;
         this.tick(true);
         deps.onReady();
@@ -220,89 +190,6 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       if (failed) return;
       failed = true;
       deps.onError(reason, message);
-    }
-
-    /** Ground tiles never change, so they are baked into four render textures. */
-    buildGround() {
-      const frames = manifest.atlases[map.tilesAtlas].frames;
-      const tiles: { frame: string; left: number; top: number; w: number; h: number }[] = [];
-      let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
-      for (let y = 0; y < map.height; y += 1) for (let x = 0; x < map.width; x += 1) {
-        const frame = map.groundFrames[map.ground[y * map.width + x]];
-        const f = frames[frame];
-        const s = worldToScreen(x, y);
-        const t = { frame, left: s.x - f.anchorX, top: s.y - f.anchorY, w: f.w, h: f.h };
-        tiles.push(t);
-        minX = Math.min(minX, t.left); minY = Math.min(minY, t.top);
-        maxX = Math.max(maxX, t.left + t.w); maxY = Math.max(maxY, t.top + t.h);
-      }
-      const chunkW = Math.ceil((maxX - minX) / 2);
-      const chunkH = Math.ceil((maxY - minY) / 2);
-      groundChunks = [];
-      for (let cy = 0; cy < 2; cy += 1) for (let cx = 0; cx < 2; cx += 1) {
-        const left = minX + cx * chunkW;
-        const top = minY + cy * chunkH;
-        const rt = this.add.renderTexture(left, top, chunkW, chunkH).setOrigin(0, 0).setDepth(-10_000_000);
-        const inside = tiles.filter(t => t.left < left + chunkW && t.left + t.w > left && t.top < top + chunkH && t.top + t.h > top);
-        groundChunks.push({ rt, left, top, tiles: inside });
-      }
-      this.paintGround();
-    }
-
-    paintGround() {
-      for (const { rt, left, top, tiles } of groundChunks) {
-        rt.clear();
-        for (const t of tiles) rt.stamp(map.tilesAtlas, t.frame, t.left - left, t.top - top, { originX: 0, originY: 0 });
-        rt.render();
-      }
-    }
-
-    buildProps() {
-      const frames = manifest.atlases[map.propsAtlas].frames;
-      for (const p of map.props) {
-        const s = worldToScreen(p.x, p.y);
-        const f = frames[p.frame];
-        const slices = drawSlices(p, { w: f.w, anchorX: f.anchorX });
-        const whole = slices.length === 1 && slices[0].left === -f.anchorX && slices[0].width === f.w;
-        const group: PropGroup = {
-          id: p.id, frame: p.frame, x: p.x, y: p.y, occludes: p.occludes, images: [],
-          left: s.x - f.anchorX, top: s.y - f.anchorY, width: f.w, height: f.h, slices: [],
-        };
-        for (const slice of slices) {
-          // Wide props draw as slices so an actor in front of any face draws over it (src/game/depth.ts).
-          const image = this.add.image(s.x, s.y, map.propsAtlas, p.frame).setDepth(s.y + slice.depthOffset);
-          if (!whole) image.setCrop(slice.left + f.anchorX, 0, slice.width, f.h);
-          group.images.push(image);
-          group.slices.push({ x0: s.x + slice.left, x1: s.x + slice.left + slice.width, depth: s.y + slice.depthOffset, left: slice.left, width: slice.width });
-        }
-        propGroups.push(group);
-        if (p.animation) {
-          const anim = manifest.animations[`prop-${map.propsAtlas}-${p.animation}`];
-          if (anim) for (const image of group.images) animatedProps.push({ image, anim, index: -1 });
-        }
-      }
-    }
-
-    buildLights() {
-      const size = 128;
-      if (!this.textures.exists('glow')) {
-        const canvas = document.createElement('canvas');
-        canvas.width = size; canvas.height = size;
-        const g = canvas.getContext('2d')!;
-        const grad = g.createRadialGradient(size / 2, size / 2, 2, size / 2, size / 2, size / 2);
-        grad.addColorStop(0, 'rgba(255,214,120,0.9)');
-        grad.addColorStop(0.45, 'rgba(255,160,60,0.35)');
-        grad.addColorStop(1, 'rgba(255,140,40,0)');
-        g.fillStyle = grad; g.fillRect(0, 0, size, size);
-        this.textures.addCanvas('glow', canvas);
-      }
-      map.lights.forEach((l, i) => {
-        const s = worldToScreen(l.x, l.y);
-        const image = this.add.image(s.x, s.y - 24, 'glow').setBlendMode(P.BlendModes.ADD).setDepth(2_000_001);
-        const base = (l.radius * 32) / size;
-        image.setScale(base * 2, base);
-        lights.push({ image, seed: i * 1.7 });
-      });
     }
 
     buildHero() {
@@ -388,60 +275,6 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       }
     }
 
-    setupInput() {
-      this.input.addPointer(1);
-      let pinch: { distance: number; zoom: number } | null = null;
-      let wheel = 0;
-      let lastWheelAt = -Infinity;
-      let dragging = false;
-      this.input.on(P.Input.Events.POINTER_DOWN, () => { dragging = false; });
-      this.input.on(P.Input.Events.POINTER_MOVE, (pointer: PhaserNS.Input.Pointer) => {
-        const p1 = this.input.pointer1;
-        const p2 = this.input.pointer2;
-        if (p1?.isDown && p2?.isDown) {
-          const distance = P.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-          if (!pinch || pinch.distance < 1) { pinch = { distance, zoom: view.zoom }; return; }
-          const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-          view = zoomAround(view, (pinch.zoom * (distance / pinch.distance)) / view.zoom, mid, bounds);
-          this.syncCamera();
-          return;
-        }
-        pinch = null;
-        if (!pointer.isDown) return;
-        // A press with a little jitter is a click, not a drag, and keeps the follow going.
-        if (!dragging && P.Math.Distance.Between(pointer.downX, pointer.downY, pointer.x, pointer.y) <= DRAG_THRESHOLD) return;
-        dragging = true;
-        stopFollowing();
-        view = panBy(view, pointer.x - pointer.prevPosition.x, pointer.y - pointer.prevPosition.y, bounds);
-        this.syncCamera();
-      });
-      this.input.on(P.Input.Events.POINTER_UP, () => { pinch = null; dragging = false; });
-      this.input.on(P.Input.Events.POINTER_WHEEL, (pointer: PhaserNS.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
-        if (!dy) return; // horizontal scroll never zooms
-        const at = performance.now();
-        if (Math.sign(dy) !== Math.sign(wheel) || at - lastWheelAt > WHEEL_IDLE_MS) wheel = 0;
-        lastWheelAt = at;
-        const mode = (pointer.event as WheelEvent | undefined)?.deltaMode ?? 0;
-        wheel += dy * (mode === 1 ? WHEEL_LINE : mode === 2 ? WHEEL_STEP * 3 : 1);
-        const steps = Math.trunc(wheel / WHEEL_STEP);
-        if (!steps) return;
-        wheel -= steps * WHEEL_STEP;
-        this.zoomTo(stepZoom(view.zoom, -Math.sign(steps) * Math.min(3, Math.abs(steps))), { x: pointer.x, y: pointer.y });
-      });
-    }
-
-    zoomTo(zoom: number, anchor: Point) {
-      view = zoomAround(view, zoom / view.zoom, anchor, bounds);
-      this.syncCamera();
-    }
-
-    syncCamera() {
-      const cam = this.cameras.main;
-      view = clampView({ ...view, viewWidth: cam.width, viewHeight: cam.height }, bounds);
-      cam.setZoom(view.zoom);
-      cam.centerOn(view.centerX, view.centerY);
-    }
-
     update() {
       // A hidden tab draws nothing (Phaser keeps its loop running when only the visibility state says
       // hidden); the first frame back reads the current display time, so nothing catches up.
@@ -457,11 +290,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       const state = deps.state();
       last.state = state;
       const now = state?.displayNowMs ?? 0;
-      this.drawLighting(now);
-      for (const a of animatedProps) {
-        const index = reducedMotion ? 0 : frameIndex(a.anim, now);
-        if (index !== a.index) { a.index = index; a.image.setFrame(a.anim.frames[index]); }
-      }
+      layer?.update(now, reducedMotion);
       this.updateWaiters(state, now);
       const route = state?.route ?? null;
       // Reduced motion keeps a search on the spot: no steps for the camera to snap to; so does the whole-trip replay.
@@ -497,11 +326,11 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         }
         hero.label.setText(look.name).setPosition(hero.container.x, feet.y - 46);
         // While searching, a following camera holds on the search spot instead of swaying with every step.
-        if (following) this.follow(pose.follow ? worldToScreen(pose.follow.x, pose.follow.y) : feet, snap);
+        if (camera.following()) camera.follow(pose.follow ? worldToScreen(pose.follow.x, pose.follow.y) : feet, snap);
       }
       this.placeWaiterLabels();
       // Props fade only for a gladiator still in the scene.
-      this.updateOccluders(pose && presence > 0 ? worldToScreen(pose.x, pose.y) : null);
+      layer?.occlude(pose && presence > 0 ? worldToScreen(pose.x, pose.y) : null);
     }
 
     setHeroFrames(animation: string, frames: string[], flip: boolean) {
@@ -577,89 +406,17 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       labelInfo.length = labels.length;
       return { ...frame, shake };
     }
-
-    follow(feet: Point, snap: boolean) {
-      const k = snap || reducedMotion ? 1 : 0.12;
-      const centerX = view.centerX + (feet.x - view.centerX) * k;
-      const centerY = view.centerY + (feet.y - 24 - view.centerY) * k;
-      if (Math.abs(centerX - view.centerX) > 0.01 || Math.abs(centerY - view.centerY) > 0.01) {
-        view = clampView({ ...view, centerX, centerY }, bounds);
-        this.syncCamera();
-      }
-    }
-
-    drawLighting(now: number) {
-      const light = lightingAt(now);
-      if (overlay && (overlay.fillColor !== light.overlayColor || overlay.fillAlpha !== light.overlayAlpha)) overlay.setFillStyle(light.overlayColor, light.overlayAlpha);
-      const torch = Math.min(1, 0.25 + 0.55 * light.torchIntensity);
-      for (const l of lights) l.image.setAlpha(reducedMotion ? torch : torch * (0.88 + 0.12 * Math.sin(now / 170 + l.seed)));
-    }
-
-    /** Fade whole props whose opaque pixels hide the gladiator; only faded ones are restored. */
-    updateOccluders(feet: Point | null) {
-      const hiding = new Set<PropGroup>();
-      if (feet) {
-        for (const g of propGroups) {
-          if (!g.occludes || feet.x < g.left - 8 || feet.x >= g.left + g.width + 8 || feet.y - 40 >= g.top + g.height || feet.y <= g.top) continue;
-          const mask = this.alphaMask(g.frame);
-          if (hidesActor(g, (x, y) => mask.alpha[y * mask.width + x], feet)) hiding.add(g);
-        }
-      }
-      for (const g of faded) if (!hiding.has(g)) { for (const image of g.images) image.setAlpha(1); faded.delete(g); }
-      for (const g of hiding) if (!faded.has(g)) { for (const image of g.images) image.setAlpha(FADED_ALPHA); faded.add(g); }
-    }
-
-    alphaMask(frameName: string) {
-      let mask = alphaMasks.get(frameName);
-      if (mask) return mask;
-      const frame = this.textures.getFrame(map.propsAtlas, frameName);
-      const canvas = document.createElement('canvas');
-      canvas.width = frame.cutWidth;
-      canvas.height = frame.cutHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      ctx.drawImage(frame.source.image as CanvasImageSource, frame.cutX, frame.cutY, frame.cutWidth, frame.cutHeight, 0, 0, frame.cutWidth, frame.cutHeight);
-      const rgba = ctx.getImageData(0, 0, frame.cutWidth, frame.cutHeight).data;
-      const alpha = new Uint8Array(frame.cutWidth * frame.cutHeight);
-      for (let i = 0; i < alpha.length; i += 1) alpha[i] = rgba[i * 4 + 3];
-      mask = { width: frame.cutWidth, alpha };
-      alphaMasks.set(frameName, mask);
-      return mask;
-    }
   }
 
   const scene = new ExpeditionScene();
   const live = () => ready && !disposed && !failed;
-
-  /** Dragging ends the follow; tell the UI so its Follow toggle stays truthful. */
-  function stopFollowing() {
-    if (!following) return;
-    following = false;
-    deps.bridge.emit('follow-character', { gladiatorId: null });
-  }
-
-  // Bridge listeners belong to this scene instance and are removed by dispose().
-  const unsubscribe: (() => void)[] = [
-    deps.bridge.on('camera-zoom', ({ direction }) => {
-      if (!live()) return;
-      const centre = { x: view.viewWidth / 2, y: view.viewHeight / 2 };
-      scene.zoomTo(direction === 'reset' ? DEFAULT_ZOOM : stepZoom(view.zoom, direction === 'in' ? 1 : -1), centre);
-    }),
-    deps.bridge.on('camera-pan', ({ dx, dy }) => {
-      if (!live()) return;
-      stopFollowing();
-      view = panBy(view, dx, dy, bounds);
-      scene.syncCamera();
-    }),
-    // The Follow toggle: any gladiator id follows the one gladiator in this scene; null frees the camera.
-    deps.bridge.on('follow-character', ({ gladiatorId }) => {
-      if (!disposed) following = gladiatorId !== null;
-    }),
-  ];
+  // The camera's bridge listeners belong to this scene instance and are removed by dispose().
+  const camera: MapCamera = createMapCamera(P, scene, { map, zoom: DEFAULT_ZOOM, bridge: deps.bridge, reducedMotion: () => reducedMotion, live });
 
   function dispose() {
     if (disposed) return;
     disposed = true;
-    for (const off of unsubscribe.splice(0)) off();
+    camera.dispose();
   }
 
   const handle: ExpeditionSceneHandle = {
@@ -678,11 +435,11 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         ready, disposed, failed, reducedMotion, environment: deps.environment,
         displayNowMs: last.state?.displayNowMs ?? null,
         phase: last.state?.phase ?? null,
-        following,
+        following: camera.following(),
         returned: last.returned,
         camera: cam
-          ? { centerX: cam.midPoint.x, centerY: cam.midPoint.y, zoom: cam.zoom, worldView: { x: cam.worldView.x, y: cam.worldView.y, width: cam.worldView.width, height: cam.worldView.height }, bounds }
-          : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds },
+          ? { centerX: cam.midPoint.x, centerY: cam.midPoint.y, zoom: cam.zoom, worldView: { x: cam.worldView.x, y: cam.worldView.y, width: cam.worldView.width, height: cam.worldView.height }, bounds: camera.bounds }
+          : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds: camera.bounds },
         gladiator: hero && pose ? {
           x: pose.x, y: pose.y, action: pose.action, animation: last.animation, frames: [...last.frames], layers: hero.layers.map(l => l.id), tint: { ...look.tint },
           facing: pose.facing, depth: hero.container.depth, screenX: hero.container.x, screenY: hero.container.y, scaleX: hero.container.scaleX,
@@ -699,15 +456,10 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
         battle: battleView && last.positionMs !== null ? { battleId: battleView.battleId, positionMs: last.positionMs } : null,
         effects: effectInfo.map((e, k) => ({ ...e, x: effectPool[k].x, y: effectPool[k].y, visible: effectPool[k].visible })),
         labels: labelInfo.map((l, k) => ({ ...l, x: labelPool[k].x, y: labelPool[k].y })),
-        faded: [...faded].map(g => g.id),
+        faded: layer?.faded() ?? [],
       };
     },
-    props() {
-      return propGroups.map(g => ({
-        id: g.id, frame: g.frame, x: g.x, y: g.y, occludes: g.occludes, alpha: g.images[0].alpha,
-        slices: g.slices.map((s, i) => ({ left: s.left, width: s.width, depth: g.images[i].depth })),
-      }));
-    },
+    props: () => layer?.props() ?? [],
   };
   return { scene, handle };
 }

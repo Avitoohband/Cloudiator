@@ -283,6 +283,9 @@
   color: var(--ink);
   font-size: 13.5px;
   white-space: nowrap;
+  /* The countdown, the stamina, the gold and the renown change all the time; tabular figures keep the chip as wide as it was (the arrival
+     banner's placement follows the chip's width, Patch A item 2). */
+  font-variant-numeric: tabular-nums;
 }
 
 /* A visitor's chip (the mockup): the Google "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). */
@@ -471,7 +474,8 @@
   position: absolute;
   right: 12px;
   top: 58px;
-  z-index: 9;
+  /* No z-index: the column makes no stacking context, so the arrival slot (z-index 8 when it is drawn in the top row) and the notice list
+     (9) take their places in the shell's. */
   display: grid;
   justify-items: end;
   max-width: min(320px, calc(100% - 24px));
@@ -490,6 +494,13 @@
   gap: 6px;
   /* The notices keep their 320 px, whatever the banner above them takes. */
   max-width: min(320px, 100%);
+  position: relative;
+  z-index: 9;
+  /* Its box is as wide as its widest notice: the strip beside a narrower one is the camp's, so the notices take the pointer, not the list. */
+  pointer-events: none;
+}
+
+.noticeList > * {
   pointer-events: auto;
 }
 
@@ -845,5 +856,10 @@
     /* Under the chip's tap area and the messages button (44 px from 12 px), as the mockup has it. */
     top: 64px;
     max-width: none;
+  }
+
+  /* The fixture pill is at 56 px here (fixture only): the column starts below it, so the pill (z-index 9) is never over the banner. */
+  .shell[data-pill='shown'] .notices[data-stacked='true'] {
+    top: 96px;
   }
 }

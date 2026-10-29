@@ -5,6 +5,11 @@
 // under the chip, in the column the notices share, 420 px wide at the right (the touch layout always uses that column, full width).
 // Under the chip it would reach over an open menu panel in a window narrower than 890 px; the shell then keeps the banner back
 // while a panel is open, as it does while a scene covers the camp.
+//
+// Hysteresis: the chip's width follows its figures (the slot countdown every second, the gold, the stamina), so a window within a few
+// pixels of the threshold would flip the banner back and forth. It goes under the chip as soon as the room is short, and returns to the top row
+// only with `RETURN_SPARE` px more than it needs: 24 px is three digits of the chip's figures (about 8 px each) and more than the 1-2 px a
+// window's edge is nudged by.
 
 /** Where the rail and an open menu panel end, with a gutter. */
 export const CLEAR_LEFT = 458;
@@ -16,6 +21,8 @@ export const MIN_TOP_WIDTH = 380;
 /** The notices' widest box, which hangs under the chip at the right. */
 export const NOTICE_WIDTH = 320;
 export const UNDER_WIDTH = 420;
+/** The room a banner that is under the chip needs beyond the top row's minimum before it returns to the top row. */
+export const RETURN_SPARE = 24;
 
 export type BannerPlace = {
   /** Under the chip, in the column with the notices, instead of in the top row. */
@@ -24,11 +31,13 @@ export type BannerPlace = {
   coversPanel: boolean;
 };
 
-export function bannerPlace({ windowWidth, chipWidth, compact }: { windowWidth: number; chipWidth: number; compact: boolean }): BannerPlace {
+/** `wasStacked`: the banner is under the chip now (the previous answer), which makes the return to the top row harder. */
+export function bannerPlace({ windowWidth, chipWidth, compact, wasStacked = false }: { windowWidth: number; chipWidth: number; compact: boolean; wasStacked?: boolean }): BannerPlace {
   if (compact) return { stacked: true, coversPanel: false };
   // Centred on the window once there is room, else held clear of the panel (the slot's `left: max(458px, 50% - 280px)`).
   const left = Math.max(CLEAR_LEFT, windowWidth / 2 - 280);
-  if (windowWidth - CHIP_MARGIN - Math.max(chipWidth, NOTICE_WIDTH) - CHIP_GAP - left >= MIN_TOP_WIDTH) return { stacked: false, coversPanel: false };
+  const room = windowWidth - CHIP_MARGIN - Math.max(chipWidth, NOTICE_WIDTH) - CHIP_GAP - left;
+  if (room >= MIN_TOP_WIDTH + (wasStacked ? RETURN_SPARE : 0)) return { stacked: false, coversPanel: false };
   const underLeft = windowWidth - CHIP_MARGIN - Math.min(UNDER_WIDTH, windowWidth - 2 * CHIP_MARGIN);
   return { stacked: true, coversPanel: underLeft < CLEAR_LEFT };
 }

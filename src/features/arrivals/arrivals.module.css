@@ -2,17 +2,20 @@
  * The arrival banner (Patch A item 2, the approved mockup). It sits in its own slot, never inside another element's box, so the
  * away button (Task 11) can sit alongside it: the slot is on the camp's top edge, the away button on its bottom edge.
  *
- * Two places, decided by the shell from the chip's measured width (`bannerPlace`, `data-stacked`):
- *  - not stacked, a pointer window with room: the top row, centred on the window once it can be, held clear of the rail and an open menu
+ * The slot is always the first child of the notices column, one place in the page, so moving the banner never remounts it (its 15 s, a fade in
+ * progress and the focus inside it all survive). It is drawn in one of two places, decided by the shell from the chip's measured width
+ * (`bannerPlace`, with its hysteresis, `data-stacked`):
+ *  - not stacked, a pointer window with room: the top row. The slot leaves the column with `position: fixed` (the shell fills the window, so
+ *    it is the shell's top row): centred on the window once it can be, held clear of the rail and an open menu
  *    panel (the left 458 px) and of the corner chip and the notices under it (`--chip-w`, the chip's measured width, or the notices' 320 px if
- *    more, with the 12 px margin and a 12 px gap), 380-560 px wide.
- *    Its z-index is 8, the menu panels' (which come later in the page), under the chip and the notices (9), so nothing of theirs is covered;
+ *    more, with the 12 px margin and a 12 px gap), 380-560 px wide. Its z-index is 8, the menu panels' (which come later in the page), under
+ *    the chip and the notice list (9, `.noticeList`; the column itself makes no stacking context), so nothing of theirs is covered;
  *  - stacked: first in the column the notices share under the chip (`.notices` in shell.module.css): the touch layout's full width with
  *    12 px gutters, or 420 px at the right of a pointer window the top row does not fit. The notices flow below it.
  * The fixture pill (`data-pill`) takes the top row's middle, so there the banner starts below it.
  */
 .slot {
-  position: absolute;
+  position: fixed;
   top: 12px;
   left: max(458px, calc(50% - 280px));
   width: min(560px, calc(100% - max(var(--chip-w, 371px), 320px) - 24px - max(458px, calc(50% - 280px))));
@@ -26,9 +29,10 @@
 }
 
 .slot[data-stacked='true'] {
-  position: static;
+  /* In the column: in its flow, with the same z-index 8, which puts it above the camp (a later, positioned element) and under the panels. */
+  position: relative;
+  inset: auto;
   width: auto;
-  z-index: auto;
   justify-self: stretch;
 }
 

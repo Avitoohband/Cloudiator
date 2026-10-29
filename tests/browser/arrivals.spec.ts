@@ -2,7 +2,7 @@
 // sees one banner for about 15 s (paused while hovered or focused), Find takes the camera to the gate, the Gladiators list shows the
 // newcomers first with a NEW pill and the camp draws a NEW tag over them. The newcomer's own player is welcomed first. Live mode uses the
 // development-only intercepted Supabase transport: the world below has Aster at camp and Ursa (the newest), Nero and Vita in orientation.
-import { expect, test, type Locator, type Page } from './fixtures';
+import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { screenToWorld } from '../../src/game/iso';
@@ -46,6 +46,23 @@ const cameraFrom = (page: Page, name: string) => page.evaluate(([who]) => {
   return { x: s.camera.centerX - (a.x - a.y) * 32, y: s.camera.centerY - ((a.x + a.y) * 16 - 24) };
 }, [name]);
 const near = async (page: Page, name: string) => { const d = await cameraFrom(page, name); return Math.hypot(d.x, d.y); };
+/**
+ * Records in the page, on the clock the banner counts on (the fake one, when a test installs it), when the arrival banner last appeared:
+ * `window.__shownAt`. Call it before `page.goto`.
+ */
+const watchBannerShown = (page: Page) => page.addInitScript(() => {
+  let present = false;
+  new MutationObserver(() => {
+    const now = document.querySelector('[data-testid="arrival-banner"]') !== null;
+    if (now && !present) (window as unknown as { __shownAt?: number }).__shownAt = performance.now();
+    present = now;
+  }).observe(document, { childList: true, subtree: true });
+});
+/** Moves the (installed, paused) clock until the banner has been showing for `seconds` since it last appeared. */
+const showingForOn = async (page: Page, seconds: number) => {
+  const elapsed = await page.evaluate(() => performance.now() - (window as unknown as { __shownAt: number }).__shownAt);
+  await page.clock.runFor(Math.max(0, seconds * 1_000 - elapsed));
+};
 type Box = { x: number; y: number; width: number; height: number };
 /** Whether two boxes share no area. */
 const clear = (a: Box, b: Box) => a.x >= b.x + b.width - 0.5 || b.x >= a.x + a.width - 0.5 || a.y >= b.y + b.height - 0.5 || b.y >= a.y + a.height - 0.5;
@@ -133,13 +150,7 @@ test.describe('Patch A: a new player is announced', () => {
     const world = worldOf(ursa);
     await routeLiveReads(context, { world });
     await page.clock.install();
-    // The page records when the banner first shows, on the (fake) clock the banner counts on.
-    await page.addInitScript(() => {
-      new MutationObserver(() => {
-        const w = window as unknown as { __shownAt?: number };
-        if (w.__shownAt === undefined && document.querySelector('[data-testid="arrival-banner"]')) w.__shownAt = performance.now();
-      }).observe(document, { childList: true, subtree: true });
-    });
+    await watchBannerShown(page);
     /** A fresh visit with the banner showing and the clock stopped: from here it moves only when the test moves it. */
     const visit = async () => {
       await page.evaluate(key => localStorage.removeItem(key), ARRIVALS_KEY).catch(() => undefined);
@@ -147,11 +158,7 @@ test.describe('Patch A: a new player is announced', () => {
       await expect(banner(page)).toBeVisible();
       await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     };
-    /** Moves the clock until the banner has been showing for `seconds`. */
-    const showingFor = async (seconds: number) => {
-      const elapsed = await page.evaluate(() => performance.now() - (window as unknown as { __shownAt: number }).__shownAt);
-      await page.clock.runFor(Math.max(0, seconds * 1_000 - elapsed));
-    };
+    const showingFor = (seconds: number) => showingForOn(page, seconds);
 
     // 14.5 s: still there, not fading. 15.5 s: gone, and remembered.
     await visit();
@@ -394,23 +401,41 @@ test.describe('Patch A: a new player is announced', () => {
       expect(clear(await boxOf(banner(page)), await boxOf(pill)), 'the banner and the pill').toBe(true);
     });
 
-    test('leaves an open menu panel alone in a narrow window, and shows the banner when it closes', async ({ page, context }) => {
+    test('leaves an open menu panel alone in a narrow window, and shows the banner when it closes, for its 15 s from then', async ({ page, context }) => {
       const world = worldOf(ursa);
-      await routeLiveReads(context, { world });
+      const live = await routeLiveReads(context, { world });
+      await page.clock.install();
+      await watchBannerShown(page);
       await page.setViewportSize({ width: 800, height: 720 });
       // A notice (the sign-in that came back cancelled) is in the column too: it keeps its 320 px, clear of the panel.
       await page.goto('/game/?signin=cancelled');
       await waitForCamp(page, world.actors.length);
-      // No panel: the banner is under the chip. A panel opens: the banner waits, so the panel's header and × are not covered.
+      // No panel: the banner is under the chip. A panel opens: the banner waits, so the panel's header and x are not covered.
       await expect(banner(page)).toBeVisible();
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
       const roster = await openMenu(page, 'Gladiators');
       await expect(banner(page)).toHaveCount(0);
       const close = roster.locator('[data-menu-close]');
-      expect(await paintedOver(close), 'the panel’s × is what is painted at its middle').toBe(false);
-      // Closing the menu shows it, for its 15 s from then, and it is clear of the chip.
+      expect(await paintedOver(close), 'the panel’s x is what is painted at its middle').toBe(false);
+      // While it waits, 20 s pass (more than its 15) and a read brings another newcomer: the banner shown later is the latest world's.
+      await page.clock.runFor(20_000);
+      live.setWorld({ ...world, revision: 'arrivals-2', actors: [aster, ursa, vita] });
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await page.waitForFunction(r => window.__cloudiatorCamp?.world()?.revision === r, 'arrivals-2', { timeout: 15_000 });
+      await expect(banner(page)).toHaveCount(0);
+      expect(await seenOnDevice(page), 'nothing was told while it waited').toEqual([]);
+      // Closing the menu shows it, clear of the chip, with the latest sentence, and it stays its full 15 s from then.
       await close.click();
+      // The pointer that closed the menu is where the banner now is: it holds a banner while it hovers, so it moves off, as a person's does.
+      await page.mouse.move(40, 650);
       await expect(banner(page)).toBeVisible();
+      expect(await shown(page)).toContain('Ursa and Vita have arrived in the camp.');
       expect(clear(await boxOf(banner(page)), await boxOf(cornerChip(page)))).toBe(true);
+      await showingForOn(page, 14.5);
+      await expect(banner(page)).toBeVisible();
+      await showingForOn(page, 15.5);
+      await expect(banner(page)).toHaveCount(0);
+      expect(await seenOnDevice(page)).toEqual([IDS.ursa, IDS.vita]);
     });
 
     test('stacks the notices under the banner in the column below the chip, 20-character name and all', async ({ page, context }) => {
@@ -429,6 +454,116 @@ test.describe('Patch A: a new player is announced', () => {
       expect(clear(b, n) && clear(b, chip) && clear(n, chip)).toBe(true);
       // Find keeps its whole name for assistive technology.
       await expect(page.getByRole('button', { name: `Find ${LONG_NAME}`, exact: true })).toBeVisible();
+    });
+  });
+
+  // Fix round 2: a placement switch never restarts the banner or takes its focus, and the chip's figures do not make it jump.
+  test.describe('across the placement threshold', () => {
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'A pointer layout: the desktop project.'); });
+
+    /** Aster's owner view at a window as wide as the top row needs plus `extra` px, with the banner showing and the clock stopped. */
+    const open = async (page: Page, context: BrowserContext) => {
+      await seedSession(context);
+      const world = worldOf(ursa);
+      await routeLiveReads(context, { world, owner: structuredClone(ownerFixture) });
+      await page.clock.install();
+      await watchBannerShown(page);
+      await watchFocus(page);
+      await page.setViewportSize({ width: 1400, height: 720 });
+      await page.goto('/game/');
+      await expectOwnerShown(page, 'Aster');
+      await waitForCamp(page, world.actors.length);
+      await expect(banner(page)).toBeVisible();
+      // The window width at which the top row has just the 380 px it needs beside this chip (and the notices' 320 px).
+      const chip = Math.ceil((await boxOf(cornerChip(page))).width);
+      const threshold = Math.max(chip, 320) + 12 + 12 + 458 + 380;
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+      return { threshold };
+    };
+    const stackedIs = (page: Page, stacked: boolean) => expect(slot(page)).toHaveAttribute('data-stacked', String(stacked));
+    const widthTo = async (page: Page, width: number, stacked: boolean) => {
+      await page.setViewportSize({ width, height: 720 });
+      await stackedIs(page, stacked);
+    };
+
+    test('keeps its 15 s across the switches a nudge or the chip makes, and is gone at 15.5 s', async ({ page, context }) => {
+      const { threshold } = await open(page, context);
+      await widthTo(page, threshold + 6, false);
+      // The same element all along: a remount would be a banner that starts its 15 s again.
+      await banner(page).evaluate(el => { el.setAttribute('data-probe', 'same'); });
+      const same = () => banner(page).getAttribute('data-probe');
+      // Nudges of 8 px (a digit of the chip's figures) every 2 s across the line: it goes under the chip at once, and comes back only with 24 px to spare.
+      await showingForOn(page, 2); await widthTo(page, threshold - 2, true);
+      await showingForOn(page, 4); await widthTo(page, threshold + 6, true);
+      await showingForOn(page, 6); await widthTo(page, threshold - 2, true);
+      await showingForOn(page, 8); await widthTo(page, threshold + 6, true);
+      await showingForOn(page, 10); await widthTo(page, threshold + 40, false);
+      await showingForOn(page, 12); await widthTo(page, threshold - 2, true);
+      await showingForOn(page, 14); await widthTo(page, threshold + 6, true);
+      expect(await same(), 'the banner was never remounted').toBe('same');
+      await expect(banner(page)).toBeVisible();
+      await expect(banner(page)).not.toHaveAttribute('data-fading', 'true');
+      await showingForOn(page, 15.5);
+      await expect(banner(page)).toHaveCount(0);
+      expect(await seenOnDevice(page)).toEqual([IDS.ursa]);
+    });
+
+    test('keeps the focus inside it across the switches', async ({ page, context }) => {
+      const { threshold } = await open(page, context);
+      await widthTo(page, threshold + 6, false);
+      const find = page.getByRole('button', { name: 'Find Ursa', exact: true });
+      await find.focus();
+      await expect(find).toBeFocused();
+      for (const [width, stacked] of [[threshold - 2, true], [threshold + 6, true], [threshold + 40, false], [threshold - 2, true], [threshold + 40, false]] as const) {
+        await widthTo(page, width, stacked);
+        await expect(find, `focused at ${width} px`).toBeFocused();
+      }
+      expect(await focusDrops(page), 'the focus never fell to <body>').toEqual([]);
+      // The focus holds the countdown, as it always does: far past 15 s, the banner is still there.
+      await page.clock.runFor(30_000);
+      await expect(banner(page)).toBeVisible();
+    });
+  });
+
+  test('sets the chip’s figures tabular, so its countdown does not change its width', async ({ page, context }) => {
+    await seedSession(context);
+    const world = worldOf(ursa);
+    await routeLiveReads(context, { world, owner: structuredClone(ownerFixture) });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const numeric = await cornerChip(page).getByTestId('chip-countdown').evaluate(el => getComputedStyle(el).fontVariantNumeric);
+    expect(numeric).toContain('tabular-nums');
+    const gold = await cornerChip(page).getByTestId('chip-money').evaluate(el => getComputedStyle(el).fontVariantNumeric);
+    expect(gold).toContain('tabular-nums');
+  });
+
+  test.describe('the notices column', () => {
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'A pointer layout: the desktop project.'); });
+
+    test('takes the pointer only where a notice is, not in the strip beside a narrower one', async ({ page, context }) => {
+      const world = worldOf(ursa);
+      const live = await routeLiveReads(context, { world });
+      await page.clock.install();
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto('/game/?signin=cancelled');
+      await waitForCamp(page, world.actors.length);
+      // Two notices of different widths: the sign-in that came back cancelled, and a lost connection.
+      live.fail('world_revision');
+      await page.clock.fastForward(30_000);
+      const lost = page.getByRole('status').filter({ hasText: 'Connection lost' });
+      const cancelled = page.getByRole('status').filter({ hasText: 'Google sign-in was canceled' });
+      await expect(lost).toBeVisible();
+      await expect(cancelled).toBeVisible();
+      const a = await boxOf(lost), b = await boxOf(cancelled);
+      const narrower = a.width < b.width ? a : b, wider = a.width < b.width ? b : a;
+      expect(wider.width - narrower.width, 'the notices differ in width, so there is a strip').toBeGreaterThan(8);
+      // In the strip (left of the narrower notice, inside the wider one's width) the camp is what is hit; on the notice, the notice.
+      const hit = (x: number, y: number) => page.evaluate(([px, py]) => {
+        const el = document.elementFromPoint(px!, py!);
+        return { camp: el?.closest('[data-camp-view]') !== null, status: el?.closest('[role="status"]') !== null };
+      }, [x, y]);
+      expect(await hit(wider.x + 3, narrower.y + narrower.height / 2), 'the strip beside the narrower notice').toMatchObject({ camp: true });
+      expect(await hit(narrower.x + narrower.width / 2, narrower.y + narrower.height / 2), 'the narrower notice').toMatchObject({ status: true });
     });
   });
 

@@ -14,17 +14,22 @@ const subscribeCompact = (onChange: () => void) => {
 };
 const readCompact = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
 
+type Measured = { windowWidth: number; chipWidth: number } & BannerPlace;
+const FIRST: Measured = { windowWidth: 1280, chipWidth: 371, ...bannerPlace({ windowWidth: 1280, chipWidth: 371, compact: false }) };
+
 export function useBannerPlace(shellRef: RefObject<HTMLElement | null>, remeasureOn: unknown): BannerPlace & { chipWidth: number } {
   // The server render and the first client render assume a pointer window with Aster's chip; the observer's first report replaces them.
   const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
-  const [size, setSize] = useState({ windowWidth: 1280, chipWidth: 371 });
+  const [measured, setMeasured] = useState<Measured>(FIRST);
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell || typeof ResizeObserver === 'undefined') return;
     const chip = shell.querySelector<HTMLElement>('[data-testid="corner-chip"]');
     const measure = () => {
-      const next = { windowWidth: Math.round(shell.clientWidth), chipWidth: Math.ceil(chip?.getBoundingClientRect().width ?? 0) };
-      setSize(previous => (previous.windowWidth === next.windowWidth && previous.chipWidth === next.chipWidth ? previous : next));
+      const size = { windowWidth: Math.round(shell.clientWidth), chipWidth: Math.ceil(chip?.getBoundingClientRect().width ?? 0) };
+      // The previous answer feeds the next (the hysteresis): a banner under the chip needs spare room to return to the top row.
+      setMeasured(previous => (previous.windowWidth === size.windowWidth && previous.chipWidth === size.chipWidth ? previous
+        : { ...size, ...bannerPlace({ ...size, compact: false, wasStacked: previous.stacked }) }));
     };
     const observer = new ResizeObserver(measure);
     observer.observe(shell);
@@ -32,5 +37,6 @@ export function useBannerPlace(shellRef: RefObject<HTMLElement | null>, remeasur
     measure();
     return () => observer.disconnect();
   }, [shellRef, remeasureOn]);
-  return { ...bannerPlace({ ...size, compact }), chipWidth: size.chipWidth };
+  return compact ? { stacked: true, coversPanel: false, chipWidth: measured.chipWidth }
+    : { stacked: measured.stacked, coversPanel: measured.coversPanel, chipWidth: measured.chipWidth };
 }

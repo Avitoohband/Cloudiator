@@ -113,6 +113,23 @@ describe('where the banner sits', () => {
     expect(bannerPlace({ windowWidth: 889, chipWidth: 270, compact: false })).toEqual({ stacked: true, coversPanel: true });
     expect(bannerPlace({ windowWidth: 890, chipWidth: 270, compact: false })).toEqual({ stacked: true, coversPanel: false });
   });
+  it('goes under the chip at once, and returns to the top row only with 24 px to spare', () => {
+    // Aster's chip, 371 px: the top row has its 380 px from a window 1233 px wide. A digit of the chip's figures is about 8 px, and the countdown, the gold
+    // and the stamina change all the time, so a banner that is up must not jump back and forth over the line (that would restart it each time).
+    const at = (windowWidth: number, chipWidth: number, wasStacked: boolean) => bannerPlace({ windowWidth, chipWidth, compact: false, wasStacked }).stacked;
+    expect(at(1233, 371, false)).toBe(false);
+    expect(at(1232, 371, false)).toBe(true);
+    // Stacked, it stays under the chip until the room is 24 px more than it needs (1257 px here).
+    expect(at(1233, 371, true)).toBe(true);
+    expect(at(1256, 371, true)).toBe(true);
+    expect(at(1257, 371, true)).toBe(false);
+    // The chip wider by a digit (8 px) puts a top-row banner under the chip; the chip back at its width does not bring it up again.
+    expect(at(1240, 371, false)).toBe(false);
+    expect(at(1240, 379, false)).toBe(true);
+    expect(at(1240, 371, true)).toBe(true);
+    // The touch layout never leaves the column, and the panel check does not depend on the history.
+    expect(bannerPlace({ windowWidth: 800, chipWidth: 371, compact: false, wasStacked: true })).toEqual({ stacked: true, coversPanel: true });
+  });
   it('is always the column in the touch layout, where a sheet never reaches it', () => {
     expect(bannerPlace({ windowWidth: 390, chipWidth: 200, compact: true })).toEqual({ stacked: true, coversPanel: false });
     expect(bannerPlace({ windowWidth: 1600, chipWidth: 200, compact: true })).toEqual({ stacked: true, coversPanel: false });

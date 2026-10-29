@@ -19,9 +19,9 @@ export const FADE_MS = 400;
 const WELCOME_LEAD = 'Welcome to the camp, ';
 
 /**
- * The banner's place: a polite status, always present, with the banner inside it while there is one. `stacked` is the shell's
- * (`bannerPlace`): the slot is the first thing in the column of notices under the chip, not a row of its own across the top; the shell
- * puts it in the right parent, and the styling follows `data-stacked`.
+ * The banner's place: a polite status, always present, with the banner inside it while there is one. It is always the first thing in the
+ * column of notices under the chip, so the banner is the same element wherever it is drawn; `stacked` is the shell's (`bannerPlace`) and
+ * only changes the styling (`data-stacked`): in the column, or taken out of it into a row of its own across the top.
  */
 export function ArrivalSlot({ stacked, children }: { stacked: boolean; children?: ReactNode }) {
   return <div className={styles.slot} role="status" data-arrival-slot="" data-stacked={stacked ? 'true' : 'false'}>{children}</div>;

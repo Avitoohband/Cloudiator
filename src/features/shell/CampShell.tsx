@@ -27,8 +27,10 @@
 //
 // Patch A item 2: a new player is announced. One banner in its own slot (`ArrivalSlot`), for every viewer, once the viewer is known
 // (the newcomer's own player is welcomed instead of announced) and while no scene covers the camp; Find is the Gladiators list's.
-// The slot sits in the top row when the chip leaves room for it beside, and otherwise first in the column the notices share under the
-// chip (`bannerPlace`, the chip's width measured); in a window where that column reaches over an open menu panel it waits for the panel to close.
+// The slot is always first in the column the notices share under the chip, one place in the page, so the banner is never remounted (its 15 s,
+// a fade and the focus in it survive): CSS takes it out of the column into the top row when the chip leaves room for it beside
+// (`bannerPlace`, the chip's width measured, `data-stacked`); in a window where the column reaches over an open menu panel it waits for the
+// panel to close.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
@@ -409,7 +411,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>
-        {place.stacked && arrivalSlot}
+        {arrivalSlot}
         <div className={styles.noticeList}>
           {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
               signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
@@ -426,7 +428,6 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
           </div>}
         </div>
       </div>
-      {!place.stacked && arrivalSlot}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}

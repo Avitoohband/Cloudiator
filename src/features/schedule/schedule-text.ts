@@ -69,7 +69,7 @@ export function choiceHint(choice: ActivityChoice, rules: Rules = RULES_V1): str
   switch (choice.kind) {
     case 'training': return `Practice yard: builds experience. ${cost}`;
     case 'rest': return `Recovers stamina. ${cost}`;
-    case 'expedition': return `Gathers loot and money over the slot. ${cost}`;
+    case 'expedition': return `Gathers loot and gold over the slot. ${cost}`;
     case 'arena': {
       const { utcWeekdays, hourUtc, minuteUtc } = rules.tournament;
       const days = utcWeekdays.map(day => WEEKDAYS[day]).join(' and ');

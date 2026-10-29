@@ -270,9 +270,9 @@ test.describe('followable expedition scenes', () => {
     const t = TIMELINES.woodland;
     await expeditionFlow.holdAt(page, t.summary!.settledAtMs - 1);
     await expect(result(page)).toContainText('Processing results');
-    await expect(result(page)).not.toContainText('money');
+    await expect(result(page)).not.toContainText('gold');
     await expeditionFlow.holdAt(page, t.summary!.settledAtMs);
-    await expect(result(page).getByRole('listitem')).toHaveText(['+20 money', '+100 XP', 'Light boots (tier 1, uncommon) ×1', 'Salvage ×1']);
+    await expect(result(page).getByRole('listitem')).toHaveText(['+20 gold', '+100 XP', 'Light boots (tier 1, uncommon) ×1', 'Salvage ×1']);
     await expect(result(page)).toContainText('Success');
     await expect(result(page)).toContainText('Encounter replays are kept until');
     await expect(page.getByText(/Processing results/)).toHaveCount(0);
@@ -282,7 +282,7 @@ test.describe('followable expedition scenes', () => {
 
     await expeditionFlow.open(page, 'laststand');
     await expect(result(page)).toContainText('Success');
-    await expect(result(page).getByRole('listitem')).toHaveText(['+120 money', '+500 XP', 'Salvage ×3']);
+    await expect(result(page).getByRole('listitem')).toHaveText(['+120 gold', '+500 XP', 'Salvage ×3']);
     await expect(page.getByText('Encounter 3: victory')).toBeVisible();
   });
 
@@ -741,7 +741,7 @@ test.describe('followable expedition scenes', () => {
     // The state the page holds at minute 39 has nothing from later stages.
     await expeditionFlow.hold(page, 'woodland', 39);
     const text = await page.locator('main').innerText();
-    expect(text).not.toMatch(/Encounter [23]|Return to camp|Arrive at camp|light boots|salvage|\+\d+ money/i);
+    expect(text).not.toMatch(/Encounter [23]|Return to camp|Arrive at camp|light boots|salvage|\+\d+ (money|gold)/i);
   });
 
   test('explains an unknown, malformed or unreadable expedition without drawing one, reading only public data', async ({ page, context }) => {

@@ -132,7 +132,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(card(page).getByRole('table')).toContainText('Varro');
     await expect(card(page)).toContainText('Champion: Varro');
     await expect(card(page)).toContainText('Your placement: 5th. Credited: +7 renown.');
-    await expect(card(page)).not.toContainText(/\+80|money/);
+    await expect(card(page)).not.toContainText(/\+80|money|gold/);
     await card(page).screenshot({ path: testInfo.outputPath('tournament-placements.png') });
     expect(remote).toEqual([]);
   });

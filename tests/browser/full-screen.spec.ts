@@ -23,6 +23,30 @@ const camera = (page: Page) => page.evaluate(() => {
 const settled = async (locator: Locator) => { await locator.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished))); return locator; };
 const nextFrames = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
+/** The old word for the currency, which the game no longer says (the data's `money` fields keep their names). */
+const MONEY_WORD = /\bmoney\b/i;
+/**
+ * Every place on the page where a player can read the old word: each text node on its own (hidden screen-reader text too; a
+ * page's `textContent` runs "Money" into the number after it, "Money100", so no word boundary shows), and every title,
+ * aria-label, alt text and placeholder. Empty means the page never says money.
+ */
+const moneyWords = (page: Page) => page.evaluate(() => {
+  const found: string[] = [];
+  const says = (text: string | null | undefined) => !!text && /\bmoney\b/i.test(text);
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    if (parent && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName) && says(node.nodeValue)) found.push(`${parent.tagName.toLowerCase()} text "${node.nodeValue!.trim()}"`);
+  }
+  for (const el of document.querySelectorAll('body *')) {
+    for (const name of ['title', 'aria-label', 'alt', 'placeholder']) {
+      const value = el.getAttribute(name);
+      if (says(value)) found.push(`${el.tagName.toLowerCase()} ${name}="${value}"`);
+    }
+  }
+  return found;
+});
+
 /** The fixture camp, ready, with the fixture owner loaded (the corner chip names it). */
 async function openCamp(page: Page, url = '/game/?mode=fixture') {
   await page.goto(url);
@@ -52,7 +76,7 @@ test.describe('the camp shell with a pointer', () => {
     expect(Math.abs(grip.y + grip.height / 2 - 360)).toBeLessThanOrEqual(1);
     await expect(openSurfaces(page)).toHaveCount(0);
     await expect(page.getByRole('tooltip')).toHaveCount(0);
-    // The player chip: name, stamina, money, renown and the slot countdown.
+    // The player chip: name, stamina, gold, renown and the slot countdown.
     const chip = cornerChip(page);
     await expect(chip).toBeVisible();
     await expect(chip.getByTestId('chip-stamina')).toHaveText(/104 \/ 104/);
@@ -209,6 +233,34 @@ test.describe('the camp shell on any device', () => {
     await page.getByRole('application').focus();
     await page.keyboard.press('+');
     await expect.poll(async () => (await camera(page)).zoom).toBeGreaterThan(before.zoom);
+  });
+
+  // Task 7b (Avi, 2026-10-28: "about the money, next patch change it to gold"): the data keeps its `money` names, but no word a
+  // player reads says money: not the corner chip, any menu, a select's every option (the shop's currency follows the choice), nor
+  // a title, label or alt text that a screen reader or a hover tooltip speaks. The fixture's Schedule is a read-only sample (no
+  // select), so its expedition hint is checked in planning.spec.ts and schedule-text. A check that only looks for the old word can pass
+  // by finding nothing, so the places that hold an amount are also checked to say gold.
+  test('says gold, never money, in the corner chip and every menu', async ({ page }) => {
+    await openCamp(page);
+    const body = page.locator('body');
+    const chipMoney = cornerChip(page).getByTestId('chip-money');
+    await expect(chipMoney).toHaveAttribute('title', 'Gold');
+    await expect(chipMoney).toContainText('Gold');
+    const GOLD_SAID: Record<string, RegExp> = { 'My gladiator': /\bGold\b/, 'Inventory and shops': /Available gold: \d/, Marketplace: /Available gold: \d/ };
+    expect(await moneyWords(page), 'the corner chip').toEqual([]);
+    for (const label of LABELS) {
+      const menu = await openMenu(page, label);
+      if (GOLD_SAID[label]) await expect(menu, label).toContainText(GOLD_SAID[label], { useInnerText: true });
+      for (const select of await menu.locator('select').all()) {
+        for (const value of await select.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))) {
+          await select.selectOption(value);
+          await expect(body, `${label}: ${value}`).not.toContainText(MONEY_WORD, { useInnerText: true });
+          expect(await moneyWords(page), `${label}: ${value}`).toEqual([]);
+        }
+      }
+      await expect(body, label).not.toContainText(MONEY_WORD, { useInnerText: true });
+      expect(await moneyWords(page), label).toEqual([]);
+    }
   });
 
   test('keeps the menus usable when the camp scene is unavailable', async ({ page }) => {

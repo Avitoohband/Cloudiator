@@ -110,7 +110,7 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await page.getByRole('button', { name: 'Confirm discard', exact: true }).click();
   await expect(bound).toHaveCount(0);
   expect(flow.commands.map(command => command.kind)).toEqual(['buy-shop', 'discard-item']);
-  await expect(page.getByText('Available money: 260')).toBeVisible();
+  await expect(page.getByText('Available gold: 260')).toBeVisible();
   await page.getByRole('button', { name: 'Armorer', exact: true }).click();
   await page.getByRole('button', { name: 'Buy Arena banner', exact: true }).click();
   await expect(page.getByText('Arena banner · Owned · Account-bound')).toBeVisible();
@@ -142,7 +142,7 @@ test('shows level locks and reservation restrictions with both currencies', asyn
   await expect(equipped.getByRole('button', { name: 'Discard' })).toBeDisabled();
   await page.getByLabel('Shop tier').selectOption('5');
   await expect(page.getByRole('button', { name: 'Buy Sword', exact: true })).toBeDisabled();
-  await expect(page.getByTestId('offer-sword:5:common')).toContainText('120 money');
+  await expect(page.getByTestId('offer-sword:5:common')).toContainText('120 gold');
   await page.getByLabel('Shop currency').selectOption('renown');
   await expect(page.getByTestId('offer-sword:5:renown')).toContainText('100 renown');
   expect(flow.commands).toHaveLength(0);

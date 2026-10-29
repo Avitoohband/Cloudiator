@@ -19,7 +19,7 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 /** Text that only an owner's settled summary holds (its credited rewards and rating change); no visitor's scene shows it. */
-const REWARDS = /\+\d+ (money|renown|XP)|Credited rewards|Credited for|Rating [+−-]\d|No rating change|Light boots|Salvage/;
+const REWARDS = /\+\d+ (money|gold|renown|XP)|Credited rewards|Credited for|Rating [+−-]\d|No rating change|Light boots|Salvage/;
 
 /** A scene over the camp: the replay or the expedition dialog. */
 const scene = (page: Page, name: 'Replay' | 'Expedition') => page.getByRole('dialog', { name, exact: true });

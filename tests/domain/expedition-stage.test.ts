@@ -304,7 +304,7 @@ describe('replays and the summary', () => {
     // A spectator's timeline never has a summary; its result comes from the revealed encounters.
     const spectator = at(T.spectator, 85);
     expect(spectator).toMatchObject({ phase: 'arrived', summary: null, complete: true, outcome: 'failure' });
-    expect(texts(spectator)).not.toMatch(/rewards|receipt|money|renown/i);
+    expect(texts(spectator)).not.toMatch(/rewards|receipt|gold|money|renown/i);
     // Without logs, the published labels decide the outcome.
     expect(at(T.expired, 85)).toMatchObject({ phase: 'settled', outcome: 'success' });
     // A failed run settles with the summary's (empty) rewards.

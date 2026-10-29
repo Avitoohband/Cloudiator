@@ -1,6 +1,6 @@
 'use client';
 
-// The corner chip, top right. A player sees their name, stamina, money, renown and the time to the next slot boundary
+// The corner chip, top right. A player sees their name, stamina, gold, renown and the time to the next slot boundary
 // (on touch only the name and the countdown), and the chip opens a small menu with "Sign out". A visitor's chip starts
 // Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
 // gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text. A player also has the
@@ -119,7 +119,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <b data-testid="chip-name">{owner.name}</b>
             <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
             <span className={styles.wide} data-testid="chip-stamina" title="Stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
-            <span className={styles.wide} data-testid="chip-money" title="Money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Money </span>{owner.wallets.money}</span>
+            <span className={styles.wide} data-testid="chip-money" title="Gold"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
             <span className={styles.wide} data-testid="chip-renown" title="Renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
             <span className={styles.chipSep} aria-hidden="true">|</span>
             <Countdown clock={clock} />

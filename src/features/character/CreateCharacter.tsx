@@ -263,7 +263,7 @@ export function CreateCharacter({ gateway, onCreated, onDismiss, onFocusLost }: 
       </fieldset>
       {preview && <section className="creation-preview" aria-label="Starting build preview"><h4>Starting build preview</h4>
         <dl><div><dt>Health</dt><dd data-testid="preview-hp">{preview.maxHp}</dd></div><div><dt>Stamina</dt><dd data-testid="preview-stamina">{preview.maxStamina}</dd></div><div><dt>Equipment load</dt><dd data-testid="preview-load">{preview.load} / {preview.loadCapacity}</dd></div></dl>
-        <p className="muted">Common sword · Light body armor · 100 money · 0 renown</p>
+        <p className="muted">Common sword · Light body armor · 100 gold · 0 renown</p>
       </section>}
       {error && <p ref={reason} id={errorId} role="alert" className="form-error" tabIndex={-1}>{error}</p>}
       {!storageAvailable && <p role="status">This browser cannot retain your draft after leaving the page.</p>}

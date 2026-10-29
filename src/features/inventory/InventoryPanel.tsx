@@ -70,7 +70,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         await refresh();
         if (mounted.current) {
           attempt.current = null;
-          setMessage(gear ? success.current : command.kind === 'buy-shop' ? 'Purchase confirmed.' : command.kind === 'sell-item' ? 'Sale confirmed.' : 'Item discarded. No money or renown awarded.');
+          setMessage(gear ? success.current : command.kind === 'buy-shop' ? 'Purchase confirmed.' : command.kind === 'sell-item' ? 'Sale confirmed.' : 'Item discarded. No gold or renown awarded.');
         }
       } else {
         const transient = ['processing', 'unavailable', 'rate-limited'].includes(result.code);
@@ -118,7 +118,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   </>;
   return <div className="inventory-panel">
     <div className="section-title"><h2>Inventory</h2><span>{owner.inventory.length} / {owner.inventoryCapacity} slots</span></div>
-    <p>Available money: {owner.wallets.money - owner.reservedFees.money}</p><p>Available renown: {owner.wallets.renown - owner.reservedFees.renown}</p>
+    <p>Available gold: {owner.wallets.money - owner.reservedFees.money}</p><p>Available renown: {owner.wallets.renown - owner.reservedFees.renown}</p>
     <p className="muted">Equipped and reserved items count toward capacity. Discarding gives no currency and never lowers historical gear strength.</p>
     <section className="gear-now" aria-labelledby={gearHeading}>
       <h3 id={gearHeading}>Wearing now</h3>
@@ -153,7 +153,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         <p>Damage {item.stats.damage} · Armor {item.stats.armor} · Weight {item.stats.weight}</p>
         {/* A listed piece says so once, here: its Wear button is described by this line's words, not by a second note. */}
         <p>{item.quantity} owned · {item.reservation?.kind === 'listing' ? <span id={state === 'listed' ? blockedId : undefined}>Listed for sale</span> : reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
-        <p>{value === null ? 'Cannot sell to NPCs' : `NPC sell value: ${value} money each`}</p>
+        <p>{value === null ? 'Cannot sell to NPCs' : `NPC sell value: ${value} gold each`}</p>
         {item.quantity > 1 && <label>Quantity for {itemName(item)}<input type="number" min="1" max={item.quantity} step="1" value={quantity || ''} onChange={e => setQuantities(values => ({ ...values, [item.id]: Number(e.target.value) }))} /></label>}
         {blocked && state !== 'listed' && <p id={blockedId} className="gear-note">{blocked}</p>}
         <div className="item-actions">
@@ -169,7 +169,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     {place === 'trade' && outcomes}
     <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => setConfirmation(null)}>
-      <h2 id="discard-heading">Confirm discard</h2><p>Discard {confirmation?.quantity} × {confirmation ? itemName(confirmation.item) : ''}? This gives no money or renown.</p>
+      <h2 id="discard-heading">Confirm discard</h2><p>Discard {confirmation?.quantity} × {confirmation ? itemName(confirmation.item) : ''}? This gives no gold or renown.</p>
       <button autoFocus onClick={() => { dialog.current?.close(); setConfirmation(null); }}>Keep item</button>
       <button {...busyProps} onClick={() => { if (sending.current) return; dialog.current?.close(); setConfirmation(null); if (confirmation) void send({ kind: 'discard-item', itemId: confirmation.item.id, quantity: confirmation.quantity }); }}>Confirm discard</button>
     </dialog>

@@ -16,6 +16,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   const section = useRef<HTMLElement>(null);
   useEffect(() => { if (initialMerchant) scrollToTop(section.current); }, [initialMerchant]);
   const [currency, setCurrency] = useState<'money' | 'renown'>('money');
+  // The currency as a player reads it: the data keeps `money`, the word is gold (Task 7b).
+  const currencyWord = currency === 'money' ? 'gold' : 'renown';
   const [tier, setTier] = useState(1), [quantity, setQuantity] = useState(1);
   const validQuantity = Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 60;
   const available = owner.wallets[currency] - owner.reservedFees[currency];
@@ -33,7 +35,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
       <button aria-pressed={merchant === 'armorer'} onClick={() => setMerchant('armorer')}>Armorer</button>
     </div>
     <div className="shop-filters">
-      <label>Shop currency<select value={currency} onChange={e => setCurrency(e.target.value as typeof currency)}><option value="money">Money</option><option value="renown">Renown</option></select></label>
+      <label>Shop currency<select value={currency} onChange={e => setCurrency(e.target.value as typeof currency)}><option value="money">Gold</option><option value="renown">Renown</option></select></label>
       <label>Shop tier<select value={tier} onChange={e => setTier(Number(e.target.value))}>{[1, 5, 10].map(level => <option key={level} value={level}>Level {level}</option>)}</select></label>
       <label>Purchase quantity<input type="number" min="1" max="60" step="1" value={quantity || ''} onChange={e => setQuantity(Number(e.target.value))}
         aria-invalid={!validQuantity || full ? true : undefined} aria-describedby={shared || undefined} /></label>
@@ -50,9 +52,9 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
       return <article className="inventory-item" key={offer.catalogId} data-testid={`offer-${offer.catalogId}`}>
         <h3>{entry.name}</h3><p>Level {entry.tier} · {entry.hands === 2 ? 'Two hands' : entry.slot}</p>
         <p>Damage {entry.stats.damage} · Armor {entry.stats.armor} · Weight {entry.stats.weight}</p>
-        <p>{offer.unitPrice} {currency} each{quantity > 1 && ` · ${total} total`}</p>
-        <p>{entry.npcSellValue === null ? 'Account-bound · Cannot sell' : `NPC sell value: ${entry.npcSellValue} money`}</p>
-        {levelLocked && <p id={levelId}>Requires level {entry.tier}</p>}{poor && <p id={moneyId}>Not enough available {currency}</p>}
+        <p>{offer.unitPrice} {currencyWord} each{quantity > 1 && ` · ${total} total`}</p>
+        <p>{entry.npcSellValue === null ? 'Account-bound · Cannot sell' : `NPC sell value: ${entry.npcSellValue} gold`}</p>
+        {levelLocked && <p id={levelId}>Requires level {entry.tier}</p>}{poor && <p id={moneyId}>Not enough available {currencyWord}</p>}
         <button disabled={!validQuantity || (!preview && (levelLocked || full || poor))} aria-disabled={busy || undefined} aria-describedby={described || undefined} onClick={() => { if (!busy) buy(offer.catalogId, quantity); }}>Buy {entry.name}</button>
       </article>;
     })}</div>

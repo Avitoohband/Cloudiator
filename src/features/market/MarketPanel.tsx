@@ -73,7 +73,7 @@ export async function readOffers(reader: MarketReader, seller: string | null, lo
 /**
  * A trader's on-demand owner reads (final review I1). A sale or an expiry changes the seller's wallet and inventory without
  * bumping the world revision (Ruling 2), so nothing else reads the owner again. The panel reads it once when it opens and
- * again on each Refresh, so the listing count, the available money and the free slots match the server. `open` reads at
+ * again on each Refresh, so the listing count, the available gold and the free slots match the server. `open` reads at
  * most once, however often it runs (a development remount runs effects twice); a failed read keeps the owner last shown.
  */
 export function ownerReads(read: () => Promise<void>): { open(): Promise<void>; refresh(): Promise<void> } {
@@ -119,7 +119,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
   moreFailed?: boolean;
   label?: string;
   empty?: string;
-  /** A buyer's available money: a dearer offer cannot be bought. */
+  /** A buyer's available gold: a dearer offer cannot be bought. */
   available?: number | null;
   /** A buyer's inventory has no free slot. */
   full?: boolean;
@@ -134,7 +134,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
           : <ul className={styles.list} aria-label={label}>{rows.map(row => {
             const name = offerName(row.item), own = row.seller.gladiatorId === ownerId, expired = row.expiresAtMs <= now;
             const poor = available !== null && row.price > available;
-            const blocked = action === 'buy' && !own && !expired ? (poor ? 'Not enough available money' : full ? 'Your inventory is full' : null) : null;
+            const blocked = action === 'buy' && !own && !expired ? (poor ? 'Not enough available gold' : full ? 'Your inventory is full' : null) : null;
             // A disabled Buy says why: the reason describes it (Task 23.5, C18).
             const blockedId = `${ids}-${row.listingId}`;
             return <li key={row.listingId} className={styles.offer} data-testid={`listing-${row.listingId}`}>
@@ -148,7 +148,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
                 {blocked && <p id={blockedId} className={styles.blocked}>{blocked}</p>}
               </div>
               <div className={styles.deal}>
-                <p className={styles.price}><span aria-hidden="true">💰 </span>{amount(row.price)}<span className={styles.sr}> money</span></p>
+                <p className={styles.price}><span aria-hidden="true">💰 </span>{amount(row.price)}<span className={styles.sr}> gold</span></p>
                 {action === 'buy' && !own && <button type="button" className={styles.act} disabled={expired || blocked !== null} aria-disabled={busy || undefined}
                   aria-label={`Buy ${name} for ${money(row.price)}`} aria-describedby={blocked ? blockedId : undefined} onClick={() => { if (!busy) onAction(row); }}>Buy</button>}
                 {action === 'cancel' && <button type="button" className={styles.act} aria-disabled={busy || undefined}
@@ -242,7 +242,7 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
               <span className={styles.detail}>{`${itemGrade(i)} · ${itemStats(i)}`}</span></span>
           </label>)}
         </fieldset>
-        <label className={styles.priceLabel} htmlFor={priceId}>Price in money</label>
+        <label className={styles.priceLabel} htmlFor={priceId}>Price in gold</label>
         <input id={priceId} className={styles.priceInput} type="number" inputMode="numeric" min={MINIMUM_PRICE} max={MAXIMUM_PRICE} step={1} value={price}
           aria-invalid={wrong ? true : undefined} aria-describedby={wrong ? `${hintId} ${errorId}` : hintId} onChange={event => setPrice(event.target.value)} />
         <p id={hintId} className="muted">{PRICE_HINT}</p>
@@ -375,7 +375,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     {viewer === 'visitor' && <p className={`muted ${styles.browsing}`}>Browsing only. Sign in to buy or sell.</p>}
     {viewer === 'no-gladiator' && <p className={styles.create}>Create your gladiator to trade.</p>}
     {trader && <div className={styles.wallet}>
-      <p>{`Available money: ${amount(available)}`}</p>
+      <p>{`Available gold: ${amount(available)}`}</p>
       <p className="muted">{`Inventory ${owner.inventory.length} / ${owner.inventoryCapacity} slots`}</p>
     </div>}
     {trader && <div role="tablist" aria-label="Marketplace sections" className={styles.tabs} onKeyDown={onTabKey}>
@@ -402,7 +402,7 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
       <h2 id={confirmId}>Confirm purchase</h2>
       {confirming && <>
         <p>{`Buy ${offerName(confirming.item)} (${itemGrade(confirming.item)}) from ${confirming.seller.name} for ${money(confirming.price)}?`}</p>
-        <p className="muted">{`Available money after the purchase: ${money(Math.max(0, available - confirming.price))}.`}</p>
+        <p className="muted">{`Available gold after the purchase: ${money(Math.max(0, available - confirming.price))}.`}</p>
       </>}
       <div className={styles.actions}>
         <button type="button" autoFocus onClick={() => { dialog.current?.close(); setConfirming(null); }}>Keep browsing</button>

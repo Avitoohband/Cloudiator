@@ -21,7 +21,7 @@ import { forbidRemote } from './remote';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
 /** The database's fee (launch feedback): 5 % floored but at least 1, `greatest(1, price*5/100)`; its lowest listing price is 2. */
 const feeOf = (price: number) => Math.max(RULES_V1.fees.marketMinimum, Math.floor(price * 5 / 100));
-const LOWEST_PRICE = 'The lowest price is 2 money, so you always receive something after the fee.';
+const LOWEST_PRICE = 'The lowest price is 2 gold, so you always receive something after the fee.';
 const escaped = (text: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 const world = (): WorldSnapshot => ({ ...worldFixture, revision: 'live-1' });
 const offer = (catalogId: string) => MARKET_ROWS.find(row => row.item.catalogId === catalogId)!;
@@ -61,7 +61,7 @@ type Flow = {
 };
 
 /**
- * A signed-in Aster with 2,000 money and the fixture market. Her inventory holds the helmet she listed, one listable axe,
+ * A signed-in Aster with 2,000 gold and the fixture market. Her inventory holds the helmet she listed, one listable axe,
  * and items that cannot be listed: bound renown gear, an equipped (reserved) armor and a salvage stack.
  */
 async function marketFlow(context: BrowserContext): Promise<Flow> {
@@ -174,7 +174,7 @@ async function openMarket(page: Page, offers = MARKET_ROWS.length) {
 
 /** Buys `listing` from its row, through the confirmation. */
 async function buy(page: Page, market: Locator, listing: MarketListing) {
-  await row(market, listing).getByRole('button', { name: `Buy ${itemName(listing)} for ${listing.price.toLocaleString('en-US')} money`, exact: true }).click();
+  await row(market, listing).getByRole('button', { name: `Buy ${itemName(listing)} for ${listing.price.toLocaleString('en-US')} gold`, exact: true }).click();
   const confirm = page.getByRole('dialog', { name: 'Confirm purchase' });
   await expect(confirm).toBeVisible();
   await confirm.getByRole('button', { name: 'Confirm purchase', exact: true }).click();
@@ -195,8 +195,8 @@ test('lets a visitor browse listings with no command and no buy or sell controls
     const offerRow = row(market, listing);
     await expect(offerRow).toContainText(itemName(listing));
     await expect(offerRow).toContainText(listing.seller.name);
-    await expect(offerRow).toContainText(`${listing.price.toLocaleString('en-US')} money`);
-    await expect(offerRow).toContainText(`NPC sale value: ${CATALOG_V1.items[listing.item.catalogId].npcSellValue} money`);
+    await expect(offerRow).toContainText(`${listing.price.toLocaleString('en-US')} gold`);
+    await expect(offerRow).toContainText(`NPC sale value: ${CATALOG_V1.items[listing.item.catalogId].npcSellValue} gold`);
     await expect(offerRow).toContainText(/\d+ (d|h|min)( \d+ (h|min))? left/);
   }
   await expect(market.getByText('Browsing only. Sign in to buy or sell.')).toBeVisible();
@@ -204,7 +204,7 @@ test('lets a visitor browse listings with no command and no buy or sell controls
   // Browse only: no tabs, and no Buy, Cancel or Sell control, and no wallet.
   await expect(market.getByRole('tab')).toHaveCount(0);
   await expect(market.getByRole('button', { name: /^(Buy|Cancel listing|List for sale)/ })).toHaveCount(0);
-  await expect(market.getByText(/My listings|Available money/)).toHaveCount(0);
+  await expect(market.getByText(/My listings|Available gold/)).toHaveCount(0);
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-visitor-browse-${info.project.name}.png`) });
   // Read-only: public offer pages as a visitor, never the owner state or a seller's page, and no command.
@@ -229,7 +229,7 @@ test('shows a signed-in account without a gladiator Browse only, with no trading
   await expect(market.getByText('Create your gladiator to trade.')).toBeVisible();
   await expect(market.getByRole('tab')).toHaveCount(0);
   await expect(market.getByRole('button', { name: /^(Buy|Cancel listing|List for sale|Sign in)/ })).toHaveCount(0);
-  await expect(market.getByText(/My listings|Available money/)).toHaveCount(0);
+  await expect(market.getByText(/My listings|Available gold/)).toHaveCount(0);
   expect(commands).toEqual([]);
   expect(live.count('market_offers')).toBeGreaterThan(0);
 });
@@ -237,28 +237,28 @@ test('shows a signed-in account without a gladiator Browse only, with no trading
 test('buys a listing, shows the receipt and the item in inventory', { tag: '@render' }, async ({ page, context }, info) => {
   const flow = await marketFlow(context);
   const market = await openMarket(page);
-  await expect(market.getByText('Available money: 2,000')).toBeVisible();
+  await expect(market.getByText('Available gold: 2,000')).toBeVisible();
   // The player's own offer is marked, and cannot be bought.
   await expect(row(market, HELMET)).toContainText('Your listing');
   await expect(row(market, HELMET).getByRole('button')).toHaveCount(0);
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-browse-${info.project.name}.png`) });
   // Buying asks first; keeping browsing sends nothing.
-  await row(market, SPEAR).getByRole('button', { name: 'Buy Spear for 450 money', exact: true }).click();
+  await row(market, SPEAR).getByRole('button', { name: 'Buy Spear for 450 gold', exact: true }).click();
   const confirm = page.getByRole('dialog', { name: 'Confirm purchase' });
-  await expect(confirm).toContainText('Buy Spear (Level 10 · Rare) from Varro for 450 money?');
+  await expect(confirm).toContainText('Buy Spear (Level 10 · Rare) from Varro for 450 gold?');
   await confirm.getByRole('button', { name: 'Keep browsing', exact: true }).click();
   await expect(confirm).toBeHidden();
   expect(flow.commands).toHaveLength(0);
   await buy(page, market, SPEAR);
   const receipt = market.getByRole('status').filter({ hasText: 'Purchase confirmed' });
-  await expect(receipt).toContainText('Spear for 450 money');
+  await expect(receipt).toContainText('Spear for 450 gold');
   await expect(receipt).toContainText('now in your inventory');
   await expect(receipt).toContainText(/Receipt [0-9a-f]{8}/);
   expect(flow.commands).toEqual([{ kind: 'buy-listing', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/), listingId: SPEAR.listingId }]);
   // The page and the wallet are refreshed: the offer is gone and the price is paid.
   await expect(row(market, SPEAR)).toHaveCount(0);
-  await expect(market.getByText('Available money: 1,550')).toBeVisible();
+  await expect(market.getByText('Available gold: 1,550')).toBeVisible();
   const inventory = await openMenu(page, 'Inventory and shops');
   await expect(inventory.getByTestId(`item-${flow.bought[0].id}`)).toContainText('Spear');
   await expect(inventory.getByTestId(`item-${flow.bought[0].id}`)).toContainText('Level 10 · rare · Tradable');
@@ -278,8 +278,8 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await expect(sell.getByRole('radio')).toHaveCount(1);
   await expect(sell).toContainText('Active listings: 1 of 5');
   await sell.getByRole('radio', { name: /^Axe/ }).check();
-  await expect(sell).toContainText('NPC sale value: 30 money');
-  const price = sell.getByLabel('Price in money');
+  await expect(sell).toContainText('NPC sale value: 30 gold');
+  const price = sell.getByLabel('Price in gold');
   const listButton = sell.getByRole('button', { name: 'List for sale', exact: true });
   await expect(sell).toContainText('A whole price from 2 to 1,000,000,000.');
   // Below 2 the lowest price is explained, nothing is offered to list, and no breakdown is shown.
@@ -295,22 +295,22 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await expect(listButton).toBeEnabled();
   await expect(price).not.toHaveAttribute('aria-invalid', 'true');
   await expect(sell).not.toContainText(LOWEST_PRICE);
-  await expect(sell).toContainText('Buyer pays: 2 money');
-  await expect(sell).toContainText('Market fee (5%, at least 1): 1 money');
-  await expect(sell).toContainText('You receive: 1 money');
+  await expect(sell).toContainText('Buyer pays: 2 gold');
+  await expect(sell).toContainText('Market fee (5%, at least 1): 1 gold');
+  await expect(sell).toContainText('You receive: 1 gold');
   await price.fill('11');
-  await expect(sell).toContainText('Buyer pays: 11 money');
-  await expect(sell).toContainText('Market fee (5%, at least 1): 1 money');
-  await expect(sell).toContainText('You receive: 10 money');
+  await expect(sell).toContainText('Buyer pays: 11 gold');
+  await expect(sell).toContainText('Market fee (5%, at least 1): 1 gold');
+  await expect(sell).toContainText('You receive: 10 gold');
   // From 40 the floored 5 % is above the minimum.
   await price.fill('101');
-  await expect(sell).toContainText('Buyer pays: 101 money');
-  await expect(sell).toContainText('Market fee (5%, at least 1): 5 money');
-  await expect(sell).toContainText('You receive: 96 money');
+  await expect(sell).toContainText('Buyer pays: 101 gold');
+  await expect(sell).toContainText('Market fee (5%, at least 1): 5 gold');
+  await expect(sell).toContainText('You receive: 96 gold');
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-sell-${info.project.name}.png`) });
   await sell.getByRole('button', { name: 'List for sale', exact: true }).click();
-  await expect(market.getByRole('status').filter({ hasText: 'Listed for sale: Axe at 101 money' })).toBeVisible();
+  await expect(market.getByRole('status').filter({ hasText: 'Listed for sale: Axe at 101 gold' })).toBeVisible();
   expect(flow.commands).toEqual([{ kind: 'create-listing', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/), itemId: flow.listable.id, price: 101 }]);
   const listingId = (flow.listable.reservation as { referenceId: string }).referenceId;
   // The listed axe is reserved: nothing more to list.
@@ -319,7 +319,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await market.getByRole('tab', { name: 'My listings', exact: true }).click();
   const mine = market.getByRole('tabpanel', { name: 'My listings' });
   await expect(mine.getByRole('listitem')).toHaveCount(2);
-  await expect(mine.getByTestId(`listing-${listingId}`)).toContainText('You receive 96 money after the market fee (5%, at least 1)');
+  await expect(mine.getByTestId(`listing-${listingId}`)).toContainText('You receive 96 gold after the market fee (5%, at least 1)');
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-my-listings-${info.project.name}.png`) });
   expect(flow.live.requests.filter(r => r.table === 'market_offers').some(r => r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`)).toBe(true);
@@ -329,7 +329,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await expect(inventory.getByTestId(`item-${flow.listable.id}`).getByRole('button', { name: 'Sell' })).toBeDisabled();
   const again = await openMenu(page, 'Marketplace');
   await again.getByRole('tab', { name: 'My listings', exact: true }).click();
-  await again.getByRole('button', { name: 'Cancel listing: Axe for 101 money', exact: true }).click();
+  await again.getByRole('button', { name: 'Cancel listing: Axe for 101 gold', exact: true }).click();
   await expect(again.getByRole('status').filter({ hasText: 'Listing cancelled. Axe is back in your inventory.' })).toBeVisible();
   await expect(again.getByRole('tabpanel', { name: 'My listings' }).getByRole('listitem')).toHaveCount(1);
   expect(flow.commands.map(c => c.kind)).toEqual(['create-listing', 'cancel-listing']);
@@ -358,13 +358,13 @@ test('explains sold and expired results and refreshes the page', { tag: '@render
   }
   expect(flow.commands.map(c => (c as { listingId: string }).listingId)).toEqual([SPEAR.listingId, BOOTS.listingId, SHIELD.listingId]);
   expect(new Set(flow.commands.map(c => c.operationId)).size).toBe(3);
-  await expect(market.getByText('Available money: 2,000')).toBeVisible();
+  await expect(market.getByText('Available gold: 2,000')).toBeVisible();
   expect(flow.bought).toEqual([]);
 });
 
 test('reads the owner when the menu opens and on Refresh, after listings sold elsewhere', { tag: '@render' }, async ({ page, context }) => {
   // Final review I1: a sale changes the seller's wallet and inventory without a new world revision (Ruling 2), so nothing
-  // else reads her owner state again. Aster has 1,000 money and five listings; two sell while the menu is closed.
+  // else reads her owner state again. Aster has 1,000 gold and five listings; two sell while the menu is closed.
   const flow = await marketFlow(context);
   flow.state.wallets.money = 1_000;
   const [hood, sword, , boots] = ([['leather-hood:5:common', 200], ['sword:5:common', 300], ['bow:1:common', 400], ['light-boots:1:uncommon', 500]] as const)
@@ -384,10 +384,10 @@ test('reads the owner when the menu opens and on Refresh, after listings sold el
   const sell = market.getByRole('tabpanel', { name: 'Sell' });
   await expect(sell).toContainText('Active listings: 3 of 5');
   await sell.getByRole('radio', { name: /^Axe/ }).check();
-  await sell.getByLabel('Price in money').fill('100');
+  await sell.getByLabel('Price in gold').fill('100');
   await expect(sell.getByRole('button', { name: 'List for sale', exact: true })).toBeEnabled();
-  // The available money includes the proceeds (1,000 + 285 + 475), so Cassia's bow at 1,250 can be bought.
-  await expect(market.getByText('Available money: 1,760')).toBeVisible();
+  // The available gold includes the proceeds (1,000 + 285 + 475), so Cassia's bow at 1,250 can be bought.
+  await expect(market.getByText('Available gold: 1,760')).toBeVisible();
   await market.getByRole('tab', { name: 'Browse', exact: true }).click();
   await expect(row(market, offer('bow:10:common')).getByRole('button', { name: /^Buy/ })).toBeEnabled();
   // One owner read for the opening, however many tabs were shown since.
@@ -395,7 +395,7 @@ test('reads the owner when the menu opens and on Refresh, after listings sold el
   // A third listing sells while the menu is open: Refresh reads the owner again, once.
   flow.soldElsewhere(hood.listing);
   await market.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(market.getByText('Available money: 1,950')).toBeVisible();
+  await expect(market.getByText('Available gold: 1,950')).toBeVisible();
   await market.getByRole('tab', { name: 'Sell', exact: true }).click();
   await expect(sell).toContainText('Active listings: 2 of 5');
   expect(owners()).toBe(read + 2);
@@ -416,7 +416,7 @@ test('keeps a failed purchase input for a retry with the same operation', { tag:
   await expect(alert).toContainText('processing');
   await expect(row(market, SHIELD)).toHaveCount(1);
   await market.getByRole('button', { name: 'Retry request', exact: true }).click();
-  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toContainText('Round shield for 18 money');
+  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toContainText('Round shield for 18 gold');
   expect(flow.commands).toHaveLength(2);
   expect(flow.commands[1]).toEqual(flow.commands[0]);
   // Rate limited: buying the same listing again (not Retry) still sends the same operation.
@@ -424,18 +424,18 @@ test('keeps a failed purchase input for a retry with the same operation', { tag:
   await buy(page, market, AXE);
   await expect(alert).toContainText('retry');
   await buy(page, market, AXE);
-  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toContainText('Axe for 90 money');
+  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toContainText('Axe for 90 gold');
   expect(flow.commands[3]).toEqual(flow.commands[2]);
   // A lost response after the server committed: Retry replays the stored receipt, and the item is bought once.
   flow.loseNext();
   await buy(page, market, BOOTS);
   await expect(alert).toContainText('could not be confirmed');
   await market.getByRole('button', { name: 'Retry request', exact: true }).click();
-  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toContainText('Heavy boots for 240 money');
+  await expect(market.getByRole('status').filter({ hasText: 'Purchase confirmed' })).toContainText('Heavy boots for 240 gold');
   expect(flow.commands[5]).toEqual(flow.commands[4]);
   expect(new Set(flow.commands.map(c => c.operationId)).size).toBe(3);
   expect(flow.bought.map(item => item.catalogId)).toEqual(['round-shield:1:common', 'axe:5:common', 'heavy-boots:10:uncommon']);
-  await expect(market.getByText('Available money: 1,652')).toBeVisible();
+  await expect(market.getByText('Available gold: 1,652')).toBeVisible();
 });
 
 test('fits the Marketplace sheet at 360 px with no horizontal scroll', async ({ page, context }) => {
@@ -465,8 +465,8 @@ test('fits the Marketplace sheet at 360 px with no horizontal scroll', async ({ 
   await market.getByRole('tab', { name: 'Sell', exact: true }).click();
   const sell = market.getByRole('tabpanel', { name: 'Sell' });
   await sell.getByRole('radio', { name: /^Axe/ }).check();
-  await sell.getByLabel('Price in money').fill('1000000000');
-  await expect(sell).toContainText('You receive: 950,000,000 money');
+  await sell.getByLabel('Price in gold').fill('1000000000');
+  await expect(sell).toContainText('You receive: 950,000,000 gold');
   await fits('Sell');
 });
 
@@ -491,7 +491,7 @@ for (const kind of ['create-listing', 'buy-listing', 'cancel-listing'] as const)
     if (kind === 'create-listing') {
       await market.getByRole('tab', { name: 'Sell', exact: true }).click();
       await market.getByRole('radio', { name: /^Axe/ }).check();
-      await market.getByLabel('Price in money').fill('120');
+      await market.getByLabel('Price in gold').fill('120');
       button = market.getByRole('button', { name: 'List for sale', exact: true });
     } else if (kind === 'cancel-listing') {
       await market.getByRole('tab', { name: 'My listings', exact: true }).click();
@@ -543,8 +543,8 @@ test('pins the purchase confirmation in an accessibility snapshot', async ({ pag
   await expect(page.getByRole('dialog', { name: 'Confirm purchase' })).toMatchAriaSnapshot(`
     - dialog "Confirm purchase":
       - heading "Confirm purchase" [level=2]
-      - paragraph: Buy Spear (Level 10 · Rare) from Varro for 450 money?
-      - paragraph: "Available money after the purchase: 1,550 money."
+      - paragraph: Buy Spear (Level 10 · Rare) from Varro for 450 gold?
+      - paragraph: "Available gold after the purchase: 1,550 gold."
       - button "Keep browsing"
       - button "Confirm purchase"
   `);
@@ -580,7 +580,7 @@ test('leaves the focus and the scroll where they are after a pointer trade', asy
   const confirm = page.getByRole('dialog', { name: 'Confirm purchase' });
   await expect(confirm).toBeVisible();
   // The confirmation is for the Axe, before it is confirmed.
-  await expect(confirm).toContainText(`Buy ${itemName(AXE)} (Level 5 · Common) from ${AXE.seller.name} for 90 money?`);
+  await expect(confirm).toContainText(`Buy ${itemName(AXE)} (Level 5 · Common) from ${AXE.seller.name} for 90 gold?`);
   expect(await body.evaluate(el => el.scrollTop)).toBe(before);
   await confirm.getByRole('button', { name: 'Confirm purchase', exact: true }).click();
   const receipt = market.getByRole('status').filter({ hasText: 'Purchase confirmed' });
@@ -654,13 +654,13 @@ test('moves the focus to the outcome of each trade, never to the page', { tag: '
   await market.getByRole('tab', { name: 'Sell', exact: true }).click();
   const sell = market.getByRole('tabpanel', { name: 'Sell' });
   await sell.getByRole('radio', { name: /^Axe/ }).check();
-  await sell.getByLabel('Price in money').fill('120');
+  await sell.getByLabel('Price in gold').fill('120');
   await sell.getByRole('button', { name: 'List for sale', exact: true }).focus();
   await page.keyboard.press('Enter');
-  const listed = market.getByRole('status').filter({ hasText: 'Listed for sale: Axe at 120 money' });
+  const listed = market.getByRole('status').filter({ hasText: 'Listed for sale: Axe at 120 gold' });
   await expect(listed).toBeFocused();
   await market.getByRole('tab', { name: 'My listings', exact: true }).click();
-  const cancel = market.getByRole('button', { name: 'Cancel listing: Axe for 120 money', exact: true });
+  const cancel = market.getByRole('button', { name: 'Cancel listing: Axe for 120 gold', exact: true });
   await cancel.focus();
   await page.keyboard.press('Enter');
   const cancelled = market.getByRole('status').filter({ hasText: 'Listing cancelled. Axe is back in your inventory.' });
@@ -671,15 +671,15 @@ test('moves the focus to the outcome of each trade, never to the page', { tag: '
   expect(await focusDrops(page)).toEqual([]);
 });
 
-test('disables Buy with its reason when the money is short or the inventory full', async ({ page, context }) => {
+test('disables Buy with its reason when the gold is short or the inventory full', async ({ page, context }) => {
   const flow = await marketFlow(context);
   flow.state.wallets.money = 100;
   const market = await openMarket(page);
   // Too dear: the Spear (450); affordable: the Round shield (18).
   const spear = row(market, SPEAR).getByRole('button', { name: /^Buy/ });
   await expect(spear).toBeDisabled();
-  await expect(row(market, SPEAR)).toContainText('Not enough available money');
-  await expect(spear).toHaveAccessibleDescription('Not enough available money');
+  await expect(row(market, SPEAR)).toContainText('Not enough available gold');
+  await expect(spear).toHaveAccessibleDescription('Not enough available gold');
   const shield = row(market, SHIELD).getByRole('button', { name: /^Buy/ });
   await expect(shield).toBeEnabled();
   // The inventory fills elsewhere (no new revision): Refresh reads the owner, and each Buy says why it cannot be used.
@@ -688,7 +688,7 @@ test('disables Buy with its reason when the money is short or the inventory full
   await market.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(shield).toBeDisabled();
   await expect(shield).toHaveAccessibleDescription('Your inventory is full');
-  await expect(spear).toHaveAccessibleDescription('Not enough available money');
+  await expect(spear).toHaveAccessibleDescription('Not enough available gold');
   expect(flow.commands).toEqual([]);
 });
 
@@ -701,7 +701,7 @@ test('refuses fractional, over-cap and under-2 prices, and List for sale at the 
   const sell = market.getByRole('tabpanel', { name: 'Sell' });
   await expect(sell).toContainText('Active listings: 5 of 5');
   await sell.getByRole('radio', { name: /^Axe/ }).check();
-  const price = sell.getByLabel('Price in money');
+  const price = sell.getByLabel('Price in gold');
   const list = sell.getByRole('button', { name: 'List for sale', exact: true });
   // A whole price under 2 is told why 2 is the lowest; a fractional or too large one is asked for a whole price from 2.
   for (const [value, said] of [['1.5', WHOLE_PRICE_TEXT], ['1000000001', WHOLE_PRICE_TEXT], ['-3', LOWEST_PRICE], ['1', LOWEST_PRICE], ['0', LOWEST_PRICE]]) {
@@ -714,10 +714,10 @@ test('refuses fractional, over-cap and under-2 prices, and List for sale at the 
   // Two is the lowest price that is accepted (the listing limit still keeps List for sale disabled below).
   await price.fill('2');
   await expect(price).not.toHaveAttribute('aria-invalid', 'true');
-  await expect(sell).toContainText('You receive: 1 money');
+  await expect(sell).toContainText('You receive: 1 gold');
   await price.fill('1000000000');
   await expect(price).not.toHaveAttribute('aria-invalid', 'true');
-  await expect(sell).toContainText('You receive: 950,000,000 money');
+  await expect(sell).toContainText('You receive: 950,000,000 gold');
   // A valid price at the limit: List for sale stays disabled, and says why.
   await expect(list).toBeDisabled();
   await expect(list).toHaveAccessibleDescription(/You have 5 active listings, the most allowed/);
@@ -737,7 +737,7 @@ test('refreshes My listings and the owner with its Refresh', async ({ page, cont
   flow.soldElsewhere(listing);
   await mine.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(mine.getByRole('listitem')).toHaveCount(1);
-  await expect(market.getByText('Available money: 2,285')).toBeVisible();
+  await expect(market.getByText('Available gold: 2,285')).toBeVisible();
   expect(sellerReads()).toBe(reads + 1);
   expect(flow.live.count('owner_state')).toBe(owners + 1);
 });
@@ -749,7 +749,7 @@ test('browses the fixture preview Marketplace, whose actions say they are unavai
   await expectOwnerShown(page, 'Aster');
   const market = await openMenu(page, 'Marketplace');
   await expect(market.getByRole('list', { name: 'Open listings' }).getByRole('listitem')).toHaveCount(MARKET_ROWS.length);
-  await expect(market.getByText('Available money: 100')).toBeVisible();
+  await expect(market.getByText('Available gold: 100')).toBeVisible();
   await row(market, SHIELD).getByRole('button', { name: /^Buy/ }).click();
   const preview = market.getByRole('status').filter({ hasText: 'Actions are unavailable in this preview.' });
   await expect(preview).toBeVisible();

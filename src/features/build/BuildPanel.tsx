@@ -121,7 +121,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       <section data-testid="current-build"><h2>Current build</h2><BuildSummary build={owner.currentBuild} inventory={owner.inventory} /></section>
       {owner.pendingBuild && <section data-testid="pending-build"><h2>Pending build</h2><BuildSummary build={owner.pendingBuild.build} inventory={owner.inventory} />
         {effective && <p>Effective {effective}</p>}
-        <p>Reserved: {owner.pendingBuild.reservedMoney} money · {owner.pendingBuild.reservedItemIds.length} equipment items</p>
+        <p>Reserved: {owner.pendingBuild.reservedMoney} gold · {owner.pendingBuild.reservedItemIds.length} equipment items</p>
         <button aria-disabled={busy || undefined} onClick={() => void send('cancel-build')}>Cancel pending build</button>
       </section>}
     </div>
@@ -152,7 +152,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       {!valid.ok && <p id={reviewId} role="status">Review your build: {valid.reason}.</p>}
       <button className="primary-button" disabled={!valid.ok} aria-disabled={busy || undefined} type="submit" aria-describedby={!valid.ok ? reviewId : undefined}>Queue build</button>
     </form>
-    <p className="muted">Available money: {owner.wallets.money - owner.reservedFees.money}. Reserved fees remain in your wallet until activation.</p>
+    <p className="muted">Available gold: {owner.wallets.money - owner.reservedFees.money}. Reserved fees remain in your wallet until activation.</p>
     {message && <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>}
     {error && <p ref={outcome} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
   </div>;

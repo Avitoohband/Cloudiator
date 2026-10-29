@@ -98,6 +98,8 @@ test('queues, confirms and cancels pending builds without optimistic current rep
   await page.goto('/game/');
   await openMenu(page, 'My gladiator');
   await expect(page.getByRole('heading', { name: 'Current build', exact: true })).toBeVisible();
+  // Task 7b: the currency is said as gold, and the data's 300 `money` is that amount.
+  await expect(page.getByText('Available gold: 300. Reserved fees remain in your wallet until activation.')).toBeVisible();
   // The class is fixed, so the change to queue is the stance, and every build change is free: no reservation is estimated.
   await page.getByLabel('Stance', { exact: true }).selectOption('offensive');
   await expect(page.getByText(/^Estimated reservation/)).toHaveCount(0);
@@ -105,7 +107,7 @@ test('queues, confirms and cancels pending builds without optimistic current rep
   await expect(page.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
   await expect(page.getByTestId('current-build')).toContainText('balanced');
   await expect(page.getByTestId('pending-build')).toContainText('offensive');
-  await expect(page.getByTestId('pending-build')).toContainText('Reserved: 0 money');
+  await expect(page.getByTestId('pending-build')).toContainText('Reserved: 0 gold');
   // The effective time is the next boundary, as a short local time (Task 23.10), shown against the display clock.
   const effective = page.getByTestId('pending-build').getByText(/^Effective /);
   await expect(effective).toHaveText(`Effective ${await slotTime(page, (flow.processedSlotIndex + 1) * SLOT_MS, await clockNow(page))}`);
@@ -293,7 +295,7 @@ test('offers Arena only in the evening and says why under the morning and the af
   await expect(page.getByLabel('evening activity')).not.toHaveAccessibleDescription(/Arena runs in the evening only\./);
   // Each choice says what it costs; Arena also says when its bout is revealed and that Wednesday and Saturday evenings are the tournament.
   await expect(schedule.getByText('Practice yard: builds experience. Costs 20 stamina.')).toBeVisible();
-  await expect(schedule.getByText('Gathers loot and money over the slot. Costs 30 stamina.')).toBeVisible();
+  await expect(schedule.getByText('Gathers loot and gold over the slot. Costs 30 stamina.')).toBeVisible();
   await expect(schedule.getByText('Recovers stamina. Costs nothing.')).toBeVisible();
   await page.getByLabel('evening activity').selectOption('arena');
   await expect(schedule.getByText('Bout revealed at minute 60, rewards at 80. Wed and Sat 18:40 UTC: the tournament. Costs 25 stamina.')).toBeVisible();

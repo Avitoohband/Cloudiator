@@ -21,7 +21,7 @@ const WEEK = 7 * DAY;
 const NOW = worldFixture.serverNowMs;
 const SLOT_START = NOW - (NOW % SLOT_MS);
 const RETENTION = 'Detailed replays are kept for 7 days. Results and credited rewards stay here for 90 days.';
-const REWARDS = /\+\d+ (money|renown|XP)|Credited rewards|Rating [+−-]\d|No rating change|Salvage/;
+const REWARDS = /\+\d+ (money|gold|renown|XP)|Credited rewards|Rating [+−-]\d|No rating change|Salvage/;
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const AGED = readJson('tests/fixtures/tournaments/aged.json') as TournamentView;
 /** When the aged tournament's bout replays went: the end of its slot plus seven days. */
@@ -109,7 +109,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await expect(trip).toBeVisible({ timeout: 45_000 });
     await expect(trip).toContainText('Success');
     await expect(trip).toContainText('Credited rewards');
-    await expect(trip).toContainText('+20 money');
+    await expect(trip).toContainText('+20 gold');
     await expect(trip).toContainText('Detailed replays are kept for seven days; the result and the credited rewards stay in your history for 90 days.');
     await expect(page.locator('main')).not.toContainText(/not available yet|Nothing has been revealed|Preparing/);
     await page.screenshot({ path: testInfo.outputPath(`retention-expedition-${testInfo.project.name}.png`), fullPage: true });

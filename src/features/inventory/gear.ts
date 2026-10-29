@@ -119,7 +119,7 @@ export function gearRefusal(code: string): string {
     : code === 'conflict' ? 'Your build changed. The latest state has been loaded; review and try again.'
       : code === 'invalid' ? 'That gear change is no longer possible. Your gear has been reloaded.'
         : code === 'unavailable' ? 'This change could not be confirmed. Retry to confirm the same request.'
-          : code === 'insufficient-funds' ? 'Not enough available money for this reservation.' : `Build change rejected: ${code}.`;
+          : code === 'insufficient-funds' ? 'Not enough available gold for this reservation.' : `Build change rejected: ${code}.`;
 }
 
 const sameAttributes = (a: Attributes, b: Attributes) => ATTRIBUTES.every(key => a[key] === b[key]);

@@ -76,7 +76,7 @@ describe('result lines', () => {
         expect(line.replay, fixture.summary.activityId).toBe(replayExpiry.state === 'available' && replayExpiry.expiresAtMs > worldFixture.serverNowMs);
         expect(line.text.endsWith(' · replay no longer kept'), fixture.summary.activityId).toBe(!line.replay);
       }
-      expect(line.text).not.toMatch(/\b(renown|money|xp|rating|rewards?)\b/i);
+      expect(line.text).not.toMatch(/\b(renown|gold|money|xp|rating|rewards?)\b/i);
     }
   });
 });

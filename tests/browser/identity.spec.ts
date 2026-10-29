@@ -160,6 +160,8 @@ test('retains creation draft through canceled OAuth, back and refresh', async ({
   await dialog.getByLabel('Gladiator name').fill('Avi Fighter');
   await dialog.getByLabel('Duelist', { exact: true }).check();
   await spendSuggestedPoints(page);
+  // Task 7b: what a new gladiator starts with (shown in the preview once a class and the points are chosen) is said in gold.
+  await expect(dialog).toContainText('Common sword · Light body armor · 100 gold · 0 renown');
   await dismissAndSignOut(page);
   await flow.cancelGoogleAndReturn(page);
   // The canceled return replaced the callback in history (plan Decision 6): Back leaves the camp, never to the callback.

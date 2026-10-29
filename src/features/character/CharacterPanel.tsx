@@ -60,7 +60,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
       </div>
       <label className={styles.stamina} htmlFor={staminaId}>Stamina <span>{owner.stamina.current} / {owner.stamina.maximum}</span></label>
       <progress id={staminaId} className={styles.bar} value={owner.stamina.current} max={owner.stamina.maximum} />
-      <dl className={styles.wallets}><div><dt>Money</dt><dd>{owner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
+      <dl className={styles.wallets}><div><dt>Gold</dt><dd>{owner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
     </section>
   );
 }

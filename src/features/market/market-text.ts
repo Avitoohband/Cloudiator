@@ -35,8 +35,8 @@ export const validPrice = (price: number): boolean => Number.isSafeInteger(price
 
 /** An amount with thousands separators: "1,250". */
 export const amount = (value: number): string => value.toLocaleString('en-US');
-/** A money amount in words: "1,250 money". */
-export const money = (value: number): string => `${amount(value)} money`;
+/** A gold amount in words: "1,250 gold". */
+export const money = (value: number): string => `${amount(value)} gold`;
 
 /** The Sell form's hint under the price field: "A whole price from 2 to 1,000,000,000." */
 export const PRICE_HINT = `A whole price from ${amount(MINIMUM_PRICE)} to ${amount(MAXIMUM_PRICE)}.`;
@@ -147,7 +147,7 @@ export function marketErrorText(code: ApiErrorCode, kind: MarketKind): string {
     case 'unavailable': return 'This request could not be confirmed. Retry the same request.';
     case 'rate-limited': return 'Too many requests right now. Wait a moment, then retry the same request.';
     case 'unauthenticated': return 'Your session has ended. Sign in again to trade.';
-    case 'insufficient-funds': return 'Not enough available money for this purchase. Held fees cannot be spent.';
+    case 'insufficient-funds': return 'Not enough available gold for this purchase. Held fees cannot be spent.';
     case 'inventory-full': return 'Your inventory is full. Clear a slot, then try again.';
     case 'sold': return 'This listing was already sold. The listings have been refreshed.';
     case 'expired': return 'This listing has expired. The listings have been refreshed.';

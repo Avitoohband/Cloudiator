@@ -117,12 +117,12 @@ function CurrentSeason({ season, nowMs, timeZone }: { season: SeasonView; nowMs:
       <h3 id={titleId}>{over ? `${name} is ending` : `${name} ends in ${ends.countdown}`}</h3>
       <p className="muted">{over
         ? `Ended ${ends.local} your time (${ends.utc}). Final standings and rewards appear once the server closes the season.`
-        : `${ends.local} your time (${ends.utc}). Ratings then restart at ${RULES_V1.rating.initial}; level, gear, money and renown stay.`}</p>
+        : `${ends.local} your time (${ends.utc}). Ratings then restart at ${RULES_V1.rating.initial}; level, gear, gold and renown stay.`}</p>
       <ul className={styles.prizes} aria-label="Season prizes">
         {placements.map((p, i) => (
           <li key={p.badge}>
             <span role="img" aria-label={`${ORDINALS[i]} place`}>{medalOf(p.badge)}</span>
-            <span><b>{p.money}</b> money · <b>{p.renown}</b> renown{p.title && <> · <b>{capital(p.title)}</b> title</>} · {p.badge} badge</span>
+            <span><b>{p.money}</b> gold · <b>{p.renown}</b> renown{p.title && <> · <b>{capital(p.title)}</b> title</>} · {p.badge} badge</span>
           </li>
         ))}
       </ul>

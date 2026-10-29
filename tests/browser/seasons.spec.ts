@@ -65,9 +65,9 @@ test.describe('seasons in the fixture preview', () => {
     // The season card: the countdown on the shared display clock, the end in local time with the UTC time, the prizes and the rule.
     const season = section.getByRole('region', { name: 'Season 2 ends in 13 days 23 h' });
     await expect(season).toBeVisible();
-    await expect(season).toContainText('Sat 24 Oct, 03:00 your time (00:00 UTC). Ratings then restart at 1000; level, gear, money and renown stay.');
+    await expect(season).toContainText('Sat 24 Oct, 03:00 your time (00:00 UTC). Ratings then restart at 1000; level, gear, gold and renown stay.');
     await expect(season.getByRole('listitem')).toHaveText([
-      /500 money · 100 renown · Champion title · gold badge/, /300 money · 60 renown · silver badge/, /200 money · 40 renown · bronze badge/]);
+      /500 gold · 100 renown · Champion title · gold badge/, /300 gold · 60 renown · silver badge/, /200 gold · 40 renown · bronze badge/]);
     await expect(season).toContainText('Top 3 in each league among gladiators with at least 5 human bouts. Paid once, in your highest league where you qualify.');
     // The display clock moves the countdown; no read is needed.
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), CURRENT.endsAtMs - 90 * 60_000);

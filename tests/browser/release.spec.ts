@@ -56,7 +56,7 @@ async function livePlayer(page: Page, owner: OwnerState = structuredClone(ARENA_
   });
   return { live, commands };
 }
-/** Aster with 30 money (too little for any shop item) and a listable axe. */
+/** Aster with 30 gold (too little for any shop item) and a listable axe. */
 function poorPlayer(): OwnerState {
   const state = structuredClone(ARENA_OWNER);
   state.wallets.money = 30;
@@ -337,16 +337,16 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(quantity).not.toHaveAttribute('aria-invalid', 'true');
     const buySword = shops.getByRole('button', { name: 'Buy Sword', exact: true });
     await expect(buySword).toBeDisabled();
-    await expect(buySword).toHaveAccessibleDescription(/Not enough available money/);
+    await expect(buySword).toHaveAccessibleDescription(/Not enough available gold/);
     // Market: a Buy the wallet cannot pay, and a fractional price on the Sell tab.
     const market = await openMenu(page, 'Marketplace');
     const spear = market.getByRole('button', { name: /^Buy Spear for/ });
     await expect(spear).toBeDisabled();
-    await expect(spear).toHaveAccessibleDescription(/Not enough available money/);
+    await expect(spear).toHaveAccessibleDescription(/Not enough available gold/);
     await market.getByRole('tab', { name: 'Sell', exact: true }).click();
     const sell = market.getByRole('tabpanel', { name: 'Sell' });
     await sell.getByRole('radio', { name: /^Axe/ }).check();
-    const price = sell.getByRole('spinbutton', { name: 'Price in money' });
+    const price = sell.getByRole('spinbutton', { name: 'Price in gold' });
     await price.fill('1.5');
     await expect(price).toHaveAttribute('aria-invalid', 'true');
     await expect(price).toHaveAccessibleDescription(/A whole price from 2 to 1,000,000,000\..*Enter a whole price from 2 to 1,000,000,000\./);
@@ -354,8 +354,8 @@ test.describe('release accessibility in the fixture preview', () => {
     // A whole price under the lowest one is told why the lowest is 2 (launch feedback): the field and List for sale say so.
     await price.fill('1');
     await expect(price).toHaveAttribute('aria-invalid', 'true');
-    await expect(price).toHaveAccessibleDescription(/A whole price from 2 to 1,000,000,000\..*The lowest price is 2 money, so you always receive something after the fee\./);
-    await expect(sell.getByRole('button', { name: 'List for sale' })).toHaveAccessibleDescription(/The lowest price is 2 money/);
+    await expect(price).toHaveAccessibleDescription(/A whole price from 2 to 1,000,000,000\..*The lowest price is 2 gold, so you always receive something after the fee\./);
+    await expect(sell.getByRole('button', { name: 'List for sale' })).toHaveAccessibleDescription(/The lowest price is 2 gold/);
     await price.fill('100');
     await expect(price).not.toHaveAttribute('aria-invalid', 'true');
     await expectNamedControls(market, 'Marketplace (player)');
@@ -801,8 +801,8 @@ test.describe('release accessibility in the fixture preview', () => {
     const market = await settled(await openMenu(page, 'Marketplace'));
     await market.getByRole('tab', { name: 'Sell', exact: true }).click();
     await market.getByRole('radio', { name: /^Axe/ }).check();
-    await market.getByRole('spinbutton', { name: 'Price in money' }).fill('0');
-    await market.getByRole('spinbutton', { name: 'Price in money' }).focus();
+    await market.getByRole('spinbutton', { name: 'Price in gold' }).fill('0');
+    await market.getByRole('spinbutton', { name: 'Price in gold' }).focus();
     expect(await contrastIssues(market, { focusRing: true }), 'Marketplace Sell').toEqual([]);
     await shot(page, testInfo, 'form-market-sell');
   });

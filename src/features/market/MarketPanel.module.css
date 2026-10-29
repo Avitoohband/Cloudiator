@@ -403,7 +403,7 @@
   justify-self: start;
 }
 
-/* Words for screen readers only ("money" after a price shown as "💰 450"). */
+/* Words for screen readers only ("gold" after a price shown as "💰 450"). */
 .sr {
   position: absolute;
   width: 1px;

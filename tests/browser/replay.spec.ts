@@ -143,7 +143,7 @@ test.describe('battle-log replay', () => {
     await expect(page.getByText('Creature', { exact: true }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Skip to result' }).click();
     const expedition = page.getByRole('region', { name: 'Result' });
-    for (const text of ['+100 XP', '+20 money', 'Light boots']) await expect(expedition).toContainText(text);
+    for (const text of ['+100 XP', '+20 gold', 'Light boots']) await expect(expedition).toContainText(text);
     // Choosing another encounter loads its own log.
     await encounters.nth(0).click();
     await expect(encounters.nth(0)).toHaveAttribute('aria-pressed', 'true');

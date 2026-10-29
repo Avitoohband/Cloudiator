@@ -42,7 +42,7 @@ describe('profile card', () => {
     expect(buttons(other)).not.toContain('Schedule');
     const own = card({ profile: PROFILE, own: true });
     expect(buttons(own)).toEqual(expect.arrayContaining(['My gladiator', 'Schedule', 'Follow']));
-    for (const html of [other, own]) expect(text(html)).not.toMatch(/Money|Stamina|Renown|Inventory|wallet|combat strength/i);
+    for (const html of [other, own]) expect(text(html)).not.toMatch(/Gold|Money|Stamina|Renown|Inventory|wallet|combat strength/i);
   });
 
   it('offers Watch bout for an Arena entrant, and gives Follow its reason when it is unavailable', () => {

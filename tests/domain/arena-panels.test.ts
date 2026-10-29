@@ -245,10 +245,10 @@ describe('Arena standings', () => {
     const html = text(view());
     expect(html).toContain('Current season');
     expect(html).toContain('Season 2 ends in 13 days 23 h');
-    expect(html).toContain('Sat 24 Oct, 03:00 your time (00:00 UTC). Ratings then restart at 1000; level, gear, money and renown stay.');
-    expect(html).toContain('500 money · 100 renown · Champion title · gold badge');
-    expect(html).toContain('300 money · 60 renown · silver badge');
-    expect(html).toContain('200 money · 40 renown · bronze badge');
+    expect(html).toContain('Sat 24 Oct, 03:00 your time (00:00 UTC). Ratings then restart at 1000; level, gear, gold and renown stay.');
+    expect(html).toContain('500 gold · 100 renown · Champion title · gold badge');
+    expect(html).toContain('300 gold · 60 renown · silver badge');
+    expect(html).toContain('200 gold · 40 renown · bronze badge');
     expect(html).toContain('Top 3 in each league among gladiators with at least 5 human bouts. Paid once, in your highest league where you qualify.');
     // Past its end but not closed yet: it says the close is coming, never a negative countdown.
     const ending = text(view({ nowMs: FIXTURE_SEASONS[0].endsAtMs + 60_000 }));

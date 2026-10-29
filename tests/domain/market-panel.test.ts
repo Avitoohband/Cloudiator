@@ -64,9 +64,9 @@ describe('market fees (plan Decision 2; launch feedback: at least 1)', () => {
       expect(prices.map(ruled.marketFee)).toEqual([3, 3, 3, 4, 10, 100_000_000]);
       expect([6, 7].map(ruled.validPrice)).toEqual([false, true]);
       expect(ruled.MARKET_FEE_TERMS).toBe('10%, at least 3');
-      expect(ruled.LOWEST_PRICE_TEXT).toContain('lowest price is 7 money');
+      expect(ruled.LOWEST_PRICE_TEXT).toContain('lowest price is 7 gold');
       expect(ruled.WHOLE_PRICE_TEXT).toBe('Enter a whole price from 7 to 1,000,000,000.');
-      expect(ruled.marketErrorText('invalid', 'create-listing')).toBe('This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least 7 money, with at most 5 active listings.');
+      expect(ruled.marketErrorText('invalid', 'create-listing')).toBe('This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least 7 gold, with at most 5 active listings.');
     } finally {
       vi.doUnmock('@domain/rules-v1');
       vi.resetModules();
@@ -81,7 +81,7 @@ describe('what the Sell form says about a typed price', () => {
 
   it('hints the whole prices from 2, and says the lowest price when a whole price is under it', () => {
     expect(PRICE_HINT).toBe('A whole price from 2 to 1,000,000,000.');
-    expect(LOWEST_PRICE_TEXT).toBe('The lowest price is 2 money, so you always receive something after the fee.');
+    expect(LOWEST_PRICE_TEXT).toBe('The lowest price is 2 gold, so you always receive something after the fee.');
     for (const typed of ['0', '1', '-3']) expect(priceProblem(typed), typed).toBe('low');
   });
 
@@ -155,7 +155,7 @@ describe('items a seller can list (controller ruling: equipment only)', () => {
 
 describe('market refusals (plan Decision 9)', () => {
   it('explains the equipment, whole-price minimum and listing limit for an invalid listing', () => {
-    expect(marketErrorText('invalid', 'create-listing')).toBe('This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least 2 money, with at most 5 active listings.');
+    expect(marketErrorText('invalid', 'create-listing')).toBe('This item cannot be listed at that price. Only free, tradable equipment can be listed, at a whole price of at least 2 gold, with at most 5 active listings.');
   });
 
   it('explains every code, and that a stale page was refreshed', () => {
@@ -163,7 +163,7 @@ describe('market refusals (plan Decision 9)', () => {
     expect(marketErrorText('expired', 'buy-listing')).toMatch(/expired.*refreshed/i);
     expect(marketErrorText('not-found', 'buy-listing')).toMatch(/no longer open.*refreshed/i);
     expect(marketErrorText('not-found', 'cancel-listing')).toMatch(/no longer open.*refreshed/i);
-    expect(marketErrorText('insufficient-funds', 'buy-listing')).toMatch(/not enough available money/i);
+    expect(marketErrorText('insufficient-funds', 'buy-listing')).toMatch(/not enough available gold/i);
     expect(marketErrorText('inventory-full', 'buy-listing')).toMatch(/inventory is full/i);
     expect(marketErrorText('processing', 'buy-listing')).toMatch(/processing.*retry/i);
     expect(marketErrorText('unavailable', 'buy-listing')).toMatch(/retry the same request/i);
@@ -194,7 +194,7 @@ describe('the Marketplace panel', () => {
     expect(text(html)).toContain('Sign in with Google to trade');
     expect(text(html)).toContain('Browsing only.');
     expect(html).not.toContain('role="tablist"');
-    expect(text(html)).not.toMatch(/My listings|Sell|money:/);
+    expect(text(html)).not.toMatch(/My listings|Sell|gold:/);
   });
 
   it('shows a signed-in account without a gladiator Browse only, with "Create your gladiator to trade"', () => {
@@ -203,12 +203,12 @@ describe('the Marketplace panel', () => {
     expect(html).not.toMatch(/Sign in with Google to trade|My listings|Sell/);
   });
 
-  it('gives a player the Browse, My listings and Sell tabs and their available money', () => {
+  it('gives a player the Browse, My listings and Sell tabs and their available gold', () => {
     const owner = structuredClone(ownerFixture);
     const html = renderToStaticMarkup(createElement(MarketPanel, { reads, gateway: null, owner, viewer: 'player', clock, refreshOwner: async () => {}, fixture: false }));
     expect(html).toContain('role="tablist"');
     expect([...html.matchAll(/role="tab"[^>]*>([^<]+)</g)].map(m => m[1])).toEqual(['Browse', 'My listings', 'Sell']);
-    expect(text(html)).toContain('Available money: 100');
+    expect(text(html)).toContain('Available gold: 100');
     expect(text(html)).not.toMatch(/Sign in with Google to trade|Create your gladiator to trade/);
   });
 
@@ -228,8 +228,8 @@ describe('the Marketplace panel', () => {
       expect(html).toContain(`Damage ${spear.item.stats.damage} · Weight ${spear.item.stats.weight}`);
       expect(text(offers({ model: { ...model, rows: [helmet] } }))).toContain(`Armor ${helmet.item.stats.armor} · Weight ${helmet.item.stats.weight}`);
       expect(html).toContain('Varro');
-      expect(html).toContain('450 money');
-      expect(html).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} money`);
+      expect(html).toContain('450 gold');
+      expect(html).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} gold`);
       expect(html).toContain('6 d 23 h left');
       // The bow was listed 2 hours before its seven days end.
       expect(text(renderToStaticMarkup(createElement(MarketOffers, { model: { ...model, rows: [bow] }, action: null, ownerId: null, now: NOW, busy: false,
@@ -241,12 +241,12 @@ describe('the Marketplace panel', () => {
       const html = offers({ action: 'buy', ownerId: helmet.seller.gladiatorId });
       expect((html.match(/>Buy</g) ?? []).length).toBe(MARKET_ROWS.length - 1);
       expect(text(html)).toContain('Your listing');
-      expect(html).toContain(`aria-label="Buy Spear for 450 money"`);
+      expect(html).toContain(`aria-label="Buy Spear for 450 gold"`);
     });
 
     it('describes a disabled Buy by its reason (Task 23.5, C18)', () => {
       const html = offers({ model: { ...model, rows: [spear] }, action: 'buy', ownerId: helmet.seller.gladiatorId, available: 100 });
-      const reason = /<p id="([^"]+)"[^>]*>Not enough available money<\/p>/.exec(html);
+      const reason = /<p id="([^"]+)"[^>]*>Not enough available gold<\/p>/.exec(html);
       expect(reason).not.toBeNull();
       expect(html).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-describedby="${reason![1]}"[^>]*>Buy</button>`));
       // An enabled Buy is described by nothing.
@@ -255,12 +255,12 @@ describe('the Marketplace panel', () => {
 
     it('offers Cancel on the seller’s own listings, with what the sale would pay', () => {
       const html = offers({ model: { ...model, rows: [helmet] }, action: 'cancel', ownerId: helmet.seller.gladiatorId });
-      expect(html).toContain(`aria-label="Cancel listing: Iron helmet for 95 money"`);
-      expect(text(html)).toContain(`You receive ${95 - 4} money after the market fee (5%, at least 1)`);
-      // A low price pays the 1-money minimum, not the floored 0: an 11-money offer credits 10, a 2-money offer credits 1.
+      expect(html).toContain(`aria-label="Cancel listing: Iron helmet for 95 gold"`);
+      expect(text(html)).toContain(`You receive ${95 - 4} gold after the market fee (5%, at least 1)`);
+      // A low price pays the 1-gold minimum, not the floored 0: an 11-gold offer credits 10, a 2-gold offer credits 1.
       const low = (price: number) => text(offers({ model: { ...model, rows: [{ ...helmet, price }] }, action: 'cancel', ownerId: helmet.seller.gladiatorId }));
-      expect(low(11)).toContain('You receive 10 money after the market fee (5%, at least 1)');
-      expect(low(2)).toContain('You receive 1 money after the market fee (5%, at least 1)');
+      expect(low(11)).toContain('You receive 10 gold after the market fee (5%, at least 1)');
+      expect(low(2)).toContain('You receive 1 gold after the market fee (5%, at least 1)');
     });
 
     it('says an offer that ran out while the page was open has expired, without Buy', () => {
@@ -277,8 +277,8 @@ describe('the Marketplace panel', () => {
         price: 150, listedAtMs: NOW - HOUR, expiresAtMs: NOW + DAY };
       const html = offers({ model: { ...model, rows: [stack] }, action: 'buy', ownerId: null });
       expect(text(html)).toContain(`${units} × Salvage`);
-      expect(html).toContain(`aria-label="Buy ${units} × Salvage for 150 money"`);
-      expect(text(html)).toContain(`NPC sale value: ${units * unitValue} money (${unitValue} each)`);
+      expect(html).toContain(`aria-label="Buy ${units} × Salvage for 150 gold"`);
+      expect(text(html)).toContain(`NPC sale value: ${units * unitValue} gold (${unitValue} each)`);
       expect(text(html)).not.toContain('NPC merchants do not buy');
       // A neutral glyph, not a weapon's.
       expect(html).not.toContain('🗡');
@@ -287,7 +287,7 @@ describe('the Marketplace panel', () => {
       const spearRow = offers({ model: { ...model, rows: [spear] } });
       expect(spearRow).toContain('aria-hidden="true">🗡</span>');
       expect(text(spearRow)).not.toContain('×');
-      expect(text(spearRow)).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} money`);
+      expect(text(spearRow)).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} gold`);
       expect(text(spearRow)).not.toContain(' each)');
     });
 

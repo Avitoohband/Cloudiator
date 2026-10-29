@@ -147,9 +147,9 @@ export function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-/** The viewer's own credited placement rewards (money and renown only; a tournament grants nothing else). */
+/** The viewer's own credited placement rewards (gold and renown only; a tournament grants nothing else). */
 export function creditedText(summary: ActivitySummary): string {
-  const parts = [summary.rewards.money ? `+${summary.rewards.money} money` : null, summary.rewards.renown ? `+${summary.rewards.renown} renown` : null].filter(Boolean);
+  const parts = [summary.rewards.money ? `+${summary.rewards.money} gold` : null, summary.rewards.renown ? `+${summary.rewards.renown} renown` : null].filter(Boolean);
   return parts.length ? parts.join(', ') : 'nothing';
 }
 

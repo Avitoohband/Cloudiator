@@ -17,7 +17,7 @@ const nextFrames = (page: Page) => page.evaluate(() => new Promise(resolve => re
 /** The profile card of `name` (a non-modal dialog over the camp). */
 const profileCard = (page: Page, name: string) => page.getByRole('dialog', { name: `Profile: ${name}`, exact: true });
 /** Text that only an owner's private state holds; no card or result row may show it. */
-const PRIVATE = /Money|Stamina|Renown|wallet|Inventory|receipt|reward/i;
+const PRIVATE = /Gold|Money|Stamina|Renown|wallet|Inventory|receipt|reward/i;
 
 async function openCamp(page: Page, url: string) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -270,7 +270,7 @@ test.describe('live results and a signed-in player through a slot end', () => {
     expect(commands).toEqual([]);
   });
 
-  test('shows the pending build, then Processing results at the slot end, without changing the displayed money', async ({ page, context }) => {
+  test('shows the pending build, then Processing results at the slot end, without changing the displayed gold', async ({ page, context }) => {
     await seedSession(context);
     const slot = Math.floor(Date.now() / SLOT_MS);
     const owner: OwnerState = structuredClone(ownerFixture);

@@ -190,7 +190,7 @@ describe('tournament bracket', () => {
     expect(words).toMatch(/Place Gladiator 1 Varro 2 Severus 3 Cassia 3 Decimus 5 Aster 5 Aurelia 5 Bellator 5 Corvina/);
     expect(words).toContain('Your placement: 5th. Credited: +7 renown.');
     expect(count(words, 'renown')).toBe(1);
-    expect(words).not.toMatch(/money|\+80|\+52/);
+    expect(words).not.toMatch(/gold|money|\+80|\+52/);
     expect(text(bracket('completed', 79))).not.toMatch(/Your placement|Place Gladiator/);
   });
 

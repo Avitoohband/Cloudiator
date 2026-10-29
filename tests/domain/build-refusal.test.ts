@@ -10,6 +10,6 @@ describe('build refusals', () => {
     expect(buildRefusal('processing')).toBe('The world is processing previous results. Retry shortly.');
     expect(buildRefusal('unavailable')).toBe('This change could not be confirmed. Retry to confirm the same request.');
     expect(buildRefusal('conflict')).toBe('Your build changed. The latest state has been loaded; review and try again.');
-    expect(buildRefusal('insufficient-funds')).toBe('Not enough available money for this reservation.');
+    expect(buildRefusal('insufficient-funds')).toBe('Not enough available gold for this reservation.');
   });
 });

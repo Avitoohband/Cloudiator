@@ -408,11 +408,11 @@ function Rewards({ summary, scope }: { summary: ActivitySummary; scope: string }
   const r = summary.rewards;
   const parts = [
     r.renown ? `+${r.renown} renown` : null,
-    r.money ? `+${r.money} money` : null,
+    r.money ? `+${r.money} gold` : null,
     r.xp ? `+${r.xp} XP` : null,
     r.attributePoints ? `+${r.attributePoints} attribute points` : null,
     ...r.items.map(item => `${itemName(`${item.catalogId.split(':')[0]}:${item.tier}:${item.rarity}`)} ×${item.quantity}`),
-    r.overflowMoney ? `+${r.overflowMoney} money for items that did not fit` : null,
+    r.overflowMoney ? `+${r.overflowMoney} gold for items that did not fit` : null,
   ].filter((p): p is string => !!p);
   const rating = summary.ratingDelta === undefined ? null : summary.ratingDelta === 0 ? 'No rating change' : `Rating ${summary.ratingDelta > 0 ? '+' : ''}${summary.ratingDelta}`;
   return <div className={styles.rewards}>

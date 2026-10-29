@@ -94,12 +94,12 @@ function itemName(catalogId: string, tier: number, rarity: string): string {
 function rewardLines(summary: ActivitySummary): string[] {
   const r = summary.rewards;
   return [
-    r.money ? `+${r.money} money` : null,
+    r.money ? `+${r.money} gold` : null,
     r.xp ? `+${r.xp} XP` : null,
     r.renown ? `+${r.renown} renown` : null,
     r.attributePoints ? `+${r.attributePoints} attribute points` : null,
     ...r.items.map(item => `${itemName(item.catalogId, item.tier, item.rarity)} ×${item.quantity}`),
-    r.overflowMoney ? `+${r.overflowMoney} money for items that did not fit` : null,
+    r.overflowMoney ? `+${r.overflowMoney} gold for items that did not fit` : null,
   ].filter((line): line is string => !!line);
 }
 

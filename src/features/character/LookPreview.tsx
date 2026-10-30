@@ -6,27 +6,16 @@
 // The idle animation loops four frames at 260 ms; under `prefers-reduced-motion` it is one still frame.
 import { useEffect, useState } from 'react';
 import type { Appearance } from '@domain/appearance';
-import rawManifest from '../../../public/assets/manifest.json';
 import {
   PREVIEW_ANCHOR, PREVIEW_FRAME_MS, PREVIEW_SCALE, frameId, hexColour, layerStyle, nextFrame, previewLayers,
 } from './look-picker';
+import { ATLAS_IMAGE, loadAtlas, type Atlas } from './look-atlas';
 import styles from './LookPicker.module.css';
 
-type Atlas = { frames: Record<string, { frame: { x: number; y: number; w: number; h: number } }>; meta: { size: { w: number; h: number } } };
-/** The atlas image, served as the game serves it (`assetBase` '/assets/'). */
-const IMAGE = `/assets/${(rawManifest as unknown as { atlases: { gladiators: { image: string } } }).atlases.gladiators.image}`;
 /** Where the feet stand on the ground, from the top of the stage, in screen pixels. */
 const FEET_Y = 150;
 
-let atlasLoad: Promise<Atlas> | null = null;
-/** The frame table, loaded once when the first dialog opens (a separate chunk, so the camp does not carry it). */
-function loadAtlas(): Promise<Atlas> {
-  atlasLoad ??= import('../../../public/assets/actors/gladiators.json').then(module => module.default as unknown as Atlas)
-    .catch(error => { atlasLoad = null; throw error; });
-  return atlasLoad;
-}
-
-function useReducedMotion() {
+export function useReducedMotion() {
   const [reduced, setReduced] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -62,7 +51,7 @@ export function LookPreview({ look, name }: { look: Appearance; name: string }) 
         const rect = atlas.frames[frameId(layer.id, frame)]?.frame;
         if (!rect) return null;
         return <span key={layer.id} className={styles.layer} data-layer={layer.id} data-tint={layer.tint === null ? undefined : hexColour(layer.tint)}
-          style={layerStyle(layer, rect, atlas.meta.size, IMAGE)} />;
+          style={layerStyle(layer, rect, atlas.meta.size, ATLAS_IMAGE)} />;
       })}
     </div>
   </div>;

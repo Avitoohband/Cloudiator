@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
-import type { ActivitySummary, BattleLog, CreditedRewards, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type { ActivityId, Attributes, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
+import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  GameMessage, GameNotification, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
@@ -11,6 +11,7 @@ import { applyXp } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
+import { patchSortKey, type PatchEntry } from '../patch';
 
 export class GatewayReadError extends Error {
   constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
@@ -25,11 +26,22 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   if (!row.state || typeof row.state !== 'object') throw new GatewayReadError('unavailable');
   return row.state;
 }
-export async function readRevision(client: SupabaseClient): Promise<RevisionState> {
-  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null}>(
-    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index').single());
+/**
+ * The revision read as this client reads it: the shared contract's `RevisionState` and the server's newest patch (`latest_patch`, M26;
+ * Patch A spec, "Patch numbers and the changelog"), null unless it is a well-formed patch number. A client-side type: the shared
+ * contracts under supabase/functions/_shared do not change, so the Edge functions need no deploy.
+ */
+export type RevisionRead = RevisionState & { latestPatch: string | null };
+export async function readRevision(client: SupabaseClient): Promise<RevisionRead> {
+  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null;latest_patch:unknown}>(
+    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index,latest_patch').single());
   return { revision: row.revision, serverNowMs: Number(row.server_now_ms), slotIndex: Number(row.slot_index),
-    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index) };
+    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index),
+    latestPatch: typeof row.latest_patch === 'string' && patchSortKey(row.latest_patch) !== null ? row.latest_patch : null };
+}
+/** A revision read as the world snapshot carries it: without the newest patch, which the sync keeps on its own. */
+export function revisionState({ latestPatch: _latest, ...state }: RevisionRead): RevisionState {
+  return state;
 }
 export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> {
   // A concurrent commit between pages must not be labeled with an earlier revision.
@@ -44,7 +56,7 @@ export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> 
       cursor = rows.at(-1)!.gladiator_id;
     }
     const after = await readRevision(client);
-    if (before.revision === after.revision) return { ...after, actors };
+    if (before.revision === after.revision) return { ...revisionState(after), actors };
   }
   throw new GatewayReadError('unavailable');
 }
@@ -61,11 +73,76 @@ function prestigeAward(entry: unknown): PrestigeAward {
   return { seasonId: String(seasonIndex), league: league as LeagueId, place, badge: badge as PrestigeAward['badge'], title };
 }
 /** A public profile; its prestige is the character's season awards, oldest season first (Task 21), mapped to `PrestigeAward`s. */
-export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<PublicProfile> {
-  const { prestige, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown } }>(
-    await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
+/** One equipped item as the public profile shows it (Task 11c): the fields a market listing shows, never its id, owner or origin. */
+export type PublicGear = Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'stats'>;
+/** A gladiator's current build as the public profile shows it (Task 11c): never a queued one. */
+export type PublicBuild = { stance: Stance; allocations: Attributes; equipment: Record<EquipmentSlot, PublicGear | null> };
+/** Bouts against players, summed over every season and league as the standings count them. */
+export type ArenaRecord = { wins: number; losses: number };
+/**
+ * The profile read as this client reads it (Task 11c, M26): the shared contract's `PublicProfile` and the current build, the creation
+ * time and the Arena record over all seasons. A client-side type, as `RevisionRead`: the shared contracts do not change. Each is null
+ * when it is missing (a database before M26) or malformed.
+ */
+export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null };
+const STANCES: readonly string[] = ['offensive', 'balanced', 'defensive'];
+const SLOTS: readonly EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
+const ATTRIBUTE_NAMES = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
+const RARITIES: readonly string[] = ['common', 'uncommon', 'rare'];
+const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+/** Five whole numbers from 0, or null. */
+function attributesOf(value: unknown): Attributes | null {
+  if (!record(value)) return null;
+  const out = {} as Attributes;
+  for (const key of ATTRIBUTE_NAMES) {
+    const points = value[key];
+    if (!count(points)) return null;
+    out[key] = points;
+  }
+  return out;
+}
+/** An item's stats: finite non-negative numbers and an attribute bonus each (which may be fractional), or null. */
+function statsOf(value: unknown): PublicGear['stats'] | null {
+  if (!record(value) || !finite(value.damage) || !finite(value.armor) || !finite(value.weight) || !finite(value.intervalMs) || !record(value.attributes)) return null;
+  const bonus = value.attributes, attributes = {} as Attributes;
+  for (const key of ATTRIBUTE_NAMES) {
+    if (!finite(bonus[key])) return null;
+    attributes[key] = bonus[key] as number;
+  }
+  return { damage: value.damage, armor: value.armor, weight: value.weight, intervalMs: value.intervalMs, attributes };
+}
+/** One published item, or null for a malformed one. */
+function gearOf(value: unknown): PublicGear | null {
+  if (!record(value) || typeof value.catalogId !== 'string' || typeof value.catalogVersion !== 'string' || (value.tier !== 1 && value.tier !== 5 && value.tier !== 10)
+    || typeof value.rarity !== 'string' || !RARITIES.includes(value.rarity)) return null;
+  const stats = statsOf(value.stats);
+  return stats ? { catalogId: value.catalogId, catalogVersion: value.catalogVersion, tier: value.tier, rarity: value.rarity as ItemRarity, stats } : null;
+}
+/** The published build, or null when any part of it is malformed (an unknown stance, a bad point, a missing or bad slot). */
+export function publicBuildOf(value: unknown): PublicBuild | null {
+  if (!record(value) || typeof value.stance !== 'string' || !STANCES.includes(value.stance) || !record(value.equipment)) return null;
+  const allocations = attributesOf(value.allocations);
+  if (!allocations) return null;
+  const equipment = {} as Record<EquipmentSlot, PublicGear | null>;
+  for (const slot of SLOTS) {
+    if (!Object.hasOwn(value.equipment, slot)) return null;
+    const item = value.equipment[slot];
+    if (item === null) { equipment[slot] = null; continue; }
+    const gear = gearOf(item);
+    if (!gear) return null;
+    equipment[slot] = gear;
+  }
+  return { stance: value.stance as Stance, allocations, equipment };
+}
+export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<ProfileRead> {
+  const { prestige, build, joinedAtMs, arenaRecord, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
+    joinedAtMs?: unknown; arenaRecord?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
   if (!Array.isArray(prestige)) throw new GatewayReadError('unavailable');
-  return { ...profile, prestige: prestige.map(prestigeAward) };
+  const wins = record(arenaRecord) ? arenaRecord.wins : undefined, losses = record(arenaRecord) ? arenaRecord.losses : undefined;
+  return { ...profile, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
+    arenaRecord: count(wins) && count(losses) ? { wins, losses } : null };
 }
 /**
  * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`
@@ -230,6 +307,57 @@ export async function readMessages(client: SupabaseClient): Promise<GameMessage[
     messages.push({ id, kind: row.kind, title: row.title, preview: row.preview, body, action: row.action, publishedAtMs });
   }
   return messages;
+}
+/** A message as the panel shows it: a patch note carries its patch number, an admin note or a note without a patch row null. */
+export type ShownMessage = GameMessage & { patch: string | null };
+const PATCHES_PAGE = 20;
+type PatchRow = { number: unknown; sort_key: unknown; title: unknown; released_at_ms: unknown; message_id: unknown; patch_features: unknown };
+/** A whole number from the Data API: a bigint may arrive as text (a driver option). Null for anything else. */
+const wholeOf = (value: unknown): number | null => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+};
+/** One patch row, or null when any part of it is malformed (the list leaves it out). Its features in position order. */
+function patchEntry(row: PatchRow): PatchEntry | null {
+  const sortKey = wholeOf(row.sort_key), releasedAtMs = wholeOf(row.released_at_ms);
+  const messageId = row.message_id === null ? null : wholeOf(row.message_id);
+  if (typeof row.number !== 'string' || sortKey === null || sortKey !== patchSortKey(row.number) || typeof row.title !== 'string'
+    || releasedAtMs === null || (row.message_id !== null && messageId === null) || !Array.isArray(row.patch_features)) return null;
+  const features: { position: number; text: string }[] = [];
+  for (const feature of row.patch_features as unknown[]) {
+    const { position, text } = (typeof feature === 'object' && feature !== null ? feature : {}) as Record<string, unknown>;
+    const at = wholeOf(position);
+    if (at === null || typeof text !== 'string') return null;
+    features.push({ position: at, text });
+  }
+  return { number: row.number, sortKey, title: row.title, releasedAtMs, messageId, features: features.sort((a, b) => a.position - b.position).map(f => f.text) };
+}
+/**
+ * The server's patches with their features (public `patches`, M26), 20 at a time, newest first (`sort_key` descending), older than
+ * `beforeSortKey` when given (the next page). `more` says a next page exists (the read asks for 21 rows and keeps 20). A malformed row
+ * is left out rather than failing the list.
+ */
+export async function readPatches(client: SupabaseClient, beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }> {
+  let query = client.from('patches').select('number,sort_key,title,released_at_ms,message_id,patch_features(position,text)')
+    .order('sort_key', { ascending: false }).limit(PATCHES_PAGE + 1);
+  if (beforeSortKey !== undefined) query = query.lt('sort_key', beforeSortKey);
+  const rows = checked(await query) as unknown as PatchRow[];
+  const items = rows.slice(0, PATCHES_PAGE).map(patchEntry).filter((entry): entry is PatchEntry => entry !== null);
+  return { items, more: rows.length > PATCHES_PAGE };
+}
+/**
+ * The patch numbers of the given patch notes, by message id, in one small read (`message_id=in.(…)`); none is asked for an empty list.
+ * A note without a patch row is absent from the map, as is a malformed row.
+ */
+export async function readPatchNumbers(client: SupabaseClient, messageIds: readonly number[]): Promise<Map<number, string>> {
+  const numbers = new Map<number, string>();
+  if (messageIds.length === 0) return numbers;
+  const rows = checked(await client.from('patches').select('number,message_id').in('message_id', [...messageIds])) as unknown as { number: unknown; message_id: unknown }[];
+  for (const row of rows) {
+    const id = wholeOf(row.message_id);
+    if (id !== null && typeof row.number === 'string' && patchSortKey(row.number) !== null) numbers.set(id, row.number);
+  }
+  return numbers;
 }
 const NOTIFICATIONS_PAGE = 20;
 /** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */

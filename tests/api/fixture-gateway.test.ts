@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import { createFixtureGateway, FIXTURE_ARENA } from '../../src/lib/api/fixture-gateway';
+import { PATCH } from '../../src/lib/patch';
 
 test('fixture commands cannot mutate even the local owner preview', async () => {
   const gateway = createFixtureGateway();
@@ -23,7 +24,10 @@ test('fixture preview: a gladiator resting at home, and with ?as=resting the own
   expect(otho).toEqual(RESTING_ACTOR);
   expect(otho).toMatchObject({ name: 'Otho', location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null });
   expect(world.actors.filter(a => a.resting)).toHaveLength(1);
-  expect(await createFixtureGateway().profile(otho.gladiatorId)).toEqual(RESTING_PROFILE);
+  // With the card's sample data (Task 11c).
+  const othoCard = await createFixtureGateway().profile(otho.gladiatorId);
+  expect(othoCard).toMatchObject(RESTING_PROFILE);
+  expect(othoCard.build).not.toBeNull();
   // The resting preview: Aster rests at home in the current slot. Before its first presence the owner state cannot say
   // when it returns; after it, the next slot's boundary (OwnerState.restingUntilSlot, processedSlotIndex + 1).
   const resting = createFixtureGateway({ resting: true });
@@ -71,7 +75,8 @@ test('fixture public actors omit private owner management state', async () => {
   const revision = await gateway.revision();
   // The fixture world's slot is published (Task 23.2's published slot; Task 23.4, C5).
   expect(world.publishedSlotIndex).toBe(world.slotIndex);
-  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex, publishedSlotIndex: world.slotIndex });
+  // The preview is up to date with this build's patch (Patch A, "Patch numbers and the changelog").
+  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex, publishedSlotIndex: world.slotIndex, latestPatch: PATCH });
 });
 
 test('unimplemented fixture reads reject explicitly as unavailable', async () => {

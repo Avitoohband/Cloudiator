@@ -104,31 +104,37 @@ const TINT_KEY = new Map((rawManifest as unknown as { actors: { gladiator: { lay
   .actors.gladiator.layers.map(layer => [layer.id, layer.tint ?? null]));
 
 /**
- * The layers the dialog draws, in manifest order: the camp's look for a fresh gladiator with no gear (body, clothes, the accent sash,
- * and any hair), each tinted by the colour its manifest entry names, exactly as the scenes do. The `held` layer is left out: it
- * only holds what is carried, and every idle frame of it is empty.
+ * The layers a gladiator is drawn with, in manifest order: the camp's look (`lookFor`, the legacy look for a null appearance), its gear
+ * from the silhouettes included, each tinted by the colour its manifest entry names, exactly as the scenes do. The `held` layer is left
+ * out: it only holds what is carried, and every idle frame of it is empty. The profile card's portrait draws these (Task 11c).
  */
-export function previewLayers(look: Appearance): PreviewLayer[] {
-  const { layers, tint } = lookFor(look, 'preview', []);
+export function actorLayers(appearance: Appearance | null, gladiatorId: string, silhouettes: readonly string[]): PreviewLayer[] {
+  const { layers, tint } = lookFor(appearance, gladiatorId, silhouettes);
   return layers.filter(id => id !== 'held').map(id => {
     const key = TINT_KEY.get(id) ?? null;
     return { id, tint: key ? tint[key] : null };
   });
 }
 
+/** The layers the creation dialog draws: the camp's look for a fresh gladiator with no gear (body, clothes, the accent sash, any hair). */
+export function previewLayers(look: Appearance): PreviewLayer[] {
+  return actorLayers(look, 'preview', []);
+}
+
 /** The atlas frame of a layer's idle animation (facing south-east). */
 export const frameId = (layer: string, index: number) => `${layer}/idle/se/${index}`;
 
 /**
- * The style of one preview layer: the frame cropped from the atlas at `PREVIEW_SCALE`. A tinted layer is multiplied over its tint
+ * The style of one preview layer: the frame cropped from the atlas at `scale` (`PREVIEW_SCALE` by default; the profile card's portrait uses 2). A tinted layer is multiplied over its tint
  * with `background-blend-mode`, and a mask of the same frame keeps its shape (a transparent pixel of the art stays transparent).
  */
-export function layerStyle(layer: PreviewLayer, frame: { x: number; y: number }, atlas: { w: number; h: number }, imageUrl: string): CSSProperties {
-  const size = `${atlas.w * PREVIEW_SCALE}px ${atlas.h * PREVIEW_SCALE}px`;
-  const position = `${-frame.x * PREVIEW_SCALE}px ${-frame.y * PREVIEW_SCALE}px`;
+export function layerStyle(layer: PreviewLayer, frame: { x: number; y: number }, atlas: { w: number; h: number }, imageUrl: string,
+  scale: number = PREVIEW_SCALE): CSSProperties {
+  const size = `${atlas.w * scale}px ${atlas.h * scale}px`;
+  const position = `${-frame.x * scale}px ${-frame.y * scale}px`;
   const image = `url(${imageUrl})`;
   const style: CSSProperties = {
-    width: 64 * PREVIEW_SCALE, height: 64 * PREVIEW_SCALE, backgroundImage: image, backgroundSize: size, backgroundPosition: position,
+    width: 64 * scale, height: 64 * scale, backgroundImage: image, backgroundSize: size, backgroundPosition: position,
   };
   if (layer.tint === null) return style;
   return {

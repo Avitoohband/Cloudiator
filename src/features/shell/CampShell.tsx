@@ -36,7 +36,7 @@
 // the camp (beside ☰ on a phone) says where it is and opens the live view, or offers the whole trip once it is back (`AwayButton`,
 // `useAwayTrip`, `away-trip.ts`). Like the arrival banner it is not mounted while a scene covers the camp; unlike it, it is the player's own
 // (nothing is read for a visitor). The scene it opens gives the focus back to it when the camp returns.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
@@ -66,14 +66,17 @@ import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
 import { useClockMode } from '../../lib/clock-setting';
+import { PATCH, noticeFor } from '../../lib/patch';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
+import { PatchNotice, reloadPage } from './PatchNotice';
+import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, type MenuId } from './menus';
-import { railReducer, type RailEvent, type RailState } from './rail-reveal';
+import { COMPACT_QUERY, railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { AwayButton } from './AwayButton';
 import { SceneOverlay } from './SceneOverlay';
 import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
@@ -103,8 +106,14 @@ const shown = (element: HTMLElement | null): element is HTMLElement => !!element
   ? element.checkVisibility({ visibilityProperty: true })
   : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
 
-/** Whether a modal dialog is open (`:modal`, Safari 15.6+, within the project's Safari 16.4 floor). */
-const modalOpen = () => document.querySelector('dialog:modal') !== null;
+/** The shell's touch layout (the phone's short notice), kept up to date. */
+const subscribeCompact = (onChange: () => void) => {
+  const query = window.matchMedia?.(COMPACT_QUERY);
+  query?.addEventListener('change', onChange);
+  return () => query?.removeEventListener('change', onChange);
+};
+const readCompact = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
+
 /** Gives the keyboard back to the camp view (the menus hand the view to the camp). */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 /**
@@ -333,6 +342,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const messaging = useMemo<MessagingActions | undefined>(() => reads ? {
     load: () => reads.messages(),
     loadNotifications: () => reads.notifications(),
+    loadPatches: beforeSortKey => reads.patches(beforeSortKey),
     read: async messageId => {
       const result = await reads.command({ kind: 'read-message', operationId: crypto.randomUUID(), messageId });
       if (!result.ok) throw new Error(result.code);
@@ -370,6 +380,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   useEffect(() => { setLookOpen(false); }, [lookOwner]);
   const savedLook = lookSaved && lookSaved.gladiatorId === lookOwner ? lookSaved.text : null;
 
+  // "A new patch is out — reload" (Patch A, "Patch numbers and the changelog"): when the server's newest patch is ahead of this build. It
+  // waits while a scene or a modal dialog is open (the creation and change-look dialogs are named too, so it never shows for the moment
+  // before they open), and Later hides it for this page's life for that number; a newer number shows it again. Visitors see it too.
+  const modal = useModalOpen();
+  const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
+  const [patchLater, setPatchLater] = useState<string | null>(null);
+  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen, later: patchLater });
+
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
   // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
@@ -405,7 +423,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         : <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
       case 'arena': return <ArenaMenu open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
-        onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
+        onProfile={(row, season) => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses, season }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex}
         knownLooks={knownLooks} />;
@@ -424,12 +442,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging}
-        onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
+        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>
         {arrivalSlot}
         <div className={styles.noticeList}>
+          <PatchNotice number={patchNotice} compact={compact} onReload={reloadPage} onLater={() => setPatchLater(patchNotice)} />
           {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
               signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
           {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))
@@ -450,6 +469,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
+        nowMs={nowMs}
         following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}

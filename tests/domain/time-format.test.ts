@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { dayText, timeOfDay, utcClockText } from '../../src/lib/time-format';
+import { calendarDays, dateText, dayText, timeOfDay, utcClockText } from '../../src/lib/time-format';
 
 // Patch A, item 7: every time of day is written by one formatter, in the shape the device's clock setting asks for. Zones are
 // named in each call, so no assertion depends on the host's own.
@@ -10,6 +10,23 @@ const PROTOTYPE = Intl.DateTimeFormat.prototype;
 const NBSP = '\xA0';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+describe('dateText and calendarDays (Task 11c: the profile card, "In camp since")', () => {
+  it('writes a date with the fixed month names, adding the year only when it is not the current one', () => {
+    expect(dateText(Date.UTC(2026, 8, 30, 12), Date.UTC(2026, 9, 1), 'UTC')).toBe('30 Sep');
+    expect(dateText(Date.UTC(2025, 9, 2, 12), Date.UTC(2026, 9, 1), 'UTC')).toBe('2 Oct 2025');
+    expect(dateText(Date.UTC(2026, 9, 9, 20), Date.UTC(2026, 9, 9, 21), 'Asia/Tokyo')).toBe('10 Oct');
+    expect(dateText(NaN, 0)).toBe('');
+    expect(dateText(0, NaN)).toBe('');
+  });
+
+  it('counts whole calendar days between two dates in a zone', () => {
+    expect(calendarDays(Date.UTC(2026, 9, 9, 23), Date.UTC(2026, 9, 10, 1), 'UTC')).toBe(1);
+    expect(calendarDays(Date.UTC(2026, 9, 9, 23), Date.UTC(2026, 9, 10, 1), 'Asia/Tokyo')).toBe(0);
+    expect(calendarDays(Date.UTC(2025, 9, 2, 12), Date.UTC(2026, 9, 29, 12), 'UTC')).toBe(392);
+    expect(calendarDays(NaN, 0)).toBeNull();
+  });
+});
 
 describe('timeOfDay', () => {
   it('writes a time of day in 12-hour and 24-hour form', () => {

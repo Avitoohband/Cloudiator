@@ -22,7 +22,24 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.3.** New since then: 1.3.1 and 1.4 (in progress).
+**Last video's patch: 1.3.** New since then: 1.3.1, 1.4 (in progress) and 1.6 (in progress).
+
+## 1.6 — A new economy: slower levels and prizes by league (in progress, not yet released)
+
+Patch 1.6 (economy rebalance). The title is the draft patch note's; Avi approves the wording at release.
+
+### Built
+
+### Planned
+
+- Expeditions give less XP and gold: 30 XP and 4 gold on the Woodland Path, 75 and 10 on the Ruined Outpost, 150 and 18 on the Mountain Pass. Level 10 takes about three weeks.
+- Gear is found half as often on expeditions, and salvage sells to merchants for 4 gold.
+- Tournament gold depends on the league: a win pays 40 in Bronze, 60 in Silver, 80 in Gold and 100 in Champion, the other places scaled the same way. The Tournaments rules list them.
+- Season gold prizes depend on the league from the next season, up to today's: 200, 300, 400 or 500 gold for first place. The season card shows every league's prizes. Season 1 pays what it promised.
+- Training gives a point until your gladiator has 10 + 4 × its level in points. At that limit it gives nothing until the next level, and the Schedule says so. Points you have stay.
+- A Training that gave no point says so in Notifications.
+- Everyone's gold was cut to a quarter when 1.6 went live. Levels, items, points and renown stayed, and shop prices did not change.
+- The Arena banner shows on your profile card.
 
 ## 1.4 — Watch your expedition, class bonuses and a clock setting (in progress, not yet released)
 

@@ -4,10 +4,11 @@ import type { DeepReadonly, FighterSnapshot, Rules, Seed } from './types.ts';
 import { freezeDomain } from './types.ts';
 import { criticalProbability, decimal, type Fraction, fractionValue, hitProbability, multiply, validFighter } from './combat.ts';
 import { RULES_V1 } from './rules-v1.ts';
+import { RETAINED_RULES } from './rules.ts';
 import { seededRandom } from './random.ts';
 
-/** Retained rules by version (also the tournament's registry). A fighter frozen under an unknown version fails closed. */
-export const RETAINED_RULES: Readonly<Record<string, Rules>> = Object.freeze({ [RULES_V1.version]: RULES_V1 });
+/** Retained rules by version (rules.ts; also the tournament's registry). A fighter frozen under an unknown version fails closed. */
+export { RETAINED_RULES } from './rules.ts';
 
 function rulesFor(fighter: FighterSnapshot): Rules {
   const version = fighter?.rulesVersion;

@@ -248,7 +248,7 @@ describe('arena strength estimate', () => {
       expect(estimateArenaStrength(tuned(maxHealth, baseDamage))).toBe(strength);
     });
   it.each([
-    { rulesVersion: 'v2' }, { maxHealth: Number.NaN }, { maxHealth: 0 }, { baseDamage: Number.POSITIVE_INFINITY },
+    { rulesVersion: 'v9' }, { maxHealth: Number.NaN }, { maxHealth: 0 }, { baseDamage: Number.POSITIVE_INFINITY },
     { efficiency: 0 }, { attackIntervalMs: 100 }, { stance: 'reckless' }, { attributes: undefined },
   ] as Partial<FighterSnapshot>[])('rejects an unknown-rules or corrupt fighter snapshot %o', patch => {
     expect(() => estimateArenaStrength({ ...reference, ...patch } as FighterSnapshot)).toThrow(RangeError);
@@ -299,7 +299,7 @@ describe('NPC fallback template', () => {
     expect(Object.isFrozen(caller) || Object.isFrozen(caller.attributes)).toBe(false);
     expect(caller).toEqual(player);
   });
-  it.each([{ rulesVersion: 'v2' }, { maxHealth: Number.NaN }, { baseDamage: -1 }, { efficiency: 1.5 }, { attributes: undefined }] as Partial<FighterSnapshot>[])(
+  it.each([{ rulesVersion: 'v9' }, { maxHealth: Number.NaN }, { baseDamage: -1 }, { efficiency: 1.5 }, { attributes: undefined }] as Partial<FighterSnapshot>[])(
     'rejects an unknown-rules or corrupt fighter snapshot %o', patch => {
       expect(() => makeFallback({ ...player, ...patch } as FighterSnapshot)).toThrow(RangeError);
     });
@@ -463,7 +463,7 @@ describe('regular Arena pairing', () => {
   });
   it('derives its rules once from the entrants and rejects mixed rules versions', () => {
     const [a, b, c] = roster(3);
-    const other = { ...b, fighter: { ...b.fighter, rulesVersion: 'v2' } };
+    const other = { ...b, fighter: { ...b.fighter, rulesVersion: 'v9' } };
     expect(() => matchArena([a, other, c], [], 's')).toThrow(/share one rules version/);
     expect(() => matchArena([other, a, c], [], 's')).toThrow(/share one rules version/);
     // A single unknown version still fails closed as an invalid snapshot.

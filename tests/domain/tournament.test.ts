@@ -64,8 +64,8 @@ describe('retained rules', () => {
     const graph = buildBracket(['c1', 'c2', 'c3'].map(id => customEntrant(id)), 'registry');
     expect(graph.rulesVersion).toBe(CUSTOM);
     expect(graph.entries.every(e => e.fighter.rulesVersion === CUSTOM)).toBe(true);
-    // A version neither registry retains still fails closed.
-    expect(() => buildBracket(['u1', 'u2', 'u3'].map(id => entrant(id, { fighter: { ...starter, rulesVersion: 'v2' } })), 'registry'))
+    // A version neither registry retains still fails closed (v2 is retained since patch 1.6).
+    expect(() => buildBracket(['u1', 'u2', 'u3'].map(id => entrant(id, { fighter: { ...starter, rulesVersion: 'v9' } })), 'registry'))
       .toThrow(RangeError);
   });
   it('settles ratings, fight renown and placements with the graph rules', () => {
@@ -419,7 +419,7 @@ describe('seeded single-elimination bracket', () => {
     ['a duplicate activity', [...roster(2), entrant('x', { activityId: 'activity-g00' })]],
     ['a non-tournament slot', roster(3, { slotIndex: SLOT + 1 })],
     ['an invalid fighter', [...roster(2), entrant('bad', { fighter: { ...starter, maxHealth: 0 } })]],
-    ['an unknown rules version', [...roster(2), entrant('v2', { fighter: { ...starter, rulesVersion: 'v2' } })]],
+    ['an unknown rules version', [...roster(2), entrant('v9', { fighter: { ...starter, rulesVersion: 'v9' } })]],
     ['a negative rating', [...roster(2), entrant('neg', { rating: -1 })]],
   ])('rejects %s', (_name, entrants) => {
     expect(() => buildBracket(entrants as ArenaEntrant[], 'reject')).toThrow(RangeError);
@@ -608,7 +608,7 @@ describe('bout jobs and results', () => {
       ['a missing bout', { ...graph, bouts: graph.bouts.slice(1) }],
       ['an early settlement time', { ...graph, settlesAtMs: graph.settlesAtMs - 1 }],
       ['reordered entries', { ...graph, entries: [graph.entries[1], graph.entries[0], ...graph.entries.slice(2)] }],
-      ['an unknown rules version', { ...graph, rulesVersion: 'v2' }],
+      ['an unknown rules version', { ...graph, rulesVersion: 'v9' }],
       ['a corrupt fighter', { ...graph, entries: graph.entries.map((e, i) => (i === 0 ? { ...e, fighter: { ...e.fighter, maxHealth: 0 } } : e)) }],
       ['a result for an unready bout', bouts((_, i) => (i === 6 ? { result: { winnerId: 'g00', loserId: 'g01', log: null } } : {}))],
       ['null', null],
@@ -721,6 +721,18 @@ describe('placement grants and settlement outcomes', () => {
     expect(grants.every(g => g.id === `${done.id}:placement:${g.gladiatorId}` && g.kind === 'placement' && g.tournamentId === done.id
       && g.activityId === `activity-${g.gladiatorId}`)).toBe(true);
     expect(Object.isFrozen(grants[0])).toBe(true);
+  });
+  it("pays the bracket's league (patch 1.6: by league under v2, the same in every league under v1)", () => {
+    const v2 = (league: LeagueId) => roster(5, { league }).map(e => ({ ...e, fighter: { ...e.fighter, rulesVersion: 'v2' } }));
+    const paid = (entrants: ArenaEntrant[], seed: string) => {
+      const graph = play(buildBracket(entrants, seed));
+      return { version: graph.rulesVersion, league: graph.league, places: placements(graph) };
+    };
+    expect(paid(v2('silver'), 'league-silver')).toEqual({ version: 'v2', league: 'silver', places: [['winner', 1, 60, 50],
+      ['runner-up', 2, 36, 30], ['semifinal', 3, 18, 15], ['semifinal', 3, 18, 15], ['entrant', 5, 0, 5]] });
+    expect(paid(v2('bronze'), 'league-bronze').places.map(p => p[2])).toEqual([40, 24, 12, 12, 0]);
+    expect(paid(roster(5, { league: 'silver' }), 'league-v1')).toEqual({ version: 'v1', league: 'silver', places: [['winner', 1, 100, 50],
+      ['runner-up', 2, 60, 30], ['semifinal', 3, 30, 15], ['semifinal', 3, 30, 15], ['entrant', 5, 0, 5]] });
   });
   it('awards only winner and runner-up placements in a two-person bracket', () => {
     expect(placements(play(buildBracket(roster(2), 'two')))).toEqual([['winner', 1, 100, 50], ['runner-up', 2, 60, 30]]);

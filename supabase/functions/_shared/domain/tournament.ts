@@ -4,6 +4,7 @@ import { applyRatingDelta, copyFighter, LEAGUES, nonEmpty, RETAINED_RULES, type 
 import type { DeepReadonly, FighterSnapshot, Rules, Seed, SlotWindow } from './types.ts';
 import { freezeDomain } from './types.ts';
 import { slotAt } from './clock.ts';
+import { tournamentPlacements } from './economy.ts';
 import { simulateBattle, validFighter } from './combat.ts';
 import { RULES_V1 } from './rules-v1.ts';
 import { isTournamentSlot } from './tournament-slot.ts';
@@ -466,11 +467,12 @@ export type RewardGrant = DeepReadonly<{
  * Spec §8.2 placement bonuses for a completed bracket, one per entrant, ordered by place then rank: the winner 100 money
  * and 50 renown, the runner-up 60 and 30, losers of the round before the final (semifinal losers) 30 and 15, every other
  * entrant 5 renown. A two-player bracket has no semifinal, so it awards only the winner and runner-up. A bye is never a
- * loss: a bye semifinal awards no semifinal placement.
+ * loss: a bye semifinal awards no semifinal placement. The amounts are the graph's rules version's for its league
+ * (`tournamentPlacements`; patch 1.6: v2 pays gold by league, v1 the same in every league).
  */
 export function placementGrants(graph: TournamentGraph): RewardGrant[] {
   const fought = completedBouts(graph);
-  const { placements } = rulesFor(graph.rulesVersion).tournament;
+  const placements = tournamentPlacements(rulesFor(graph.rulesVersion), graph.league);
   const lostIn = new Map(fought.map(({ bout, loserId }) => [loserId, bout.round]));
   const grants = graph.entries.map(entry => {
     const round = lostIn.get(entry.gladiatorId);

@@ -2,11 +2,13 @@ import type { ActivityChoice, Attributes, ClassId, EquipmentSlot, GameCommand, L
 import type { BuildView, ItemInstance } from '../contracts/reads.ts';
 import type { ItemRarity, ItemStats } from '../contracts/events.ts';
 import type { RULES_V1 } from './rules-v1.ts';
+import type { RULES_V2 } from './rules-v2.ts';
 import type { CATALOG_V1 } from './catalog-v1.ts';
 
 export type { Attributes, ClassId, EquipmentSlot, Phase, Stance, ItemInstance };
 export type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
-export type Rules = typeof RULES_V1;
+/** Every retained rules version (rules.ts). The versions' economies differ: read those keys through economy.ts. */
+export type Rules = typeof RULES_V1 | typeof RULES_V2;
 /** Typed versioned catalog: equipment variants, expeditions and the stackable salvage material. */
 export type Catalog = typeof CATALOG_V1;
 /** Private domain inputs reuse the canonical queue command's fields. */

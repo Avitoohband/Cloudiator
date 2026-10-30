@@ -317,6 +317,13 @@ test('names the opponent from the last bout, and only for a kept replay', () => 
   // The row's own gladiator must be in the log: a stranger's bout names nobody.
   expect(boutOf(input({ gladiatorId: uuid(1) + 'x', lastBout: last('Varro') }))?.opponent).toBeNull();
   expect(boutOf(input({ lastBout: last('Varro', { participants: [last('Varro').participants[0]] }) }))?.opponent).toBeNull();
+  // Task 2 review carry: nor does it say a tie-break or a round. They rest on the same participant check as the opponent, so a row
+  // never says "won on a tie-break" or "Final" of a bout that is not the owner's.
+  const stranger = { gladiatorId: uuid(1) + 'x', kind: 'tournament' as const, summary: row(1, 'tournament').summary,
+    lastBout: last('Varro', { label: 'Final: victory', tieBreakReason: 'simultaneous-defeat' }) };
+  expect(boutOf(input(stranger))).toMatchObject({ opponent: null, tieBreak: false, round: null });
+  expect(boutOf(input({ ...stranger, gladiatorId: ME }))).toMatchObject({ opponent: { name: 'Varro' }, tieBreak: true, round: 'Final' });
+  expect(boutOf(input({ lastBout: last('Varro', { tieBreakReason: 'simultaneous-defeat', participants: [last('Varro').participants[0]] }) }))).toMatchObject({ tieBreak: false });
 });
 
 test('is the owner’s own read: a visitor is refused before any request', async () => {

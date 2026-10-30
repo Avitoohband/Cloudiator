@@ -14,7 +14,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { chipToggle, cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -178,6 +178,12 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(icon('Results')).toBeFocused();
     await press('Enter');
     const results = menuDialog(page, 'Results');
+    // A player's Results opens on My bouts (Arena replays Task 4): the tabs are ARIA tabs, so the arrow key selects Everyone.
+    const mine = results.getByRole('tab', { name: /^My bouts/ });
+    for (let n = 0; n < 20 && !(await mine.evaluate(el => el === document.activeElement)); n++) await press('Tab');
+    await expect(mine).toBeFocused();
+    await press('ArrowRight');
+    await expect(results.getByRole('tab', { name: 'Everyone', exact: true })).toBeFocused();
     const replayButton = results.getByRole('button', { name: /^Replay: / }).first();
     await expect(replayButton).toBeVisible();
     for (let n = 0; n < 20 && !(await replayButton.evaluate(el => el === document.activeElement)); n++) await press('Tab');
@@ -824,7 +830,7 @@ test.describe('release accessibility in the fixture preview', () => {
     expect(await page.evaluate(() => window.__cloudiatorCamp!.state()!.reducedMotion)).toBe(true);
     await revealRail(page);
     if (testInfo.project.name === 'desktop') expect(await page.getByTestId('menu-rail').evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0s');
-    const panel = await openMenu(page, 'Results');
+    const panel = await everyoneResults(page);
     expect(await panel.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
     await panel.getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first().click();
     const replay = scene(page, 'Replay');

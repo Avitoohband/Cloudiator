@@ -643,6 +643,11 @@
  * show the content scrolling beneath it.
  */
 @media (hover: none), (max-width: 480px) {
+  /* A control the keyboard reaches is scrolled clear of the 65 px bar, not under it (WCAG 2.4.11; Arena replays Task 3 review). */
+  .scene {
+    scroll-padding-top: 72px;
+  }
+
   .sceneTop {
     position: sticky;
     top: 0;

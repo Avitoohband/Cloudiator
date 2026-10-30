@@ -5,7 +5,7 @@ import type { OwnerState, PublicActor, ResultRow } from '../../supabase/function
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
-import { closeMenu, cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
+import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
 // list and the standings), the merchants' shortcuts into Inventory and shops, and the owner's pending build through a
@@ -171,7 +171,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
   test('lists recent results with their replays and the viewer’s own rows, beside the fixture samples', async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
-    const results = await openMenu(page, 'Results');
+    const results = await everyoneResults(page);
     const list = results.getByRole('list', { name: 'Recent results' });
     await expect(list.getByRole('listitem').first()).toBeVisible();
     // Training and Rest offer no replay and never say one is no longer kept; the owner's rows say "You".
@@ -189,7 +189,8 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     const replay = list.getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first();
     await replay.click();
     await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/\/game\/\?mode=fixture&view=replay&activity=[0-9a-f-]{36}$/);
+    // A row of Everyone names Results as its origin (Arena replays Task 3).
+    await expect(page).toHaveURL(/\/game\/\?mode=fixture&view=replay&activity=[0-9a-f-]{36}&from=results$/);
   });
 });
 
@@ -268,7 +269,7 @@ test.describe('live results and a signed-in player through a slot end', () => {
     expect(live.requests.every(r => r.reader === null)).toBe(true);
     await list.getByRole('button', { name: 'Replay: Varro won an Arena bout' }).click();
     await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/game/\\?view=replay&activity=${bout}$`));
+    await expect(page).toHaveURL(new RegExp(`/game/\\?view=replay&activity=${bout}&from=results$`));
     expect(commands).toEqual([]);
   });
 

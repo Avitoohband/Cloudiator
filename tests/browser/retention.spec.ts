@@ -7,7 +7,7 @@ import { worldFixture } from '../fixtures/domain';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { TOURNAMENTS, tournamentAsOf } from '../fixtures/tournament-ids';
 import { SLOT_MS, emptyWorld, routeLiveReads } from './live-routes';
-import { closeMenu, expectOwnerShown, openMenu } from './shell-helpers';
+import { closeMenu, everyoneResults, expectOwnerShown, openMenu } from './shell-helpers';
 import { storeClock } from './slot-time';
 
 // Task 22.5 (Review Focus 4): a replay older than seven days shows its summary with "no longer kept" everywhere: Recent
@@ -70,7 +70,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
   test('explains retention in Recent results and offers no replay once a result is older than seven days', { tag: '@render' }, async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
-    const results = await openMenu(page, 'Results');
+    const results = await everyoneResults(page);
     await expect(results.getByText(RETENTION, { exact: true })).toBeVisible();
     const list = results.getByRole('list', { name: 'Recent results' });
     await expect(list.getByRole('listitem').first()).toBeVisible();
@@ -165,7 +165,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
     await freezeShellClock(page, expiry - MIN);
-    let results = await openMenu(page, 'Results');
+    let results = await everyoneResults(page);
     let lastDay = resultRow(results.getByRole('list', { name: 'Recent results' }), 'Aster won an Arena bout', settledSlotsAgo(126));
     await lastDay.getByRole('button', { name: 'Replay: Aster won an Arena bout' }).click();
     await expect(scene(page, 'Replay').getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
@@ -173,7 +173,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await expect(scene(page, 'Replay')).toHaveCount(0);
     // The shared display clock reaches the expiry: the row no longer offers the replay, without a new read.
     await freezeShellClock(page, expiry);
-    results = await openMenu(page, 'Results');
+    results = await everyoneResults(page);
     lastDay = resultRow(results.getByRole('list', { name: 'Recent results' }), 'Aster won an Arena bout', settledSlotsAgo(126));
     await expect(lastDay).toContainText('Aster won an Arena bout · replay no longer kept');
     await expect(lastDay.getByRole('button')).toHaveCount(0);
@@ -188,7 +188,7 @@ test.describe('a 360 px phone', () => {
   test('fits the retention line and the expired rows of Recent results', async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
-    const results = await openMenu(page, 'Results');
+    const results = await everyoneResults(page);
     const line = results.getByText(RETENTION, { exact: true });
     await expect(line).toBeVisible();
     const lapsed = resultRow(results.getByRole('list', { name: 'Recent results' }), 'Aster won an Arena bout', settledSlotsAgo(127));

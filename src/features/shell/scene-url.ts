@@ -130,6 +130,11 @@ export function boutFilterOf(from: SceneFrom | undefined): BoutFilter | null {
   return from === 'bouts' ? 'all' : from === 'bouts-won' ? 'won' : from === 'bouts-lost' ? 'lost' : null;
 }
 
+/** The origin a My bouts row opens its scene with: its chip, which Back (and a reload) opens again (`boutFilterOf` reads it back). */
+export function boutsFrom(filter: BoutFilter): Extract<SceneFrom, 'bouts' | 'bouts-won' | 'bouts-lost'> {
+  return filter === 'won' ? 'bouts-won' : filter === 'lost' ? 'bouts-lost' : 'bouts';
+}
+
 /**
  * The scene a recent result opens: an expedition its whole-trip replay (Patch A), an Arena or tournament bout its battle
  * replay. Training and Rest have no replay (Tasks 7, 9), so none.

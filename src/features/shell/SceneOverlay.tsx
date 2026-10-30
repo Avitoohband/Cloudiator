@@ -11,13 +11,15 @@
 // with a malformed activity id names nothing: the scene says so and reads nothing (final review Minor 6). Each view is
 // the account's own read: once the session is known, a sign-out, expiry or account switch (here or in another tab)
 // remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1). It mounts only once
-// the viewer is known, so a signed-in deep link reads once (Task 23.5).
-import { useLayoutEffect, useMemo, useRef } from 'react';
+// the viewer is known, so a signed-in deep link reads once (Task 23.5). A player's replay scene marks its activity watched on this
+// device whenever it shows one, so My bouts drops that bout's dot (Arena replays Task 4).
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
 import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
 import { ExpeditionUnavailable, ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
 import { appearancesOf } from '../../game/replay-looks';
+import { markWatched } from '../bouts/watched';
 import { backLabel, namedScene, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneView } from './scene-url';
 import styles from './shell.module.css';
 
@@ -73,6 +75,10 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   }, [sceneKey]);
 
   const player = state.viewer === 'player';
+  // My bouts' "not watched" dot goes once a player's replay scene shows the bout (each later bout it steps to as well).
+  const watching = player && named?.kind === 'replay' ? named.activityId : null;
+  const displayClock = state.clock;
+  useEffect(() => { if (watching) markWatched(watching, displayClock.now()); }, [watching, displayClock]);
   const reads = useMemo<(ExpeditionReads & Partial<Pick<GameGateway, 'looks' | 'restAfter'>>) | null>(() => {
     if (!gateway) return null;
     if (player) return gateway;

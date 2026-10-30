@@ -23,6 +23,9 @@
 // (the scene's "Back to camp"); Results opens each result by its kind. The camp pauses beneath a scene, which covers it
 // (Task 23.4, C8), and goes on from the shared clock's time when the scene closes. A scene opened from a menu names it (`from`, Arena
 // replays Task 3): its Back button says so, and when the scene closes and that menu is not open (a reload, a link), the shell opens it.
+// Arena replays Task 4: Results opens on My bouts for a player, one list store per reader and owner (a new account never sees the last
+// one's bouts). Its tab and chip are the shell's state, reset to My bouts and All when the owner changes, and the origin rule sets them:
+// a row of Everyone goes back to Everyone, a My bouts row to My bouts under its chip (`bouts-won` → Won).
 //
 // Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
 //
@@ -56,7 +59,9 @@ import { MarketPanel } from '../market/MarketPanel';
 import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
-import { ResultsPanel } from '../results/ResultsPanel';
+import { ResultsPanel, type ResultsTab } from '../results/ResultsPanel';
+import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
+import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import type { MessagingActions } from '../messages/messages';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
@@ -71,7 +76,7 @@ import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, originMenu, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
-import { sceneForResult, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneFrom, type SceneView } from './scene-url';
+import { boutFilterOf, boutsFrom, sceneForResult, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneFrom, type SceneView } from './scene-url';
 import { useCampClicks } from './useCampClicks';
 import { useFocusRescue } from './useFocusRescue';
 import { useJoining } from './useJoining';
@@ -147,16 +152,23 @@ function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 
   }}>{label}</a>;
 }
 
-/** Results: the recent results, and in fixture mode the sample replays and expeditions below them, opened as scenes. */
-function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen }: {
+/** The Results tab and My bouts chip, which belong to one owner. */
+type ResultsChoice = { owner: string | null; view: ResultsTab; filter: BoutFilter };
+const FIRST_RESULTS = { view: 'mine', filter: 'all' } as const;
+
+/** Results: the recent results (a player's My bouts first), and in fixture mode the sample replays and expeditions below them, opened as scenes. */
+function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen, bouts, choice, onChoose, onWatchBout }: {
   fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; clock: DisplayClock;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
   onOpen(view: SceneView): void;
+  bouts: BoutsStore | null; choice: ResultsChoice; onChoose(next: Partial<Omit<ResultsChoice, 'owner'>>): void;
+  onWatchBout(bout: MyBout, filter: BoutFilter): void;
 }) {
   // The sample rows sit in the Results menu, which stays open beneath the scene: Back says Results.
   const sample = (view: Exclude<SceneView, { kind: 'bout' }>): Exclude<SceneView, { kind: 'bout' }> => ({ ...view, from: 'results' });
   return <>
-    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />
+    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts} view={choice.view} onView={view => onChoose({ view })}
+      filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
@@ -215,6 +227,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const nowMs = useMinuteNow(clock);
   const clockMode = useClockMode();
   const menus = menusFor(viewer);
+  // My bouts' lists: one store per reader and owner, a player's only (a visitor, or an account without a gladiator, sees Everyone alone).
+  const boutsOwner = viewer === 'player' ? owner?.gladiatorId ?? null : null;
+  const bouts = useMemo(() => (reads && boutsOwner ? createBoutsStore(reads) : null), [reads, boutsOwner]);
+  // The Results tab and chip: My bouts and All for each owner until changed; another owner (or none) starts there again.
+  const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ owner: null, ...FIRST_RESULTS });
+  const results: ResultsChoice = resultsChoice.owner === boutsOwner ? resultsChoice : { owner: boutsOwner, ...FIRST_RESULTS };
+  const chooseResults = useCallback((next: Partial<Omit<ResultsChoice, 'owner'>>) => setResultsChoice(state =>
+    ({ ...(state.owner === boutsOwner ? state : FIRST_RESULTS), ...next, owner: boutsOwner })), [boutsOwner]);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
   const send = useCallback((event: RailEvent) => setRail(state => railReducer(state, event)), []);
@@ -310,19 +330,26 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const sceneOpen = scene !== null;
   const sceneFrom = scene ? sceneFromOf(scene) ?? null : null;
   const cameFrom = useRef<SceneFrom | null>(null);
+  // Results opens on the tab and chip the scene came from (Task 4): Everyone for its rows, My bouts with the chip for a bout's.
   useEffect(() => {
     if (sceneOpen) { cameFrom.current = sceneFrom; return; }
     const from = cameFrom.current;
     cameFrom.current = null;
-    const menu = from ? originMenu(from) : null;
+    if (!from) return;
+    const filter = boutFilterOf(from);
+    if (filter) chooseResults({ view: 'mine', filter });
+    else if (from === 'results') chooseResults({ view: 'everyone' });
+    const menu = originMenu(from);
     if (menu) show(menu);
-  }, [sceneOpen, sceneFrom, show]);
+  }, [sceneOpen, sceneFrom, show, chooseResults]);
   // Results open each kept result by its kind: an expedition its expedition, a bout its replay (13.7 review).
   const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind']) => {
     const view = sceneForResult(activityId, kind);
-    // Everyone's rows: Back returns to Results (Task 4 adds My bouts' rows, which go back to their own tab).
+    // Everyone's rows: Back returns to Results, on Everyone.
     if (view) openScene({ ...view, from: 'results' });
   }, [openScene]);
+  // My bouts' rows: the bout's replay (or the saved outcome of one that is gone), from its chip, which Back returns to.
+  const watchBout = useCallback((bout: MyBout, filter: BoutFilter) => openScene({ kind: 'replay', activityId: bout.activityId, from: boutsFrom(filter) }), [openScene]);
 
   // The messages button's reads and marks (Task 6). The lists are read through the gateway the shell reads with (the fixture preview's, once
   // loaded); a mark is a command with no receipt and is followed by an owner read, so the badge drops at once. Both reject when the
@@ -409,7 +436,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex}
         knownLooks={knownLooks} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
-        onWatch={watchResult} onOpen={openScene} />;
+        onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;

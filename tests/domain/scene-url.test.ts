@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { backLabel, boutFilterOf, campHref, namedScene, sameScene, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
+import { backLabel, boutFilterOf, boutsFrom, campHref, namedScene, sameScene, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
 import { originMenu } from '@/features/shell/menus';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ExpeditionUnavailable } from '@/features/character/ExpeditionView';
@@ -198,6 +198,9 @@ describe('the scene names its origin', () => {
     expect(backLabel('bouts-lost')).toBe('My bouts');
     expect([boutFilterOf('bouts'), boutFilterOf('bouts-won'), boutFilterOf('bouts-lost'), boutFilterOf('arena')]).toEqual(['all', 'won', 'lost', null]);
     expect([undefined, 'results', 'notifications', 'tournaments', 'gladiators'].map(f => boutFilterOf(f as SceneFrom | undefined))).toEqual([null, null, null, null, null]);
+    // Task 4: a My bouts row names its chip as the origin, and the chip comes back from it.
+    expect([boutsFrom('all'), boutsFrom('won'), boutsFrom('lost')]).toEqual(['bouts', 'bouts-won', 'bouts-lost']);
+    for (const filter of ['all', 'won', 'lost'] as const) expect(boutFilterOf(boutsFrom(filter))).toBe(filter);
   });
 
   it('names the menu an origin goes back to, none for the camp and the Notifications panel', () => {

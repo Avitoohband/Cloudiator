@@ -1,0 +1,289 @@
+/*
+ * My bouts in 📜 Results (Arena replays Task 4, the approved mockup's rows): the chips, the retention line, the day groups and the
+ * rows (a W/L badge, the opponent with its dot and tag, the sub-line and a gold ▶ Watch). In the touch layout (`COMPACT_QUERY`, a
+ * bottom sheet) the sub-line leaves out its leading kind word and every control is at least 44 px high.
+ */
+.bouts {
+  min-width: 0;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.chip {
+  min-height: 30px;
+  padding: 2px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.chip[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--accent, #e6b450);
+  color: #2a1d05;
+  font-weight: 700;
+}
+
+.keep {
+  margin: 0 0 4px;
+  color: var(--ink-dim, var(--muted));
+  font-size: 0.74rem;
+}
+
+.legend {
+  color: var(--gold);
+}
+
+.group {
+  min-width: 0;
+}
+
+.day {
+  margin: 10px 0 2px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.won {
+  border: 1px solid #3f7a52;
+  background: #24492f;
+  color: #8fd7a8;
+}
+
+.lost {
+  border: 1px solid #8a4038;
+  background: #4d2420;
+  color: #ff9f8f;
+}
+
+.who {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  display: block;
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  vertical-align: 2px;
+}
+
+.tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid #88683d;
+  border-radius: 6px;
+  background: rgba(71, 54, 35, 0.92);
+  color: #ffe1a3;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+
+/* A long sub-line wraps between its parts (never inside one), so no part, the rating least of all, is cut off. */
+.subWide,
+.subNarrow {
+  display: block;
+  color: var(--ink-dim, var(--muted));
+  font-size: 0.74rem;
+}
+
+.part {
+  white-space: nowrap;
+}
+
+.subNarrow {
+  display: none;
+}
+
+.up {
+  color: #8fd7a8;
+}
+
+.down {
+  color: #ff9f8f;
+}
+
+.watch,
+.result {
+  flex: none;
+  min-height: 34px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.watch {
+  border: 0;
+  background: var(--accent, #e6b450);
+  color: #2a1d05;
+  font-weight: 700;
+}
+
+.watch:hover {
+  background: #f2c66b;
+}
+
+.result {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.result:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/*
+ * A bout whose replay is gone, dimmed by its colours, never by opacity, so its text keeps 4.5:1 on the panel and the sheet (an opacity of
+ * 0.7 on the badge took its "Won"/"Lost" to 4.43:1 in the release contrast check). The badge keeps its letter's colour on a neutral fill.
+ */
+.gone .won,
+.gone .lost {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.gone .name {
+  color: #b9b4a8;
+}
+
+.gone .subWide,
+.gone .subNarrow {
+  color: #9d998f;
+}
+
+.chip:focus-visible,
+.watch:focus-visible,
+.result:focus-visible,
+.more:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.state {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.more {
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 5px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.more:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.failed p,
+.moreFailed {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.failed .more {
+  margin-top: 0;
+}
+
+/* The shell's touch layout (`COMPACT_QUERY`): the phone's sub-line, and 44 px targets. */
+@media (hover: none), (max-width: 480px) {
+  .subWide {
+    display: none;
+  }
+
+  .subNarrow {
+    display: block;
+  }
+
+  .chip,
+  .watch,
+  .result,
+  .more {
+    min-height: 44px;
+  }
+
+  .chip {
+    padding: 2px 16px;
+  }
+}

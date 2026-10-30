@@ -51,6 +51,21 @@ export async function openMenu(page: Page, label: string): Promise<Locator> {
   return dialog;
 }
 
+/**
+ * Opens Results on Everyone (today's list of everyone's results) for a player, whose Results opens on My bouts (Arena replays Task 4),
+ * and returns the menu. It waits for the player's tabs, so it is for a signed-in player's (or the fixture owner's) camp; a visitor's
+ * Results has no tabs and shows Everyone as it opens.
+ */
+export async function everyoneResults(page: Page): Promise<Locator> {
+  const results = await openMenu(page, 'Results');
+  const everyone = results.getByRole('tab', { name: 'Everyone', exact: true });
+  await expect(everyone).toBeVisible({ timeout: 45_000 });
+  if ((await everyone.getAttribute('aria-selected')) !== 'true') await everyone.click();
+  await expect(everyone).toHaveAttribute('aria-selected', 'true');
+  await expect(results.getByText('RECENT RESULTS', { exact: true })).toBeVisible();
+  return results;
+}
+
 /** Closes the open menu panel or sheet, if any, with its × button. */
 export async function closeMenu(page: Page) {
   const open = page.locator('[data-menu-surface]:visible');

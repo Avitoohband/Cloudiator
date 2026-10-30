@@ -405,14 +405,16 @@ const TIE_BREAKS: readonly unknown[] = ['simultaneous-defeat', 'equal-health-fra
 /**
  * The bout with what its run's last bout says: the opponent (the participant whose gladiator id is not the row's; an NPC fallback
  * has none), whether a seeded tie-break decided it, and a tournament's round. Nothing of it for a replay that is no longer kept
- * (`expired`), and no opponent unless the row's own gladiator is exactly one of the two participants.
+ * (`expired`), and nothing of it unless the row's own gladiator is exactly one of the two participants: a bout that is not the owner's
+ * never lends a row its opponent, its tie-break or its round (Arena replays Task 2 review, carried to Task 4).
  */
 function withLastBout(parts: BoutParts, lastBout: LastBout | null): MyBout {
   const { gladiatorId, ...bout } = parts;
-  const log = lastBout !== null && bout.replayExpiry.state === 'available' ? lastBout : null;
-  const mine = log?.participants.filter(p => p.gladiatorId === gladiatorId) ?? [], other = log?.participants.filter(p => p.gladiatorId !== gladiatorId) ?? [];
+  const kept = lastBout !== null && bout.replayExpiry.state === 'available' ? lastBout : null;
+  const mine = kept?.participants.filter(p => p.gladiatorId === gladiatorId) ?? [], other = kept?.participants.filter(p => p.gladiatorId !== gladiatorId) ?? [];
+  const log = kept !== null && kept.participants.length === 2 && mine.length === 1 && other.length === 1 ? kept : null;
   return { ...bout, tieBreak: log !== null && TIE_BREAKS.includes(log.tieBreakReason), round: log !== null && bout.kind === 'tournament' ? tournamentRound(log.label) : null,
-    opponent: log !== null && log.participants.length === 2 && mine.length === 1 && other.length === 1 ? { name: other[0].name, npc: other[0].gladiatorId === null } : null };
+    opponent: log !== null ? { name: other[0].name, npc: other[0].gladiatorId === null } : null };
 }
 /**
  * One of the owner's bouts as My bouts shows it, or null for a row it cannot show faithfully. `lastBout` is the run's last bout, read

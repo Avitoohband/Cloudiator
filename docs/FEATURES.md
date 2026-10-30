@@ -81,8 +81,9 @@ Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
 ## Features by area
 
-**Status:** Live (in the game now) · In 1.4 (not out yet) · Planned 1.5 / 1.6 / 1.7 / 1.8 (designed, not built: don't film
-them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
+**Status:** Live (in the game now) · In 1.4 / In 1.6 (built, not out yet) · Planned 1.5 / 1.6 / 1.7 / 1.8 (designed, not
+built: don't film them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming
+soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
 (2026-10-28) · Too Tiny = `camp-life-too-tiny` (2026-10-29) · Messages update = `messages-look-and-beds-update`
@@ -141,7 +142,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
 | Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | In 1.4 | The first seconds of any whole-trip replay | — |
 | Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | Still being built: the camp during your own trip (test player) | — |
-| Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | Planned 1.6 | Not built | — |
+| Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | In 1.6 | Not in the fixture camp: a trip's rewards once v2 is active (after the economy switch) | — |
 | Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.8 | Planned 1.8 | Not built | — |
 | Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.8 | Planned 1.8 | Not built | — |
 | Rooms, then the boss | A run is 3 rooms, then the boss, in one afternoon; health carries from fight to fight. | 1.8 | Planned 1.8 | Not built | — |

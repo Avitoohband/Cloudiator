@@ -5,7 +5,7 @@ import { CATALOG_V1 } from './catalog-v1.ts';
 import { expeditionReward } from './economy.ts';
 import { makeFighter, simulateBattle } from './combat.ts';
 import { seededRandom } from './random.ts';
-import { RETAINED_RULES } from './rules.ts';
+import { RETAINED_RULES, requireRetained } from './rules.ts';
 import { freezeDomain } from './types.ts';
 
 export type ExpeditionEncounter = { index: number; dependsOn: number | null; revealOffsetMs: number;
@@ -38,11 +38,13 @@ export function expeditionLoot(entry: Expedition, catalog: Catalog, rules: Rules
  * Pure planner for any retained rules version (rules.ts). `rules` must be the retained rules of both the snapshot and its
  * build, so a trip is planned under the version that froze it and never a mixed one. The enemies, the fights and the catalog
  * are CATALOG_V1's in every version; the entry's rewards (XP, gold, gear chance) are the version's (`expeditionReward`).
- * Future catalog versions require explicit retained implementations.
+ * `rules` is the retained constant itself: a copy of a retained version, even an equal one, is refused with
+ * `requireRetained`'s own message. Future catalog versions require explicit retained implementations.
  */
 export function planExpedition(snapshot: ActivitySnapshot, seed: Seed, rules: Rules): ExpeditionPlan {
-  if (!Object.hasOwn(RETAINED_RULES, rules.version) || RETAINED_RULES[rules.version] !== rules
-    || snapshot.rulesVersion !== rules.version || snapshot.build.rulesVersion !== rules.version
+  if (!Object.hasOwn(RETAINED_RULES, rules.version)) throw new RangeError('Unsupported expedition snapshot');
+  requireRetained(rules);
+  if (snapshot.rulesVersion !== rules.version || snapshot.build.rulesVersion !== rules.version
     || snapshot.choice.kind !== 'expedition' || !Object.hasOwn(CATALOG_V1.expeditions, snapshot.choice.expeditionId)) throw new RangeError('Unsupported expedition snapshot');
   const id = snapshot.choice.expeditionId, catalog = CATALOG_V1, base = catalog.expeditions[id];
   const entry: Expedition = { ...base, rewards: expeditionReward(rules, id) };

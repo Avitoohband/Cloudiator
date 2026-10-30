@@ -51,7 +51,7 @@ async function revealAll() {
 }
 async function settlementPreparation(f: Awaited<ReturnType<typeof fixture>>, rewards: { xp: number; money: number; loot: readonly import('../../supabase/functions/_shared/domain/inventory.ts').LootGrant[] }) {
   const state=await f.state(), baseline={level:state.progression.level,xp:state.progression.xp};
-  return {rewards,grant:prepareGrant(state,rewards.loot),progressionBaseline:baseline,progression:applyXp(baseline.level,baseline.xp,rewards.xp)};
+  return {rewards,grant:prepareGrant(state,rewards.loot,RULES_V1),progressionBaseline:baseline,progression:applyXp(baseline.level,baseline.xp,rewards.xp)};
 }
 beforeEach(async()=>{
   await resetIdentity();

@@ -7,6 +7,7 @@ import { handleCommand } from '../../supabase/functions/_shared/backend/commands
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands.ts';
 import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
+import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { shopOffers } from '../../supabase/functions/_shared/domain/inventory.ts';
 
 type Outcome = { ok: boolean; code?: string; receiptId?: string; value?: Record<string, unknown> };
@@ -423,7 +424,7 @@ describe('inventory and NPC shops', () => {
     const state = await owner.state();
     expect(state.inventory).toHaveLength(59);
     const prepared = prepareGrant(state, [{ catalogId: 'salvage', catalogVersion: 'v1', quantity: 1005, origin: 'expedition' },
-      { catalogId: 'axe:5:uncommon', catalogVersion: 'v1', quantity: 1, origin: 'expedition' }]);
+      { catalogId: 'axe:5:uncommon', catalogVersion: 'v1', quantity: 1, origin: 'expedition' }], RULES_V1);
     expect(prepared.plan).toMatchObject({ stacked: [{ itemId: stack.id, quantity: 1 }], overflowMoney: 84,
       overflow: [{ catalogId: 'salvage', quantity: 5, money: 50 }, { catalogId: 'axe:5:uncommon', quantity: 1, money: 34 }] });
     // Settlement calls the primitive inside its own locked transaction; the operator reproduces that here.

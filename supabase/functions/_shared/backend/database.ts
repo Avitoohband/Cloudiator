@@ -4,13 +4,14 @@ import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/re
 import type { Actor } from './auth.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
+import { retainedRules } from '../domain/rules.ts';
 import { buildChangeFee, lockedChange, validateBuild, validateCreationAllocation } from '../domain/build.ts';
 import { deriveStats } from '../domain/stats.ts';
 import { applyXp, historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer } from '../domain/inventory.ts';
 import type { ExpeditionRewards } from '../domain/expedition.ts';
 import type { InventoryGrantPlan, ShopOffer } from '../domain/inventory.ts';
 import type { TournamentGraph } from '../domain/tournament.ts';
-import type { CoordinatorReport, JobKind, JobLease } from '../domain/types.ts';
+import type { CoordinatorReport, JobKind, JobLease, Rules } from '../domain/types.ts';
 
 type Creation = Extract<GameCommand, { kind: 'create-character' }>;
 export type PlanningCommand = Extract<GameCommand, { kind: 'queue-build' | 'cancel-build' | 'edit-schedule' | 'edit-day-schedule' }>;
@@ -51,9 +52,13 @@ export type PreparedGrant = { baseline: InventoryBaseline; plan: InventoryGrantP
 export function inventoryBaseline(state: OwnerState): InventoryBaseline {
   return { items: Object.fromEntries(state.inventory.map(item => [item.id, item.quantity])), peakStrength: state.progression.peakStrength };
 }
-/** Canonical grant: capacity/stacking/overflow plan plus the acquisition's new historical strength. */
-export function prepareGrant(state: OwnerState, grants: Parameters<typeof planInventoryGrant>[1]): PreparedGrant {
-  const plan = planInventoryGrant(state.inventory, grants, CATALOG_V1);
+/**
+ * Canonical grant: capacity/stacking/overflow plan plus the acquisition's new historical strength. `rules` is required (patch
+ * 1.6): the rules version of what is granted decides the capacity and an overflowing salvage unit's value, so every caller
+ * names it (an expedition settlement: its plan's version).
+ */
+export function prepareGrant(state: OwnerState, grants: Parameters<typeof planInventoryGrant>[1], rules: Rules): PreparedGrant {
+  const plan = planInventoryGrant(state.inventory, grants, CATALOG_V1, rules);
   return { baseline: inventoryBaseline(state), plan, peakStrength: historicalGearScore([...state.inventory, ...plan.retained], state.progression.peakStrength) };
 }
 /** Exact versioned merchant offer and its grant; null for anything the NPC shops do not sell. SQL decides level, funds and capacity under lock. */
@@ -64,8 +69,10 @@ export function prepareShopPurchase(command: Extract<InventoryCommand, { kind: '
   }
   const offer = shopOffer(command.catalogId, CATALOG_V1);
   if (!offer || command.catalogVersion !== offer.catalogVersion) return null;
+  // A purchase converts nothing (shop and renown units that do not fit are refused) and the capacity is the same in every
+  // rules version, so buying stays on RULES_V1 (patch 1.6 changes only the salvage sale, Task 6).
   return { offer, ...prepareGrant(state, [{ catalogId: offer.catalogId, catalogVersion: offer.catalogVersion, quantity: command.quantity,
-    origin: offer.currency === 'renown' ? 'renown' : 'shop' }]) };
+    origin: offer.currency === 'renown' ? 'renown' : 'shop' }], RULES_V1) };
 }
 /** NPC unit value for the server-read item; null when it is absent or unsellable (bound or renown origin). */
 export function prepareItemSale(command: Extract<InventoryCommand, { kind: 'sell-item' }>, state: OwnerState) {
@@ -290,9 +297,12 @@ export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
         const input = await rpc<{ state: OwnerState; rewards: ExpeditionRewards; rulesVersion: string; jobId: string } | null>(
           'expedition_settlement_input', { activity_id: activityId, lease_token: token });
         if (!input) return rpc('settle_activity', { activity_id: activityId, lease_token: token });
-        if (input.rulesVersion !== 'v1') throw new Error('unsupported-rules');
+        // The trip is settled under its plan's own version (patch 1.6): a v1 trip's overflowing salvage converts at 10 even
+        // after the switch, a v2 trip's at 4. An unknown version is refused before anything is renewed or settled.
+        let rules: Rules;
+        try { rules = retainedRules(input.rulesVersion); } catch { throw new Error('unsupported-rules'); }
         const baseline = { level: input.state.progression.level, xp: input.state.progression.xp };
-        const prepared = { rewards: input.rewards, grant: prepareGrant(input.state, input.rewards.loot), progressionBaseline: baseline,
+        const prepared = { rewards: input.rewards, grant: prepareGrant(input.state, input.rewards.loot, rules), progressionBaseline: baseline,
           progression: applyXp(baseline.level, baseline.xp, input.rewards.xp) };
         const renewed = await rpc<RenewOutcome>('renew_job', { job_id: input.jobId, lease_token: token });
         if (!renewed.ok) return renewed;

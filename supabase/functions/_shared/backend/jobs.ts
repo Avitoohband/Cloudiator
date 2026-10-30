@@ -1,4 +1,7 @@
 import { RULES_V1 } from '../domain/rules-v1.ts';
+import { RULES_V2 } from '../domain/rules-v2.ts';
+import { requireRetained } from '../domain/rules.ts';
+import { trainingPoints } from '../domain/economy.ts';
 import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
 import { freezeDomain } from '../domain/types.ts';
@@ -11,9 +14,9 @@ import type { OptInRevision, TournamentCandidate, TournamentGraph, TournamentOut
 import { slotAt } from '../domain/clock.ts';
 import type { ActivityChoice, LeagueId } from '../contracts/commands.ts';
 import type { BattleLog } from '../contracts/events.ts';
-import type { ActivitySnapshot, BattleParticipant, DeepReadonly, FighterSnapshot, Seed, SlotWindow } from '../domain/types.ts';
+import type { ActivitySnapshot, BattleParticipant, DeepReadonly, FighterSnapshot, Rules, Seed, SlotWindow } from '../domain/types.ts';
 import type { ActivityCosts, ActivityKind, BuildInput, CoordinatorReport, ItemInstance, JobKind, JobLease, PreparationInput, PreparationResult, WorkerReport } from '../domain/types.ts';
-import type { ExecutorIo, ExecutorRegistry, JobOutcome, TournamentBoutRead, WorkerDependencies } from './database.ts';
+import type { ExecutorIo, ExecutorRegistry, JobExecutor, JobOutcome, TournamentBoutRead, WorkerDependencies } from './database.ts';
 
 /** Spec 10.4 batch limits and lease length; CPU measurements may lower the batch sizes without changing semantics. */
 export const WORKER_LIMITS = Object.freeze({ simple: 20, combat: 5, cpuMs: 2_000, leaseMs: 120_000, renewBelowMs: 60_000 });
@@ -34,27 +37,41 @@ export class WorkerFailure extends Error {
 }
 
 const ACTIVITY_KINDS: readonly ActivityKind[] = ['training', 'rest', 'expedition', 'arena', 'tournament'];
-/**
- * Canonical v1 boundary recompute: legal build snapshot, derived stats and versioned stamina costs. Task 16 adds the
- * frozen arena fighter, its NPC fallback template, its visible strength estimate and the league placement, so SQL
- * compares pairing results with these values instead of restating makeFighter, makeFallback or leagueFor.
+/*
+ * Patch 1.6 (spec "Worker"): every executor is written once over `rules`, the retained constant of the job's own version
+ * (`RULES_V1`, `RULES_V2`) passed by reference, never a copy (`requireRetained` refuses one with its own message). Each refuses
+ * an input of another version with `unsupported-rules`. The `…V1` names stay as wrappers over `RULES_V1`.
  */
-export function prepareActivityV1(input: PreparationInput): PreparationResult {
+
+/**
+ * Canonical boundary recompute under `rules`: legal build snapshot, derived stats and versioned stamina costs. Task 16 adds the
+ * frozen arena fighter, its NPC fallback template, its visible strength estimate and the league placement, so SQL
+ * compares pairing results with these values instead of restating makeFighter, makeFallback or leagueFor. Patch 1.6 applies
+ * the Training cap here: `trainingPoints` is the version's answer for the frozen level and earned points (v1: always 1; v2: 1
+ * below 10 + 4 × level, else 0), which SQL freezes into the snapshot and credits at settlement.
+ */
+export function prepareActivity(input: PreparationInput, rules: Rules): PreparationResult {
+  requireRetained(rules);
   if (!input || typeof input !== 'object' || !input.build || !Array.isArray(input.items)) throw new WorkerFailure('invalid-input');
-  if (input.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
+  if (input.rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
   const build: BuildInput = { classId: input.build.classId, stance: input.build.stance,
     allocation: { ...input.build.allocations }, equipment: { ...input.build.equipment } };
-  const validation = validateBuild(build, structuredClone(input.items) as ItemInstance[], input.earnedPoints, input.level);
+  const validation = validateBuild(build, structuredClone(input.items) as ItemInstance[], input.earnedPoints, input.level, rules);
   if (!validation.ok) throw new WorkerFailure('invalid-build');
-  const derived = deriveStats(validation.snapshot, RULES_V1);
-  const costs = Object.fromEntries(ACTIVITY_KINDS.map(kind => [kind, activityCost(RULES_V1.activityStamina[kind], derived.overload)])) as ActivityCosts;
-  const arenaFighter = makeFighter(validation.snapshot, 'arena', RULES_V1);
-  return { rulesVersion: RULES_V1.version, snapshot: structuredClone(validation.snapshot) as PreparationResult['snapshot'], derived,
-    staminaMaximum: derived.maxStamina, costs, trainingPoints: RULES_V1.progression.trainingPoints,
+  const derived = deriveStats(validation.snapshot, rules);
+  const costs = Object.fromEntries(ACTIVITY_KINDS.map(kind => [kind, activityCost(rules.activityStamina[kind], derived.overload)])) as ActivityCosts;
+  const arenaFighter = makeFighter(validation.snapshot, 'arena', rules);
+  return { rulesVersion: rules.version, snapshot: structuredClone(validation.snapshot) as PreparationResult['snapshot'], derived,
+    // The level and earned points were validated above (safe integers, level ≥ 1, earned ≥ the creation points).
+    staminaMaximum: derived.maxStamina, costs, trainingPoints: trainingPoints(rules, input.level, input.earnedPoints),
     // A job frozen before Task 8 has no gear history. SQL never lowers a placement, so 0 can only delay a promotion.
-    league: leagueFor(input.level, input.earnedPoints, input.peakStrength ?? 0, RULES_V1),
+    league: leagueFor(input.level, input.earnedPoints, input.peakStrength ?? 0, rules),
     arenaFighter: structuredClone(arenaFighter) as FighterSnapshot, npcTemplate: structuredClone(makeFallback(arenaFighter)) as FighterSnapshot,
     arenaStrength: estimateArenaStrength(arenaFighter) };
+}
+/** `prepareActivity` under `RULES_V1`. */
+export function prepareActivityV1(input: PreparationInput): PreparationResult {
+  return prepareActivity(input, RULES_V1);
 }
 
 /**
@@ -82,27 +99,30 @@ export type PairingInput = DeepReadonly<{
 /** Task 19: one route per candidate, and the league's bracket when it has one (checked by `checkGraph` before completion). */
 export type PairingResult = { assignments: ArenaAssignment[]; tournament?: { routes: TournamentRoute[]; bracket: TournamentGraph | null } };
 /**
- * Canonical v1 pairing: spec §8.1 `matchArena` on the frozen entrants and history, under the pairing job's private seed.
- * Since Task 19 the job first runs spec §8.2's `partitionTournament` over every Arena request of its league, then
+ * Canonical pairing under `rules`: spec §8.1 `matchArena` on the frozen entrants and history, under the pairing job's private
+ * seed. Since Task 19 the job first runs spec §8.2's `partitionTournament` over every Arena request of its league, then
  * `buildBracket` under the separate placement seed when the league has a bracket, and `matchArena` exactly once over the
- * rest. No entrant is in both. SQL restates none of these rules; it checks the result against the frozen values.
+ * rest. No entrant is in both. SQL restates none of these rules; it checks the result against the frozen values. Every
+ * entrant's fighter was frozen at the same boundary, so it carries the job's version (the domain pairs under the fighters').
  */
-export function pairArenaV1(input: PairingInput, seed: Seed): PairingResult {
+export function pairArena(input: PairingInput, seed: Seed, rules: Rules): PairingResult {
+  requireRetained(rules);
   if (!input || typeof input !== 'object' || !Array.isArray(input.entrants) || !Array.isArray(input.recent)) throw new WorkerFailure('invalid-input');
-  if (input.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
-  // One job pairs exactly one slot, season and league; a mixed input is corrupt rather than a cross-league pairing.
+  if (input.rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
+  // One job pairs exactly one slot, season, league and rules version; a mixed input is corrupt rather than a cross-league
+  // (or cross-version) pairing.
   const inScope = (entrant: ArenaEntrant | null | undefined) => !!entrant && entrant.league === input.league
-    && entrant.slotIndex === input.slotIndex && entrant.seasonId === input.seasonId;
+    && entrant.slotIndex === input.slotIndex && entrant.seasonId === input.seasonId && entrant.fighter?.rulesVersion === rules.version;
   if (!input.entrants.every(inScope)) throw new WorkerFailure('invalid-input');
   // SQL bounds the history it passes; a window shorter than this version's own would silently drop counted bouts.
   if (!Number.isSafeInteger(input.historyFromSlot) || !Number.isSafeInteger(input.slotIndex)
-    || input.historyFromSlot > input.slotIndex - RULES_V1.matchmaking.recentPairingSlots) throw new WorkerFailure('invalid-input');
+    || input.historyFromSlot > input.slotIndex - rules.matchmaking.recentPairingSlots) throw new WorkerFailure('invalid-input');
   let slot: SlotWindow;
-  try { slot = slotAt(input.slotIndex * RULES_V1.clock.slotMs); } catch { throw new WorkerFailure('invalid-input'); }
+  try { slot = slotAt(input.slotIndex * rules.clock.slotMs); } catch { throw new WorkerFailure('invalid-input'); }
   const tournament = input.tournament;
   if (tournament === undefined) {
     // A pre-M11 input pairs as before, but on a tournament slot that would silently turn a bracket into regular Arena.
-    if (isTournamentSlot(slot, RULES_V1)) throw new WorkerFailure('invalid-input');
+    if (isTournamentSlot(slot, rules)) throw new WorkerFailure('invalid-input');
     return { assignments: matchArena(input.entrants, input.recent, seed) };
   }
   if (!tournament || typeof tournament !== 'object' || !nonEmpty(tournament.bracketSeed) || tournament.bracketSeed === seed
@@ -135,6 +155,10 @@ export function pairArenaV1(input: PairingInput, seed: Seed): PairingResult {
     throw new WorkerFailure('invalid-input');
   }
 }
+/** `pairArena` under `RULES_V1`. */
+export function pairArenaV1(input: PairingInput, seed: Seed): PairingResult {
+  return pairArena(input, seed, RULES_V1);
+}
 
 /**
  * The one regular-Arena simulation of a battle, written by `private.prepare_activity_jobs` at phase 8 (Task 16). Its job
@@ -149,17 +173,19 @@ export type ArenaSimulationInput = DeepReadonly<{
 /** The bout's log and each side's outcome in assignment order, validated and frozen once by `private.accept_arena_result`. */
 export type ArenaSimulationResult = { battleId: string; log: BattleLog; outcomes: ArenaOutcome[] };
 /**
- * Canonical v1 regular bout: one `simulateBattle` of the frozen assignment under the battle seed, then `arenaOutcomes`.
- * Fighters are never rebuilt from stored build snapshots (JSONB reorders equipment keys, which would change the logged
- * silhouette order). A human participant's id is its gladiatorId; the NPC is `opponent.id` with a null gladiatorId.
+ * Canonical regular bout under `rules`: one `simulateBattle` of the frozen assignment under the battle seed, then
+ * `arenaOutcomes`. Fighters are never rebuilt from stored build snapshots (JSONB reorders equipment keys, which would change
+ * the logged silhouette order); a fighter frozen under another version fails the battle's own check. A human participant's
+ * id is its gladiatorId; the NPC is `opponent.id` with a null gladiatorId.
  */
-export function simulateArenaV1(input: ArenaSimulationInput, seed: Seed): ArenaSimulationResult {
+export function simulateArena(input: ArenaSimulationInput, seed: Seed, rules: Rules): ArenaSimulationResult {
+  requireRetained(rules);
   if (!input || typeof input !== 'object') throw new WorkerFailure('invalid-input');
-  if (input.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
+  if (input.rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
   const { assignment, names } = input;
   if (!assignment || typeof assignment !== 'object' || !Array.isArray(assignment.sides) || !Array.isArray(names)
     || assignment.battleId !== input.battleId || assignment.slotIndex !== input.slotIndex || !Number.isSafeInteger(input.slotIndex)
-    || input.startsAtMs !== input.slotIndex * RULES_V1.clock.slotMs || input.revealAtMs !== input.startsAtMs + RULES_V1.arena.revealAfterMs
+    || input.startsAtMs !== input.slotIndex * rules.clock.slotMs || input.revealAtMs !== input.startsAtMs + rules.arena.revealAfterMs
     || names.length !== assignment.sides.length || !names.every(nonEmpty)) throw new WorkerFailure('invalid-input');
   const human = (index: number): BattleParticipant => {
     const side = assignment.sides[index];
@@ -170,11 +196,15 @@ export function simulateArenaV1(input: ArenaSimulationInput, seed: Seed): ArenaS
       : assignment.kind === 'npc' && assignment.sides.length === 1
         ? [human(0), { id: assignment.opponent.id, gladiatorId: null, name: arenaNpcName(assignment.league), snapshot: assignment.opponent.snapshot }]
         : (() => { throw new RangeError('Unknown arena assignment'); })();
-    const log = simulateBattle({ battleId: assignment.battleId, rulesVersion: RULES_V1.version, rules: RULES_V1, fighters }, seed);
+    const log = simulateBattle({ battleId: assignment.battleId, rulesVersion: rules.version, rules, fighters }, seed);
     return { battleId: assignment.battleId, log, outcomes: arenaOutcomes(assignment, log) };
   } catch {
     throw new WorkerFailure('invalid-input');
   }
+}
+/** `simulateArena` under `RULES_V1`. */
+export function simulateArenaV1(input: ArenaSimulationInput, seed: Seed): ArenaSimulationResult {
+  return simulateArena(input, seed, RULES_V1);
 }
 
 /**
@@ -190,19 +220,21 @@ export type TournamentBoutInput = DeepReadonly<{ kind: 'tournament-bout'; tourna
  */
 export type TournamentBoutResult = { boutId: string; log: BattleLog; outcomes?: TournamentOutcome[] };
 /**
- * Canonical v1 tournament bout: the stored graph read under the job's current lease (`public.tournament_bout_input`)
- * is rebuilt and checked by `readyBouts` (its `checkGraph` refuses stub or altered stored logs); the bout must be ready,
- * so a child fights its parents' stored winners. `runBout` simulates it from the frozen entries at full health under the
- * bout's own one-way seed, labelled with the frozen names, and `recordBout` applies the full log fence before the worker
- * completes the job. The final, which completes the graph, also returns every entrant's `tournamentOutcomes`. A bye, an
- * unready, resolved or unknown bout, a refused read or missing name fails closed.
+ * Canonical tournament bout under `rules`, the version of the stored graph: the graph read under the job's current lease
+ * (`public.tournament_bout_input`) is rebuilt and checked by `readyBouts` (its `checkGraph` refuses stub or altered stored
+ * logs); the bout must be ready, so a child fights its parents' stored winners. `runBout` simulates it from the frozen entries
+ * at full health under the bout's own one-way seed, labelled with the frozen names, and `recordBout` applies the full log
+ * fence before the worker completes the job. The final, which completes the graph, also returns every entrant's
+ * `tournamentOutcomes` (its placements paid by the graph's version and league). A bye, an unready, resolved or unknown bout,
+ * a refused read or missing name fails closed.
  */
-export function simulateTournamentBoutV1(input: TournamentBoutInput, read: TournamentBoutRead, seed: Seed): TournamentBoutResult {
+export function simulateTournamentBout(input: TournamentBoutInput, read: TournamentBoutRead, seed: Seed, rules: Rules): TournamentBoutResult {
+  requireRetained(rules);
   if (!input || typeof input !== 'object' || Object.keys(input).length !== 3 || input.kind !== 'tournament-bout'
     || !nonEmpty(input.tournamentId) || !nonEmpty(input.boutId) || !nonEmpty(seed)) throw new WorkerFailure('invalid-input');
   if (!read || read.ok !== true || !read.graph || typeof read.graph !== 'object') throw new WorkerFailure('invalid-input');
   const { graph, names } = read;
-  if (graph.rulesVersion !== RULES_V1.version) throw new WorkerFailure('unsupported-rules');
+  if (graph.rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
   if (graph.id !== input.tournamentId) throw new WorkerFailure('invalid-input');
   try {
     const job = readyBouts(graph).find(bout => bout.boutId === input.boutId);
@@ -216,39 +248,58 @@ export function simulateTournamentBoutV1(input: TournamentBoutInput, read: Tourn
     throw new WorkerFailure('invalid-input');
   }
 }
-
-/**
- * `v1.simulation` dispatches on an explicit discriminator. An Arena input carries `kind: 'arena'`, a tournament bout
- * `kind: 'tournament-bout'`; an expedition job's input is its activity snapshot, which has no `kind` and whose choice is
- * an expedition. Anything else is unsupported.
- */
-function simulateV1(job: JobLease, io?: ExecutorIo): unknown {
-  const input: unknown = job.snapshot;
-  if (input && typeof input === 'object' && !Array.isArray(input)) {
-    if (Object.hasOwn(input, 'kind')) {
-      const kind = (input as { kind?: unknown }).kind;
-      if (kind === 'arena') return simulateArenaV1(input as ArenaSimulationInput, job.seed);
-      if (kind === 'tournament-bout') {
-        if (!io) throw new WorkerFailure('invalid-input');
-        // The parents' winners come from storage under this job's own lease, never from the job input.
-        return io.database.tournamentBoutInput(job.id, job.token)
-          .then(read => simulateTournamentBoutV1(input as TournamentBoutInput, read, job.seed));
-      }
-    } else if ((input as { choice?: { kind?: unknown } }).choice?.kind === 'expedition') {
-      return planExpedition(input as ActivitySnapshot, job.seed, RULES_V1);
-    }
-  }
-  throw new WorkerFailure('unsupported-executor');
+/** `simulateTournamentBout` under `RULES_V1`. */
+export function simulateTournamentBoutV1(input: TournamentBoutInput, read: TournamentBoutRead, seed: Seed): TournamentBoutResult {
+  return simulateTournamentBout(input, read, seed, RULES_V1);
 }
 
-/** Keep every retained rules version registered: a job always runs with the version persisted on it. */
-export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({
-  v1: Object.freeze({ prepare: (job: JobLease) => prepareActivityV1(job.snapshot as PreparationInput),
-    pair: (job: JobLease) => pairArenaV1(job.snapshot as PairingInput, job.seed),
-    simulation: simulateV1,
+/**
+ * A version's `simulation` executor dispatches on an explicit discriminator, under that version's `rules`. An Arena input
+ * carries `kind: 'arena'`, a tournament bout `kind: 'tournament-bout'`; an expedition job's input is its activity snapshot,
+ * which has no `kind` and whose choice is an expedition: it is planned only when it was frozen under `rules`. Anything else
+ * is unsupported.
+ */
+function simulate(rules: Rules): JobExecutor {
+  return (job: JobLease, io?: ExecutorIo): unknown => {
+    const input: unknown = job.snapshot;
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+      if (Object.hasOwn(input, 'kind')) {
+        const kind = (input as { kind?: unknown }).kind;
+        if (kind === 'arena') return simulateArena(input as ArenaSimulationInput, job.seed, rules);
+        if (kind === 'tournament-bout') {
+          if (!io) throw new WorkerFailure('invalid-input');
+          // The parents' winners come from storage under this job's own lease, never from the job input.
+          return io.database.tournamentBoutInput(job.id, job.token)
+            .then(read => simulateTournamentBout(input as TournamentBoutInput, read, job.seed, rules));
+        }
+      } else if ((input as { choice?: { kind?: unknown } }).choice?.kind === 'expedition') {
+        if ((input as { rulesVersion?: unknown }).rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
+        return planExpedition(input as ActivitySnapshot, job.seed, rules);
+      }
+    }
+    throw new WorkerFailure('unsupported-executor');
+  };
+}
+
+/**
+ * The executors of one retained rules version, each closed over `rules`, which must be the retained constant itself (a copy
+ * is refused here, at registration, with `requireRetained`'s message): the planner and every generic executor check identity.
+ */
+export function executorsFor(rules: Rules): Readonly<Partial<Record<Exclude<JobKind, 'settlement'>, JobExecutor>>> {
+  requireRetained(rules);
+  return Object.freeze({ prepare: (job: JobLease) => prepareActivity(job.snapshot as PreparationInput, rules),
+    pair: (job: JobLease) => pairArena(job.snapshot as PairingInput, job.seed, rules),
+    simulation: simulate(rules),
     // SQL selects the immutable stage by ordinal; no worker-supplied stage payload is trusted here.
-    reveal: () => ({}) }),
-});
+    reveal: () => ({}) });
+}
+
+/**
+ * Keep every retained rules version registered: a job always runs with the version persisted on it, so an activity frozen
+ * under v1 settles on v1 after the switch to v2 (spec "Rules versioning"). Both stay until a later patch proves no v1 job is
+ * left (runbook, "Retained-rule deployments").
+ */
+export const DEFAULT_EXECUTORS: ExecutorRegistry = Object.freeze({ v1: executorsFor(RULES_V1), v2: executorsFor(RULES_V2) });
 
 /**
  * One bounded invocation: settle, then prepare, then pair, then reveal (≤20 simple), then any pairing its own coordination

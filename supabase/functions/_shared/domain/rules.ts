@@ -15,6 +15,17 @@ export function retainedRules(version: unknown): Rules {
   return RETAINED_RULES[version];
 }
 
+/**
+ * `rules` itself when it is the retained constant of its version (`retainedRules`' RangeError for an unknown version). A copy,
+ * even an equal or frozen one, is a RangeError with its own message: code that plans or pays under a version (the expedition
+ * planner, the worker's executors) receives the retained constants by reference, so a copy is a caller's bug, not an
+ * unsupported version.
+ */
+export function requireRetained(rules: Rules): Rules {
+  if (retainedRules(rules?.version) !== rules) throw new RangeError('Rules must be the retained constants, never a copy');
+  return rules;
+}
+
 /** Whether `rules` is Patch 1.6's economy (economy.ts reads the differences through it). */
 export function isRulesV2(rules: Rules): rules is typeof RULES_V2 {
   return rules.version === RULES_V2.version;

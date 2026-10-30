@@ -4,7 +4,9 @@ import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { deriveStats } from '../../supabase/functions/_shared/domain/stats.ts';
-import type { ActivitySnapshot, BuildSnapshot } from '../../supabase/functions/_shared/domain/types.ts';
+import { expeditionReward } from '../../supabase/functions/_shared/domain/economy.ts';
+import { seededRandom } from '../../supabase/functions/_shared/domain/random.ts';
+import type { ActivitySnapshot, BuildSnapshot, Rules } from '../../supabase/functions/_shared/domain/types.ts';
 import { baseFiveBuild, itemFixture } from '../fixtures/domain.ts';
 
 export function expeditionSnapshot(strength = 150, vitality = 30, expeditionId: 'woodland' | 'outpost' | 'mountain' = 'woodland', level = 10): ActivitySnapshot {
@@ -147,19 +149,42 @@ describe('expeditions under the activity\'s rules version (patch 1.6)', () => {
       expect(plan.rewards.loot[0]).toMatchObject({ catalogId: 'salvage', quantity: salvage });
     });
   it('finds gear half as often', () => {
+    // "Half" exactly (Avi's answer): every expedition's v2 gear chance is its v1 chance halved, 10 / 15 / 20 % for 20 / 30 / 40 %.
+    expect((['woodland', 'outpost', 'mountain'] as const).map(id => [expeditionReward(RULES_V1, id).gearChance, expeditionReward(RULES_V2, id).gearChance]))
+      .toEqual([[0.2, 0.1], [0.3, 0.15], [0.4, 0.2]]);
     const v1Snapshot = outpost(), v2Prepared = v2Snapshot(v1Snapshot);
-    let v1Wins = 0, v1Gear = 0, v2Wins = 0, v2Gear = 0;
+    let v1Wins = 0, v1Gear = 0, v2Wins = 0, v2Gear = 0, v1Draws = 0, v2Draws = 0;
     for (let i = 0; i < 2000; i++) {
       const v1 = planExpedition(v1Snapshot, `seed-${i}`, RULES_V1), v2 = planExpedition(v2Prepared, `seed-${i}`, RULES_V2);
-      if (v1.success) { v1Wins += 1; if (v1.rewards.loot.length > 1) v1Gear += 1; }
-      if (v2.success) { v2Wins += 1; if (v2.rewards.loot.length > 1) v2Gear += 1; }
+      // A won trip finds gear exactly when the first draw of its loot stream is below the version's chance.
+      const draw = seededRandom(`seed-${i}:loot`)();
+      if (v1.success) { v1Wins += 1; if (v1.rewards.loot.length > 1) v1Gear += 1; if (draw < 0.3) v1Draws += 1; }
+      if (v2.success) { v2Wins += 1; if (v2.rewards.loot.length > 1) v2Gear += 1; if (draw < 0.15) v2Draws += 1; }
     }
     expect(v1Wins).toBeGreaterThan(1900);
     expect(v2Wins).toBe(v1Wins);
+    expect([v1Gear, v2Gear]).toEqual([v1Draws, v2Draws]);
     expect(v1Gear / v1Wins).toBeGreaterThan(0.27);
     expect(v1Gear / v1Wins).toBeLessThan(0.33);
     expect(v2Gear / v2Wins).toBeGreaterThan(0.12);
     expect(v2Gear / v2Wins).toBeLessThan(0.18);
+    expect(v2Gear / v1Gear).toBeGreaterThan(0.45);
+    expect(v2Gear / v1Gear).toBeLessThan(0.58);
+  });
+  it('plans with the retained rules themselves, never a copy', () => {
+    const prepared = v2Snapshot(outpost());
+    const COPY = 'Rules must be the retained constants, never a copy';
+    // An equal copy, and a copy whose expedition rewards were altered, are refused with their own message.
+    const altered = { ...RULES_V2, expeditionRewards: { ...RULES_V2.expeditionRewards, outpost: { xp: 9_999, money: 9_999, gearChance: 1 } } };
+    for (const copy of [{ ...RULES_V2 }, altered, Object.freeze(structuredClone(RULES_V2))]) {
+      expect(() => planExpedition(prepared, 'success', copy as Rules)).toThrow(RangeError);
+      expect(() => planExpedition(prepared, 'success', copy as Rules)).toThrow(COPY);
+    }
+    expect(() => planExpedition(outpost(), 'success', { ...RULES_V1 } as Rules)).toThrow(COPY);
+    // An unknown version, or a snapshot of another version, keeps the snapshot's message.
+    expect(() => planExpedition(prepared, 'success', { ...RULES_V2, version: 'v9' } as unknown as Rules)).toThrow('Unsupported expedition snapshot');
+    expect(() => planExpedition(outpost(), 'success', RULES_V2)).toThrow('Unsupported expedition snapshot');
+    expect(planExpedition(prepared, 'success', RULES_V2).rewards).toMatchObject({ xp: 75, money: 10 });
   });
   it('refuses mixed versions', () => {
     const v1Snapshot = outpost(), prepared = v2Snapshot(v1Snapshot);

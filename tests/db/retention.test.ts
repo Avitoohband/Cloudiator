@@ -7,6 +7,7 @@ import { createDatabase, createWorkerDatabase, prepareGrant } from '../../supaba
 import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
 import { applyXp } from '../../supabase/functions/_shared/domain/inventory.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { retainedRules } from '../../supabase/functions/_shared/domain/rules.ts';
 import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 
@@ -291,7 +292,7 @@ async function settleAt(job: JobLease, atMs: number) {
     const [{ input }] = await tx`select public.expedition_settlement_input(${job.activityId},${job.token}) as input`;
     if (!input) return (await tx`select public.settle_activity(${job.activityId},${job.token}) as outcome`)[0].outcome as Outcome;
     const baseline = { level: input.state.progression.level as number, xp: input.state.progression.xp as number };
-    const prepared = { rewards: input.rewards, grant: prepareGrant(input.state as OwnerState, input.rewards.loot), progressionBaseline: baseline,
+    const prepared = { rewards: input.rewards, grant: prepareGrant(input.state as OwnerState, input.rewards.loot, retainedRules(input.rulesVersion)), progressionBaseline: baseline,
       progression: applyXp(baseline.level, baseline.xp, input.rewards.xp) };
     return (await tx`select public.settle_expedition(${job.activityId},${job.token},${tx.json(prepared as never)}) as outcome`)[0].outcome as Outcome;
   });

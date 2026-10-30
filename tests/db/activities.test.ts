@@ -545,15 +545,16 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     const owner = await fighter();
     const token = await coordinatorLease();
     expect(await advance(300, token)).toMatchObject({ wait: 'preparation' });
-    await sql`insert into private.rules_versions(version,active) values('v2',false)`;
+    // 'v9': since patch 1.6 the worker has v2 executors, so an unknown version is one no executor registers.
+    await sql`insert into private.rules_versions(version,active) values('v9',false)`;
     await sql`update private.rules_versions set active=false where version='v1'`;
-    await sql`update private.rules_versions set active=true where version='v2'`;
+    await sql`update private.rules_versions set active=true where version='v9'`;
     expect(await runBoundary(300, token)).toMatchObject({ status: 'complete' });
     expect(await sql`select s.rules_version, s.snapshot->>'rulesVersion' as snapshot_version from private.activity_snapshots s`)
       .toEqual([{ rules_version: 'v1', snapshot_version: 'v1' }]);
     for (let round = 0; round < 4; round++) await runWorker({ database: historicalPort(301, token), workerId: randomUUID() });
     expect(await sql`select rules_version, status, attempts::int, last_failure from private.jobs where kind='prepare' and slot_index=301`)
-      .toEqual([{ rules_version: 'v2', status: 'operator', attempts: 3, last_failure: 'unsupported-rules' }]);
+      .toEqual([{ rules_version: 'v9', status: 'operator', attempts: 3, last_failure: 'unsupported-rules' }]);
     expect(await advance(301, token)).toMatchObject({ phase: 4, wait: 'operator' });
     expect(await owner.row()).toMatchObject({ processed: 300, earned: 11 });
     expect(await sql`select count(*)::int as n from public.activities where slot_index=301`).toEqual([{ n: 0 }]);

@@ -1,18 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_EXECUTORS, handleWorker, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { DEFAULT_EXECUTORS, executorsFor, handleWorker, prepareActivity, prepareActivityV1, runWorker, WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { ArenaSimulationInput, ArenaSimulationResult, PairingInput, PairingResult, TournamentBoutResult } from '../../supabase/functions/_shared/backend/jobs.ts';
-import type { ExecutorRegistry, JobOutcome, TournamentBoutRead, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import type { ExecutorRegistry, JobOutcome, PreparedGrant, TournamentBoutRead, WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout, tournamentOutcomes } from '../../supabase/functions/_shared/domain/tournament.ts';
 import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
 import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
-import type { ActivitySnapshot, Attributes, JobKind, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
+import type { ActivitySnapshot, Attributes, JobKind, JobLease, PreparationInput, PreparationResult, Rules } from '../../supabase/functions/_shared/domain/types.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
+import { RETAINED_RULES } from '../../supabase/functions/_shared/domain/rules.ts';
 import { makeFighter, simulateBattle } from '../../supabase/functions/_shared/domain/combat.ts';
 import { planExpedition } from '../../supabase/functions/_shared/domain/expedition.ts';
+import type { ExpeditionPlan } from '../../supabase/functions/_shared/domain/expedition.ts';
 import { arenaNpcName, arenaOutcomes, estimateArenaStrength, makeFallback, matchArena } from '../../supabase/functions/_shared/domain/arena.ts';
 import type { ArenaAssignment } from '../../supabase/functions/_shared/domain/arena.ts';
-import { itemFixture } from '../fixtures/domain.ts';
+import { itemFixture, ownerFixture } from '../fixtures/domain.ts';
 
 const SECRET = 'unit-worker-secret-0123456789abcdef0123456789';
 const gid = '0d5f8471-d919-428f-9ab7-058c95821757';
@@ -653,6 +658,160 @@ describe('fenced worker orchestration', () => {
     const { database, calls } = port({ prepare: [job] }, () => ({ ok: false, code: 'invalid' }));
     expect(await runWorker({ database, workerId: 'worker-g' })).toMatchObject({ failed: 1, completed: 0 });
     expect(calls.find(c => c.name === 'fail')?.args).toEqual([job.id, job.token, 'invalid-result']);
+  });
+});
+
+/**
+ * Patch 1.6 (spec "Worker"): every executor is written once over `rules`, and the worker runs each job with the executors of
+ * the job's own version, so an activity is paid by the version of the boundary that froze it.
+ */
+describe('v2 jobs beside v1 (patch 1.6)', () => {
+  const SLOT_MS = RULES_V1.clock.slotMs;
+  const refused = expect.objectContaining({ code: 'unsupported-rules' });
+  const COPY = 'Rules must be the retained constants, never a copy';
+  const unchanged = (result: PreparationResult) => ({ derived: result.derived, costs: result.costs, league: result.league,
+    arenaStrength: result.arenaStrength });
+
+  it('prepares a v2 member with the cap', () => {
+    const v2 = (earnedPoints: number, level = 1) => prepareActivity(preparation({ rulesVersion: 'v2', earnedPoints, level }), RULES_V2);
+    // Level 1 allows 10 + 4 × 1 = 14 earned points: 13 still trains; 14, and 94 far above the cap, credit nothing.
+    expect([13, 14, 94].map(points => v2(points).trainingPoints)).toEqual([1, 0, 0]);
+    // Level 10 allows 50.
+    expect([v2(49, 10).trainingPoints, v2(50, 10).trainingPoints]).toEqual([1, 0]);
+    const result = v2(13);
+    expect([result.rulesVersion, result.snapshot.rulesVersion, result.arenaFighter.rulesVersion, result.npcTemplate.rulesVersion])
+      .toEqual(['v2', 'v2', 'v2', 'v2']);
+    // Only the economy differs: the stats, the stamina costs, the league and the visible strength are v1's.
+    expect(unchanged(result)).toEqual(unchanged(prepareActivity(preparation({ earnedPoints: 13 }), RULES_V1)));
+    expect(unchanged(v2(94))).toEqual(unchanged(prepareActivityV1(preparation({ earnedPoints: 94 }))));
+    // v1 has no cap.
+    expect(prepareActivity(preparation({ earnedPoints: 94 }), RULES_V1).trainingPoints).toBe(1);
+    expect(prepareActivityV1(preparation({ earnedPoints: 94 })).trainingPoints).toBe(1);
+  });
+
+  it('refuses a job of another version', () => {
+    expect(() => prepareActivity(preparation(), RULES_V2)).toThrow(refused);
+    expect(() => prepareActivity(preparation({ rulesVersion: 'v2' }), RULES_V1)).toThrow(refused);
+    // Through the registry: a v2 job carrying a v1 input, and the reverse.
+    expect(() => DEFAULT_EXECUTORS.v2.prepare!(lease('prepare', { rulesVersion: 'v2' }))).toThrow(refused);
+    expect(() => DEFAULT_EXECUTORS.v1.prepare!(lease('prepare', { snapshot: preparation({ rulesVersion: 'v2' }) }))).toThrow(refused);
+  });
+
+  it('registers both versions', () => {
+    expect(Object.keys(DEFAULT_EXECUTORS)).toEqual(['v1', 'v2']);
+    expect(Object.keys(DEFAULT_EXECUTORS)).toEqual(Object.keys(RETAINED_RULES));
+    expect(Object.isFrozen(DEFAULT_EXECUTORS)).toBe(true);
+    for (const version of ['v1', 'v2']) {
+      expect(Object.keys(DEFAULT_EXECUTORS[version]).sort(), version).toEqual(['pair', 'prepare', 'reveal', 'simulation']);
+      expect(Object.isFrozen(DEFAULT_EXECUTORS[version]), version).toBe(true);
+    }
+    expect(DEFAULT_EXECUTORS.v2.prepare!(lease('prepare', { snapshot: preparation({ rulesVersion: 'v2' }), rulesVersion: 'v2' })))
+      .toEqual(prepareActivity(preparation({ rulesVersion: 'v2' }), RULES_V2));
+  });
+
+  it('builds executors over the retained constants only, never a copy', () => {
+    // An equal or frozen copy is refused with its own message, at registration and in each generic executor.
+    for (const copy of [{ ...RULES_V2 }, structuredClone(RULES_V1), Object.freeze({ ...RULES_V1 })] as Rules[]) {
+      expect(() => executorsFor(copy)).toThrow(RangeError);
+      expect(() => executorsFor(copy)).toThrow(COPY);
+      expect(() => prepareActivity(preparation({ rulesVersion: copy.version }), copy)).toThrow(COPY);
+    }
+    expect(() => executorsFor({ ...RULES_V2, version: 'v9' } as unknown as Rules)).toThrow('Unsupported rules version');
+    expect(Object.keys(executorsFor(RULES_V2)).sort()).toEqual(['pair', 'prepare', 'reveal', 'simulation']);
+  });
+
+  /** One gladiator's Ruined Outpost trip, prepared under `rules` (its build stamped with that version), as the boundary freezes it. */
+  function trip(rules: Rules): ActivitySnapshot {
+    const prepared = prepareActivity(preparation({ rulesVersion: rules.version, level: 10, earnedPoints: 200,
+      build: { ...preparation().build, allocations: { strength: 150, agility: 5, vitality: 30, endurance: 5, precision: 5 } } }), rules);
+    return { activityId: 'activity-trip', gladiatorId: gid, slotIndex: 300, rulesVersion: rules.version, cutoffMs: 300 * SLOT_MS,
+      choice: { kind: 'expedition', expeditionId: 'outpost' }, scheduleVersion: 1, build: prepared.snapshot, derived: prepared.derived,
+      costs: prepared.costs, trainingPoints: prepared.trainingPoints, starting: { stamina: { current: 100, maximum: 100 }, level: 10, xp: 0,
+        earnedPoints: 200, unspentPoints: 5, league: prepared.league, rating: 1000, peakStrength: 0, tournamentOptIn: false } };
+  }
+
+  it('runs each job with its own version', async () => {
+    const v1Job = lease('simulation', { snapshot: trip(RULES_V1), seed: 'success' });
+    const v2Job = lease('simulation', { snapshot: trip(RULES_V2), seed: 'success', rulesVersion: 'v2' });
+    // A v1 trip on a v2 job is mixed: it is refused, never planned under either version.
+    const mixed = lease('simulation', { snapshot: trip(RULES_V1), seed: 'success', rulesVersion: 'v2' });
+    const { database, calls } = port({ simulation: [v1Job, v2Job, mixed] });
+    expect(await runWorker({ database, workerId: 'worker-v2' })).toMatchObject({ claimed: 3, completed: 2, failed: 1 });
+    const plan = (job: JobLease) => calls.find(c => c.name === 'complete' && c.args[0] === job.id)?.args[2] as ExpeditionPlan;
+    expect(plan(v1Job)).toEqual(planExpedition(trip(RULES_V1), 'success', RULES_V1));
+    expect(plan(v2Job)).toEqual(planExpedition(trip(RULES_V2), 'success', RULES_V2));
+    expect([plan(v1Job).rulesVersion, plan(v1Job).success, plan(v1Job).rewards.xp, plan(v1Job).rewards.money]).toEqual(['v1', true, 250, 60]);
+    expect([plan(v2Job).rulesVersion, plan(v2Job).success, plan(v2Job).rewards.xp, plan(v2Job).rewards.money]).toEqual(['v2', true, 75, 10]);
+    // The same build and seed fight the same bouts; the version changes the pay only.
+    expect(plan(v2Job).encounters.map(e => e.battleLog.winnerId)).toEqual(plan(v1Job).encounters.map(e => e.battleLog.winnerId));
+    expect(calls.filter(c => c.name === 'fail').map(c => c.args)).toEqual([[mixed.id, mixed.token, 'unsupported-rules']]);
+  });
+
+  it('pairs, fights and runs a tournament bout of a v2 boundary under v2', async () => {
+    const v2Fighter = (strength: number) => prepareActivity(preparation({ rulesVersion: 'v2', earnedPoints: 40,
+      build: { ...preparation().build, allocations: { strength, agility: 2, vitality: 2, endurance: 0, precision: 2 } } }), RULES_V2).arenaFighter;
+    const entrant = (id: string, strength: number, slotIndex = 300) => ({ gladiatorId: id, activityId: `activity-${id}`, seasonId: '0',
+      league: 'bronze' as const, slotIndex, rating: 1000, fighter: v2Fighter(strength) });
+    const pairing: PairingInput = { slotIndex: 300, league: 'bronze', seasonId: '0', rulesVersion: 'v2', historyFromSlot: 282, recent: [],
+      entrants: [entrant('a', 6), entrant('b', 6), entrant('c', 2)] };
+    const pairLease = (snapshot: PairingInput, rulesVersion = 'v2') => lease('pair', { snapshot, seed: 'pair-seed', gladiatorId: null, rulesVersion });
+    expect(DEFAULT_EXECUTORS.v2.pair!(pairLease(pairing))).toEqual({ assignments: matchArena(pairing.entrants, [], 'pair-seed') });
+    expect(() => DEFAULT_EXECUTORS.v1.pair!(pairLease(pairing, 'v1'))).toThrow(refused);
+    // A v2 pairing of fighters frozen under v1 is mixed: it is corrupt, never paired under the fighters' version.
+    const v1Fighters = { ...pairing, entrants: pairing.entrants.map(e => ({ ...e, fighter: tournamentFighter(6) })) };
+    expect(() => DEFAULT_EXECUTORS.v2.pair!(pairLease(v1Fighters))).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+
+    const [human] = matchArena([entrant('a', 6), entrant('b', 6)], [], 'pair-seed');
+    expect(human.kind).toBe('human');
+    const arena = { kind: 'arena', battleId: human.battleId, slotIndex: 300, rulesVersion: 'v2', startsAtMs: 300 * SLOT_MS,
+      revealAtMs: 300 * SLOT_MS + RULES_V2.arena.revealAfterMs, assignment: human, names: human.sides.map(side => `Name ${side.gladiatorId}`) } as ArenaSimulationInput;
+    const fought = DEFAULT_EXECUTORS.v2.simulation!(lease('simulation', { snapshot: arena, seed: 'battle-seed', rulesVersion: 'v2' })) as ArenaSimulationResult;
+    expect(fought.log.rulesVersion).toBe('v2');
+    expect(fought.outcomes).toEqual(arenaOutcomes(human, fought.log));
+    expect(() => DEFAULT_EXECUTORS.v1.simulation!(lease('simulation', { snapshot: arena, seed: 'battle-seed' }))).toThrow(refused);
+
+    const entrants = ['a', 'b', 'c', 'd', 'e'].map((id, i) => entrant(id, i, TOURNAMENT_SLOT));
+    const bracket = buildBracket(entrants, 'bracket-seed');
+    expect(bracket.rulesVersion).toBe('v2');
+    const names = Object.fromEntries(entrants.map(e => [e.gladiatorId, `Name ${e.gladiatorId}`]));
+    const [ready] = readyBouts(bracket);
+    const io = { database: { tournamentBoutInput: async (): Promise<TournamentBoutRead> => ({ ok: true, graph: JSON.parse(JSON.stringify(bracket)), names }) } };
+    const bout = (rulesVersion: string) => lease('simulation', { snapshot: { kind: 'tournament-bout', tournamentId: bracket.id, boutId: ready.boutId } as never,
+      seed: 'bout-seed', rulesVersion });
+    expect(await DEFAULT_EXECUTORS.v2.simulation!(bout('v2'), io)).toEqual({ boutId: ready.boutId, log: runBout(ready, 'bout-seed', names) });
+    await expect(DEFAULT_EXECUTORS.v1.simulation!(bout('v1'), io)).rejects.toThrow(refused);
+  });
+
+  /**
+   * A fake service-role client for `createWorkerDatabase().settle`: the fenced settlement input is a full inventory (60 tier-1
+   * swords, no salvage stack with room) and a trip's loot of 2 salvage under `rulesVersion`.
+   */
+  function settlementClient(rulesVersion: string) {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const sword = itemFixture(CATALOG_V1.items['sword:1:common']);
+    const state = { ...ownerFixture, inventory: Array.from({ length: 60 }, (_, i) => ({ ...sword, id: `item-${String(i).padStart(2, '0')}` })) };
+    const rewards = { xp: 75, money: 10, loot: [{ catalogId: 'salvage', catalogVersion: 'v1', quantity: 2, origin: 'expedition' }] };
+    const answers: Record<string, unknown> = { expedition_settlement_input: { state, rewards, rulesVersion, jobId: 'job-trip' },
+      renew_job: { ok: true, expiresAtMs: 1 }, settle_expedition: { ok: true } };
+    const client = { rpc: async (name: string, args: Record<string, unknown>) => {
+      calls.push({ name, args });
+      return Object.hasOwn(answers, name) ? { data: answers[name], error: null } : { data: null, error: { message: 'unexpected' } };
+    } } as unknown as SupabaseClient;
+    return { client, calls };
+  }
+
+  it('settles a trip with its own salvage value', async () => {
+    for (const [version, unitValue] of [['v1', 10], ['v2', 4]] as const) {
+      const { client, calls } = settlementClient(version);
+      expect(await createWorkerDatabase(client).settle('activity-trip', 'token-trip'), version).toEqual({ ok: true });
+      const prepared = calls.find(c => c.name === 'settle_expedition')?.args.prepared as { grant: PreparedGrant };
+      expect(prepared.grant.plan.overflow, version).toEqual([{ catalogId: 'salvage', quantity: 2, unitValue, money: 2 * unitValue }]);
+      expect(prepared.grant.plan.overflowMoney, version).toBe(2 * unitValue);
+    }
+    // An unknown version is refused before anything is renewed or settled.
+    const { client, calls } = settlementClient('v3');
+    await expect(createWorkerDatabase(client).settle('activity-trip', 'token-trip')).rejects.toThrow('unsupported-rules');
+    expect(calls.map(c => c.name)).toEqual(['expedition_settlement_input']);
   });
 });
 

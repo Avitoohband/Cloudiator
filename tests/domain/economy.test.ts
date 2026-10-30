@@ -4,7 +4,8 @@ import { CATALOG_V1 } from '@domain/catalog-v1.ts';
 import { expeditionReward, salvageSellValue, seasonPrizes, tournamentPlacements, trainingCap, trainingPoints, type ExpeditionId } from '@domain/economy.ts';
 import { RULES_V1 } from '@domain/rules-v1.ts';
 import { RULES_V2 } from '@domain/rules-v2.ts';
-import { RETAINED_RULES, retainedRules } from '@domain/rules.ts';
+import { RETAINED_RULES, requireRetained, retainedRules } from '@domain/rules.ts';
+import type { Rules } from '@domain/types.ts';
 import type { LeagueId } from '@contracts/commands.ts';
 
 // Patch 1.6 (spec "Domain"; plan Task 1): economy.ts is the only place that knows how the rules versions differ. Each accessor
@@ -81,5 +82,15 @@ describe('economy accessors', () => {
     expect(retainedRules('v2')).toBe(RULES_V2);
     expect(() => retainedRules('v3')).toThrow(RangeError);
     expect(Object.keys(RETAINED_RULES)).toEqual(['v1', 'v2']);
+  });
+
+  it('accepts only the retained constants themselves, never a copy', () => {
+    expect([requireRetained(RULES_V1), requireRetained(RULES_V2)]).toEqual([RULES_V1, RULES_V2]);
+    expect(requireRetained(RULES_V2)).toBe(RULES_V2);
+    for (const copy of [{ ...RULES_V1 }, structuredClone(RULES_V2), Object.freeze({ ...RULES_V2 })] as Rules[]) {
+      expect(() => requireRetained(copy)).toThrow(RangeError);
+      expect(() => requireRetained(copy)).toThrow('Rules must be the retained constants, never a copy');
+    }
+    expect(() => requireRetained({ ...RULES_V2, version: 'v9' } as unknown as Rules)).toThrow('Unsupported rules version');
   });
 });

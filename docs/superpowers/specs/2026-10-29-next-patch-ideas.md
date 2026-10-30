@@ -98,3 +98,16 @@ More from Avi, 2026-10-29:
 28. **A bigger camp map.** "i want to make the map bigger".
 29. **Future facilities where the trees are.** "also where there are trees in the camp, in the future it will be new
     facilities": the wooded parts of the camp are reserved as plots for new buildings later.
+
+More from Avi, 2026-10-30 (collected for the plans, not yet designed):
+
+30. **Player support.** "Add players reach out support option": a way for players to contact support from the game.
+31. **A watch mode for the Arena and tournaments, for streams.** "a button when arena is live which shows different battle
+    and a text narration it, who's fighting, wins, blows and more": while the Arena is live, a button opens a spectator view
+    that moves between bouts, with a running text commentary (who fights, the blows, the winner). It builds on 1.5's replay
+    viewer.
+32. **Stream the game 24/7 on YouTube (to check).** "checking the option to live stream the game 24/7 somehow at YouTube":
+    a feasibility check, likely a headless browser on the watch mode (idea 31) pushed to a YouTube live stream on the Indigo
+    Labs channel; cost and hosting to be checked.
+33. **An NPC "the Champ".** "Add npc 'the champ' - which was the champ of the arena, level unknown": a legendary former Arena
+    champion in the camp, level shown as unknown (fits the 1.5.1 camp NPCs and the bigger camp's plots).

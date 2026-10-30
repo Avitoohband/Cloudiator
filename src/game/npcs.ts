@@ -7,7 +7,7 @@
 // in the evening, with a torch whose light walks with them (src/game/camp-scene.ts). The new rounds walk around the
 // gladiators' spots, the Arena floor, the whole-trip replay's gate road and the other NPCs' posts.
 import type { Direction, MapData, TilePoint } from './assets';
-import { SLOT_MS, phaseOfSlot } from './lighting';
+import { lightingAt } from './lighting';
 import { facingFor, findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
 import { spectatorSpots } from './tournament-camp';
 import { gateRoadTiles } from './trip-vignette';
@@ -72,9 +72,10 @@ export const NPC_ROUTINES: NpcRoutine[] = [
   ] },
   // Patch 1.5.1 guards: the gate's south post beside its torch, the lookout at the foot of the watchtower, and the two wall
   // patrols round the inside of the palisade (the night watch in the evening).
+  // The south post stands beside the gate torch, clear of the departure spots the arrival Find shows (review fix 1).
   { npcId: 'guard-south', look: 'guard', name: 'Gate Guard', keepClear: true, periodMs: 70_000, steps: [
-    { x: 40, y: 24, at: 0, durationMs: 40_000, action: 'idle', facing: 'sw' },
-    { x: 38, y: 26, at: 48_000, durationMs: 10_000, action: 'idle', facing: 'se' },
+    { x: 41, y: 25, at: 0, durationMs: 40_000, action: 'idle', facing: 'sw' },
+    { x: 38, y: 26, at: 46_000, durationMs: 10_000, action: 'tend', facing: 'se' },
   ] },
   { npcId: 'lookout', look: 'guard', name: 'Tower Lookout', keepClear: true, periodMs: 80_000, steps: [
     { x: 40, y: 17, at: 0, durationMs: 50_000, action: 'idle', facing: 'se' },
@@ -94,10 +95,12 @@ export const NPC_ROUTINES: NpcRoutine[] = [
   ] },
   // Patch 1.5.1 camp NPCs: water from the well to the training yard and the gate; the herald at the Arena gate, the camp gate
   // and the plaza; crates from the gate to the stalls and the kitchen; the forester's four wooded corners (the future plots).
+  // Petra's posts and the porter's stall post stand clear of today's NPCs' nameplates and routes (review fixes 4 and 6: the
+  // proposal had (28, 31), (13, 18), (37, 25) and (21, 6)).
   { npcId: 'water-carrier', look: 'water-carrier', name: 'Petra the Water Carrier', keepClear: true, periodMs: 120_000, steps: [
-    { x: 28, y: 31, at: 0, durationMs: 12_000, action: 'tend', facing: 'sw' },
-    { x: 13, y: 18, at: 43_000, durationMs: 8_000, action: 'tend', facing: 'sw' },
-    { x: 37, y: 25, at: 88_000, durationMs: 8_000, action: 'tend', facing: 'se' },
+    { x: 27, y: 30, at: 0, durationMs: 12_000, action: 'tend', facing: 'sw' },
+    { x: 14, y: 22, at: 43_000, durationMs: 8_000, action: 'tend', facing: 'sw' },
+    { x: 36, y: 26, at: 88_000, durationMs: 8_000, action: 'tend', facing: 'se' },
   ] },
   { npcId: 'herald', look: 'herald', name: 'Felix the Herald', keepClear: true, periodMs: 100_000, steps: [
     { x: 29, y: 27, at: 0, durationMs: 30_000, action: 'tend', facing: 'se' },
@@ -106,7 +109,7 @@ export const NPC_ROUTINES: NpcRoutine[] = [
   ] },
   { npcId: 'porter', look: 'porter', name: 'Quintus the Porter', keepClear: true, periodMs: 140_000, steps: [
     { x: 35, y: 25, at: 0, durationMs: 10_000, action: 'tend', facing: 'sw' },
-    { x: 21, y: 6, at: 41_000, durationMs: 10_000, action: 'tend', facing: 'se' },
+    { x: 20, y: 5, at: 41_000, durationMs: 10_000, action: 'tend', facing: 'se' },
     { x: 27, y: 40, at: 98_000, durationMs: 10_000, action: 'tend', facing: 'sw' },
   ] },
   { npcId: 'forester', look: 'forester', name: 'Silva the Forester', keepClear: true, periodMs: 190_000, steps: [
@@ -122,17 +125,22 @@ export function npcPostTiles(routines: NpcRoutine[] = NPC_ROUTINES): Set<string>
   return new Set(routines.flatMap(r => r.steps.map(s => `${s.x},${s.y}`)));
 }
 
-/** The evening phase of the shared clock: the camp's own day and evening light (src/game/lighting.ts). */
-const isEvening = (nowMs: number) => phaseOfSlot(Math.floor(nowMs / SLOT_MS)) === 'evening';
+/**
+ * The night watch is out while the camp torches are at least half lit (src/game/lighting.ts `torchIntensity`). They brighten
+ * over the last 3 minutes of the afternoon and dim over the last 3 minutes of the evening, so the patrols take up and put
+ * down their torches with the camp's, never at the slot edge (review fix 5).
+ */
+export const NIGHT_WATCH_TORCHES = 0.5;
+const nightWatch = (nowMs: number) => lightingAt(nowMs).torchIntensity >= NIGHT_WATCH_TORCHES;
 
-/** The art an NPC wears at shared time `nowMs`: the night watch's in the evening, its own otherwise. */
+/** The art an NPC wears at shared time `nowMs`: the night watch's while the camp torches burn, its own otherwise. */
 export function npcLookAt(routine: NpcRoutine, nowMs: number): string {
-  return routine.evening && isEvening(nowMs) ? routine.evening.look : routine.look ?? routine.npcId;
+  return routine.evening && nightWatch(nowMs) ? routine.evening.look : routine.look ?? routine.npcId;
 }
 
-/** Whether an NPC carries a lit torch at shared time `nowMs`: a night-watch patrol, in the evening phase only. */
+/** Whether an NPC carries a lit torch at shared time `nowMs`: a night-watch patrol, while the camp torches burn. */
 export function npcCarriesTorch(routine: NpcRoutine, nowMs: number): boolean {
-  return !!routine.evening?.torch && isEvening(nowMs);
+  return !!routine.evening?.torch && nightWatch(nowMs);
 }
 
 /** Beds and seats: where gladiators sleep, sit and eat (their props' footprints). */

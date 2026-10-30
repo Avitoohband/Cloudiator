@@ -699,13 +699,16 @@ export function held() {
   };
 }
 
-/** The porter's crate (patch 1.5.1), carried on the far shoulder behind the head and steadied by the far hand. */
+/**
+ * The porter's crate (patch 1.5.1), carried on the far shoulder behind the head. From the front it sits back behind the head,
+ * so the far hand, raised beside the face, holds its visible edge (Avi's review: the arm no longer runs under the chin).
+ */
 export function shoulderCrate() {
   return ctx => {
     const { p, view } = ctx;
     ctx.part('back', c => {
       const s = p.farShoulder;
-      const cx = s[0] + (view === 'front' ? 5 : -5);
+      const cx = s[0] + (view === 'front' ? 2 : -5);
       const by = s[1] - 1;
       const planks = (x, y, mk) => (!mk.has(x - 1, y) || !mk.has(x, y - 1) ? 'wood1' : !mk.has(x + 1, y) || !mk.has(x, y + 1) ? 'wood3' : y % 3 === 0 ? 'wood3' : 'wood2');
       c.stamp(m().rect(cx - 5, by - 8, 10, 8), planks);
@@ -781,15 +784,24 @@ export function apron(r) {
   };
 }
 
-export function cape(r) {
+/**
+ * A cape from the shoulders. `spread` widens it past the shoulders and `flare` sets how far its hem trails behind. By default
+ * its hem follows the legs to just above the knees (the Gate Guard's); with `drape` it hangs straight down that many pixels
+ * below the hips, whatever the legs do. `view` paints it in that view only: a look can list it once before its clothes (seen
+ * from the front, behind them) and once after them (seen from behind, over their back). The herald's is wider, longer and
+ * flared, so it shows beside the body from the front and over his back from behind (patch 1.5.1 review).
+ */
+export function cape(r, { spread = 1.5, flare = 3, drape = null, view: only = null } = {}) {
   return ctx => {
     const { p, side } = ctx;
+    if (only && ctx.view !== only) return;
     ctx.part('back', c => {
-      const a = add(p.nearShoulder, [side * 1.5, -0.5]);
-      const b = add(p.farShoulder, [-side * 1.5, -0.5]);
+      const a = add(p.nearShoulder, [side * spread, -0.5]);
+      const b = add(p.farShoulder, [-side * spread, -0.5]);
       const back = -1; // capes trail behind (screen-left) for right-facing frames
-      const cc = add(lerp(p.farHip, p.farKnee, 0.9), [back * 3 - side * 2, 0]);
-      const d = add(lerp(p.nearHip, p.nearKnee, 0.9), [back * 3 + side * 2, 0]);
+      const hemOf = (hip, knee) => (drape === null ? lerp(hip, knee, 0.9) : add(hip, [0, drape]));
+      const cc = add(hemOf(p.farHip, p.farKnee), [back * flare - side * 2, 0]);
+      const d = add(hemOf(p.nearHip, p.nearKnee), [back * flare + side * 2, 0]);
       c.stamp(m().polygon([a, b, cc, d]), (x, y, mk) => { const v = dim(r)(x, y, mk); return (x % 3 === 0 && v === r.lo) ? r.deep : v; });
     });
   };

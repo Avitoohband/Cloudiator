@@ -133,7 +133,7 @@
    "kind": "actor"
   },
   "npcs": {
-   "image": "actors/npcs.b60fef893d.png",
+   "image": "actors/npcs.7e743ff82c.png",
    "data": "actors/npcs.json",
    "width": 1536,
    "height": 832,
@@ -3389,9 +3389,9 @@
    "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
   },
   {
-   "file": "actors/npcs.b60fef893d.png",
-   "sha256": "b60fef893d9fde6657c17ded348cff03f31cd55772089877f1c365ba00cdea22",
-   "bytes": 67546,
+   "file": "actors/npcs.7e743ff82c.png",
+   "sha256": "7e743ff82cabd316758b44787fb048d83799aba53ffcf6707e35128a301e0b80",
+   "bytes": 67807,
    "source": "generated",
    "generator": "assets/source/generators/npcs.mjs",
    "inputs": [
@@ -3411,7 +3411,7 @@
   },
   {
    "file": "actors/npcs.json",
-   "sha256": "ddf1e6a2d3d307fce306185bc0b333de3cc5ddffbd1ced75a9fa69a2253bd204",
+   "sha256": "b95d43f289edc3bf8798f251ad82363c193d351476640058b84fb836208a72a2",
    "bytes": 70093,
    "source": "generated",
    "generator": "assets/source/generators/npcs.mjs",

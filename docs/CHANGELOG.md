@@ -28,7 +28,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 A small app-only patch after 1.5 (branch `claude/p151-camp-npcs`): Patch 1 of the camp-expansion proposal (ideas 27–29 in
 `docs/superpowers/specs/2026-10-29-next-patch-ideas.md`; Avi's answers 2026-10-30), on today's map. It is recorded after
-1.5 at release. The bigger camp and its plots come in their own patch after 1.7.
+1.5 at release. The bigger camp and its plots come in their own patch after 1.8.
 
 ### Built
 

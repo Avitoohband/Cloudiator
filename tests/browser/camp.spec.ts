@@ -372,18 +372,31 @@ test.describe('living isometric camp', () => {
     for (const id of ['water-carrier', 'herald', 'porter', 'forester']) expect(npcs.find(a => a.id === `npc:${id}`)!.look, id).toBe(id);
 
     const slot = await page.evaluate(() => window.__cloudiatorCamp!.world()!.slotIndex);
-    for (const [i, phase] of ['morning', 'afternoon', 'evening'].entries()) {
-      const at = (slot - (slot % 3) + i) * SLOT_MS + 1_200_000;
+    // Minute 20 of each phase, and 30 s before the afternoon ends, when the camp torches have mostly brightened for the evening
+    // (review fix 5: the night watch takes up its torches with them, not at the slot edge).
+    const moments: [string, number, boolean][] = [
+      ['morning', 1_200_000, false], ['afternoon', SLOT_MS + 1_200_000, false], ['afternoon end', 2 * SLOT_MS - 30_000, true], ['evening', 2 * SLOT_MS + 1_200_000, true],
+    ];
+    for (const [phase, offset, evening] of moments) {
+      const at = (slot - (slot % 3)) * SLOT_MS + offset;
       await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), at);
       for (const r of NPC_ROUTINES) {
         const p = planNpcPosition(r, campMap as unknown as MapData, at);
-        // Each NPC in view, so its light (if any) is drawn.
-        await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 1), { x: p.x, y: p.y });
+        // Each NPC in view at zoom 2, so its nameplate and its light (if any) are drawn.
+        await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: p.x, y: p.y });
         await nextFrames(page);
         const state = await campState(page);
         const a = state.actors.find(x => x.id === `npc:${r.npcId}`)!;
         expect([a.x, a.y], `${r.npcId} ${phase}`).toEqual([p.x, p.y]);
-        const watch = phase === 'evening' && r.npcId.startsWith('patrol-');
+        // The drawn nameplate fits the box tests/domain/camp-npcs.test.ts keeps clear (6 px a character + 4, 14 px, 46 px up).
+        const feetAt = worldToScreen(a.x, a.y);
+        expect(a.plates, `${r.npcId} nameplate`).toHaveLength(1);
+        const [plate] = a.plates;
+        expect(plate.width, `${r.npcId} nameplate`).toBeLessThanOrEqual(6 * a.name.length + 4);
+        expect(plate.height, `${r.npcId} nameplate`).toBeLessThanOrEqual(14);
+        expect(Math.abs(plate.y + plate.height - (feetAt.y - 46)), `${r.npcId} nameplate`).toBeLessThanOrEqual(1);
+        expect(Math.abs(plate.x + plate.width / 2 - feetAt.x), `${r.npcId} nameplate`).toBeLessThanOrEqual(1);
+        const watch = evening && r.npcId.startsWith('patrol-');
         expect(a.look, `${r.npcId} ${phase}`).toBe(watch ? 'night-watch' : r.look ?? r.npcId);
         expect(a.frame.startsWith(`${a.look}/`), `${r.npcId} ${phase} draws ${a.frame}`).toBe(true);
         if (!watch) { expect(a.torch, `${r.npcId} ${phase}`).toBeNull(); continue; }
@@ -395,11 +408,33 @@ test.describe('living isometric camp', () => {
         expect(feet.y - a.torch!.y, r.npcId).toBeLessThan(48);
         expect(a.torch!.alpha, r.npcId).toBeGreaterThan(state.lighting.torchAlpha * 0.7);
         expect(a.torch!.alpha, r.npcId).toBeLessThan(state.lighting.torchAlpha / 0.7);
-        if (r.npcId === 'patrol-south') {
-          await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: p.x, y: p.y });
-          await nextFrames(page);
-          await page.screenshot({ path: testInfo.outputPath('camp-night-watch.png') });
-        }
+        if (r.npcId === 'patrol-south' && phase === 'evening') await page.screenshot({ path: testInfo.outputPath('camp-night-watch.png') });
+      }
+    }
+  });
+
+  // Review fix 6: with reduced motion the NPCs keep to their first post, and the night watch still carries a steady torch.
+  test('lights the night watch\'s torches with reduced motion too, steady and only while the camp torches burn', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openCamp(page);
+    expect((await campState(page)).reducedMotion).toBe(true);
+    const slot = await page.evaluate(() => window.__cloudiatorCamp!.world()!.slotIndex);
+    const base = (slot - (slot % 3)) * SLOT_MS;
+    for (const [phase, offset, lit] of [['morning', 1_200_000, false], ['afternoon', SLOT_MS + 1_200_000, false], ['evening', 2 * SLOT_MS + 1_200_000, true], ['evening end', 3 * SLOT_MS - 30_000, false]] as const) {
+      for (const r of NPC_ROUTINES.filter(o => o.evening)) {
+        const first = [...r.steps].sort((a, b) => a.at - b.at)[0];
+        await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), base + offset);
+        await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: first.x + 0.5, y: first.y + 0.5 });
+        await nextFrames(page);
+        const state = await campState(page);
+        const a = state.actors.find(x => x.id === `npc:${r.npcId}`)!;
+        expect([a.x, a.y, a.action], `${r.npcId} ${phase}`).toEqual([first.x + 0.5, first.y + 0.5, first.action]);
+        expect(a.look, `${r.npcId} ${phase}`).toBe(lit ? 'night-watch' : 'guard');
+        if (!lit) { expect(a.torch, `${r.npcId} ${phase}`).toBeNull(); continue; }
+        // No flicker: exactly the camp torches' strength, every frame.
+        expect(a.torch!.alpha, `${r.npcId} ${phase}`).toBeCloseTo(state.lighting.torchAlpha, 6);
+        await nextFrames(page);
+        expect((await campState(page)).actors.find(x => x.id === a.id)!.torch!.alpha, `${r.npcId} ${phase}`).toBeCloseTo(a.torch!.alpha, 6);
       }
     }
   });

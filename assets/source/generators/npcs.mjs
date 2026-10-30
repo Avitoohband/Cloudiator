@@ -5,6 +5,10 @@ import { flatten, renderLayers } from './rig.mjs';
 import { NPC_ACTIONS } from './poses.mjs';
 import { RAMP, SKIN, apron, beard, body, cap, cape, hair, headband, heavyArmor, held, helmet, hood, kilt, robe, shoulderCrate, tool, tunic, weapon } from './outfits.mjs';
 
+/** The herald's gold cape: wide, long and flared; seen from the front behind his tunic, from behind over its back. */
+const HERALD_CAPE = { spread: 3.5, flare: 8, drape: 12 };
+const HERALD_CAPE_FRONT = { ...HERALD_CAPE, view: 'front' };
+const HERALD_CAPE_BACK = { ...HERALD_CAPE, view: 'back' };
 const guardLayers = () => [cape(RAMP.crimson), body(SKIN.tan), kilt(RAMP.crimson), heavyArmor(), helmet(RAMP.gold), weapon('spear')];
 
 export const NPCS = [
@@ -44,13 +48,13 @@ export const NPCS = [
     layers: [body(SKIN.tan, 'female'), tunic(RAMP.water, { skirt: 0.9, sleeves: 0.5 }), hair(RAMP.blackHair, 'bun'), held()],
   },
   {
-    // The trainer's staff and a cape.
+    // The trainer's staff and a gold cape.
     id: 'herald', name: 'Felix the Herald', role: 'herald',
-    layers: [cape(RAMP.gold), body(SKIN.light), tunic(RAMP.violet, { skirt: 0.8, sleeves: 0.6 }), hair(RAMP.brownHair, 'short'), tool('staff')],
+    layers: [cape(RAMP.gold, HERALD_CAPE_FRONT), body(SKIN.light), tunic(RAMP.violet, { skirt: 0.8, sleeves: 0.6 }), cape(RAMP.gold, HERALD_CAPE_BACK), hair(RAMP.brownHair, 'short'), tool('staff')],
   },
   {
     // The one new part: a crate on the shoulder, steadied by the far hand.
-    id: 'porter', name: 'Quintus the Porter', role: 'porter', pose: { weapon: 'none', farArm: [100, 40] },
+    id: 'porter', name: 'Quintus the Porter', role: 'porter', pose: { weapon: 'none', farArm: [60, 100] },
     layers: [shoulderCrate(), body(SKIN.dark), tunic(RAMP.canvas, { skirt: 0.6, sleeves: 0.3 }), hair(RAMP.blackHair, 'short'), headband(RAMP.crimson)],
   },
   {

@@ -126,6 +126,8 @@ export type LiveTransport = {
   setMessages(messages: readonly GameMessage[]): void;
   /** Replaces the owner's settled results the Notifications tab lists (a result was credited). */
   setNotifications(notifications: readonly LiveNotification[]): void;
+  /** Replaces the owner's settled bouts My bouts lists (another account's, or a bout was credited). */
+  setBouts(bouts: readonly RevealedTimeline[]): void;
   /** Replaces the revision's published slot (a slot's publication), or restores the default with undefined. */
   setPublishedSlotIndex(published: ((serverNowMs: number) => number | null) | undefined): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
@@ -245,6 +247,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setMarket: offers => { data.market = offers; },
     setMessages: messages => { data.messages = messages; },
     setNotifications: notifications => { data.notifications = notifications; },
+    setBouts: bouts => { data.bouts = bouts; },
     setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {

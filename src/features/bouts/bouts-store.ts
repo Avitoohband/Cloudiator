@@ -15,8 +15,11 @@ export type BoutsStore = {
   load(filter: BoutFilter): void;
   /** The next page appended, no bout twice; the rows are kept on failure, which `moreFailed` says. */
   more(filter: BoutFilter): Promise<void>;
-  /** Every list read again (Results reads once each time it opens); the pages of older reads are dropped. */
-  reload(): void;
+  /**
+   * The chip `shown` and All (the tab's count) read again, once each time Results opens; the other chips go back to unread (their rows
+   * and any read still out dropped), so each is read when shown. Pages of older reads are dropped. A failed reload keeps the rows shown.
+   */
+  reload(shown: BoutFilter): void;
   subscribe(listener: () => void): () => void;
 };
 
@@ -89,8 +92,16 @@ export function createBoutsStore(reads: Pick<GameGateway, 'bouts'>): BoutsStore 
         if (entry.more === id) entry.more = null;
       }
     },
-    reload() {
-      for (const filter of FILTERS) if (list(filter).status !== 'idle') readFirst(filter);
+    reload(shown) {
+      for (const filter of FILTERS) {
+        if (filter === 'all' || filter === shown) { readFirst(filter); continue; }
+        if (list(filter).status === 'idle' && waiting.get(filter)?.first == null) continue;
+        // Not shown: let it go, so a page still out for it is dropped and it is read again when shown.
+        const entry = wait(filter);
+        entry.first = null;
+        entry.more = null;
+        set(filter, IDLE);
+      }
     },
     subscribe(listener) {
       listeners.add(listener);

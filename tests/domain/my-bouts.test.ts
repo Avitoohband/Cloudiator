@@ -89,7 +89,7 @@ describe('the bouts store', () => {
   it('lands only the latest read: a reload drops the page of the read before it', async () => {
     const reads = heldReads(), store = createBoutsStore(reads);
     store.load('all');
-    store.reload();
+    store.reload('all');
     const [first, second] = reads.calls;
     expect([first.cursor, second.cursor]).toEqual([undefined, undefined]);
     first.resolve(page(['old']));
@@ -99,8 +99,10 @@ describe('the bouts store', () => {
     // The other way round: the newer read lands first, and the older one that comes after it changes nothing.
     const other = createBoutsStore(reads);
     other.load('lost');
-    other.reload();
-    const [older, newer] = reads.calls.slice(2);
+    other.reload('lost');
+    // The reload reads Lost again and All (the tab's count), Lost's first read is still out.
+    expect(reads.calls.slice(2).map(c => c.filter)).toEqual(['lost', 'all', 'lost']);
+    const [older, , newer] = reads.calls.slice(2);
     newer.resolve(page(['new']));
     await settle();
     older.resolve(page(['old']));
@@ -116,7 +118,7 @@ describe('the bouts store', () => {
     reads.calls[0].resolve(page(ids(20), '980'));
     await settle();
     const more = store.more('all');
-    store.reload();
+    store.reload('all');
     // The rows stay on screen while the reload is out (Results opening again does not flash an empty list).
     expect(store.list('all')).toMatchObject({ status: 'loading', loadingMore: false });
     expect(rowIds(store, 'all')).toEqual(ids(20));
@@ -130,14 +132,56 @@ describe('the bouts store', () => {
     await settle();
     expect(rowIds(store, 'all')).toEqual(['fresh', ...ids(19)]);
     expect(store.list('all')).toMatchObject({ status: 'ready', nextCursor: '981', loadingMore: false, moreFailed: false });
-    // A list never read is not read by a reload; one that failed is read again.
-    expect(store.list('won').status).toBe('idle');
-    store.load('lost');
-    reads.calls[3].reject(new Error('down'));
+  });
+
+  it('reads again only the chip on screen and All, and lets the other chips go (review Minor 3)', async () => {
+    const reads = heldReads(), store = createBoutsStore(reads);
+    // Results opening on All for the first time: one read, the All list (the count is the same list).
+    store.reload('all');
+    expect(reads.calls.map(c => c.filter)).toEqual(['all']);
+    store.load('all');
+    expect(reads.calls).toHaveLength(1);
+    reads.calls[0].resolve(page(['a']));
+    store.load('won');
+    reads.calls[1].resolve(page(['w']));
+    const late = (store.load('lost'), reads.calls[2]);
+    await settle();
+    // Opened again on Lost: Lost and All are read again; Won goes back to unread, its rows gone, and Lost's late first page is dropped.
+    store.reload('lost');
+    expect(reads.calls.slice(3).map(c => c.filter)).toEqual(['all', 'lost']);
+    expect(store.list('won')).toEqual({ rows: [], nextCursor: null, status: 'idle', loadingMore: false, moreFailed: false });
+    late.resolve(page(['stale']));
+    await settle();
+    expect(store.list('lost').status).toBe('loading');
+    // A list that failed is read again when it is the one shown.
+    reads.calls[4].reject(new Error('down'));
     await settle();
     expect(store.list('lost').status).toBe('failed');
-    store.reload();
-    expect(reads.calls.slice(4).map(c => c.filter).sort()).toEqual(['all', 'lost']);
+    store.reload('lost');
+    expect(reads.calls.slice(5).map(c => c.filter)).toEqual(['all', 'lost']);
+    // Won, opened later, reads its first page then.
+    store.load('won');
+    expect(reads.calls.slice(7).map(c => c.filter)).toEqual(['won']);
+  });
+
+  it('keeps the rows shown when a reload fails, and says so with Try again above them (review Minor 2)', async () => {
+    const reads = heldReads(), store = createBoutsStore(reads);
+    store.load('all');
+    reads.calls[0].resolve(page(['a', 'b']));
+    await settle();
+    store.reload('all');
+    reads.calls[1].reject(new Error('down'));
+    await settle();
+    expect(store.list('all')).toMatchObject({ status: 'failed' });
+    expect(rowIds(store, 'all')).toEqual(['a', 'b']);
+    const html = renderToStaticMarkup(createElement(MyBouts, { store, filter: 'all', onFilter: () => {}, nowMs: NOW, onOpen: () => {}, timeZone: 'UTC' }));
+    expect(html).toContain('role="alert"');
+    expect(text(html)).toMatch(/Your bouts could not be loaded right now\. Try again .*vs Varro/);
+    expect(html.match(/data-bout-row=/g)).toHaveLength(2);
+    // Try again reads the first page again; the rows stay until it lands.
+    store.load('all');
+    expect(reads.calls).toHaveLength(3);
+    expect(rowIds(store, 'all')).toEqual(['a', 'b']);
   });
 
   it('keeps the rows and says so when More fails', async () => {
@@ -255,6 +299,28 @@ describe('watched marks', () => {
     off(); w.markWatched('b', T);
     expect(heard).toHaveBeenCalledTimes(2);
   });
+
+  it('trims another tab’s marks as its own: none older than 7 days before the newest, the newest 200 (review Minor 6)', async () => {
+    const window = new EventTarget(); vi.stubGlobal('window', window);
+    const w = await fresh();
+    w.subscribeWatched(() => {});
+    w.markWatched('mine', T + 8 * DAY);
+    // A few marks: the one older than 7 days before the newest goes, though the 200 have room for it.
+    stored.set(KEY, JSON.stringify([['old', T], ['recent', T + 8 * DAY + 1]]));
+    window.dispatchEvent(Object.assign(new Event('storage'), { key: KEY }));
+    expect([...w.readWatched()]).toEqual(['mine', 'recent']);
+    // Many: the newest 200 stay.
+    const theirs: [string, number][] = [['old', T], ...Array.from({ length: 205 }, (_, i): [string, number] => [`t-${i}`, T + 8 * DAY + i])];
+    stored.set(KEY, JSON.stringify(theirs));
+    window.dispatchEvent(Object.assign(new Event('storage'), { key: KEY }));
+    const marks = w.readWatched();
+    expect(marks.size).toBe(200);
+    expect(marks.has('old')).toBe(false);
+    expect(marks.has('mine')).toBe(false);
+    expect(marks.has('t-204')).toBe(true);
+    expect(marks.has('t-5')).toBe(true);
+    expect(marks.has('t-4')).toBe(false);
+  });
 });
 
 describe('the My bouts view', () => {
@@ -310,6 +376,28 @@ describe('the My bouts view', () => {
     expect(html).not.toContain('Watch:');
     expect(text(html)).toContain('vs Varro');
     expect(text(html)).not.toContain('TODAY');
+  });
+
+  it('names the legend’s dot for a screen reader (review Minor 5)', async () => {
+    const html = view(await loaded([bout()]));
+    expect(html).toMatch(/<span[^>]*role="img"[^>]*aria-label="a gold dot"[^>]*>●<\/span>/);
+    expect(text(html)).toContain('Replays are kept 7 days · ● not watched yet');
+  });
+
+  it('keeps each separator with the part after it, so a wrapped sub-line never ends in " ·" (review Minor 7)', () => {
+    const html = renderToStaticMarkup(createElement(BoutRow, { text: boutRow(bout({ tieBreak: true }), NOW, '12', 'UTC'), watched: true, onOpen: noop }));
+    const wide = /data-sub="wide">(.*?)<span[^>]*data-sub="narrow"/.exec(html)![1];
+    // Each part is one unbreakable span; the separator opens the span of the part after it, and a plain space comes before it.
+    const part = (inner: string) => new RegExp(`<span class="[^"]*part[^"]*">${inner}</span>`);
+    expect(wide).toMatch(part('Arena'));
+    expect(wide).toMatch(part('· 3:00\xA0AM'));
+    expect(wide).toMatch(part('· won on a tie-break'));
+    expect(wide).toMatch(part('· \\+10 renown'));
+    expect(wide).toMatch(part('· <span class="[^"]*up[^"]*">Rating \\+14</span>'));
+    expect(wide).toMatch(/<\/span> <span class="[^"]*part/);
+    // No separator ends a part, nor stands between two of them outside one.
+    expect(wide).not.toMatch(/·\s*<\/span>|·\s*<span class="[^"]*part/);
+    expect(text(html)).toContain('Arena · 3:00\xA0AM · won on a tie-break · +10 renown · Rating +14');
   });
 
   it('writes both sub-lines, the narrow one without the leading kind', () => {

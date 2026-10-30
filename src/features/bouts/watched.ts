@@ -52,13 +52,18 @@ export function readWatched(): Set<string> {
  * Marks a bout's replay watched at `nowMs` (the display clock's time): in memory first, then the marks older than a replay is kept are
  * dropped and the newest 200 kept, then stored if the device lets it, then every listener is told.
  */
+/** The marks to keep at `nowMs`, oldest first: none older than a replay is kept (7 days), and the newest 200. */
+function trimmed(marks: Iterable<[string, number]>, nowMs: number): [string, number][] {
+  return [...marks].filter(([, at]) => nowMs - at <= RULES_V1.retention.replayMs).sort((a, b) => a[1] - b[1]).slice(-KEEP);
+}
+
 export function markWatched(activityId: string, nowMs: number): void {
   // The display clock runs on performance.now(): a time with a fraction is stored as whole milliseconds, which is what a read accepts.
   const at = Math.floor(nowMs);
   const current = marks();
   current.delete(activityId);
   current.set(activityId, at);
-  const kept = [...current].filter(([, when]) => at - when <= RULES_V1.retention.replayMs).sort((a, b) => a[1] - b[1]).slice(-KEEP);
+  const kept = trimmed(current, at);
   memory = new Map(kept);
   try { localStorage.setItem(WATCHED_KEY, JSON.stringify(kept)); } catch { /* No storage: the page's memory holds the marks. */ }
   changed();
@@ -72,7 +77,8 @@ export function subscribeWatched(listener: () => void): () => void {
     if (event.key !== null && event.key !== WATCHED_KEY) return;
     const merged = new Map(marks());
     for (const [id, at] of stored()) if ((merged.get(id) ?? -Infinity) < at) merged.set(id, at);
-    memory = new Map([...merged].sort((a, b) => a[1] - b[1]).slice(-KEEP));
+    // Trimmed as a mark here is, at the newest mark's time (this module has no clock of its own).
+    memory = new Map(trimmed(merged, Math.max(-Infinity, ...merged.values())));
     snapshot = null;
     listener();
   };

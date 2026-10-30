@@ -266,6 +266,11 @@
   margin-top: 0;
 }
 
+/* Said above the rows a failed reload kept. */
+.failed + .group {
+  margin-top: 4px;
+}
+
 /* The shell's touch layout (`COMPACT_QUERY`): the phone's sub-line, and 44 px targets. */
 @media (hover: none), (max-width: 480px) {
   .subWide {

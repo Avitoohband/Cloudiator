@@ -59,7 +59,8 @@ import { MarketPanel } from '../market/MarketPanel';
 import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
-import { ResultsPanel, type ResultsTab } from '../results/ResultsPanel';
+import { ResultsPanel } from '../results/ResultsPanel';
+import { FIRST_RESULTS, choiceFor, choiceOwner, choose, type ResultsChoice } from '../results/results-choice';
 import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import type { MessagingActions } from '../messages/messages';
@@ -152,16 +153,12 @@ function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 
   }}>{label}</a>;
 }
 
-/** The Results tab and My bouts chip, which belong to one owner. */
-type ResultsChoice = { owner: string | null; view: ResultsTab; filter: BoutFilter };
-const FIRST_RESULTS = { view: 'mine', filter: 'all' } as const;
-
 /** Results: the recent results (a player's My bouts first), and in fixture mode the sample replays and expeditions below them, opened as scenes. */
 function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen, bouts, choice, onChoose, onWatchBout }: {
   fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; clock: DisplayClock;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
   onOpen(view: SceneView): void;
-  bouts: BoutsStore | null; choice: ResultsChoice; onChoose(next: Partial<Omit<ResultsChoice, 'owner'>>): void;
+  bouts: BoutsStore | null; choice: ResultsChoice; onChoose(next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>): void;
   onWatchBout(bout: MyBout, filter: BoutFilter): void;
 }) {
   // The sample rows sit in the Results menu, which stays open beneath the scene: Back says Results.
@@ -230,11 +227,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // My bouts' lists: one store per reader and owner, a player's only (a visitor, or an account without a gladiator, sees Everyone alone).
   const boutsOwner = viewer === 'player' ? owner?.gladiatorId ?? null : null;
   const bouts = useMemo(() => (reads && boutsOwner ? createBoutsStore(reads) : null), [reads, boutsOwner]);
-  // The Results tab and chip: My bouts and All for each owner until changed; another owner (or none) starts there again.
-  const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ owner: null, ...FIRST_RESULTS });
-  const results: ResultsChoice = resultsChoice.owner === boutsOwner ? resultsChoice : { owner: boutsOwner, ...FIRST_RESULTS };
-  const chooseResults = useCallback((next: Partial<Omit<ResultsChoice, 'owner'>>) => setResultsChoice(state =>
-    ({ ...(state.owner === boutsOwner ? state : FIRST_RESULTS), ...next, owner: boutsOwner })), [boutsOwner]);
+  // The Results tab and chip (`results-choice.ts`): My bouts and All for each owner until changed; another owner (or none) starts there
+  // again. A choice made while the viewer loads (Back from a scene right after a reload) waits for the first owner that loads (fix round 1).
+  const choiceKey = choiceOwner(viewer, owner?.gladiatorId);
+  const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ owner: undefined, ...FIRST_RESULTS });
+  const results = choiceFor(resultsChoice, choiceKey);
+  // The owner settles the choice once known, so a later owner never adopts it (an account switch goes through a loading viewer).
+  useEffect(() => { setResultsChoice(state => choiceFor(state, choiceKey)); }, [choiceKey]);
+  const chooseResults = useCallback((next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>) => setResultsChoice(state => choose(state, choiceKey, next)), [choiceKey]);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
   const send = useCallback((event: RailEvent) => setRail(state => railReducer(state, event)), []);

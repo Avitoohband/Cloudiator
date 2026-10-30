@@ -1,9 +1,13 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page, type TestInfo } from './fixtures';
+import type { BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import { arenaActivityId } from '../fixtures/arena-ids';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { noHorizontalScroll } from './a11y-helpers';
-import { closeMenu, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { SLOT_MS, emptyWorld, routeLiveReads, seedSession, testUser, type LiveTransport } from './live-routes';
+import { closeMenu, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 
 // Arena replays Task 4 (spec 1, the approved mockup; plan Review Focus 1 and 5): a player's 📜 Results opens on My bouts, the owner's
 // own Arena and tournament bouts, newest first, by day, with the result, the opponent, the renown and the rating, a gold dot until
@@ -15,6 +19,32 @@ test.use({ timezoneId: 'Etc/GMT-3', locale: 'en-US' });
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const KEY = 'cloudiator.bouts-watched.v1';
 const VARRO = arenaActivityId('ownerHumanWin');
+const MIN = 60_000, DAY = 86_400_000;
+/** The fixture world's slot start: Varro's bout (one slot back) settled then, so its replay is kept until 7 days later. */
+const SLOT_START = worldFixture.serverNowMs - (worldFixture.serverNowMs % SLOT_MS);
+const VARRO_EXPIRY = SLOT_START + 7 * DAY;
+const freezeShellClock = (page: Page, ms: number) => page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), ms);
+
+/** The owner Aster's settled Arena bout against Varro (the fixture PvP log) `slotsAgo` slots before `nowMs`, with its credited summary. */
+function liveBout(nowMs: number, slotsAgo: number, result: 'victory' | 'defeat'): RevealedTimeline {
+  const activityId = randomUUID();
+  const start = (Math.floor(nowMs / SLOT_MS) - slotsAgo) * SLOT_MS, settledAtMs = start + SLOT_MS;
+  const log = JSON.parse(readFileSync('tests/fixtures/battles/pvp.json', 'utf8')) as BattleLog;
+  const stage = (n: number, kind: RevealedStage['kind'], from: number, to: number, label: string, battleLog?: BattleLog): RevealedStage =>
+    ({ id: `${activityId}:${n}`, kind, revealedAtMs: start + from * MIN, startedAtMs: start + from * MIN, endsAtMs: start + to * MIN, label, ...(battleLog ? { battleLog } : {}) });
+  const replayExpiry = { state: 'available' as const, expiresAtMs: settledAtMs + 7 * DAY };
+  const won = result === 'victory';
+  return {
+    activityId, serverNowMs: nowMs, visibleThroughMs: nowMs,
+    stages: [stage(0, 'staging', 0, 60, 'Warm-up in the arena staging area'), stage(1, 'bout', 60, 80, `Bout: ${result}`, log), stage(2, 'settlement', 80, 80, 'Result credited')],
+    summary: { activityId, resolvedKind: 'arena', result, success: won, rewards: { money: 0, renown: won ? 10 : 2, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 },
+      receiptId: `my-bouts-${activityId}`, settledAtMs, replayExpiry, ratingDelta: won ? 12 : -11 },
+    completion: { activityId, resolvedKind: 'arena', result, success: won, settledAtMs, replayExpiry },
+  };
+}
+/** The My bouts reads the transport answered, by the chip each asked for ('all', 'won' or 'lost'). */
+const boutReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'activities' && (r.query.get('select') ?? '').includes('starts_at_ms'))
+  .map(r => { const result = r.query.get('summary->>result'); return result === 'eq.victory' ? 'won' : result === 'eq.defeat' ? 'lost' : 'all'; });
 
 type Row = { name: string; tag?: 'NPC' | 'TOURNAMENT'; letter: 'W' | 'L'; sub: string; gone?: boolean };
 /** The plan's Fixture reference, newest first, by day. */
@@ -68,7 +98,30 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 }
 
 test.describe('My bouts in Results', () => {
+  test.skip(production, 'These checks use the fixture preview.');
   test.beforeEach(async ({ context }) => { await quietArrivals(context); });
+
+  test('turns a row into a Result row when the clock passes its replay’s expiry', async ({ page }) => {
+    // Review fix round 1, Minor 4: the server's time decides, on the shared display clock, without a new read.
+    await openCamp(page);
+    await freezeShellClock(page, VARRO_EXPIRY - MIN);
+    const results = await myBouts(page);
+    const first = rows(results).first();
+    await expect(first.locator('[data-bout-name]')).toHaveText('vs Varro');
+    await expect(first.getByRole('button')).toHaveText('▶ Watch');
+    await expect(first.locator('[data-unwatched-dot]')).toHaveCount(1);
+    // Every other kept bout settled earlier, so it has gone already: Varro is the one bout not watched.
+    await expect(results.getByRole('tab', { name: 'My bouts, 1 not watched', exact: true })).toBeVisible();
+    await freezeShellClock(page, VARRO_EXPIRY);
+    await expect(first.locator('[data-bout-name]')).toHaveText('Arena bout');
+    await expect(first).toHaveAttribute('data-gone', '');
+    await expect(first.getByRole('button')).toHaveText('Result');
+    await expect(first.getByRole('button')).toHaveAccessibleName('Result: Arena bout, Sat 10 Oct, 2:40\xA0AM');
+    await expect(first.locator('[data-sub]:visible')).toHaveText('2:40\xA0AM · replay no longer kept');
+    await expect(first.locator('[data-unwatched-dot]')).toHaveCount(0);
+    await expect(results.getByRole('tab', { name: 'My bouts', exact: true })).toBeVisible();
+    await expect(results.locator('[data-gone]')).toHaveCount(8);
+  });
 
   test('opens Results on My bouts, by day, with the result, the opponent and the rating', async ({ page }, testInfo) => {
     await openCamp(page);
@@ -330,5 +383,117 @@ test.describe('My bouts in Results', () => {
     await shot(page, testInfo, 'my-bouts-360');
     await rowOf(results, 'Arena bout').scrollIntoViewIfNeeded();
     await shot(page, testInfo, 'my-bouts-360-gone');
+  });
+});
+
+test.describe('My bouts for a signed-in player', () => {
+  // The live read through the routed Data API: the owner Aster's two bouts against Varro, a win one slot back and a loss two slots back.
+  async function livePlayer(context: Parameters<typeof seedSession>[0]) {
+    await seedSession(context);
+    const now = Date.now();
+    const win = liveBout(now, 1, 'victory'), loss = liveBout(now, 2, 'defeat');
+    const live = await routeLiveReads(context, { world: { ...emptyWorld(now), revision: 'my-bouts-live' }, owner: ownerFixture, bouts: [win, loss] });
+    return { live, win, loss };
+  }
+
+  test('keeps the chip of a scene closed while the owner still loads', async ({ page, context }) => {
+    // Review fix round 1, Important 1 (AGENTS.md React async state): Back from a reloaded `from=bouts-lost` scene before the owner read
+    // lands. The choice waits for the owner instead of being reset to All when the owner arrives.
+    const { live, loss } = await livePlayer(context);
+    const release = live.hold('owner_state');
+    await page.goto(`/game/?view=replay&activity=${loss.activityId}&from=bouts-lost`);
+    const scene = replayScene(page);
+    await expect(scene.getByRole('status')).toHaveText('Loading the replay…', { timeout: 45_000 });
+    await expect.poll(() => live.count('owner_state'), { timeout: 45_000 }).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+    await expect(scene).toHaveCount(0);
+    // Results opens at once (a public menu): Everyone alone, while the viewer is not known yet.
+    const results = menuDialog(page, 'Results');
+    await expect(results).toBeVisible();
+    await expect(results.getByRole('tablist')).toHaveCount(0);
+    release();
+    await expectOwnerShown(page, 'Aster');
+    await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true', { timeout: 45_000 });
+    await expect(chip(results, 'Lost')).toHaveAttribute('aria-pressed', 'true');
+    await expect(names(results)).toHaveText(['vs Varro']);
+    await expect(rows(results).getByText('Lost', { exact: true })).toHaveCount(1);
+    expect(boutReads(live)).not.toContain('won');
+  });
+
+  test('reads the bouts once each time Results opens: the chip on screen and All', async ({ page, context }) => {
+    // Review fix round 1, Minors 3 and 4: an opening reads the chip shown and All (the tab's count), once; a chip opened later reads
+    // itself; the chips not shown are let go, so they are read again when shown.
+    const { live } = await livePlayer(context);
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const settledReads = async (expected: string[]) => {
+      await expect.poll(() => boutReads(live).sort(), { timeout: 45_000 }).toEqual([...expected].sort());
+      // And no more come after them.
+      await page.waitForTimeout(700);
+      expect(boutReads(live).sort()).toEqual([...expected].sort());
+    };
+    let results = await openMenu(page, 'Results');
+    await expect(names(results)).toHaveText(['vs Varro', 'vs Varro']);
+    await settledReads(['all']);
+    await closeMenu(page);
+    results = await openMenu(page, 'Results');
+    await expect(names(results)).toHaveCount(2);
+    await settledReads(['all', 'all']);
+    await chip(results, 'Lost').click();
+    await expect(names(results)).toHaveText(['vs Varro']);
+    await settledReads(['all', 'all', 'lost']);
+    await closeMenu(page);
+    results = await openMenu(page, 'Results');
+    await expect(chip(results, 'Lost')).toHaveAttribute('aria-pressed', 'true');
+    await settledReads(['all', 'all', 'lost', 'all', 'lost']);
+    await chip(results, 'Won').click();
+    await expect(names(results)).toHaveText(['vs Varro']);
+    await settledReads(['all', 'all', 'lost', 'all', 'lost', 'won']);
+    // Back to Lost: this opening read it, so a chip change reads nothing more.
+    await chip(results, 'Lost').click();
+    await settledReads(['all', 'all', 'lost', 'all', 'lost', 'won']);
+  });
+
+  test('leaves no bout of the last account after another signs in or the session ends, and starts on My bouts and All', async ({ page, context }) => {
+    // Review fix round 1, Minor 4 (Global Constraints: a sign-out or account change drops the owner's list): a new store and a new choice.
+    const { live } = await livePlayer(context);
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const results = await openMenu(page, 'Results');
+    await chip(results, 'Lost').click();
+    await expect(names(results)).toHaveText(['vs Varro']);
+    // Brutus, with no bouts, signs in in another tab.
+    const other = testUser('brutus@example.invalid');
+    await seedSession(context, other);
+    live.setBouts([]);
+    live.setOwner({ ...structuredClone(ownerFixture), gladiatorId: randomUUID(), name: 'Brutus', wallets: { money: 7, renown: 0 } });
+    await page.evaluate(user => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const token = `${btoa(JSON.stringify({ alg: 'HS256' }))}.${btoa(JSON.stringify({ sub: user.id, exp }))}.test-only`;
+      const session = { access_token: token, refresh_token: `test-only:${user.id}`, token_type: 'bearer', expires_at: exp, expires_in: 3600, user };
+      localStorage.setItem('sb-127-auth-token', JSON.stringify(session));
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_IN', session });
+      channel.close();
+    }, other);
+    await expectOwnerShown(page, 'Brutus');
+    await expect(results).toBeVisible();
+    await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true', { timeout: 45_000 });
+    await expect(chip(results, 'All')).toHaveAttribute('aria-pressed', 'true');
+    await expect(results.getByText('No bouts yet. Your Arena and tournament bouts show here with their replays.', { exact: true })).toBeVisible();
+    await expect(rows(results)).toHaveCount(0);
+    // Brutus's list was read as Brutus.
+    expect(live.requests.some(r => r.table === 'activities' && r.reader === other.id && (r.query.get('select') ?? '').includes('starts_at_ms'))).toBe(true);
+    // The session ends in another tab: Everyone alone, no tabs and no bouts.
+    await page.evaluate(() => {
+      localStorage.removeItem('sb-127-auth-token');
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_OUT', session: null });
+      channel.close();
+    });
+    await expect(results.getByRole('tablist')).toHaveCount(0, { timeout: 45_000 });
+    await expect(results.getByText('RECENT RESULTS', { exact: true })).toBeVisible();
+    await expect(results.getByRole('group', { name: 'Show bouts' })).toHaveCount(0);
+    await expect(rows(results)).toHaveCount(0);
   });
 });

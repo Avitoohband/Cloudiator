@@ -29,14 +29,14 @@ import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import { MyBouts } from '../bouts/MyBouts';
 import { useWatched } from '../bouts/watched';
 import { RETENTION_TEXT, resultKind, resultLine, resultTime } from './result-text';
+import type { ResultsTab } from './results-choice';
 import styles from './ResultsPanel.module.css';
+
+export type { ResultsTab } from './results-choice';
 
 const PAGE_ROWS = 50;
 /** The rows before the first page has loaded (one array, so the server-time timer is not reset on every render). */
 const NO_ROWS: ResultRow[] = [];
-
-/** Which of a player's two tabs Results shows. */
-export type ResultsTab = 'mine' | 'everyone';
 
 export type ResultsReader = Pick<GameGateway, 'recent'>;
 export type ResultsList = { rows: ResultRow[]; nextCursor: string | null };

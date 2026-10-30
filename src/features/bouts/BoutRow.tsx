@@ -3,19 +3,28 @@
 // One row of My bouts (Arena replays spec 1, the approved mockup's rows): the W or L badge, the gold dot while the bout's replay is kept
 // and not watched on this device, the opponent and its tag, the sub-line (a phone's leaves out a leading "Arena" or "Tournament"), and
 // ▶ Watch, or Result for a bout whose replay is gone (the row then dimmed). Every word is `boutRow`'s, rendered as text.
+import { Fragment } from 'react';
 import type { BoutRowText } from './bout-text';
 import styles from './bouts.module.css';
 
 const SEP = ' · ';
 
-/** A sub-line with its rating part coloured (up green, down red, as the mockup); the text is the sub-line's, unchanged. */
+/**
+ * A sub-line with its rating part coloured (up green, down red, as the mockup); the text is the sub-line's, unchanged. Each part is
+ * one unbreakable span that starts with its separator ("· +10 renown"), after a plain space: a long line wraps before a "·", never
+ * after one, so no line ends in " ·" (fix round 1, review Minor 7).
+ */
 function Sub({ text, which }: { text: string; which: 'wide' | 'narrow' }) {
   const parts = text.split(SEP);
+  const tone = (part: string) => (part.startsWith('Rating +') ? styles.up : part.startsWith('Rating −') ? styles.down : null);
   return <span className={which === 'wide' ? styles.subWide : styles.subNarrow} data-sub={which}>
-    {parts.map((part, i) => <span key={i}>
-      {i > 0 && SEP}
-      <span className={part.startsWith('Rating +') ? `${styles.part} ${styles.up}` : part.startsWith('Rating −') ? `${styles.part} ${styles.down}` : styles.part}>{part}</span>
-    </span>)}
+    {parts.map((part, i) => {
+      const lead = i > 0 ? '· ' : '', colour = tone(part);
+      return <Fragment key={i}>
+        {i > 0 && ' '}
+        <span className={styles.part}>{colour ? <>{lead}<span className={colour}>{part}</span></> : `${lead}${part}`}</span>
+      </Fragment>;
+    })}
   </span>;
 }
 

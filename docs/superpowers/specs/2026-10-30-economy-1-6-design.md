@@ -32,7 +32,7 @@ version: `v2` starts at one operator switch, and everything frozen before it set
 
 ## Non-goals
 
-- **Later patches only, not in 1.6:** party dungeons and the bot team (patch **1.7**, on v2 rewards from the start); the
+- **Later patches only, not in 1.6:** party dungeons and the bot team (patch **1.8**, on v2 rewards from the start); the
   renown skins shop with dyes for clothes and weapons (**1.7 or 1.8**); new gear and attribute requirements (**a later
   patch**); the Deep, the weekly solo delve (**after the dungeons**).
 - Item prices, NPC gear sale values, market fees, Arena renown, the XP curve (100 × level a level), stamina, leagues and the
@@ -51,7 +51,7 @@ version: `v2` starts at one operator switch, and everything frozen before it set
 | Everyone's gold cut to a quarter at 1.6; levels, items, renown stay; season 1 pays its promised prizes | Avi |
 | Training cap 10 + 4 × level; at the cap Training gives nothing and the Schedule says so | Avi |
 | Salvage 10 → 4 gold, with a game message a day before | Avi |
-| 1.6 is the economy alone; dungeons and the bot team move to 1.7 | Avi |
+| 1.6 is the economy alone; dungeons and the bot team move to 1.7, then 1.8 when titles took 1.7 (Avi, 2026-10-30) | Avi |
 | Item prices stay | Avi |
 | Expedition gold **4 / 10 / 18** (Woodland / Outpost / Mountain) | Claude's call (within Avi's "less than a quarter") |
 | "Scaled the same way" read literally: factors 0.4 / 0.6 / 0.8 / 1.0 on today's gold, for tournaments and seasons alike | Claude's call |
@@ -432,7 +432,7 @@ stories; uploads and posts only on Avi's go. The release report reminds Avi of i
 
 ## Later patches (noted only)
 
-- **1.7: party dungeons and the bot team** (spec `2026-10-29-party-dungeons-design.md`, now M28 from
+- **1.8: party dungeons and the bot team** (1.7 is wearable titles, M28) (spec `2026-10-29-party-dungeons-design.md`, now M29 from
   `22-dungeons.sql`; friend parties M29). Its §3 adds keys to `RULES_V1` and pays v1-sized rewards; once 1.6 has made `v2`
   active, those keys and the proposal's v2 dungeon amounts belong in `RULES_V2`, and its monster numbers must be measured
   again against capped builds (up to 50 points at level 10). Revise its §3 and §8 before building it.

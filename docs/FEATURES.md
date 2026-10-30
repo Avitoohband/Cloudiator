@@ -1,6 +1,6 @@
 # Cloudiator features: what to film
 
-Every player-visible feature, from the launch (1.0) to the planned 1.7, for whoever makes a reel or a video. The exact
+Every player-visible feature, from the launch (1.0) to the planned 1.8, for whoever makes a reel or a video. The exact
 words players see are in [CHANGELOG.md](CHANGELOG.md). This file says what each feature gives a player, where to find it on
 screen, and which video already showed it. Updated 2026-10-30, while 1.4 is being built.
 
@@ -81,7 +81,7 @@ Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
 ## Features by area
 
-**Status:** Live (in the game now) · In 1.4 (not out yet) · Planned 1.5 / 1.6 / 1.7 (designed, not built: don't film
+**Status:** Live (in the game now) · In 1.4 (not out yet) · Planned 1.5 / 1.6 / 1.7 / 1.8 (designed, not built: don't film
 them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
@@ -142,12 +142,12 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | In 1.4 | The first seconds of any whole-trip replay | — |
 | Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | Still being built: the camp during your own trip (test player) | — |
 | Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | Planned 1.6 | Not built | — |
-| Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.7 | Planned 1.7 | Not built | — |
-| Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.7 | Planned 1.7 | Not built | — |
-| Rooms, then the boss | A run is 3 rooms, then the boss, in one afternoon; health carries from fight to fight. | 1.7 | Planned 1.7 | Not built | — |
-| Dungeon rewards | Every fight your party wins pays you; the boss pays most and opens a chest; lose to the boss and you keep what the rooms paid. A run costs 40 stamina. | 1.7 | Planned 1.7 | Not built | — |
-| Watch your run | Watch the party walk the dungeon live, with the camp button and a replay of the whole run. | 1.7 | Planned 1.7 | Not built | — |
-| Off to the dungeon | The party leaves through the camp gate together, and the camp shows where it went ("In Wolf Den"). | 1.7 | Planned 1.7 | Not built | — |
+| Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.8 | Planned 1.8 | Not built | — |
+| Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.8 | Planned 1.8 | Not built | — |
+| Rooms, then the boss | A run is 3 rooms, then the boss, in one afternoon; health carries from fight to fight. | 1.8 | Planned 1.8 | Not built | — |
+| Dungeon rewards | Every fight your party wins pays you; the boss pays most and opens a chest; lose to the boss and you keep what the rooms paid. A run costs 40 stamina. | 1.8 | Planned 1.8 | Not built | — |
+| Watch your run | Watch the party walk the dungeon live, with the camp button and a replay of the whole run. | 1.8 | Planned 1.8 | Not built | — |
+| Off to the dungeon | The party leaves through the camp gate together, and the camp shows where it went ("In Wolf Den"). | 1.8 | Planned 1.8 | Not built | — |
 
 ### Arena and tournaments
 
@@ -182,8 +182,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Planned 1.5 | Not built | — |
 | No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Planned 1.5 | Not built | — |
 | Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Planned 1.5 | Not built | — |
-| Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.7 | Planned 1.7 | Not built | — |
-| Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.7 | Planned 1.7 | Not built | — |
+| Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.8 | Planned 1.8 | Not built | — |
+| Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.8 | Planned 1.8 | Not built | — |
 
 ### Market, shops and gold
 
@@ -216,7 +216,19 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | In 1.4 | Fixture camp → Gladiators, the line on top | — |
 | Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | In 1.4 | Not built yet: it waits for Avi's look at its mockup (`.superpowers/design/2026-10-29-profile-card/`) | — |
 | Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Planned 1.6 | Not built | — |
-| Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.7 | Planned 1.7 | Being designed | — |
+| Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.8 | Planned 1.8 | Being designed | — |
+
+### Titles
+
+| Feature | What players get | Patch | Status | How to film it | Shown in video |
+| --- | --- | --- | --- | --- | --- |
+| Titles to earn | 31 titles for expeditions won, Trainings, Arena wins, tournaments, season places, gear ever owned, gold earned and a few special ones; a gladiator wears one beside its name. | 1.7 | Planned 1.7 | Not built | — |
+| Your history counts | Everything done before 1.7 counts: a notice in Notifications lists the titles a gladiator's history earned. | 1.7 | Planned 1.7 | Not built | — |
+| Founder | Every gladiator made in Season 1 (it ends on 22 Nov 2026) is a Founder; nobody gets it again. | 1.7 | Planned 1.7 | Not built | — |
+| Choose your title | A Title button on My gladiator opens "Choose your title": one title or none, free, any time; locked titles show how close you are. | 1.7 | Planned 1.7 | Not built | — |
+| Your title with your name | A gold line over the name in the camp, and the title in the Gladiators list, on the profile card, in Arena bouts and replays, and in tournament brackets. | 1.7 | Planned 1.7 | Not built | — |
+| New-title notices | New titles arrive in Notifications; one earned by a result shows inside that result, with Wear. | 1.7 | Planned 1.7 | Not built | — |
+| Titles on the card | The profile card counts the titles a gladiator has earned. | 1.7 | Planned 1.7 | Not built | — |
 
 ### Settings and accessibility
 
@@ -241,8 +253,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 - A rotating schedule: a routine of several different days that repeats.
 - Undo a purchase you just made.
 - How many you already own, beside each market and shop item.
-- Friend parties and invites for dungeons (after 1.7).
-- A renown skins shop: colours and dyes for clothes and weapons (1.7 or 1.8).
+- Friend parties and invites for dungeons (after 1.8).
+- A renown skins shop: colours and dyes for clothes and weapons (1.8 or 1.9).
 - New gear with level and attribute requirements (a later patch).
 - The Deep: a weekly solo delve from level 15 (after the dungeons).
 - A summoner class, with spirits or animal spirits.

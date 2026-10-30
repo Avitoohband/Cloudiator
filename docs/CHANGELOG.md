@@ -27,8 +27,8 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 ## 1.4 — Watch your expedition, class bonuses and a clock setting (in progress, not yet released)
 
 Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi approves the wording at release. After 1.4:
-1.5 Arena replays, 1.6 the economy rebalance, then 1.7 party dungeons and the bot team (all planned, not built); new gear
-comes in a later patch.
+1.5 Arena replays, 1.6 the economy rebalance, 1.7 wearable titles, then 1.8 party dungeons and the bot team (all planned,
+not built); new gear comes in a later patch.
 
 ### Built
 

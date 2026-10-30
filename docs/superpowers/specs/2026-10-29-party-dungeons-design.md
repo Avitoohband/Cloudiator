@@ -1,4 +1,4 @@
-# Patch 1.7 (Patch B): party dungeons (MVP) — design
+# Patch 1.8 (Patch B): party dungeons (MVP) — design
 
 Date: 2026-10-29. Author: Claude. Status: **approved direction** — Avi's go on the proposal, 2026-10-29: "yes, and your
 recommendations, go", with decisions (4)–(8) in [the next-patch ideas](2026-10-29-next-patch-ideas.md). The UI parts still
@@ -21,19 +21,19 @@ Decisions Claude made inside Avi's go are marked **(Claude)**; the reasons are i
 
 ## 1. Scope
 
-**In the MVP (M28):** a Dungeon choice in the afternoon part of the schedule; three dungeons (Wolf Den, level 3; Raider
+**In the MVP (M29):** a Dungeon choice in the afternoon part of the schedule; three dungeons (Wolf Den, level 3; Raider
 Stronghold, level 7; Troll Hall, level 12) built from the six existing creatures; automatic grouping at the boundary into
 parties of up to 3, with hired fighters in every empty seat; a run of 3 rooms then the major (the boss) inside the one
 80-minute afternoon slot; personal rewards where every won fight a member entered pays (a lost major still pays the rooms);
 timed reveals, a run view, a party close-up replay, results, notifications and the camp location; a patch note.
 
-**Not in the MVP:** friend parties and invites, and seeing a friend's planned dungeon (phase 2, M29; Avi's decisions 5
+**Not in the MVP:** friend parties and invites, and seeing a friend's planned dungeon (phase 2, M30; Avi's decisions 5
 and 8); run records and first-clear trophies (phase 3); bot gladiators (a separate future design, HANDOFF); summoners (a
 future class). Solo expeditions, Arena, tournaments, seasons, the market, the v1 combat formulas and every existing replay
 and battle log are unchanged.
 
 **Extension points kept open (not built):**
-- *Friend parties (M29):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
+- *Friend parties (M30):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
   strangers. The frozen assignment already records each seat's kind.
 - *Bots:* a seat's `kind` is `'human' | 'hireling'` in the MVP; a named bot later adds `'bot'` (an entrant after the humans
   and before the hired fighters, with its own rewards).
@@ -64,7 +64,7 @@ and battle log are unchanged.
 
 Every new key is added to `RULES_V1` / `CATALOG_V1` without changing an existing value (the 2026-10-25 `arenaPhases`
 precedent). No rules version changes: no in-flight snapshot can hold a dungeon choice, and the SQL choice check refuses one
-until M28. A guard test pins every pre-existing v1 value (a hash of the rules and catalog without the new keys).
+until M29. A guard test pins every pre-existing v1 value (a hash of the rules and catalog without the new keys).
 
 ```
 RULES_V1.schedule.dungeonPhases = ['afternoon']
@@ -196,7 +196,7 @@ with an optional factor (folded into the exact product only when it is not 1, so
 6. Each run's seed is `encode(digest(<grouping job seed> || ':' || runId, 'sha256'), 'hex')`, written by acceptance (the
    Arena battle-seed exception).
 
-## 7. Server integration (M28 from `supabase/sql/22-dungeons.sql`)
+## 7. Server integration (M29 from `supabase/sql/23-dungeons.sql`)
 
 **No new job kind.** Grouping is a `pair` job with input `kind: 'dungeon-grouping'`; a run is one `simulation` job with
 input `kind: 'dungeon'`; reveals are `reveal` jobs with input `kind: 'dungeon-reveal'`; members settle through their own
@@ -256,7 +256,7 @@ All time-limited mutations go through the existing fenced paths (`complete_job`,
 job first, then sample `clock_timestamp()` time and revalidate token, status and expiry (the Postgres concurrency override);
 the plan adds the override's regression for the dungeon reveal.
 
-**Deploy window.** M28 first: with the previous worker, preparations keep 5 cost keys (accepted), no dungeon choice can be
+**Deploy window.** M29 first: with the previous worker, preparations keep 5 cost keys (accepted), no dungeon choice can be
 saved (the previous Edge parser refuses it), and every existing path behaves as before. Then `game-command` and
 `game-worker` together. Then the client. The patch note is posted last, once the client that offers dungeons is live.
 
@@ -323,7 +323,7 @@ the final numbers here. A run plans in well under the worker's 2,000 ms invocati
 
 The gate of record (`node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs`, 12/12, DB-test rule), a
 fresh whole-branch review, then hosted read-only pre-checks. **Production needs Avi's go in chat** (with the patch note's
-text), outside Wednesday and Saturday 17:20–20:00 UTC and with no open boundary: `db push --dry-run` (exactly M28),
+text), outside Wednesday and Saturday 17:20–20:00 UTC and with no open boundary: `db push --dry-run` (exactly M29),
 `db push`, the access audit and fingerprint; `functions deploy game-command` and `game-worker`; the `release`
 fast-forward; the deployed checks about 2 minutes after Pages is live; then the patch note.
 

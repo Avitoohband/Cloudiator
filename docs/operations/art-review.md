@@ -26,7 +26,7 @@ manifest's projection, anchors and depth rule, including wide-prop slices.
 | `gladiator-axe-light-hood.png` | Olive skin, crimson accent, light armor, hood, axe and shield. |
 | `gladiator-spear-heavy-helmet.png` | Brown skin, gold sash and crest over heavy armor, helmet and spear, including the `thrust` variant. |
 | `gladiator-bow-light.png` | Deep skin, violet accent, light armor and bow, including the `shoot` nock, draw and release frames. |
-| `npcs.png` | Six NPCs: idle, walk (SE and NE), talk and tend. |
+| `npcs.png` | Eleven NPC looks (six until patch 1.5.1): idle, walk (SE and NE), talk and tend. |
 | `creatures.png` | Two variants per expedition (dire and timber wolf, raider and raider archer, rock and frost troll): idle, walk, attack, hit, defend, evade, defeat, victory. |
 | `effects.png`, `icons.png` | Eight combat effects and 37 interface icons. |
 | `map-camp.png` | Living camp with sample gladiators at their stations, NPCs at stalls and gate. |
@@ -200,6 +200,30 @@ keep their names); `maps.mjs` places them.
 The camp props atlas was re-packed, so its content-named image changed (`props.b664d8dc84.png` to `props.b2b178ef35.png`). In
 the same release the atlas images kept at their old unhashed paths for open tabs (release `84f2d44`) were deleted
 (`assets/source/README.md`, "Atlas image names").
+
+## Camp guards and NPCs (patch 1.5.1, 2026-10-30)
+
+Patch 1 of the camp-expansion proposal (ideas 27–29 in `docs/superpowers/specs/2026-10-29-next-patch-ideas.md`; Avi's
+answers of 2026-10-30): five guards and four new camp NPCs on today's map. `npcs.mjs` adds five looks after today's six, built from
+the existing parts plus two new ones in `outfits.mjs` (a torch held in the near hand, and the porter's shoulder crate).
+Avi's art review of the five looks is still to come.
+
+| Look | Art |
+| --- | --- |
+| `night-watch` | The Gate Guard (cape, heavy armour, gold-crested helmet) with a lit torch in the near hand and the spear stowed on his back. The flame uses the camp torches' fire colours. The two wall patrols wear it in the evening. |
+| `water-carrier` | Petra: the female body, tan skin, a water-blue tunic (a new `water` ramp of palette colours), a black bun and the healer's jug. |
+| `herald` | Felix: a violet tunic, a gold cape, short brown hair and the trainer's staff. |
+| `porter` | Quintus: dark skin, a canvas tunic, a crimson headband and the one new part, a wooden crate on the far shoulder, held up by the far hand in every frame. |
+| `forester` | Silva: the female body, a leaf-green tunic, a brown ponytail and the gladiators' axe, which she swings when she tends. |
+
+| Check | Result |
+| --- | --- |
+| Atlas page | The NPC page grows from 1536 × 448 (six looks, 28 frames each) to 1536 × 832 (eleven looks), under the 2048 px any WebGL device holds. Today's six looks keep their cells and are pixel-identical (compared with the previous image: 0 differing values). `tests/assets/manifest.test.ts` checks the size and every cell. |
+| Night watch | Every night-watch frame has a lit flame and no guard frame has fire colours (test). |
+| Distinct looks | All eleven idle frames differ (test). Several guards share the Gate Guard look, so no guard needed new frames. |
+| Palette, borders, anchors | The existing whole-atlas tests cover the new frames: palette colours only, alpha 0 or 255, a clear 1 px border and the second row and column empty. |
+| Review sheet | `npcs.png` was regenerated; no other sheet changed. The camp map sheets draw only the station NPCs, so they are unchanged. |
+| Build | `node assets/source/build-assets.mjs --check` passes. The NPC image's content name changed and its previous version was removed. |
 
 ## Known limitations
 

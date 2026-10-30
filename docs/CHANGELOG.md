@@ -24,6 +24,18 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.3.** New since then: 1.3.1 and 1.4 (in progress).
 
+## 1.5.1 — More guards and new faces in the camp (in progress, not yet released)
+
+A small app-only patch after 1.5 (branch `claude/p151-camp-npcs`): Patch 1 of the camp-expansion proposal (ideas 27–29 in
+`docs/superpowers/specs/2026-10-29-next-patch-ideas.md`; Avi's answers 2026-10-30), on today's map. It is recorded after
+1.5 at release. The bigger camp and its plots come in their own patch after 1.7.
+
+### Built
+
+- More guards watch the camp: a second guard at the gate, a lookout at the watchtower and two patrols that walk along the walls.
+- In the evening the two wall patrols are the night watch: they carry torches, and the light goes with them.
+- New faces in the camp: Petra carries water from the well, Felix the herald walks between the Arena gate and the camp gate, Quintus carries crates to the stalls and the kitchen, and Silva the forester tends the woods.
+
 ## 1.4 — Watch your expedition, class bonuses and a clock setting (in progress, not yet released)
 
 Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi approves the wording at release. After 1.4:

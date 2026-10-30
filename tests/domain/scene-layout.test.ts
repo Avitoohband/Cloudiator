@@ -435,8 +435,11 @@ describe('occlusion fading', () => {
 });
 
 describe('ambient NPCs', () => {
-  it('keeps six NPCs on walkable tiles near their posts at all times', () => {
-    expect(NPC_ROUTINES.map(n => n.npcId).sort()).toEqual(['armorer', 'cook', 'guard', 'healer', 'smith', 'trainer']);
+  it('keeps fourteen NPCs on walkable tiles near their posts at all times', () => {
+    // Today's six, plus patch 1.5.1's four guards and four camp NPCs (tests/domain/camp-npcs.test.ts).
+    expect(NPC_ROUTINES.map(n => n.npcId).sort()).toEqual([
+      'armorer', 'cook', 'forester', 'guard', 'guard-south', 'healer', 'herald', 'lookout', 'patrol-north', 'patrol-south', 'porter', 'smith', 'trainer', 'water-carrier',
+    ]);
     for (let t = 0; t < 20 * 60_000; t += 7_919) {
       for (const routine of NPC_ROUTINES) {
         const p = planNpcPosition(routine, camp, t);

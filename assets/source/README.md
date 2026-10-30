@@ -57,7 +57,8 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
 - `generators/rig.mjs`: the pose rig and the depth slots used to clip layers.
 - `generators/poses.mjs`: keyframes for all 17 gladiator animations plus the NPC `talk` and `tend` loops.
 - `generators/outfits.mjs`: layer painters for body (male and female), cloth and the female chest wrap, hair
-  (short, long, ponytail, bun), armor, head gear, weapons, shield, held props, NPC clothing and troll features.
+  (short, long, ponytail, bun), armor, head gear, weapons, shield, held props (barbell, bowl, jug, the night watch's torch),
+  NPC clothing, the porter's shoulder crate and troll features.
 - `generators/gladiator.mjs`, `npcs.mjs`, `creatures.mjs`: actor packages.
 - `generators/tiles.mjs`: corner-based 64×32 isometric autotiles. There are 16 masks per environment.
 - `generators/props.mjs`: camp and expedition props, and the 16 arena wall segments.

@@ -51,7 +51,8 @@ test.describe('living isometric camp', () => {
     const state = await campState(page);
     expect(await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors.length)).toBeLessThanOrEqual(50);
     // 50 public rows: 6 away, and 44 in the camp, of whom Otho rests at home and is not drawn (Task 23.9).
-    expect({ players: state.players, ambientNpcs: state.ambientNpcs, away: state.away }).toEqual({ players: 43, ambientNpcs: 6, away: 6 });
+    // 14 NPCs since patch 1.5.1: today's six, four more guards and four camp NPCs.
+    expect({ players: state.players, ambientNpcs: state.ambientNpcs, away: state.away }).toEqual({ players: 43, ambientNpcs: 14, away: 6 });
     const posts = npcPostTiles();
     const players = state.actors.filter(a => a.kind === 'player');
     expect(new Set(players.map(a => a.location)).size).toBeGreaterThanOrEqual(4);
@@ -356,6 +357,51 @@ test.describe('living isometric camp', () => {
     expect(applied.afternoon.overlayAlpha).toBeLessThan(applied.morning.overlayAlpha);
     expect(applied.evening.torchAlpha).toBeGreaterThan(applied.afternoon.torchAlpha * 2);
     expect(applied.evening.overlayAlpha).toBeLessThanOrEqual(0.35);
+  });
+
+  // Patch 1.5.1 (camp-expansion proposal, Patch 1): five guards and four new camp NPCs on today's map; in the evening the two
+  // wall patrols are the night watch, carrying a torch whose light walks with them.
+  test('shows the five guards and the new camp NPCs, and lights the wall patrols\' torches only in the evening', async ({ page }, testInfo) => {
+    await openCamp(page);
+    const first = await campState(page);
+    const npcs = first.actors.filter(a => a.kind === 'npc');
+    expect(npcs.map(a => a.id).sort()).toEqual(NPC_ROUTINES.map(r => `npc:${r.npcId}`).sort());
+    for (const r of NPC_ROUTINES) if (r.name) expect(npcs.find(a => a.id === `npc:${r.npcId}`)!.name, r.npcId).toBe(r.name);
+    expect(npcs.filter(a => a.look === 'guard' || a.look === 'night-watch').map(a => a.id).sort())
+      .toEqual(['npc:guard', 'npc:guard-south', 'npc:lookout', 'npc:patrol-north', 'npc:patrol-south']);
+    for (const id of ['water-carrier', 'herald', 'porter', 'forester']) expect(npcs.find(a => a.id === `npc:${id}`)!.look, id).toBe(id);
+
+    const slot = await page.evaluate(() => window.__cloudiatorCamp!.world()!.slotIndex);
+    for (const [i, phase] of ['morning', 'afternoon', 'evening'].entries()) {
+      const at = (slot - (slot % 3) + i) * SLOT_MS + 1_200_000;
+      await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), at);
+      for (const r of NPC_ROUTINES) {
+        const p = planNpcPosition(r, campMap as unknown as MapData, at);
+        // Each NPC in view, so its light (if any) is drawn.
+        await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 1), { x: p.x, y: p.y });
+        await nextFrames(page);
+        const state = await campState(page);
+        const a = state.actors.find(x => x.id === `npc:${r.npcId}`)!;
+        expect([a.x, a.y], `${r.npcId} ${phase}`).toEqual([p.x, p.y]);
+        const watch = phase === 'evening' && r.npcId.startsWith('patrol-');
+        expect(a.look, `${r.npcId} ${phase}`).toBe(watch ? 'night-watch' : r.look ?? r.npcId);
+        expect(a.frame.startsWith(`${a.look}/`), `${r.npcId} ${phase} draws ${a.frame}`).toBe(true);
+        if (!watch) { expect(a.torch, `${r.npcId} ${phase}`).toBeNull(); continue; }
+        // The torch light rides with the patrol, at the strength of the camp's own evening torches.
+        expect(a.torch, `${r.npcId} ${phase}`).not.toBeNull();
+        const feet = worldToScreen(a.x, a.y);
+        expect(Math.abs(a.torch!.x - feet.x), r.npcId).toBeLessThanOrEqual(16);
+        expect(feet.y - a.torch!.y, r.npcId).toBeGreaterThan(16);
+        expect(feet.y - a.torch!.y, r.npcId).toBeLessThan(48);
+        expect(a.torch!.alpha, r.npcId).toBeGreaterThan(state.lighting.torchAlpha * 0.7);
+        expect(a.torch!.alpha, r.npcId).toBeLessThan(state.lighting.torchAlpha / 0.7);
+        if (r.npcId === 'patrol-south') {
+          await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: p.x, y: p.y });
+          await nextFrames(page);
+          await page.screenshot({ path: testInfo.outputPath('camp-night-watch.png') });
+        }
+      }
+    }
   });
 
   test('walks departures to the gate, arrivals in from it, and redraws changed equipment', async ({ page }) => {

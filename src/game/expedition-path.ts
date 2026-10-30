@@ -4,8 +4,7 @@
 // speed, so the feet keep pace with the walk cycle; it is a function of display time alone.
 import type { Direction, MapData, TilePoint } from './assets';
 import { EXPEDITION_ENCOUNTERS, JOURNEY, type JourneyPoint, type RouteProgress } from './expedition-stage';
-import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
-import { facingFor } from './npcs';
+import { facingFor, findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
 
 export type EncounterSpot = { gladiator: TilePoint; enemy: TilePoint; facing: Direction; enemyFacing: Direction; creature: string };
 /** A point the gladiator steps to while searching around a search spot, with the walkable paths there and back. */

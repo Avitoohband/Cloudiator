@@ -97,6 +97,9 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Day and night | Morning, afternoon and evening each have their own light, and torches burn in the evening. | 1.0 | Live | Live game in an evening part (see Filming kit) | Too Tiny |
 | Resting at home | A gladiator whose player is away rests at home, and says when it will be back. | 1.0 | Live | Fixture camp → Gladiators → Otho; `&as=resting` for your own | — |
 | Bigger beds | The camp's beds fit a whole gladiator. Punchy asked for them. | 1.3 | Live | Live camp while gladiators Rest (the Messages update used the fixture camp with test gladiators sent to rest) | Messages update; Too Tiny |
+| More guards | Five guards in all: two at the gate, a lookout at the watchtower and two patrols walking along the inside of the walls. | 1.5.1 | In 1.5.1 (built, not out) | Fixture camp: zoom in at the gate (east side) and follow a wall; names show from zoom 2 | — |
+| Night watch | In the evening the two wall patrols carry torches, and the light goes with them along the walls. | 1.5.1 | In 1.5.1 (built, not out) | An evening part (torches lit; see Filming kit); the fixture camp opens in a morning | — |
+| New camp NPCs | Petra the water carrier, Felix the herald, Quintus the porter (a crate on his shoulder) and Silva the forester (an axe) walk their rounds through the camp. | 1.5.1 | In 1.5.1 (built, not out) | Fixture camp, zoomed in: the well and training yard, the Arena gate, the stalls, the wooded corners | — |
 
 ### Your gladiator: creation, looks, class, attributes and build
 

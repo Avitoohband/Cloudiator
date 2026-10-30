@@ -1,4 +1,4 @@
-import type { Attributes, BuildInput, BuildValidation, ItemInstance } from './types.ts';
+import type { Attributes, BuildInput, BuildValidation, ItemInstance, Rules } from './types.ts';
 import { freezeDomain } from './types.ts';
 import { RULES_V1 } from './rules-v1.ts';
 import { CATALOG_V1 } from './catalog-v1.ts';
@@ -12,35 +12,38 @@ function exactKeys(value: unknown, keys: readonly string[]): boolean {
 function boundedInteger(value: unknown, maximum: number, minimum = 0): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 }
-function allocationTotal(value: unknown): number | null {
+function allocationTotal(value: unknown, rules: Rules): number | null {
   if (!exactKeys(value, attributes)) return null;
   const allocation = value as Attributes;
   let total = 0;
   for (const key of attributes) {
-    if (!boundedInteger(allocation[key], RULES_V1.attributes.maximumPoints)) return null;
+    if (!boundedInteger(allocation[key], rules.attributes.maximumPoints)) return null;
     total += allocation[key];
   }
-  return total <= RULES_V1.attributes.maximumPoints ? total : null;
+  return total <= rules.attributes.maximumPoints ? total : null;
 }
-function validInput(input: BuildInput): boolean {
-  return isRecord(input) && typeof input.classId === 'string' && Object.hasOwn(RULES_V1.classes, input.classId)
-    && typeof input.stance === 'string' && Object.hasOwn(RULES_V1.stances, input.stance)
-    && allocationTotal(input.allocation) !== null && exactKeys(input.equipment, slots);
+function validInput(input: BuildInput, rules: Rules): boolean {
+  return isRecord(input) && typeof input.classId === 'string' && Object.hasOwn(rules.classes, input.classId)
+    && typeof input.stance === 'string' && Object.hasOwn(rules.stances, input.stance)
+    && allocationTotal(input.allocation, rules) !== null && exactKeys(input.equipment, slots);
 }
-function validStats(item: ItemInstance): boolean {
+function validStats(item: ItemInstance, rules: Rules): boolean {
   const stats = item.stats;
   if (!isRecord(stats) || !exactKeys(stats.attributes, attributes)) return false;
   const decimal = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0
-    && value <= RULES_V1.attributes.maximumPoints && Math.abs(value * 100 - Math.round(value * 100)) < 0.000001;
+    && value <= rules.attributes.maximumPoints && Math.abs(value * 100 - Math.round(value * 100)) < 0.000001;
   return [stats.damage, stats.armor, stats.weight, ...attributes.map(key => stats.attributes[key])].every(decimal)
-    && boundedInteger(stats.intervalMs, RULES_V1.attributes.maximumPoints);
+    && boundedInteger(stats.intervalMs, rules.attributes.maximumPoints);
 }
 
-/** `owned` must be loaded server-side for the authenticated actor, never accepted from a client. */
-export function validateBuild(input: BuildInput, owned: ItemInstance[], earnedPoints: number, level: number): BuildValidation {
-  if (!validInput(input) || !boundedInteger(earnedPoints, RULES_V1.attributes.maximumPoints, RULES_V1.attributes.creationPoints)
-    || !boundedInteger(level, RULES_V1.attributes.maximumLevel, 1) || !Array.isArray(owned)) return { ok: false, reason: 'invalid-input' };
-  const total = allocationTotal(input.allocation)!;
+/**
+ * `owned` must be loaded server-side for the authenticated actor, never accepted from a client. The attributes, classes and
+ * stances are `rules`' (default RULES_V1) and the snapshot is stamped `rules.version`; the catalog is CATALOG_V1 in every version.
+ */
+export function validateBuild(input: BuildInput, owned: ItemInstance[], earnedPoints: number, level: number, rules: Rules = RULES_V1): BuildValidation {
+  if (!validInput(input, rules) || !boundedInteger(earnedPoints, rules.attributes.maximumPoints, rules.attributes.creationPoints)
+    || !boundedInteger(level, rules.attributes.maximumLevel, 1) || !Array.isArray(owned)) return { ok: false, reason: 'invalid-input' };
+  const total = allocationTotal(input.allocation, rules)!;
   if (total > earnedPoints) return { ok: false, reason: 'points' };
   const equipment: Record<typeof slots[number], ItemInstance | null> = { weapon: null, offHand: null, head: null, body: null, feet: null };
   const used = new Set<string>();
@@ -54,7 +57,7 @@ export function validateBuild(input: BuildInput, owned: ItemInstance[], earnedPo
     const item = matches[0];
     const entry = CATALOG_V1.items[item.catalogId];
     if (!entry || item.catalogVersion !== CATALOG_V1.version || item.tier !== entry.tier || item.rarity !== entry.rarity
-      || item.quantity !== 1 || !validStats(item) || (slot === 'weapon' && item.stats.intervalMs === 0)) return { ok: false, reason: 'item' };
+      || item.quantity !== 1 || !validStats(item, rules) || (slot === 'weapon' && item.stats.intervalMs === 0)) return { ok: false, reason: 'item' };
     if (entry.slot !== slot) return { ok: false, reason: 'slot' };
     if (item.tier > level) return { ok: false, reason: 'level' };
     if (item.reservation?.kind === 'listing') return { ok: false, reason: 'reserved' };
@@ -64,12 +67,12 @@ export function validateBuild(input: BuildInput, owned: ItemInstance[], earnedPo
   const weapon = equipment.weapon;
   if (weapon && CATALOG_V1.items[weapon.catalogId].hands === 2 && equipment.offHand) return { ok: false, reason: 'two-handed' };
   return { ok: true, unspentPoints: earnedPoints - total,
-    snapshot: freezeDomain({ rulesVersion: RULES_V1.version, classId: input.classId, stance: input.stance,
+    snapshot: freezeDomain({ rulesVersion: rules.version, classId: input.classId, stance: input.stance,
       allocations: { ...input.allocation }, equipment }) };
 }
 
 export function validateCreationAllocation(allocation: Attributes): boolean {
-  return allocationTotal(allocation) === RULES_V1.attributes.creationPoints;
+  return allocationTotal(allocation, RULES_V1) === RULES_V1.attributes.creationPoints;
 }
 
 /**
@@ -79,14 +82,14 @@ export function validateCreationAllocation(allocation: Attributes): boolean {
  * `buildChangeFee` is unchanged and returns 0 for every change this allows.
  */
 export function lockedChange(current: BuildInput, next: BuildInput): 'class' | 'points' | null {
-  if (!validInput(current) || !validInput(next)) throw new RangeError('Invalid build lock input');
+  if (!validInput(current, RULES_V1) || !validInput(next, RULES_V1)) throw new RangeError('Invalid build lock input');
   if (current.classId !== next.classId) return 'class';
   return attributes.some(key => next.allocation[key] < current.allocation[key]) ? 'points' : null;
 }
 
 /** Compare against the active build, not a previously queued request. Reservation/refund is transactional backend work. */
 export function buildChangeFee(current: BuildInput, next: BuildInput): number {
-  if (!validInput(current) || !validInput(next)) throw new RangeError('Invalid build fee input');
+  if (!validInput(current, RULES_V1) || !validInput(next, RULES_V1)) throw new RangeError('Invalid build fee input');
   const changedClass = current.classId !== next.classId;
   const respec = attributes.some(key => next.allocation[key] < current.allocation[key]);
   return (changedClass ? RULES_V1.fees.classChange : 0) + (respec ? RULES_V1.fees.respec : 0);

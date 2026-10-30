@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CATALOG_V1 } from '@domain/catalog-v1.ts';
+import { RULES_V1 } from '@domain/rules-v1.ts';
+import { RULES_V2 } from '@domain/rules-v2.ts';
 import { applyXp, historicalGearScore, npcSaleValue, planInventoryGrant, shopOffer, shopOffers, type LootGrant } from '@domain/inventory.ts';
 import type { ItemInstance } from '@domain/types.ts';
 import { itemFixture, ownerFixture } from '../fixtures/domain.ts';
@@ -218,5 +220,46 @@ describe('NPC shops', () => {
     expect(npcSaleValue(gear('sword:1:common', { origin: 'renown' }), CATALOG_V1)).toBeNull();
     expect(npcSaleValue(gear('sword:1:common', { tier: 5 }), CATALOG_V1)).toBeNull();
     expect(npcSaleValue(gear('sword:1:common', { catalogVersion: 'v2' }), CATALOG_V1)).toBeNull();
+  });
+});
+
+// Patch 1.6: capacity and the salvage value come from the rules of the activity (or, for an NPC sale, of the active version).
+describe('inventory under a rules version', () => {
+  it('sells salvage at the version\'s value and every other item at the catalog\'s', () => {
+    expect(npcSaleValue(salvage(12), CATALOG_V1, RULES_V2)).toBe(4);
+    expect(npcSaleValue(salvage(12), CATALOG_V1, RULES_V1)).toBe(10);
+    expect(npcSaleValue(salvage(12), CATALOG_V1)).toBe(10);
+    for (const item of [gear('sword:5:common'), gear('axe:5:uncommon', { origin: 'expedition' }), gear('heavy-armor:10:common')]) {
+      expect(npcSaleValue(item, CATALOG_V1, RULES_V2)).toBe(npcSaleValue(item, CATALOG_V1));
+    }
+    expect(npcSaleValue(gear('sword:5:common'), CATALOG_V1, RULES_V2)).toBe(30);
+    // What a merchant refuses, it refuses in both versions.
+    expect(npcSaleValue(gear('sword:1:renown'), CATALOG_V1, RULES_V2)).toBeNull();
+    expect(npcSaleValue(gear('sword:1:common', { binding: 'bound' }), CATALOG_V1, RULES_V2)).toBeNull();
+    expect(npcSaleValue({ ...salvage(1), catalogVersion: 'v9' }, CATALOG_V1, RULES_V2)).toBeNull();
+  });
+  it('converts overflowing salvage at the version\'s value', () => {
+    const grant = [loot('salvage', 5)];
+    expect(planInventoryGrant(fullInventory, grant, CATALOG_V1, RULES_V2).overflow)
+      .toEqual([{ catalogId: 'salvage', quantity: 5, unitValue: 4, money: 20 }]);
+    expect(planInventoryGrant(fullInventory, grant, CATALOG_V1, RULES_V2)).toMatchObject({ overflowMoney: 20, retained: [], stacked: [], slotsUsed: 60 });
+    expect(planInventoryGrant(fullInventory, grant, CATALOG_V1, RULES_V1).overflow)
+      .toEqual([{ catalogId: 'salvage', quantity: 5, unitValue: 10, money: 50 }]);
+    expect(planInventoryGrant(fullInventory, grant, CATALOG_V1).overflow)
+      .toEqual([{ catalogId: 'salvage', quantity: 5, unitValue: 10, money: 50 }]);
+  });
+  it('converts expedition gear that does not fit at its catalog value in both versions', () => {
+    for (const rules of [RULES_V1, RULES_V2]) {
+      expect(planInventoryGrant(fullInventory, [loot('axe:5:uncommon')], CATALOG_V1, rules).overflow)
+        .toEqual([{ catalogId: 'axe:5:uncommon', quantity: 1, unitValue: 34, money: 34 }]);
+    }
+  });
+  it('holds as many slots as the rules say', () => {
+    // Both retained versions hold 60 slots; the capacity is read from the rules, not from a constant.
+    expect(RULES_V2.inventory.capacity).toBe(RULES_V1.inventory.capacity);
+    const tiny = { ...RULES_V2, inventory: { ...RULES_V2.inventory, capacity: 3 } };
+    expect(planInventoryGrant(swords(2), [loot('sword:1:common', 3, 'shop')], CATALOG_V1, tiny))
+      .toMatchObject({ slotsUsed: 3, rejected: [{ catalogId: 'sword:1:common', quantity: 2 }] });
+    expect(planInventoryGrant(swords(2), [loot('sword:1:common', 3, 'shop')], CATALOG_V1, RULES_V2).rejected).toEqual([]);
   });
 });

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildChangeFee, lockedChange } from '@domain/build.ts';
+import { buildChangeFee, lockedChange, validateBuild } from '@domain/build.ts';
+import { CATALOG_V1 } from '@domain/catalog-v1.ts';
+import { RULES_V1 } from '@domain/rules-v1.ts';
+import { RULES_V2 } from '@domain/rules-v2.ts';
 import type { BuildInput } from '@domain/types.ts';
-import { buildInputFixture } from '../fixtures/domain.ts';
+import { buildInputFixture, itemFixture } from '../fixtures/domain.ts';
 
 // Fixed class and points (spec "Added 2026-10-28"): a saved build's class and every added point are permanent. Only the stance,
 // the equipment and more points can change, and every such change is free.
@@ -51,5 +54,30 @@ describe('buildChangeFee for every change lockedChange allows', () => {
       expect(lockedChange(current, allowed)).toBeNull();
       expect(buildChangeFee(current, allowed)).toBe(0);
     }
+  });
+});
+
+describe('validateBuild under a rules version (patch 1.6)', () => {
+  const sword = itemFixture(CATALOG_V1.items['sword:1:common']);
+  const input: BuildInput = { ...buildInputFixture, equipment: { ...buildInputFixture.equipment, weapon: sword.id } };
+  it('stamps the rules version it validated under and changes nothing else', () => {
+    const v1 = validateBuild(input, [sword], 10, 1), v1Explicit = validateBuild(input, [sword], 10, 1, RULES_V1);
+    const v2 = validateBuild(input, [sword], 10, 1, RULES_V2);
+    if (!v1.ok || !v1Explicit.ok || !v2.ok) throw new Error('every build above is legal');
+    expect(v1.snapshot.rulesVersion).toBe('v1');
+    expect(v1Explicit).toEqual(v1);
+    expect(v2.snapshot.rulesVersion).toBe('v2');
+    expect(v2.unspentPoints).toBe(v1.unspentPoints);
+    expect({ ...v2.snapshot, rulesVersion: 'v1' }).toEqual(v1.snapshot);
+    expect(v2.snapshot.allocations).toEqual(v1.snapshot.allocations);
+    expect(v2.snapshot.equipment).toEqual(v1.snapshot.equipment);
+    expect(v2.snapshot.equipment.weapon?.id).toBe(sword.id);
+  });
+  it('keeps refusing what both versions refuse', () => {
+    expect(validateBuild({ ...input, classId: 'nobody' as never }, [sword], 10, 1, RULES_V2)).toEqual({ ok: false, reason: 'invalid-input' });
+    expect(validateBuild({ ...input, stance: 'nobody' as never }, [sword], 10, 1, RULES_V2)).toEqual({ ok: false, reason: 'invalid-input' });
+    expect(validateBuild(input, [sword], 10, 1, RULES_V2)).toMatchObject({ ok: true });
+    expect(validateBuild({ ...input, allocation: { ...input.allocation, strength: 5 } }, [sword], 10, 1, RULES_V2)).toEqual({ ok: false, reason: 'points' });
+    expect(validateBuild(input, [], 10, 1, RULES_V2)).toEqual({ ok: false, reason: 'item' });
   });
 });

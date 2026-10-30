@@ -419,6 +419,7 @@ describe('seeded single-elimination bracket', () => {
     ['a duplicate activity', [...roster(2), entrant('x', { activityId: 'activity-g00' })]],
     ['a non-tournament slot', roster(3, { slotIndex: SLOT + 1 })],
     ['an invalid fighter', [...roster(2), entrant('bad', { fighter: { ...starter, maxHealth: 0 } })]],
+    ['mixed rules versions (v1 with a real v2 entrant)', [...roster(2), entrant('v2', { fighter: { ...starter, rulesVersion: 'v2' } })]],
     ['an unknown rules version', [...roster(2), entrant('v9', { fighter: { ...starter, rulesVersion: 'v9' } })]],
     ['a negative rating', [...roster(2), entrant('neg', { rating: -1 })]],
   ])('rejects %s', (_name, entrants) => {

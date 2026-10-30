@@ -463,11 +463,16 @@ describe('regular Arena pairing', () => {
   });
   it('derives its rules once from the entrants and rejects mixed rules versions', () => {
     const [a, b, c] = roster(3);
-    const other = { ...b, fighter: { ...b.fighter, rulesVersion: 'v9' } };
+    // A real, retained v2 fighter among v1 fighters is mixed; every entrant of one version is not.
+    const other = { ...b, fighter: { ...b.fighter, rulesVersion: 'v2' } };
     expect(() => matchArena([a, other, c], [], 's')).toThrow(/share one rules version/);
     expect(() => matchArena([other, a, c], [], 's')).toThrow(/share one rules version/);
+    const allV2 = roster(3).map(e => ({ ...e, fighter: { ...e.fighter, rulesVersion: 'v2' } }));
+    expect(() => matchArena(allV2, [], 's')).not.toThrow();
     // A single unknown version still fails closed as an invalid snapshot.
-    expect(() => matchArena([other], [], 's')).toThrow(/Invalid arena fighter snapshot/);
+    const unknown = { ...b, fighter: { ...b.fighter, rulesVersion: 'v9' } };
+    expect(() => matchArena([unknown], [], 's')).toThrow(/Invalid arena fighter snapshot/);
+    expect(() => matchArena([a, unknown, c], [], 's')).toThrow(/share one rules version/);
   });
 });
 

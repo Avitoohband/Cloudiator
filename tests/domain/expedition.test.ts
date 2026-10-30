@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planExpedition, expeditionLoot } from '../../supabase/functions/_shared/domain/expedition.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { deriveStats } from '../../supabase/functions/_shared/domain/stats.ts';
 import type { ActivitySnapshot, BuildSnapshot } from '../../supabase/functions/_shared/domain/types.ts';
@@ -114,5 +115,71 @@ describe('private deterministic expedition planning', () => {
       const loot = roll([entry.rewards.gearChance - .000001, value, 0]);
       expect(CATALOG_V1.items[loot[1].catalogId]).toMatchObject({ tier: entry.rewards.gearTier, rarity, renownPrice: null });
     }
+  });
+});
+
+// Patch 1.6: a trip is planned under the rules of the snapshot that froze it (spec "Domain"): any retained version, the same
+// fights, the version's own rewards. A snapshot "prepared under" v2 has its build stamped v2 and its stats derived under v2.
+function v2Snapshot(snapshot: ActivitySnapshot): ActivitySnapshot {
+  const build: BuildSnapshot = { ...snapshot.build, rulesVersion: 'v2' };
+  return { ...snapshot, rulesVersion: 'v2', build, derived: deriveStats(build, RULES_V2), costs: RULES_V2.activityStamina };
+}
+describe('expeditions under the activity\'s rules version (patch 1.6)', () => {
+  const outpost = () => expeditionSnapshot(150, 30, 'outpost', 10);
+  it('plans a v2 trip with v2 rewards and the same fights', () => {
+    const v1Snapshot = outpost(), v2 = planExpedition(v2Snapshot(v1Snapshot), 'success', RULES_V2), v1 = planExpedition(v1Snapshot, 'success', RULES_V1);
+    expect(v1.success).toBe(true);
+    expect(v2).toMatchObject({ success: true, rulesVersion: 'v2', catalogVersion: 'v1', expeditionId: 'outpost' });
+    expect(v2.rewards).toMatchObject({ xp: 75, money: 10 });
+    expect(v2.rewards.loot[0]).toEqual({ catalogId: 'salvage', catalogVersion: 'v1', quantity: 2, origin: 'expedition' });
+    expect(v1).toMatchObject({ rulesVersion: 'v1', catalogVersion: 'v1' });
+    expect(v1.rewards).toMatchObject({ xp: 250, money: 60 });
+    expect(v2.encounters).toHaveLength(3);
+    expect(v2.encounters.map(e => e.battleLog.winnerId)).toEqual(v1.encounters.map(e => e.battleLog.winnerId));
+    expect(v2.encounters.map(e => e.battleLog.durationMs)).toEqual(v1.encounters.map(e => e.battleLog.durationMs));
+    expect(v2.stages.map(stage => stage.label)).toEqual(v1.stages.map(stage => stage.label));
+  });
+  it.each([['woodland', 30, 4, 1], ['outpost', 75, 10, 2], ['mountain', 150, 18, 3]] as const)(
+    'pays %s %i XP, %i gold and %i salvage under v2', (id, xp, money, salvage) => {
+      const plan = planExpedition(v2Snapshot(expeditionSnapshot(300, 100, id, 10)), 'rewards', RULES_V2);
+      expect(plan.success).toBe(true);
+      expect(plan.rewards).toMatchObject({ xp, money });
+      expect(plan.rewards.loot[0]).toMatchObject({ catalogId: 'salvage', quantity: salvage });
+    });
+  it('finds gear half as often', () => {
+    const v1Snapshot = outpost(), v2Prepared = v2Snapshot(v1Snapshot);
+    let v1Wins = 0, v1Gear = 0, v2Wins = 0, v2Gear = 0;
+    for (let i = 0; i < 2000; i++) {
+      const v1 = planExpedition(v1Snapshot, `seed-${i}`, RULES_V1), v2 = planExpedition(v2Prepared, `seed-${i}`, RULES_V2);
+      if (v1.success) { v1Wins += 1; if (v1.rewards.loot.length > 1) v1Gear += 1; }
+      if (v2.success) { v2Wins += 1; if (v2.rewards.loot.length > 1) v2Gear += 1; }
+    }
+    expect(v1Wins).toBeGreaterThan(1900);
+    expect(v2Wins).toBe(v1Wins);
+    expect(v1Gear / v1Wins).toBeGreaterThan(0.27);
+    expect(v1Gear / v1Wins).toBeLessThan(0.33);
+    expect(v2Gear / v2Wins).toBeGreaterThan(0.12);
+    expect(v2Gear / v2Wins).toBeLessThan(0.18);
+  });
+  it('refuses mixed versions', () => {
+    const v1Snapshot = outpost(), prepared = v2Snapshot(v1Snapshot);
+    // Each snapshot is fine under its own rules; only the pairing is refused.
+    expect(() => planExpedition(v1Snapshot, 'x', RULES_V1)).not.toThrow();
+    expect(() => planExpedition(prepared, 'x', RULES_V2)).not.toThrow();
+    expect(() => planExpedition(v1Snapshot, 'x', RULES_V2)).toThrow(RangeError);
+    expect(() => planExpedition(prepared, 'x', RULES_V1)).toThrow(RangeError);
+    // A v2 trip whose build was stamped v1 (or the reverse) is as mixed as a wrong rules argument.
+    expect(() => planExpedition({ ...prepared, build: { ...prepared.build, rulesVersion: 'v1' } }, 'x', RULES_V2)).toThrow(RangeError);
+    expect(() => planExpedition({ ...v1Snapshot, build: { ...v1Snapshot.build, rulesVersion: 'v2' } }, 'x', RULES_V1)).toThrow(RangeError);
+    expect(() => planExpedition({ ...prepared, rulesVersion: 'v9', build: { ...prepared.build, rulesVersion: 'v9' } }, 'x', RULES_V2)).toThrow(RangeError);
+  });
+  it('keeps the loot stream of a seed: v2 loot is v1 loot whenever v1 found gear that v2 also found', () => {
+    const v1Snapshot = outpost(), prepared = v2Snapshot(v1Snapshot);
+    let shared = 0;
+    for (let i = 0; i < 300; i++) {
+      const v1 = planExpedition(v1Snapshot, `loot-${i}`, RULES_V1), v2 = planExpedition(prepared, `loot-${i}`, RULES_V2);
+      if (v2.rewards.loot.length > 1) { expect(v1.rewards.loot).toEqual(v2.rewards.loot); shared += 1; }
+    }
+    expect(shared).toBeGreaterThan(10);
   });
 });

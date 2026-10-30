@@ -2,8 +2,10 @@ import type { BattleLog, RevealedStage } from '../contracts/events.ts';
 import type { ActivitySnapshot, Catalog, DeepReadonly, Expedition, FighterSnapshot, Rules, Seed } from './types.ts';
 import type { LootGrant } from './inventory.ts';
 import { CATALOG_V1 } from './catalog-v1.ts';
+import { expeditionReward } from './economy.ts';
 import { makeFighter, simulateBattle } from './combat.ts';
 import { seededRandom } from './random.ts';
+import { RETAINED_RULES } from './rules.ts';
 import { freezeDomain } from './types.ts';
 
 export type ExpeditionEncounter = { index: number; dependsOn: number | null; revealOffsetMs: number;
@@ -32,11 +34,18 @@ export function expeditionLoot(entry: Expedition, catalog: Catalog, rules: Rules
   return loot;
 }
 
-/** Pure retained-v1 planner; future rules/catalog versions require explicit retained implementations. */
+/**
+ * Pure planner for any retained rules version (rules.ts). `rules` must be the retained rules of both the snapshot and its
+ * build, so a trip is planned under the version that froze it and never a mixed one. The enemies, the fights and the catalog
+ * are CATALOG_V1's in every version; the entry's rewards (XP, gold, gear chance) are the version's (`expeditionReward`).
+ * Future catalog versions require explicit retained implementations.
+ */
 export function planExpedition(snapshot: ActivitySnapshot, seed: Seed, rules: Rules): ExpeditionPlan {
-  if (rules.version !== 'v1' || snapshot.rulesVersion !== rules.version || snapshot.build.rulesVersion !== rules.version
+  if (!Object.hasOwn(RETAINED_RULES, rules.version) || RETAINED_RULES[rules.version] !== rules
+    || snapshot.rulesVersion !== rules.version || snapshot.build.rulesVersion !== rules.version
     || snapshot.choice.kind !== 'expedition' || !Object.hasOwn(CATALOG_V1.expeditions, snapshot.choice.expeditionId)) throw new RangeError('Unsupported expedition snapshot');
-  const id = snapshot.choice.expeditionId, catalog = CATALOG_V1, entry = catalog.expeditions[id];
+  const id = snapshot.choice.expeditionId, catalog = CATALOG_V1, base = catalog.expeditions[id];
+  const entry: Expedition = { ...base, rewards: expeditionReward(rules, id) };
   if (snapshot.starting.level < entry.requiredLevel) throw new RangeError('Locked expedition');
   const player = makeFighter(snapshot.build, 'expedition', rules), enemy = entry.enemy;
   const template: FighterSnapshot = { rulesVersion: rules.version, classId: null, stance: enemy.stance, attributes: enemy.attributes,

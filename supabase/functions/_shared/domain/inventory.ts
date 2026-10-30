@@ -1,8 +1,9 @@
 import type { ItemInstance } from '../contracts/reads.ts';
 import type { ItemStats } from '../contracts/events.ts';
-import type { Catalog, CatalogItem } from './types.ts';
+import type { Catalog, CatalogItem, Rules } from './types.ts';
 import { RULES_V1 } from './rules-v1.ts';
 import { CATALOG_V1 } from './catalog-v1.ts';
+import { salvageSellValue } from './economy.ts';
 
 /** Where a granted item comes from. Starter items are created only by character creation. */
 export type GrantOrigin = 'shop' | 'expedition' | 'renown';
@@ -56,15 +57,17 @@ function validGrant(grant: LootGrant, catalog: Catalog): CatalogItem | 'salvage'
  * Plans placing rewards or purchases into an inventory of `capacity` slots, every owned item (equipped, reserved, listed,
  * salvage stack) occupying one. Salvage first tops up partial stacks in item-ID order, then opens slots of at most the
  * stack limit. Expedition units that do not fit convert to money at NPC sell value; shop and renown units are rejected.
+ * `rules` (default RULES_V1) give the capacity and the value of an overflowing salvage unit (`salvageSellValue`: the rules
+ * version of the trip that earned it); gear overflow converts at the catalog's value in every version.
  */
-export function planInventoryGrant(inventory: readonly ItemInstance[], rewards: readonly LootGrant[], catalog: Catalog): InventoryGrantPlan {
+export function planInventoryGrant(inventory: readonly ItemInstance[], rewards: readonly LootGrant[], catalog: Catalog, rules: Rules = RULES_V1): InventoryGrantPlan {
   if (!Array.isArray(inventory) || !Array.isArray(rewards)) throw new RangeError('Invalid inventory grant input');
   const stackLimit = catalog.salvage.stackLimit;
   for (const item of inventory) {
     if (!Number.isSafeInteger(item.quantity) || item.quantity < 1
       || item.quantity > (item.catalogId === catalog.salvage.id ? stackLimit : 1)) throw new RangeError('Invalid inventory quantity');
   }
-  let free = Math.max(0, RULES_V1.inventory.capacity - inventory.length);
+  let free = Math.max(0, rules.inventory.capacity - inventory.length);
   const partial = inventory.filter(item => item.catalogId === catalog.salvage.id && item.catalogVersion === catalog.version && item.quantity < stackLimit && item.reservation === null)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(item => ({ itemId: item.id, room: stackLimit - item.quantity }));
   const added = new Map<string, number>();
@@ -96,7 +99,7 @@ export function planInventoryGrant(inventory: readonly ItemInstance[], rewards: 
           stats: structuredClone(material.stats) as ItemStats, quantity, origin: 'expedition', binding: material.binding });
         free -= 1; remaining -= quantity;
       }
-      if (remaining > 0) convert(catalog.salvage.id, remaining, catalog.salvage.npcSellValue);
+      if (remaining > 0) convert(catalog.salvage.id, remaining, salvageSellValue(rules));
       continue;
     }
     const fit = Math.min(free, grant.quantity);
@@ -178,10 +181,13 @@ export function shopOffers(catalog: Catalog): ShopOffer[] {
   return Object.keys(catalog.items).map(id => shopOffer(id, catalog)).filter((offer): offer is ShopOffer => offer !== null);
 }
 
-/** Money an NPC pays per unit, or null: NPCs never buy bound or renown-origin gear, or anything outside this catalog. */
-export function npcSaleValue(item: Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'origin' | 'binding'>, catalog: Catalog): number | null {
+/**
+ * Money an NPC pays per unit, or null: NPCs never buy bound or renown-origin gear, or anything outside this catalog. Salvage
+ * sells at `rules`' value (default RULES_V1; the active version for a sale at command time); gear at the catalog's.
+ */
+export function npcSaleValue(item: Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'origin' | 'binding'>, catalog: Catalog, rules: Rules = RULES_V1): number | null {
   if (item.catalogVersion !== catalog.version || item.binding !== 'tradable' || item.origin === 'renown') return null;
-  if (item.catalogId === catalog.salvage.id) return catalog.salvage.npcSellValue;
+  if (item.catalogId === catalog.salvage.id) return salvageSellValue(rules);
   const entry = entryFor(catalog, item.catalogId);
   if (!entry || entry.tier !== item.tier || entry.rarity !== item.rarity) return null;
   return entry.npcSellValue;

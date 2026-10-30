@@ -464,11 +464,13 @@ export type RewardGrant = DeepReadonly<{
 }>;
 
 /**
- * Spec §8.2 placement bonuses for a completed bracket, one per entrant, ordered by place then rank: the winner 100 money
- * and 50 renown, the runner-up 60 and 30, losers of the round before the final (semifinal losers) 30 and 15, every other
- * entrant 5 renown. A two-player bracket has no semifinal, so it awards only the winner and runner-up. A bye is never a
- * loss: a bye semifinal awards no semifinal placement. The amounts are the graph's rules version's for its league
- * (`tournamentPlacements`; patch 1.6: v2 pays gold by league, v1 the same in every league).
+ * Spec §8.2 placement bonuses for a completed bracket, one per entrant, ordered by place then rank: the winner, the
+ * runner-up, losers of the round before the final (semifinal losers), and every other entrant (renown only). A two-player
+ * bracket has no semifinal, so it awards only the winner and runner-up. A bye is never a loss: a bye semifinal awards no
+ * semifinal placement. The amounts are the graph's rules version's for its league (`tournamentPlacements`):
+ * - v1 (the same in every league): winner 100 money and 50 renown, runner-up 60 and 30, semifinal 30 and 15, others 5 renown;
+ * - v2 (patch 1.6, gold by league, renown unchanged): the winner's gold is 40 / 60 / 80 / 100 in Bronze / Silver / Gold /
+ *   Champion, the runner-up's 24 / 36 / 48 / 60, a semifinalist's 12 / 18 / 24 / 30.
  */
 export function placementGrants(graph: TournamentGraph): RewardGrant[] {
   const fought = completedBouts(graph);

@@ -10,6 +10,8 @@
   top: var(--card-top, 64px);
   z-index: 11;
   width: 520px;
+  /* A narrow pointer window (481-597 px): never past the right edge, so × stays in view (fix round). */
+  max-width: calc(100% - 78px);
   max-height: calc(100% - 76px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -346,6 +348,9 @@
     top: auto;
     bottom: 76px;
     width: auto;
+    /* A wide touch screen (a tablet): the sheet keeps the desktop card's width, centred (fix round). */
+    max-width: 520px;
+    margin: 0 auto;
     max-height: calc(100% - 140px);
     display: flex;
     flex-direction: column;

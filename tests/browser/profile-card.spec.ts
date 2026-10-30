@@ -37,12 +37,16 @@ test.describe('the richer profile card', () => {
     const lucilla = await openFromList(page, 'Lucilla');
     await expect(section(page, 'Lucilla', 'Stats')).toContainText('Health');
     // A pointer window: 520 px beside the menus. (The mobile project has no hover, so its card is the touch sheet, checked below.)
+    const box = (await lucilla.boundingBox())!;
     if (!(await touchLayout(page))) {
-      const box = (await lucilla.boundingBox())!;
       expect(Math.round(box.width)).toBe(520);
       expect(Math.round(box.x)).toBe(458);
       expect(Math.round(box.y)).toBe(64);
       expect(box.y + box.height).toBeLessThan(900);
+    } else {
+      // A wide touch screen: the sheet keeps the card's 520 px, centred (fix round).
+      expect(Math.round(box.width)).toBe(520);
+      expect(Math.abs(box.x + box.width / 2 - 720)).toBeLessThanOrEqual(1);
     }
     expect(await lucilla.getByTestId('profile-look').locator('[data-layer]').count()).toBeGreaterThanOrEqual(3);
     await expect(lucilla.getByTestId('profile-look')).toHaveAttribute('aria-hidden', 'true');
@@ -52,7 +56,8 @@ test.describe('the richer profile card', () => {
     await expect(section(page, 'Lucilla', 'Gear')).toContainText('Two-handed weapon');
     const record = section(page, 'Lucilla', 'Record');
     await expect(record).toContainText(/Arena record\s*7–4 · all seasons/);
-    await expect(record).toContainText('In camp since');
+    // Made 6 days (her level) before the fixture's clock: the card's minute clock follows the synced display clock.
+    await expect(record).toContainText(/In camp since\s*\d+ \w+ · 6 days/);
     await expect(lucilla).not.toContainText(PRIVATE);
     await expect(lucilla.getByTestId('class-bonus')).toHaveText(['Vitality +5%', 'Endurance +5%']);
     await expectNamedControls(lucilla, 'the profile card');
@@ -102,6 +107,21 @@ test.describe('the richer profile card', () => {
     await shot(page, testInfo, 'xanthe');
   });
 
+  test('a narrow pointer window keeps the card and its × on screen', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'A pointer window (the mobile project has no hover).');
+    await page.setViewportSize({ width: 540, height: 800 });
+    await openCamp(page);
+    expect(await touchLayout(page)).toBe(false);
+    const lucilla = await openFromList(page, 'Lucilla');
+    await expect(section(page, 'Lucilla', 'Stats')).toContainText('Health');
+    const box = (await lucilla.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(540 - 12);
+    await expect(lucilla.getByRole('button', { name: 'Close profile' })).toBeInViewport({ ratio: 1 });
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await expect(section(page, 'Lucilla', 'Record')).toContainText(/In camp since\s*\d+ \w+ · 6 days/);
+    await shot(page, testInfo, 'lucilla-540');
+  });
+
   test('phone 360 × 740: the sheet scrolls and keeps Follow in reach', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await openCamp(page);
@@ -120,6 +140,7 @@ test.describe('the richer profile card', () => {
     expect((await follow.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect((await lucilla.getByRole('button', { name: 'Close profile' }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await noHorizontalScroll(page)).toBe(true);
+    await expect(section(page, 'Lucilla', 'Record')).toContainText(/In camp since\s*\d+ \w+ · 6 days/);
     await shot(page, testInfo, 'lucilla-360');
     await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
     await expect(lucilla.getByText('In camp since', { exact: true })).toBeInViewport();

@@ -105,26 +105,61 @@ No CHECK calls a function. M26 re-emits no unchanged function.
   1.1→1, 1.2→2, 1.3→3 and 1.3.1→4; 1.0 and 1.2.1 stayed null.
 - **Access audit** (`scripts/access-audit.sql`): 648 rows and 0 finding rows; the same rows (sorted) as on the source-applied
   database.
-- **Lint and advisors**: lint is empty. The advisors (`--type all --level info --fail-on warn`) gave 36 INFO notices and no
-  warnings or errors: 35 `unused_index` (no statistics yet) and M25's `message_reads_message_id_fkey`.
+- **Lint and advisors**: lint is empty. On a fresh replay, the advisors (`--type all --level info --fail-on warn`) gave 37 INFO notices
+  and no warnings or errors: 36 `unused_index` (no statistics yet) and M25's `message_reads_message_id_fkey`. That is the same as M25's
+  record.
+
+  A first run gave 36 notices (35 `unused_index`). That run came after my inspection reads of `world_revision`. Those reads scan
+  `visible_events` and so used `activity_stages_reveal_idx`, which then dropped off the list. No index was added or removed.
 - **`npm run test:db`**: 403/403 in 30 files on the M01–M26 replay (06:05–06:12 UTC). Before it, the Edge source's access times were
   refreshed and the runtime settled (the Edge function is served from this worktree). The Edge container's start time was the same
   before and after the run.
+- **The backfill on existing rows.** The replays run `--no-seed`, so on a replay the backfill has no profile to fill. Two tests in
+  `tests/db/profile-card.test.ts` cover it:
+  - a rolled-back test nulls both new columns on a character and runs `refresh_projections()`: both are filled, and a second call
+    writes no row;
+  - the file test checks that the backfill comes after `project_character`'s restatement.
 
 **Release** (spec "Release"):
+- **Before the push** (each a read, run with the linked CLI as in the runbook's "Schema fingerprint and hosted checks"):
+  1. Production's migration list (`supabase migration list --linked`) ends at M25, `20261028165017_messages.sql`.
+  2. `npx supabase db push --dry-run` lists exactly one migration, `20261030055918_patch_1_4.sql`.
+  3. The window: outside Wednesday and Saturday 17:20–20:00 UTC (tournaments), and with no open boundary (the runbook's hosted
+     checks: `scheduler` / `boundaries open` = 0).
+  4. Production's visible patch-note titles:
+     `select id, kind, title, hidden from public.game_messages where kind='patch-notes' order by id`.
+     The seed links notes by exact title, so ids 1–4 must carry these titles exactly:
+     - "Evening Arena, waiting monsters, clearer menus";
+     - "New: choose your gladiator's look";
+     - "Messages, gold, fixed builds and bigger beds";
+     - "Attribute points: easier on a phone".
+
+     Note 4 (posted 2026-10-29 for 1.3.1) is not in release-evidence.md. Its title is the coordinator's record, so this read confirms
+     it.
 - **Order.** M26 first: the 1.4 client's revision read names `latest_patch`, so a 1.4 client could not read the camp on a database
-  without M26. Then the client. Once the client is live, each after Avi's go: the patch note, then
-  `record_patch('1.4', …)`. Recording 1.4 only after its client is live means a reload always brings 1.4.
+  without M26. Then the client. Once the client is live, each after Avi's go: the patch note, then `record_patch('1.4', …)`.
+  Recording 1.4 only after its client is live means a reload always brings 1.4.
 - **An older client.** A 1.3.1 client on M26 reads its named revision columns, and its profile read ignores the new keys.
-- **Read-back after `db push`.** The seed links notes by exact title, and a mismatch silently stores null. So read back, read-only:
-  `select number, message_id from public.patches order by sort_key`. It must give 1.1→1, 1.2→2, 1.3→3 and 1.3.1→4, with 1.0 and
-  1.2.1 null. A null in place of a link is fixed with a plain owner `update`, after Avi's go.
+- **Rollback.**
+  - There is no down migration. Never revert M26 while a 1.4 client is live: that client's revision read names `latest_patch`, and
+    without M26 it could not read the camp.
+  - To roll back, roll back the client only. A 1.3.1 client works on M26.
+- **Read-back after `db push`** (read-only). The seed links notes by exact title, and a mismatch silently stores null:
+  - `select number, message_id from public.patches order by sort_key` must give 1.1→1, 1.2→2, 1.3→3 and 1.3.1→4, with 1.0 and 1.2.1
+    null. A null in place of a link is fixed with a plain owner `update`, after Avi's go.
+  - `select count(*) from public.public_profiles where build is null or joined_at_ms is null` must be 0: the backfill filled every
+    profile.
 - **Locks.**
-  - Replacing `world_revision` and `public_profile_reads` takes ACCESS EXCLUSIVE locks on the two views until the commit, so
+  - Adding the two columns takes an ACCESS EXCLUSIVE lock on `public_profiles`, held until the commit, through the backfill. There is
+    no rewrite, but profile writes and reads wait for the whole transaction.
+  - Replacing `world_revision` and `public_profile_reads` takes ACCESS EXCLUSIVE locks on the two views, also until the commit, so
     revision and profile reads wait for that moment.
-  - Adding the two columns locks `public_profiles` briefly, with no rewrite.
-  - The backfill re-projects every character inside the transaction (9 gladiators on production at the time of writing).
-  - No existing table is rewritten.
+  - The backfill re-projects every character inside the transaction (9 gladiators on production at the time of writing). No
+    existing table is rewritten.
+- **Deadlock risk.** M26 locks `public_profiles` before `public_profile_reads`. A profile read locks the view and then the table, and
+  `project_character` (a boundary's projection) locks `world_actors` and then `public_profiles`. Postgres aborts one side of a
+  deadlock. If that side is M26, it rolls back whole and can be run again. This is why the release waits for a window with no open
+  boundary.
 - **After `db push`.** Compare the hosted fingerprint and access audit with this replay's (1,240 and 648 lines), as in the runbook's
   "Schema fingerprint and hosted checks" and "Release access audit".
 

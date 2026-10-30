@@ -168,9 +168,20 @@ test.describe('seasons in the fixture preview', () => {
     await rowOf(page, 'Bronze', 'Varro').getByRole('button', { name: 'Profile: Varro', exact: true }).click();
     const varro = profileCard(page, 'Varro');
     await expect(varro).toContainText(/Rating\s*\d+/);
-    await expect(varro).toContainText(/This season\s*\d+–\d+/);
+    // The closed season's standings name that season (Avi, 2026-10-30: "Season 1 · 12–3"), never "This season".
+    const closedRecord = (await rowOf(page, 'Bronze', 'Varro').locator('td').nth(2).textContent())!.trim();
+    await expect(varro.getByRole('region', { name: 'Record' })).toContainText(new RegExp(`Season 1\\s*${closedRecord}`));
+    await expect(varro).not.toContainText('This season');
     await expect(varro.getByRole('list', { name: 'Season badges' })).toHaveCount(0);
-    await expect(varro).not.toContainText(/Season \d|Champion ·/);
+    await expect(varro).not.toContainText('Champion ·');
+    await varro.getByRole('button', { name: 'Close profile' }).click();
+    // The current season's standings: "This season", with that row's record.
+    await picker(page).selectOption({ label: 'Season 2 · current' });
+    const current = rowOf(page, 'Bronze', 'Varro');
+    const currentRecord = (await current.locator('td').nth(2).textContent())!.trim();
+    await current.getByRole('button', { name: 'Profile: Varro', exact: true }).click();
+    await expect(profileCard(page, 'Varro').getByRole('region', { name: 'Record' })).toContainText(new RegExp(`This season\\s*${currentRecord}`));
+    await expect(profileCard(page, 'Varro')).not.toContainText('Season 2');
   });
 
   test('fits the standings sheet at 360 px with no horizontal scroll', async ({ page }, testInfo) => {

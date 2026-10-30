@@ -28,7 +28,8 @@ export function ArenaMenu({ open, bridge, reads, owner, world, clock, fixture, s
   sceneUnavailable: boolean;
   revision: string | null;
   /** Opens a standings row's profile card (Task 13.7). */
-  onProfile(row: StandingRow): void;
+  /** A standings row's profile card, with the season the standings show (null for the current one). */
+  onProfile(row: StandingRow, season: string | null): void;
 }) {
   return <>
     {open && !sceneUnavailable && fights.length > 0 && (

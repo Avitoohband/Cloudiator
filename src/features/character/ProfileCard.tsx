@@ -27,13 +27,17 @@ import { COMPACT_QUERY } from '../shell/rail-reveal';
 import type { Roster } from './RosterPanel';
 import { classLine, gearText, isAway, placeOf } from './actor-text';
 import { ownRestingText } from './activity-status';
-import { badgeText, titleText } from '../seasons/season-text';
+import { badgeText, seasonName, titleText } from '../seasons/season-text';
 import { ActorPortrait } from './ActorPortrait';
 import { ClassChips } from './ClassCard';
 import { attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statRows } from './profile-card';
 import styles from './ProfileCard.module.css';
 
-export type ProfileRecord = { wins: number; losses: number };
+/**
+ * Human wins and losses from a standings row, and the season those standings show: a closed season's id ("Season 1 · 12–3"), or null
+ * for the current season ("This season"; Avi, 2026-10-30).
+ */
+export type ProfileRecord = { wins: number; losses: number; season?: string | null };
 
 /** Whose card to show, and how it was opened. */
 export type ProfileTarget = {
@@ -135,7 +139,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
             <div><dt>Rating</dt><dd>{rating}</dd></div>
             {profile?.arenaRecord && <div><dt>Arena record</dt><dd>{recordText(profile.arenaRecord)}
               {profile.arenaRecord.wins + profile.arenaRecord.losses > 0 && <small> · all seasons</small>}</dd></div>}
-            {record && <div><dt>This season</dt><dd>{record.wins}–{record.losses}</dd></div>}
+            {record && <div><dt>{record.season ? seasonName(record.season) : 'This season'}</dt><dd>{record.wins}–{record.losses}</dd></div>}
             {since && <div><dt>In camp since</dt><dd>{since}</dd></div>}
           </dl>
           {own && profile && <p className={styles.see}>Other players see this card too.</p>}

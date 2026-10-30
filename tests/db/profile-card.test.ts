@@ -22,6 +22,23 @@ async function fighter() {
 const FORBIDDEN = ['owner_id', 'ownerId', 'wallets', 'inventory', 'seed', 'email', 'schedule', 'ownedCosmetics', 'rewards', 'receiptId', 'pendingBuild',
   'origin', 'binding', 'reservation'];
 const SLOTS = ['weapon', 'offHand', 'head', 'body', 'feet'] as const;
+/** The keys a worn item may show on the card: the fields a market listing shows, and nothing else. */
+const ITEM_KEYS = ['catalogId', 'catalogVersion', 'rarity', 'stats', 'tier'];
+/**
+ * What in a raw profile row (as the Data API serves it, before the client's read rebuilds anything) is the owner's own: a forbidden key,
+ * an item's id or owner key, an item id's value, or a worn slot with keys beyond the five public ones. Empty when nothing leaks.
+ */
+function leaks(profile: unknown, itemIds: readonly string[]): string[] {
+  const found: string[] = [];
+  const json = JSON.stringify(profile);
+  for (const key of [...FORBIDDEN, 'id', 'owner']) if (json.includes(`"${key}":`)) found.push(`key ${key}`);
+  for (const id of itemIds) if (json.includes(id)) found.push(`item id ${id}`);
+  const equipment = (profile as { build?: { equipment?: Record<string, unknown> } }).build?.equipment ?? {};
+  for (const [slot, item] of Object.entries(equipment)) {
+    if (item !== null && JSON.stringify(Object.keys(item as object).sort()) !== JSON.stringify(ITEM_KEYS)) found.push(`slot ${slot} keys ${Object.keys(item as object)}`);
+  }
+  return found;
+}
 
 describe('the public profile card', () => {
   it('publishes the current build, its worn items\' public fields and the creation time', async () => {
@@ -44,10 +61,53 @@ describe('the public profile card', () => {
     const [{ created }] = await sql`select created_at_ms::bigint as created from public.gladiators where id=${f.gid}`;
     expect(visitor.joinedAtMs).toBe(Number(created));
     expect(visitor.arenaRecord).toEqual({ wins: 0, losses: 0 });
-    // Nothing that is the owner's own: no forbidden key, and no item id.
-    const json = JSON.stringify(visitor);
-    for (const key of FORBIDDEN) expect(json, key).not.toContain(`"${key}"`);
-    for (const item of owner.inventory) expect(json).not.toContain(item.id);
+    // Nothing that is the owner's own, checked on the RAW row the Data API serves a visitor (fix round: the read rebuilds each item from
+    // its five fields, so a check on its result could not see a leak inside an item).
+    const raw = await anonymous.from('public_profile_reads').select('profile').eq('gladiator_id', f.gid).single();
+    expect(raw.error).toBeNull();
+    const ids = owner.inventory.map(item => item.id);
+    expect(leaks(raw.data!.profile, ids)).toEqual([]);
+    for (const slot of SLOTS) {
+      const item = (raw.data!.profile as { build: { equipment: Record<string, object | null> } }).build.equipment[slot];
+      if (item !== null) expect(Object.keys(item).sort(), slot).toEqual(ITEM_KEYS);
+    }
+  });
+
+  it('would see a leak inside an item: the check is not vacuous', async () => {
+    const f = await fighter();
+    const owner = await readOwner(f.owner.client);
+    const ids = owner.inventory.map(item => item.id);
+    // In a transaction that rolls back, the stored build's weapon gains the item's id, origin and owner: the raw row read as a visitor shows them.
+    const seen = await sql.begin(async tx => {
+      await tx`update public.public_profiles set build=jsonb_set(build,'{equipment,weapon}',(build->'equipment'->'weapon')
+        ||jsonb_build_object('id',${ids[0]}::text,'origin','starter','ownerId',${f.owner.id}::text)) where gladiator_id=${f.gid}`;
+      await tx.unsafe('set local role anon');
+      const [{ profile }] = await tx`select profile from public.public_profile_reads where gladiator_id=${f.gid}`;
+      throw Object.assign(new Error('rollback'), { profile });
+    }).catch(error => (error as { profile?: unknown }).profile);
+    expect(leaks(seen, ids)).toEqual(expect.arrayContaining(['key ownerId', 'key origin', 'key id', `item id ${ids[0]}`]));
+    expect(leaks(seen, ids).some(found => found.startsWith('slot weapon keys'))).toBe(true);
+    // Rolled back: the served row is clean again.
+    const raw = await anonymous.from('public_profile_reads').select('profile').eq('gladiator_id', f.gid).single();
+    expect(leaks(raw.data!.profile, ids)).toEqual([]);
+  });
+
+  it('backfills an existing profile with refresh_projections, and a second call changes nothing', async () => {
+    const f = await fighter();
+    const [{ created }] = await sql`select created_at_ms::bigint as created from public.gladiators where id=${f.gid}`;
+    const result = await sql.begin(async tx => {
+      // A profile as M25 left it: no build and no creation time.
+      await tx`update public.public_profiles set build=null, joined_at_ms=null where gladiator_id=${f.gid}`;
+      await tx`select public.refresh_projections()`;
+      const [filled] = await tx`select build, joined_at_ms::bigint as joined, ctid::text as version from public.public_profiles where gladiator_id=${f.gid}`;
+      await tx`select public.refresh_projections()`;
+      const [again] = await tx`select ctid::text as version from public.public_profiles where gladiator_id=${f.gid}`;
+      throw Object.assign(new Error('rollback'), { filled, again });
+    }).catch(error => error as { filled: { build: { stance: string } | null; joined: string; version: string }; again: { version: string } });
+    expect(result.filled.build?.stance).toEqual(expect.any(String));
+    expect(Number(result.filled.joined)).toBe(Number(created));
+    // The is-distinct check: an unchanged profile is not written again (its tuple stays where it is).
+    expect(result.again.version).toBe(result.filled.version);
   });
 
   it('keeps a queued build private until it takes effect', async () => {
@@ -111,5 +171,7 @@ describe('the public profile card', () => {
     const grant = at('grant select on public.public_profile_reads to anon,authenticated,service_role;', revoke);
     const backfill = at('select public.refresh_projections();', grant);
     expect(backfill).toBeLessThan(m26.lastIndexOf('notify pgrst'));
+    // The backfill runs the NEW projector: it comes after project_character's restatement (fix round).
+    expect(backfill).toBeGreaterThan(start);
   });
 });

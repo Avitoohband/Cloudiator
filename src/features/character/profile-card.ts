@@ -55,7 +55,8 @@ export function statRows(stats: CardStats): [label: string, value: string][] {
   return [
     ['Health', String(stats.health)],
     ['Damage', `${stats.hit} a hit`],
-    ['Speed', `every ${decimals(stats.intervalMs / 1000, 2)} s`],
+    // Half up to hundredths: 1005 ms is 1.01 s (1.005 × 100 in binary is 100.49…, which Math.round would take down).
+    ['Speed', `every ${String(Math.round(stats.intervalMs / 10) / 100)} s`],
     ['Armor', stats.armor > 0 ? `${decimals(stats.armor, 1)} · blocks ${stats.blocks}%` : 'None'],
     ['Critical', `${Math.round(stats.critical * 100)}% of hits`],
   ];

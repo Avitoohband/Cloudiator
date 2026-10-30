@@ -4,7 +4,7 @@
 // (`actorLayers`, so the legacy look too), drawn as the creation preview draws its look: a DOM sprite of the gladiator atlas, the idle
 // loop facing south-east (a still frame under reduced motion), on the preview's green ground, at scale 2. Decorative: the name and
 // the class line say who it is.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PublicActor } from '@contracts/reads';
 import { PREVIEW_ANCHOR, PREVIEW_FRAME_MS, actorLayers, frameId, hexColour, layerStyle, nextFrame } from './look-picker';
 import { ATLAS_IMAGE, loadAtlas, type Atlas } from './look-atlas';
@@ -13,14 +13,17 @@ import styles from './ProfileCard.module.css';
 
 /** Art pixels to screen pixels in the portrait. */
 const SCALE = 2;
+/** The frame table once loaded, so a card opened again paints its sprite at once (fix round). */
+let loadedAtlas: Atlas | null = null;
 
 export function ActorPortrait({ actor }: { actor: Pick<PublicActor, 'gladiatorId' | 'appearance' | 'equipmentSilhouettes'> }) {
-  const [atlas, setAtlas] = useState<Atlas | null>(null);
+  const [atlas, setAtlas] = useState<Atlas | null>(loadedAtlas);
   const [frame, setFrame] = useState(0);
   const reduced = useReducedMotion();
   useEffect(() => {
     let live = true;
-    loadAtlas().then(table => { if (live) setAtlas(table); }, () => { /* The art did not load: the ground stays. */ });
+    if (loadedAtlas) return;
+    loadAtlas().then(table => { loadedAtlas = table; if (live) setAtlas(table); }, () => { /* The art did not load: the ground stays. */ });
     return () => { live = false; };
   }, []);
   useEffect(() => {
@@ -29,7 +32,8 @@ export function ActorPortrait({ actor }: { actor: Pick<PublicActor, 'gladiatorId
     const timer = setInterval(() => setFrame(current => nextFrame(current, false)), PREVIEW_FRAME_MS);
     return () => clearInterval(timer);
   }, [reduced]);
-  const layers = actorLayers(actor.appearance ?? null, actor.gladiatorId, actor.equipmentSilhouettes);
+  const layers = useMemo(() => actorLayers(actor.appearance ?? null, actor.gladiatorId, actor.equipmentSilhouettes),
+    [actor.appearance, actor.gladiatorId, actor.equipmentSilhouettes]);
   return <div className={styles.look} data-testid="profile-look" data-frame={frame} aria-hidden="true">
     <div className={styles.lookSprite} style={{ marginLeft: -PREVIEW_ANCHOR.x * SCALE, marginTop: -PREVIEW_ANCHOR.y * SCALE }}>
       {atlas && layers.map(layer => {

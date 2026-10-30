@@ -213,6 +213,11 @@ describe('profile card', () => {
     expect(season).toMatch(/This season\s+7–4/);
     expect(season).not.toContain('Rating · record');
     expect(text(card({ actor: LUCILLA, profile: LUCILLA_PROFILE }))).not.toContain('This season');
+    // Fix round (Avi, 2026-10-30: "Season 1 · 12–3"): a closed season's standings name that season; "This season" is the current one only.
+    const closed = text(card({ actor: LUCILLA, profile: LUCILLA_PROFILE, record: { wins: 12, losses: 3, season: '0' } }));
+    expect(closed).toMatch(/Season 1\s+12–3/);
+    expect(closed).not.toContain('This season');
+    expect(text(card({ actor: LUCILLA, profile: LUCILLA_PROFILE, record: { wins: 12, losses: 3, season: null } }))).toMatch(/This season\s+12–3/);
   });
 
   it('says Loading… before the profile, Not available when it failed or has no build, and own-card words', () => {

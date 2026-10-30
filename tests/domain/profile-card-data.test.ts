@@ -31,6 +31,11 @@ describe('profile card data', () => {
       offHand: gear('round-shield:1:common'), head: gear('iron-helmet:1:common'), body: gear('heavy-armor:1:common'), feet: gear('heavy-boots:1:common') } };
     expect(overloadLine(cardStats('guardian', heavy)!)).toBe('Overloaded: load 29 of 20.5, fighting at 79%');
     expect(cardStats('guardian', { ...LUCILLA, stance: 'reckless' as Stance })).toBeNull();
+    // Speed rounds half up to hundredths (fix round: 1005 ms is 1.01 s, where 1.005 × 100 in binary would round down).
+    const base = { health: 100, hit: 5, armor: 0, blocks: 0, critical: 0.07, efficiency: 1, load: 0, capacity: 10 };
+    expect(statRows({ ...base, intervalMs: 1005 })[2]).toEqual(['Speed', 'every 1.01 s']);
+    expect(statRows({ ...base, intervalMs: 1296 })[2]).toEqual(['Speed', 'every 1.3 s']);
+    expect(statRows({ ...base, intervalMs: 935 })[2]).toEqual(['Speed', 'every 0.94 s']);
   });
 
   it('lists the build\'s points with the class bonus', () => {

@@ -167,7 +167,8 @@ test.describe('seasons in the fixture preview', () => {
     // Varro qualified in Bronze but placed fifth: no award, so no title line and no badge list.
     await rowOf(page, 'Bronze', 'Varro').getByRole('button', { name: 'Profile: Varro', exact: true }).click();
     const varro = profileCard(page, 'Varro');
-    await expect(varro).toContainText(/Rating · record\s*\d+/);
+    await expect(varro).toContainText(/Rating\s*\d+/);
+    await expect(varro).toContainText(/This season\s*\d+–\d+/);
     await expect(varro.getByRole('list', { name: 'Season badges' })).toHaveCount(0);
     await expect(varro).not.toContainText(/Season \d|Champion ·/);
   });

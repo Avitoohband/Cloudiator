@@ -162,7 +162,8 @@ describe('public projection reads without a session', () => {
     // The revision read names the newest patch too (M26): null when the server sends none.
     expect(await gateway.revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, latestPatch: null });
     expect(await gateway.timeline('act')).toMatchObject({ activityId: 'act', completion, stages: [{ id: 's1' }] });
-    expect(await gateway.profile('g1')).toEqual(profile);
+    // A profile from before M26 reads the card's three keys (Task 11c) as null.
+    expect(await gateway.profile('g1')).toEqual({ ...profile, build: null, joinedAtMs: null, arenaRecord: null });
     expect(await gateway.standings('bronze')).toMatchObject({ league: 'bronze', seasonId: '2', rows: [{ rank: 1, gladiatorId: 'g1', name: 'Aster' }] });
     expect(await gateway.tournament(TID)).toMatchObject({ id: TID, status: 'insufficient-entrants', bouts: [], placements: [] });
     expect(await gateway.tournamentLog(BOUT)).toEqual(log);

@@ -13,6 +13,7 @@ import { FIXTURE_SEASONS } from '../../../tests/fixtures/seasons';
 import { RESTING_ACTOR, RESTING_OWNER, RESTING_PROFILE, restingActor } from '../../../tests/fixtures/resting';
 import { FIXTURE_INBOX, FIXTURE_MESSAGES, FIXTURE_NOTIFICATIONS } from '../../../tests/fixtures/messages';
 import { PATCH_1_4, SEED_PATCHES, linkNotes } from '../../../tests/fixtures/patches';
+import { profileCards } from '../../../tests/fixtures/profile-cards';
 import { PATCH } from '../patch';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 
@@ -34,7 +35,9 @@ const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARE
  * (Task 23.9: listed, not drawn in the camp).
  */
 const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS, RESTING_ACTOR] };
-const FIXTURE_PROFILES = { ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE };
+/** The public profiles with their card data (Task 11c): sample builds, creation times and each standings row's record. */
+const FIXTURE_PROFILES = profileCards({ ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE }, Object.values(ARENA_STANDINGS).flat(), ARENA_OWNER,
+  worldFixture.serverNowMs);
 const OWNER_ID = RESTING_OWNER.gladiatorId;
 /**
  * The one trip the preview says was followed by a Rest: the Woodland sample's gladiator (Aster) at the end of its trip. The

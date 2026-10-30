@@ -10,9 +10,17 @@
 // The layer is a labelled, non-modal dialog over the camp: on desktop beside the click that opened it, clear of the
 // gladiator (or beside the menus when a list row opened it); on touch a sheet above the ☰ button. A row (the keyboard
 // path of a camp click) gives it the focus; a camp click leaves the focus with the camp. Names render as React text.
+//
+// Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card is filled in sections. The look (a
+// portrait as the camp draws it) beside the name, class line and the class's bonus chips; then ATTRIBUTES (the current build's points)
+// beside STATS (what they make, computed with the shared rules), and GEAR beside RECORD (now, rating, the Arena record over all seasons,
+// "This season" from a standings row, and "In camp since"). 520 px in two columns on a desktop; on touch the sheet's body scrolls and
+// its actions stay at its foot. Before the one profile read arrives the build's sections say "Loading…", and "Not available" when it
+// failed or has no usable build; GEAR then keeps the world's "Equipped" line. The own card shows what others see, and says so.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import type { PublicActor, PublicProfile, WorldSnapshot } from '@contracts/reads';
+import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
+import type { ProfileRead } from '../../lib/api/reads';
 import type { Point } from '../../game/iso';
 import type { MenuId } from '../shell/menus';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
@@ -20,6 +28,9 @@ import type { Roster } from './RosterPanel';
 import { classLine, gearText, isAway, placeOf } from './actor-text';
 import { ownRestingText } from './activity-status';
 import { badgeText, titleText } from '../seasons/season-text';
+import { ActorPortrait } from './ActorPortrait';
+import { ClassChips } from './ClassCard';
+import { attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statRows } from './profile-card';
 import styles from './ProfileCard.module.css';
 
 export type ProfileRecord = { wins: number; losses: number };
@@ -37,12 +48,16 @@ export type ProfileTarget = {
   focus: boolean;
 };
 
-export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, onFollow, onWatch,
-  onOpenMenu }: {
+const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare: styles.rRare } as const;
+
+export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
+  onWatch, onOpenMenu }: {
   actor: PublicActor;
-  /** The public profile, once loaded (null while it loads or when it failed). */
-  profile: PublicProfile | null;
+  /** The public profile with its card data, once loaded (null while it loads or when it failed). */
+  profile: ProfileRead | null;
   profileFailed?: boolean;
+  /** The viewer's clock (the shell's minute clock), for "In camp since". */
+  nowMs: number;
   /** The viewer's own gladiator: the card adds the management shortcuts. */
   own: boolean;
   /**
@@ -66,20 +81,68 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   // Season prestige (Task 21.4): the badges newest season first, and the title of the latest champion award.
   const awards = [...(profile?.prestige ?? [])].sort((p, q) => Number(q.seasonId) - Number(p.seasonId));
   const title = awards.map(titleText).find(text => text !== null) ?? null;
+  // The build's sections: from the profile's build once it is read; "Loading…" before, "Not available" without a usable build.
+  const build = profile?.build ?? null;
+  const stats = build ? cardStats(actor.classId, build) : null;
+  const missing = profile || profileFailed ? 'Not available' : 'Loading…';
+  const gear = build ? gearRows(build) : null;
+  const overload = stats ? overloadLine(stats) : null;
+  const since = profile && profile.joinedAtMs !== null ? sinceText(profile.joinedAtMs, nowMs) : '';
   return <>
-    <div className={styles.head}>
-      {own && <p className="eyebrow">YOUR GLADIATOR</p>}
-      <h2 className={styles.name}>{actor.name}</h2>
-      {title && <p className={styles.title}>{title}</p>}
-      <p className={styles.class}>{classLine(actor)}</p>
-      {awards.length > 0 && <ul className={styles.badges} aria-label="Season badges">{awards.map(award => <li key={award.seasonId}>{badgeText(award)}</li>)}</ul>}
+    <div className={styles.body} data-testid="profile-body">
+      <div className={styles.head}>
+        <ActorPortrait actor={actor} />
+        <div className={styles.who}>
+          {own && <p className="eyebrow">YOUR GLADIATOR</p>}
+          <h2 className={styles.name}>{actor.name}</h2>
+          {title && <p className={styles.title}>{title}</p>}
+          <p className={styles.class}>{classLine(actor)}</p>
+          <ClassChips classId={actor.classId} />
+          {awards.length > 0 && <ul className={styles.badges} aria-label="Season badges">{awards.map(award => <li key={award.seasonId}>{badgeText(award)}</li>)}</ul>}
+        </div>
+      </div>
+      <div className={styles.grid}>
+        <section className={styles.section} aria-label="Attributes">
+          <p className="eyebrow">{build ? `ATTRIBUTES · ${pointsTotal(build.allocations)} POINTS` : 'ATTRIBUTES'}</p>
+          {build ? <ul className={styles.attributes}>
+            {attributeRows(actor.classId, build.allocations).map(row => <li key={row.attribute}>
+              <span>{row.label}{row.bonus && <span className={styles.bonus}> {row.bonus}</span>}</span>
+              <span className={styles.bar} aria-hidden="true"><i style={{ width: `${row.width * 100}%` }} /></span>
+              <b>{row.points}</b>
+            </li>)}
+          </ul> : <p className={styles.state}>{missing}</p>}
+        </section>
+        <section className={styles.section} aria-label="Stats">
+          <p className="eyebrow">{stats && build ? `STATS · ${build.stance.toUpperCase()} STANCE` : 'STATS'}</p>
+          {stats ? <>
+            <dl className={`${styles.facts} ${styles.stats}`}>{statRows(stats).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+            {overload && <p className={styles.overload}>{overload}</p>}
+          </> : <p className={styles.state}>{missing}</p>}
+        </section>
+        <section className={styles.section} aria-label="Gear">
+          <p className="eyebrow">GEAR</p>
+          {!build ? <dl className={styles.facts}><div><dt>Equipped</dt><dd>{gearText(actor.equipmentSilhouettes)}</dd></div></dl>
+            : gear ? <dl className={styles.facts}>{gear.map(row => <div key={row.slot}><dt>{row.label}</dt><dd>
+              {row.name ? <><span className={row.rarity ? RARITY_CLASS[row.rarity] : undefined}>{row.name}</span><span className={styles.detail}>{row.detail}</span></>
+                : <span className={styles.empty}>{row.note}</span>}
+            </dd></div>)}</dl>
+              : <p className={styles.state}>Nothing worn yet.</p>}
+        </section>
+        <section className={styles.section} aria-label="Record">
+          <p className="eyebrow">RECORD</p>
+          <dl className={styles.facts}>
+            <div><dt>Now</dt><dd>{own && actor.resting ? ownPlace ?? ownRestingText(null) : placeOf(actor)}</dd></div>
+            <div><dt>Rating</dt><dd>{rating}</dd></div>
+            {profile?.arenaRecord && <div><dt>Arena record</dt><dd>{recordText(profile.arenaRecord)}
+              {profile.arenaRecord.wins + profile.arenaRecord.losses > 0 && <small> · all seasons</small>}</dd></div>}
+            {record && <div><dt>This season</dt><dd>{record.wins}–{record.losses}</dd></div>}
+            {since && <div><dt>In camp since</dt><dd>{since}</dd></div>}
+          </dl>
+          {own && profile && <p className={styles.see}>Other players see this card too.</p>}
+        </section>
+      </div>
+      {followReason && <p id={reasonId} className={styles.reason}>{followReason}</p>}
     </div>
-    <dl className={styles.facts}>
-      <div><dt>Now</dt><dd>{own && actor.resting ? ownPlace ?? ownRestingText(null) : placeOf(actor)}</dd></div>
-      <div><dt>{record ? 'Rating · record' : 'Rating'}</dt><dd>{record ? `${rating} · ${record.wins}–${record.losses}` : rating}</dd></div>
-      <div><dt>Equipped</dt><dd>{gearText(actor.equipmentSilhouettes)}</dd></div>
-    </dl>
-    {followReason && <p id={reasonId} className={styles.reason}>{followReason}</p>}
     <div className={styles.actions}>
       {own && <>
         <button type="button" className={styles.gold} onClick={() => onOpenMenu('gladiator')}>My gladiator</button>
@@ -97,6 +160,8 @@ type Size = { width: number; height: number };
 const RAIL_RIGHT = 66, PANEL_RIGHT = 66 + 380 + 12, TOP = 64, MARGIN = 12;
 /** The card's bottom sits this far above a clicked body's centre (clear of the head), or its top this far below. */
 const ABOVE = 64, BELOW = 44;
+/** Beside a clicked body: the card's near edge this far from the body's centre (clear of the gladiator at the camp's zoom). */
+const SIDE = 40;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 
 /**
@@ -106,11 +171,14 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 export function placeCard(screen: Point | null, card: Size, view: Size): { left: number; top: number } {
   const maxLeft = view.width - card.width - MARGIN, maxTop = view.height - card.height - MARGIN;
   if (!screen) return { left: clamp(PANEL_RIGHT, RAIL_RIGHT, maxLeft), top: TOP };
-  const above = screen.y - ABOVE - card.height;
-  return {
-    left: clamp(screen.x - card.width / 2, RAIL_RIGHT, maxLeft),
-    top: clamp(above >= TOP ? above : screen.y + BELOW, TOP, maxTop),
-  };
+  const above = screen.y - ABOVE - card.height, below = screen.y + BELOW;
+  const centred = clamp(screen.x - card.width / 2, RAIL_RIGHT, maxLeft);
+  if (above >= TOP) return { left: centred, top: above };
+  if (below <= maxTop) return { left: centred, top: below };
+  // Task 11c: a card too tall for either (the richer card in a short window) sits beside the gladiator instead, right of the click
+  // or, near the right edge, left of it, so the gladiator stays in view.
+  const right = screen.x + SIDE, left = screen.x - SIDE - card.width;
+  return { left: right <= maxLeft ? right : left >= RAIL_RIGHT ? left : centred, top: clamp(screen.y - card.height / 2, TOP, maxTop) };
 }
 
 /**
@@ -125,7 +193,7 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
 }
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
-export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, onFollow, onWatch, onOpenMenu, onClose }: {
+export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, onFollow, onWatch, onOpenMenu, onClose }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
   /** Public profile reads (null until the fixture preview's reads load). */
@@ -138,13 +206,15 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   sceneStatus: 'loading' | 'ready' | 'unavailable';
   /** The gladiator the camera follows, or null. */
   following: string | null;
+  /** The viewer's clock (the shell's minute clock), for "In camp since". */
+  nowMs: number;
   onFollow(gladiatorId: string): void;
   onWatch(activityId: string, gladiatorId: string): void;
   onOpenMenu(id: MenuId): void;
   onClose(): void;
 }) {
   const card = useRef<HTMLElement>(null);
-  const [loaded, setLoaded] = useState<{ profile: PublicProfile | null; failed: boolean } | null>(null);
+  const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
   const id = target.gladiatorId;
 
@@ -182,13 +252,13 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
       <button type="button" className={styles.close} aria-label="Close profile" onClick={onClose}>×</button>
       {actor ? (
         <ProfileCard actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
-          followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} onFollow={onFollow}
+          followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} nowMs={nowMs} onFollow={onFollow}
           onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} />
-      ) : <>
-        <div className={styles.head}><h2 className={styles.name}>{name}</h2></div>
+      ) : <div className={styles.body} data-testid="profile-body">
+        <div className={styles.headPlain}><h2 className={styles.name}>{name}</h2></div>
         {target.record && <dl className={styles.facts}><div><dt>Record</dt><dd>{target.record.wins}–{target.record.losses}</dd></div></dl>}
         <p className={styles.reason} role="status">{loaded?.failed ? 'This profile is not available right now.' : 'Loading the profile…'}</p>
-      </>}
+      </div>}
     </section>
   );
 }

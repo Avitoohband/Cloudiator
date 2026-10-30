@@ -469,6 +469,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
+        nowMs={nowMs}
         following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}

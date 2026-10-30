@@ -44,9 +44,6 @@ Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi appr
 - While your gladiator is away, a button on the camp shows where it is and opens the live view. Once it is back, the same button offers the whole trip with your own result.
 - Patch numbers: the menu under your name shows the patch you are playing, each patch note shows its number, and Patch history lists what every patch added.
 - When a new patch is out, an open game says so, and Reload brings it in.
-
-### Planned
-
 - Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp.
 
 ## 1.3.1 — Phone attribute points (2026-10-29)

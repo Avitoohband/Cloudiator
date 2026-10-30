@@ -24,7 +24,10 @@ test('fixture preview: a gladiator resting at home, and with ?as=resting the own
   expect(otho).toEqual(RESTING_ACTOR);
   expect(otho).toMatchObject({ name: 'Otho', location: 'camp', activityId: null, activityStatus: 'idle', startsAtMs: null, endsAtMs: null, visibleStage: null });
   expect(world.actors.filter(a => a.resting)).toHaveLength(1);
-  expect(await createFixtureGateway().profile(otho.gladiatorId)).toEqual(RESTING_PROFILE);
+  // With the card's sample data (Task 11c).
+  const othoCard = await createFixtureGateway().profile(otho.gladiatorId);
+  expect(othoCard).toMatchObject(RESTING_PROFILE);
+  expect(othoCard.build).not.toBeNull();
   // The resting preview: Aster rests at home in the current slot. Before its first presence the owner state cannot say
   // when it returns; after it, the next slot's boundary (OwnerState.restingUntilSlot, processedSlotIndex + 1).
   const resting = createFixtureGateway({ resting: true });

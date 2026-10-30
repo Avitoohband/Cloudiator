@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
-import type { ActivitySummary, BattleLog, CreditedRewards, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type { ActivityId, Attributes, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
+import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  GameMessage, GameNotification, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
@@ -73,11 +73,76 @@ function prestigeAward(entry: unknown): PrestigeAward {
   return { seasonId: String(seasonIndex), league: league as LeagueId, place, badge: badge as PrestigeAward['badge'], title };
 }
 /** A public profile; its prestige is the character's season awards, oldest season first (Task 21), mapped to `PrestigeAward`s. */
-export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<PublicProfile> {
-  const { prestige, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown } }>(
-    await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
+/** One equipped item as the public profile shows it (Task 11c): the fields a market listing shows, never its id, owner or origin. */
+export type PublicGear = Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'stats'>;
+/** A gladiator's current build as the public profile shows it (Task 11c): never a queued one. */
+export type PublicBuild = { stance: Stance; allocations: Attributes; equipment: Record<EquipmentSlot, PublicGear | null> };
+/** Bouts against players, summed over every season and league as the standings count them. */
+export type ArenaRecord = { wins: number; losses: number };
+/**
+ * The profile read as this client reads it (Task 11c, M26): the shared contract's `PublicProfile` and the current build, the creation
+ * time and the Arena record over all seasons. A client-side type, as `RevisionRead`: the shared contracts do not change. Each is null
+ * when it is missing (a database before M26) or malformed.
+ */
+export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null };
+const STANCES: readonly string[] = ['offensive', 'balanced', 'defensive'];
+const SLOTS: readonly EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
+const ATTRIBUTE_NAMES = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
+const RARITIES: readonly string[] = ['common', 'uncommon', 'rare'];
+const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+/** Five whole numbers from 0, or null. */
+function attributesOf(value: unknown): Attributes | null {
+  if (!record(value)) return null;
+  const out = {} as Attributes;
+  for (const key of ATTRIBUTE_NAMES) {
+    const points = value[key];
+    if (!count(points)) return null;
+    out[key] = points;
+  }
+  return out;
+}
+/** An item's stats: finite non-negative numbers and an attribute bonus each (which may be fractional), or null. */
+function statsOf(value: unknown): PublicGear['stats'] | null {
+  if (!record(value) || !finite(value.damage) || !finite(value.armor) || !finite(value.weight) || !finite(value.intervalMs) || !record(value.attributes)) return null;
+  const bonus = value.attributes, attributes = {} as Attributes;
+  for (const key of ATTRIBUTE_NAMES) {
+    if (!finite(bonus[key])) return null;
+    attributes[key] = bonus[key] as number;
+  }
+  return { damage: value.damage, armor: value.armor, weight: value.weight, intervalMs: value.intervalMs, attributes };
+}
+/** One published item, or null for a malformed one. */
+function gearOf(value: unknown): PublicGear | null {
+  if (!record(value) || typeof value.catalogId !== 'string' || typeof value.catalogVersion !== 'string' || (value.tier !== 1 && value.tier !== 5 && value.tier !== 10)
+    || typeof value.rarity !== 'string' || !RARITIES.includes(value.rarity)) return null;
+  const stats = statsOf(value.stats);
+  return stats ? { catalogId: value.catalogId, catalogVersion: value.catalogVersion, tier: value.tier, rarity: value.rarity as ItemRarity, stats } : null;
+}
+/** The published build, or null when any part of it is malformed (an unknown stance, a bad point, a missing or bad slot). */
+export function publicBuildOf(value: unknown): PublicBuild | null {
+  if (!record(value) || typeof value.stance !== 'string' || !STANCES.includes(value.stance) || !record(value.equipment)) return null;
+  const allocations = attributesOf(value.allocations);
+  if (!allocations) return null;
+  const equipment = {} as Record<EquipmentSlot, PublicGear | null>;
+  for (const slot of SLOTS) {
+    if (!Object.hasOwn(value.equipment, slot)) return null;
+    const item = value.equipment[slot];
+    if (item === null) { equipment[slot] = null; continue; }
+    const gear = gearOf(item);
+    if (!gear) return null;
+    equipment[slot] = gear;
+  }
+  return { stance: value.stance as Stance, allocations, equipment };
+}
+export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<ProfileRead> {
+  const { prestige, build, joinedAtMs, arenaRecord, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
+    joinedAtMs?: unknown; arenaRecord?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
   if (!Array.isArray(prestige)) throw new GatewayReadError('unavailable');
-  return { ...profile, prestige: prestige.map(prestigeAward) };
+  const wins = record(arenaRecord) ? arenaRecord.wins : undefined, losses = record(arenaRecord) ? arenaRecord.losses : undefined;
+  return { ...profile, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
+    arenaRecord: count(wins) && count(losses) ? { wins, losses } : null };
 }
 /**
  * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`

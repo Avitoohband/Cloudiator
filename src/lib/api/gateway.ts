@@ -1,14 +1,14 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { MarketPage, OwnerState, PublicProfile, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { MarketPage, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
   GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
-  readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type NotificationsRead, type RevisionRead, type ShownMessage,
+  readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
-export { GatewayReadError, type NotificationsRead, type RevisionRead, type ShownMessage } from './reads';
+export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
@@ -29,7 +29,11 @@ export interface GameGateway {
   /** The world's revision and the server's time, and the server's newest patch (`latestPatch`, null when missing or malformed). */
   revision(): Promise<RevisionRead>;
   timeline(id: ActivityId): Promise<RevealedTimeline>;
-  profile(id: GladiatorId): Promise<PublicProfile>;
+  /**
+   * A gladiator's public profile with its card data (Task 11c): its current build, creation time and Arena record over all seasons,
+   * each null when missing or malformed.
+   */
+  profile(id: GladiatorId): Promise<ProfileRead>;
   /**
    * One page of open fixed-price offers, newest listing first, at most 50 rows; `cursor` is a page's `nextCursor`, and
    * `seller` keeps only that gladiator's offers. A malformed cursor or seller is `unavailable`. Loaded on demand: offers

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, ReadMessageResult, SeeNotificationsResult } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
+import { WorkerFailure } from './failure.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { retainedRules } from '../domain/rules.ts';
@@ -298,9 +299,10 @@ export function createWorkerDatabase(client: SupabaseClient): WorkerDatabase {
           'expedition_settlement_input', { activity_id: activityId, lease_token: token });
         if (!input) return rpc('settle_activity', { activity_id: activityId, lease_token: token });
         // The trip is settled under its plan's own version (patch 1.6): a v1 trip's overflowing salvage converts at 10 even
-        // after the switch, a v2 trip's at 4. An unknown version is refused before anything is renewed or settled.
+        // after the switch, a v2 trip's at 4. An unknown version is refused before anything is renewed or settled, and the
+        // worker records it as `unsupported-rules` (a deploy is needed, not a retry).
         let rules: Rules;
-        try { rules = retainedRules(input.rulesVersion); } catch { throw new Error('unsupported-rules'); }
+        try { rules = retainedRules(input.rulesVersion); } catch { throw new WorkerFailure('unsupported-rules'); }
         const baseline = { level: input.state.progression.level, xp: input.state.progression.xp };
         const prepared = { rewards: input.rewards, grant: prepareGrant(input.state, input.rewards.loot, rules), progressionBaseline: baseline,
           progression: applyXp(baseline.level, baseline.xp, input.rewards.xp) };

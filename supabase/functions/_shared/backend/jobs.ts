@@ -17,6 +17,8 @@ import type { BattleLog } from '../contracts/events.ts';
 import type { ActivitySnapshot, BattleParticipant, DeepReadonly, FighterSnapshot, Rules, Seed, SlotWindow } from '../domain/types.ts';
 import type { ActivityCosts, ActivityKind, BuildInput, CoordinatorReport, ItemInstance, JobKind, JobLease, PreparationInput, PreparationResult, WorkerReport } from '../domain/types.ts';
 import type { ExecutorIo, ExecutorRegistry, JobExecutor, JobOutcome, TournamentBoutRead, WorkerDependencies } from './database.ts';
+import { WorkerFailure } from './failure.ts';
+import type { FailureCode } from './failure.ts';
 
 /** Spec 10.4 batch limits and lease length; CPU measurements may lower the batch sizes without changing semantics. */
 export const WORKER_LIMITS = Object.freeze({ simple: 20, combat: 5, cpuMs: 2_000, leaseMs: 120_000, renewBelowMs: 60_000 });
@@ -30,11 +32,9 @@ export const WORKER_LIMITS = Object.freeze({ simple: 20, combat: 5, cpuMs: 2_000
  */
 export const COORDINATION_RETRY = Object.freeze({ attempts: 3, delayMs: 250, jitterMs: 250 });
 
-/** Stable, secret-free failure codes. Raw exception text is never stored, logged or returned. */
-export type FailureCode = 'unsupported-rules' | 'unsupported-executor' | 'invalid-input' | 'invalid-build' | 'invalid-result' | 'execution-failed';
-export class WorkerFailure extends Error {
-  constructor(readonly code: FailureCode) { super(code); this.name = 'WorkerFailure'; }
-}
+/** Stable, secret-free failure codes (failure.ts, re-exported here beside the executors that throw them). */
+export { WorkerFailure } from './failure.ts';
+export type { FailureCode } from './failure.ts';
 
 const ACTIVITY_KINDS: readonly ActivityKind[] = ['training', 'rest', 'expedition', 'arena', 'tournament'];
 /*
@@ -273,7 +273,9 @@ function simulate(rules: Rules): JobExecutor {
             .then(read => simulateTournamentBout(input as TournamentBoutInput, read, job.seed, rules));
         }
       } else if ((input as { choice?: { kind?: unknown } }).choice?.kind === 'expedition') {
-        if ((input as { rulesVersion?: unknown }).rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
+        // Both the snapshot and its build were frozen under the job's version, or the trip is mixed: refused, never planned.
+        const trip = input as { rulesVersion?: unknown; build?: { rulesVersion?: unknown } | null };
+        if (trip.rulesVersion !== rules.version || trip.build?.rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
         return planExpedition(input as ActivitySnapshot, job.seed, rules);
       }
     }

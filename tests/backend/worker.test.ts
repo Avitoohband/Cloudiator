@@ -811,7 +811,25 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
     // An unknown version is refused before anything is renewed or settled.
     const { client, calls } = settlementClient('v3');
     await expect(createWorkerDatabase(client).settle('activity-trip', 'token-trip')).rejects.toThrow('unsupported-rules');
-    expect(calls.map(c => c.name)).toEqual(['expedition_settlement_input']);
+    await expect(createWorkerDatabase(client).settle('activity-trip', 'token-trip')).rejects.toMatchObject({ code: 'unsupported-rules' });
+    expect(calls.map(c => c.name)).toEqual(['expedition_settlement_input', 'expedition_settlement_input']);
+  });
+
+  it('records unsupported-rules, never execution-failed, for a trip or a settlement of another version', async () => {
+    // The runbook and the release health check look for `unsupported-rules`: a version this worker cannot pay needs a deploy,
+    // not a retry. A trip whose build was stamped under another version is as mixed as a snapshot of another version.
+    const v2Trip = trip(RULES_V2), v1Trip = trip(RULES_V1);
+    const v1Build = lease('simulation', { snapshot: { ...v2Trip, build: { ...v2Trip.build, rulesVersion: 'v1' } }, seed: 'success', rulesVersion: 'v2' });
+    const v2Build = lease('simulation', { snapshot: { ...v1Trip, build: { ...v1Trip.build, rulesVersion: 'v2' } }, seed: 'success' });
+    const settlement = lease('settlement');
+    const { database, calls } = port({ settlement: [settlement] });
+    const unknown = createWorkerDatabase(settlementClient('v3').client);
+    expect(await runWorker({ database: { ...database, settle: unknown.settle }, workerId: 'worker-v3' })).toMatchObject({ claimed: 1, failed: 1 });
+    const simulations = port({ simulation: [v1Build, v2Build] });
+    expect(await runWorker({ database: simulations.database, workerId: 'worker-mixed' })).toMatchObject({ claimed: 2, failed: 2, completed: 0 });
+    expect([...calls, ...simulations.calls].filter(c => c.name === 'fail').map(c => c.args)).toEqual([
+      [settlement.id, settlement.token, 'unsupported-rules'], [v1Build.id, v1Build.token, 'unsupported-rules'],
+      [v2Build.id, v2Build.token, 'unsupported-rules']]);
   });
 });
 

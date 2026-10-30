@@ -246,6 +246,10 @@ export const ANON_PROBES: AnonProbe[] = [
   // M25: the operator's post function, called with null arguments (it would insert nothing); the private schema is not served at all.
   { label: 'rpc private.post_message', method: 'POST', path: '/rest/v1/rpc/post_message', body: { kind: null, title: null, preview: null, body: null, action: null },
     profile: 'private', expected: ['PGRST106'] },
+  // M26: the operator's patch record, called with null arguments (an empty list of features is refused, so it records nothing); the
+  // private schema is not served at all.
+  { label: 'rpc private.record_patch', method: 'POST', path: '/rest/v1/rpc/record_patch', body: { number: null, title: null, features: null, message_id: null },
+    profile: 'private', expected: ['PGRST106'] },
 ];
 
 /** anonDenied: null when `probe` was refused with one of its codes; otherwise its status and code, never the response text. */

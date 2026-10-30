@@ -187,12 +187,10 @@ describe('patch numbers', () => {
     expect(now.replace(',\n    (select p.number from public.patches p order by p.sort_key desc limit 1) as latest_patch', '')).toBe(was);
   });
 
-  // M26 is generated once for the whole patch (one database change per patch, Avi): Task 11c adds its public profile columns to the
-  // same migration, so the controller generates, completes and replays M26 after 11c's source exists (Task 11b's report, "What remains
-  // of Step 5"). Unskip this case then, run it on the as-generated draft (expect FAIL), complete the draft, and see it pass. If the
-  // file takes another name than `_patches.sql`, change M26_SUFFIX.
-  const M26_SUFFIX = '_patches.sql';
-  it.skip('ships M26 completed from 19-patches.sql: revokes before grants, the source\'s CHECK and generated expressions, the invoker view kept, the operator-only function, the seed, the reload last', () => {
+  // M26 is Patch 1.4's one migration (one database change per patch, Avi), generated once from 19-patches.sql and 20-profile-card.sql
+  // (Task 11c's part has its own file test in tests/db/profile-card.test.ts).
+  const M26_SUFFIX = '_patch_1_4.sql';
+  it('ships M26 completed from 19-patches.sql: revokes before grants, the source\'s CHECK and generated expressions, the invoker view kept, the operator-only function, the seed, the reload last', () => {
     const dir = new URL('../../supabase/migrations/', import.meta.url);
     const files = readdirSync(dir).filter(name => name.endsWith(M26_SUFFIX));
     expect(files).toHaveLength(1);
@@ -231,8 +229,8 @@ describe('patch numbers', () => {
     const head = 'create or replace view public.world_revision with(security_invoker=true) as';
     const view = source.slice(source.indexOf(head), source.indexOf('where singleton;', source.indexOf(head)) + 'where singleton;'.length);
     expect(m26).toContain(view);
-    expect(m26.match(/^create or replace view/gim)).toHaveLength(1);
-    expect(m26).not.toMatch(/drop view/i);
+    expect(m26.match(/^create or replace view public\.world_revision\b/gim)).toHaveLength(1);
+    expect(m26).not.toMatch(/drop view[^;]*world_revision/i);
     // The seed: the six rows, their features and the four note titles.
     for (const s of released()) {
       expect(m26, s.number).toContain(`('${s.number}',$t$${s.title}$t$`);

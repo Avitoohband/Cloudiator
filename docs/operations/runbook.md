@@ -712,7 +712,7 @@ deployed evidence | desktop | securityHeaders | connect-src origin https://<proj
 deployed evidence | desktop | connectSrc | connect-src exactly 'self' https://<project>.supabase.co on 5 of 5 routes
 deployed evidence | desktop | compression | <n> of <n> responses br or gzip
 deployed evidence | desktop | cors | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 unauthenticated
-deployed evidence | desktop | anonDenied | 21 of 21 anonymous probes refused as expected
+deployed evidence | desktop | anonDenied | 22 of 22 anonymous probes refused as expected
 deployed evidence | desktop | authProvidersGoogleOnly | GET /auth/v1/settings 200; Google only, sign-up open
 deployed evidence | desktop | shippedAssetsClean | scanned <n> assets, <m> of them JavaScript; 0 problems
 ```
@@ -727,13 +727,14 @@ variable, a failed crawl) has no line, and its error names the cause. Copy the b
   `/_next/static/` chunk carry exactly what the generated `_headers` gives that path), `connectSrc` (exactly `'self'` and the
   project), `compression` (every route's HTML and crawled chunk `br` or `gzip`), `cors` (the command preflight from the site:
   204 or 200, exactly the site's grant, never `*`, `Access-Control-Max-Age: 7200`; from another origin 403 with no grant; the
-  worker without its secret 401 `unauthenticated`), `anonDenied` (21 anonymous probes from `tests/db/access-matrix.test.ts`
+  worker without its secret 401 `unauthenticated`), `anonDenied` (22 anonymous probes from `tests/db/access-matrix.test.ts`
   that change nothing even if granted: backend-only and owner RPCs with null arguments, empty inserts, an update and a delete
   filtered on `is.null` of a NOT NULL primary-key column, and the unexposed `private` schema, a table read and a call of the
   STRICT `schedule_effective_slot` with null arguments; M25 added five of them: the RPCs `change_appearance`,
   `read_message` and `see_notifications` with null arguments, an empty insert into `game_messages`, and `private.post_message`
-  through the unexposed `private` schema (so run the deployed checks only after M25 is on the project); M26 (patch numbers) added two:
-  empty inserts into `patches` and `patch_features` (so run them only after M26 is on the project); no function that acts without arguments, such as `cleanup_tick`, is
+  through the unexposed `private` schema (so run the deployed checks only after M25 is on the project); M26 (patch 1.4) added three:
+  empty inserts into `patches` and `patch_features`, and `private.record_patch` with null arguments through the unexposed `private` schema
+  (so run them only after M26 is on the project); no function that acts without arguments, such as `cleanup_tick`, is
   called; `tests/deployed.test.ts` checks these rules against the migrations), `authProvidersGoogleOnly` (`/auth/v1/settings`: Google alone, sign-up open),
   `shippedAssetsClean` (the release scan's patterns, `scripts/release-scan.mjs`, over every asset the routes reference or load).
   Every page runs under the CSP-violation listener.

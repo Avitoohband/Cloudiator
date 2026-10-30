@@ -86,8 +86,8 @@ describe('the public profile card', () => {
     expect(added.join('\n')).toContain("card:=jsonb_build_object('stance',b->'stance','allocations',b->'allocations','equipment',");
   });
 
-  // M26 is generated once for the whole patch with 19-patches.sql (Task 11b Step 5). Unskip with the M26 file test there.
-  it.skip('ships the profile card in M26: project_character as its source, the invoker view kept with its grants, the backfill', () => {
+  // M26 carries the card with 19-patches.sql (Task 11b Step 5): one migration for Patch 1.4.
+  it('ships the profile card in M26: project_character as its source, the invoker view kept with its grants, the backfill', () => {
     const dir = new URL('../../supabase/migrations/', import.meta.url);
     const [name] = readdirSync(dir).filter(file => file.endsWith('_patch_1_4.sql'));
     const m26 = readFileSync(new URL(name, dir), 'utf8').replace(/\r\n/g, '\n');

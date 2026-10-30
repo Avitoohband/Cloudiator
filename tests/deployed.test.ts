@@ -239,8 +239,9 @@ describe('anonDenied', () => {
     expect(ANON_PROBES.filter(p => p.method === 'POST' && !p.path.includes('/rpc/')).map(p => p.label))
       .toEqual(['insert wallets', 'insert item_instances', 'insert world_actors', 'insert game_messages', 'insert patches', 'insert patch_features']);
     expect(ANON_PROBES.filter(p => p.profile === 'private').map(p => [p.label, p.expected]))
-      .toEqual([['read private.jobs', ['PGRST106']], ['rpc private.schedule_effective_slot', ['PGRST106']], ['rpc private.post_message', ['PGRST106']]]);
-    expect(ANON_PROBES).toHaveLength(21);
+      .toEqual([['read private.jobs', ['PGRST106']], ['rpc private.schedule_effective_slot', ['PGRST106']], ['rpc private.post_message', ['PGRST106']],
+        ['rpc private.record_patch', ['PGRST106']]]);
+    expect(ANON_PROBES).toHaveLength(22);
   });
 
   it('calls only functions that take arguments, each argument null, by the names the migrations define', () => {

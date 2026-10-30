@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import postgres from 'postgres';
 import { sql, account, admin, anonymous, resetIdentity } from '../fixtures/db.ts';
 import { parseChangelog } from '../../scripts/changelog.mjs';
+import { patchSortKey } from '../../src/lib/patch';
 
 // Patch numbers (Patch A spec, "Patch numbers and the changelog", Server; Task 11b; source supabase/sql/19-patches.sql, M26). The
 // server's list of patches and their features is public text in two OPEN tables that nobody writes through the Data API; the
@@ -14,7 +15,10 @@ afterAll(() => sql.end());
 
 const SEED_TIMES: Record<string, number> = { '1.0': 1792920000000, '1.1': 1793006949000, '1.2': 1793095651000, '1.2.1': 1793115007000,
   '1.3': 1793263477000, '1.3.1': 1793295600000 };
-const released = () => parseChangelog(readFileSync(new URL('../../docs/CHANGELOG.md', import.meta.url), 'utf8')).filter(s => !s.planned && s.date !== null);
+/** CHANGELOG.md's released sections that M26 seeds, 1.0 to 1.3.1: a later patch is recorded at its own release, so a dated 1.4 section
+ * (the release finalizes it) is not part of the seed. */
+const seeded = () => parseChangelog(readFileSync(new URL('../../docs/CHANGELOG.md', import.meta.url), 'utf8'))
+  .filter(s => !s.planned && s.date !== null && patchSortKey(s.number)! <= patchSortKey('1.3.1')!);
 /** The database's own clock (the container's may differ from this host's). */
 const dbNow = async (q: postgres.Sql | postgres.TransactionSql = sql) => Number((await q`select floor(extract(epoch from clock_timestamp())*1000)::bigint as ms`)[0].ms);
 /** Posts a message as the operator: its id. */
@@ -45,7 +49,7 @@ describe('patch numbers', () => {
     const rows = await seedRows();
     expect(rows.map(r => r.number)).toEqual(['1.3.1', '1.3', '1.2.1', '1.2', '1.1', '1.0']);
     expect(rows.map(r => r.key)).toEqual([1003001, 1003000, 1002001, 1002000, 1001000, 1000000]);
-    const sections = released();
+    const sections = seeded();
     expect(sections.map(s => s.number)).toEqual(rows.map(r => r.number));
     for (const [i, row] of rows.entries()) {
       const section = sections[i];
@@ -122,7 +126,7 @@ describe('patch numbers', () => {
     for (const [label, body, codes] of cases) expect(codes, label).toContain(await refusal(body));
     // Nothing was stored: the six seed rows only.
     expect((await seedRows()).map(r => r.number)).toEqual(['1.3.1', '1.3', '1.2.1', '1.2', '1.1', '1.0']);
-    expect((await sql`select count(*)::int as n from public.patch_features`)[0].n).toBe(released().reduce((n, s) => n + s.features.length, 0));
+    expect((await sql`select count(*)::int as n from public.patch_features`)[0].n).toBe(seeded().reduce((n, s) => n + s.features.length, 0));
     // The limits are accepted: 20 features of 240 characters and an 80-character title.
     const limits = await rolledBack(async tx => {
       await record(tx, '1.4', Array.from({ length: 20 }, () => 'y'.repeat(240)), null, 't'.repeat(80));
@@ -149,7 +153,7 @@ describe('patch numbers', () => {
       expect(error, who).toBeNull();
       expect(data!.map(r => r.number), who).toEqual(['1.3.1', '1.3', '1.2.1', '1.2', '1.1', '1.0']);
       const [newest] = data!;
-      expect(newest.patch_features.length, who).toBe(released()[0].features.length);
+      expect(newest.patch_features.length, who).toBe(seeded()[0].features.length);
       const revision = await client.from('world_revision').select('latest_patch');
       expect(revision.error, who).toBeNull();
       expect(revision.data, who).toEqual([{ latest_patch: '1.3.1' }]);
@@ -168,7 +172,7 @@ describe('patch numbers', () => {
       expect(await refusal(async tx => { await tx.unsafe(`set local role ${role}`); await tx`insert into public.patches(number,title,released_at_ms) values('9.0','Forged',0)`; }), role).toBe('42501');
       expect(await refusal(async tx => { await tx.unsafe(`set local role ${role}`); await tx`update public.patch_features set text='Forged.'`; }), role).toBe('42501');
     }
-    expect((await seedRows())[0]).toMatchObject({ number: '1.3.1', title: released()[0].title });
+    expect((await seedRows())[0]).toMatchObject({ number: '1.3.1', title: seeded()[0].title });
   });
 
   it('orders its source: the tables, then the function, the revision view and the seed (M24 lesson: nothing before what it calls)', () => {
@@ -232,7 +236,7 @@ describe('patch numbers', () => {
     expect(m26.match(/^create or replace view public\.world_revision\b/gim)).toHaveLength(1);
     expect(m26).not.toMatch(/drop view[^;]*world_revision/i);
     // The seed: the six rows, their features and the four note titles.
-    for (const s of released()) {
+    for (const s of seeded()) {
       expect(m26, s.number).toContain(`('${s.number}',$t$${s.title}$t$`);
       for (const f of s.features) expect(m26, f).toContain(`$f$${f}$f$`);
     }

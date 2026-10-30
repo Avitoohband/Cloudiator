@@ -2,7 +2,7 @@
 
 Every player-visible feature, from the launch (1.0) to the planned 1.8, for whoever makes a reel or a video. The exact
 words players see are in [CHANGELOG.md](CHANGELOG.md). This file says what each feature gives a player, where to find it on
-screen, and which video already showed it. Updated 2026-10-30, while 1.4 is being built.
+screen, and which video already showed it. Updated 2026-10-30, while 1.4 waits for its release.
 
 ## New since the last video
 
@@ -31,14 +31,11 @@ Built, waiting for the release:
 - 1.4 · Replay a whole trip in about a minute and a quarter: out through the camp gate, the fights, home, and to bed when
   a Rest follows.
 - 1.4 · A replay names and draws your gladiator from its first moment, not only from its first fight.
-
-Still being built:
-
 - 1.4 · Watch your expedition: a button on the camp while your gladiator is away, and the whole trip when it is back.
 - 1.4 · Patch numbers: the patch you play in the menu, a number on each patch note, and Patch history.
 - 1.4 · When a new patch is out, an open game says so, and Reload brings it in.
 - 1.4 · A bigger profile card: click a gladiator's name for its look, class bonuses, attributes, stats, gear and Arena
-  record (it waits for Avi's look at its mockup).
+  record.
 
 Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
@@ -140,7 +137,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | LIVE with named marks | The live view shows LIVE and the minute, and names each mark: leaving camp, each fight, the way back. "Watch from the start" replays what you missed, never past now. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&minute=30` → ⏪ | — |
 | Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
 | Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | In 1.4 | The first seconds of any whole-trip replay | — |
-| Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | Still being built: the camp during your own trip (test player) | — |
+| Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | The camp while the owner's gladiator is on a trip (test player); on a phone it sits beside ☰. Once the trip is back, the same button offers the whole trip | — |
 | Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | Planned 1.6 | Not built | — |
 | Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.8 | Planned 1.8 | Not built | — |
 | Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.8 | Planned 1.8 | Not built | — |
@@ -202,8 +199,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | --- | --- | --- | --- | --- | --- |
 | Messages | A button beside your name, with a count, where patch notes and news from the game arrive. | 1.3 | Live | Fixture camp: the button beside your name | Messages update; Too Tiny (a drawn copy) |
 | Notifications | See what your training, expeditions, Arena fights and tournaments earned: XP, level-ups, gear and gold. | 1.3 | Live | Messages → Notifications | Messages update (named as coming in Looks update) |
-| Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | In 1.4 | Still being built | — |
-| New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | In 1.4 | Still being built | — |
+| Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | In 1.4 | The chip menu: tap or click your name for "Patch 1.4" and Patch history ›; a patch note's number opens the history at that patch | — |
+| New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | In 1.4 | Needs a server ahead of the game: a test camp with `setLatestPatch('1.5')` (the patches spec's hook), then a window focus; the notice shows under your name | — |
 | Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Planned 1.5 | Not built | — |
 
 ### Players and community
@@ -214,7 +211,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Visitors welcome | Anyone can watch the camp and the public menus without signing in. | 1.0 | Live | `/game/?mode=fixture&as=visitor` | — |
 | New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | In 1.4 | Fixture camp (it always shows a banner) → Find | — |
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | In 1.4 | Fixture camp → Gladiators, the line on top | — |
-| Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | In 1.4 | Not built yet: it waits for Avi's look at its mockup (`.superpowers/design/2026-10-29-profile-card/`) | — |
+| Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | In 1.4 | Fixture camp → Gladiators → a name (Lucilla has a sample build); a click on a gladiator in the camp opens it too | — |
 | Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Planned 1.6 | Not built | — |
 | Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.8 | Planned 1.8 | Being designed | — |
 

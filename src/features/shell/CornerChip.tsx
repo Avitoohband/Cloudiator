@@ -27,22 +27,25 @@ import styles from './shell.module.css';
 const SLOT_MS = RULES_V1.clock.slotMs;
 const TICK_MS = 1000;
 
-/** Whole seconds to the next slot boundary of the display clock, ticking while the tab is visible. */
-function useSlotCountdown(clock: DisplayClock) {
+/**
+ * Whole seconds to the next slot boundary of the display clock, ticking while the tab is visible and `on` (the chip shows an owner).
+ * The chip runs one for both of its countdowns, the one on the name and the one in the bar behind it, so the two never differ.
+ */
+function useSlotCountdown(clock: DisplayClock, on: boolean) {
   const read = () => Math.ceil((SLOT_MS - (((clock.now() % SLOT_MS) + SLOT_MS) % SLOT_MS)) / 1000);
   const [seconds, setSeconds] = useState(read);
   useEffect(() => {
+    if (!on) return;
     const update = () => setSeconds(read());
     update();
     const off = clock.subscribe(update);
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') update(); }, TICK_MS);
     return () => { off(); window.clearInterval(timer); };
-  }, [clock]);
+  }, [clock, on]);
   return seconds;
 }
 
-function Countdown({ clock, testId = 'chip-countdown' }: { clock: DisplayClock; testId?: string }) {
-  const seconds = useSlotCountdown(clock);
+function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; testId?: string }) {
   const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   return <span title="Next slot starts in">
     <span aria-hidden="true">⏱ </span><span data-testid={testId} aria-hidden="true">{text}</span>
@@ -84,6 +87,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   const clockMode = useClockMode();
   const signedIn = !fixture && session.status === 'signed-in';
   const account = viewer === 'player' || signedIn;
+  // One ticker for the name's countdown and the bar's (the owner's only).
+  const seconds = useSlotCountdown(clock, account && owner !== null);
 
   // Escape (before the shell's own handler, which then leaves an open panel alone) and a press elsewhere close it. While
   // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1). Escape and
@@ -138,7 +143,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <span className={styles.wide} data-testid="chip-money" title="Gold"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
             <span className={styles.wide} data-testid="chip-renown" title="Renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
             <span className={styles.chipSep} aria-hidden="true">|</span>
-            <Countdown clock={clock} />
+            <Countdown seconds={seconds} />
           </> : <span>Signed in</span>}
         </button>
       </div>
@@ -150,7 +155,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
               <span data-testid="bar-stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
               <span data-testid="bar-money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
               <span data-testid="bar-renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
-              <span data-testid="bar-countdown"><Countdown clock={clock} testId="bar-countdown-time" /></span>
+              <span data-testid="bar-countdown"><Countdown seconds={seconds} testId="bar-countdown-time" /></span>
             </div>
             <div className={styles.staminaLine}>
               <span id={staminaLineId}>{`Stamina ${owner.stamina.current} of ${owner.stamina.maximum} · a Rest refills it`}</span>

@@ -106,6 +106,34 @@ test.describe('the bar behind the name', () => {
       await reviewShot360(page, testInfo, 'phonebar-open');
     });
 
+    test('the countdown on the name and the one in the bar always say the same', async ({ page }) => {
+      await openLive(page);
+      // The bar opens half a second after the name's countdown ticked, so two tickers of their own would run half a second apart.
+      await page.evaluate(() => new Promise<void>(resolve => {
+        const name = document.querySelector('[data-testid="chip-countdown"]')!;
+        const was = name.textContent;
+        const poll = () => {
+          if (name.textContent === was) { setTimeout(poll, 10); return; }
+          setTimeout(() => { name.closest('button')!.click(); resolve(); }, 500);
+        };
+        poll();
+      }));
+      await expect(account(page)).toBeVisible();
+      // Each sample reads both texts in one task, the same moment, every 20 ms for three seconds (three ticks).
+      const samples = await page.evaluate(async () => {
+        const text = (id: string) => document.querySelector(`[data-testid="${id}"]`)?.textContent ?? null;
+        const seen: [string | null, string | null][] = [];
+        for (const end = performance.now() + 3000; performance.now() < end;) {
+          seen.push([text('chip-countdown'), text('bar-countdown-time')]);
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        return seen;
+      });
+      expect(samples.length).toBeGreaterThan(50);
+      expect(new Set(samples.map(([name]) => name)).size, 'the countdown ticked while it was sampled').toBeGreaterThan(1);
+      expect(samples.filter(([name, bar]) => name === null || name !== bar), 'samples where the two differ').toEqual([]);
+    });
+
     test('closes on a second tap, Escape and a press elsewhere', async ({ page }) => {
       await openLive(page);
       const toggle = chipToggle(page);

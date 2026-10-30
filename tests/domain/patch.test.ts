@@ -56,10 +56,13 @@ describe('patch numbers', () => {
     }
   });
 
-  it('keeps the preview\'s seed patches word for word as CHANGELOG.md\'s released sections, on their release days', () => {
-    const released = parseChangelog(readFileSync('docs/CHANGELOG.md', 'utf8')).filter(s => !s.planned);
+  it('keeps the preview\'s seed patches word for word as CHANGELOG.md\'s released sections up to 1.3.1, on their release days', () => {
+    // M26 seeds the patches released before it (1.0 to 1.3.1); a later patch is recorded at its own release, so a dated 1.4 section (the
+    // release finalizes it) is not compared with the seed.
+    const seeded = parseChangelog(readFileSync('docs/CHANGELOG.md', 'utf8'))
+      .filter(s => !s.planned && patchSortKey(s.number)! <= patchSortKey('1.3.1')!);
     expect(SEED_PATCHES.map(p => ({ number: p.number, title: p.title, date: new Date(p.releasedAtMs).toISOString().slice(0, 10), features: p.features, planned: false })))
-      .toEqual(released);
+      .toEqual(seeded);
     for (const p of [PATCH_1_4, ...SEED_PATCHES]) expect(p.sortKey, p.number).toBe(patchSortKey(p.number));
     expect(PATCH_1_4.number).toBe(PATCH);
   });

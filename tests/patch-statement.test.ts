@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PATCH } from '../src/lib/patch';
 import { parseChangelog } from '../scripts/changelog.mjs';
 import { patchStatement } from '../scripts/patch-statement.mjs';
 
@@ -27,7 +26,9 @@ describe('patch statement', () => {
     expect(() => patchStatement(at({ title: 'a $t$ b' }), '2.0', null)).toThrow(/dollar quote/);
   });
 
-  it('writes the statement to the temporary folder as UTF-8 without a byte-order mark, and refuses a patch in progress', () => {
+  // The command's refusal is pinned with a number CHANGELOG.md never has: the patch in progress is dated at its release, so the command
+  // must not depend on it (the unit case above pins the in-progress refusal).
+  it('writes the statement to the temporary folder as UTF-8 without a byte-order mark, and refuses an unknown number', () => {
     const dir = mkdtempSync(join(tmpdir(), 'patch-statement-'));
     try {
       const env = { ...process.env, TEMP: dir, TMP: dir, TMPDIR: dir };
@@ -38,9 +39,10 @@ describe('patch statement', () => {
       const bytes = readFileSync(path);
       expect([...bytes.subarray(0, 3)]).not.toEqual([0xef, 0xbb, 0xbf]);
       expect(bytes.toString('utf8')).toBe(patchStatement(parseChangelog(readFileSync('docs/CHANGELOG.md', 'utf8')), '1.3.1', 4));
-      const refused = spawnSync(process.execPath, ['scripts/patch-statement.mjs', PATCH], { encoding: 'utf8', env });
+      const refused = spawnSync(process.execPath, ['scripts/patch-statement.mjs', '9.9'], { encoding: 'utf8', env });
       expect(refused.status).toBe(2);
-      expect(refused.stderr).toMatch(/in progress/);
+      expect(refused.stderr).toMatch(/no section/);
+      expect(readdirSync(dir)).toEqual(['cloudiator-patch-1.3.1.sql']);
       expect(spawnSync(process.execPath, ['scripts/patch-statement.mjs', '1.3.1', '--message', 'x'], { encoding: 'utf8', env }).status).toBe(2);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });

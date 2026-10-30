@@ -226,7 +226,7 @@ function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock
     </article>;
   }
   if (!state) return <p role="status" className={styles.detail}>Loading the Arena bout…</p>;
-  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId }); }}
+  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId, from: 'arena' }); }}
     onClose={onClose} headingRef={heading} />;
 }
 

@@ -597,9 +597,10 @@ test.describe('the Arena card and league standings', () => {
     await expect(scene).toBeVisible();
     const url = new URL(page.url());
     expect(url.pathname).toBe('/game/');
-    expect(Object.fromEntries(url.searchParams)).toEqual({ mode: 'fixture', view: 'replay', activity: arenaActivityId('ownerNpcWin'), stage: `${arenaActivityId('ownerNpcWin')}:1` });
+    expect(Object.fromEntries(url.searchParams)).toEqual({ mode: 'fixture', view: 'replay', activity: arenaActivityId('ownerNpcWin'), stage: `${arenaActivityId('ownerNpcWin')}:1`, from: 'arena' });
     await expect(scene.getByRole('heading', { level: 2, name: 'Aster vs Iron Warden' })).toBeVisible({ timeout: 45_000 });
-    await scene.getByRole('button', { name: 'Back to camp' }).click();
+    // The Arena card's Watch replay goes back to the Arena menu, and says so (Arena replays Task 3).
+    await scene.getByRole('button', { name: 'Back to Arena', exact: true }).click();
     await expect(scene).toHaveCount(0);
     expect(new URL(page.url()).search).toBe('?mode=fixture');
     // One camp, ready. Polled: early in a full development run (this test is among the first), the dev server's on-demand
@@ -832,9 +833,9 @@ test.describe('the Arena card and league standings', () => {
     await expect(watch).toBeEnabled();
     await watch.focus();
     await page.keyboard.press('Enter');
-    // The replay opens over the camp (Task 13.8) with Back to camp focused; Escape closes it and gives the focus back.
+    // The replay opens over the camp (Task 13.8) with its Back button ("← Arena") focused; Escape closes it and gives the focus back.
     const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
-    await expect(scene.getByRole('button', { name: 'Back to camp' })).toBeFocused();
+    await expect(scene.getByRole('button', { name: 'Back to Arena', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(scene).toHaveCount(0);
     await expect(watch).toBeFocused();

@@ -24,7 +24,9 @@ export function perfPhaseOf(campStatus: 'loading' | 'ready' | 'unavailable', sce
   const camp = campStatus === 'ready' ? 'camp' : campStatus === 'unavailable' ? 'camp unavailable' : 'loading';
   if (!scene) return { label: camp, key: campStatus };
   // A replay's stage, or an expedition's whole-trip `play` (Patch A Task 9: live and trip are measured apart).
-  return { label: scene.kind, key: `${campStatus}|${scene.kind}|${scene.activityId ?? ''}|${sceneDetail(scene) ?? ''}` };
+  // A bracket's bout has no activity: its tournament is the scene (its chapters are one scene).
+  const subject = 'activityId' in scene ? scene.activityId ?? '' : scene.tournamentId;
+  return { label: scene.kind, key: `${campStatus}|${scene.kind}|${subject}|${sceneDetail(scene) ?? ''}` };
 }
 
 /** The WebGL renderer string (unmasked where the browser allows), from a probe context released at once. */

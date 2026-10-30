@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { campHref, sameScene, sceneForResult, sceneHref, sceneOf } from '@/features/shell/scene-url';
+import { backLabel, boutFilterOf, campHref, namedScene, sameScene, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
+import { originMenu } from '@/features/shell/menus';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ExpeditionUnavailable } from '@/features/character/ExpeditionView';
 
@@ -119,5 +120,132 @@ describe('a scene whose activity cannot be read (final review Minor 6)', () => {
       .toBe('This replay is not available No fight was found for this link.');
     expect(text(renderToStaticMarkup(createElement(ExpeditionUnavailable, { fixture: false, reason: 'not-found', overCamp: true }))))
       .toBe('This expedition is not available No expedition matches this link.');
+  });
+});
+
+// Arena replays (patch 1.5) Task 3: the scene says where Back goes. A `from` parameter keeps the origin across a reload, and a
+// tournament bout is addressed without an activity (`?view=bout&tournament=<id>&bout=<id>`).
+describe('the scene names its origin', () => {
+  const A = '00000000-0000-4000-8000-000000000001', T = 'tournament:373248:bronze', B = `${T}:3:0`;
+  const ORIGINS: SceneFrom[] = ['bouts', 'bouts-won', 'bouts-lost', 'results', 'arena', 'notifications', 'tournaments', 'gladiators'];
+
+  it('reads and writes the origin', () => {
+    expect(sceneOf(params(`view=replay&activity=${A}&from=bouts-lost`))).toEqual({ kind: 'replay', activityId: A, from: 'bouts-lost' });
+    expect(sceneOf(params(`view=replay&activity=${A}&from=elsewhere`))).toEqual({ kind: 'replay', activityId: A });
+    expect(sceneHref('http://x/game/?mode=fixture', { kind: 'replay', activityId: A, from: 'arena' })).toBe(`/game/?mode=fixture&view=replay&activity=${A}&from=arena`);
+    expect(campHref(`http://x/game/?view=bout&tournament=${T}&bout=${B}&from=tournaments`)).toBe('/game/');
+  });
+
+  it('reads every origin, and nothing that only looks like one, for every kind of scene', () => {
+    for (const from of ORIGINS) {
+      expect(sceneOf(params(`view=replay&activity=${A}&from=${from}`)), from).toEqual({ kind: 'replay', activityId: A, from });
+      expect(sceneOf(params(`view=expedition&activity=${A}&from=${from}`)), from).toEqual({ kind: 'expedition', activityId: A, from });
+      expect(sceneOf(params(`view=bout&tournament=${T}&bout=${B}&from=${from}`)), from).toEqual({ kind: 'bout', tournamentId: T, boutId: B, from });
+    }
+    for (const bad of ['', 'Bouts', 'bouts ', 'camp', 'bouts,arena', 'constructor', '__proto__', 'toString']) {
+      const scene = sceneOf(params(`view=replay&activity=${A}&from=${encodeURIComponent(bad)}`));
+      expect(scene, bad).toEqual({ kind: 'replay', activityId: A });
+      expect(scene, bad).not.toHaveProperty('from');
+    }
+    expect(sceneOf(params(`view=replay&activity=${A}`))).not.toHaveProperty('from');
+  });
+
+  it('keeps the origin beside the stage and the whole-trip play, and writes them in one order', () => {
+    expect(sceneOf(params(`view=expedition&activity=${A}&play=trip&from=gladiators`))).toEqual({ kind: 'expedition', activityId: A, play: 'trip', from: 'gladiators' });
+    expect(sceneOf(params(`view=replay&activity=${A}&stage=s2&from=results`))).toEqual({ kind: 'replay', activityId: A, stageId: 's2', from: 'results' });
+    expect(sceneHref('http://x/game/?mode=fixture', { kind: 'expedition', activityId: A, play: 'trip', from: 'notifications' }))
+      .toBe(`/game/?mode=fixture&view=expedition&activity=${A}&play=trip&from=notifications`);
+    expect(sceneHref('http://x/game/', { kind: 'replay', activityId: A, stageId: 's2', from: 'results' })).toBe(`/game/?view=replay&activity=${A}&stage=s2&from=results`);
+    // What it writes reads back as the same scene.
+    for (const view of [{ kind: 'expedition' as const, activityId: A, play: 'trip' as const, from: 'results' as const }, { kind: 'replay' as const, activityId: A, stageId: 'a:1', from: 'bouts-won' as const },
+      { kind: 'bout' as const, tournamentId: T, boutId: B, from: 'tournaments' as const }]) {
+      expect(sceneOf(new URL(`http://x${sceneHref('http://x/game/', view)}`).searchParams)).toEqual(view);
+    }
+  });
+
+  it('drops the origin, the play, the stage and the bout the next scene does not have', () => {
+    const shown = `http://x/game/?mode=fixture&view=expedition&activity=${A}&play=trip&from=results`;
+    expect(sceneHref(shown, { kind: 'expedition', activityId: A })).toBe(`/game/?mode=fixture&view=expedition&activity=${A}`);
+    expect(sceneHref(shown, { kind: 'replay', activityId: A, from: 'arena' })).toBe(`/game/?mode=fixture&view=replay&activity=${A}&from=arena`);
+    expect(sceneHref(`http://x/game/?view=bout&tournament=${T}&bout=${B}&from=tournaments`, { kind: 'replay', activityId: A })).toBe(`/game/?view=replay&activity=${A}`);
+    expect(sceneHref(`http://x/game/?view=replay&activity=${A}&from=bouts`, { kind: 'bout', tournamentId: T, boutId: B }))
+      .toBe(`/game/?view=bout&tournament=${encodeURIComponent(T)}&bout=${encodeURIComponent(B)}`);
+    expect(campHref(shown)).toBe('/game/?mode=fixture');
+  });
+
+  it('addresses a tournament bout without an activity', () => {
+    expect(sceneOf(params(`view=bout&tournament=${T}&bout=${B}`))).toEqual({ kind: 'bout', tournamentId: T, boutId: B });
+    expect(sceneOf(params(`view=bout&tournament=${T}&bout=tournament:1:gold:1:0`))).toEqual({ kind: 'bout', activityId: null });
+    expect(sceneHref(`http://x/game/?view=bout&tournament=${T}&bout=${B}`, { kind: 'replay', activityId: A })).toBe(`/game/?view=replay&activity=${A}`);
+  });
+
+  it('names no bout for a malformed bout address, and no scene for none at all', () => {
+    // Either part missing, malformed, or of another tournament; a prefix that is not followed by ":" is another tournament too.
+    for (const search of [`view=bout&tournament=${T}`, `view=bout&bout=${B}`, `view=bout&tournament=bad&bout=${B}`, `view=bout&tournament=${T}&bout=bad`,
+      `view=bout&tournament=${T}&bout=${T}`, `view=bout&tournament=${T}&bout=${T}:3`, `view=bout&tournament=${T}&bout=tournament:373248:silver:3:0`,
+      'view=bout&tournament=tournament:37324:bronze&bout=tournament:373248:bronze:3:0', `view=bout&tournament=${T}&bout=${encodeURIComponent(`${B}x`)}`]) {
+      expect(sceneOf(params(search)), search).toEqual({ kind: 'bout', activityId: null });
+    }
+    expect(sceneOf(params('view=bout'))).toBeNull();
+    expect(sceneOf(params(`view=bout&activity=${A}`))).toBeNull();
+    // An origin on a malformed address changes nothing.
+    expect(sceneOf(params(`view=bout&tournament=${T}&from=arena`))).toEqual({ kind: 'bout', activityId: null });
+  });
+
+  it('names the origin and its chip', () => {
+    expect([undefined, 'bouts', 'bouts-won', 'results', 'arena', 'notifications', 'tournaments', 'gladiators'].map(f => backLabel(f as SceneFrom | undefined)))
+      .toEqual(['Camp', 'My bouts', 'My bouts', 'Results', 'Arena', 'Notifications', 'Tournaments', 'Gladiators']);
+    expect(backLabel('bouts-lost')).toBe('My bouts');
+    expect([boutFilterOf('bouts'), boutFilterOf('bouts-won'), boutFilterOf('bouts-lost'), boutFilterOf('arena')]).toEqual(['all', 'won', 'lost', null]);
+    expect([undefined, 'results', 'notifications', 'tournaments', 'gladiators'].map(f => boutFilterOf(f as SceneFrom | undefined))).toEqual([null, null, null, null, null]);
+  });
+
+  it('names the menu an origin goes back to, none for the camp and the Notifications panel', () => {
+    expect(ORIGINS.map(from => originMenu(from))).toEqual(['results', 'results', 'results', 'results', 'arena', null, 'tournaments', 'gladiators']);
+  });
+
+  it('hands the shell the origin and the named scene, and nothing for an address that names none', () => {
+    expect(sceneFromOf({ kind: 'replay', activityId: A, from: 'arena' })).toBe('arena');
+    expect(sceneFromOf({ kind: 'bout', tournamentId: T, boutId: B, from: 'tournaments' })).toBe('tournaments');
+    expect(sceneFromOf({ kind: 'replay', activityId: A })).toBeUndefined();
+    expect(sceneFromOf({ kind: 'replay', activityId: null })).toBeUndefined();
+    expect(namedScene({ kind: 'replay', activityId: A })).toEqual({ kind: 'replay', activityId: A });
+    expect(namedScene({ kind: 'bout', tournamentId: T, boutId: B })).toEqual({ kind: 'bout', tournamentId: T, boutId: B });
+    expect(namedScene({ kind: 'bout', activityId: null })).toBeNull();
+    expect(namedScene({ kind: 'expedition', activityId: null })).toBeNull();
+  });
+
+  it('keys a scene without its origin, and a bracket without its bout', () => {
+    expect(sceneKeyOf({ kind: 'replay', activityId: A, from: 'arena' })).toBe(sceneKeyOf({ kind: 'replay', activityId: A }));
+    expect(sceneKeyOf({ kind: 'bout', tournamentId: T, boutId: B })).toBe(sceneKeyOf({ kind: 'bout', tournamentId: T, boutId: `${T}:2:0` }));
+  });
+
+  it('keys a scene by what makes it another scene: the activity, the stage, the play, the tournament', () => {
+    expect(sceneKeyOf({ kind: 'replay', activityId: A })).toBe(`replay|${A}|`);
+    expect(sceneKeyOf({ kind: 'replay', activityId: A, stageId: 's2', from: 'bouts' })).toBe(`replay|${A}|s2`);
+    expect(sceneKeyOf({ kind: 'expedition', activityId: A })).toBe(`expedition|${A}|`);
+    expect(sceneKeyOf({ kind: 'expedition', activityId: A, play: 'trip', from: 'results' })).toBe(`expedition|${A}|trip`);
+    expect(sceneKeyOf({ kind: 'bout', tournamentId: T, boutId: B })).toBe(`bout|${T}`);
+    expect(sceneKeyOf({ kind: 'bout', activityId: null })).toBe('bout|null');
+    expect(sceneKeyOf({ kind: 'replay', activityId: null })).toBe('replay|null');
+    expect(sceneKeyOf({ kind: 'expedition', activityId: null })).toBe('expedition|null');
+    const keys = [{ kind: 'replay', activityId: A }, { kind: 'replay', activityId: A, stageId: 's2' }, { kind: 'expedition', activityId: A }, { kind: 'expedition', activityId: A, play: 'trip' },
+      { kind: 'replay', activityId: 'b2' }, { kind: 'bout', tournamentId: T, boutId: B }, { kind: 'bout', tournamentId: 'tournament:1:gold', boutId: 'tournament:1:gold:1:0' }] as const;
+    expect(new Set(keys.map(view => sceneKeyOf(view))).size).toBe(keys.length);
+  });
+
+  it('treats the same scene from another origin as the same scene, and another play or bout as another', () => {
+    const shown = (search: string) => sceneOf(params(search));
+    expect(sameScene(shown(`view=replay&activity=${A}&from=bouts`), { kind: 'replay', activityId: A, from: 'arena' })).toBe(true);
+    expect(sameScene(shown(`view=replay&activity=${A}&from=bouts`), { kind: 'replay', activityId: A })).toBe(true);
+    expect(sameScene(shown(`view=replay&activity=${A}`), { kind: 'replay', activityId: A, from: 'bouts' })).toBe(true);
+    expect(sameScene(shown(`view=expedition&activity=${A}&play=trip&from=results`), { kind: 'expedition', activityId: A, play: 'trip', from: 'gladiators' })).toBe(true);
+    expect(sameScene(shown(`view=expedition&activity=${A}&play=trip&from=results`), { kind: 'expedition', activityId: A, from: 'results' })).toBe(false);
+    expect(sameScene(shown(`view=replay&activity=${A}&stage=s2&from=results`), { kind: 'replay', activityId: A, from: 'results' })).toBe(false);
+    expect(sameScene(shown(`view=bout&tournament=${T}&bout=${B}&from=tournaments`), { kind: 'bout', tournamentId: T, boutId: B })).toBe(true);
+    expect(sameScene(shown(`view=bout&tournament=${T}&bout=${B}`), { kind: 'bout', tournamentId: T, boutId: `${T}:2:0` })).toBe(false);
+    expect(sameScene(shown(`view=bout&tournament=${T}&bout=${B}`), { kind: 'replay', activityId: A })).toBe(false);
+    expect(sameScene(shown(`view=replay&activity=${A}`), { kind: 'bout', tournamentId: T, boutId: B })).toBe(false);
+    expect(sameScene(shown(`view=bout&tournament=${T}&bout=bad`), { kind: 'bout', tournamentId: T, boutId: B })).toBe(false);
   });
 });

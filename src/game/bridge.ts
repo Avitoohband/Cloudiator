@@ -1,5 +1,6 @@
 // Typed event bridge between the Phaser scenes and React management panels.
 // Scenes emit user intent (select, open merchant, view replay...); panels send camera commands.
+import type { SceneFrom } from '../features/shell/scene-url';
 import type { Point } from './iso';
 
 export type SceneEvents = {
@@ -12,10 +13,12 @@ export type SceneEvents = {
   'open-merchant': { merchant: 'weapons' | 'armor' };
   /**
    * Scene or UI to the shell (Task 13.8): open an expedition, or a battle replay (at one stage, or the first), as a
-   * full-screen scene over the camp; `return-camp` closes it (the scene's "Back to camp").
+   * full-screen scene over the camp; `return-camp` closes it (the scene's Back button). `from` names the menu that opened it
+   * (the Arena card's Watch replay, the Gladiators list's Watch expedition), so Back says where it goes; none is the camp
+   * (Arena replays Task 3).
    */
-  'view-expedition': { activityId: string };
-  'view-replay': { activityId: string; stageId?: string | null };
+  'view-expedition': { activityId: string; from?: SceneFrom };
+  'view-replay': { activityId: string; stageId?: string | null; from?: SceneFrom };
   'return-camp': Record<string, never>;
   'follow-character': { gladiatorId: string | null };
   /** UI to scene: zoom buttons and character search. */

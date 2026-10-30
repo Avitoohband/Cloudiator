@@ -84,7 +84,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
         {away ? (actor.activityId ? (
           <span className={styles.actions}>
             <button type="button" aria-label={`Watch ${actor.name}'s expedition`}
-              onClick={() => bridge.emit('view-expedition', { activityId: actor.activityId! })}>Watch expedition</button>
+              onClick={() => bridge.emit('view-expedition', { activityId: actor.activityId!, from: 'gladiators' })}>Watch expedition</button>
           </span>
         ) : <span className={styles.away}>On an expedition</span>) : (
           <span className={styles.actions}>

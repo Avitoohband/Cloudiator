@@ -21,7 +21,8 @@
 // entry on the camp's route (`?view=…`, plan Decision 4, `useSceneHistory`). The bridge carries them: `view-replay` and
 // `view-expedition` open one (the Arena card's Watch replay, the Gladiators list's away rows), `return-camp` closes it
 // (the scene's "Back to camp"); Results opens each result by its kind. The camp pauses beneath a scene, which covers it
-// (Task 23.4, C8), and goes on from the shared clock's time when the scene closes.
+// (Task 23.4, C8), and goes on from the shared clock's time when the scene closes. A scene opened from a menu names it (`from`, Arena
+// replays Task 3): its Back button says so, and when the scene closes and that menu is not open (a reload, a link), the shell opens it.
 //
 // Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
 //
@@ -67,10 +68,10 @@ import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
-import { menusFor, type MenuId } from './menus';
+import { menusFor, originMenu, type MenuId } from './menus';
 import { railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
-import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
+import { sceneForResult, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneFrom, type SceneView } from './scene-url';
 import { useCampClicks } from './useCampClicks';
 import { useFocusRescue } from './useFocusRescue';
 import { useJoining } from './useJoining';
@@ -137,8 +138,8 @@ function SchedulePreview({ owner }: { owner: OwnerState | null }) {
  * A fixture sample as a link to its scene over the camp (spec "Scenes", Task 13.8 fix round 1): a plain click opens the
  * scene in place; a modified click (a new tab or window) follows the link, which opens the same scene over a new camp.
  */
-function SampleLink({ view, label, onOpen }: { view: SceneView; label: string; onOpen(view: SceneView): void }) {
-  const href = `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}`;
+function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 'bout' }>; label: string; onOpen(view: SceneView): void }) {
+  const href = `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}${view.from ? `&from=${view.from}` : ''}`;
   return <a href={href} onClick={event => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -152,16 +153,18 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
   onOpen(view: SceneView): void;
 }) {
+  // The sample rows sit in the Results menu, which stays open beneath the scene: Back says Results.
+  const sample = (view: Exclude<SceneView, { kind: 'bout' }>): Exclude<SceneView, { kind: 'bout' }> => ({ ...view, from: 'results' });
   return <>
     {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
-      <ul>{samples.replays.map(r => <li key={r.activityId}><SampleLink view={{ kind: 'replay', activityId: r.activityId }} label={r.label} onOpen={onOpen} /></li>)}</ul>
+      <ul>{samples.replays.map(r => <li key={r.activityId}><SampleLink view={sample({ kind: 'replay', activityId: r.activityId })} label={r.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
     {fixture && samples.expeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
       <p className="eyebrow">SAMPLE EXPEDITIONS</p>
-      <ul>{samples.expeditions.map(e => <li key={e.activityId}><SampleLink view={{ kind: 'expedition', activityId: e.activityId }} label={e.label} onOpen={onOpen} /></li>)}</ul>
+      <ul>{samples.expeditions.map(e => <li key={e.activityId}><SampleLink view={sample({ kind: 'expedition', activityId: e.activityId })} label={e.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
   </>;
 }
@@ -295,17 +298,30 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
 
   // Scenes over the camp: a history entry each; the bridge opens and closes them.
   const { open: openScene, close: closeScene } = useSceneHistory();
-  useEffect(() => bridge.on('view-replay', ({ activityId, stageId }) => openScene(stageId ? { kind: 'replay', activityId, stageId } : { kind: 'replay', activityId })),
+  useEffect(() => bridge.on('view-replay', ({ activityId, stageId, from }) => openScene({ kind: 'replay', activityId, ...(stageId ? { stageId } : {}), ...(from ? { from } : {}) })),
     [bridge, openScene]);
-  useEffect(() => bridge.on('view-expedition', ({ activityId }) => openScene({ kind: 'expedition', activityId })), [bridge, openScene]);
+  useEffect(() => bridge.on('view-expedition', ({ activityId, from }) => openScene({ kind: 'expedition', activityId, ...(from ? { from } : {}) })), [bridge, openScene]);
   useEffect(() => bridge.on('return-camp', () => closeScene()), [bridge, closeScene]);
   // A scene takes the screen: the profile card closes (the menus stay, to come back to).
-  const sceneKey = scene ? `${scene.kind}|${scene.activityId}` : null;
+  const sceneKey = scene ? sceneKeyOf(scene) : null;
   useEffect(() => { if (sceneKey) closeCard(false); }, [sceneKey, closeCard]);
+  // A scene that closes opens its origin if that menu is not open: Back, Escape and the browser's Back all return to the menu the scene came
+  // from, which stays open beneath it; after a reload or a link it is not, and the shell opens it (`show` does nothing when it is).
+  const sceneOpen = scene !== null;
+  const sceneFrom = scene ? sceneFromOf(scene) ?? null : null;
+  const cameFrom = useRef<SceneFrom | null>(null);
+  useEffect(() => {
+    if (sceneOpen) { cameFrom.current = sceneFrom; return; }
+    const from = cameFrom.current;
+    cameFrom.current = null;
+    const menu = from ? originMenu(from) : null;
+    if (menu) show(menu);
+  }, [sceneOpen, sceneFrom, show]);
   // Results open each kept result by its kind: an expedition its expedition, a bout its replay (13.7 review).
   const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind']) => {
     const view = sceneForResult(activityId, kind);
-    if (view) openScene(view);
+    // Everyone's rows: Back returns to Results (Task 4 adds My bouts' rows, which go back to their own tab).
+    if (view) openScene({ ...view, from: 'results' });
   }, [openScene]);
 
   // The messages button's reads and marks (Task 6). The lists are read through the gateway the shell reads with (the fixture preview's, once

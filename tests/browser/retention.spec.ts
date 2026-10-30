@@ -169,7 +169,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     let lastDay = resultRow(results.getByRole('list', { name: 'Recent results' }), 'Aster won an Arena bout', settledSlotsAgo(126));
     await lastDay.getByRole('button', { name: 'Replay: Aster won an Arena bout' }).click();
     await expect(scene(page, 'Replay').getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
-    await scene(page, 'Replay').getByRole('button', { name: 'Back to camp' }).click();
+    await scene(page, 'Replay').getByRole('button', { name: 'Back to Results', exact: true }).click();
     await expect(scene(page, 'Replay')).toHaveCount(0);
     // The shared display clock reaches the expiry: the row no longer offers the replay, without a new read.
     await freezeShellClock(page, expiry);

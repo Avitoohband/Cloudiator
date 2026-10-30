@@ -3,11 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from './fixtures';
 import type { BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
-import { ownerFixture } from '../fixtures/domain';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS } from '../fixtures/expedition-ids';
+import { ARENA_ACTIVITIES, arenaActivityId } from '../fixtures/arena-ids';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
+import { noHorizontalScroll } from './a11y-helpers';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { menuDialog, openMenu } from './shell-helpers';
+import { reviewShot, reviewShot360 } from './review-shots';
+import { menuDialog, openMenu, quietArrivals } from './shell-helpers';
 
 // Task 13.8 (spec "Scenes", plan Decision 4): a replay or an expedition opens as a full-screen scene over the running
 // camp, with "Back to camp", as a history entry on the camp's own route (`?view=replay|expedition&activity=…`); the
@@ -23,7 +26,10 @@ const REWARDS = /\+\d+ (money|gold|renown|XP)|Credited rewards|Credited for|Rati
 
 /** A scene over the camp: the replay or the expedition dialog. */
 const scene = (page: Page, name: 'Replay' | 'Expedition') => page.getByRole('dialog', { name, exact: true });
+/** A scene opened from no menu: its Back button names the camp ("Back to Camp"; the lookup is not case-sensitive). */
 const backToCamp = (page: Page) => page.getByRole('button', { name: 'Back to camp' });
+/** A scene's Back button names where it goes: "← Results", "← Arena", "← Gladiators" or "← Camp" (Arena replays Task 3). */
+const backTo = (page: Page, label: 'Camp' | 'Results' | 'Arena' | 'Gladiators') => page.getByRole('button', { name: `Back to ${label}`, exact: true });
 const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 async function openCamp(page: Page, url: string) {
   await page.goto(url);
@@ -82,7 +88,7 @@ function awayActor(timeline: RevealedTimeline): PublicActor {
 test.describe('replays and expeditions over the camp (fixture preview)', () => {
   test.skip(production, 'These checks use the fixture preview.');
 
-  test('opens a replay full screen over the camp and returns with Back to camp', async ({ page }, testInfo) => {
+  test('opens a replay full screen over the camp and returns with its Back button', async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     const results = await openMenu(page, 'Results');
     const replay = results.getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first();
@@ -91,18 +97,19 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await expect(replayScene).toBeVisible();
     // A history entry on the camp's own route (plan Decision 4); the newest Arena win is the pvp sample.
     expect(new URL(page.url()).pathname).toBe('/game/');
-    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.pvp.activityId });
+    // A row of Results' Everyone: its Back button says so (Arena replays Task 3).
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.pvp.activityId, from: 'results' });
     await expect(replayScene.getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
-    // Full window, over the camp, which stays ready (paused beneath it since Task 23.4); Back to camp takes the focus.
+    // Full window, over the camp, which stays ready (paused beneath it since Task 23.4); Back takes the focus.
     const viewport = page.viewportSize()!;
     expect(await replayScene.boundingBox()).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
-    await expect(backToCamp(page)).toBeFocused();
+    await expect(backTo(page, 'Results')).toBeFocused();
     expect(await page.evaluate(() => window.__cloudiatorCamp!.state()!.ready)).toBe(true);
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
     await settled(page);
     await page.screenshot({ path: testInfo.outputPath(`scene-replay-${testInfo.project.name}.png`) });
-    await backToCamp(page).click();
+    await backTo(page, 'Results').click();
     await expect(replayScene).toHaveCount(0);
     expect(search(page)).toEqual({ mode: 'fixture' });
     // The camp is the same, still ready, with its one canvas; the focus goes back to the Replay button.
@@ -125,7 +132,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await page.goForward();
     await expect(scene(page, 'Replay')).toBeVisible();
     expect(page.url()).toBe(opened);
-    await backToCamp(page).click();
+    await backTo(page, 'Results').click();
     await expect(scene(page, 'Replay')).toHaveCount(0);
     expect(search(page)).toEqual({ mode: 'fixture' });
     await page.goForward();
@@ -142,10 +149,10 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     const expedition = scene(page, 'Expedition');
     await expect(expedition).toBeVisible();
     // A result opens the whole-trip replay (Patch A Task 8): its address carries `play=trip`, and the view opens as that replay (Task 9).
-    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland, play: 'trip' });
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: woodland, play: 'trip', from: 'results' });
     await expect(expedition.getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
     await expect(scene(page, 'Replay')).toHaveCount(0);
-    // Over the camp the scene has no Camp link of its own, only Back to camp.
+    // Over the camp the scene has no Camp link of its own, only its Back button.
     await expect(expedition.getByRole('link', { name: 'Camp', exact: true })).toHaveCount(0);
     await page.waitForFunction(() => window.__cloudiatorExpeditionScene?.debug()?.ready === true, null, { timeout: 45_000 });
     await settled(page);
@@ -157,9 +164,10 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     const watch = expedition.getByRole('button', { name: /^Watch the replay of encounter 1$/ });
     await watch.click();
     await expect(scene(page, 'Replay')).toBeVisible();
-    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: woodland, stage: `${woodland}:1` });
-    // The focus moves with the scene (fix round 1, M6): to Back to camp, never to <body>.
-    await expect(backToCamp(page)).toBeFocused();
+    // The encounter's replay goes back to where the expedition did.
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: woodland, stage: `${woodland}:1`, from: 'results' });
+    // The focus moves with the scene (fix round 1, M6): to its Back button, never to <body>.
+    await expect(backTo(page, 'Results')).toBeFocused();
     await expect(scene(page, 'Replay').getByRole('button', { name: 'Encounter 1: victory', exact: true })).toHaveAttribute('aria-pressed', 'true');
     // The browser's Back returns to the expedition scene, again with the focus in the scene: its whole-trip replay starts with ▶
     // focused (Patch A Task 9).
@@ -168,8 +176,8 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await expect(scene(page, 'Expedition').getByRole('button', { name: 'Play', exact: true })).toBeFocused();
     await page.goForward();
     await expect(scene(page, 'Replay')).toBeVisible();
-    await expect(backToCamp(page)).toBeFocused();
-    await backToCamp(page).click();
+    await expect(backTo(page, 'Results')).toBeFocused();
+    await backTo(page, 'Results').click();
     await expect(scene(page, 'Replay')).toHaveCount(0);
     await expect(scene(page, 'Expedition')).toHaveCount(0);
     expect(search(page)).toEqual({ mode: 'fixture' });
@@ -251,7 +259,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await expect(replay).not.toContainText(REWARDS);
     // Nor a promise of rewards that are not theirs (fix round 1, M5).
     await expect(replay).not.toContainText(/Rewards are credited/i);
-    await backToCamp(page).click();
+    await backTo(page, 'Results').click();
     await page.goto(`/game/?mode=fixture&as=visitor&view=expedition&activity=${EXPEDITION_FIXTURES.woodland.activityId}`);
     const expedition = scene(page, 'Expedition');
     await expect(expedition.getByRole('heading', { level: 2, name: 'Woodland Path' })).toBeVisible({ timeout: 45_000 });
@@ -267,16 +275,146 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await results.getByRole('navigation', { name: 'Sample replays' }).getByRole('link', { name: REPLAY_FIXTURES.npc.label }).click();
     await expect(scene(page, 'Replay').getByRole('heading', { level: 2, name: 'Aster vs Iron Warden' })).toBeVisible({ timeout: 45_000 });
     expect(new URL(page.url()).pathname).toBe('/game/');
-    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.npc.activityId });
-    await backToCamp(page).click();
+    // The sample rows are Results' own: Back goes there.
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.npc.activityId, from: 'results' });
+    await backTo(page, 'Results').click();
     await expect(scene(page, 'Replay')).toHaveCount(0);
     await results.getByRole('navigation', { name: 'Sample expeditions' }).getByRole('link', { name: EXPEDITION_FIXTURES.mountain.label }).click();
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'Mountain Pass' })).toBeVisible({ timeout: 45_000 });
-    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: EXPEDITION_FIXTURES.mountain.activityId });
-    await backToCamp(page).click();
+    expect(search(page)).toEqual({ mode: 'fixture', view: 'expedition', activity: EXPEDITION_FIXTURES.mountain.activityId, from: 'results' });
+    await backTo(page, 'Results').click();
     await expect(scene(page, 'Expedition')).toHaveCount(0);
     expect(search(page)).toEqual({ mode: 'fixture' });
     expect(await page.evaluate(() => ({ ready: window.__cloudiatorCamp!.state()!.ready, canvases: window.__cloudiatorCamp!.canvases() }))).toEqual({ ready: true, canvases: 1 });
+  });
+
+  test('names where the scene goes back to, and opens it after a reload', async ({ page, context }, testInfo) => {
+    // Arena replays Task 3 (spec 5): a scene's Back button names the menu it came from, "← Results", "← Arena", "← Camp", with the
+    // accessible name "Back to Results"; a `from` in the address keeps that across a reload, and a menu that is not open when the
+    // scene closes is opened. A scene is one history entry over the camp, whatever its origin.
+    await quietArrivals(context);
+    await openCamp(page, '/game/?mode=fixture');
+    const atCamp = await page.evaluate(() => history.length);
+    const replayScene = scene(page, 'Replay');
+    const menusOpen = () => page.locator('[data-menu-surface]:visible');
+    const openRow = async () => (await openMenu(page, 'Results')).getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first().click();
+
+    // A row of Results' Everyone: "← Results", and Back returns with Results open.
+    await openRow();
+    await expect(replayScene).toBeVisible();
+    await expect(backTo(page, 'Results')).toHaveText('← Results');
+    expect(await page.evaluate(() => history.length)).toBe(atCamp + 1);
+    await settled(page);
+    await reviewShot(page, testInfo, 'scene-back-results');
+    await reviewShot360(page, testInfo, 'scene-back-results');
+    await backTo(page, 'Results').click();
+    await expect(replayScene).toHaveCount(0);
+    await expect(menuDialog(page, 'Results')).toBeVisible();
+    expect(await page.evaluate(() => history.length)).toBe(atCamp + 1);
+
+    // A reload with the scene open still says "← Results", and Back opens Results, which the reload closed.
+    await openRow();
+    await expect(replayScene).toBeVisible();
+    await page.reload();
+    await campReady(page);
+    await expect(replayScene).toBeVisible();
+    await expect(backTo(page, 'Results')).toHaveText('← Results');
+    await expect(menusOpen()).toHaveCount(0);
+    await backTo(page, 'Results').click();
+    await expect(replayScene).toHaveCount(0);
+    await expect(menuDialog(page, 'Results')).toBeVisible();
+    expect(search(page)).toEqual({ mode: 'fixture' });
+
+    // The Arena card's Watch replay: "← Arena", with Arena still open beneath; after a reload Escape opens it again.
+    const bout = ARENA_ACTIVITIES.ownerNpcWin;
+    const slotStart = worldFixture.serverNowMs - (worldFixture.serverNowMs % SLOT_MS) - bout.slotsAgo * SLOT_MS;
+    await openMenu(page, 'Arena');
+    await page.getByRole('button', { name: bout.label, exact: true }).click();
+    await page.waitForFunction(id => window.__cloudiatorArena?.state()?.activityId === id, arenaActivityId('ownerNpcWin'));
+    await page.evaluate(ms => window.__cloudiatorArena!.freeze(ms), slotStart + 61 * MIN);
+    const watch = page.getByRole('button', { name: 'Watch replay' });
+    await expect(watch).toBeEnabled();
+    await watch.click();
+    await expect(replayScene).toBeVisible();
+    await expect(backTo(page, 'Arena')).toHaveText('← Arena');
+    expect(search(page).from).toBe('arena');
+    await settled(page);
+    await reviewShot(page, testInfo, 'scene-back-arena');
+    await page.keyboard.press('Escape');
+    await expect(replayScene).toHaveCount(0);
+    await expect(menuDialog(page, 'Arena')).toBeVisible();
+    await watch.click();
+    await expect(backTo(page, 'Arena')).toBeVisible();
+    await page.reload();
+    await campReady(page);
+    await expect(backTo(page, 'Arena')).toHaveText('← Arena');
+    await expect(menusOpen()).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(replayScene).toHaveCount(0);
+    await expect(menuDialog(page, 'Arena')).toBeVisible();
+
+    // A shared link has no camp entry below it: closing it replaces its entry, and still opens the origin it names.
+    await page.goto(`/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}&from=gladiators`);
+    await campReady(page);
+    await expect(backTo(page, 'Gladiators')).toHaveText('← Gladiators');
+    await expect(menusOpen()).toHaveCount(0);
+    await backTo(page, 'Gladiators').click();
+    await expect(replayScene).toHaveCount(0);
+    await expect(menuDialog(page, 'Gladiators')).toBeVisible();
+    expect(search(page)).toEqual({ mode: 'fixture' });
+
+    // An address without a `from` says "← Camp" and opens no menu: not when it closes, and not by the browser's Back.
+    await page.goto(`/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}`);
+    await campReady(page);
+    await expect(replayScene).toBeVisible();
+    await expect(backTo(page, 'Camp')).toHaveText('← Camp');
+    await settled(page);
+    await reviewShot(page, testInfo, 'scene-back-camp');
+    await backTo(page, 'Camp').click();
+    await expect(replayScene).toHaveCount(0);
+    expect(search(page)).toEqual({ mode: 'fixture' });
+    await expect(menusOpen()).toHaveCount(0);
+  });
+
+  test('phone: Back sits in a solid bar at the top of the scene, which stays there as it scrolls', async ({ page, context }, testInfo) => {
+    // Arena replays Task 3 (spec 2): the scene's header is solid on a phone, so nothing floats over the content once you scroll.
+    await quietArrivals(context);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openCamp(page, `/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}&from=results`);
+    const replayScene = scene(page, 'Replay');
+    await expect(replayScene.getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
+    await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
+    await settled(page);
+    await reviewShot(page, testInfo, 'scene-back-390-top');
+    await replayScene.evaluate(element => { element.scrollTop = 400; });
+    // The scene is tall enough to scroll 400 px, and has done so.
+    expect(await replayScene.evaluate(element => element.scrollTop)).toBe(400);
+    await nextFrames(page);
+    const bar = page.getByTestId('scene-top');
+    const box = (await bar.boundingBox())!;
+    const button = (await backTo(page, 'Results').boundingBox())!;
+    expect(button.y).toBeGreaterThanOrEqual(0);
+    expect(box.x).toBe(0);
+    expect(box.y).toBe(0);
+    expect(box.width).toBe(390);
+    expect(button.y + button.height).toBeLessThanOrEqual(box.y + box.height);
+    // Opaque: nothing of the content scrolling beneath shows through it.
+    const alpha = await bar.evaluate(element => {
+      const [, channels = ''] = /rgba?\(([^)]*)\)/.exec(getComputedStyle(element).backgroundColor) ?? [];
+      const parts = channels.split(/[,/\s]+/).filter(Boolean);
+      return parts.length > 3 ? Number(parts[3]) : 1;
+    });
+    expect(alpha).toBe(1);
+    await reviewShot(page, testInfo, 'scene-back-390-scrolled');
+    // The phone at 360 x 740: the bar and its button fit, and the page does not scroll sideways.
+    await page.setViewportSize({ width: 360, height: 740 });
+    await nextFrames(page);
+    const narrow = (await backTo(page, 'Results').boundingBox())!;
+    expect(narrow.x).toBeGreaterThanOrEqual(0);
+    expect(narrow.x + narrow.width).toBeLessThanOrEqual(360);
+    expect(narrow.height).toBeGreaterThanOrEqual(44);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await reviewShot(page, testInfo, 'scene-back-360-scrolled');
   });
 
   test("releases each closed scene's WebGL context, so the camp's is never the one the browser drops", async ({ page }) => {
@@ -357,7 +495,8 @@ test.describe('replays and expeditions over the live camp for a visitor', () => 
     await watch.click();
     const expedition = scene(page, 'Expedition');
     await expect(expedition).toBeVisible();
-    expect(search(page)).toEqual({ view: 'expedition', activity: timeline.activityId });
+    expect(search(page)).toEqual({ view: 'expedition', activity: timeline.activityId, from: 'gladiators' });
+    await expect(backTo(page, 'Gladiators')).toHaveText('← Gladiators');
     await expect(expedition.getByRole('heading', { level: 2, name: 'Ruined Outpost' })).toBeVisible({ timeout: 45_000 });
     await expect(expedition.getByText('EXPEDITION · Varro')).toBeVisible();
     await expect(expedition.getByRole('status', { name: 'Current stage' })).toContainText('Returning without rewards');
@@ -365,7 +504,7 @@ test.describe('replays and expeditions over the live camp for a visitor', () => 
     await page.waitForFunction(() => window.__cloudiatorExpeditionScene?.debug()?.ready === true, null, { timeout: 45_000 });
     await settled(page);
     await page.screenshot({ path: testInfo.outputPath(`scene-expedition-${testInfo.project.name}.png`) });
-    await backToCamp(page).click();
+    await backTo(page, 'Gladiators').click();
     await expect(expedition).toHaveCount(0);
     expect(search(page)).toEqual({});
     await expect(watch).toBeFocused();

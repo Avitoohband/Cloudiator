@@ -549,7 +549,8 @@
 
 /*
  * ---- Scenes over the camp (Task 13.8, the mockup's bout scene): a replay or an expedition fills the window as a modal
- * dialog, scrolling inside itself, with "Back to camp" kept in view at its top left. The camp keeps running beneath.
+ * dialog, scrolling inside itself, with its Back button ("← Results", "← Camp") kept in view at its top left. The camp keeps
+ * running beneath.
  */
 .scene {
   position: fixed;
@@ -615,6 +616,11 @@
   outline-offset: 3px;
 }
 
+/* The row that holds Back. Wide, it makes no box of its own: the button floats at the top left, as before. */
+.sceneTop {
+  display: contents;
+}
+
 .sceneBody {
   max-width: 1008px;
   margin: 0 auto;
@@ -628,6 +634,33 @@
 
   .sceneBody {
     padding: 8px 12px 24px;
+  }
+}
+
+/*
+ * On a phone the row is a solid bar across the top of the scene, sticky, so nothing floats over the content once it scrolls
+ * (Arena replays Task 3, the mockup's phone header). Its colour is the scene's own, opaque: the scene's 3% see-through would
+ * show the content scrolling beneath it.
+ */
+@media (hover: none), (max-width: 480px) {
+  .sceneTop {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px;
+    border-bottom: 1px solid var(--glass-line);
+    background: #0d0c12;
+  }
+
+  .sceneBack {
+    position: static;
+    margin: 0;
+    box-shadow: none;
   }
 }
 

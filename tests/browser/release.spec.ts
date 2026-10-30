@@ -173,7 +173,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(page.getByText('Google sign-in was canceled. You can keep watching the camp.')).toHaveCount(0);
     expect(await focusedElement(page), 'Dismiss leaves the focus on the page').not.toBe('body');
 
-    // A replay scene from Results: Back to camp takes the focus, the replay keys work, Escape returns to the Replay button.
+    // A replay scene from Results: Back ("← Results") takes the focus, the replay keys work, Escape returns to the Replay button.
     for (let n = 0; n < 40 && !(await icon('Results').evaluate(el => el === document.activeElement)); n++) await press('Shift+Tab');
     await expect(icon('Results')).toBeFocused();
     await press('Enter');
@@ -185,7 +185,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await press('Enter');
     const replay = scene(page, 'Replay');
     await expect(replay).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Back to camp' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Back to Results', exact: true })).toBeFocused();
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
     // Tab walks the scene's controls (the page behind the modal scene is inert).
     const skipToResult = replay.getByRole('button', { name: 'Skip to result' });
@@ -719,7 +719,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
     await expect(scene(page, 'Replay')).toMatchAriaSnapshot(`
       - dialog "Replay":
-        - button "Back to camp"
+        - button "Back to Camp"
         - region "Aster vs Varro":
           - heading "Aster vs Varro" [level=2]
           - img
@@ -833,7 +833,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
     expect(await page.evaluate(() => window.__cloudiatorReplay!.state().reducedMotion)).toBe(true);
     expect(await page.evaluate(() => window.__cloudiatorBattle!.debug()!.reducedMotion)).toBe(true);
-    await page.getByRole('button', { name: 'Back to camp' }).click();
+    await page.getByRole('button', { name: 'Back to Results', exact: true }).click();
     await expect(replay).toHaveCount(0);
     await page.evaluate(id => window.__cloudiatorCamp!.emit('view-expedition', { activityId: id }), EXPEDITION_FIXTURES.woodland.activityId);
     await expect(scene(page, 'Expedition')).toBeVisible();

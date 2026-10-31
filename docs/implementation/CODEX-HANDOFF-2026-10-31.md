@@ -86,7 +86,7 @@ list: `docs/superpowers/specs/2026-10-29-next-patch-ideas.md`, items 1-35).
 - **Ledger:** `.superpowers/sdd/2026-10-30-economy-1-6/progress.md`.
 - **Status:** Tasks 1-3 are done (RULES_V2, the domain, the worker). Next:
   1. **Hold** until 1.4 ships. Then merge 1.4 into this branch, and 1.5 before Tasks 8-9.
-  2. Fit Avi's newest decision into the plan: **at most 2 Training slots per game day**, on top of the cap of
+  2. Fit Avi's newest decisions into the plan: **tournaments cost 0 stamina** (RULES_V2), and **at most 2 Training slots per game day**, on top of the cap of
      10 + 4 × level. It is appended to the end of the spec and the plan.
   3. Then Tasks 4-9. M27 comes from `21-economy.sql`, and the quarter gold cut runs through an owner-only switch with Avi's go.
 

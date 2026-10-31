@@ -69,7 +69,7 @@ import { FIRST_RESULTS, choiceFor, choiceOwner, choose, type ResultsChoice } fro
 import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import { replayKept } from '../../lib/replay-retention';
-import type { MessagingActions } from '../messages/messages';
+import { messagesRequestFor, type MessagesRequest, type MessagingActions } from '../messages/messages';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
@@ -247,13 +247,15 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // The Results tab and chip (`results-choice.ts`): My bouts and All for each owner until changed; another owner (or none) starts there
   // again. A choice made while the viewer loads (Back from a scene right after a reload) waits for the first owner that loads (fix round 1).
   const choiceKey = choiceOwner(viewer, owner?.gladiatorId);
-  const [messagesRequest, setMessagesRequest] = useState<{ tab: 'notifications'; n: number; owner: typeof choiceKey } | null>(null);
+  // Auth identity can change while both gladiator reads are still loading. Only the initial unknown session may adopt an account.
+  const requestAccount = fixture ? (previewAs === 'visitor' ? null : 'fixture')
+    : game.session.status === 'loading' ? undefined : game.session.status === 'signed-in' ? game.session.userId : null;
+  const [messagesRequest, setMessagesRequest] = useState<MessagesRequest | null>(null);
   const messageRequests = useRef(0);
   useEffect(() => {
-    setMessagesRequest(request => !request || request.owner === choiceKey ? request
-      : request.owner === undefined && typeof choiceKey === 'string' ? { ...request, owner: choiceKey } : null);
-  }, [choiceKey]);
-  const currentMessagesRequest = messagesRequest && (messagesRequest.owner === choiceKey || messagesRequest.owner === undefined && typeof choiceKey === 'string') ? messagesRequest : null;
+    setMessagesRequest(request => messagesRequestFor(request, requestAccount, choiceKey));
+  }, [requestAccount, choiceKey]);
+  const currentMessagesRequest = messagesRequestFor(messagesRequest, requestAccount, choiceKey);
   const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ owner: undefined, ...FIRST_RESULTS });
   const results = choiceFor(resultsChoice, choiceKey);
   // The owner settles the choice once known, so a later owner never adopts it (an account switch goes through a loading viewer).
@@ -360,13 +362,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     const from = cameFrom.current;
     cameFrom.current = null;
     if (!from) return;
-    if (from === 'notifications') setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, owner: choiceKey });
+    if (from === 'notifications') setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
     const filter = boutFilterOf(from);
     if (filter) chooseResults({ view: 'mine', filter });
     else if (from === 'results') chooseResults({ view: 'everyone' });
     const menu = originMenu(from);
     if (menu) show(menu);
-  }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey]);
+  }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey, requestAccount]);
   // The away button (Patch A item 3): the player's own trip, from the owner state, the world, the owner's results and its timeline. It opens
   // the scene `awayScene` names; when the scene closes, the focus goes back to the button (the scene's own opener is gone with it).
   const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs });

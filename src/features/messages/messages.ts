@@ -6,6 +6,22 @@ import type { NotificationsRead, ShownMessage } from '../../lib/api/reads';
 import type { PatchEntry } from '../../lib/patch';
 export type { ShownMessage } from '../../lib/api/reads';
 
+/** Undefined while identity loads, null for a known visitor or missing gladiator. */
+type RequestIdentity = string | null | undefined;
+export type MessagesRequest = { tab: 'notifications'; n: number; account: RequestIdentity; owner: RequestIdentity };
+
+/**
+ * The request this account/owner may consume now. Bootstrap may adopt its first authenticated account, then its first owner;
+ * once either is known it cannot be adopted again. Use this during render as well as when settling stored identity, so another
+ * account's first ready render cannot consume a stale request before the cleanup effect runs.
+ */
+export function messagesRequestFor(request: MessagesRequest | null, account: RequestIdentity, owner: RequestIdentity): MessagesRequest | null {
+  if (!request) return null;
+  if (request.account !== account && !(request.account === undefined && typeof account === 'string')) return null;
+  if (request.owner !== owner && !(request.owner === undefined && typeof owner === 'string')) return null;
+  return request.account === account && request.owner === owner ? request : { ...request, account, owner };
+}
+
 /**
  * What the messages button and panel need from the shell: the two lists, and the two marks a player's reading sends. `read` marks a
  * message read and then reads the owner again (the badge then drops); `seeNotifications` marks the results shown as seen the same way.

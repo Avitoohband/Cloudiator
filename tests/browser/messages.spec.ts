@@ -307,6 +307,53 @@ test.describe('Watch from Notifications', () => {
     await expect(panel.locator('[data-notification]')).toHaveCount(0);
   });
 
+  test('drops a pending Notifications return on a direct account switch while both owners load', async ({ page, context }) => {
+    const { live, arena } = await watchPlayer(page);
+    const release = live.hold('owner_state');
+    await page.goto('/game/?view=replay&activity=' + arena.activityId + '&from=notifications');
+    await expect.poll(() => live.count('owner_state')).toBeGreaterThan(0);
+    const first = live.requests.find(r => r.table === 'owner_state')!.reader;
+    expect(first).not.toBeNull();
+    await expect(chipToggle(page)).toHaveText('Signed in');
+    await page.getByRole('button', { name: 'Back to Notifications', exact: true }).click();
+    await expect(panelOf(page)).toHaveCount(0);
+    // A stays signed in with its owner unresolved. Switch directly to B: no SIGNED_OUT/visitor step.
+    const other = testUser('watch-direct-brutus@example.invalid');
+    expect(other.id).not.toBe(first);
+    await seedSession(context, other);
+    live.setOwner({ ...structuredClone(ownerFixture), gladiatorId: randomUUID(), name: 'Brutus', inbox: { unread: 1, readIds: [], sinceMs: SINCE, newNotifications: 0, notificationsSeenMs: NOW } });
+    live.setNotifications([]); live.setBouts([]);
+    await page.evaluate(user => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const token = btoa(JSON.stringify({ alg: 'HS256' })) + '.' + btoa(JSON.stringify({ sub: user.id, exp })) + '.test-only';
+      const session = { access_token: token, refresh_token: 'test-only:' + user.id, token_type: 'bearer', expires_at: exp, expires_in: 3600, user };
+      localStorage.setItem('sb-127-auth-token', JSON.stringify(session));
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_IN', session }); channel.close();
+    }, other);
+    await expect.poll(() => live.requests.some(r => r.table === 'owner_state' && r.reader === other.id)).toBe(true);
+    // Both accounts' owner reads are still held; B is authenticated without a gladiator/inbox yet.
+    await expect(chipToggle(page)).toHaveText('Signed in');
+    await expect(page.getByTestId('chip-name')).toHaveCount(0);
+    await expect(panelOf(page)).toHaveCount(0);
+    // Record even a transient focus steal during B's first ready render, before any cleanup could hide it.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { __watchReturnFocus: string[] }).__watchReturnFocus = seen;
+      document.addEventListener('focusin', event => {
+        if (event.target instanceof HTMLElement && event.target.matches('[data-tab="notifications"]')) seen.push('notifications');
+      });
+    });
+    release();
+    await expectOwnerShown(page, 'Brutus');
+    await expect(messagesButton(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(panelOf(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __watchReturnFocus: string[] }).__watchReturnFocus)).toEqual([]);
+    const panel = await openPanel(page);
+    await expect(tab(panel, /^Messages/)).toHaveAttribute('aria-selected', 'true');
+    await expect(panel.locator('[data-notification]')).toHaveCount(0);
+  });
+
   test('Watch buttons sit beside reward lines with room for the title', async ({ page }) => {
     await watchPlayer(page);
     await openLive(page);

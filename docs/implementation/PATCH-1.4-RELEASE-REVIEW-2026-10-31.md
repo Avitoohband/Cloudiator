@@ -1,5 +1,7 @@
 # Patch 1.4 — Avi's production review
 
+**Approved and shipped — 2026-10-31:** Avi approved all four named writes and the exact note/14 feature lines below. All completed: M26, client `26dd0d7`, note 5 at 21:03:56.750 UTC, record 1.4 at 21:04:00.468 UTC. The original review bundle below is preserved word for word as the approved artifact; its pending/candidate language is historical. See `docs/operations/release-evidence.md`.
+
 **Release candidate, not live. Production go is pending.** The full local gate passed 12/12 on `b7d3651`, exit 0;
 see [the gate evidence](PATCH-1.4-GATE-2026-10-31.md). The following preparation changes documentation only.
 

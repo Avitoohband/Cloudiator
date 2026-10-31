@@ -1,5 +1,16 @@
 # Handoff to Codex — Cloudiator, 2026-10-31
 
+## Current authority, locations and next work — 2026-10-31
+
+This dated override supersedes older ownership, checkout and next-task statements below; historical handoff text is preserved. Codex took over from Claude at Avi's explicit request on 2026-10-31. Main checkout: `C:\Avi\Studies\Projects\Cloudiator\codex`; Patch 1.4 execution checkout: `C:\Avi\Studies\Projects\Cloudiator\claude` (`claude/task-24`, port 3200). The Cloudiator root is only the parent.
+
+**Current status — 2026-10-31: Patch 1.4 is live.** Client `26dd0d7116a1429f4a6b134559f44766b25f9478`, Pages deployment `b49e262c-9dfe-453c-96dd-5989b39c379b`, Supabase M01–M26; site https://cloudiator-arena.pages.dev. Avi explicitly approved all four named writes (M26, client, exact note, patch record); all completed. Note **5** published **21:03:56.750 UTC**; patch **1.4** recorded **21:04:00.468 UTC**, with 14 exact CHANGELOG features and `latest_patch=1.4`. Nine automatic deployed checks passed, including 22 anonymous denial probes. At **21:06:51 UTC**, a clean anonymous post-record browser probe passed: client/history code 1.4, revision 1.4, zero Reload offer buttons. No Edge change/deployment or package download.
+
+Avi's signed-in human journey and attested checks remain pending. The combined **1.3.1 + 1.4 clip and feature-post reminder** was sent; no new video was requested. Future production releases require a fresh explicit go. Evidence: `docs/operations/release-evidence.md`, "Patch 1.4 released — 2026-10-31".
+
+Next: **1.5 Arena replays**, worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`: read its ledger, merge shipped 1.4, preserve/resume Task 5's uncommitted work. Then **1.5.1 NPC re-review/art approval**, then **1.6 economy** (merge 1.4, incorporate at most two Training slots per game day, Tasks 4–9; zero-stamina tournaments). See `CODEX-HANDOFF-2026-10-31.md` for stream ledgers. Only one worktree uses the local Supabase stack; Edge currently serves from `claude`. No package downloads without asking; no secrets in output. The 1.4 go authorizes no 1.5/1.5.1/1.6 production writes.
+
+
 **Codex checkpoint, 2026-10-31:** read [the gate report](PATCH-1.4-GATE-2026-10-31.md) before resuming Patch 1.4. The fresh post-restart gate passed **12/12, exit 0**, on `b7d3651` (19:49:56–20:35:17 UTC). Unit 1,994/111 files, DB 405/30 files with Edge unchanged, development browser 1,029 passed/71 skipped, static browser 34 passed/1,066 skipped; no step omitted. Earlier failed/aborted attempts remain recorded. The local CHANGELOG is now a dated release candidate for review, not a production-release claim. No production go, write or deployment; next show the draft, patch row and six go points, then obtain Avi's explicit production go. The stream order and production holds below remain in force.
 
 Claude hands off to you because its credits are running low. Everything below is on this PC. The branches are local, not pushed:
@@ -29,7 +40,7 @@ list: `docs/superpowers/specs/2026-10-29-next-patch-ideas.md`, items 1-35).
 
 ## Where each stream stands (each has a ledger at .superpowers/sdd/<plan>/progress.md in its worktree)
 
-### 1. Patch 1.4 — LOCAL GATE PASSED; AWAITING PRODUCTION GO (do this first)
+### 1. Patch 1.4 — SHIPPED 2026-10-31 (pre-release procedure retained below)
 - **Where:** worktree `C:\Avi\Studies\Projects\Cloudiator\claude`, branch `claude/task-24` @ `7362b53`.
 - **Ledger:** `.superpowers/sdd/2026-10-29-patch-a/progress.md`. Read its last FINAL REVIEW, FIX WAVE and PAUSE POINT entries.
 - **What it holds:** Tasks 1-11c are done and reviewed, with the final review's fix wave applied. M26

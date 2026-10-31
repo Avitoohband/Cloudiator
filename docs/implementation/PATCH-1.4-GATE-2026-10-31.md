@@ -1,5 +1,7 @@
 # Patch 1.4 gate checkpoint — 2026-10-31
 
+**Shipped — 2026-10-31:** All four approved writes completed: M26, client `26dd0d7`, note 5, record 1.4. Nine automatic deployed checks passed, including 22 anonymous denial probes; post-record anonymous browser probe passed. Pending-go/no-push statements below describe their historical checkpoint. Earlier failed/aborted attempts remain unchanged.
+
 **Local gate passed 12/12; not released. Avi's production go is pending; none has been received.** The fresh gate on `b7d3651` finished at **20:35:17 UTC, exit 0**, after Avi's chosen PC restart and an isolated unit-worker recovery. Earlier failed and aborted attempts are preserved below; none was rewritten as a pass. The [review bundle](PATCH-1.4-RELEASE-REVIEW-2026-10-31.md) holds the exact draft, patch row and six go points for his decision.
 
 ## Checkout and commits
@@ -102,3 +104,11 @@ Task briefs, reports, screenshots and the detailed ledger remain in `.superpower
 4. After 1.4 ships, remind Avi about the combined 1.3.1/1.4 clip and feature posts, then follow the assigned 1.5 → 1.5.1 → 1.6 order. Other streams and their uncommitted work are untouched.
 
 Marketing requested aggregate production player counts through delegation. No verified current production count is available in this session, and local fixture counts must not be reported as production counts. No return message was sent.
+
+## Shipped follow-up — 2026-10-31
+
+**Current status — 2026-10-31: Patch 1.4 is live.** Client `26dd0d7116a1429f4a6b134559f44766b25f9478`, Pages deployment `b49e262c-9dfe-453c-96dd-5989b39c379b`, Supabase M01–M26; site https://cloudiator-arena.pages.dev. Avi explicitly approved all four named writes (M26, client, exact note, patch record); all completed. Note **5** published **21:03:56.750 UTC**; patch **1.4** recorded **21:04:00.468 UTC**, with 14 exact CHANGELOG features and `latest_patch=1.4`. Nine automatic deployed checks passed, including 22 anonymous denial probes. At **21:06:51 UTC**, a clean anonymous post-record browser probe passed: client/history code 1.4, revision 1.4, zero Reload offer buttons. No Edge change/deployment or package download.
+
+Avi's signed-in human journey and attested checks remain pending. The combined **1.3.1 + 1.4 clip and feature-post reminder** was sent; no new video was requested. Future production releases require a fresh explicit go. Evidence: `docs/operations/release-evidence.md`, "Patch 1.4 released — 2026-10-31".
+
+Windows Tcpip event 4231 remains unresolved: it recurred during the passing final gate without an ERR_NO_BUFFER_SPACE marker or browser failure; no permanent host fix claimed.

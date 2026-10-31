@@ -88,6 +88,11 @@ export function sameScene(shown: SceneAddress | null, view: SceneView): boolean 
   return view.kind !== 'bout' && shown.activityId === view.activityId && sceneDetail(shown) === sceneDetail(view);
 }
 
+/** A pending step still belongs to this exact source, including its origin/filter, before replacing the live address. */
+export function sameSceneSource(shown: SceneAddress | null, source: SceneView): boolean {
+  return shown !== null && sameScene(shown, source) && sceneFromOf(shown) === sceneFromOf(source);
+}
+
 /** `href` (an absolute address) with its scene replaced by `view`: the same route and options, as a path and search. */
 export function sceneHref(href: string, view: SceneView): string {
   const url = new URL(href);

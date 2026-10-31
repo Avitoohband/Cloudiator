@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { backLabel, boutFilterOf, boutsFrom, campHref, namedScene, sameScene, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
+import { backLabel, boutFilterOf, boutsFrom, campHref, namedScene, sameScene, sameSceneSource, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
 import { originMenu } from '@/features/shell/menus';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ExpeditionUnavailable } from '@/features/character/ExpeditionView';
@@ -13,6 +13,21 @@ const A1 = 'a1d0c2e4-5f60-4b7a-9c3d-1e2f3a4b5c61';
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, '\'').replace(/\s+/g, ' ').trim();
 
 describe('scenes over the camp in the address', () => {
+  it('matches a pending step source by live activity, stage and origin, rather than scene identity alone', () => {
+    const source = { kind: 'replay' as const, activityId: A1, stageId: 's2', from: 'bouts' as const };
+    expect(sameSceneSource(sceneOf(params(`view=replay&activity=${A1}&stage=s2&from=bouts`)), source)).toBe(true);
+    for (const search of ['', `view=expedition&activity=${A1}&from=bouts`, 'view=replay&activity=malformed',
+      'view=replay&activity=00000000-0000-4000-8000-000000000002&stage=s2&from=bouts',
+      `view=replay&activity=${A1}&stage=s1&from=bouts`, `view=replay&activity=${A1}&from=bouts`,
+      `view=replay&activity=${A1}&stage=s2&from=bouts-lost`, `view=replay&activity=${A1}&stage=s2`]) {
+      expect(sameSceneSource(sceneOf(params(search)), source), search).toBe(false);
+    }
+    const withoutDetails = { kind: 'replay' as const, activityId: A1 };
+    expect(sameSceneSource(sceneOf(params(`view=replay&activity=${A1}`)), withoutDetails)).toBe(true);
+    expect(sameSceneSource(sceneOf(params(`view=replay&activity=${A1}&stage=s2`)), withoutDetails)).toBe(false);
+    expect(sameSceneSource(sceneOf(params(`view=replay&activity=${A1}&from=bouts`)), withoutDetails)).toBe(false);
+  });
+
   it('reads a replay or an expedition scene, and nothing else', () => {
     expect(sceneOf(params(`view=replay&activity=${A1}&stage=s2`))).toEqual({ kind: 'replay', activityId: A1, stageId: 's2' });
     expect(sceneOf(params(`view=replay&activity=${A1}`))).toEqual({ kind: 'replay', activityId: A1 });

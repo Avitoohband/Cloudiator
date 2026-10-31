@@ -23,7 +23,7 @@ import { appearancesOf } from '../../game/replay-looks';
 import { markWatched } from '../bouts/watched';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import type { ReplayQueue } from '../bouts/bout-queue';
-import { backLabel, boutFilterOf, namedScene, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneView } from './scene-url';
+import { backLabel, boutFilterOf, namedScene, sameSceneSource, sceneFromOf, sceneKeyOf, sceneOf, type SceneAddress, type SceneView } from './scene-url';
 import styles from './shell.module.css';
 
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
@@ -108,11 +108,17 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   const owner = player ? state.owner : null;
   const currentActivityId = owner?.currentActivity && ['arena', 'tournament'].includes(owner.currentActivity.kind) ? owner.currentActivity.id : null;
   const replayId = named?.kind === 'replay' ? named.activityId : null;
+  const replayStage = named?.kind === 'replay' ? named.stageId : undefined;
   const queue = useMemo<ReplayQueue | null>(() => bouts && owner && replayId ? {
     filter, get list() { return bouts.list(filter); }, ownerName: owner.name, currentActivityId,
-    open: activityId => onReplace({ kind: 'replay', activityId, ...(from ? { from } : {}) }),
+    open: activityId => {
+      // Native history changes the address before React commits new props/refs. A page from that older source must not replace it.
+      const source: SceneView = { kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...(from ? { from } : {}) };
+      if (!sameSceneSource(sceneOf(new URL(window.location.href).searchParams), source)) return;
+      onReplace({ kind: 'replay', activityId, ...(from ? { from } : {}) });
+    },
     more: () => bouts.more(filter),
-  } : null, [bouts, owner?.gladiatorId, owner?.name, replayId, filter, currentActivityId, from, onReplace]);
+  } : null, [bouts, owner?.gladiatorId, owner?.name, replayId, replayStage, filter, currentActivityId, from, onReplace]);
   const viewKey = `${sceneKey}|${state.session.userId ?? 'visitor'}`;
   // The view mounts once the viewer is known: the session, and for an account its owner read (Task 23.5, C19). Mounted
   // earlier, a signed-in player's view would read as a visitor's and remount as the player's a moment later, reading its

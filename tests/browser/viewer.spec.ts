@@ -23,6 +23,13 @@ const VARRO = arenaActivityId('ownerHumanWin');
 const EXPEDITION = REPLAY_FIXTURES.expedition.activityId;
 const ENCOUNTERS = ['Encounter 1: Dire Wolf', 'Encounter 2: Timber Wolf', 'Encounter 3: Dire Wolf'];
 
+type QueuePageRace = {
+  armed: boolean; held: boolean; resume: (() => void) | null;
+  handoff: { activity: string | null; stage: string | null; from: string | null; index: number | null } | null;
+  replacements: { activity: string | null; index: number | null }[];
+};
+declare global { interface Window { __queuePageRace?: QueuePageRace } }
+
 const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 async function openCamp(page: Page, url = '/game/?mode=fixture') {
   await page.goto(url);
@@ -333,6 +340,65 @@ test.describe('the replay viewer', () => {
     expect(new URL(page.url()).searchParams.get('activity')).toBe(bouts[0].activityId);
     expect(await page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 0, count: 20, more: true });
     expect(await page.evaluate(() => history.length)).toBe(before);
+  });
+
+  for (const changedPart of ['activity', 'stage', 'origin'] as const) test(`a held page cannot replace native ${changedPart} navigation before its React commit`, async ({ page, context }, testInfo) => {
+    await seedSession(context);
+    const now = Date.now(), bouts = Array.from({ length: 22 }, (_, i) => pagedBout(now, i + 1));
+    await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
+    // Hold the fully fetched final names response at text(), preserving its real bytes and all production readers/continuations.
+    await page.addInitScript(() => {
+      const race: QueuePageRace = { armed: false, held: false, resume: null, handoff: null, replacements: [] };
+      window.__queuePageRace = race;
+      const fetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const response = await fetch(...args);
+        const url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), location.href);
+        if (!race.armed || !url.pathname.endsWith('/visible_events') || !url.searchParams.get('select')?.includes('p0name')) return response;
+        race.armed = false;
+        const body = await response.text();
+        Object.defineProperty(response, 'text', { value: async () => {
+          await new Promise<void>(resolve => { race.resume = resolve; race.held = true; });
+          const address = new URL(location.href).searchParams;
+          race.handoff = { activity: address.get('activity'), stage: address.get('stage'), from: address.get('from'), index: window.__cloudiatorReplay?.queue()?.index ?? null };
+          return body;
+        } });
+        return response;
+      };
+    });
+    await page.goto(`/game/?view=replay&activity=${bouts[19].activityId}&from=bouts`);
+    await expectOwnerShown(page, 'Aster'); await replayReady(page);
+    await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 19, count: 20, more: true });
+    await page.evaluate(staleTarget => {
+      window.__queuePageRace!.armed = true;
+      const replace = history.replaceState.bind(history);
+      history.replaceState = (state, unused, url) => {
+        if (url && new URL(String(url), location.href).searchParams.get('activity') === staleTarget) {
+          window.__queuePageRace!.replacements.push({ activity: new URL(location.href).searchParams.get('activity'), index: window.__cloudiatorReplay?.queue()?.index ?? null });
+        }
+        replace(state, unused, url);
+      };
+    }, bouts[20].activityId);
+    await page.keyboard.press('n');
+    await page.waitForFunction(() => window.__queuePageRace?.held);
+    // The address changes synchronously; the held response resumes in this same page turn before React commits that address.
+    const activity = changedPart === 'activity' ? bouts[0].activityId : bouts[19].activityId;
+    const stage = changedPart === 'stage' ? bouts[19].stages[0].id : null;
+    const from = changedPart === 'origin' ? 'bouts-won' : 'bouts';
+    const destination = `/game/?view=replay&activity=${activity}&from=${from}${stage ? `&stage=${encodeURIComponent(stage)}` : ''}`;
+    await page.evaluate(destination => {
+      history.pushState({ cloudiatorScene: 1 }, '', destination);
+      window.__queuePageRace!.resume!();
+    }, destination);
+    await page.waitForFunction(() => window.__queuePageRace?.handoff !== null);
+    await nextFrames(page);
+    const observed = await page.evaluate(() => window.__queuePageRace!);
+    await testInfo.attach('native-navigation-page-handoff', { body: JSON.stringify(observed, null, 2), contentType: 'application/json' });
+    expect(observed.handoff).toEqual({ activity, stage, from, index: 19 });
+    expect(observed.replacements, 'the held continuation must not replace an address that has already moved').toEqual([]);
+    expect(new URL(page.url()).searchParams.get('activity')).toBe(activity);
+    expect(new URL(page.url()).searchParams.get('stage')).toBe(stage);
+    expect(new URL(page.url()).searchParams.get('from')).toBe(from);
   });
 
   test('plays a bout with the replay bar, focused on Pause, and remembers the speed', async ({ page }, testInfo) => {

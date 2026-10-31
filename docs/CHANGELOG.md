@@ -22,15 +22,14 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.3.** New since then: 1.3.1 and 1.4 (in progress).
+**Last video's patch: 1.3.** New since then: 1.3.1 and the 1.4 release candidate below.
 
-## 1.4 — Watch your expedition, class bonuses and a clock setting (in progress, not yet released)
+## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)
 
-Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi approves the wording at release. After 1.4:
+Release candidate only: the date is planned, and Avi's production go is pending. Production has not been changed.
+Patch A (branch `claude/task-24`). The title follows the draft patch note; Avi approves the wording at release. After 1.4:
 1.5 Arena replays, 1.6 the economy rebalance, 1.7 wearable titles, then 1.8 party dungeons and the bot team (all planned,
 not built); new gear comes in a later patch.
-
-### Built
 
 - New arrivals: everyone in the camp sees a banner when a gladiator arrives. Find takes you to the gate, and the Gladiators list shows newcomers first with a NEW tag.
 - My gladiator shows your class's bonuses and its suggested split of points. When you plan a build, Suggested spends the points left your class's way.

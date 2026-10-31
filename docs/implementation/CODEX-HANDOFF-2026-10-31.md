@@ -1,6 +1,6 @@
 # Handoff to Codex — Cloudiator, 2026-10-31
 
-**Codex checkpoint, 2026-10-31:** read [the gate report](PATCH-1.4-GATE-2026-10-31.md) before resuming Patch 1.4. Two full gates finished at 11/12; the camp test setup is fixed in `cb38ad0`, and the remaining failed run records a Windows socket-buffer fault. Approved migration-only Vault guidance is committed in `2d2225c`. No production go, write or deployment; a clean full gate is still required. The stream order and production holds below remain in force.
+**Codex checkpoint, 2026-10-31:** read [the gate report](PATCH-1.4-GATE-2026-10-31.md) before resuming Patch 1.4. The fresh post-restart gate passed **12/12, exit 0**, on `b7d3651` (19:49:56–20:35:17 UTC). Unit 1,994/111 files, DB 405/30 files with Edge unchanged, development browser 1,029 passed/71 skipped, static browser 34 passed/1,066 skipped; no step omitted. Earlier failed/aborted attempts remain recorded. The local CHANGELOG is now a dated release candidate for review, not a production-release claim. No production go, write or deployment; next show the draft, patch row and six go points, then obtain Avi's explicit production go. The stream order and production holds below remain in force.
 
 Claude hands off to you because its credits are running low. Everything below is on this PC. The branches are local, not pushed:
 they are worktrees of the same repository, so `git branch -a` from your checkout shows them. Read `AGENTS.md` first. It holds the
@@ -29,16 +29,16 @@ list: `docs/superpowers/specs/2026-10-29-next-patch-ideas.md`, items 1-35).
 
 ## Where each stream stands (each has a ledger at .superpowers/sdd/<plan>/progress.md in its worktree)
 
-### 1. Patch 1.4 — READY FOR THE GATE (do this first)
+### 1. Patch 1.4 — LOCAL GATE PASSED; AWAITING PRODUCTION GO (do this first)
 - **Where:** worktree `C:\Avi\Studies\Projects\Cloudiator\claude`, branch `claude/task-24` @ `7362b53`.
 - **Ledger:** `.superpowers/sdd/2026-10-29-patch-a/progress.md`. Read its last FINAL REVIEW, FIX WAVE and PAUSE POINT entries.
 - **What it holds:** Tasks 1-11c are done and reviewed, with the final review's fix wave applied. M26
   (`supabase/migrations/20261030055918_patch_1_4.sql`) is the only migration. It holds patch numbers and the richer profile card.
   There is no Edge change.
 - **Next steps:**
-  1. Run the 12/12 gate on a quiet host: `node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs`.
-     Before the database step, move the Edge serve back to this worktree. Known flakes under load: `arrivals.spec:149`,
-     `tests/assets/camp-beds`. Rerun them serialized before you call either a failure.
+  1. **Done:** the fresh 12/12 gate passed on `b7d3651`, using one Chrome worker and unchanged coverage. Edge now serves this
+     worktree (launcher PID 38656 after the PC restart); M01–M26 are intact. See the gate report for the exact evidence and
+     host limitations. No new application/test change followed the gated commit; only local release/checkpoint documentation.
   2. Show Avi the patch note draft (`.superpowers/sdd/2026-10-29-patch-a/patch-note-1.4-draft.md`) together with the points
      the ledger lists "For Avi at the go":
      - the note-number buttons are 24 px on a phone;

@@ -118,3 +118,8 @@ More from Avi, 2026-10-30 (collected for the plans, not yet designed):
     overload; what each attribute does (Strength, Agility, Vitality, Endurance, Precision) in numbers; class bonuses; how a
     fight resolves (hit, miss, dodge, critical, armour, attack speed); Rest and the Training cap. The numbers must be read from
     the active rules (v1 now, v2 after 1.6), never typed by hand. A players' explainer clip follows its release.
+
+35. **Class quests that raise the class bonus (Avi, 2026-10-31, future).** "quest per class, that improve their class
+    bonuses, should be very hard to achieve. for example, Berserker has more % STR and Guardian have 10% endurance instead of 5."
+    One long, very hard quest chain per class; finishing it upgrades that class's bonus (Berserker Strength above +10 %,
+    Guardian Endurance +5 % → +10 %, Duelist Agility/Precision up). Endgame; fits with the Deep and titles (a title for each).

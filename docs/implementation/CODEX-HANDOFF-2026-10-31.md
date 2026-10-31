@@ -8,6 +8,10 @@ This dated override supersedes older ownership, checkout and next-task statement
 
 Avi's signed-in human journey and attested checks remain pending. The combined **1.3.1 + 1.4 clip and feature-post reminder** was sent; no new video was requested. Future production releases require a fresh explicit go. Evidence: `docs/operations/release-evidence.md`, "Patch 1.4 released — 2026-10-31".
 
+Separate CI follow-up: GitHub run `41241478227` failed only the known `camp-beds.test.ts:113` 5-second timeout; the local
+12/12 gate and deployed nine checks passed. CI rerun versus carrying its test-budget correction into 1.5 is awaiting Avi's
+question-form answer (normal remote pinned dependency installs explicitly included). No CI retry or timeout change yet.
+
 Next: **1.5 Arena replays**, worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`: read its ledger, merge shipped 1.4, preserve/resume Task 5's uncommitted work. Then **1.5.1 NPC re-review/art approval**, then **1.6 economy** (merge 1.4, incorporate at most two Training slots per game day, Tasks 4–9; zero-stamina tournaments). See `CODEX-HANDOFF-2026-10-31.md` for stream ledgers. Only one worktree uses the local Supabase stack; Edge currently serves from `claude`. No package downloads without asking; no secrets in output. The 1.4 go authorizes no 1.5/1.5.1/1.6 production writes.
 
 

@@ -1,5 +1,7 @@
 # Handoff to Codex — Cloudiator, 2026-10-31
 
+**Codex checkpoint, 2026-10-31:** read [the gate report](PATCH-1.4-GATE-2026-10-31.md) before resuming Patch 1.4. Two full gates finished at 11/12; the camp test setup is fixed in `cb38ad0`, and the remaining failed run records a Windows socket-buffer fault. Approved migration-only Vault guidance is committed in `2d2225c`. No production go, write or deployment; a clean full gate is still required. The stream order and production holds below remain in force.
+
 Claude hands off to you because its credits are running low. Everything below is on this PC. The branches are local, not pushed:
 they are worktrees of the same repository, so `git branch -a` from your checkout shows them. Read `AGENTS.md` first. It holds the
 binding project rules: TDD, the migration workflow, the build/browser output separation, the database-test rule and the React

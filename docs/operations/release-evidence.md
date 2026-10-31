@@ -1488,3 +1488,17 @@ deployed evidence | mobile | fixedRoutesReload | 5 of 5 routes loaded and reload
 ### Follow-up and limits
 
 Combined **1.3.1 + 1.4 patch clip and feature posts** reminder sent; no new video requested, made or published. Next 1.5 Arena replays (preserve/resume Task 5 uncommitted work), then 1.5.1 NPC re-review/art approval, then 1.6 economy (at most two Training slots per game day). The go covers 1.4 only; each future production release needs a fresh explicit go.
+
+### Separate GitHub CI result
+
+The [release-gate workflow](https://github.com/Avitoohband/Cloudiator/actions/runs/41241478227) for shipped commit `26dd0d7`
+completed with **failure**: `tests/assets/camp-beds.test.ts:113`, "draws the sleeping gladiator entirely on the bed, in both
+sleep frames", exceeded the default **5,000 ms** test timeout. It reported 1,983 unit passes, 10 CI skips and one failure;
+the geometry assertions did not report a mismatch. This is the previously noted under-load timeout case, not a demonstrated
+gameplay regression. Its remaining CI stages passed, including 405 DB tests and the static-browser gate. CI intentionally
+omits the development-browser stage; the earlier **12/12 local gate** and nine deployed checks remain distinct results.
+
+Avi has been asked whether to rerun CI once with its normal pinned dependency installs or carry the timeout into 1.5. That
+choice is pending; no rerun or test-budget change has been made. No local package was installed/downloaded; the approved
+client release triggered the normal GitHub/Pages build pipelines and their pinned dependency setup. The aggregate CI
+metadata is saved in `github-ci-initial.json` beside this release's temporary evidence.

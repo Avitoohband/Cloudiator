@@ -455,3 +455,7 @@ stories; uploads and posts only on Avi's go. The release report reminds Avi of i
 
 1. The day-before warning message **says plainly that everyone's gold will be cut to a quarter** (with the new salvage value), so nobody sells at 10 just before the cut.
 2. **Gear drops are halved** on expeditions: 10 / 15 / 20 % (Woodland / Outpost / Mountain).
+
+## Avi's added decision (2026-10-31, question form) — binding
+
+3. **At most 2 Training slots per game day** (a game day = the morning, afternoon and evening slots), on top of the Training cap (10 + 4 × level). A third Training in the same game day gives nothing; the Schedule refuses or warns before saving (exact copy and where the check lives — client schedule validation and the server's preparation — to be settled in the spec/plan update before Task 4). Avi: today a player can train about 12 times a real day, "it is OP".

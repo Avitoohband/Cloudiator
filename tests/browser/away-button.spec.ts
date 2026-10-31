@@ -699,6 +699,38 @@ test.describe('the Arena bout button on the camp', () => {
     await page.evaluate(() => window.__cloudiatorShell!.clock.freeze(null));
     await expect(awayMain(page)).toContainText('Aster beat Varro');
   });
+  test('re-arms the logged-end timer after an ordinary same-minute clock sync and parent render', async ({ page, context }, info) => {
+    const now = ARENA_START + 60 * MIN + 2_000;
+    const transport = await arenaLive(context, now);
+    await openCamp(page, now);
+    await expect.poll(() => transport.requests.filter(r => r.table === 'activities' && r.query.get('id') === `eq.${ARENA_ID}`).length).toBe(1);
+    // Establish a running-clock timer with over ten seconds left, independently of the later sync path.
+    await page.evaluate(() => window.__cloudiatorShell!.clock.freeze(null));
+    await page.waitForTimeout(200);
+    await expect(awayButton(page)).toHaveCount(0);
+    const sample = await page.evaluate(end => {
+      const shell = window.__cloudiatorShell!;
+      const before = shell.clock.now();
+      const frozen = shell.clock.frozen();
+      // sync does not emit a freeze/release subscription event. Renewing the existing parent callback identity renders
+      // CampShell just as an ordinary server sync's setSync does, while useMinuteNow remains in this same minute.
+      shell.clock.sync(end - 2_000);
+      const after = shell.clock.now();
+      shell.renewRefreshOwner();
+      return { before, after, frozen, end, oldRemainingMs: end - before, correctedRemainingMs: end - after,
+        minuteBefore: Math.floor(before / 60_000), minuteAfter: Math.floor(after / 60_000) };
+    }, ARENA_END);
+    writeFileSync(info.outputPath('ordinary-sync-sample.json'), JSON.stringify(sample, null, 2));
+    expect(sample.frozen).toBeNull();
+    expect(sample.minuteAfter).toBe(sample.minuteBefore);
+    expect(sample.oldRemainingMs).toBeGreaterThan(10_000);
+    expect(sample.correctedRemainingMs).toBeGreaterThan(1_900);
+    expect(sample.correctedRemainingMs).toBeLessThanOrEqual(2_000);
+    // Wide separation from the original deadline makes this a clock scheduling regression, not a sub-frame race.
+    await expect(awayButton(page)).toHaveCount(0);
+    await expect(awayMain(page)).toContainText('Aster beat Varro', { timeout: 5_000 });
+    expect(transport.requests.filter(r => r.table === 'activities' && r.query.get('id') === `eq.${ARENA_ID}`).length).toBe(1);
+  });
   test('drops cached Arena data on sign-out and does not restore it before the new owner read', async ({ page, context }) => {
     const at = ARENA_START + 85 * MIN;
     const transport = await arenaLive(context, at, true); await openCamp(page, at);

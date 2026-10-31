@@ -84,22 +84,24 @@ export function useAwayTrip({ reads, owner, world, nowMs: minuteNow, clock }: {
   const arenaTimeline = arena?.scope === arenaScope ? arena.timeline : null;
   const arenaEnd = arenaTimeline?.stages.find(stage => stage.kind === 'bout' && stage.battleLog?.participants.some(p => p.gladiatorId === ownerId));
   const endedAt = arenaEnd ? boutEndMs(arenaEnd) : null;
+  // Ordinary server sync renders without notifying subscribers: re-arm from this render's exact clock sample too.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
+    const schedule = (sampledAt: number) => {
       clearTimeout(timer);
       if (arenaStart === null || clock.frozen() !== null) return;
       const now = clock.now();
       const boundaries = [arenaStart + 60 * MINUTE_MS + 1_000, arenaStart + RULES_V1.clock.slotMs, arenaStart + 2 * RULES_V1.clock.slotMs,
-        ...(endedAt === null ? [] : [endedAt])].filter(at => at > now);
-      if (boundaries.length) timer = setTimeout(update, Math.min(60_000, Math.min(...boundaries) - now));
+        ...(endedAt === null ? [] : [endedAt])].filter(at => at > sampledAt);
+      // A boundary passed since the UI's sample still needs a redraw; do not drop it during effect setup.
+      if (boundaries.length) timer = setTimeout(update, Math.max(0, Math.min(60_000, Math.min(...boundaries) - now)));
     };
-    const update = () => { redraw(value => value + 1); schedule(); };
+    const update = () => { const sample = clock.now(); redraw(value => value + 1); schedule(sample); };
     const off = clock.subscribe(update);
     document.addEventListener('visibilitychange', update);
-    schedule();
+    schedule(nowMs);
     return () => { clearTimeout(timer); off(); document.removeEventListener('visibilitychange', update); };
-  }, [clock, minuteNow, arenaStart, endedAt]);
+  }, [clock, minuteNow, nowMs, arenaStart, endedAt]);
 
   // The timeline of the trip that is running: when the button appears, and in each bucket of minutes after a fight's minute.
   const running = current?.kind === 'expedition' && current.startsAtMs <= nowMs && nowMs < current.endsAtMs ? current : null;

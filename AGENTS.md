@@ -99,6 +99,19 @@ passed in a normal window. `scripts/set-worker-secret.mjs` matches its count
 with a pattern that reads both shapes, so it needs no change. The rule as a
 general practice is adopted, not separately tested.
 
+## Migration-only pushes — approved local guidance
+
+Avi approved this **Supabase CLI** supplement on 2026-10-31. For a
+migration-only release, pass `--skip-vault` to both `db push --dry-run` and
+`db push`; keep Vault updates separately authorized. Check the installed
+version and command help before use.
+
+Observed: CLI **2.120.0** help states that `db push` updates Vault secrets
+from `config.toml` before migrations unless `--skip-vault` is set. At approval
+time, no default Vault write or hosted release with this flag had been tested;
+the rule is adopted from the documented help, not a verified release fix.
+See the [M26 release steps](docs/operations/migrations.md).
+
 ## Windows Docker startup — approved local guidance
 
 Avi approved this extension on 2026-10-14 for **Supabase CLI**. Before retrying

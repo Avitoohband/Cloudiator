@@ -29,6 +29,9 @@
 // participant 0), so a replay opened after the trip names it from its first moment (plan Review Focus 1). Whether the next slot was
 // a Rest is asked once per activity and gladiator: the owner's own current Rest from the trip's end answers it without a read, and
 // any failed read means the replay ends at the gate.
+//
+// Patch A Task 10: the replay's camp chapters ("Leaving camp", "Back in camp", "Resting") are drawn on the camp's own map, at the
+// gate and on the gladiator's bed, in the same viewport (src/game/trip-camp-scene.ts); the view hands it the chapter each frame.
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import type { ActivitySummary, RevealedTimeline } from '@contracts/events';
@@ -570,6 +573,11 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
     const t = timelineRef.current;
     return t && clock.current ? renderExpeditionStage(t, drawnMs()) : null;
   }, [drawnMs]);
+  /** The camp chapter at the replay clock, read every frame by the viewport (Task 10: the camp's gate and beds draw it). */
+  const vignetteNow = useCallback(() => {
+    const p = planRef.current;
+    return drawn.current.trip && p ? tripFrame(p, position()).vignette : null;
+  }, [position]);
 
   // Moves the replay a chapter on or back (it stops playing): past the last chapter a running trip may show, back to live.
   const step = useCallback((by: -1 | 1) => {
@@ -695,6 +703,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
       </header>
 
       {environment ? <ExpeditionViewport environment={environment} state={sceneState} look={look} bridge={bridge} reducedMotion={reduced} banner={banner} wander={!frame}
+        vignette={tripMode ? vignetteNow : undefined}
         label={`Isometric view of the ${expedition}. The gladiator travels automatically; drag or use the arrow keys to look around, plus and minus to zoom, F to follow.`} />
         : <div className={styles.placeholder}>The scene appears once the departure is revealed.</div>}
 

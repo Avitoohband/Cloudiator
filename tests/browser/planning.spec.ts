@@ -944,6 +944,7 @@ test.describe('what a Rest gives back', () => {
     await expect(hintOf(page, 'afternoon')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
     // The gain is the one emphasised thing in the line (the approved mockup's bold "+50").
     await expect(hintOf(page, 'evening').locator('b')).toHaveText('+50');
+    await expect(schedule).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
     expect(await contrastIssues(schedule), 'the schedule with a Rest that gives stamina').toEqual([]);
     await hintOf(page, 'evening').scrollIntoViewIfNeeded();
     await reviewShot(page, testInfo, 'rest-stamina-evening');
@@ -997,6 +998,7 @@ test.describe('what a Rest gives back', () => {
     await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
     // The other parts keep their own hints.
     await expect(hintOf(page, 'morning')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+    await expect(schedule).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
     expect(await contrastIssues(schedule), 'the schedule with no number').toEqual([]);
     // A Rest that comes before the build takes effect (the afternoon's) keeps its number; the evening's still has none.
     await page.getByLabel('afternoon activity').selectOption('rest');
@@ -1041,6 +1043,7 @@ test.describe('what a Rest gives back', () => {
     await expect(gain.locator('b')).toHaveText('+30');
     // It sits in the activity box, under the status line.
     await expect(summary.getByRole('status').filter({ hasText: /^In progress/ })).toBeVisible();
+    await expect(summary).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
     expect(await contrastIssues(summary), 'My gladiator with the running Rest').toEqual([]);
     await reviewShot(page, testInfo, 'rest-gain-mygladiator');
     await reviewShot360(page, testInfo, 'rest-gain-mygladiator', gain);

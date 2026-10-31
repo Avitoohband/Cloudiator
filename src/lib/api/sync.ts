@@ -4,6 +4,11 @@ import type { GameGateway } from './gateway';
 export type SyncState = {
   world: WorldSnapshot | null; offsetMs: number | null; lastSyncMs: number | null;
   processing: boolean; refreshing: boolean; error: 'unavailable' | 'unauthenticated' | null;
+  /**
+   * The server's newest patch, from every revision read (Patch A, "Patch numbers and the changelog"): a missing or malformed value is
+   * null, which shows no notice. A failed read keeps the last one; a session change forgets it until the next read.
+   */
+  latestPatch: string | null;
 };
 export type SyncController = {
   start(): Promise<void>; stop(): void;
@@ -24,7 +29,7 @@ export type SyncController = {
  */
 export function createSync(gateway: GameGateway, listener: (state: SyncState) => void, options: { actors?: boolean } = {}): SyncController {
   const actors = options.actors ?? true;
-  let state: SyncState = { world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null };
+  let state: SyncState = { world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null };
   let running = false, generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: Promise<void> | null = null;
@@ -41,9 +46,11 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
     const work = (async () => {
       try {
         const began = Date.now();
-        const clock = await gateway.revision();
+        const { latestPatch: latest, ...clock } = await gateway.revision();
         const ended = Date.now();
         if (ticket !== generation || !running) return;
+        // The gateway's read keeps only a well-formed number (readRevision); an older server's read names none.
+        const latestPatch = typeof latest === 'string' ? latest : null;
         const offsetMs = clock.serverNowMs - (began + ended) / 2;
         let world: WorldSnapshot;
         if (!actors) world = { ...clock, actors: [] };
@@ -52,12 +59,12 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
           world = await gateway.world();
           if (ticket !== generation || !running) return;
         }
-        publish({ world, offsetMs, lastSyncMs: Date.now(), refreshing: false,
+        publish({ world, offsetMs, lastSyncMs: Date.now(), refreshing: false, latestPatch,
           processing: world.actors.some(actor => actor.activityStatus === 'processing' || actor.activityStatus === 'queued'), error: null });
       } catch (error) {
         if (ticket !== generation || !running) return;
         const code = error && typeof error === 'object' && 'code' in error && error.code === 'unauthenticated' ? 'unauthenticated' : 'unavailable';
-        publish({ refreshing: false, error: code, ...(code === 'unauthenticated' ? { world: null, offsetMs: null, lastSyncMs: null, processing: false } : {}) });
+        publish({ refreshing: false, error: code, ...(code === 'unauthenticated' ? { world: null, offsetMs: null, lastSyncMs: null, processing: false, latestPatch: null } : {}) });
       }
     })();
     pending = work.finally(() => { if (ticket === generation) { pending = null; schedule(); } });
@@ -67,7 +74,7 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
   const visibility = () => { if (visible()) focus(); else cancelTimer(); };
   const changedSession = () => {
     generation++; pending = null; cancelTimer();
-    publish({ world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null });
+    publish({ world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null });
     // Defer SDK reads until onAuthStateChange returns (Supabase holds its auth lock in callbacks).
     queueMicrotask(() => { if (running) void refresh(); });
   };
@@ -75,7 +82,7 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
     start() {
       if (running) return pending ?? Promise.resolve();
       running = true; generation++;
-      publish({ world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null });
+      publish({ world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null });
       if (typeof window !== 'undefined') window.addEventListener('focus', focus);
       if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visibility);
       unsubscribe = gateway.subscribeSession?.(changedSession);

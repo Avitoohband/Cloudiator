@@ -2,7 +2,9 @@
 
 // The corner chip, top right. A player sees their name, stamina, gold, renown and the time to the next slot boundary
 // (on touch only the name and the countdown), and the chip opens a small menu: on touch the bar behind the name (the same
-// items in one row, the stamina line over its bar), then the Clock switch (12/24-hour, Patch A) and "Sign out". A visitor's chip starts
+// items in one row, the stamina line over its bar), then the Clock switch (12/24-hour, Patch A), the patch this build is ("Patch 1.4",
+// with "Patch history ›" for a player, and "Patch 1.5 is out" with Reload while the server is ahead; Patch A, "Patch numbers and the
+// changelog") and "Sign out". A visitor's chip starts
 // Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
 // gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text. A player also has the
 // messages button left of the pill (Task 6): the chip shows one popover at a time, the account menu or the messages panel.
@@ -13,32 +15,37 @@ import { signOut, type SessionState } from '../../lib/api/session';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import type { DisplayClock } from '../../game/display-clock';
 import { saveClockMode, useClockMode } from '../../lib/clock-setting';
+import { PATCH, isBehind } from '../../lib/patch';
 import type { Viewer } from '../character/useGameState';
 import { MessagesButton } from '../messages/MessagesButton';
 import type { MessagingActions } from '../messages/messages';
 import { ClockSwitch } from './ClockSwitch';
+import { reloadPage } from './PatchNotice';
 import type { MenuId } from './menus';
 import styles from './shell.module.css';
 
 const SLOT_MS = RULES_V1.clock.slotMs;
 const TICK_MS = 1000;
 
-/** Whole seconds to the next slot boundary of the display clock, ticking while the tab is visible. */
-function useSlotCountdown(clock: DisplayClock) {
+/**
+ * Whole seconds to the next slot boundary of the display clock, ticking while the tab is visible and `on` (the chip shows an owner).
+ * The chip runs one for both of its countdowns, the one on the name and the one in the bar behind it, so the two never differ.
+ */
+function useSlotCountdown(clock: DisplayClock, on: boolean) {
   const read = () => Math.ceil((SLOT_MS - (((clock.now() % SLOT_MS) + SLOT_MS) % SLOT_MS)) / 1000);
   const [seconds, setSeconds] = useState(read);
   useEffect(() => {
+    if (!on) return;
     const update = () => setSeconds(read());
     update();
     const off = clock.subscribe(update);
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') update(); }, TICK_MS);
     return () => { off(); window.clearInterval(timer); };
-  }, [clock]);
+  }, [clock, on]);
   return seconds;
 }
 
-function Countdown({ clock, testId = 'chip-countdown' }: { clock: DisplayClock; testId?: string }) {
-  const seconds = useSlotCountdown(clock);
+function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; testId?: string }) {
   const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   return <span title="Next slot starts in">
     <span aria-hidden="true">⏱ </span><span data-testid={testId} aria-hidden="true">{text}</span>
@@ -46,7 +53,7 @@ function Countdown({ clock, testId = 'chip-countdown' }: { clock: DisplayClock; 
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, onChangeLook, onOpenMenu, onCreate }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, latestPatch = null, onChangeLook, onOpenMenu, onCreate }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -55,6 +62,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   clock: DisplayClock;
   /** The messages button's lists and marks (the shell's); a player without it, or a visitor, has no messages button. */
   messaging?: MessagingActions;
+  /** The server's newest patch (the sync's): ahead of this build, the menu offers Reload. */
+  latestPatch?: string | null;
   /** Opens the change-look dialog from the look note's Change look button (the messages panel closes first; the shell owns the dialog). */
   onChangeLook(): void;
   onOpenMenu(id: MenuId): void;
@@ -63,6 +72,9 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
 }) {
   // One popover at a time: the account menu or the messages panel.
   const [popover, setPopover] = useState<'account' | 'messages' | null>(null);
+  // The messages panel opened from the account menu's "Patch history ›" opens on the history, and gives the focus back to the account
+  // button when it closes; opened from its own button, it opens on the lists and gives it back there.
+  const [history, setHistory] = useState<{ patch: string | null } | undefined>(undefined);
   const open = popover === 'account';
   const [signOutError, setSignOutError] = useState(false);
   const google = useGoogleSignIn();
@@ -75,24 +87,26 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   const clockMode = useClockMode();
   const signedIn = !fixture && session.status === 'signed-in';
   const account = viewer === 'player' || signedIn;
+  // One ticker for the name's countdown and the bar's (the owner's only).
+  const seconds = useSlotCountdown(clock, account && owner !== null);
 
   // Escape (before the shell's own handler, which then leaves an open panel alone) and a press elsewhere close it. While
   // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1). Escape and
   // the panel's own Close give the focus back to the button that opened it; a press elsewhere takes it where it went.
-  const closeMessages = () => { setPopover(null); messagesButton.current?.focus(); };
+  const closeMessages = () => { setPopover(null); (history ? toggle : messagesButton).current?.focus(); };
   useEffect(() => {
     if (popover === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || document.querySelector('dialog:modal')) return;
       event.preventDefault();
       setPopover(null);
-      (popover === 'messages' ? messagesButton : toggle).current?.focus();
+      (popover === 'messages' && !history ? messagesButton : toggle).current?.focus();
     };
     const onPress = (event: PointerEvent) => { if (!chip.current?.contains(event.target as Node)) setPopover(null); };
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPress, true);
     return () => { document.removeEventListener('keydown', onKey, true); document.removeEventListener('pointerdown', onPress, true); };
-  }, [popover]);
+  }, [popover, history]);
   // The messages button belongs to a player with a gladiator whose owner read carries an inbox.
   const inbox = owner?.inbox;
   const showMessages = !!(messaging && inbox);
@@ -118,8 +132,10 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
       <div className={styles.chipRow}>
         {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { setPopover(null); onCreate(); }}>Create your gladiator</button>}
         {messaging && inbox && <MessagesButton inbox={inbox} {...messaging} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
-          onToggle={() => setPopover(value => (value === 'messages' ? null : 'messages'))} onClose={closeMessages} buttonRef={messagesButton} />}
-        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId} onClick={() => setPopover(value => (value === 'account' ? null : 'account'))}>
+          onToggle={() => { setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); }} onClose={closeMessages} buttonRef={messagesButton}
+          history={history} latestPatch={latestPatch} />}
+        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId}
+          onClick={() => { setHistory(undefined); setPopover(value => (value === 'account' ? null : 'account')); }}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>
             <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
@@ -127,7 +143,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <span className={styles.wide} data-testid="chip-money" title="Gold"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
             <span className={styles.wide} data-testid="chip-renown" title="Renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
             <span className={styles.chipSep} aria-hidden="true">|</span>
-            <Countdown clock={clock} />
+            <Countdown seconds={seconds} />
           </> : <span>Signed in</span>}
         </button>
       </div>
@@ -139,7 +155,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
               <span data-testid="bar-stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
               <span data-testid="bar-money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
               <span data-testid="bar-renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
-              <span data-testid="bar-countdown"><Countdown clock={clock} testId="bar-countdown-time" /></span>
+              <span data-testid="bar-countdown"><Countdown seconds={seconds} testId="bar-countdown-time" /></span>
             </div>
             <div className={styles.staminaLine}>
               <span id={staminaLineId}>{`Stamina ${owner.stamina.current} of ${owner.stamina.maximum} · a Rest refills it`}</span>
@@ -147,6 +163,17 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             </div>
           </>}
           <ClockSwitch mode={clockMode} onChange={saveClockMode} />
+          <div className={styles.patchRow} data-patch-row="">
+            <span>Patch <b>{PATCH}</b></span>
+            {/* An account without a gladiator has no messages panel, so no history to open. */}
+            {showMessages && <button type="button" className={styles.patchLink} onClick={() => { setHistory({ patch: null }); setPopover('messages'); }}>
+              Patch history<span aria-hidden="true"> ›</span>
+            </button>}
+          </div>
+          {isBehind(latestPatch) && <div className={styles.behindRow} data-patch-behind="">
+            <span>Patch {latestPatch} is out</span>
+            <button type="button" className={styles.reload} onClick={reloadPage}>Reload</button>
+          </div>}
           {signedIn ? <button type="button" onClick={() => {
             setSignOutError(false);
             void signOut().then(() => setPopover(null), () => setSignOutError(true));

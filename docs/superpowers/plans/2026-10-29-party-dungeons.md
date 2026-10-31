@@ -1,4 +1,4 @@
-# Patch B: Party Dungeons (MVP) Implementation Plan
+# Patch 1.8 (Patch B): Party Dungeons (MVP) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@ each member personally for every won fight it entered.
 
 **Architecture:** Pure, seeded TypeScript decides everything (an N-versus-M party engine beside the untouched two-fighter
 engine, a run planner, a grouper), run by the existing worker through the existing job kinds with input discriminators.
-One migration (M27, from `supabase/sql/20-dungeons.sql`) adds the dungeon choice, phase-7 grouping, one simulation and one
+One migration (M29, from `supabase/sql/23-dungeons.sql`) adds the dungeon choice, phase-7 grouping, one simulation and one
 shared reveal chain per run, a public `dungeon_fights` log table and per-member settlement through the expedition
 settlement path. The client adds dungeon choices to the schedule, a run view built on Patch A's whole-trip replay, a party
 close-up replay, and dungeon results, notifications and camp locations.
@@ -43,7 +43,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - **Hired fighters** earn nothing and never become a gladiator row, world actor, result, standing or notification; their
   share is never handed to the humans.
 - **Words:** every player word says gold; plain text only; times use Patch A's 12/24-hour setting.
-- **Database:** committed migrations are never edited; new M27 generated from the reapplicable `20-dungeons.sql`,
+- **Database:** committed migrations are never edited; new M29 generated from the reapplicable `23-dungeons.sql`,
   completed and replayed per `AGENTS.md` (ACLs, RLS and policies, the invoker view, every CHECK and trigger after the
   functions it calls, data and initialisation statements), the replayed fingerprint byte-equal to the source-applied one,
   the access audit after the migration; multi-statement source through the psql fallback after the container label check;
@@ -57,7 +57,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - **Gate of record:** `node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs` 12/12 with the local
   Edge serve running.
 - **Release:** production writes need Avi's go in chat; outside Wednesday and Saturday 17:20–20:00 UTC with no open
-  boundary; order M27 → `game-command` + `game-worker` → client → patch note.
+  boundary; order M29 → `game-command` + `game-worker` → client → patch note.
 
 ## Review Focus
 
@@ -288,7 +288,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - Modify: `supabase/functions/_shared/backend/commands.ts` (`choiceShape` accepts `{ kind: 'dungeon', dungeonId }` with a
   catalog id; `choiceAllowedInPhase` already refuses other parts), `backend/jobs.ts` (`ACTIVITY_KINDS` adds `'dungeon'`, so
   preparations carry 6 costs), `tests/fixtures/db.ts` (`resetIdentity` truncates the new tables)
-- Create: `supabase/sql/20-dungeons.sql` with a header (purpose, lock order, the accepted exceptions of spec §7) and:
+- Create: `supabase/sql/23-dungeons.sql` with a header (purpose, lock order, the accepted exceptions of spec §7) and:
   - **Section 1:** `activities_resolved_kind_check` re-added with `'dungeon'`; `private.planning_command` restated from
     `18-messages.sql` with, in both `edit-schedule` and `edit-day-schedule`, a dungeon outside the afternoon `invalid` and
     `{ kind, dungeonId }` (exactly 2 keys) checked by `case dungeonId when 'wolf-den' then 3 when 'raider-stronghold' then 7
@@ -332,7 +332,7 @@ close-up replay, and dungeon results, notifications and camp locations.
   dungeon entrant` (a dungeon activity inserted after its grouping job completed); `denies clients the runs, members, seeds
   and grouping jobs`.
 - [ ] **Step 4: Run** `npx vitest run tests/backend` and `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
-- [ ] **Step 5: Implement** the Edge and worker changes and sections 1–2; apply `20-dungeons.sql` locally with the psql
+- [ ] **Step 5: Implement** the Edge and worker changes and sections 1–2; apply `23-dungeons.sql` locally with the psql
   fallback (container label check first).
 - [ ] **Step 6: Run** step 4's commands plus `npm run test:db -- tests/db/build-schedule.test.ts tests/db/launch-feedback-backfill.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts`;
   expect PASS (Arena and tournaments unchanged).
@@ -341,7 +341,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 ### Task 5: Run jobs and shared reveals (SQL section 3)
 
 **Files:**
-- Modify: `supabase/sql/20-dungeons.sql` section 3:
+- Modify: `supabase/sql/23-dungeons.sql` section 3:
   - `private.dungeon_results` (`run_id text primary key references private.dungeon_runs`, `simulation_job_id uuid
     references private.jobs(id)`, `plan jsonb` object, `created_at_ms`), backend only and frozen;
     `public.dungeon_fights` (`run_id text references private.dungeon_runs`, `ordinal smallint` 1–4, `reveal_at_ms bigint`,
@@ -389,10 +389,10 @@ close-up replay, and dungeon results, notifications and camp locations.
   expect PASS.
 - [ ] **Step 5: Commit** `feat: run dungeon parties and reveal their fights on time`.
 
-### Task 6: Member settlement, projections, retention and access (SQL section 4), then M27 and capacity
+### Task 6: Member settlement, projections, retention and access (SQL section 4), then M29 and capacity
 
 **Files:**
-- Modify: `supabase/sql/20-dungeons.sql` section 4: `public.expedition_settlement_input` restated from `05-expeditions.sql`
+- Modify: `supabase/sql/23-dungeons.sql` section 4: `public.expedition_settlement_input` restated from `05-expeditions.sql`
   (a dungeon member's `rewards` are its outcome's from `dungeon_results.plan->'outcomes'`, `rulesVersion` the plan's, the
   same lease fence); new `private.dungeon_rewards(activity uuid, prepared jsonb) returns jsonb` (`expedition_rewards`'
   body over the member's outcome, `result` and `success` from it, the 7-day `replayExpiry`); `private.settle_activity_core`
@@ -408,15 +408,15 @@ close-up replay, and dungeon results, notifications and camp locations.
   and functions' privilege lines), `tests/rule-retention.test.ts` (table list), `tests/performance/capacity-model.ts`
   (retention classes and per-run bytes from Task 2), `tests/browser/live-routes.ts` (`dungeon_fights` in `tables()`),
   `tests/db/patches.test.ts` ("M26 is `<generated>_patches.sql`, the only `_patches.sql`, the 26th migration"),
-  every migration-count pin (`grep -rn "toHaveLength(26)\|M01–M26" tests`, e.g. `tests/db/restore-hosted.test.ts` → 27),
-  `tests/db/capacity.test.ts`, `docs/operations/migrations.md` (the M27 record and its release order)
+  every migration-count pin (`grep -rn "toHaveLength(28)\|M01–M28" tests`, e.g. `tests/db/restore-hosted.test.ts` → 29),
+  `tests/db/capacity.test.ts`, `docs/operations/migrations.md` (the M29 record and its release order)
 - Test: `tests/db/dungeons.test.ts` (`describe('dungeon settlement')`), `tests/db/retention.test.ts`, the access matrix,
   `tests/db/capacity.test.ts`
 
 **Interfaces:**
 - Consumes: Task 5's plans and gated settlement jobs; the worker's unchanged `settle` path (`expedition_settlement_input`,
   `prepareGrant`, `applyXp`, `settle_expedition`).
-- Produces: settled dungeon summaries (`resolvedKind: 'dungeon'`), `dungeon:<id>` world locations, M27.
+- Produces: settled dungeon summaries (`resolvedKind: 'dungeon'`), `dungeon:<id>` world locations, M29.
 
 - [ ] **Step 1: Failing tests:** `settles each member once at minute 80 from its own outcome; a retry replays the
   receipt`; `pays the won rooms when the major is lost` (Avi's decision 7: Wolf Den → `result: 'defeat'`, `success: false`,
@@ -433,10 +433,10 @@ close-up replay, and dungeon results, notifications and camp locations.
 - [ ] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts tests/db/retention.test.ts tests/db/access-matrix.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** section 4; reapply the source; update the fixtures, lists and pins above.
 - [ ] **Step 4: Run** step 2's command and `npx vitest run tests/rule-retention.test.ts tests/performance`; expect PASS.
-- [ ] **Step 5: Write the M27 test** in `tests/db/dungeons.test.ts`: `ships M27 completed from 20-dungeons.sql: functions
+- [ ] **Step 5: Write the M29 test** in `tests/db/dungeons.test.ts`: `ships M29 completed from 23-dungeons.sql: functions
   before the CHECKs and triggers that call them, revokes before grants, the source bodies, ACLs, RLS and policies, the
   invoker view and the reload last` (the shape of `tests/db/messages.test.ts`'s M25 test). Run it; expect FAIL (no file).
-- [ ] **Step 6: Generate and complete M27** per `docs/operations/migrations.md` (as M25): compare the draft with the source
+- [ ] **Step 6: Generate and complete M29** per `docs/operations/migrations.md` (as M25): compare the draft with the source
   for grants and revokes, RLS and policies, the invoker view, function / trigger / CHECK order, initialisation statements,
   and re-emitted unchanged functions byte-equal to their previous migration; complete every omission (a privilege-only
   omission through `supabase migration new`, the Task 23.1 rule).
@@ -449,7 +449,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - [ ] **Step 9: Capacity:** add to `tests/db/capacity.test.ts` `publishes an afternoon with 25 of 50 characters in dungeons
   within 120 s, by the tick after the cutoff` and the 90-day size check with dungeon rows; run with `CAPACITY_GATE=1`;
   expect PASS. If either fails, stop and report the numbers to the controller (no scope change).
-- [ ] **Step 10: Commit** `feat: settle dungeon members and ship M27`, with the M27 record in `migrations.md`.
+- [ ] **Step 10: Commit** `feat: settle dungeon members and ship M29`, with the M29 record in `migrations.md`.
 
 ### Task 7: Client: mockups for Avi, then reads, schedule, results, notifications and camp
 
@@ -565,7 +565,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 
 ### Task 9: Gate, review, release and the patch note
 
-- [ ] **Step 1: Deployed probes:** add to `tests/browser/deployed-checks.ts` the anonymous M27 probes (`dungeon_fights`
+- [ ] **Step 1: Deployed probes:** add to `tests/browser/deployed-checks.ts` the anonymous M29 probes (`dungeon_fights`
   returns only revealed rows; the new private tables and functions are refused).
 - [ ] **Step 2: Gate:** start the local Edge serve and run the gate of record; expect 12/12 (DB-test rule, no build during
   the browser run).
@@ -574,7 +574,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - [ ] **Step 4: Hosted pre-checks (read-only, `db query --linked --agent no`):** Patch A is live on `release`; no open
   boundary; the time is outside Wednesday and Saturday 17:20–20:00 UTC; 0 failed jobs in the last hour.
 - [ ] **Step 5: Avi's go in chat**, showing him the spec §12 patch note. Then `npx supabase db push --dry-run` (exactly
-  M27), `db push`, the access audit and fingerprint against the local replay; `functions deploy game-command` and
+  M29), `db push`, the access audit and fingerprint against the local replay; `functions deploy game-command` and
   `functions deploy game-worker` (`--project-ref djkblzbnritgbmctsvob`, Docker bundling); the `release` fast-forward; the
   deployed checks about 2 minutes after Pages is live.
 - [ ] **Step 6: Post the patch note** with `private.post_message('patch-notes', …)` exactly as spec §12, only after the
@@ -582,4 +582,4 @@ close-up replay, and dungeon results, notifications and camp locations.
 - [ ] **Step 7: Watch the first afternoon** after the release (read-only): publication time, the grouping jobs completed,
   0 failed or operator jobs, the runs settled at minute 80.
 - [ ] **Step 8: Record** the evidence in `docs/operations/release-evidence.md` and `deployment.md`, update
-  `docs/implementation/HANDOFF.md`; commit `deploy: ship party dungeons (M27)`.
+  `docs/implementation/HANDOFF.md`; commit `deploy: ship party dungeons (M29)`.

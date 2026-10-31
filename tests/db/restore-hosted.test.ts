@@ -40,7 +40,8 @@ describe('the hosted restore SQL', () => {
       return JSON.parse(results[results.length - 1][0].jsonb_build_object);
     });
     expect(Object.keys(facts).sort()).toEqual(['accounts', 'characters', 'epochSet', 'identities', 'migrations', 'schedulerEnabled']);
-    expect(facts.migrations).toHaveLength(25);
+    // M01-M26 (M26: patch 1.4, the patch list and the profile card).
+    expect(facts.migrations).toHaveLength(26);
     for (const key of ['accounts', 'identities', 'characters']) expect(Number.isSafeInteger(facts[key])).toBe(true);
   });
 

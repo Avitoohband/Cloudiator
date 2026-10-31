@@ -62,7 +62,10 @@ test.describe('profile cards and merchants in the fixture preview', () => {
       expect(card.x + card.width).toBeLessThanOrEqual(viewport.width);
     } else {
       expect(Math.abs(card.x + card.width / 2 - at.x)).toBeLessThan(card.width);
-      expect(card.y + card.height <= at.y - 40 || card.y >= at.y + 30, 'the card leaves the gladiator visible').toBe(true);
+      // Above or below the gladiator, or (Task 11c: the taller card in a short window) beside them.
+      const clearAboveOrBelow = card.y + card.height <= at.y - 40 || card.y >= at.y + 30;
+      const clearBeside = card.x >= at.x + 30 || card.x + card.width <= at.x - 30;
+      expect(clearAboveOrBelow || clearBeside, 'the card leaves the gladiator visible').toBe(true);
       expect(card.y).toBeGreaterThanOrEqual(60);
     }
     await nextFrames(page);
@@ -95,7 +98,9 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await cassiaRow.getByRole('button', { name: 'Profile: Cassia', exact: true }).click();
     const cassia = profileCard(page, 'Cassia');
     await expect(cassia).toBeVisible();
-    await expect(cassia).toContainText(new RegExp(`Rating · record\\s*\\d+ · ${record}`));
+    // Task 11c: the row's season record has its own line, "This season"; the rating its own.
+    await expect(cassia).toContainText(/Rating\s*\d+/);
+    await expect(cassia).toContainText(new RegExp(`This season\\s*${record}`));
     await expect(cassia).not.toContainText(PRIVATE);
     await cassia.getByRole('button', { name: 'Close profile' }).click();
     await expect(cassia).toBeHidden();

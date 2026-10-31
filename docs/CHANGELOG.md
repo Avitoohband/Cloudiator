@@ -9,6 +9,7 @@ The release moves the section to released (its date in the heading, the "Built"/
 records it on the server. A fix-only release from `release` takes the next third number (1.3.1). After a video is made, add
 its row to "Videos". Bullets are plain text, one line each, at most 240 characters, no Markdown inside them: players read
 them as they are.
+That task also adds its row to [FEATURES.md](FEATURES.md); after a video is made, fill in its "Shown in video" column there.
 
 ## Videos
 
@@ -21,14 +22,14 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.3.** New since then: 1.3.1 and 1.4 (in progress).
+**Last video's patch: 1.3.** New since then: 1.3.1 and 1.4, both live.
 
-## 1.4 — Watch your expedition, class bonuses and a clock setting (in progress, not yet released)
+## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)
 
-Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi approves the wording at release. After 1.4:
-1.5 Arena replays, then 1.6 Party dungeons (both planned, not built).
-
-### Built
+Released 2026-10-31: M26, client `26dd0d7`, note 5 and the linked 14-feature record are live.
+Patch A (branch `claude/task-24`). Avi approved the exact note and patch-history wording. After 1.4:
+1.5 Arena replays, 1.6 the economy rebalance, 1.7 wearable titles, then 1.8 party dungeons and the bot team (all planned,
+not built); new gear comes in a later patch.
 
 - New arrivals: everyone in the camp sees a banner when a gladiator arrives. Find takes you to the gate, and the Gladiators list shows newcomers first with a NEW tag.
 - My gladiator shows your class's bonuses and its suggested split of points. When you plan a build, Suggested spends the points left your class's way.
@@ -38,14 +39,12 @@ Patch A (branch `claude/task-24`). The title is the draft patch note's; Avi appr
 - The Gladiators list shows how many players there are and where they are now.
 - On an expedition, a gladiator searches slowly around each spot instead of squatting.
 - The live view of an expedition shows LIVE with the minute and names each mark on its timeline: leaving camp, each fight and the way back. Watch from the start replays what you missed, never past now.
-- Replay a whole trip in about a minute and a quarter: leaving camp, the trail, the fights at their real speed, coming home and resting.
+- Replay a whole trip in about a minute and a quarter: out through the camp's gate, the trail, the fights at their real speed, home through the gate, and to bed in camp when a Rest follows.
 - A replay names and draws your gladiator from its first moment, not only from its first fight.
-
-### Planned
-
-- Watch your expedition: while your gladiator is away, a button at the bottom of the camp shows where it is and opens the live view.
+- While your gladiator is away, a button on the camp shows where it is and opens the live view. Once it is back, the same button offers the whole trip with your own result.
 - Patch numbers: the menu under your name shows the patch you are playing, each patch note shows its number, and Patch history lists what every patch added.
 - When a new patch is out, an open game says so, and Reload brings it in.
+- Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp.
 
 ## 1.3.1 — Phone attribute points (2026-10-29)
 

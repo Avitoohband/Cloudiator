@@ -8,7 +8,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { screenToWorld } from '../../src/game/iso';
 import { contrastIssues, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { routeLiveReads, seedSession, testUser } from './live-routes';
-import { cornerChip, expectOwnerShown, openMenu, touchLayout } from './shell-helpers';
+import { chipToggle, cornerChip, expectOwnerShown, openMenu, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const ARRIVALS_KEY = 'cloudiator.arrivals-seen.v1';
@@ -391,6 +391,29 @@ test.describe('Patch A: a new player is announced', () => {
       expect(await noHorizontalScroll(page)).toBe(true);
     });
 
+    test('stays in the top row while the chip’s menu or messages panel is open: they never meet there', async ({ page, context }) => {
+      await seedSession(context);
+      const world = worldOf(ursa);
+      await routeLiveReads(context, { world, owner: structuredClone(ownerFixture) });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/game/');
+      await expectOwnerShown(page, 'Aster');
+      await waitForCamp(page, world.actors.length);
+      await expect(banner(page)).toBeVisible();
+      await expect(slot(page)).toHaveAttribute('data-stacked', 'false');
+      await chipToggle(page).click();
+      const menu = cornerChip(page).getByRole('group', { name: 'Account', exact: true });
+      await expect(menu).toBeVisible();
+      await expect(banner(page).getByRole('button', { name: 'Find Ursa', exact: true })).toBeVisible();
+      expect(clear(await boxOf(banner(page)), await boxOf(menu))).toBe(true);
+      await page.keyboard.press('Escape');
+      await cornerChip(page).locator('[data-messages-button]').click();
+      const panel = page.getByRole('region', { name: 'Messages', exact: true });
+      await expect(panel).toBeVisible();
+      await expect(banner(page).getByRole('button', { name: 'Find Ursa', exact: true })).toBeVisible();
+      expect(clear(await boxOf(banner(page)), await boxOf(panel))).toBe(true);
+    });
+
     test('is not painted over the fixture pill, and does not cover it', async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 720 });
       await page.goto('/game/?mode=fixture');
@@ -585,6 +608,43 @@ test.describe('Patch A: a new player is announced', () => {
       expect(clear(b, n)).toBe(true);
       expect(n.x + n.width).toBeLessThanOrEqual(360);
       expect(await noHorizontalScroll(page)).toBe(true);
+    });
+
+    // The 1.4 gate shot (final review): at 360 × 740 the open phone bar lay over the stacked banner, and its glass showed the banner's
+    // words and Find through it. Like the reload notice, the banner steps aside under the chip's menu and its messages panel.
+    test('steps aside, with the reload notice, under the open phone bar and the messages panel, and comes back when they close', async ({ page, context }) => {
+      const world = worldOf(ursa);
+      await seedSession(context);
+      await routeLiveReads(context, { world, owner: structuredClone(ownerFixture), latestPatch: '1.5' });
+      await page.goto('/game/');
+      await expectOwnerShown(page, 'Aster');
+      await waitForCamp(page, world.actors.length);
+      await expect(banner(page)).toBeVisible();
+      const reload = page.locator('[data-patch-notice]');
+      await expect(reload.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
+      const drawn = async (locator: Locator) => { const box = await locator.boundingBox(); return box !== null && box.width * box.height > 1; };
+      const covered = async (what: string) => {
+        expect(await drawn(banner(page)), `the banner under ${what}`).toBe(false);
+        for (const button of await banner(page).locator('button').all()) await expect(button, `a banner button under ${what}`).toBeHidden();
+        expect(await drawn(reload), `the reload notice under ${what}`).toBe(false);
+        // Still in its polite status, so an arrival that comes meanwhile is announced.
+        await expect(slot(page)).toContainText('Ursa');
+      };
+      const back = async () => {
+        await expect(banner(page).getByRole('button', { name: 'Find Ursa', exact: true })).toBeVisible();
+        expect((await boxOf(banner(page))).width).toBeGreaterThan(300);
+        expect(await drawn(reload)).toBe(true);
+      };
+      await chipToggle(page).click();
+      await expect(cornerChip(page).getByRole('group', { name: 'Account', exact: true })).toBeVisible();
+      await covered('the phone bar');
+      await page.keyboard.press('Escape');
+      await back();
+      await cornerChip(page).locator('[data-messages-button]').click();
+      await expect(page.getByRole('region', { name: 'Messages', exact: true })).toBeVisible();
+      await covered('the messages panel');
+      await page.keyboard.press('Escape');
+      await back();
     });
   });
 

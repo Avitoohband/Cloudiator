@@ -1,5 +1,9 @@
 # Deployment checklist
 
+**Current status — 2026-10-31: Patch 1.4 is live.** Client `26dd0d7116a1429f4a6b134559f44766b25f9478`, Pages deployment `b49e262c-9dfe-453c-96dd-5989b39c379b`, Supabase M01–M26; site https://cloudiator-arena.pages.dev. Avi explicitly approved all four named writes (M26, client, exact note, patch record); all completed. Note **5** published **21:03:56.750 UTC**; patch **1.4** recorded **21:04:00.468 UTC**, with 14 exact CHANGELOG features and `latest_patch=1.4`. Nine automatic deployed checks passed, including 22 anonymous denial probes. At **21:06:51 UTC**, a clean anonymous post-record browser probe passed: client/history code 1.4, revision 1.4, zero Reload offer buttons. No Edge change/deployment or package download.
+
+Avi's signed-in human journey and attested checks remain pending. The combined **1.3.1 + 1.4 clip and feature-post reminder** was sent; no new video was requested. Future production releases require a fresh explicit go. Evidence: `docs/operations/release-evidence.md`, "Patch 1.4 released — 2026-10-31".
+
 Task 24.2 (plan [`2026-10-20-task-24-launch.md`](../superpowers/plans/2026-10-20-task-24-launch.md), Decisions 2–8 and 13;
 Avi accepted every recommended answer on 2026-10-20). This is the operator checklist for putting Cloudiator on a free
 Cloudflare Pages origin backed by a free Supabase project and a Google OAuth client: first the rehearsal project
@@ -8,7 +12,7 @@ Cloudflare Pages origin backed by a free Supabase project and a Google OAuth cli
 - **[Claude after Avi's go]**: Claude, only after Avi has said "go" for that command on that project.
 - **[Claude]**: Claude, credential-free (local work, reading files Avi saved, probes against public URLs).
 
-Nothing here has run against a hosted project yet. Dashboard labels are written as of October 2026 and can move; when a
+The original checklist below is retained as procedure/history; current release status is above. Dashboard labels are written as of October 2026 and can move; when a
 label differs, follow the setting's meaning and tell Claude, who corrects this file. Long procedures live in the
 [runbook](runbook.md) and are linked, not repeated. Environment names are in [environment.md](environment.md).
 

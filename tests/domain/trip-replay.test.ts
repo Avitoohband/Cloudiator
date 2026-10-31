@@ -238,6 +238,15 @@ describe('replay time and display time', () => {
     expect(woodland.stages[0].startedAtMs).toBe(plan.departureMs);
   });
 
+  it('tells a camp vignette the display time its chapter shows, for the light of its time of day', () => {
+    // Patch A Task 10 fix round 1: the camp scene lights a chapter by the frame's own display time.
+    const at = (id: TripChapterId) => plan.chapters.find(c => c.id === id)!;
+    expect(tripFrame(plan, 2_500).vignette).toMatchObject({ kind: 'leaving', displayMs: plan.departureMs });
+    expect(tripFrame(plan, at('back').startMs + 1_000).vignette).toMatchObject({ kind: 'back', displayMs: plan.endMs });
+    expect(tripFrame(plan, plan.totalMs).vignette).toMatchObject({ kind: 'resting', displayMs: plan.endMs });
+    for (const ms of [0, at('back').startMs, at('resting').startMs + 3_000]) expect(tripFrame(plan, ms).vignette!.displayMs).toBe(tripFrame(plan, ms).displayMs);
+  });
+
   it('reads the frame at a position: its chapter, its index and the vignette of the camp chapters', () => {
     const at = (id: TripChapterId) => plan.chapters.find(c => c.id === id)!;
     const frame = (ms: number) => tripFrame(plan, ms);
@@ -487,9 +496,9 @@ describe('lengths and guards', () => {
         }
         expect(tripFrame(plan, c.startMs).vignette!.elapsedMs, `${key} ${kind}`).toBe(0);
       }
-      expect(tripFrame(plan, plan.totalMs).vignette, key).toEqual({ kind: 'resting', elapsedMs: TRIP_PACE.restMs, durationMs: TRIP_PACE.restMs });
+      expect(tripFrame(plan, plan.totalMs).vignette, key).toEqual({ kind: 'resting', elapsedMs: TRIP_PACE.restMs, durationMs: TRIP_PACE.restMs, displayMs: plan.endMs });
       const gate = trip(key, false);
-      expect(tripFrame(gate, gate.totalMs).vignette, key).toEqual({ kind: 'back', elapsedMs: TRIP_PACE.campMs, durationMs: TRIP_PACE.campMs });
+      expect(tripFrame(gate, gate.totalMs).vignette, key).toEqual({ kind: 'back', elapsedMs: TRIP_PACE.campMs, durationMs: TRIP_PACE.campMs, displayMs: gate.endMs });
     }
   });
 

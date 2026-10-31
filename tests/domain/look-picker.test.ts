@@ -5,7 +5,7 @@ import gladiatorsAtlas from '../../public/assets/actors/gladiators.json';
 import rawManifest from '../../public/assets/manifest.json';
 import { CLOTH_TINTS, HAIR_TINTS, SKIN_TINTS, lookFor } from '@/game/actors';
 import {
-  PREVIEW_FRAME_COUNT, PREVIEW_FRAME_MS, PREVIEW_SCALE, choose, frameId, groupLabels, layerStyle, lookFromDraft, lookRandom, lookSummary, nextFrame,
+  PREVIEW_FRAME_COUNT, PREVIEW_FRAME_MS, PREVIEW_SCALE, actorLayers, choose, frameId, groupLabels, layerStyle, lookFromDraft, lookRandom, lookSummary, nextFrame,
   previewLayers, rerollLook, swatchColour, swatchName, swatchesOf,
 } from '@/features/character/look-picker';
 
@@ -255,5 +255,19 @@ describe('lookRandom (the generator behind a random look)', () => {
     expect(randomAppearance(lookRandom)).toEqual({ body: 'male', hair: 'long', skin: 1, hairColor: 1, cloth: 3 });
     vi.stubEnv('NEXT_PUBLIC_FIXTURE_ENABLED', 'false');
     expect(lookRandom()).not.toBe(0.3);
+  });
+});
+
+describe('actorLayers (Task 11c: the profile card portrait, gear included)', () => {
+  it('is the preview layers for a look without gear, and the camp layers with gear, the held layer left out', () => {
+    for (const look of every) expect(previewLayers(look)).toEqual(actorLayers(look, 'preview', []));
+    const id = 'a0000000-0000-4000-8000-000000000001', silhouettes = ['weapon-spear', 'head-helmet', 'armor-heavy'];
+    expect(actorLayers(null, id, silhouettes).map(l => l.id)).toEqual(lookFor(null, id, silhouettes).layers.filter(layer => layer !== 'held'));
+    expect(actorLayers(null, id, silhouettes).map(l => l.id)).toEqual(expect.arrayContaining(['armor-heavy', 'head-helmet', 'weapon-spear']));
+  });
+
+  it('crops a frame at any whole scale', () => {
+    const style = layerStyle({ id: 'body', tint: null }, { x: 10, y: 20 }, { w: 2048, h: 2752 }, '/a.png', 2);
+    expect(style).toMatchObject({ width: 128, height: 128, backgroundSize: '4096px 5504px', backgroundPosition: '-20px -40px' });
   });
 });

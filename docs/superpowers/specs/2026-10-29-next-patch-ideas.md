@@ -55,3 +55,93 @@ Being fixed as a hotfix from the release branch (`claude/points-hotfix`).
 Avi, 2026-10-29: the Arena-replay spec and plan (`docs/superpowers/specs/2026-10-29-arena-replays-design.md`,
 `docs/superpowers/plans/2026-10-29-arena-replays.md`) are approved ("Ok"). It ships as patch 1.5, after Patch A (1.4) and
 before Party dungeons (1.6).
+
+Economy and progression feedback from Avi, 2026-10-29 (collected; an economy design pass follows):
+
+13. **Gold harder to get**, so it matches the tournament prizes: "about gold, it should be harder to get, so it match the
+    trounements prises".
+14. **A skins shop for renown**: "about renown, start the skins shop".
+15. **More PvE**: "we need to develop the pve aspect more".
+16. **Higher leagues, higher prizes**: "higher leagues have higher prises".
+17. **Lower prizes and lower expedition gold**: "again the prises should be lower and the gold from expeditions".
+18. **Harder progression**: "the game should be harder to progress".
+
+Gear feedback from Avi, 2026-10-29 (collected; a gear design pass follows, aligned with the economy pass):
+
+19. **More gear**, "much more clothes, and weapons": "we need to add more gear".
+20. **Attribute requirements**: "certain gear demands certain attributes to wear".
+21. **New weapons**: "also new weapons".
+
+More from Avi, 2026-10-29:
+
+22. **A respec offered in a message**, with an explanation of which attributes suit which class, coming with a video: "respec
+    option for attributes in messages with explanation about which attrubutes good for which class. it will come with video."
+    (Like 1.3's free look change from a patch note. It fits the gear-requirement change, ideas 19-21.)
+23. **New classes ahead, maybe**: "maybe new classes ahead" (summoners are already noted as a future class).
+24. **A suggested spread per class in the attributes section**: "the attributes section should have suggestion for spread
+    attributes for each class". Built in 1.4 (Patch A Task 5): the class card's "of every 10 points" split on My gladiator, and
+    "Suggested for {Class}" with Undo in the Build panel.
+
+25. **Long endgame dungeons (Avi, 2026-10-29).** "a player could go the dungeon, it takes a whole day, even more than a day. he
+    going thorugh stages there. every few levels there is mini boss, and there is the dungeon final boss at the end which is
+    high level gladitor, or monster. big prises at the end, those dungeos are super hard and not for early game at all."
+    Different from 1.6's party dungeons (3 rooms and a boss in one afternoon): a multi-day delve of many stages, mini bosses
+    every few stages, a final boss, big prizes, endgame only. Goes into the PvE part of the economy pass, then its own design.
+
+26. **Titles a gladiator wears (Avi, 2026-10-30).** "I want to add titles that gladiator wear and it shows something. From
+    tournaments. Dungeons, number of expeditions, number of training and more. A unique title for the first batch of players
+    that they are the test group." Earned titles (tournament wins, dungeon clears, expedition and Training counts, and more);
+    a gladiator wears one, shown with its name; a unique founders' title for the first batch of players (the test group).
+    Today only the season "champion" title exists (prestige, Task 21). Avi added: "Titles for gear collection as well" and "For amount of gold".
+
+27. **More NPCs, more guards (Avi, 2026-10-30).** "Add more npcs. More guards".
+28. **A bigger camp map.** "i want to make the map bigger".
+29. **Future facilities where the trees are.** "also where there are trees in the camp, in the future it will be new
+    facilities": the wooded parts of the camp are reserved as plots for new buildings later.
+
+More from Avi, 2026-10-30 (collected for the plans, not yet designed):
+
+30. **Player support.** "Add players reach out support option": a way for players to contact support from the game.
+31. **A watch mode for the Arena and tournaments, for streams.** "a button when arena is live which shows different battle
+    and a text narration it, who's fighting, wins, blows and more": while the Arena is live, a button opens a spectator view
+    that moves between bouts, with a running text commentary (who fights, the blows, the winner). It builds on 1.5's replay
+    viewer.
+32. **Stream the game 24/7 on YouTube (to check).** "checking the option to live stream the game 24/7 somehow at YouTube":
+    a feasibility check, likely a headless browser on the watch mode (idea 31) pushed to a YouTube live stream on the Indigo
+    Labs channel; cost and hosting to be checked.
+33. **An NPC "the Champ".** "Add npc 'the champ' - which was the champ of the arena, level unknown": a legendary former Arena
+    champion in the camp, level shown as unknown (fits the 1.5.1 camp NPCs and the bigger camp's plots).
+
+34. **An in-game guide (a small wiki) and an explainer clip (Avi, 2026-10-31).** "all of those should be in the game
+    details somewhere, maybe a little wiki, when it comes out. also a clip should explain that as well. and what each stat does,
+    how agility, precision affect the game, and fights, why someone miss or dodge." Covers: stamina costs per activity and
+    overload; what each attribute does (Strength, Agility, Vitality, Endurance, Precision) in numbers; class bonuses; how a
+    fight resolves (hit, miss, dodge, critical, armour, attack speed); Rest and the Training cap. The numbers must be read from
+    the active rules (v1 now, v2 after 1.6), never typed by hand. A players' explainer clip follows its release.
+
+35. **Class quests that raise the class bonus (Avi, 2026-10-31, future).** "quest per class, that improve their class
+    bonuses, should be very hard to achieve. for example, Berserker has more % STR and Guardian have 10% endurance instead of 5."
+    One long, very hard quest chain per class; finishing it upgrades that class's bonus (Berserker Strength above +10 %,
+    Guardian Endurance +5 % → +10 %, Duelist Agility/Precision up). Endgame; fits with the Deep and titles (a title for each).
+
+More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 30-34):
+
+36. **Videos in the guide.** "In the wiki your links to YouTube videos and explanation and links to the patch notes videos on
+    YouTube": the in-game guide (idea 34) links the explainer videos and each patch's video on YouTube (Indigo Labs).
+37. **A better inventory with item pictures, and in the shops too.** "Better inventory setup with items appearance. Also in
+    shop": each item shown with its picture, in Inventory and in the shops.
+38. **A look-change option.** "appearance look change option": change look from the menu at any time (today only from the 1.3
+    patch note's one free change); maybe priced, or tied to the renown skins shop.
+39. **Support with triage.** Idea 30 plus "with jev to classify those issues": support requests are classified (bug, account,
+    balance, idea…) automatically; Avi's word "jev" to confirm.
+40. **A world tournament with a statue for the winner.** "World tournament for statue for winner": a big all-leagues
+    tournament; the winner gets a statue in the camp (a facility plot, idea 29).
+41. **Events.** "Make events": timed in-game events.
+42. **Potions for stamina and health.** "Potions for stamina and health": consumables (fits the 1.6 economy and the shops).
+43. **Houses, decorations and achievements.** "When camp full, the gladiator rest in house, add decorations and achievements":
+    when the camp's beds are full, a gladiator rests in a house; houses can be decorated; achievements.
+44. **Guilds and raids.** "Guilds in the future with raids. And special items to sell in market": guilds, raid content, and
+    special raid items that can be sold on the market.
+
+Already listed: the watch mode for streams (31), the 24/7 stream (32), the Champ (33), Endurance and load and what each stat
+does (34).

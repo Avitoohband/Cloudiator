@@ -150,7 +150,8 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
   /** Shows another season (a `SeasonView.seasonId` from the picker). */
   onSeason?(seasonId: string): void;
   /** Opens a row's profile card (Task 13.7: the keyboard path of a camp click); without it names are plain text. */
-  onProfile?(row: StandingRow): void;
+  /** Opens a row's profile card, with the season these standings show (a closed season's id, or null for the current one). */
+  onProfile?(row: StandingRow, season: string | null): void;
   /** The viewer's time zone for season times; undefined is the runtime's zone. */
   timeZone?: string;
 }) {
@@ -227,7 +228,7 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
                       <tr key={row.gladiatorId} aria-current={row.gladiatorId === model.ownerId ? 'true' : undefined} className={row.gladiatorId === model.ownerId ? styles.mine : undefined}>
                         <td>{row.rank}</td>
                         <th scope="row">{onProfile
-                          ? <button type="button" className={styles.name} aria-label={`Profile: ${row.name}`} onClick={() => onProfile(row)}>{row.name}</button>
+                          ? <button type="button" className={styles.name} aria-label={`Profile: ${row.name}`} onClick={() => onProfile(row, archived ? model.seasonId : null)}>{row.name}</button>
                           : row.name}</th>
                         <td>{row.rating}</td>
                         <td>{row.humanWins}–{row.humanLosses}</td>
@@ -265,7 +266,8 @@ export type StandingsPanelProps = {
   /** The shared world revision (`GameUiState.revision`); a change re-reads the shown standings. */
   revision: string | null;
   /** Opens a row's profile card. */
-  onProfile?(row: StandingRow): void;
+  /** Opens a row's profile card, with the season these standings show (a closed season's id, or null for the current one). */
+  onProfile?(row: StandingRow, season: string | null): void;
   /** The viewer's time zone for season times (tests); undefined is the runtime's zone. */
   timeZone?: string;
 };

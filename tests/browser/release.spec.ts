@@ -708,16 +708,26 @@ test.describe('release accessibility in the fixture preview', () => {
     `);
     // A profile card.
     const roster = await openMenu(page, 'Gladiators');
-    await roster.getByRole('button', { name: 'Profile: Varro', exact: true }).first().click();
-    const card = page.getByRole('dialog', { name: 'Profile: Varro' });
-    await expect(card.getByRole('heading', { name: 'Varro' })).toBeVisible();
+    // An Arena entrant with a public profile (the crowd's gladiators have none): the card in its sections (Task 11c).
+    await roster.getByRole('button', { name: 'Profile: Lucilla', exact: true }).first().click();
+    const card = page.getByRole('dialog', { name: 'Profile: Lucilla' });
+    await expect(card.getByRole('heading', { name: 'Lucilla' })).toBeVisible();
+    await expect(card.getByRole('region', { name: 'Record' })).toContainText('In camp since');
     await expect(card).toMatchAriaSnapshot(`
-      - 'dialog "Profile: Varro"':
+      - 'dialog "Profile: Lucilla"':
         - button "Close profile"
-        - heading "Varro" [level=2]
-        - term: Now
-        - term: Rating
-        - term: Equipped
+        - heading "Lucilla" [level=2]
+        - list:
+          - listitem: Vitality +5%
+          - listitem: Endurance +5%
+        - region "Attributes"
+        - region "Stats"
+        - region "Gear"
+        - region "Record":
+          - term: Now
+          - term: Rating
+          - term: Arena record
+          - term: In camp since
         - button "Follow"
     `);
     // A replay scene over the camp.
@@ -781,6 +791,8 @@ test.describe('release accessibility in the fixture preview', () => {
     await shot(page, testInfo, 'roster-filter-focus');
     await roster.getByRole('button', { name: /^Profile: / }).first().click();
     expect(await contrastIssues(await settled(page.getByRole('dialog', { name: /^Profile: / }))), 'a profile card').toEqual([]);
+    // The card closes first: on a phone the taller card (Task 11c) covers the open sheet's own close button, as a player sees it.
+    await page.getByRole('dialog', { name: /^Profile: / }).getByRole('button', { name: 'Close profile' }).click();
     const shops = await settled(await openMenu(page, 'Inventory and shops'));
     // Reached by Tab, so the button shows its focus ring (:focus-visible).
     await shops.getByRole('button', { name: 'Weaponsmith' }).focus();

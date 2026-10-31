@@ -414,6 +414,7 @@
   }
 
   .barText {
+    min-width: 44px;
     height: 44px;
   }
 }

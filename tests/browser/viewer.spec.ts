@@ -101,7 +101,9 @@ async function expectPhoneBar(page: Page, maxHeight = 100) {
   for (let i = 0; i < await buttons.count(); i += 1) {
     const button = buttons.nth(i);
     if (!await button.isVisible()) continue;
-    expect((await box(button)).height, `${await button.getAttribute('aria-label')} height`).toBeGreaterThanOrEqual(44);
+    const target = await box(button);
+    expect(target.height, `${await button.getAttribute('aria-label')} height`).toBeGreaterThanOrEqual(44);
+    expect.soft(target.width, `${page.viewportSize()!.width}px: ${await button.getAttribute('aria-label')} width`).toBeGreaterThanOrEqual(44);
   }
 }
 

@@ -523,12 +523,12 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     const woodland = EXPEDITION_FIXTURES.woodland.activityId;
     const battleReady = (id: string) => page.waitForFunction(b => window.__cloudiatorReplay?.state().battleId === b && window.__cloudiatorBattle?.debug()?.ready === true, id, { timeout: 45_000 });
     for (let round = 0; round < 6; round += 1) {
-      // A replay with its three encounters (each a scene of its own), then an expedition.
+      // A replay with its three encounter scenes as chapters, then an expedition.
       await page.evaluate(id => window.__cloudiatorCamp!.emit('view-replay', { activityId: id, stageId: null }), REPLAY_FIXTURES.expedition.activityId);
       const replay = scene(page, 'Replay');
       await battleReady(REPLAY_FIXTURES.expedition.battleIds[0]);
       for (const n of [1, 2]) {
-        await replay.getByRole('button', { name: 'Next bout', exact: true }).click();
+        await replay.getByRole('group', { name: 'Replay controls', exact: true }).getByRole('button', { name: 'Next bout', exact: true }).click();
         await battleReady(REPLAY_FIXTURES.expedition.battleIds[n]);
       }
       await backToCamp(page).click();

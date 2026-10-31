@@ -757,6 +757,8 @@
   display: contents;
 }
 
+.sceneCounter { display: none; }
+
 .sceneBody {
   max-width: 1008px;
   margin: 0 auto;
@@ -796,6 +798,13 @@
     padding: 10px;
     border-bottom: 1px solid var(--glass-line);
     background: #0d0c12;
+  }
+
+  .sceneCounter {
+    display: block;
+    margin-left: auto;
+    padding-right: 4px;
+    white-space: nowrap;
   }
 
   .sceneBack {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActivitySummary, BattleLog, RevealedStage } from '@contracts/events';
 import type { MyBout } from '@/lib/api/reads';
 import {
-  RESULT_HINT, againLabel, boutEyebrow, boutRow, chapterLabel, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, verdictText,
+  RESULT_HINT, againLabel, boutEyebrow, boutRow, chapterLabel, counterText, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, upNextText, verdictText,
 } from '@/features/bouts/bout-text';
 import { ARENA_BATTLE_LOGS } from '../fixtures/arena';
 
@@ -10,6 +10,17 @@ import { ARENA_BATTLE_LOGS } from '../fixtures/arena';
 const NOW = Date.UTC(2026, 9, 10, 4, 0);
 const AT = Date.UTC(2026, 9, 10, 3, 0);
 const DAY = 86_400_000;
+
+it('writes the queue counter and Up next in the approved wide and narrow copy', () => {
+  expect(counterText({ entries: Array.from({ length: 5 }, () => bout()), index: 0, more: false }))
+    .toEqual({ wide: 'Bout 1 of 5 in My bouts', narrow: '1 / 5' });
+  expect(counterText({ entries: Array.from({ length: 20 }, () => bout()), index: 19, more: true }))
+    .toEqual({ wide: 'Bout 20 of 20+ in My bouts', narrow: '20 / 20+' });
+  expect(upNextText({ a: 'Aster', b: 'Cassia', kind: 'arena', foughtAtMs: Date.UTC(2026, 9, 10, 0, 20) }, '12', 'UTC'))
+    .toEqual({ wide: 'Aster vs Cassia · Arena · Sat 10 Oct, 12:20\xA0AM', narrow: 'Aster vs Cassia · Sat 12:20\xA0AM' });
+  expect(upNextText({ a: 'Aster', b: 'Varro', chapter: 'Semifinal' }, '12', 'UTC'))
+    .toEqual({ wide: 'Aster vs Varro · Semifinal', narrow: 'Aster vs Varro · Semifinal' });
+});
 
 /** An Arena victory fought at 03:00 UTC on Sat 10 Oct, +10 renown, rating +14, its replay kept, against Varro. */
 function bout(over: Partial<MyBout> = {}): MyBout {

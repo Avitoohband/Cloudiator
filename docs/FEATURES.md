@@ -175,7 +175,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Planned 1.5 | Not built | — |
+| Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch → ⏭; Lost follows only losses | — |
 | Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |

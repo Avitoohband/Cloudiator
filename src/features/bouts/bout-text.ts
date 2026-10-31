@@ -11,6 +11,7 @@ import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import { replayKept } from '../../lib/replay-retention';
 import { dayText, timeOfDay } from '../../lib/time-format';
 import { tournamentRound } from '../../lib/tournament-id';
+import type { QueueEntries } from './bout-queue';
 
 export type BoutRowText = {
   kept: boolean;
@@ -175,4 +176,20 @@ export function nextLabel(opponent: string | null, compact: boolean): string {
 /** The end card's replay button: "↺ Watch again" (phone "↺ Again"). */
 export function againLabel(compact: boolean): string {
   return compact ? '↺ Again' : '↺ Watch again';
+}
+
+/** The position among loaded kept replays, with + while another page exists. */
+export function counterText(queue: QueueEntries): { wide: string; narrow: string } {
+  const total = `${queue.entries.length}${queue.more ? '+' : ''}`;
+  return { wide: `Bout ${queue.index + 1} of ${total} in My bouts`, narrow: `${queue.index + 1} / ${total}` };
+}
+
+/** Up next comes from the next chapter's revealed log or the next kept row, through the shared clock formatter. */
+export function upNextText(next: { a: string; b: string | null; kind: 'arena' | 'tournament'; foughtAtMs: number }
+  | { a: string; b: string; chapter: string }, clock: ClockMode, timeZone?: string): { wide: string; narrow: string } {
+  const names = next.b ? `${next.a} vs ${next.b}` : next.a;
+  if ('chapter' in next) return { wide: `${names}${SEP}${next.chapter}`, narrow: `${names}${SEP}${next.chapter}` };
+  const day = dayText(next.foughtAtMs, timeZone);
+  const time = timeOfDay(next.foughtAtMs, clock, timeZone);
+  return { wide: `${names}${SEP}${KIND_WORD[next.kind]}${SEP}${day}, ${time}`, narrow: `${names}${SEP}${day.split(' ')[0]} ${time}` };
 }

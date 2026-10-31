@@ -39,6 +39,26 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 const rowIds = (store: BoutsStore, filter: BoutFilter) => store.list(filter).rows.map(b => b.activityId);
 
 describe('the bouts store', () => {
+  it('reports whether this page landed, including an old page after a completed reload', async () => {
+    const reads = heldReads(), store = createBoutsStore(reads);
+    expect(await store.more('all')).toBe(false);
+    store.load('all'); reads.calls[0].resolve(page(['a'], '9')); await settle();
+    const old = store.more('all');
+    expect(await store.more('all')).toBe(false);
+    store.reload('all'); reads.calls[2].resolve(page(['new'], '8')); await settle();
+    reads.calls[1].resolve(page(['stale']));
+    expect(await old).toBe(false);
+    expect(rowIds(store, 'all')).toEqual(['new']);
+    const failed = store.more('all'); reads.calls[3].reject(new Error('offline'));
+    expect(await failed).toBe(false);
+    const success = store.more('all'); reads.calls[4].resolve(page(['older'], '7'));
+    expect(await success).toBe(true);
+    const duplicate = store.more('all'); reads.calls[5].resolve(page(['older'], '6'));
+    expect(await duplicate).toBe(true);
+    expect(store.list('all').nextCursor).toBeNull();
+    expect(await store.more('all')).toBe(false);
+  });
+
   it('reads a list on first use, pages with More, never lists a bout twice', async () => {
     const reads = heldReads(), store = createBoutsStore(reads);
     const heard = vi.fn();

@@ -13,8 +13,8 @@ export type BoutsStore = {
   list(filter: BoutFilter): BoutList;
   /** The first page, unless the list is loaded or loading (a failed one is read again: Try again). */
   load(filter: BoutFilter): void;
-  /** The next page appended, no bout twice; the rows are kept on failure, which `moreFailed` says. */
-  more(filter: BoutFilter): Promise<void>;
+  /** True only if this invocation applied a page; false on failure, invalidation or no-op. Rows stay on failure. */
+  more(filter: BoutFilter): Promise<boolean>;
   /**
    * The chip `shown` and All (the tab's count) read again, once each time Results opens; the other chips go back to unread (their rows
    * and any read still out dropped), so each is read when shown. Pages of older reads are dropped. A failed reload keeps the rows shown.
@@ -73,21 +73,23 @@ export function createBoutsStore(reads: Pick<GameGateway, 'bouts'>): BoutsStore 
     },
     async more(filter) {
       const current = list(filter), entry = wait(filter);
-      if (current.status !== 'ready' || !current.nextCursor || current.loadingMore) return;
+      if (current.status !== 'ready' || !current.nextCursor || current.loadingMore) return false;
       const id = ++reads_;
       entry.more = id;
       set(filter, { loadingMore: true, moreFailed: false });
       try {
         const page = await reads.bouts(filter, current.nextCursor);
-        if (entry.more !== id) return;
+        if (entry.more !== id) return false;
         const { rows } = list(filter);
         const seen = new Set(rows.map(bout => bout.activityId));
         const fresh = page.rows.filter(bout => !seen.has(bout.activityId) && seen.add(bout.activityId));
         // A page with nothing new (a read that ignores the cursor) ends the list rather than offering More for ever.
         set(filter, { rows: [...rows, ...fresh], nextCursor: fresh.length ? page.nextCursor : null, loadingMore: false });
+        return true;
       } catch {
-        if (entry.more !== id) return;
+        if (entry.more !== id) return false;
         set(filter, { loadingMore: false, moreFailed: true });
+        return false;
       } finally {
         if (entry.more === id) entry.more = null;
       }

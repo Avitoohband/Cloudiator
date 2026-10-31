@@ -333,7 +333,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   useFocusRescue(shellRef, focusCamp);
 
   // Scenes over the camp: a history entry each; the bridge opens and closes them.
-  const { open: openScene, close: closeScene } = useSceneHistory();
+  const { open: openScene, close: closeScene, replace: replaceScene } = useSceneHistory();
   useEffect(() => bridge.on('view-replay', ({ activityId, stageId, from }) => openScene({ kind: 'replay', activityId, ...(stageId ? { stageId } : {}), ...(from ? { from } : {}) })),
     [bridge, openScene]);
   useEffect(() => bridge.on('view-expedition', ({ activityId, from }) => openScene({ kind: 'expedition', activityId, ...(from ? { from } : {}) })), [bridge, openScene]);
@@ -528,7 +528,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
           onStatus={game.setSceneStatus} paused={scene !== null} />
       </main>
-      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
+      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} onReplace={replaceScene}
+        onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
       )}

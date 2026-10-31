@@ -1,10 +1,13 @@
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page, type TestInfo } from './fixtures';
 import { arenaActivityId } from '../fixtures/arena-ids';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
-import type { BattleLog } from '../../supabase/functions/_shared/contracts/events';
+import type { BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import { ownerFixture } from '../fixtures/domain';
+import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { noHorizontalScroll } from './a11y-helpers';
-import { menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 
 // Arena replays Task 5 (spec 2, the approved mockup; plan Review Focus 1, 4 and 5): one replay viewer with Patch A's bar (▶/⏸, a
 // track, the time, a speed this device remembers and ⚑ Result), the result card on the arena at the end with ↺ Watch again and the
@@ -35,6 +38,20 @@ const hook = async (page: Page) => (await page.evaluate(() => window.__cloudiato
 const nextFrames = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const settled = async (page: Page) => { await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished))); await nextFrames(page); };
 const box = async (locator: Locator) => (await locator.boundingBox())!;
+
+/** Settled owner bouts on distinct slots, using the authoritative fixture log, for routed live pagination. */
+function pagedBout(now: number, slotsAgo: number): RevealedTimeline {
+  const activityId = randomUUID();
+  const settledAtMs = (Math.floor(now / SLOT_MS) - slotsAgo + 1) * SLOT_MS;
+  const foughtAtMs = settledAtMs - 20 * 60_000;
+  const replayExpiry = { state: 'available' as const, expiresAtMs: settledAtMs + 7 * 86_400_000 };
+  return { activityId, serverNowMs: now, visibleThroughMs: now,
+    stages: [{ id: `${activityId}:bout`, kind: 'bout', label: 'Bout: victory', startedAtMs: foughtAtMs, revealedAtMs: foughtAtMs,
+      endsAtMs: settledAtMs, battleLog: JSON.parse(readFileSync('tests/fixtures/battles/pvp.json', 'utf8')) as BattleLog }],
+    summary: { activityId, resolvedKind: 'arena', result: 'victory', success: true, settledAtMs, replayExpiry, receiptId: `page-${activityId}`,
+      rewards: { money: 0, renown: 10, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 }, ratingDelta: 13 },
+    completion: { activityId, resolvedKind: 'arena', result: 'victory', success: true, settledAtMs, replayExpiry } };
+}
 
 /** Results, opened on My bouts once the owner's list has loaded. */
 async function myBouts(page: Page): Promise<Locator> {
@@ -111,6 +128,213 @@ test.describe('the replay viewer', () => {
   test.skip(production, 'These checks use the fixture preview.');
   test.beforeEach(async ({ context }) => { await quietArrivals(context); });
 
+  test('walks My bouts with ⏭ and Next bout, and one Back returns to the list', async ({ page }, testInfo) => {
+    await openCamp(page);
+    await watch(page, await myBouts(page), 'Varro');
+    const touch = await touchLayout(page);
+    const count = (wide: string, narrow: string) => replayScene(page).getByText(touch ? narrow : wide, { exact: true });
+    await expect(count('Bout 1 of 5 in My bouts', '1 / 5')).toBeVisible();
+    await expect(replayScene(page).getByText('UP NEXT', { exact: true })).toBeVisible();
+    await expect(replayScene(page).getByText(touch ? 'Aster vs Cassia · Sat 1:20\xA0AM' : 'Aster vs Cassia · Arena · Sat 10 Oct, 1:20\xA0AM', { exact: true })).toBeVisible();
+    const before = await page.evaluate(() => history.length);
+    if (!touch) {
+      const [counter, title] = await Promise.all([box(count('Bout 1 of 5 in My bouts', '1 / 5')), box(replayScene(page).getByRole('heading', { name: 'Aster vs Varro' }))]);
+      expect(counter.x).toBeGreaterThanOrEqual(title.x + title.width);
+      expect(Math.abs(counter.y + counter.height / 2 - title.y - title.height / 2)).toBeLessThanOrEqual(3);
+    }
+    await shot(page, testInfo, 'queue-first');
+    await bar(page).getByRole('button', { name: 'Next bout', exact: true }).click();
+    await expect(replayScene(page).getByRole('heading', { name: 'Aster vs Cassia' })).toBeVisible();
+    await expect(count('Bout 2 of 5 in My bouts', '2 / 5')).toBeVisible();
+    await expect(playButton(page)).toHaveAccessibleName('Pause');
+    await expect(playButton(page)).toBeFocused();
+    await page.keyboard.press('End');
+    await endCard(page).getByRole('button', { name: touch ? 'Next · vs Iron Warden' : 'Next bout · vs Iron Warden', exact: true }).click();
+    await expect(replayScene(page).getByRole('heading', { name: 'Aster vs Iron Warden' })).toBeVisible();
+    expect(await page.evaluate(() => history.length)).toBe(before);
+    await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+    await expect(replayScene(page)).toHaveCount(0);
+    await expect(menuDialog(page, 'Results').getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await watch(page, menuDialog(page, 'Results'), 'Varro');
+    await page.keyboard.press('n');
+    await expect(replayScene(page).getByRole('heading', { name: 'Aster vs Cassia' })).toBeVisible();
+    await page.keyboard.press('n');
+    await expect(replayScene(page).getByRole('heading', { name: 'Aster vs Iron Warden' })).toBeVisible();
+    await page.goBack();
+    await expect(replayScene(page)).toHaveCount(0);
+    await expect(menuDialog(page, 'Results')).toBeVisible();
+  });
+
+  test('follows the chip: Lost walks only the losses', async ({ page }) => {
+    await openCamp(page);
+    const results = await myBouts(page);
+    await results.getByRole('button', { name: 'Lost', exact: true }).click();
+    await watch(page, results, 'Cassia');
+    const touch = await touchLayout(page);
+    await expect(replayScene(page).getByText(touch ? '1 / 2' : 'Bout 1 of 2 in My bouts', { exact: true })).toBeVisible();
+    await page.keyboard.press('n');
+    await expect(replayScene(page).getByRole('heading', { name: 'Aster vs Bronze Sentinel' })).toBeVisible();
+    await expect(bar(page).getByRole('button', { name: 'Next bout', exact: true })).toHaveAttribute('aria-disabled', 'true');
+    await page.keyboard.press('End');
+    await expect(endCard(page).getByRole('button', { name: 'My bouts', exact: true })).toBeVisible();
+    await page.reload();
+    await replayReady(page);
+    await expect(replayScene(page).getByText(touch ? '2 / 2' : 'Bout 2 of 2 in My bouts', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+    await expect(results.getByRole('button', { name: 'Lost', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('someone else’s bout has no ⏮ ⏭ and no counter', async ({ page }) => {
+    await openScene(page, arenaActivityId('varroSpectator'), 'bouts');
+    await expect(bar(page).getByRole('button', { name: 'Next bout', exact: true })).toHaveCount(0);
+    await expect(bar(page).getByRole('button', { name: 'Previous bout', exact: true })).toHaveCount(0);
+    await expect(replayScene(page).locator('[data-bout-counter]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__cloudiatorReplay!.queue())).toBeNull();
+  });
+
+  test('phone: 1 / 5 and the up-next line without its button', async ({ page }, testInfo) => {
+    for (const [width, height] of [[390, 844], [360, 740]]) {
+      await page.setViewportSize({ width, height });
+      if (width === 390) await openScene(page, VARRO, 'bouts');
+      await expect(replayScene(page).getByText('1 / 5', { exact: true })).toBeVisible();
+      const [counter, top] = await Promise.all([box(replayScene(page).locator('[data-bout-counter]')), box(replayScene(page).getByTestId('scene-top'))]);
+      expect(counter.y).toBeGreaterThanOrEqual(top.y);
+      expect(counter.y + counter.height).toBeLessThanOrEqual(top.y + top.height);
+      expect(counter.x).toBeGreaterThan((await box(page.getByRole('button', { name: 'Back to My bouts', exact: true }))).x);
+      const up = replayScene(page).locator('[data-up-next]');
+      await expect(up).toContainText('UP NEXT');
+      await expect(up).toContainText('Aster vs Cassia · Sat 1:20\xA0AM');
+      await expect(up.getByRole('button')).toBeHidden();
+      await expectPhoneBar(page);
+      expect(await noHorizontalScroll(page)).toBe(true);
+      const geometry = await replayScene(page).evaluate(root => {
+        const controls = root.querySelector<HTMLElement>('[aria-label="Replay controls"]')!;
+        const slider = controls.querySelector<HTMLInputElement>('input[type="range"]')!;
+        const bounds = (element: Element) => { const b = element.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height }; };
+        return { viewport: { width: innerWidth, height: innerHeight }, bar: bounds(controls), slider: bounds(slider), row: bounds(slider.parentElement!.parentElement!),
+          buttons: [...controls.querySelectorAll('button')].filter(e => e.getBoundingClientRect().width > 0).map(e => ({ name: e.getAttribute('aria-label'), ...bounds(e) })),
+          counter: bounds(root.querySelector('[data-bout-counter]')!), upNext: bounds(root.querySelector('[data-up-next]')!), overflow: root.scrollWidth - root.clientWidth };
+      });
+      await testInfo.attach(`queue-${width}-geometry`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+      if (process.env.TASK_SHOTS) {
+        mkdirSync(process.env.TASK_SHOTS, { recursive: true });
+        writeFileSync(`${process.env.TASK_SHOTS}/queue-${width}-${testInfo.project.name}-geometry.json`, JSON.stringify(geometry, null, 2));
+      }
+      await shot(page, testInfo, `queue-${width}`);
+    }
+  });
+
+  test('chapter selection replaces the stage address, reloads it and leaves in one Back', async ({ page }) => {
+    await openCamp(page);
+    // A push from the existing camp entry, as a scene opener does.
+    await page.evaluate(activityId => history.pushState({ cloudiatorScene: 1 }, '', `?mode=fixture&view=replay&activity=${activityId}&from=results`), EXPEDITION);
+    await replayReady(page);
+    const before = await page.evaluate(() => history.length);
+    await page.keyboard.press('n');
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 1);
+    const stage = new URL(page.url()).searchParams.get('stage');
+    expect(stage).toBeTruthy();
+    expect(new URL(page.url()).searchParams.get('from')).toBe('results');
+    expect(await page.evaluate(() => history.length)).toBe(before);
+    await page.reload();
+    await replayReady(page);
+    expect((await hook(page)).chapter).toBe(1);
+    expect(new URL(page.url()).searchParams.get('stage')).toBe(stage);
+    await page.goBack();
+    await expect(replayScene(page)).toHaveCount(0);
+    await expect(menuDialog(page, 'Results')).toBeVisible();
+  });
+
+  test('reads the next page before stepping, using its latest rows and clearing the old stage', async ({ page, context }) => {
+    await seedSession(context);
+    const now = Date.now(), bouts = Array.from({ length: 22 }, (_, i) => pagedBout(now, i + 1));
+    const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
+    await page.goto(`/game/?view=replay&activity=${bouts[19].activityId}&stage=${bouts[19].stages[0].id}&from=bouts`);
+    await expectOwnerShown(page, 'Aster'); await replayReady(page);
+    await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 19, count: 20, more: true });
+    const before = await page.evaluate(() => history.length);
+    await page.keyboard.press('n');
+    await expect.poll(() => new URL(page.url()).searchParams.get('activity')).toBe(bouts[20].activityId);
+    await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay?.queue())).toMatchObject({ index: 20, count: 22, more: false });
+    expect(live.requests.some(r => r.table === 'activities' && r.query.has('slot_index'))).toBe(true);
+    expect(new URL(page.url()).searchParams.has('stage')).toBe(false);
+    expect(new URL(page.url()).searchParams.get('from')).toBe('bouts');
+    expect(await page.evaluate(() => history.length)).toBe(before);
+    await expect(playButton(page)).toHaveAccessibleName('Pause');
+    await expect(playButton(page)).toBeFocused();
+  });
+
+  test('a chapter replacement reuses the loaded timeline and fighter looks', async ({ page, context }) => {
+    await seedSession(context);
+    const now = Date.now(), timeline = pagedBout(now, 1);
+    timeline.summary!.resolvedKind = 'expedition';
+    timeline.stages = ENCOUNTERS.map((label, i) => ({ id: `${timeline.activityId}:${i}`, kind: 'encounter', label,
+      revealedAtMs: now - (4 - i) * 60_000, startedAtMs: now - (4 - i) * 60_000, endsAtMs: now - (3 - i) * 60_000,
+      battleLog: JSON.parse(readFileSync(`tests/fixtures/battles/expedition-${i + 1}.json`, 'utf8')) as BattleLog }));
+    const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, timelines: { [timeline.activityId]: timeline } });
+    await page.goto(`/game/?view=replay&activity=${timeline.activityId}&from=results`);
+    await expectOwnerShown(page, 'Aster'); await replayReady(page);
+    const timelineReads = () => live.requests.filter(r => r.table === 'visible_events' && r.query.get('activity_id') === `eq.${timeline.activityId}`).length;
+    const before = timelineReads();
+    expect(before).toBeGreaterThan(0);
+    const lookReads = () => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('select')?.includes('appearance:actor')).length;
+    await expect.poll(lookReads).toBeGreaterThan(0);
+    const looks = lookReads();
+    await page.keyboard.press('n');
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 1);
+    await nextFrames(page);
+    expect(timelineReads()).toBe(before);
+    expect(lookReads()).toBe(looks);
+  });
+
+  test('an own current bout without a settled summary leads the queue without invented row details', async ({ page, context }) => {
+    await seedSession(context);
+    const now = Date.now(), current = pagedBout(now, 1), older = pagedBout(now, 2);
+    delete current.summary; delete current.completion;
+    const liveOwner = { ...ownerFixture, currentActivity: { id: current.activityId, kind: 'arena' as const, status: 'active' as const,
+      startsAtMs: now - SLOT_MS, endsAtMs: now + 20 * 60_000, label: 'Arena' } };
+    await routeLiveReads(context, { world: emptyWorld(now), owner: liveOwner, bouts: [older], timelines: { [current.activityId]: current } });
+    await page.goto(`/game/?view=replay&activity=${current.activityId}&from=bouts`);
+    await expectOwnerShown(page, 'Aster'); await replayReady(page);
+    await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 0, count: 2, next: older.activityId });
+    await page.keyboard.press('End');
+    await expect(endCard(page).getByRole('list', { name: 'Rewards' })).toHaveText('Rewards are credited when the bout settles');
+    await page.keyboard.press('n');
+    await expect.poll(() => new URL(page.url()).searchParams.get('activity')).toBe(older.activityId);
+  });
+
+  test('a held next page cannot replace a newer replay after the list reopened', async ({ page, context }) => {
+    await seedSession(context);
+    const now = Date.now(), bouts = Array.from({ length: 22 }, (_, i) => pagedBout(now, i + 1));
+    await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let paging = 0;
+    await context.route('**/rest/v1/activities?*', async route => {
+      const q = new URL(route.request().url()).searchParams;
+      if (q.get('select')?.includes('starts_at_ms') && q.has('slot_index')) { paging += 1; await held; }
+      await route.fallback();
+    });
+    await page.goto(`/game/?view=replay&activity=${bouts[19].activityId}&from=bouts`);
+    await expectOwnerShown(page, 'Aster'); await replayReady(page);
+    await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 19, more: true });
+    await page.keyboard.press('n');
+    await expect.poll(() => paging).toBe(1);
+    await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+    const results = menuDialog(page, 'Results');
+    await expect(results.locator('[data-bout-row]')).toHaveCount(20);
+    await expect(results.getByRole('status')).toHaveCount(0);
+    await results.getByRole('button', { name: /^Watch: vs Varro,/ }).first().click();
+    await replayReady(page);
+    await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 0, count: 20, more: true });
+    const before = await page.evaluate(() => history.length);
+    const answered = page.waitForResponse(response => response.url().includes('/activities?') && new URL(response.url()).searchParams.has('slot_index'));
+    release(); await answered; await nextFrames(page);
+    expect(new URL(page.url()).searchParams.get('activity')).toBe(bouts[0].activityId);
+    expect(await page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 0, count: 20, more: true });
+    expect(await page.evaluate(() => history.length)).toBe(before);
+  });
+
   test('plays a bout with the replay bar, focused on Pause, and remembers the speed', async ({ page }, testInfo) => {
     await openCamp(page);
     const results = await myBouts(page);
@@ -136,8 +360,9 @@ test.describe('the replay viewer', () => {
     await expect(result).toHaveAttribute('aria-keyshortcuts', 'End');
     await expect(controls.getByRole('slider', { name: 'Replay position', exact: true })).toBeVisible();
     await expect(controls.locator('[data-replay-time]')).toHaveText(/^0:\d\d \/ 0:\d\d$/);
-    // A single bout with no queue has no ⏮ or ⏭, and the old buttons and key line are gone.
-    await expect(controls.getByRole('button', { name: /^(Previous|Next) bout$/ })).toHaveCount(0);
+    // An own bout now steps its queue; at the newest bout only Next is enabled.
+    await expect(controls.getByRole('button', { name: 'Previous bout', exact: true })).toHaveAttribute('aria-disabled', 'true');
+    await expect(controls.getByRole('button', { name: 'Next bout', exact: true })).toBeEnabled();
     for (const gone of ['Fast ×4', 'Restart', 'Skip to result']) await expect(scene.getByRole('button', { name: gone, exact: true })).toHaveCount(0);
     await expect(scene.getByText(/^Keys:/)).toHaveCount(0);
     await shot(page, testInfo, 'viewer-playing');
@@ -181,8 +406,7 @@ test.describe('the replay viewer', () => {
     await expect(card.getByText('Aster wins', { exact: true })).toBeVisible();
     await expect(card.getByText('Varro is defeated.', { exact: true })).toBeVisible();
     await expect(card.getByRole('list', { name: 'Rewards' }).getByRole('listitem')).toHaveText(['+10 renown', 'Rating +13']);
-    // No queue yet: ↺ Watch again, and the way back where a next bout would be.
-    await expect(card.getByRole('button')).toHaveText([touch ? '↺ Again' : '↺ Watch again', '← My bouts']);
+    await expect(card.getByRole('button')).toHaveText([touch ? '↺ Again' : '↺ Watch again', touch ? '▶ Next · vs Cassia' : '▶ Next bout · vs Cassia']);
     // On the arena: inside the close-up's box.
     const arena = await box(card.locator('xpath=..').getByRole('img'));
     const shown = await box(card);
@@ -203,9 +427,9 @@ test.describe('the replay viewer', () => {
     await expect(bar(page).getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
     await expect(scene.getByRole('region', { name: 'Result' })).toContainText(RESULT_HINT);
 
-    // At the end again, the card's way back closes the scene to My bouts.
+    // At the end again, the scene's way back still closes it to My bouts.
     await bar(page).getByRole('button', { name: 'Skip to the result', exact: true }).click();
-    await card.getByRole('button', { name: 'My bouts', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
     await expect(scene).toHaveCount(0);
     await expect(menuDialog(page, 'Results').getByRole('tab', { name: /^My bouts/ })).toHaveAttribute('aria-selected', 'true');
   });
@@ -246,8 +470,10 @@ test.describe('the replay viewer', () => {
     const restarted = await hook(page);
     expect(restarted).toMatchObject({ endCard: false, playing: true });
     expect(restarted.positionMs).toBeLessThan(1000);
-    // No step without a queue: N and P do nothing.
+    // N and P step the own-bout queue, each opening playing.
     await page.keyboard.press('n');
+    await expect(replayScene(page).getByRole('heading', { level: 2, name: 'Aster vs Cassia' })).toBeVisible();
+    await page.keyboard.press('p');
     await expect(replayScene(page).getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible();
     // The keys are in the buttons' titles; the old line is gone, on every width.
     await expect(page.getByText('Keys:')).toHaveCount(0);
@@ -410,7 +636,7 @@ test.describe('the replay viewer', () => {
     const verdict = endCard(page).getByText('Aster wins', { exact: true });
     await expect(verdict).toBeVisible();
     await expect(endCard(page).getByText('Varro is defeated.', { exact: true })).toBeVisible();
-    await expect(endCard(page).getByRole('button')).toHaveText(['↺ Again', '← My bouts']);
+    await expect(endCard(page).getByRole('button')).toHaveText(['↺ Again', '▶ Next · vs Cassia']);
     expect(await scene.evaluate(element => element.scrollTop)).toBe(0);
     const shown = await box(verdict);
     expect(shown.y + shown.height).toBeLessThanOrEqual(844);

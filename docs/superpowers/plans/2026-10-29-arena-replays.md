@@ -407,7 +407,7 @@ export type BoutList = { rows: readonly MyBout[]; nextCursor: string | null; sta
 export type BoutsStore = {
   list(filter: BoutFilter): BoutList;
   load(filter: BoutFilter): void;          // the first page, unless loaded or loading
-  more(filter: BoutFilter): Promise<void>; // the next page appended, no bout twice; rows kept on failure
+  more(filter: BoutFilter): Promise<boolean>; // true only for an applied page; rows kept on failure (Task 6 amendment)
   reload(): void;                          // every list read again; pages of older reads are dropped
   subscribe(listener: () => void): () => void;
 };
@@ -642,6 +642,10 @@ it('names the end card’s buttons', () => {
 
 ### Task 6: Next bout: the queue
 
+Controller amendment (2026-11-01): `BoutsStore.more(filter)` and `ReplayQueue.more()` return `Promise<boolean>`.
+True means that invocation applied a valid page, including terminal duplicate pagination; false means no-op, failure or
+invalidation. Read the current list after true and revalidate the active owner/filter/activity/chapter before stepping.
+
 **Files:**
 - Create: `src/features/bouts/bout-queue.ts`
 - Modify: `src/features/arena/BattleReplay.tsx` (`ActivityReplay` takes a queue and builds `nav`; the up-next line; the
@@ -658,7 +662,7 @@ export type ReplayQueue = {
   filter: BoutFilter; list: BoutList; ownerName: string;
   /** The owner's current activity: an own bout not settled yet. */
   currentActivityId: string | null;
-  open(activityId: string): void; more(): Promise<void>;
+  open(activityId: string): void; more(): Promise<boolean>;
 };
 export type QueueEntries = { entries: readonly MyBout[]; index: number; more: boolean };
 /** The kept replays of a ready list, with `current` first when it is own but not listed yet; null when the list is not ready. */

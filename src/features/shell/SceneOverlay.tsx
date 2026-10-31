@@ -14,20 +14,22 @@
 // the viewer is known, so a signed-in deep link reads once (Task 23.5). A player's replay scene marks its activity watched on this
 // device whenever it shows one, so My bouts drops that bout's dot (Arena replays Task 4). A replay takes the focus from Back to ⏸ once
 // it has loaded, and its result card offers the same way back at the end (Arena replays Task 5).
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
 import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
 import { ExpeditionUnavailable, ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
 import { appearancesOf } from '../../game/replay-looks';
 import { markWatched } from '../bouts/watched';
-import { backLabel, namedScene, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneView } from './scene-url';
+import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
+import type { ReplayQueue } from '../bouts/bout-queue';
+import { backLabel, boutFilterOf, namedScene, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneView } from './scene-url';
 import styles from './shell.module.css';
 
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 
-export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch }: {
+export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch, bouts, onReplace }: {
   view: SceneAddress;
   /** The camp's reads: the live gateway, or the fixture preview's once it has loaded (null until then). */
   gateway: GameGateway | null;
@@ -37,9 +39,12 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   onClose(): void;
   /** An expedition's encounter replay: the shell opens the replay scene. */
   onWatch?(view: SceneView): void;
+  bouts: BoutsStore | null;
+  onReplace(view: SceneView): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const back = useRef<HTMLButtonElement>(null);
+  const [counterHost, setCounterHost] = useState<HTMLSpanElement | null>(null);
   const leaving = useRef(false);
   const closeRef = useRef(onClose);
   useLayoutEffect(() => { closeRef.current = onClose; });
@@ -66,7 +71,8 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   // reads and its place, and puts the focus on ▶ or back on its own button (Patch A Task 9). A scene's origin is not part of it, and
   // a bracket's bouts are chapters of one scene (`sceneKeyOf`).
   const named = namedScene(view);
-  const sceneKey = named?.kind === 'expedition' ? `expedition|${named.activityId}` : sceneKeyOf(view);
+  // A replay's stage is a chapter of the loaded activity too: replace its address without rereading its timeline or looks.
+  const sceneKey = named?.kind === 'expedition' || named?.kind === 'replay' ? `${named.kind}|${named.activityId}` : sceneKeyOf(view);
   const shownKey = useRef(sceneKey);
   useLayoutEffect(() => {
     if (shownKey.current === sceneKey) return;
@@ -98,6 +104,15 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   const label = backLabel(from);
   // A scene it opens from this one (an encounter's replay, the whole trip) goes back to the same place.
   const origin = from ? { from } : {};
+  const filter = boutFilterOf(from) ?? 'all';
+  const owner = player ? state.owner : null;
+  const currentActivityId = owner?.currentActivity && ['arena', 'tournament'].includes(owner.currentActivity.kind) ? owner.currentActivity.id : null;
+  const replayId = named?.kind === 'replay' ? named.activityId : null;
+  const queue = useMemo<ReplayQueue | null>(() => bouts && owner && replayId ? {
+    filter, get list() { return bouts.list(filter); }, ownerName: owner.name, currentActivityId,
+    open: activityId => onReplace({ kind: 'replay', activityId, ...(from ? { from } : {}) }),
+    more: () => bouts.more(filter),
+  } : null, [bouts, owner?.gladiatorId, owner?.name, replayId, filter, currentActivityId, from, onReplace]);
   const viewKey = `${sceneKey}|${state.session.userId ?? 'visitor'}`;
   // The view mounts once the viewer is known: the session, and for an account its owner read (Task 23.5, C19). Mounted
   // earlier, a signed-in player's view would read as a visitor's and remount as the player's a moment later, reading its
@@ -113,6 +128,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
       onClose={() => { if (!leaving.current && !dialog.current?.open) closeRef.current(); }}>
       <div className={styles.sceneTop} data-testid="scene-top">
         <button ref={back} type="button" className={styles.sceneBack} data-scene-back="" aria-label={`Back to ${label}`} onClick={onClose}><span aria-hidden="true">←</span> {label}</button>
+        <span ref={setCounterHost} className={styles.sceneCounter} />
       </div>
       <div className={styles.sceneBody}>
         {named === null
@@ -122,7 +138,12 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
           : named.kind === 'bout' ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} headingLevel={2} />
           : named.kind === 'replay'
             ? loading ? <p role="status">Loading the replay…</p>
-              : <ActivityReplay key={viewKey} reads={reads} activityId={named.activityId} stageId={named.stageId ?? null} clock={clock} headingLevel={2}
+              : <QueuedReplay key={viewKey} store={bouts} queue={queue} reads={reads} activityId={named.activityId} stageId={named.stageId ?? null} clock={clock} headingLevel={2} counterHost={counterHost}
+                onChapter={stageId => {
+                  // The activity stays mounted; hand the outgoing chapter's focus to Back before its player remounts.
+                  back.current?.focus({ preventScroll: true });
+                  onReplace({ kind: 'replay', activityId: named.activityId, stageId, ...origin });
+                }}
                 viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} takeFocus back={{ label, go: onClose }} />
             : loading ? <p role="status">Loading the expedition…</p>
               : <ExpeditionView key={viewKey} reads={reads} activityId={named.activityId} fixture={fixture} play={named.play ?? null}
@@ -133,4 +154,13 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
       </div>
     </dialog>
   );
+}
+
+/** Keep the same store snapshot live while a replay steps or reads its next page. */
+function QueuedReplay({ store, queue, ...props }: ComponentProps<typeof ActivityReplay> & { store: BoutsStore | null }) {
+  return store && queue ? <SubscribedReplay store={store} queue={queue} {...props} /> : <ActivityReplay {...props} />;
+}
+function SubscribedReplay({ store, queue, ...props }: ComponentProps<typeof ActivityReplay> & { store: BoutsStore; queue: ReplayQueue }) {
+  useBoutList(store, queue.filter);
+  return <ActivityReplay {...props} queue={queue} />;
 }

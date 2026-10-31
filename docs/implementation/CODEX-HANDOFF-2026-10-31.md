@@ -1,6 +1,6 @@
 # Handoff to Codex — Cloudiator, 2026-10-31
 
-## Current authority, locations and next work — 2026-10-31
+## Current authority, locations and next work — 2026-11-01
 
 This dated override supersedes older ownership, checkout and next-task statements below; historical handoff text is preserved. Codex took over from Claude at Avi's explicit request on 2026-10-31. Main checkout: `C:\Avi\Studies\Projects\Cloudiator\codex`; Patch 1.4 execution checkout: `C:\Avi\Studies\Projects\Cloudiator\claude` (`claude/task-24`, port 3200). The Cloudiator root is only the parent.
 
@@ -12,7 +12,17 @@ Separate CI follow-up: GitHub run `41241478227` failed only the known `camp-beds
 12/12 gate and deployed nine checks passed. CI rerun versus carrying its test-budget correction into 1.5 is awaiting Avi's
 question-form answer (normal remote pinned dependency installs explicitly included). No CI retry or timeout change yet.
 
-Next: **1.5 Arena replays**, worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`: read its ledger, merge shipped 1.4, preserve/resume Task 5's uncommitted work. Then **1.5.1 NPC re-review/art approval**, then **1.6 economy** (merge 1.4, incorporate at most two Training slots per game day, Tasks 4–9; zero-stamina tournaments). See `CODEX-HANDOFF-2026-10-31.md` for stream ledgers. Only one worktree uses the local Supabase stack; Edge currently serves from `claude`. No package downloads without asking; no secrets in output. The 1.4 go authorizes no 1.5/1.5.1/1.6 production writes.
+**1.5 development checkpoint — 2026-11-01 (Asia/Jerusalem):** the active worktree is `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`. Shipped 1.4 and its release evidence were merged at `2616007`; the later CI clarification was carried as `bdceae3`. Tasks 1–7 are now implemented and independently reviewed, including each scoped correction:
+
+- Task 5 viewer: `1cc6483`, then `e0d2958` (44px touch width). Original 12-file WIP was preserved byte-for-byte before continuation; backup stash `6273de922970dde8eef5ce2372ec7eab7c181df2` remains, plus local original patch/hash evidence. Do not restore it over completed work.
+- Task 6 queue/counter/Up next: `78b489a`, then `b1cddbc` (live activity/stage/origin guard at final replacement). The internal `more()` contract returns a success boolean. Real pre-React-commit navigation races were reproduced before fixing.
+- Task 7 Notifications/Arena links: `31e80d0`, then `28a2af3` (pending return scoped to authenticated account while owner loads). Real direct A-to-B switching was reproduced before fixing. Full units 2,095/119 files and browser families 187 passed/1 inherited skip preceded this final scope correction; its covering checks passed 19 units, TypeScript and 104 browser cases.
+
+Detailed Git commit bodies preserve transferable implementation, RED/GREEN and validation notes. The local ledger/reports/screenshots are under `.superpowers/sdd/2026-10-29-arena-replays/` and ignored by Git. Source was frozen during serialized one-worker Chrome runs on private port 3800; no new skips/retries, package downloads, DB operations or production writes occurred in this stream. PATCH/CHANGELOG/FEATURES honestly identify 1.5 as in progress; no 1.5 full release gate or production go is claimed.
+
+Next: **Task 8 camp Arena button**, then **Task 9 full-screen bracket viewer**, whole-branch review/fix wave, the complete 12-step gate and Avi's fresh 1.5 production go. Preserve the chapter-bar exception (118px, ordinary bars 96px) and show it in Task 9's 360px screenshots before release. Final-review carries: Task 4's deferred lifecycle tests/JSDoc; standalone `/replay` initially addressed at a not-yet-ended later chapter; Arena cached-All freshness after a new settlement (source observation, not runtime reproduced); expedition overlay reward-copy ambiguity; and `Texture key already in use: gladiators` (proven in shipped 1.4, cause unresolved). Final Go captures must wait for the fully rendered camp background.
+
+Then **1.5.1 NPC re-review/art approval**, then **1.6 economy** (merge 1.4, incorporate at most two Training slots per game day, Tasks 4–9; zero-stamina tournaments). Only one worktree uses the local Supabase stack; Edge still serves from `claude` and must move to the database-test worktree before the final gate. All current browser invocations explicitly use one worker; ensure the private gate config also does so. No package downloads without asking; no secrets in output. The 1.4 go authorizes no 1.5/1.5.1/1.6 production writes. The optional project override for raw CSS-pixel limits/both touch dimensions is also awaiting Avi's question-form answer; no unapproved override was added.
 
 
 **Codex checkpoint, 2026-10-31:** read [the gate report](PATCH-1.4-GATE-2026-10-31.md) before resuming Patch 1.4. The fresh post-restart gate passed **12/12, exit 0**, on `b7d3651` (19:49:56–20:35:17 UTC). Unit 1,994/111 files, DB 405/30 files with Edge unchanged, development browser 1,029 passed/71 skipped, static browser 34 passed/1,066 skipped; no step omitted. Earlier failed/aborted attempts remain recorded. The local CHANGELOG is now a dated release candidate for review, not a production-release claim. No production go, write or deployment; next show the draft, patch row and six go points, then obtain Avi's explicit production go. The stream order and production holds below remain in force.
@@ -78,15 +88,15 @@ list: `docs/superpowers/specs/2026-10-29-next-patch-ideas.md`, items 1-35).
   4. Then remind Avi about the clip. It covers 1.3.1 and 1.4. Write the WhatsApp and YouTube feature posts.
 
 ### 2. Patch 1.5 Arena replays
-- **Where:** worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays` @ `a3242f2`.
+- **Where:** worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`; latest reviewed code `28a2af3` (plus later documentation checkpoint).
 - **Plan:** `docs/superpowers/plans/2026-10-29-arena-replays.md`.
 - **Ledger:** `.superpowers/sdd/2026-10-29-arena-replays/progress.md`. It has the carries for every remaining task.
 - **Status:**
-  - Tasks 1-4 are done and reviewed.
-  - **Task 5 (the viewer) was stopped mid-way.** Its uncommitted work, 12 files, is in the tree. Continue it and don't discard
-    it; it was updating `replay.spec.ts`.
-  - Then Tasks 6-9, the final review, the gate, Avi's go, the release (no migration) and the clip.
-- **Merge:** merge 1.4 into this branch after 1.4 ships.
+  - Tasks 1–7 are done and independently reviewed; see the current checkpoint above for commits, evidence and carries.
+  - Task 5's original stopped WIP was preserved and completed; it is no longer uncommitted work to resume or restore.
+  - Next Tasks 8–9, final review/fix wave, complete gate, Avi's fresh go, and client/note/patch-record release (no migration).
+  - Remind Avi about the patch clip and feature posts after release; no new video has been requested in this takeover.
+- **Merge:** shipped 1.4 and release evidence are already merged; do not repeat its production steps.
 
 ### 3. Patch 1.5.1 camp guards + NPCs
 - **Where:** worktree `C:\Avi\Studies\Projects\Cloudiator\hotfix`, branch `claude/p151-camp-npcs` @ `a18ffc8`.

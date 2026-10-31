@@ -24,6 +24,22 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.3.** New since then: 1.3.1 and 1.4, both live.
 
+## 1.5 — Watch your Arena bouts more easily (in progress, not yet released)
+
+### Built
+
+- Results opens on My bouts: your Arena and tournament bouts by day, with All, Won and Lost filters, rating changes and a dot until watched on this device.
+- The replay bar has play and pause, a track, the time, a remembered speed of 1×, 2× or 4×, and ⚑ Result.
+- A bout's result appears on the arena after the victory poses, with Watch again and a button back where you came from.
+- The replay header keeps the result hidden while the fight plays. On a phone, who won stays in view and Fighters and Combat log fold away.
+- Back names where you opened the replay and returns there in one step.
+
+### Planned
+
+- Next bout follows your list, with a counter and Up next.
+- Open replays directly from Notifications, recent Arena bouts and the camp's Arena result button.
+- Tournament brackets open the full-screen viewer, with each decided bout as a chapter.
+
 ## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)
 
 Released 2026-10-31: M26, client `26dd0d7`, note 5 and the linked 14-feature record are live.

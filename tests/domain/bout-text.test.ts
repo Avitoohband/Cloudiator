@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { ActivitySummary, BattleLog, RevealedStage } from '@contracts/events';
 import type { MyBout } from '@/lib/api/reads';
-import { boutRow, dayGroups, emptyText, ratingText, unwatchedCount } from '@/features/bouts/bout-text';
+import {
+  RESULT_HINT, againLabel, boutEyebrow, boutRow, chapterLabel, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, verdictText,
+} from '@/features/bouts/bout-text';
+import { ARENA_BATTLE_LOGS } from '../fixtures/arena';
 
 // Arena replays Task 4 (spec 1): the words of My bouts' rows, day groups, count and empty states. Zones are named in each call.
 const NOW = Date.UTC(2026, 9, 10, 4, 0);
@@ -78,5 +82,88 @@ describe('the My bouts list', () => {
     expect(unwatchedCount([bout({ replayExpiry: { state: 'available', expiresAtMs: NOW } })], new Set(), NOW)).toBe(0);
     expect([emptyText('all'), emptyText('won'), emptyText('lost')]).toEqual(['No bouts yet. Your Arena and tournament bouts show here with their replays.',
       'No won bouts yet.', 'No lost bouts yet.']);
+  });
+});
+
+// Arena replays Task 5 (spec 2): the viewer's words. The eyebrow says the kind and when the bout was fought, never the server's stage
+// label (Review Focus 4); the end card says who won and why, the owner's credited rewards as chips, and names its buttons.
+describe('the replay viewer', () => {
+  const at = Date.UTC(2026, 9, 10, 3, 0), fri = Date.UTC(2026, 9, 9, 23, 0);
+  const boutStage = (startedAtMs: number, label: string): RevealedStage =>
+    ({ id: `bout-${label}`, kind: 'bout', revealedAtMs: startedAtMs, startedAtMs, endsAtMs: startedAtMs + 20 * 60_000, label });
+  const encounterStage = (label: string): RevealedStage =>
+    ({ id: `encounter-${label}`, kind: 'encounter', revealedAtMs: at, startedAtMs: at, endsAtMs: at + 60_000, label });
+  const LOGS = ARENA_BATTLE_LOGS;
+  const summary = (over: { renown?: number; money?: number; ratingDelta?: number }): ActivitySummary => ({
+    activityId: 'a', resolvedKind: 'arena', result: 'victory', success: true,
+    rewards: { money: over.money ?? 0, renown: over.renown ?? 0, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 },
+    receiptId: 'r', settledAtMs: at, replayExpiry: { state: 'available', expiresAtMs: at + 7 * DAY },
+    ...(over.ratingDelta === undefined ? {} : { ratingDelta: over.ratingDelta }),
+  });
+  /** Varro's bout, ended another way: the victory event and the log say the same reason. */
+  const endedBy = (reason: BattleLog['victoryReason'], tieBreakReason: BattleLog['tieBreakReason']): BattleLog => ({
+    ...LOGS.ownerHumanWin, victoryReason: reason, tieBreakReason,
+    events: LOGS.ownerHumanWin.events.map(e => (e.kind === 'victory' ? { ...e, reason } : e)),
+  });
+
+  it('writes the eyebrow from the kind and the time, never the stage label', () => {
+    expect(boutEyebrow(boutStage(at, 'Bout: victory'), { npc: false, league: null, compact: false }, '12', 'UTC')).toBe('ARENA · SAT 10 OCT, 3:00\xA0AM');
+    expect(boutEyebrow(boutStage(fri, 'Bout: defeat'), { npc: true, league: null, compact: false }, '12', 'UTC')).toBe('ARENA · FRI 9 OCT, 11:00\xA0PM · NPC OPPONENT');
+    expect(boutEyebrow(boutStage(at, 'Bout: victory'), { npc: false, league: null, compact: true }, '12', 'UTC')).toBe('ARENA · SAT 3:00\xA0AM');
+    expect(boutEyebrow(boutStage(fri, 'Bout: victory'), { npc: true, league: null, compact: true }, '12', 'UTC')).toBe('ARENA · FRI 11:00\xA0PM · NPC');
+    expect(boutEyebrow(boutStage(at, 'Bout: victory'), { npc: false, league: null, compact: false }, '24', 'UTC')).toBe('ARENA · SAT 10 OCT, 03:00');
+    expect(boutEyebrow(boutStage(at, 'Final: defeat'), { npc: false, league: 'bronze', compact: false }, '12', 'UTC')).toBe('TOURNAMENT · BRONZE · FINAL');
+    expect(boutEyebrow(boutStage(at, 'Final: defeat'), { npc: false, league: null, compact: false }, '12', 'UTC')).toBe('TOURNAMENT · FINAL');
+    expect(boutEyebrow(encounterStage('Encounter 1: Dire Wolf'), { npc: false, league: null, compact: false }, '12', 'UTC')).toBe('Expedition · Encounter 1: Dire Wolf');
+    expect(chapterLabel(boutStage(at, 'Quarterfinal: victory'))).toBe('Quarterfinal');
+    // TournamentPanel supplies this safe bracket label; its round must survive in the eyebrow.
+    expect(boutEyebrow(boutStage(at, 'Tournament · Final'), { npc: false, league: 'silver', compact: false }, '12', 'UTC')).toBe('TOURNAMENT · SILVER · FINAL');
+    expect(boutEyebrow(boutStage(at, 'Tournament · Semifinals'), { npc: false, league: 'bronze', compact: false }, '12', 'UTC')).toBe('TOURNAMENT · BRONZE · SEMIFINAL');
+    expect(boutEyebrow(boutStage(at, 'Tournament · Quarterfinals'), { npc: false, league: 'bronze', compact: true }, '12', 'UTC')).toBe('TOURNAMENT · BRONZE · QUARTERFINAL');
+    expect(boutEyebrow(boutStage(at, 'Arena bout against Varro'), { npc: false, league: null, compact: false }, '12', 'UTC')).toBe('ARENA · SAT 10 OCT, 3:00\xA0AM');
+    expect(chapterLabel(encounterStage('Encounter 2: Forest Bear'))).toBe('Encounter 2: Forest Bear');
+    expect(chapterLabel(boutStage(at, 'Bout: defeat'))).toBe('Bout');
+    // An eyebrow or a chapter never carries the outcome, whatever the label says.
+    for (const label of ['Bout: victory', 'Bout: defeat', 'Final: victory', 'Round 2: defeat']) {
+      for (const compact of [false, true]) {
+        expect(boutEyebrow(boutStage(at, label), { npc: false, league: null, compact }, '12', 'UTC')).not.toMatch(/victory|defeat/i);
+      }
+      expect(chapterLabel(boutStage(at, label))).not.toMatch(/victory|defeat/i);
+    }
+  });
+
+  it('says who won and why', () => {
+    expect(verdictText(LOGS.ownerHumanWin, false)).toEqual({ verdict: 'Aster wins', reason: 'Varro is defeated.' });
+    expect(verdictText(LOGS.ownerHumanLoss, true)).toEqual({ verdict: 'Cassia wins', reason: 'Aster is defeated.' });
+    expect(verdictText(LOGS.ownerTieBreak, false).reason).toBe('Both fell at the same moment; a seeded tie-break chose Aster.');
+    expect(verdictText(LOGS.ownerTieBreak, true).reason).toBe('A tie-break chose Aster.');
+    // The time-out endings (Planner's call).
+    expect(verdictText(endedBy('health-fraction', null), false)).toEqual({ verdict: 'Aster wins', reason: 'Time ran out and Aster kept more health.' });
+    expect(verdictText(endedBy('tie-break', 'equal-health-fraction'), false).reason).toBe('Time ran out with equal health; a seeded tie-break chose Aster.');
+    expect(verdictText(endedBy('tie-break', 'equal-health-fraction'), true).reason).toBe('A tie-break chose Aster.');
+  });
+
+  it('lists the credited rewards as chips', () => {
+    expect(rewardChips(summary({ renown: 10, ratingDelta: 14 }), { fighter: true, npc: false, kind: 'arena', last: true })).toEqual(['+10 renown', 'Rating +14']);
+    expect(rewardChips(summary({ renown: 3 }), { fighter: true, npc: true, kind: 'arena', last: true })).toEqual(['+3 renown', 'NPC: no rating change']);
+    expect(rewardChips(summary({ renown: 60, money: 100, ratingDelta: 16 }), { fighter: true, npc: false, kind: 'tournament', last: true })).toEqual(['+60 renown', '+100 gold', 'Rating +16']);
+    expect(rewardChips(summary({ renown: 60 }), { fighter: true, npc: false, kind: 'tournament', last: false })).toEqual([]);
+    expect(rewardChips(null, { fighter: true, npc: false, kind: 'arena', last: true })).toEqual(['Rewards are credited when the bout settles']);
+    expect(rewardChips(null, { fighter: true, npc: false, kind: 'tournament', last: true })).toEqual(['Rewards are credited when the tournament settles']);
+    expect(rewardChips(null, { fighter: false, npc: false, kind: 'arena', last: true })).toEqual([]);
+    // A loss writes its rating as the notifications do; zero parts are left out; a spectator sees none.
+    expect(rewardChips(summary({ renown: 2, ratingDelta: -13 }), { fighter: true, npc: false, kind: 'arena', last: true })).toEqual(['+2 renown', 'Rating −13']);
+    expect(rewardChips(summary({ ratingDelta: 0 }), { fighter: true, npc: false, kind: 'arena', last: true })).toEqual([]);
+    expect(rewardChips(summary({ renown: 10, ratingDelta: 14 }), { fighter: false, npc: false, kind: 'arena', last: true })).toEqual([]);
+    // An expedition's rewards are the whole trip's: the Result card below lists them, the end card has none (builder's call).
+    expect(rewardChips(summary({ renown: 5, money: 20 }), { fighter: true, npc: true, kind: 'expedition', last: true })).toEqual([]);
+    expect(rewardChips(null, { fighter: true, npc: true, kind: 'expedition', last: true })).toEqual([]);
+  });
+
+  it('names the end card’s buttons', () => {
+    expect([nextLabel('Cassia', false), nextLabel('Cassia', true), nextLabel(null, false), againLabel(false), againLabel(true)])
+      .toEqual(['▶ Next bout · vs Cassia', '▶ Next · vs Cassia', '▶ Next bout', '↺ Watch again', '↺ Again']);
+    expect(nextLabel(null, true)).toBe('▶ Next');
+    expect(RESULT_HINT).toBe('The result appears when the fight ends, or now with ⚑ Result.');
   });
 });

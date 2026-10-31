@@ -27,7 +27,7 @@ const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) 
 const VIEWS = Object.fromEntries(TOURNAMENT_KEYS.map(key => [key, readJson<TournamentView>(`tests/fixtures/tournaments/${key}.json`)])) as Record<TournamentKey, TournamentView>;
 const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 const scene = (page: Page, name: 'Replay' | 'Expedition') => page.getByRole('dialog', { name, exact: true });
-const backToCamp = (page: Page) => page.getByRole('button', { name: 'Back to camp' });
+const backToCamp = (page: Page) => page.getByRole('button', { name: 'Back to Camp' });
 const campState = (page: Page) => page.evaluate(() => window.__cloudiatorCamp!.state()!);
 const CORS = { 'access-control-allow-origin': '*' };
 const serverError = { status: 500, headers: CORS, contentType: 'application/json', body: JSON.stringify({ code: 'XX000', message: 'internal error', details: null, hint: null }) };

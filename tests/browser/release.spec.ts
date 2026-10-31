@@ -191,10 +191,10 @@ test.describe('release accessibility in the fixture preview', () => {
     await press('Enter');
     const replay = scene(page, 'Replay');
     await expect(replay).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Back to Results', exact: true })).toBeFocused();
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+    await expect(replay.getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
     // Tab walks the scene's controls (the page behind the modal scene is inert).
-    const skipToResult = replay.getByRole('button', { name: 'Skip to result' });
+    const skipToResult = replay.getByRole('button', { name: 'Skip to the result' });
     for (let n = 0; n < 8 && !(await skipToResult.evaluate(el => el === document.activeElement)); n++) {
       await press('Tab');
       expect(await inside(replay), 'the modal scene keeps the focus').toBe(true);
@@ -743,16 +743,12 @@ test.describe('release accessibility in the fixture preview', () => {
           - meter "Varro health"
           - group "Replay controls":
             - button /^(Pause|Play)$/
-            - button "Fast ×4"
-            - button "Restart"
-            - button "Skip to result"
-          - slider "Replay position"
+            - slider "Replay position"
+            - button "Speed 1×"
+            - button "Skip to the result"
           - region "Result":
             - heading "Result" [level=3]
-          - region "Fighters":
-            - heading "Fighters" [level=3]
-          - region "Combat log":
-            - heading "Combat log" [level=3]
+          ${await touchLayout(page) ? '- group "Fighters at the start"\n          - group "Combat log"' : '- region "Fighters":\n            - heading "Fighters" [level=3]\n          - region "Combat log":\n            - heading "Combat log" [level=3]'}
     `);
     void testInfo;
   });
@@ -884,7 +880,7 @@ test.describe('release accessibility in the fixture preview', () => {
     // The scenes over the camp at 360 px (C20): the replay, after its result, and the expedition.
     await page.goto(`/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}`);
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     await fits(scene(page, 'Replay'), 'the replay scene');
     await shot(page, testInfo, '360-replay');
     await page.goto(`/game/?mode=fixture&view=expedition&activity=${EXPEDITION_FIXTURES.woodland.activityId}`);
@@ -940,7 +936,7 @@ test.describe('release accessibility in the fixture preview', () => {
     const replay = scene(page, 'Replay');
     await expect(replay.getByRole('heading', { name: 'This replay is not available yet' })).toBeVisible({ timeout: 45_000 });
     await expect(replay).toContainText('The fight is still going on. Its replay appears here as soon as it ends.');
-    await expect(replay.getByRole('button', { name: 'Skip to result' })).toHaveCount(0);
+    await expect(replay.getByRole('button', { name: 'Skip to the result' })).toHaveCount(0);
     // Once the display time passes the logged end, the replay is offered.
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), start + 30_000);
     await expect(replay.getByRole('heading', { name: 'Aster vs Cassia' })).toBeVisible();
@@ -951,7 +947,7 @@ test.describe('release accessibility in the fixture preview', () => {
     for (const visitor of [false, true]) {
       await openFixtureCamp(page, `/game/?mode=fixture${visitor ? '&as=visitor' : ''}&view=replay&activity=${REPLAY_FIXTURES.tie.activityId}`);
       const replay = scene(page, 'Replay');
-      await replay.getByRole('button', { name: 'Skip to result' }).click();
+      await replay.getByRole('button', { name: 'Skip to the result' }).click();
       const result = replay.getByRole('region', { name: 'Result' });
       await expect(result).toContainText('Aster wins');
       if (visitor) await expect(result).not.toContainText('Rewards are credited');

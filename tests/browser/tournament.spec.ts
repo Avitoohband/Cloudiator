@@ -406,6 +406,7 @@ test.describe('tournament registration and brackets', () => {
     expect(await wide()).toBeLessThanOrEqual(0);
     // Every word in the replay's fighter table stays whole ("Endurance", "Equipment"): no word spans two lines.
     const fighters = card(page).getByRole('table', { name: 'Fighters at the start of the fight' });
+    await card(page).getByRole('group', { name: 'Fighters at the start', exact: true }).locator('summary').click();
     await fighters.scrollIntoViewIfNeeded();
     const split = await fighters.evaluate(table => {
       const broken: string[] = [];

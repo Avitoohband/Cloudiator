@@ -43,12 +43,12 @@ this plan binds to.
 - History: opening a scene pushes one entry (as today); every step inside it (⏮ ⏭ N P, ▶ Next bout, a bracket chapter)
   replaces that entry, so Back leaves in one step.
 - TDD: each task's tests fail before its code. Browser tests run with
-  `npx playwright test --config node_modules/.cache/pw-claude.config.mjs <spec>`; never build while a browser run is active. New
+  `npx playwright test --config node_modules/.cache/pw-p15-arena.config.mjs <spec>`; never build while a browser run is active. New
   browser specs that pin times use `test.use({ timezoneId: 'Etc/GMT-3' })`; fixture-mode specs call `quietArrivals(context)`
   where Patch A's arrival banner could cover a control.
 - The phone layout is the shell's touch layout (`COMPACT_QUERY`, `@media (hover: none), (max-width: 480px)`); every new
   surface fits 360 × 740 with `noHorizontalScroll` and 44 px touch targets.
-- Gate of record: `node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs`.
+- Gate of record: `node scripts/verify.mjs --config node_modules/.cache/pw-p15-arena.config.mjs`.
 - Production writes need Avi's go in chat; deploy outside Wed/Sat 17:20-20:00 UTC with no open boundary.
 
 ## Review Focus
@@ -160,7 +160,7 @@ it('keeps the track, the time and the tail in that order', () => {
 - [ ] **Step 2: Run** `npx vitest run tests/domain/replay-bar.test.ts`; expect FAIL (no module).
 - [ ] **Step 3: Implement** `ReplayBar` and make `TripBar` render it: "Previous chapter" / "Next chapter" steps, Patch A's
   chapter items with their locked titles, the time, "● Back to live" as the tail. Move the bar's CSS rules unchanged.
-- [ ] **Step 4: Run** the unit test, `npm run typecheck` and `npx playwright test --config node_modules/.cache/pw-claude.config.mjs
+- [ ] **Step 4: Run** the unit test, `npm run typecheck` and `npx playwright test --config node_modules/.cache/pw-p15-arena.config.mjs
   tests/browser/trip-replay.spec.ts tests/browser/expedition.spec.ts`; expect PASS with the trip specs unchanged.
 - [ ] **Step 5: Commit** `refactor: one replay bar for the trip and the bouts`.
 
@@ -283,7 +283,7 @@ test('is the owner’s own read: a visitor is refused before any request', async
 - [ ] **Step 2: Run** `npx vitest run tests/api tests/domain/tournament-id.test.ts`; expect FAIL (`readBouts` not exported).
 - [ ] **Step 3: Implement** the read, the gateway method, the fixture module and gateway, and the `live-routes.ts` additions.
 - [ ] **Step 4: Run** the step 2 command and `npm run typecheck`; then `npx playwright test --config
-  node_modules/.cache/pw-claude.config.mjs tests/browser/messages.spec.ts tests/browser/read-render.spec.ts` (the live routes
+  node_modules/.cache/pw-p15-arena.config.mjs tests/browser/messages.spec.ts tests/browser/read-render.spec.ts` (the live routes
   still serve today's reads); expect PASS.
 - [ ] **Step 5: Commit** `feat: read my own Arena and tournament bouts`.
 
@@ -363,7 +363,7 @@ it('keys a scene without its origin, and a bracket without its bout', () => {
   than at the camp while a scene is open. Phone (390 × 844): with the scene scrolled 400 px, the back button's top is ≥ 0, the
   bar spans the viewport width and its computed background alpha is 1. Update the scene specs that read the visible text "Back
   to camp" on a scene button (the name `Back to Camp` still matches their `name: 'Back to camp'` lookups).
-- [ ] **Step 5: Run** the unit tests and `npx playwright test --config node_modules/.cache/pw-claude.config.mjs
+- [ ] **Step 5: Run** the unit tests and `npx playwright test --config node_modules/.cache/pw-p15-arena.config.mjs
   tests/browser/scenes.spec.ts tests/browser/arena.spec.ts tests/browser/expedition.spec.ts tests/browser/read-render.spec.ts`;
   expect PASS.
 - [ ] **Step 6: Commit** `feat: a scene says where Back goes, and opens it again`.
@@ -895,8 +895,10 @@ expect([bracketChapter('Final', 0, 1), bracketChapter('Semifinal', 1, 2), bracke
 
 ### Task 10: Gate, review and release
 
+Release from p15-arena on port 3800. Finalize docs/CHANGELOG.md and docs/FEATURES.md before the go: built bullets must exactly match the patch-record draft. Present the exact 1.5 title, features and linked-note record draft together with the patch-note draft. Avi must give a fresh explicit 1.5 go; the four-write 1.4 approval is exhausted. This patch changes nothing under supabase/.
+
 - [ ] **Step 1:** With the local stack and `supabase functions serve` running, run the gate of record `node scripts/verify.mjs
-  --config node_modules/.cache/pw-claude.config.mjs`; expect every step to pass. The DB-test rule applies (AGENTS.md); no build
+  --config node_modules/.cache/pw-p15-arena.config.mjs`; expect every step to pass. The DB-test rule applies (AGENTS.md); no build
   or edit during the browser run.
 - [ ] **Step 2:** A fresh reviewer checks the whole branch against the spec (copy word for word, the Review Focus, owner-only
   data, the formatter guard, history replace-not-push); fix what it finds; rerun the affected tests and the gate.
@@ -905,13 +907,13 @@ expect([bracketChapter('Final', 0, 1), bracketChapter('Semifinal', 1, 2), bracke
   parallel): choose the commit to release with Avi first.
 - [ ] **Step 4:** Ask Avi in chat for the go, with the spec's "Patch note draft" for his wording. Check the window (not Wed/Sat
   17:20-20:00 UTC) and, read-only, that no boundary is open (`hosted-checks.sql` through `db query --linked --agent no`).
-- [ ] **Step 5:** After the go: the `release` fast-forward from `C:\Avi\Studies\Projects\Cloudiator-claude` (`git merge-base
+- [ ] **Step 5:** After the go: the `release` fast-forward from `C:\Avi\Studies\Projects\Cloudiator\p15-arena` (`git merge-base
   --is-ancestor origin/release <deploy-commit>`, then `git push origin <deploy-commit>:refs/heads/release`, never `--force`;
   deployment.md "Client step"); the deployed checks about 2 minutes after Pages is live.
 - [ ] **Step 6:** Post the approved note with `private.post_message('patch-notes', <title>, <preview>, <body>, null)` per the
   runbook ("Posting a game message": one statement, UTF-8 without a byte-order mark, dollar quotes); read back the visible
   messages and one account's inbox (unread up by one).
-- [ ] **Step 7:** Record the evidence in `docs/operations/release-evidence.md` and `docs/operations/deployment.md`, update
+- [ ] **Step 7:** Only after the client, deployed probes and approved note succeed, run the approved private.record_patch statement for 1.5 linked to that new note, generated with scripts/patch-statement.mjs from the finalized changelog. Verify the patch record, exact feature wording, note link and world_revision.latest_patch read-only. Record the evidence in `docs/operations/release-evidence.md` and `docs/operations/deployment.md`, update
   `docs/implementation/HANDOFF.md` and this plan's status; commit `deploy: ship the Arena replays patch`.
 
 ### Task 11: A players' clip of the Arena replays patch

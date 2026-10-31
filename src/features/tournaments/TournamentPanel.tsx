@@ -265,7 +265,7 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, 
             <p className="muted">The replay is the recorded bout. Watching it never changes the result.</p>
             {/* Under the card's h4 and this section's h5: the replay title is an h6 (its sections stay at h6). Only a fighter
                 in the bout is told its rewards are credited when the activity settles (13.8 review). */}
-            <BattleReplay key={replay.id} headingLevel={6} viewerId={model.viewerId ?? null} looks={model.looks} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
+            <BattleReplay key={replay.id} headingLevel={6} viewerId={model.viewerId ?? null} looks={model.looks} league={state.league} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
               log: replay.log,
               stage: { id: replay.id, kind: 'bout', label: `Tournament · ${replayRound.label}`, revealedAtMs: replay.revealAtMs, startedAtMs: replay.revealAtMs, endsAtMs: replay.fightEndsAtMs! },
             }] }} />

@@ -4,7 +4,9 @@ import type { GameGateway } from '@/lib/api/gateway';
 import { createFixtureGateway } from '@/lib/api/fixture-gateway';
 import {
   REPLAY_OUTRO_MS,
+  REPLAY_SPEEDS,
   createReplayController,
+  nextSpeed,
   groupReplay,
   loadReplayView,
   reduceReplay,
@@ -262,6 +264,36 @@ describe('replay controller', () => {
     expect(c.listenerCount()).toBe(0);
     c.restart();
     expect(seen).toHaveLength(4);
+  });
+
+  it('cycles its speeds 1× → 2× → 4× → 1×, and plays at 2× twice as fast (Arena replays Task 5)', () => {
+    expect(REPLAY_SPEEDS).toEqual({ normal: 1, double: 2, fast: 4 });
+    expect([nextSpeed('normal'), nextSpeed('double'), nextSpeed('fast')]).toEqual(['double', 'fast', 'normal']);
+    const c = createReplayController(FIXTURE_BATTLE_LOGS.pvp, { speed: 'double' });
+    expect(c.speed).toBe('double');
+    c.play();
+    c.tick(1000);
+    expect(c.positionMs).toBe(2000);
+  });
+
+  it('says when the replay has ended, after the outro, and tells subscribers (Arena replays Task 5: the end card)', () => {
+    const c = createReplayController(small);
+    const seen: boolean[] = [];
+    c.subscribe(() => seen.push(c.ended));
+    expect(c.ended).toBe(false);
+    c.pause();
+    // Paused at the end by a seek: no play state, group or result change, yet the end is news.
+    c.seek(small.durationMs);
+    expect(c.ended).toBe(false);
+    c.seek(c.endMs);
+    expect(c.ended).toBe(true);
+    c.seek(c.endMs - 1);
+    expect(c.ended).toBe(false);
+    c.skipToResult();
+    expect(c.ended).toBe(true);
+    c.restart();
+    expect(c.ended).toBe(false);
+    expect(seen).toEqual([false, true, false, true, false]);
   });
 
   it('exposes read-only state', () => {

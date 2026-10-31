@@ -3,10 +3,14 @@
 // shared formatter (`src/lib/time-format.ts`) in the form the device's clock setting asks for. Whether a replay is kept is decided by
 // the server's time (the shared display clock), never the device's: a row turns into a dimmed "replay no longer kept" row the moment
 // the clock passes its expiry, and from then on never names its opponent, as the read never does for an expired replay.
+// The replay viewer's words (Arena replays spec 2, Task 5) are here too: its eyebrow, chapter names, end card and buttons.
+import type { LeagueId } from '@contracts/commands';
+import type { ActivitySummary, BattleLog, RevealedStage } from '@contracts/events';
 import type { ClockMode } from '../../lib/clock-setting';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import { replayKept } from '../../lib/replay-retention';
 import { dayText, timeOfDay } from '../../lib/time-format';
+import { tournamentRound } from '../../lib/tournament-id';
 
 export type BoutRowText = {
   kept: boolean;
@@ -99,3 +103,76 @@ const EMPTY: Record<BoutFilter, string> = {
 };
 /** What an empty list says, for its chip. */
 export const emptyText = (filter: BoutFilter): string => EMPTY[filter];
+
+// ------------------------------------------------------------------ the replay viewer (Task 5)
+
+/** The Result card's line before the fight ends, on every width. */
+export const RESULT_HINT = 'The result appears when the fight ends, or now with ⚑ Result.';
+
+/**
+ * The viewer's eyebrow: the kind and when the bout was fought, never the server's stage label, which names the outcome ("Bout:
+ * victory"; plan Review Focus 4). An Arena bout: "ARENA · SAT 10 OCT, 3:00 AM" (phone "ARENA · SAT 3:00 AM"), against an NPC "· NPC
+ * OPPONENT" (phone "· NPC"), at the stage's start (minute 60, its reveal). A tournament's bout, known by its round in the label or a
+ * bracket's league: "TOURNAMENT · BRONZE · FINAL", or "TOURNAMENT · FINAL" for a run whose timeline carries no league. An
+ * expedition's encounter keeps today's "Expedition · Encounter 1: Dire Wolf" (it holds no result).
+ */
+export function boutEyebrow(stage: RevealedStage, options: { npc: boolean; league: LeagueId | null; compact: boolean }, clock: ClockMode, timeZone?: string): string {
+  if (stage.kind === 'encounter') return `Expedition${SEP}${stage.label}`;
+  // The bracket supplies a safe round label rather than the run's outcome-bearing stage label.
+  const bracketRound = /^Tournament · (Final|Semifinals?|Quarterfinals?|Round [1-9]\d{0,2})$/.exec(stage.label)?.[1];
+  const round = tournamentRound(stage.label) ?? bracketRound?.replace(/finals$/, 'final') ?? null;
+  if (round !== null || options.league !== null) return ['TOURNAMENT', options.league ?? '', round ?? ''].filter(Boolean).join(SEP).toUpperCase();
+  const day = dayText(stage.startedAtMs, timeZone);
+  const time = timeOfDay(stage.startedAtMs, clock, timeZone);
+  const when = options.compact ? [day.split(' ')[0], time].filter(Boolean).join(' ') : [day, time].filter(Boolean).join(', ');
+  return ['ARENA', when, options.npc ? (options.compact ? 'NPC' : 'NPC OPPONENT') : ''].filter(Boolean).join(SEP).toUpperCase();
+}
+
+/** A chapter's name on the bar: a tournament run's round ("Quarterfinal"), an expedition encounter's label, else "Bout". */
+export function chapterLabel(stage: RevealedStage): string {
+  return tournamentRound(stage.label) ?? (stage.kind === 'encounter' ? stage.label : 'Bout');
+}
+
+/**
+ * The end card's verdict and reason, from the revealed log: "Aster wins", "Varro is defeated."; a simultaneous tie-break "Both fell at
+ * the same moment; a seeded tie-break chose Aster."; the time-out endings "Time ran out and Aster kept more health." and "Time ran out
+ * with equal health; a seeded tie-break chose Aster." A phone says either tie-break as "A tie-break chose Aster."
+ */
+export function verdictText(log: BattleLog, compact: boolean): { verdict: string; reason: string } {
+  const winner = log.participants.find(p => p.id === log.winnerId) ?? log.participants[0];
+  const loser = log.participants.find(p => p.id !== winner.id) ?? log.participants[1];
+  const reason = log.victoryReason === 'defeat' ? `${loser.name} is defeated.`
+    : log.victoryReason === 'health-fraction' ? `Time ran out and ${winner.name} kept more health.`
+      : compact ? `A tie-break chose ${winner.name}.`
+        : log.tieBreakReason === 'simultaneous-defeat' ? `Both fell at the same moment; a seeded tie-break chose ${winner.name}.`
+          : `Time ran out with equal health; a seeded tie-break chose ${winner.name}.`;
+  return { verdict: `${winner.name} wins`, reason };
+}
+
+/**
+ * The end card's chips: the fighter's credited rewards ("+10 renown", "+100 gold", "Rating +14" or "NPC: no rating change"; zero parts
+ * left out), or before settlement "Rewards are credited when the bout settles" ("…when the tournament settles" for a run). A spectator
+ * sees none; a tournament run shows them on its last chapter only. An expedition's rewards are the whole trip's, which the Result card
+ * below lists, so its end card shows none.
+ */
+export function rewardChips(summary: ActivitySummary | null,
+  options: { fighter: boolean; npc: boolean; kind: 'arena' | 'tournament' | 'expedition'; last: boolean }): string[] {
+  if (!options.fighter || !options.last || options.kind === 'expedition') return [];
+  if (!summary) return [`Rewards are credited when the ${options.kind === 'tournament' ? 'tournament' : 'bout'} settles`];
+  const { renown, money } = summary.rewards;
+  return [
+    renown > 0 ? `+${renown} renown` : '',
+    money > 0 ? `+${money} gold` : '',
+    options.npc ? 'NPC: no rating change' : summary.ratingDelta ? ratingText(summary.ratingDelta) : '',
+  ].filter(Boolean);
+}
+
+/** The end card's step to the next bout: "▶ Next bout · vs Cassia" (phone "▶ Next · vs Cassia"), "▶ Next bout" with no known opponent. */
+export function nextLabel(opponent: string | null, compact: boolean): string {
+  return `${compact ? '▶ Next' : '▶ Next bout'}${opponent ? `${SEP}vs ${opponent}` : ''}`;
+}
+
+/** The end card's replay button: "↺ Watch again" (phone "↺ Again"). */
+export function againLabel(compact: boolean): string {
+  return compact ? '↺ Again' : '↺ Watch again';
+}

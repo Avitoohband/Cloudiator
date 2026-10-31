@@ -833,9 +833,10 @@ test.describe('the Arena card and league standings', () => {
     await expect(watch).toBeEnabled();
     await watch.focus();
     await page.keyboard.press('Enter');
-    // The replay opens over the camp (Task 13.8) with its Back button ("← Arena") focused; Escape closes it and gives the focus back.
+    // Once loaded, Pause takes focus; Escape closes the replay and returns focus to Watch replay.
     const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
-    await expect(scene.getByRole('button', { name: 'Back to Arena', exact: true })).toBeFocused();
+    await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+    await expect(scene.getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(scene).toHaveCount(0);
     await expect(watch).toBeFocused();

@@ -172,13 +172,13 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | A fight up close | Watch any bout up close, blow by blow, with health bars. | 1.0 | Live | Replay page, `<Aster vs Varro>`; `<Tie-break bout>` for a close finish | Concept trailer |
 | Replays kept a week | Every replay can be watched for 7 days. | 1.0 | Live | Replay page, `<Expired bout>` shows the "no longer kept" card | — |
 | The whole trip from Results | Replay on an expedition in Results opens the whole-trip replay. | 1.4 | Live | Results → Replay on an expedition row | — |
-| My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Planned 1.5 | Not built | — |
-| A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Planned 1.5 | Not built | — |
-| The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Planned 1.5 | Not built | — |
+| My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
+| A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
+| The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Planned 1.5 | Not built | — |
-| Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Planned 1.5 | Not built | — |
-| No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Planned 1.5 | Not built | — |
-| Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Planned 1.5 | Not built | — |
+| Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
+| No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
+| Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.8 | Planned 1.8 | Not built | — |
 | Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.8 | Planned 1.8 | Not built | — |
 

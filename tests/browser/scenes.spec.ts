@@ -102,10 +102,10 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: REPLAY_FIXTURES.pvp.activityId, from: 'results' });
     await expect(replayScene.getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
-    // Full window, over the camp, which stays ready (paused beneath it since Task 23.4); Back takes the focus.
+    // Full window over the camp; the loaded replay moves the focus from Back to Pause.
     const viewport = page.viewportSize()!;
     expect(await replayScene.boundingBox()).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
-    await expect(backTo(page, 'Results')).toBeFocused();
+    await expect(replayScene.getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
     expect(await page.evaluate(() => window.__cloudiatorCamp!.state()!.ready)).toBe(true);
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
     await settled(page);
@@ -167,9 +167,10 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await expect(scene(page, 'Replay')).toBeVisible();
     // The encounter's replay goes back to where the expedition did.
     expect(search(page)).toEqual({ mode: 'fixture', view: 'replay', activity: woodland, stage: `${woodland}:1`, from: 'results' });
-    // The focus moves with the scene (fix round 1, M6): to its Back button, never to <body>.
-    await expect(backTo(page, 'Results')).toBeFocused();
-    await expect(scene(page, 'Replay').getByRole('button', { name: 'Encounter 1: victory', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // The loaded replay moves focus to Pause, never to <body>.
+    await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+    await expect(scene(page, 'Replay').getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
+    await expect(scene(page, 'Replay').getByRole('list', { name: 'Chapters', includeHidden: true }).getByRole('button', { includeHidden: true }).first()).toHaveAttribute('aria-current', 'step');
     // The browser's Back returns to the expedition scene, again with the focus in the scene: its whole-trip replay starts with ▶
     // focused (Patch A Task 9).
     await page.goBack();
@@ -177,7 +178,8 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await expect(scene(page, 'Expedition').getByRole('button', { name: 'Play', exact: true })).toBeFocused();
     await page.goForward();
     await expect(scene(page, 'Replay')).toBeVisible();
-    await expect(backTo(page, 'Results')).toBeFocused();
+    await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+    await expect(scene(page, 'Replay').getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
     await backTo(page, 'Results').click();
     await expect(scene(page, 'Replay')).toHaveCount(0);
     await expect(scene(page, 'Expedition')).toHaveCount(0);
@@ -255,7 +257,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     const replay = scene(page, 'Replay');
     await expect(replay.getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
     expect(search(page).activity).toBe(REPLAY_FIXTURES.pvp.activityId);
-    await replay.getByRole('button', { name: 'Skip to result' }).click();
+    await replay.getByRole('button', { name: 'Skip to the result' }).click();
     await expect(replay.getByRole('region', { name: 'Result' })).toContainText('wins');
     await expect(replay).not.toContainText(REWARDS);
     // Nor a promise of rewards that are not theirs (fix round 1, M5).
@@ -406,6 +408,8 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
     await settled(page);
     await reviewShot(page, testInfo, 'scene-back-390-top');
+    // Task 5 folds these details; expand them to retain the original 400px scroll-boundary coverage.
+    for (const name of ['Fighters at the start', 'Combat log']) await replayScene.getByRole('group', { name, exact: true }).locator('summary').click();
     await replayScene.evaluate(element => { element.scrollTop = 400; });
     // The scene is tall enough to scroll 400 px, and has done so.
     expect(await replayScene.evaluate(element => element.scrollTop)).toBe(400);
@@ -446,6 +450,8 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
     const replayScene = scene(page, 'Replay');
     await expect(replayScene.getByRole('heading', { level: 2, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
+    // Expanded details keep enough page below the controls to exercise focus obscured by the sticky header.
+    for (const name of ['Fighters at the start', 'Combat log']) await replayScene.getByRole('group', { name, exact: true }).locator('summary').click();
     const back = backTo(page, 'Results');
     // The control after Back in the Tab order.
     await back.focus();
@@ -522,7 +528,7 @@ test.describe('replays and expeditions over the camp (fixture preview)', () => {
       const replay = scene(page, 'Replay');
       await battleReady(REPLAY_FIXTURES.expedition.battleIds[0]);
       for (const n of [1, 2]) {
-        await replay.getByRole('group', { name: 'Encounters' }).getByRole('button').nth(n).click();
+        await replay.getByRole('button', { name: 'Next bout', exact: true }).click();
         await battleReady(REPLAY_FIXTURES.expedition.battleIds[n]);
       }
       await backToCamp(page).click();
@@ -705,7 +711,7 @@ test.describe("an owner's replay and expedition when the session ends", () => {
     type Root = ReturnType<Page['locator']>;
     // A replay shows its result (and any credited rewards) once played through: skip to it.
     const replayResult = async (root: Root) => {
-      await root.getByRole('button', { name: 'Skip to result' }).click({ timeout: 45_000 });
+      await root.getByRole('button', { name: 'Skip to the result' }).click({ timeout: 45_000 });
       await expect(root.getByRole('heading', { name: 'Result' })).toBeVisible();
     };
     const journey = async (root: Root) => { await expect(root.getByRole('heading', { name: 'Woodland Path', exact: true })).toBeVisible({ timeout: 45_000 }); };

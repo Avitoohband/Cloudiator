@@ -12,7 +12,8 @@
 // the account's own read: once the session is known, a sign-out, expiry or account switch (here or in another tab)
 // remounts it as the new reader, so no owner's rewards outlive the session (final review Minor 1). It mounts only once
 // the viewer is known, so a signed-in deep link reads once (Task 23.5). A player's replay scene marks its activity watched on this
-// device whenever it shows one, so My bouts drops that bout's dot (Arena replays Task 4).
+// device whenever it shows one, so My bouts drops that bout's dot (Arena replays Task 4). A replay takes the focus from Back to ⏸ once
+// it has loaded, and its result card offers the same way back at the end (Arena replays Task 5).
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
@@ -111,7 +112,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
       onCancel={event => { event.preventDefault(); closeRef.current(); }}
       onClose={() => { if (!leaving.current && !dialog.current?.open) closeRef.current(); }}>
       <div className={styles.sceneTop} data-testid="scene-top">
-        <button ref={back} type="button" className={styles.sceneBack} aria-label={`Back to ${label}`} onClick={onClose}><span aria-hidden="true">←</span> {label}</button>
+        <button ref={back} type="button" className={styles.sceneBack} data-scene-back="" aria-label={`Back to ${label}`} onClick={onClose}><span aria-hidden="true">←</span> {label}</button>
       </div>
       <div className={styles.sceneBody}>
         {named === null
@@ -122,7 +123,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
           : named.kind === 'replay'
             ? loading ? <p role="status">Loading the replay…</p>
               : <ActivityReplay key={viewKey} reads={reads} activityId={named.activityId} stageId={named.stageId ?? null} clock={clock} headingLevel={2}
-                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} />
+                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} takeFocus back={{ label, go: onClose }} />
             : loading ? <p role="status">Loading the expedition…</p>
               : <ExpeditionView key={viewKey} reads={reads} activityId={named.activityId} fixture={fixture} play={named.play ?? null}
                 onPlay={play => onWatch?.(play ? { kind: 'expedition', activityId: named.activityId, play, ...origin } : { kind: 'expedition', activityId: named.activityId, ...origin })}

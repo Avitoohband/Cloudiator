@@ -64,6 +64,6 @@ describe('patch numbers', () => {
     expect(SEED_PATCHES.map(p => ({ number: p.number, title: p.title, date: new Date(p.releasedAtMs).toISOString().slice(0, 10), features: p.features, planned: false })))
       .toEqual(seeded);
     for (const p of [PATCH_1_4, ...SEED_PATCHES]) expect(p.sortKey, p.number).toBe(patchSortKey(p.number));
-    expect(PATCH_1_4.number).toBe(PATCH);
+    expect(PATCH_1_4.number).toBe('1.4');
   });
 });

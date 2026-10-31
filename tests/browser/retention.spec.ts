@@ -104,7 +104,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await expect(saved).toContainText('The animation for this fight is no longer kept');
     await expect(saved).toContainText('Credited rewards');
     await expect(saved).toContainText('+3 renown');
-    await expect(page.getByRole('button', { name: 'Skip to result' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Skip to the result' })).toHaveCount(0);
     expect(await page.evaluate(() => !!window.__cloudiatorReplay)).toBe(false);
     await page.screenshot({ path: testInfo.outputPath(`retention-arena-replay-${testInfo.project.name}.png`), fullPage: true });
     // Expedition, after cleanup: no stage is left, only the owner's settled summary.

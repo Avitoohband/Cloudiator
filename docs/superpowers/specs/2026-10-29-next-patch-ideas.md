@@ -123,3 +123,25 @@ More from Avi, 2026-10-30 (collected for the plans, not yet designed):
     bonuses, should be very hard to achieve. for example, Berserker has more % STR and Guardian have 10% endurance instead of 5."
     One long, very hard quest chain per class; finishing it upgrades that class's bonus (Berserker Strength above +10 %,
     Guardian Endurance +5 % → +10 %, Duelist Agility/Precision up). Endgame; fits with the Deep and titles (a title for each).
+
+More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 30-34):
+
+36. **Videos in the guide.** "In the wiki your links to YouTube videos and explanation and links to the patch notes videos on
+    YouTube": the in-game guide (idea 34) links the explainer videos and each patch's video on YouTube (Indigo Labs).
+37. **A better inventory with item pictures, and in the shops too.** "Better inventory setup with items appearance. Also in
+    shop": each item shown with its picture, in Inventory and in the shops.
+38. **A look-change option.** "appearance look change option": change look from the menu at any time (today only from the 1.3
+    patch note's one free change); maybe priced, or tied to the renown skins shop.
+39. **Support with triage.** Idea 30 plus "with jev to classify those issues": support requests are classified (bug, account,
+    balance, idea…) automatically; Avi's word "jev" to confirm.
+40. **A world tournament with a statue for the winner.** "World tournament for statue for winner": a big all-leagues
+    tournament; the winner gets a statue in the camp (a facility plot, idea 29).
+41. **Events.** "Make events": timed in-game events.
+42. **Potions for stamina and health.** "Potions for stamina and health": consumables (fits the 1.6 economy and the shops).
+43. **Houses, decorations and achievements.** "When camp full, the gladiator rest in house, add decorations and achievements":
+    when the camp's beds are full, a gladiator rests in a house; houses can be decorated; achievements.
+44. **Guilds and raids.** "Guilds in the future with raids. And special items to sell in market": guilds, raid content, and
+    special raid items that can be sold on the market.
+
+Already listed: the watch mode for streams (31), the 24/7 stream (32), the Champ (33), Endurance and load and what each stat
+does (34).

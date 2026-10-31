@@ -111,3 +111,10 @@ More from Avi, 2026-10-30 (collected for the plans, not yet designed):
     Labs channel; cost and hosting to be checked.
 33. **An NPC "the Champ".** "Add npc 'the champ' - which was the champ of the arena, level unknown": a legendary former Arena
     champion in the camp, level shown as unknown (fits the 1.5.1 camp NPCs and the bigger camp's plots).
+
+34. **An in-game guide (a small wiki) and an explainer clip (Avi, 2026-10-31).** "all of those should be in the game
+    details somewhere, maybe a little wiki, when it comes out. also a clip should explain that as well. and what each stat does,
+    how agility, precision affect the game, and fights, why someone miss or dodge." Covers: stamina costs per activity and
+    overload; what each attribute does (Strength, Agility, Vitality, Endurance, Precision) in numbers; class bonuses; how a
+    fight resolves (hit, miss, dodge, critical, armour, attack speed); Rest and the Training cap. The numbers must be read from
+    the active rules (v1 now, v2 after 1.6), never typed by hand. A players' explainer clip follows its release.

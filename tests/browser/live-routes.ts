@@ -445,7 +445,8 @@ function activityRows(timelines: readonly RevealedTimeline[], owner: OwnerState 
   for (const t of timelines) if (t.summary) merge(t.activityId, { id: t.activityId, status: 'completed', settled_at_ms: t.summary.settledAtMs, summary: t.summary });
   if (!owner) return [...rows.values()];
   for (const n of data.notifications ?? []) {
-    merge(n.summary.activityId, { id: n.summary.activityId, slot_index: Math.floor(n.summary.settledAtMs / SLOT_MS), status: 'completed',
+    const slot = Math.floor((n.summary.settledAtMs - 1) / SLOT_MS);
+    merge(n.summary.activityId, { id: n.summary.activityId, gladiator_id: owner.gladiatorId, slot_index: slot, starts_at_ms: slot * SLOT_MS, status: 'completed',
       resolved_kind: n.summary.resolvedKind, settled_at_ms: n.summary.settledAtMs, summary: n.summary,
       requested: n.expeditionId ? { expeditionId: n.expeditionId } : {},
       gladiators: { level: owner.progression.level, xp: owner.progression.xp, newer: [{ count: 0 }] } });

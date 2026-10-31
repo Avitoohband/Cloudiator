@@ -12,9 +12,10 @@ import { badgeText, buttonName, newCount, type MessagingActions } from './messag
 import { MessagesPanel } from './MessagesPanel';
 import styles from './messages.module.css';
 
-export function MessagesButton({ inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef, history,
+export function MessagesButton({ inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef, history, initialTab, watch,
   latestPatch = null }: MessagingActions & {
   inbox: Inbox;
+  initialTab?: 'messages' | 'notifications';
   /** Opens the panel on Patch history, at that patch (the account menu's "Patch history ›"); absent opens the lists. */
   history?: { patch: string | null };
   /** The server's newest patch, for Patch history. */
@@ -48,6 +49,6 @@ export function MessagesButton({ inbox, load, loadNotifications, loadPatches, re
     </button>
     <span role="status" className={styles.sr} data-testid="messages-live">{announcement}</span>
     {open && <MessagesPanel id={panelId} inbox={inbox} load={load} loadNotifications={loadNotifications} loadPatches={loadPatches} read={read}
-      seeNotifications={seeNotifications} changeLook={changeLook} onClose={onClose} history={history} latestPatch={latestPatch} />}
+      seeNotifications={seeNotifications} initialTab={initialTab} watch={watch} changeLook={changeLook} onClose={onClose} history={history} latestPatch={latestPatch} />}
   </>;
 }

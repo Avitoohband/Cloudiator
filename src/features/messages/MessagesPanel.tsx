@@ -18,7 +18,7 @@ import { PATCH } from '../../lib/patch';
 import { isNewNotification, isUnread, messageDate, messagesStale, notificationsStale, tagName, badgeText, type MessagingActions, type ShownMessage } from './messages';
 import { PatchHistory } from './PatchHistory';
 import { LookDisclaimer } from './LookDisclaimer';
-import { levelUpLine, notificationLines } from './notifications';
+import { levelUpLine, notificationLines, watchLabel } from './notifications';
 import { useLoaded, useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
 
@@ -54,9 +54,11 @@ function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
   return <button type="button" className={styles.patchNumber} data-patch-number={patch} onClick={onOpen}>Patch {patch}</button>;
 }
 
-export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, latestPatch = null }: MessagingActions & {
+export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null }: MessagingActions & {
   id: string;
   inbox: Inbox;
+  /** Explicit origin return overrides the ordinary unread-count choice. */
+  initialTab?: Tab;
   /** Opens the panel on Patch history, with that patch open (null: the newest). */
   history?: { patch: string | null };
   /** The server's newest patch (the sync's), for Patch history's "Patch 1.5 is out". */
@@ -70,7 +72,15 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const ids = useId();
   // Open on what is new: Notifications when only results are, else Messages.
   // (Opened on Patch history, it stays on Messages beneath it: the results are marked seen only once their tab is shown.)
-  const [tab, setTab] = useState<Tab>(() => (!history && inbox.unread === 0 && inbox.newNotifications > 0 ? 'notifications' : 'messages'));
+  const [tab, setTab] = useState<Tab>(() => (initialTab ?? (!history && inbox.unread === 0 && inbox.newNotifications > 0 ? 'notifications' : 'messages')));
+  useEffect(() => { if (initialTab) root.current?.querySelector<HTMLElement>('[data-tab="' + initialTab + '"]')?.focus(); }, [initialTab]);
+  // Retention follows the shared clock even while no inbox read changes the cards.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!watch) return;
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') tick(n => n + 1); }, 1000);
+    return () => window.clearInterval(timer);
+  }, [watch]);
   const [visitedNotifications, setVisitedNotifications] = useState(tab === 'notifications');
   const [current, setCurrent] = useState<number | null>(null);
   // Patch history over the list: the patch it opens at, and the note whose number opened it (Back to messages returns to its row).
@@ -253,6 +263,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                     {noteItems.map(note => {
                       const { title, lines, levelUp } = notificationLines(note);
                       const fresh = isNewNotification(note, seenAtOpen);
+                      const label = watch && watch.kept(note) ? watchLabel(note) : null;
                       return <li key={note.activityId} className={styles.card} data-notification data-unread={fresh ? '' : undefined}>
                         <span className={styles.rowTop}>
                           <span className={styles.rowTitle}>
@@ -262,6 +273,9 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                           </span>
                           <span className={styles.date}>{messageDate(note.settledAtMs)}</span>
                         </span>
+                        {label && <button type="button" className={styles.noteWatch} aria-label={label.name} onClick={() => watch?.open(note)}>
+                          <span className={styles.wide}>{label.wide}</span><span className={styles.narrow}>{label.narrow}</span>
+                        </button>}
                         <ul className={styles.lines}>
                           {lines.map((line, n) => <li key={n} className={levelUp !== null && line === levelUpLine(levelUp) ? styles.level : undefined}>{line}</li>)}
                         </ul>

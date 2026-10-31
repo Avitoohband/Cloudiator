@@ -12,6 +12,8 @@ export type { ShownMessage } from '../../lib/api/reads';
  * Both reject when the mark or the re-read fails, and the panel then asks again the next time the same thing happens.
  */
 export type MessagingActions = {
+  /** Watch uses the shared server clock; the popover closes before open is called. */
+  watch?: { kept(note: GameNotification): boolean; open(note: GameNotification): void };
   /** The messages, each patch note with its patch number (null when it has none, or the numbers read failed). */
   load(): Promise<ShownMessage[]>;
   /** One page of Patch history: 20 patches, newest first, older than `beforeSortKey` when given; `more` when there are older ones. */

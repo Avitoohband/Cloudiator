@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActivitySummary, BattleLog, RevealedStage } from '@contracts/events';
 import type { MyBout } from '@/lib/api/reads';
 import {
-  RESULT_HINT, againLabel, boutEyebrow, boutRow, chapterLabel, counterText, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, upNextText, verdictText,
+  RESULT_HINT, againLabel, recentRow, boutEyebrow, boutRow, chapterLabel, counterText, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, upNextText, verdictText,
 } from '@/features/bouts/bout-text';
 import { ARENA_BATTLE_LOGS } from '../fixtures/arena';
 
@@ -177,4 +177,17 @@ describe('the replay viewer', () => {
     expect(nextLabel(null, true)).toBe('▶ Next');
     expect(RESULT_HINT).toBe('The result appears when the fight ends, or now with ⚑ Result.');
   });
+});
+
+describe('recent Arena menu rows', () => {
+ it('uses relative calendar days and only the first applicable detail', () => {
+ expect(recentRow(bout(), NOW, '12', 'UTC').sub).toEqual({ wide: 'Today, 3:00 AM · Rating +14', narrow: 'Today, 3:00 AM · Rating +14' });
+ expect(recentRow(bout({ ratingDelta: null, renown: 0, tieBreak: true }), NOW, '12', 'UTC').sub).toEqual({ wide: 'Today, 3:00 AM · won on a tie-break', narrow: 'Today, 3:00 AM · tie-break' });
+ expect(recentRow(bout({ result: 'defeat', ratingDelta: 0, tieBreak: true }), NOW, '24', 'UTC').sub.wide).toBe('Today, 03:00 · lost on a tie-break');
+ expect(recentRow(bout({ foughtAtMs: Date.UTC(2026, 9, 9, 23), ratingDelta: null, renown: 3 }), NOW, '12', 'UTC').sub.wide).toBe('Fri, 11:00 PM · +3 renown');
+ expect(recentRow(bout({ foughtAtMs: Date.UTC(2026, 9, 3, 19), ratingDelta: 0, renown: 0 }), NOW, '12', 'UTC').sub.wide).toBe('Sat 3 Oct, 7:00 PM');
+ expect(recentRow(bout({ replayExpiry: { state: 'expired' } }), NOW, '12', 'UTC').sub.wide).toBe('Today, 3:00 AM · replay no longer kept');
+ expect(recentRow(bout(), null, '12', 'UTC')).toMatchObject({ action: null, sub: { wide: 'Sat 10 Oct, 3:00 AM · Rating +14' } });
+ expect(recentRow(bout({ foughtAtMs: Date.UTC(2026, 9, 9, 23) }), NOW, '24', 'Etc/GMT-3').sub.wide).toBe('Today, 02:00 · Rating +14');
+ });
 });

@@ -68,6 +68,7 @@ import { ResultsPanel } from '../results/ResultsPanel';
 import { FIRST_RESULTS, choiceFor, choiceOwner, choose, type ResultsChoice } from '../results/results-choice';
 import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
+import { replayKept } from '../../lib/replay-retention';
 import type { MessagingActions } from '../messages/messages';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
@@ -246,6 +247,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // The Results tab and chip (`results-choice.ts`): My bouts and All for each owner until changed; another owner (or none) starts there
   // again. A choice made while the viewer loads (Back from a scene right after a reload) waits for the first owner that loads (fix round 1).
   const choiceKey = choiceOwner(viewer, owner?.gladiatorId);
+  const [messagesRequest, setMessagesRequest] = useState<{ tab: 'notifications'; n: number; owner: typeof choiceKey } | null>(null);
+  const messageRequests = useRef(0);
+  useEffect(() => {
+    setMessagesRequest(request => !request || request.owner === choiceKey ? request
+      : request.owner === undefined && typeof choiceKey === 'string' ? { ...request, owner: choiceKey } : null);
+  }, [choiceKey]);
+  const currentMessagesRequest = messagesRequest && (messagesRequest.owner === choiceKey || messagesRequest.owner === undefined && typeof choiceKey === 'string') ? messagesRequest : null;
   const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ owner: undefined, ...FIRST_RESULTS });
   const results = choiceFor(resultsChoice, choiceKey);
   // The owner settles the choice once known, so a later owner never adopts it (an account switch goes through a loading viewer).
@@ -352,12 +360,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     const from = cameFrom.current;
     cameFrom.current = null;
     if (!from) return;
+    if (from === 'notifications') setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, owner: choiceKey });
     const filter = boutFilterOf(from);
     if (filter) chooseResults({ view: 'mine', filter });
     else if (from === 'results') chooseResults({ view: 'everyone' });
     const menu = originMenu(from);
     if (menu) show(menu);
-  }, [sceneOpen, sceneFrom, show, chooseResults]);
+  }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey]);
   // The away button (Patch A item 3): the player's own trip, from the owner state, the world, the owner's results and its timeline. It opens
   // the scene `awayScene` names; when the scene closes, the focus goes back to the button (the scene's own opener is gone with it).
   const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs });
@@ -383,6 +392,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // opens the same message or tab again.
   const { refreshOwner } = game;
   const messaging = useMemo<MessagingActions | undefined>(() => reads ? {
+    watch: {
+      kept: note => clock.synced() && replayKept(note.summary.replayExpiry, clock.now()),
+      open: note => {
+        if (!clock.synced() || !replayKept(note.summary.replayExpiry, clock.now()) || note.kind === 'training') return;
+        openScene(note.kind === 'expedition' ? { kind: 'expedition', activityId: note.activityId, play: 'trip', from: 'notifications' }
+          : { kind: 'replay', activityId: note.activityId, from: 'notifications' });
+      },
+    },
     load: () => reads.messages(),
     loadNotifications: () => reads.notifications(),
     loadPatches: beforeSortKey => reads.patches(beforeSortKey),
@@ -396,7 +413,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       if (!result.ok) throw new Error(result.code);
       await refreshOwner();
     },
-  } : undefined, [reads, refreshOwner]);
+  } : undefined, [reads, refreshOwner, clock, openScene]);
 
   // The change-look dialog (Task 7), opened by the look note's Change look button: the messages panel has closed by then, and the focus
   // goes back to the Messages button when the dialog does. A saved look is said by a status line that stays until it is dismissed, the
@@ -464,7 +481,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       case 'market': return reads ? <MarketPanel key={ownerId ?? viewer} reads={reads} gateway={viewer === 'player' ? gateway : null} owner={owner} viewer={viewer}
         clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} />
         : <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
-      case 'arena': return <ArenaMenu open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
+      case 'arena': return <ArenaMenu bouts={bouts} onWatchBout={bout => openScene({ kind: 'replay', activityId: bout.activityId, from: 'arena' })}
+        onAllBouts={() => { chooseResults({ view: 'mine', filter: 'all' }); show('results'); }} open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
         onProfile={(row, season) => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses, season }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
@@ -484,7 +502,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
-      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging}
+      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging} messagesRequest={currentMessagesRequest}
         latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}

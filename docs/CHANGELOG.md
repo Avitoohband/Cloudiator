@@ -34,10 +34,12 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - The replay header keeps the result hidden while the fight plays. On a phone, who won stays in view and Fighters and Combat log fold away.
 - Back names where you opened the replay and returns there in one step.
 - Next bout follows your list, with a counter and Up next.
+- Notifications open your kept Arena and tournament replays with Watch, and expeditions with Watch the trip; Back returns to Notifications.
+- The Arena menu shows your three latest bouts with Watch and a link to all your bouts in Results.
 
 ### Planned
 
-- Open replays directly from Notifications, recent Arena bouts and the camp's Arena result button.
+- Open replays directly from the camp's Arena result button.
 - Tournament brackets open the full-screen viewer, with each decided bout as a chapter.
 
 ## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)

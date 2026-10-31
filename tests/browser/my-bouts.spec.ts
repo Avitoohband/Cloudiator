@@ -101,6 +101,41 @@ test.describe('My bouts in Results', () => {
   test.skip(production, 'These checks use the fixture preview.');
   test.beforeEach(async ({ context }) => { await quietArrivals(context); });
 
+test('the Arena menu lists my three latest bouts and links to all of them', async ({ page, context }, testInfo) => {
+  await quietArrivals(context);
+  await openCamp(page);
+  const initialResults = await myBouts(page);
+  await chip(initialResults, 'Lost').click();
+  await initialResults.getByRole('tab', { name: 'Everyone', exact: true }).click();
+  await closeMenu(page);
+  const arena = await openMenu(page, 'Arena');
+  const recent = arena.getByRole('region', { name: 'Your recent bouts', exact: true });
+  await expect(names(recent)).toHaveText(['vs Varro', 'vs Cassia', 'vs Iron Warden']);
+  await expect(recent.locator('[data-sub]:visible')).toHaveText(['Today, 2:40 AM · Rating +13', 'Today, 1:20 AM · Rating −13', 'Today, 12:00 AM · +3 renown']);
+  const current = arena.getByRole('button', { name: 'Your arena bout', exact: true });
+  if (await current.count()) expect((await current.boundingBox())!.y).toBeLessThan((await recent.boundingBox())!.y);
+  await shot(page, testInfo, 'arena-recent');
+  await rows(recent).first().getByRole('button').click();
+  await expect(replayScene(page).getByRole('heading', { name: 'Aster vs Varro', exact: true })).toBeVisible();
+  await expect(replayScene(page).locator('[data-bout-counter]')).toContainText('1');
+  await expect(replayScene(page).locator('[data-bout-counter]')).toContainText('5');
+  await page.getByRole('button', { name: 'Back to Arena', exact: true }).click();
+  await expect(arena).toBeVisible();
+  await expect(rows(recent).first().locator('[data-unwatched-dot]')).toHaveCount(0);
+  await recent.getByRole('button', { name: /All my bouts/ }).click();
+  const results = menuDialog(page, 'Results');
+  await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true');
+  await expect(chip(results, 'All')).toHaveAttribute('aria-pressed', 'true');
+  await closeMenu(page);
+  await openMenu(page, 'Arena');
+  await page.setViewportSize({ width: 360, height: 740 });
+  await recent.scrollIntoViewIfNeeded();
+  expect(await noHorizontalScroll(page)).toBe(true);
+  const rects = await recent.getByRole('button').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
+  expect(rects.every(r => r.w >= 44 && r.h >= 44)).toBe(true);
+  await shot(page, testInfo, 'arena-recent-360');
+});
+
   test('turns a row into a Result row when the clock passes its replay’s expiry', async ({ page }) => {
     // Review fix round 1, Minor 4: the server's time decides, on the shared display clock, without a new read.
     await openCamp(page);

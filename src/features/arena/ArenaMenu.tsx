@@ -12,10 +12,15 @@ import type { DisplayClock } from '../../game/display-clock';
 import { arenaFightButton } from '../../game/arena-layout';
 import { ArenaPanel, type ArenaSample } from './ArenaPanel';
 import { StandingsPanel } from './StandingsPanel';
+import type { BoutsStore } from '../bouts/bouts-store';
+import type { MyBout } from '../../lib/api/reads';
 import styles from './ArenaPanel.module.css';
 
-export function ArenaMenu({ open, bridge, reads, owner, world, clock, fixture, samples, fights, sceneUnavailable, revision, onProfile }: {
+export function ArenaMenu({ open, bridge, reads, owner, world, clock, fixture, samples, fights, sceneUnavailable, revision, onProfile, bouts, onWatchBout, onAllBouts }: {
   open: boolean;
+  bouts?: BoutsStore | null;
+  onWatchBout?(bout: MyBout): void;
+  onAllBouts?(): void;
   bridge: SceneBridge;
   reads: GameGateway | null;
   owner: OwnerState | null;
@@ -50,7 +55,7 @@ export function ArenaMenu({ open, bridge, reads, owner, world, clock, fixture, s
     )}
     {/* Live mode reads Arena timelines and opponent profiles through the live gateway (Tasks 10/16); without an owner
         it is a spectator's: cards opened from the camp, with public stages and results only. */}
-    <ArenaPanel bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture} samples={samples} />
+    <ArenaPanel bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture} samples={samples} bouts={open ? bouts : null} onWatchBout={onWatchBout} onAllBouts={onAllBouts} />
     {/* Live mode reads the paginated league standings through the live gateway (Task 16); the same reads serve the seasons
         for the season picker and card, finished seasons' archives, and the owner's own season row (Task 21.4). */}
     {open && <StandingsPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} revision={revision} onProfile={onProfile} />}

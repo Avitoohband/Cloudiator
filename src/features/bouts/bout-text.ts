@@ -9,7 +9,7 @@ import type { ActivitySummary, BattleLog, RevealedStage } from '@contracts/event
 import type { ClockMode } from '../../lib/clock-setting';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import { replayKept } from '../../lib/replay-retention';
-import { dayText, timeOfDay } from '../../lib/time-format';
+import { calendarDays, dayText, timeOfDay } from '../../lib/time-format';
 import { tournamentRound } from '../../lib/tournament-id';
 import type { QueueEntries } from './bout-queue';
 
@@ -73,6 +73,18 @@ export function boutRow(bout: MyBout, nowMs: number | null, clock: ClockMode, ti
   const action = nowMs === null ? null : kept ? '▶ Watch' : 'Result';
   const when = [dayText(bout.foughtAtMs, timeZone), time].filter(Boolean).join(', ');
   return { kept, badge, name, tag, sub, action, label: `${kept ? 'Watch' : 'Result'}: ${name}${when ? `, ${when}` : ''}` };
+}
+
+/** The Arena menu's relative day, time and one detail, with My bouts' retention and identity rules. */
+export function recentRow(bout: MyBout, nowMs: number | null, clock: ClockMode, timeZone?: string): BoutRowText {
+  const row = boutRow(bout, nowMs, clock, timeZone);
+  const day = dayText(bout.foughtAtMs, timeZone);
+  const days = nowMs === null ? null : calendarDays(bout.foughtAtMs, nowMs, timeZone);
+  const relative = days === 0 ? 'Today' : days !== null && days > 0 && days <= 6 ? day.split(' ')[0] : day;
+  const when = [relative, timeOfDay(bout.foughtAtMs, clock, timeZone)].filter(Boolean).join(', ');
+  const detail = !row.kept ? 'replay no longer kept' : bout.ratingDelta ? ratingText(bout.ratingDelta)
+    : bout.tieBreak ? (bout.result === 'defeat' ? 'lost on a tie-break' : 'won on a tie-break') : bout.renown > 0 ? `+${bout.renown} renown` : '';
+  return { ...row, sub: { wide: [when, detail].filter(Boolean).join(SEP), narrow: [when, row.kept && bout.tieBreak && !bout.ratingDelta ? 'tie-break' : detail].filter(Boolean).join(SEP) } };
 }
 
 /**

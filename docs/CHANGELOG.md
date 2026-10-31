@@ -36,10 +36,10 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Next bout follows your list, with a counter and Up next.
 - Notifications open your kept Arena and tournament replays with Watch, and expeditions with Watch the trip; Back returns to Notifications.
 - The Arena menu shows your three latest bouts with Watch and a link to all your bouts in Results.
+- After your Arena bout ends, a camp button names who won, shows rewards once credited and opens the replay; dismiss it for that bout on this device.
 
 ### Planned
 
-- Open replays directly from the camp's Arena result button.
 - Tournament brackets open the full-screen viewer, with each decided bout as a chapter.
 
 ## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)

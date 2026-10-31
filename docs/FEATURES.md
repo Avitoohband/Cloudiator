@@ -179,6 +179,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
 | Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
+| Your Arena result on the camp | After your bout ends, see who won and the credited rewards, Watch the bout, or dismiss it on this device. | 1.5 | Built; waiting for 1.5 release | Live camp after your Arena bout; phone beside ☰ | — |
 | Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.8 | Planned 1.8 | Not built | — |
 | Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.8 | Planned 1.8 | Not built | — |
 

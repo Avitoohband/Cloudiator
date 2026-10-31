@@ -371,7 +371,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey, requestAccount]);
   // The away button (Patch A item 3): the player's own trip, from the owner state, the world, the owner's results and its timeline. It opens
   // the scene `awayScene` names; when the scene closes, the focus goes back to the button (the scene's own opener is gone with it).
-  const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs });
+  const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs, clock });
   const awayOpened = useRef(false);
   const openFromAway = useCallback((view: SceneView) => { awayOpened.current = true; openScene(view); }, [openScene]);
   useEffect(() => {

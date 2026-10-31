@@ -793,12 +793,15 @@ expect(recentRow(bout({ replayExpiry: { state: 'expired' } }), NOW, '12', 'UTC')
 
 **Files:**
 - Modify: Patch A's `src/features/shell/away-trip.ts` (the `bout` state), `src/features/shell/AwayButton.tsx` (⚔ and the bout's
-  action), `src/features/shell/CampShell.tsx` (the bout's candidate and timeline read; the newer state wins)
+  action), `src/features/shell/useAwayTrip.ts` (the bout's candidate and timeline read; the newer state wins),
+  `src/features/shell/CampShell.tsx` (passes the shared display clock to the existing hook)
 - Test: Patch A's `tests/domain/away-trip.test.ts` and `tests/browser/away-button.spec.ts`
 
 **Interfaces:**
 - Consumes: Patch A Task 11's `AwayState`, `awayText`, `readClosedTrips`, `closeTrip`, its notifications read; `boutEndMs`
   (`src/game/replay.ts`); Task 3's scene; Task 6's queue (an own bout not yet listed leads it).
+- Shipped 1.4 integration: candidate/read work lives in `useAwayTrip`, not a duplicate in `CampShell`; the hook also receives
+  `clock: DisplayClock` for exact bout-end, minute 60 + 1 s and minute 80 boundaries while retaining the shell's minute pulse.
 - Produces: `AwayState` gains `| { kind: 'bout'; activityId: string; name: string; opponent: string; won: boolean; rewards: {
   renown: number; ratingDelta: number | null } | null }`; `boutAway(input: { owner: Pick<OwnerState, 'name' | 'gladiatorId'>;
   timeline: RevealedTimeline | null; nowMs: number; closed: ReadonlySet<string> }): AwayState | null`; `awayText` writes the

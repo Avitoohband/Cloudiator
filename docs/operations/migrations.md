@@ -123,7 +123,9 @@ No CHECK calls a function. M26 re-emits no unchanged function.
 **Release** (spec "Release"):
 - **Before the push** (each a read, run with the linked CLI as in the runbook's "Schema fingerprint and hosted checks"):
   1. Production's migration list (`supabase migration list --linked`) ends at M25, `20261028165017_messages.sql`.
-  2. `npx supabase db push --dry-run` lists exactly one migration, `20261030055918_patch_1_4.sql`.
+  2. `npx --no-install supabase db push --dry-run --skip-vault` lists exactly one migration, `20261030055918_patch_1_4.sql`.
+     Use `--skip-vault` on the actual push too: this release changes migrations only. Avi approved that project override on
+     2026-10-31 after CLI 2.120.0 help documented its default Vault-update phase; no hosted run had tested the flag at approval.
   3. The window: outside Wednesday and Saturday 17:20–20:00 UTC (tournaments), and with no open boundary (the runbook's hosted
      checks: `scheduler` / `boundaries open` = 0).
   4. Production's visible patch-note titles:
@@ -136,7 +138,7 @@ No CHECK calls a function. M26 re-emits no unchanged function.
 
      Note 4 (posted 2026-10-29 for 1.3.1) is not in release-evidence.md. Its title is the coordinator's record, so this read confirms
      it.
-- **Order.** M26 first: the 1.4 client's revision read names `latest_patch`, so a 1.4 client could not read the camp on a database
+- **Order.** M26 first (`db push --skip-vault`): the 1.4 client's revision read names `latest_patch`, so a 1.4 client could not read the camp on a database
   without M26. Then the client. Once the client is live, each after Avi's go: the patch note, then `record_patch('1.4', …)`.
   Recording 1.4 only after its client is live means a reload always brings 1.4.
 - **An older client.** A 1.3.1 client on M26 reads its named revision columns, and its profile read ignores the new keys.

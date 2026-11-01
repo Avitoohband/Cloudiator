@@ -24,9 +24,9 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.3.** New since then: 1.3.1 and 1.4, both live.
 
-## 1.5 — Watch your Arena bouts more easily (in progress, not yet released)
+## 1.5 — Watch your Arena bouts more easily (2026-11-01)
 
-### Built
+Release candidate for review; not yet published. Final gate and Avi’s fresh production go are pending.
 
 - Results opens on My bouts: your Arena and tournament bouts by day, with All, Won and Lost filters, rating changes and a dot until watched on this device.
 - The replay bar has play and pause, a track, the time, a remembered speed of 1×, 2× or 4×, and ⚑ Result.

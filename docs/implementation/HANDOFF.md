@@ -1,3 +1,5 @@
+> **2026-11-01 release-candidate checkpoint:** Single scoped review of `db386db` resolved all Critical/Important findings; two Minor residuals are explicitly parked. Next: full 12-step gate, then fresh 1.5 go for client/note/record. Production remains 1.4. Read [the approval bundle](PATCH-1.5-RELEASE-REVIEW-2026-11-01.md) and [rulings](PATCH-1.5-RULINGS-2026-11-01.md). This checkpoint supersedes earlier pending-review status below.
+
 # Cloudiator development handoff
 
 ## Current authority, locations and next work — 2026-11-01
@@ -106,7 +108,7 @@ Avi explicitly authorized communication and parallel development through the [Cl
 - Migration generation note (Tasks 6, 7 and the Task 7 fix): the CLI's `db pull` draft omitted extensions, seed rows, `cron.schedule`, function ACLs, table revokes and a view's `security_invoker`. Avi approved a standing check on 2026-10-12, now in the AGENTS.md Supabase override: diff every generated migration against its SQL source, append the omissions, then verify the replayed database.
 - Task 23 builds and locally verifies release harnesses; hosted benchmarks run after Task 24 provisions infrastructure.
 - Verified pins: Next 16.4.0, React/React DOM 19.3.0, TypeScript 5.9.3, Phaser 4.2.1, Vitest 5.0.3, Playwright 1.64.0, React type packages 19.3.0, Node types 22.20.5. Runtime Node 22.19.0/npm 11.8.0.
-- Docker Desktop is installed locally (Engine 29.9.1 after the 2026-10-20 host restart; 29.8.2 before). Supabase CLI2.120.0, client2.117.3, npmDeno2.9.6 and test-driver postgres3.4.7 are pinned/installed. LocalPG17.11, real Edge runtime and Deno checks passed Task4; see migration guide for sanitized setup.
+- Docker Desktop is installed locally (Engine 29.9.1 after the 2026-10-20 host restart; 29.8.2 before). Supabase CLI2.120.0, client2.117.3, npmDeno2.9.6 and test-driver postgres3.4.7 are pinned/installed. LocalPG17.11, real Edge runtime and Deno checks passed Task 4; see migration guide for sanitized setup.
 - Supabase account is connected, but no Cloudiator project exists. Two unrelated inactive projects must not be reused or changed. Hosting, Google OAuth, real deployed flows, and measured hosted/mobile capacity remain pending.
 - Default sandbox networking, Git Bash, and the native Next compiler encountered environment restrictions. Necessary approved escalations worked; these are environment issues rather than product test evidence.
 - `next dev` generates `AGENTS.md`. Its local Next documentation guidance applies. Preserve Avi's standing skill-upkeep instructions as well.
@@ -121,7 +123,7 @@ Avi explicitly authorized communication and parallel development through the [Cl
 
 After all tasks, perform the whole-branch review and full release verification described in the plan. Do not claim a public launch based only on fixture tests or static build success.
 
-### Task4 local tooling findings (reviewed; hosted gate remains)
+### Task 4 local tooling findings (reviewed; hosted gate remains)
 
 - Current CLI2.120.0 rejects multi-statement SQL through db query --file; the local-container psql fallback and exact commands are verified in task04 report/migration guide, including generated M01 clean replay and advisors.
 - Local Kong functions gateway overrides handler Access-Control-Allow-Origin with wildcard, with no supported CLI config found. Controller permits characterization only for this local tooling limitation: exact-origin handler and direct-Edge HTTP tests plus actual gateway bad-origin403/no-state-change tests remain required. Task24 must verify hosted header parity before launch; a failure needs a supported boundary or concrete user options. Cost: hosted proof deferred; possible additional boundary work.
@@ -296,7 +298,7 @@ Task14 retains the recorded close-up replay acceptance criteria: reproducible ar
 - **Task 22's list** in [task-22-report.md](task-22-report.md) still applies.
 - **Pending Avi.** Seven visible changes from 23.4 and 23.5 (screenshots sent 2026-10-19); the "· ends 04:20 AM" format on My gladiator and Arena; the see-through profile card; a resting gladiator vanishing while a waking one walks in; the Follow reason wording; the plan's defaults for Avi's open choices; the all-menus side pane (Avi to confirm the table and approve its design); two skill-upkeep proposals listed in the [review record](task-23-review.md#carried-items).
 
-### Task5 integration notes
+### Task 5 integration notes
 
 - Session/client/live gateway and exact owner/error mapping are documented in task05 report. Future live command kinds and general reads remain unavailable until their owning tasks; never substitute fixture state. Root owner results are account/effect/request-revision scoped, including creation confirmation invalidating earlier no-character reads.
 - Only creation draft plus account-scoped immutable attempted command/UUID is retained locally; SDK session persistence is separate. No local wallet/inventory/OwnerState authority. Account changes and edited drafts receive new attempt IDs; unknown outcomes reuse the same command.
@@ -320,7 +322,7 @@ Task 8's original partial source remains on `claude/task-8-wip` at `2bed1a3`, in
 
 The reviewed scanner supplement has source628e88f, report554c677 and independent review1d66458, with no findings. Owning21/full317 tests and fresh isolated four-route80-asset scan passed. This resolves Task1's escaped-JSON Minor; Task23 is still pending. Full report/review are tracked. No launch or exhaustive secrecy claim.
 
-Task14 final Minor commit3283feb has now received a fresh read-only scoped review. Document-listener cleanup, local dates and reward keys are addressed; early-destroy window handler restoration and unknown creature-prefix warning remain deferred Minors. No new Critical/Important breakage. See task-14-final-delta-review.md and carry both into management integration/final triage. Broad suites were not repeated. Task9 carries Task7 summary whitelist/validation, malformed-hook rollback, dependency and lease-renewal gates; Task13 must combine currentActivity with processedSlotIndex.
+Task14 final Minor commit3283feb has now received a fresh read-only scoped review. Document-listener cleanup, local dates and reward keys are addressed; early-destroy window handler restoration and unknown creature-prefix warning remain deferred Minors. No new Critical/Important breakage. See task-14-final-delta-review.md and carry both into management integration/final triage. Broad suites were not repeated. Task 9 carries Task7 summary whitelist/validation, malformed-hook rollback, dependency and lease-renewal gates; Task13 must combine currentActivity with processedSlotIndex.
 
 Current local runtime was restored after Docker had stopped. The verified Cloudiator container and Edge functions now use Codex's checkout and its own fresh ignored worker secret; Claude's secret was never copied or printed. At the Task 8 report, Edge session was7337 and fixture preview was72301 on port3000 with HTTP200. These are last-observed sessions, not a guarantee they survive another restart. Keep test ports3100/4173 separate and verify current runtime before later HTTP proof.
 
@@ -330,7 +332,7 @@ Current local runtime was restored after Docker had stopped. The verified Cloudi
 - M05 `20261013065108_inventory_shops.sql` was CLI-generated and completed before commit. Migration-only replay matches tested source across228 metadata entries;39 re-emitted unchanged function bodies match earlier migrations. M01–M04 remain unchanged. Lint is empty; advisors have four INFO unused indexes.
 - Exact DB evidence: full replay run82 passed/1 old-error-text assertion failed; the earlier immutable guard correctly rejected the mutation. Corrected assertion and expanded denial checks then passed36/36 shops/planning cases on the same replayed DB; activities36 and identity11 had passed. All83 are covered green across final runs, not one claimed83-pass rerun. See the report for every command and distinction between inherited and newly observed TDD evidence.
 - Bound banner ownership is separate from the66 equipment offers and60 inventory slots, with no stats/combat/history effect or resale/trade. `OwnerState.ownedCosmetics` is additive. The legacy `peakStrength` is historical legal equipment score only; Task16 owns the combined league index.
-- **Task9:** `prepareGrant(state, grants)` returns baseline/plan/history. `private.apply_inventory_plan(gid, prepared)` writes items/history under common locks and returns ids/overflow/history, or null for stale preparation. It does not credit a wallet, issue a receipt or provide idempotency. Fenced settlement must atomically credit rewards/overflow/XP and retain the permanent guard, retrying changed inventory from the same immutable reward proposal. Preserve Task7 summary whitelist, malformed-hook rollback, dependency and lease-renewal gates.
+- **Task 9:** `prepareGrant(state, grants)` returns baseline/plan/history. `private.apply_inventory_plan(gid, prepared)` writes items/history under common locks and returns ids/overflow/history, or null for stale preparation. It does not credit a wallet, issue a receipt or provide idempotency. Fenced settlement must atomically credit rewards/overflow/XP and retain the permanent guard, retrying changed inventory from the same immutable reward proposal. Preserve Task7 summary whitelist, malformed-hook rollback, dependency and lease-renewal gates.
 - **Task13:** consume InventoryPanel/ShopPanel, bridge camp merchant events, combine currentActivity with processedSlotIndex and use noncombat result states for Training/Rest. **Task16:** promote from level/earned points/history only at boundaries. **Task18:** preserve binding, reservations, held fees, sorted lock order and acquisition history for transfers.
 - Root records the reviewed checkpoint commit separately and verifies the pushed remote SHA before posting it on the board. Hosted OAuth/CORS/scheduling, retention, budgets and physical FPS remain release gates; this is not a public launch.
 
@@ -338,8 +340,8 @@ Current local runtime was restored after Docker had stopped. The verified Cloudi
 
 The reviewed Task8 checkpoint is05b1ea0. Subsequent docs-only395bc2d contains
 Avi's approved persistent Postgres lease guidance (AGENTS and
-[job-leases.md](../operations/job-leases.md)); it publishes no unfinished Task9
-source. Task9's full review base remains05b1ea0. Source e96e0f1 and report5dbf34e completed preserved work after interruptions.
+[job-leases.md](../operations/job-leases.md)); it publishes no unfinished Task 9
+source. Task 9's full review base remains05b1ea0. Source e96e0f1 and report5dbf34e completed preserved work after interruptions.
 M06 is now committed, clean-replayed and independently reviewed. Full review
 found one Important canonical zero-HP winner defect; fix545a82d passed focused
 re-review. See task-09-report.md and task-09-review.md. Do not redo completed
@@ -369,7 +371,7 @@ or edits the other checkout.
 - Immutable private plans, chained due-reveal dependencies, DB-time stage RLS and fenced end-slot settlement are ready. Public `activity_stages` exposes only due sanitized stages/logs. Owner activities/summary/reward/overflow reads remain owner-only; no future plans or private grants are client-visible.
 - Canonical `winnerId` decides expedition success, including simultaneous defeat at zero HP: nonfinal win heals by floored20% and continues; final win grants success rewards. True loss still ends the trip without rewards. Wire stage shape is unchanged.
 - Task10 supplies safe public completion/revision/profile/timeline projections and sync; Training/Rest results remain noncombat. Task16 supplies arena/league hooks. Retention, hosted scheduling, exact-origin Google/CORS, CPU/budgets and physical FPS remain later gates. This checkpoint is not a public launch.
-- Claude resumed Task15 on2026-10-14 at04:40 IDT from saved `claude/task-15-wip`6ceb5e8 (partial7c57106 plus dispatch record). Its earlier Task14 fix708688b awaits independent review/integration with15. Do not restart or edit his checkout. Current preview3000 availability is unverified; it was already stopped at Task9 continuation entry. Historical session IDs above are not current proof.
+- Claude resumed Task15 on2026-10-14 at04:40 IDT from saved `claude/task-15-wip`6ceb5e8 (partial7c57106 plus dispatch record). Its earlier Task14 fix708688b awaits independent review/integration with15. Do not restart or edit his checkout. Current preview3000 availability is unverified; it was already stopped at Task 9 continuation entry. Historical session IDs above are not current proof.
 
 ### Bounded checkpoint queue and paused Claude lanes — 2026-10-14
 

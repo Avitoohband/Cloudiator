@@ -161,3 +161,9 @@ Avi, 2026-11-01, added a standalone social feature after the economy patch:
     later [friend-party invitations](2026-10-29-party-dungeons-design.md) so that work can build on the Friends feature.
     The request lifecycle, discovery, privacy and interface still need their design pass; no specific patch or migration
     number is assigned yet.
+
+47. **Game music, sound effects and Audio settings (Avi, 2026-11-01).** Add music and sound effects, with separate Music
+    and SFX volume sliders and independent mute controls in a Settings menu. Avi chose to remember these preferences per
+    device, so phone and desktop can differ. Handle [browser autoplay restrictions](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay#autoplay_availability)
+    when starting sound. Music/SFX assets, default levels, sound coverage and the concrete interface need their design
+    pass; no release number or asset generation/download is assigned or authorized by this planning entry.

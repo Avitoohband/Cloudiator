@@ -130,6 +130,7 @@ More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 3
     YouTube": the in-game guide (idea 34) links the explainer videos and each patch's video on YouTube (Indigo Labs).
 37. **A better inventory with item pictures, and in the shops too.** "Better inventory setup with items appearance. Also in
     shop": each item shown with its picture, in Inventory and in the shops.
+    Avi reiterated on 2026-11-01 that inventory item appearance is still wanted later; coordinate this with idea 45.
 38. **A look-change option.** "appearance look change option": change look from the menu at any time (today only from the 1.3
     patch note's one free change); maybe priced, or tied to the renown skins shop.
 39. **Support with triage.** Idea 30 plus "with jev to classify those issues": support requests are classified (bug, account,
@@ -145,3 +146,10 @@ More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 3
 
 Already listed: the watch mode for streams (31), the 24/7 stream (32), the Champ (33), Endurance and load and what each stat
 does (34).
+
+Avi, 2026-11-01, added to the future gear/inventory plan:
+
+45. **Gear attributes on hover in My gladiator.** When choosing or switching gear in the My gladiator menu, hovering over
+    an item shows that item's attributes/stats. Avi also reiterated that these inventory items should have a visual
+    appearance later (idea 37). Keep the requested stat preview and the later item-art work linked when the gear UI is
+    designed; keyboard/touch behavior and the concrete presentation are to be settled in that design pass.

@@ -1,6 +1,6 @@
 # Patch 1.5 — Avi’s production review
 
-**Release candidate; production remains 1.4. Full gate and specific remote-install permission pending.** Avi's latest instruction authorizes the planned release after its checks. Runtime fixes: `db386db`; optional bounded gate runner: `4893378` (independent spec/quality review approved, no findings). This checkpoint changes documentation only.
+**Release candidate; production remains 1.4. Fresh full gate and specific remote-install permission pending.** Avi's latest instruction authorizes the planned release after its checks. Runtime fixes: `db386db`; bounded runner `4893378`, static guard `2aa9158` and offline verification `26b824f` are independently approved. This checkpoint changes documentation only.
 
 ## Exact patch-note draft
 
@@ -84,3 +84,11 @@ Both failures are independently confirmed in actual trace network response field
 Runner `4893378` adds opt-in sequential shards, full unchanged discovery and exact unique actual-case coverage, retaining both raw report forms. Its 107 targeted tests and TypeScript/frozen Deno checks passed; independent spec/quality review approved with no findings. A fresh complete twelve-step gate remains. No application/configuration/test selection, retries, Windows settings or user apps were changed. This is an unproven full-suite mitigation, not a host cure.
 
 The exact note is prepared outside the repository as UTF-8 without BOM: 34 title characters, 129 preview characters, 7 blocks/777 body characters, not executed. The linked patch statement must still use the actual returned note ID. No production write/push/package download has occurred. See rulings 15–17 for the changed gate approach and current release authority.
+
+## Complete bounded-run disposition and final preparation
+
+c04e0d0 completed all12steps, exit1:11passed, only production failed. Units2,159/121, DB405/30, development1,192expected/50skips and production34expected/1,202skips/6unexpected each covered exactly1,242cases. There were no host faults; both earlier resource-failure cases passed. The six failures all require signed-in routed client setup intentionally unavailable in the isolated export. Guard2aa9158 preserves their development assertions; targeted static10passed/54skipped and development6/6 passed. Independent review approved; its minor report wording was corrected, and the targeted colour warning remains disclosed.
+
+Offline verification26b824f passed114targeted checks and real typecheck/Edge3tests, with zero Download statuses; independent review approved. The old run's two npm metadata status lines do not establish completed transfers or archives. The rejected Deno2.9.6 check+cached-only hypothesis and tested no-run alternative are recorded in rulings19 and the gate guide. CI preparation has not been run; its remote permission remains unanswered.
+
+One fresh complete gate on both reviewed corrections remains required. No publication step is authorized to bypass it, and no production write or push has occurred. The exact note/record drafts above are unchanged.

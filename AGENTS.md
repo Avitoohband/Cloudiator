@@ -258,3 +258,43 @@ stale conflict alert on the next background version. Tested fix `6dc5047` scopes
 the guard to the command's expected version; the ordered
 [planning regression](tests/browser/planning.spec.ts) failed before the fix and
 passed afterward on desktop and mobile.
+
+# Verification modes and offline checks — persistent project overrides
+
+Avi approved these supplements on 2026-11-01 for Verification Before Completion,
+“The Gate Function”. Keep vendor skill caches unchanged.
+
+## Browser groups that need development transport
+
+Give each new sibling describe group its own static-mode guard when its setup
+needs routed backend reads or development-only hooks. A guard in another
+sibling group is not inherited. Key this guard to the gate's `PLAYWRIGHT_STATIC`
+flag (`process.env.PLAYWRIGHT_STATIC === 'true'`). Keep supported static cases active and retain
+the development assertions; verify both applicable behavior and mode selection.
+
+Observed: Away and signed-in My bouts groups used unavailable setup in the
+isolated export. Tested correction: precise group guards retained development
+behavior and supported static checks. Full release evidence stays in the
+[gate handoff](docs/implementation/PATCH-1.5-GATE-2026-11-01.md).
+
+## Deno verification when downloads are not approved
+
+Use the project's `npm run typecheck`; a cache miss stops for separately approved
+preparation. A frozen lock is not an offline guarantee. Validate no-download
+claims with a cold local fixture that observes dependency requests.
+
+Observed on native Windows Deno 2.9.6: `deno check --cached-only --frozen` still requested
+loopback HTTP/npm dependencies from local entrypoints. Tested alternative:
+`deno test --cached-only --frozen --no-run --check` retained local type checking,
+refused cold dependency misses with zero dependency requests, caught a type
+error and did not execute top-level code. In source `26b824f`, the real project's
+`npm run typecheck` passed both function checks and all 3 Edge tests with zero Download
+statuses; these targeted results are separate from a full release gate. The
+actual Edge tests still run afterward. For an already installed tool upgrade, run the existing project offline
+boundary tests against the binary the project actually uses; proceed when the
+same invariants pass, or report the boundary failure. Installing or downgrading
+a binary still needs its own authorization.
+See the [gate guide](docs/operations/verification-gates.md) and
+[boundary tests](tests/scripts/deno-offline.test.ts). CI dependency preparation
+is a separate install stage, using the frozen config/lock and existing pinned
+entrypoints, requiring its own applicable authorization.

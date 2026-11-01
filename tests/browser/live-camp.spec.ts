@@ -39,19 +39,22 @@ test('mounts the camp from live public reads, polling only the revision every 30
   const world = liveWorld();
   const live = await routeLiveReads(context, { world });
   await page.clock.install();
+  const syncPoll = await watchSyncPoll(page);
   await page.goto('/game/');
   await waitForCamp(page, world.actors.length);
   await expect(page.locator('.scene-placeholder')).toHaveCount(0);
   // The shared clock shows the server's time from the timed revision read (days behind this browser's wall clock here).
   expect(Math.abs(await shownTime(page) - live.serverNowMs())).toBeLessThan(5_000);
+  await syncPoll.idle();
   const revisions = live.count('world_revision'), loads = live.count('world_actor_reads');
-  // The next poll's timer is set once the browser has handled the previous read, which can trail the request this route
-  // counts on a loaded host (2026-10-24, two gate runs). So: 25 s with no poll (the installed clock also runs on in real
-  // time, hence the slack), then a second at a time until it comes.
+  // Each window starts after the previous refresh has finished and armed its next poll, not merely received a request.
+  // There is no poll for 25 s (the installed clock also runs on in real time, hence the slack), then it comes a second
+  // at a time. Wait for rearm again before the next window or changing the routed world.
   const nextPoll = async (count: () => number, expected: number) => {
     await page.clock.fastForward(25_000);
     expect(count()).toBe(expected - 1);
     await expect.poll(async () => { await page.clock.fastForward(1_000); return count(); }, { timeout: 15_000 }).toBe(expected);
+    await syncPoll.idle();
   };
   for (let poll = 1; poll <= 3; poll++) await nextPoll(() => live.count('world_revision'), revisions + poll);
   expect(live.count('world_actor_reads')).toBe(loads);

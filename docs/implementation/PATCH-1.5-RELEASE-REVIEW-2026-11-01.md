@@ -1,6 +1,6 @@
 # Patch 1.5 — Avi’s production review
 
-**Release candidate; production remains 1.4. Fresh full gate and specific remote-install permission pending.** Avi's latest instruction authorizes the planned release after its checks. Runtime fixes: `db386db`; bounded runner `4893378`, static guard `2aa9158` and offline verification `26b824f` are independently approved. This checkpoint changes documentation only.
+**Release candidate; production remains 1.4. Full gate awaits host recovery; remote pinned installs are approved.** Avi's latest instruction authorizes the planned release after its checks. Runtime fixes: `db386db`; bounded runner `4893378`, static guard `2aa9158` and offline verification `26b824f` are independently approved. Both approved guidance overrides are persisted in AGENTS.md (`9e6acfa`). This checkpoint changes documentation only.
 
 ## Exact patch-note draft
 
@@ -52,7 +52,7 @@ select private.record_patch(
 
 ## For Avi at the go
 
-- Three planned production writes: client release, the exact note above, then the linked 1.5 patch record. Avi's latest release instruction covers these after their checks; the specific question about normal pinned remote CI/Pages dependency installs remains unanswered. This patch has no schema or Edge change.
+- Three planned production writes: client release, the exact note above, then the linked 1.5 patch record. Avi's latest release instruction covers these after their checks; he has approved normal pinned remote CI/Pages dependency installs and CI container pulls. New local package downloads remain unapproved. This patch has no schema or Edge change.
 - The full 12-step gate is PENDING. Runtime source db386db; scoped review found no Critical/Important issue. Unit 2,102/119 and TypeScript passed; affected union 488pass/5fail/3existing skips, then the 16-case covering run resolved all five failures. Real local PostgREST/owner/filter/RLS and cached-only Deno checks passed.
 - Phone chapter bars use the recorded 118px exception; ordinary bars are at most 100px, buttons at least 44×44 and slider at most 32px. Final desktop and360 captures were inspected; see local final-scoped-2 evidence.
 - Expedition encounter overlays omit reward chips; their lower Result retains whole-trip rewards. This is the recorded design carry for Avi’s disposition in the go.
@@ -89,6 +89,12 @@ The exact note is prepared outside the repository as UTF-8 without BOM: 34 title
 
 c04e0d0 completed all12steps, exit1:11passed, only production failed. Units2,159/121, DB405/30, development1,192expected/50skips and production34expected/1,202skips/6unexpected each covered exactly1,242cases. There were no host faults; both earlier resource-failure cases passed. The six failures all require signed-in routed client setup intentionally unavailable in the isolated export. Guard2aa9158 preserves their development assertions; targeted static10passed/54skipped and development6/6 passed. Independent review approved; its minor report wording was corrected, and the targeted colour warning remains disclosed.
 
-Offline verification26b824f passed114targeted checks and real typecheck/Edge3tests, with zero Download statuses; independent review approved. The old run's two npm metadata status lines do not establish completed transfers or archives. The rejected Deno2.9.6 check+cached-only hypothesis and tested no-run alternative are recorded in rulings19 and the gate guide. CI preparation has not been run; its remote permission remains unanswered.
+Offline verification26b824f passed114targeted checks and real typecheck/Edge3tests, with zero Download statuses; independent review approved. The old run's two npm metadata status lines do not establish completed transfers or archives. The rejected Deno2.9.6 check+cached-only hypothesis and tested no-run alternative are recorded in rulings19 and the gate guide. CI preparation has not been run; its normal remote pinned installs are now approved.
 
-One fresh complete gate on both reviewed corrections remains required. No publication step is authorized to bypass it, and no production write or push has occurred. The exact note/record drafts above are unchanged.
+One fresh complete gate on both reviewed corrections remains required. No publication step is authorized to bypass it, and no production write or production-branch push has occurred. The exact note/record drafts above are unchanged.
+
+## Latest stopped gate and approvals
+
+Frozen candidate a68978e passed units2,170/122 files and DB/Auth/Edge405/30 files. Development shard1 passed302/11existing skips; root stopped Step8 after609 observed result markers when a required React DOM chunk failed with net::ERR_NO_BUFFER_SPACE in release.spec.ts:71 desktop. The first art-failure prerequisite, not a Schedule assertion, timed out. Actual trace:29requests/1failed/0actor-art requests, before hydration. Independent diagnosis supports host transport failure; no application fix is justified by this failure. All owned runners are stopped and port3800 is free; no complete browser or12/12 pass. Windows has not rebooted since2026-10-31T19:31:23.9418480Z. Preserve this evidence and recover the host before another full run.
+
+Avi also approved keeping the current1.5.1south-guard placement; the porter redraw was already fulfilled. Both scoped Verification Before Completion guidance changes are applied in9e6acfa, with observed failures, tested corrections and still-required full-gate/CI evidence distinguished. No new local download or automated reboot is authorized. The1.6day-ahead warning and irreversible activation retain their explicit-go requirements. See the gate handoff for exact recovery and release steps.

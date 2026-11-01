@@ -156,7 +156,7 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView,
  * is no next bout; `takeFocus` moves the focus to ⏸ once the replay has loaded, when it is still on the scene's back button or
  * nowhere; `league` is a tournament bracket's (its eyebrow names it, and a bracket's bouts show no rewards).
  */
-export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null }: {
+export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null, endActions = 'navigation' }: {
   view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
   /**
    * Where the fighters' looks come from: the looks the caller already holds (its world actors) and a reader for the rest. The
@@ -171,6 +171,8 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   back?: ReplayBack | null;
   takeFocus?: boolean;
   league?: LeagueId | null;
+  /** Standalone pages keep bar/keyboard chapters, but their end card offers only Again. */
+  endActions?: 'again' | 'navigation';
 }) {
   const now = useReplayTime(clock, view);
   if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
@@ -188,7 +190,7 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   // The whole view's fighters (every encounter of an expedition), whichever battles are shown yet: read once for the replay.
   return <ReplayBattles battle={battles[selected]} summary={summary} keptUntil={keptUntil} bridge={bridge} level={headingLevel} viewerId={viewerId}
     looks={looks} lookIds={lookIdsFor(...view.battles.map(b => b.log))} chapters={chapters} nav={nav ?? (chapters ? chaptersNav(chapters) : null)}
-    back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} />;
+    back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} endActions={endActions} />;
 }
 
 /** A chapters-only nav: ⏮ and ⏭ step through the chapters, and the last one has no next. */
@@ -215,7 +217,7 @@ const opponentIn = (log: BattleLog, side: string | null) => (log.participants.fi
  * server time, so nothing is filtered by the device's own clock). An activity with several bouts shows them as chapters, and
  * ⏮ ⏭ step through them (Arena replays Task 5); a step never adds a history entry.
  */
-export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, takeFocus = false, back = null, queue = null, onChapter, counterHost = null }: {
+export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, takeFocus = false, back = null, queue = null, onChapter, counterHost = null, endActions = 'navigation' }: {
   /** `looks` (when the gateway has it) reads the fighters' looks the caller does not already hold. */
   reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks'>>) | null;
   activityId: string;
@@ -234,6 +236,7 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   onChapter?(stageId: string): void;
   /** The compact scene's solid Back row; receives the queue counter as text, with no duplicate state. */
   counterHost?: HTMLElement | null;
+  endActions?: 'again' | 'navigation';
 }) {
   const [loaded, setLoaded] = useState<{ reads: object; attempt: number; view: ReplayView } | null>(null);
   /** Each Try again reads the replay once more (Task 23.4). */
@@ -246,7 +249,7 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   }, [activityId, reads, attempt]);
   const view = loaded && loaded.reads === reads && loaded.attempt === attempt ? loaded.view : null;
   return view && clock ? <ActivityChapters view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} looks={{ known, read: reads?.looks?.bind(reads) ?? null }}
-    onRetry={() => setAttempt(n => n + 1)} takeFocus={takeFocus} back={back} queue={queue} activityId={activityId} stageId={stageId} onChapter={onChapter} counterHost={counterHost} />
+    onRetry={() => setAttempt(n => n + 1)} takeFocus={takeFocus} back={back} queue={queue} activityId={activityId} stageId={stageId} onChapter={onChapter} counterHost={counterHost} endActions={endActions} />
     : <p role="status">Loading the replay…</p>;
 }
 
@@ -256,14 +259,16 @@ function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, 
   takeFocus: boolean; back: ReplayBack | null;
   queue: ReplayQueue | null; activityId: string; stageId: string | null; onChapter?: (stageId: string) => void;
   counterHost: HTMLElement | null;
+  endActions: 'again' | 'navigation';
 }) {
   const now = useReplayTime(clock, view, queue?.list);
   const clockMode = useClockMode();
   const compact = useCompact();
   const battles = replayBattles(view, now);
-  const addressed = Math.max(0, battles.findIndex(b => b.stage.id === stageId));
-  const [chosen, setChosen] = useState(addressed);
-  const current = Math.max(0, Math.min(onChapter ? addressed : chosen, battles.length - 1));
+  // Keep identity while eligibility changes. An explicit local choice overrides the requested stage, even after a clock tick.
+  const [chosen, setChosen] = useState<string | null>(null);
+  const requested = onChapter ? stageId : chosen ?? stageId;
+  const current = Math.max(0, battles.findIndex(b => b.stage.id === requested));
   const mounted = useRef(false);
   const pending = useRef(false);
   const generation = useRef(0);
@@ -274,14 +279,23 @@ function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, 
     if (index === current) return;
     generation.current += 1;
     if (onChapter) onChapter(battles[index].stage.id);
-    else setChosen(index);
+    else setChosen(battles[index].stage.id);
   };
   const chapters: ReplayChapters | null = battles.length > 1 ? { labels: battles.map(b => chapterLabel(b.stage)), current, select } : null;
   const side = sideOf(battles);
   // A filter/origin never establishes ownership. Only the owner summary or their current bout does.
   const own = queue !== null && view.kind === 'replay' && (view.summary?.resolvedKind === 'arena' || view.summary?.resolvedKind === 'tournament'
     || activityId === queue.currentActivityId) && battles.some(b => b.stage.kind === 'bout');
-  const entries = own ? queueEntries(queue.list, activityId, now) : null;
+  const unsettled = own && view.kind === 'replay' && !view.summary && activityId === queue.currentActivityId;
+  const list = queue?.list;
+  // Discover a settled bookmark one ordered page at a time. No counter or list targets exist until its real position is known.
+  // The store guards each response; every subsequent page also checks the native address before React can commit navigation.
+  useEffect(() => {
+    if (!own || unsettled || !queue || !list || list.status !== 'ready' || list.loadingMore || list.moreFailed
+      || !list.nextCursor || list.rows.some(row => row.activityId === activityId) || queue.isCurrent?.() === false) return;
+    void queue.more();
+  }, [queue, list, own, unsettled, activityId, stageId]);
+  const entries = own ? queueEntries(queue.list, activityId, now, unsettled) : null;
   const next = nextTarget(current, battles.length, entries);
   const previous = previousTarget(current, entries);
   const go = (target: StepTarget) => {
@@ -315,7 +329,7 @@ function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, 
 function ReplayBattles({ battle, looks, lookIds, ...rest }: {
   battle: ReplayBattle; summary: ActivitySummary | null; keptUntil: number | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
   looks?: LookSource; lookIds: readonly string[]; chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean;
-  league: LeagueId | null; last: boolean;
+  league: LeagueId | null; last: boolean; endActions: 'again' | 'navigation';
 }) {
   // One look read for the whole replay: choosing another chapter of the same view reuses it and never waits again.
   const settledLooks = useSettledLooks(lookIds, looks);
@@ -348,7 +362,7 @@ function useSettledLooks(ids: readonly string[], source: LookSource | undefined)
 /** Whether a key press came from a control that the key operates itself (Space presses a button, a summary toggles). */
 const operates = (target: HTMLElement) => target.closest('button, a, summary, input, select, textarea, [contenteditable="true"]') !== null;
 
-function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, looks: settledLooks, chapters, nav, back, takeFocus, league, last }: {
+function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, looks: settledLooks, chapters, nav, back, takeFocus, league, last, endActions }: {
   battle: ReplayBattle; summary: ActivitySummary | null;
   /** When the replay stops being kept, while it still is at the display time (else null: no note). */
   keptUntil: number | null;
@@ -358,6 +372,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean; league: LeagueId | null;
   /** The activity's last chapter (a tournament run's rewards show there only). */
   last: boolean;
+  endActions: 'again' | 'navigation';
 }) {
   const { log, stage } = battle;
   // Rewards to come are promised only to a fighter in the bout (or when the viewer is not known).
@@ -551,8 +566,8 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
           {chips.length > 0 && <ul className={styles.chips} aria-label="Rewards">{chips.map(chip => <li key={chip}>{chip}</li>)}</ul>}
           <div className={styles.endActions}>
             <button type="button" onClick={restart}><IconText text={againLabel(compact)} /></button>
-            {next ? <button type="button" className={styles.gold} onClick={() => next.go()}><IconText text={nextLabel(next.opponent, compact)} /></button>
-              : back ? <button type="button" className={styles.gold} onClick={() => back.go()}><IconText text={`← ${back.label}`} /></button> : null}
+            {endActions === 'navigation' && (next ? <button type="button" className={styles.gold} onClick={() => next.go()}><IconText text={nextLabel(next.opponent, compact)} /></button>
+              : back ? <button type="button" className={styles.gold} onClick={() => back.go()}><IconText text={`← ${back.label}`} /></button> : null)}
           </div>
         </div>}
       </div>

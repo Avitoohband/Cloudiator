@@ -114,6 +114,9 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   const replayStage = named?.kind === 'replay' ? named.stageId : undefined;
   const queue = useMemo<ReplayQueue | null>(() => bouts && owner && replayId ? {
     filter, get list() { return bouts.list(filter); }, ownerName: owner.name, currentActivityId,
+    isCurrent: () => sameSceneSource(sceneOf(new URL(window.location.href).searchParams), {
+      kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...(from ? { from } : {}),
+    }),
     open: activityId => {
       // Native history changes the address before React commits new props/refs. A page from that older source must not replace it.
       const source: SceneView = { kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...(from ? { from } : {}) };

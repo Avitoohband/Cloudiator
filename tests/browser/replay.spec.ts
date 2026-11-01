@@ -12,6 +12,41 @@ import { SUPABASE_URL, emptyWorld, routeLiveReads, type LiveTransport } from './
 import { openMenu, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
+test.describe('final review regressions', () => {
+  test.skip(production, 'These regressions require the development fixture or routed transport.');
+test('final R4 standalone retains a future requested stage then respects an intentional selection', async ({ page, context }) => {
+  const at = Date.now(), activityId = REPLAY_FIXTURES.expedition.activityId;
+  const first = structuredClone(LOGS['expedition-1']), second = structuredClone(LOGS['expedition-2']);
+  const secondAt = at - 1000;
+  const timeline: RevealedTimeline = { activityId, serverNowMs: at, visibleThroughMs: at, stages: [
+    { id: 'first', kind: 'encounter', label: 'Encounter 1', revealedAtMs: at - 60000, startedAtMs: at - 60000, endsAtMs: at - 30000, battleLog: first },
+    { id: 'second', kind: 'encounter', label: 'Encounter 2', revealedAtMs: secondAt, startedAtMs: secondAt, endsAtMs: secondAt + second.durationMs, battleLog: second },
+  ] };
+  await routeLiveReads(context, { world: emptyWorld(at), timelines: { [activityId]: timeline }, serverNowMs: () => at });
+  await page.goto(`/replay/?activity=${activityId}&stage=second`);
+  await page.waitForFunction(() => !!window.__cloudiatorReplay);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), secondAt + second.durationMs - 1);
+  expect((await replayState(page)).battleId).toBe(first.battleId);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), secondAt + second.durationMs);
+  await expect.poll(async () => (await replayState(page)).battleId).toBe(second.battleId);
+  const length = await page.evaluate(() => history.length);
+  await page.getByRole('button', { name: 'Previous bout', exact: true }).click();
+  await expect.poll(async () => (await replayState(page)).battleId).toBe(first.battleId);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), secondAt + second.durationMs + 1000);
+  expect((await replayState(page)).battleId).toBe(first.battleId); expect(await page.evaluate(() => history.length)).toBe(length);
+});
+
+test('final R7 standalone multichapter end card is Again only while bar still steps', async ({ page }) => {
+  await openReplay(page, REPLAY_FIXTURES.expedition.activityId, 'woodland-encounter-1');
+  await page.evaluate(() => window.__cloudiatorReplay!.seek(999999));
+  const card = page.locator('[data-end-card]');
+  await expect(card.getByRole('button')).toHaveCount(1);
+  await expect(card.getByRole('button')).toHaveAccessibleName(/Again|Watch again/);
+  await page.getByRole('group', { name: 'Replay controls', exact: true }).getByRole('button', { name: 'Next bout', exact: true }).click();
+  await expect.poll(async () => (await replayState(page)).battleId).toBe(LOGS['expedition-2'].battleId);
+});
+});
+
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const LOGS: Record<string, BattleLog> = Object.fromEntries(['pvp', 'npc', 'tie', 'expedition-1', 'expedition-2', 'expedition-3']
   .map(name => [name, readJson(`tests/fixtures/battles/${name}.json`)]));

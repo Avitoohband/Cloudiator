@@ -48,15 +48,15 @@ export function readWatched(): Set<string> {
   return new Set(marks().keys());
 }
 
-/**
- * Marks a bout's replay watched at `nowMs` (the display clock's time): in memory first, then the marks older than a replay is kept are
- * dropped and the newest 200 kept, then stored if the device lets it, then every listener is told.
- */
 /** The marks to keep at `nowMs`, oldest first: none older than a replay is kept (7 days), and the newest 200. */
 function trimmed(marks: Iterable<[string, number]>, nowMs: number): [string, number][] {
   return [...marks].filter(([, at]) => nowMs - at <= RULES_V1.retention.replayMs).sort((a, b) => a[1] - b[1]).slice(-KEEP);
 }
 
+/**
+ * Marks a bout's replay watched at `nowMs` (the display clock's time): in memory first, then the marks older than a replay is kept are
+ * dropped and the newest 200 kept, then stored if the device lets it, then every listener is told.
+ */
 export function markWatched(activityId: string, nowMs: number): void {
   // The display clock runs on performance.now(): a time with a fraction is stored as whole milliseconds, which is what a read accepts.
   const at = Math.floor(nowMs);

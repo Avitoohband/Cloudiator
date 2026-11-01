@@ -237,7 +237,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Clearer busy buttons | While a button sends its command, it dims and keeps the keyboard focus, and pressing it again does nothing. | 1.2.1 | Live | Wear, Buy or Queue build (test player) | — |
 | 12- or 24-hour clock | Choose a 12-hour or 24-hour clock in the menu under your name; every time in the game follows it. | 1.4 | Live | Menu under your name → Clock; watch the times in Results change | — |
 | Phone status bar | On a phone, tap your name to see stamina, gold, renown and the time to the next slot. | 1.4 | Live | Fixture camp at phone width → tap your name | — |
-| Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Planned 1.5 | Not built | — |
+| Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Implemented locally; release/go pending | Open a replay and use its keys | — |
 
 ### Under the hood
 

@@ -39,6 +39,30 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 const rowIds = (store: BoutsStore, filter: BoutFilter) => store.list(filter).rows.map(b => b.activityId);
 
 describe('the bouts store', () => {
+  it('refreshes only the opened menu list, joining its pending first read or page', async () => {
+    const reads = heldReads(), store = createBoutsStore(reads);
+    store.refresh('all'); store.load('all'); store.refresh('all');
+    expect(reads.calls).toHaveLength(1);
+    reads.calls[0].resolve(page(['a'], '9')); await settle();
+    store.load('lost');
+    const more = store.more('all'); store.refresh('all');
+    expect(reads.calls).toHaveLength(3);
+    reads.calls[2].resolve(page(['older'])); await more;
+    expect(rowIds(store, 'all')).toEqual(['a', 'older']);
+    store.refresh('all'); reads.calls[3].resolve(page(['new', 'a'])); await settle();
+    reads.calls[1].resolve(page(['loss'])); await settle();
+    expect(rowIds(store, 'all')).toEqual(['new', 'a']);
+    expect(rowIds(store, 'lost')).toEqual(['loss']);
+  });
+  it('lets go of a hidden filter while its first read is still pending', async () => {
+    const reads = heldReads(), store = createBoutsStore(reads);
+    store.load('won'); store.reload('lost');
+    reads.calls[0].resolve(page(['stale'])); await settle();
+    expect(store.list('won')).toMatchObject({ status: 'idle', rows: [] });
+    store.load('won'); expect(reads.calls).toHaveLength(4);
+    reads.calls[3].resolve(page(['fresh'])); await settle();
+    expect(rowIds(store, 'won')).toEqual(['fresh']);
+  });
   it('reports whether this page landed, including an old page after a completed reload', async () => {
     const reads = heldReads(), store = createBoutsStore(reads);
     expect(await store.more('all')).toBe(false);

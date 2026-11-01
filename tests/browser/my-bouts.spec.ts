@@ -20,6 +20,110 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const KEY = 'cloudiator.bouts-watched.v1';
 const VARRO = arenaActivityId('ownerHumanWin');
 const MIN = 60_000, DAY = 86_400_000;
+test.describe('final review regressions', () => {
+  test.skip(production, 'These regressions require the development fixture or routed transport.');
+// Final review: real lifecycle transitions through the routed gateway.
+for (const empty of [false, true]) test(`final R3 Arena refreshes a ready ${empty ? 'empty' : 'old'} cache on reopen`, async ({ page, context }) => {
+  await quietArrivals(context); await seedSession(context);
+  const now = Date.now(), old = liveBout(now, 2, 'defeat'), fresh = liveBout(now, 1, 'victory');
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts: empty ? [] : [old] });
+  await page.goto('/game/'); await expectOwnerShown(page, 'Aster');
+  let arena = await openMenu(page, 'Arena');
+  await expect.poll(() => boutReads(live).length).toBe(1);
+  if (!empty) await expect(names(arena)).toHaveText(['vs Varro']);
+  await closeMenu(page); live.setBouts([fresh, old]);
+  arena = await openMenu(page, 'Arena');
+  await expect(names(arena)).toHaveText(['vs Varro', 'vs Varro']);
+  await expect(rows(arena).first().getByText('Won', { exact: true })).toHaveCount(1);
+  await expect(rows(arena).nth(1).getByText('Lost', { exact: true })).toHaveCount(1);
+  await page.waitForTimeout(500); expect(boutReads(live)).toEqual(['all', 'all']);
+});
+
+test('final R2 stops bookmark discovery when the native origin changes before a held page commits', async ({ page, context }, testInfo) => {
+  await quietArrivals(context); await seedSession(context);
+  const now = Date.now(), bouts = Array.from({ length: 43 }, (_, i) => liveBout(now, i + 1, 'victory'));
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
+  await page.addInitScript(() => {
+    const race = { reads: 0, held: false, resume: null as (() => void) | null, origin: null as string | null };
+    (window as unknown as { __discovery: typeof race }).__discovery = race;
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const response = await fetch(...args), url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), location.href);
+      if (!url.pathname.endsWith('/visible_events') || !url.searchParams.get('select')?.includes('p0name') || ++race.reads !== 2) return response;
+      const body = await response.text();
+      Object.defineProperty(response, 'text', { value: async () => {
+        await new Promise<void>(resolve => { race.resume = resolve; race.held = true; });
+        race.origin = new URL(location.href).searchParams.get('from'); return body;
+      } }); return response;
+    };
+  });
+  await page.goto(`/game/?view=replay&activity=${bouts[42].activityId}&from=bouts`);
+  await page.waitForFunction(() => (window as unknown as { __discovery: { held: boolean } }).__discovery.held);
+  expect(await page.evaluate(() => window.__cloudiatorReplay!.queue())).toBeNull();
+  await expect(replayScene(page).locator('[data-bout-counter]')).toHaveCount(0);
+  await page.evaluate(() => {
+    const url = new URL(location.href); url.searchParams.set('from', 'bouts-lost'); history.pushState({ cloudiatorScene: 1 }, '', url);
+    (window as unknown as { __discovery: { resume(): void } }).__discovery.resume();
+  });
+  await expect.poll(() => boutReads(live).filter(x => x === 'lost').length).toBe(1);
+  await nextFrames(page);
+  expect(boutReads(live).filter(x => x === 'all')).toHaveLength(2);
+  expect(search(page)).toMatchObject({ activity: bouts[42].activityId, from: 'bouts-lost' });
+  expect(await page.evaluate(() => window.__cloudiatorReplay!.queue())).toBeNull();
+  const observed = await page.evaluate(() => (window as unknown as { __discovery: { origin: string } }).__discovery.origin);
+  expect(observed).toBe('bouts-lost');
+  await testInfo.attach('native-bookmark-discovery', { body: JSON.stringify({ observed, reads: boutReads(live) }), contentType: 'application/json' });
+});
+
+test('final R2 locates an old settled bookmark in newest to oldest order', async ({ page, context }) => {
+  await quietArrivals(context); await seedSession(context);
+  const now = Date.now(), bouts = Array.from({ length: 23 }, (_, i) => liveBout(now, i + 1, 'victory'));
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
+  await page.goto(`/game/?view=replay&activity=${bouts[21].activityId}&from=bouts`);
+  await page.waitForFunction(() => !!window.__cloudiatorReplay);
+  await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay?.queue())).toMatchObject({ index: 21, count: 23, previous: bouts[20].activityId, next: bouts[22].activityId });
+  expect(boutReads(live)).toEqual(['all', 'all']);
+  const length = await page.evaluate(() => history.length);
+  await replayScene(page).getByRole('group', { name: 'Replay controls', exact: true }).getByRole('button', { name: 'Next bout', exact: true }).click();
+  await expect.poll(() => search(page).activity).toBe(bouts[22].activityId);
+  expect(await page.evaluate(() => history.length)).toBe(length);
+  await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+  await expect(replayScene(page)).toHaveCount(0); await expect(menuDialog(page, 'Results')).toBeVisible();
+});
+
+for (const signOut of [false, true]) test(`final R5 pending Results choice resets on ${signOut ? 'signout then signin' : 'direct account switch'} with unknown owners`, async ({ page, context }) => {
+  await quietArrivals(context); await seedSession(context);
+  const now = Date.now(), loss = liveBout(now, 1, 'defeat');
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts: [loss] });
+  const release = live.hold('owner_state');
+  await page.goto(`/game/?view=replay&activity=${loss.activityId}&from=bouts-lost`);
+  await expect.poll(() => live.count('owner_state')).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+  const results = menuDialog(page, 'Results'); await expect(results).toBeVisible();
+  if (signOut) {
+    await page.evaluate(() => { localStorage.removeItem('sb-127-auth-token'); const c = new BroadcastChannel('sb-127-auth-token'); c.postMessage({ event: 'SIGNED_OUT', session: null }); c.close(); });
+    await expect(page.getByTestId('corner-chip').getByRole('button', { name: /^Sign in (with Google )?to join$/ })).toBeVisible();
+  }
+  const other = testUser('final-brutus@example.invalid'); await seedSession(context, other);
+  live.setOwner({ ...structuredClone(ownerFixture), gladiatorId: randomUUID(), name: 'Brutus' }); live.setBouts([]);
+  await page.evaluate(user => {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const token = btoa(JSON.stringify({ alg: 'HS256' })) + '.' + btoa(JSON.stringify({ sub: user.id, exp })) + '.test-only';
+    const session = { access_token: token, refresh_token: 'test-only:' + user.id, token_type: 'bearer', expires_at: exp, expires_in: 3600, user };
+    localStorage.setItem('sb-127-auth-token', JSON.stringify(session)); const c = new BroadcastChannel('sb-127-auth-token'); c.postMessage({ event: 'SIGNED_IN', session }); c.close();
+  }, other);
+  await expect.poll(() => live.requests.some(r => r.table === 'owner_state' && r.reader === other.id)).toBe(true);
+  await expect(results.getByRole('tablist')).toHaveCount(0);
+  await page.evaluate(() => {
+    const choices: string[] = []; (window as unknown as { __firstChoices: string[] }).__firstChoices = choices;
+    new MutationObserver(() => { const chip = document.querySelector('[aria-label="Show bouts"] button[aria-pressed="true"]'); if (chip) choices.push(chip.textContent ?? ''); }).observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+  release(); await expectOwnerShown(page, 'Brutus');
+  await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true'); await expect(chip(results, 'All')).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => (window as unknown as { __firstChoices: string[] }).__firstChoices)).not.toContain('Lost');
+});
+});
+
 /** The fixture world's slot start: Varro's bout (one slot back) settled then, so its replay is kept until 7 days later. */
 const SLOT_START = worldFixture.serverNowMs - (worldFixture.serverNowMs % SLOT_MS);
 const VARRO_EXPIRY = SLOT_START + 7 * DAY;

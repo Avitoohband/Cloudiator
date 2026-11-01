@@ -63,10 +63,11 @@ describe('the replay queue', () => {
 
   it('queues kept replays and puts an own unlisted current bout first', () => {
     const l = list(['a', 'b', 'c']);
+    expect(queueEntries(l, 'old-settled', NOW)).toBeNull();
     (l.rows[1] as MyBout).replayExpiry = { state: 'expired' };
     expect(queueEntries(l, 'c', NOW)).toMatchObject({ index: 1, more: false });
     expect(queueEntries(l, 'c', NOW)!.entries.map(e => e.activityId)).toEqual(['a', 'c']);
-    expect(queueEntries(l, 'new', NOW)!.entries.map(e => e.activityId)).toEqual(['new', 'a', 'c']);
+    expect(queueEntries(l, 'new', NOW, true)!.entries.map(e => e.activityId)).toEqual(['new', 'a', 'c']);
     expect(queueEntries(list([], { status: 'loading' }), 'a', NOW)).toBeNull();
     expect(queueEntries(list([], { status: 'failed' }), 'a', NOW)).toBeNull();
   });

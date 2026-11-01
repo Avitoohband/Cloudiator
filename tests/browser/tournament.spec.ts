@@ -22,6 +22,73 @@ const revealOf = (key: TournamentKey, round: number) => {
   return startOf(key) + Math.ceil(80 * MIN * round / (rounds + 1));
 };
 const ASTER = ARENA_GLADIATORS.aster.id;
+test.describe('final review regressions', () => {
+  test.skip(production, 'These regressions require the development fixture or routed transport.');
+for (const future of [false, true]) test(`final R1 refreshes live bracket publication for ${future ? 'addressed future bout with delayed publication' : 'playing quarterfinal without restarting it'}`, async ({ page, context }) => {
+  const view = VIEWS.completed, first = view.bouts.find(b => b.round === 1)!, semi = view.bouts.find(b => b.round === 2)!;
+  let at = revealOf('completed', 2) - 1000;
+  const partial = structuredClone(view); for (const bout of partial.bouts) if (bout.round > 1) bout.revealedResult = null;
+  const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [partial], serverNowMs: () => at });
+  await page.goto(`/game/?view=bout&tournament=${view.id}&bout=${future ? semi.id : first.id}&from=tournaments`);
+  await page.waitForFunction(() => !!window.__cloudiatorShell);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), at);
+  const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+  if (future) await expect(replay).toContainText('This replay is not available yet');
+  else { await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapters === 4); await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(1000); }); }
+  if (!future) live.setTournaments([view]);
+  at = revealOf('completed', 2) + 30000;
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), at);
+  await expect.poll(() => live.count('tournament_views')).toBe(2);
+  if (future) {
+    await expect(replay).toContainText('This replay is not available yet'); live.setTournaments([view]);
+    at += 30001; await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), at);
+    await expect.poll(() => live.count('tournament_views')).toBe(3);
+  }
+  await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay?.state().chapters)).toBe(6);
+  if (!future) expect(await page.evaluate(() => window.__cloudiatorReplay!.state())).toMatchObject({ battleId: first.id, playing: false, positionMs: 1000 });
+  else expect(await page.evaluate(() => window.__cloudiatorReplay!.state().battleId)).toBe(semi.id);
+  const logs = live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id'));
+  expect(logs).toHaveLength(1);
+});
+
+test('final R6 bracket Up next names the next pair and round then disappears at Final', async ({ page, context }, testInfo) => {
+  const view = VIEWS.completed, at = view.endsAtMs + MIN;
+  const first = view.bouts.find(b => b.round === 1 && b.position === 0)!, next = view.bouts.find(b => b.round === 1 && b.position === 1)!;
+  await quietArrivals(context);
+  await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+  await page.goto(`/game/?view=bout&tournament=${view.id}&bout=${first.id}&from=tournaments`);
+  await page.waitForFunction(() => !!window.__cloudiatorReplay);
+  const replay = page.getByRole('dialog', { name: 'Replay', exact: true }), up = replay.locator('[data-up-next]');
+  await expect(up).toContainText(`${next.revealedResult!.participants[0].name} vs ${next.revealedResult!.participants[1].name} · Quarterfinal`);
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true && window.__cloudiatorBattle?.debug()?.ready === true);
+  await page.screenshot({ path: testInfo.outputPath('bracket-up-next-loaded.png') });
+  await up.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('bracket-up-next-visible.png') });
+  await replay.evaluate(element => element.scrollTo(0, 0));
+  const mobile = testInfo.project.name.includes('mobile');
+  await expect(up.getByRole('button')).toHaveCount(mobile ? 0 : 1);
+  const length = await page.evaluate(() => history.length);
+  if (!mobile) await up.getByRole('button').click();
+  else await replay.getByRole('group', { name: 'Replay controls', exact: true }).getByRole('button', { name: 'Next bout', exact: true }).click();
+  await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, next.id);
+  expect(await page.evaluate(() => history.length)).toBe(length);
+  await page.setViewportSize({ width: 360, height: 740 });
+  await expect(up.getByRole('button')).toHaveCount(0);
+  expect(await noHorizontalScroll(page)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('bracket-up-next-360.png') });
+  await page.evaluate(id => { const url = new URL(location.href); url.searchParams.set('bout', id); history.replaceState(null, '', url); }, view.bouts.find(b => b.round === 3)!.id);
+  await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 6);
+  await expect(up).toHaveCount(0);
+  await expect(replay.getByRole('group', { name: 'Replay controls', exact: true })).toContainText('7 / 7');
+  await page.screenshot({ path: testInfo.outputPath('bracket-final-360.png') });
+  await replay.getByRole('button', { name: 'Back to Tournaments', exact: true }).click();
+  await closeMenu(page);
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true);
+  await page.screenshot({ path: testInfo.outputPath('camp-loaded-360.png') });
+  if (!mobile) { await page.setViewportSize({ width: 1280, height: 720 }); await page.screenshot({ path: testInfo.outputPath('camp-loaded-desktop.png') }); }
+});
+
+});
 
 const card = (page: Page) => page.locator('article[data-status]');
 const panelState = (page: Page) => page.evaluate(() => window.__cloudiatorTournaments!.state());
@@ -513,7 +580,7 @@ test.describe('the live Tournaments panel', () => {
     await replay.getByRole('button', { name: 'Previous bout', exact: true }).click();
     await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, semi);
     expect(reads()).toEqual([final, semi]);
-    await replay.getByRole('button', { name: 'Next bout', exact: true }).click();
+    await replay.getByRole('group', { name: 'Replay controls', exact: true }).getByRole('button', { name: 'Next bout', exact: true }).click();
     await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, final);
     expect(reads()).toEqual([final, semi]);
     expect(views()).toBe(1);

@@ -256,11 +256,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     setMessagesRequest(request => messagesRequestFor(request, requestAccount, choiceKey));
   }, [requestAccount, choiceKey]);
   const currentMessagesRequest = messagesRequestFor(messagesRequest, requestAccount, choiceKey);
-  const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ owner: undefined, ...FIRST_RESULTS });
-  const results = choiceFor(resultsChoice, choiceKey);
-  // The owner settles the choice once known, so a later owner never adopts it (an account switch goes through a loading viewer).
-  useEffect(() => { setResultsChoice(state => choiceFor(state, choiceKey)); }, [choiceKey]);
-  const chooseResults = useCallback((next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>) => setResultsChoice(state => choose(state, choiceKey, next)), [choiceKey]);
+  const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ account: undefined, owner: undefined, ...FIRST_RESULTS });
+  const results = choiceFor(resultsChoice, choiceKey, requestAccount);
+  // Bind the account even while its owner loads; render rejects another account before cleanup can run.
+  useEffect(() => { setResultsChoice(state => choiceFor(state, choiceKey, requestAccount)); }, [choiceKey, requestAccount]);
+  const chooseResults = useCallback((next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>) => setResultsChoice(state => choose(state, choiceKey, next, requestAccount)), [choiceKey, requestAccount]);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
   const send = useCallback((event: RailEvent) => setRail(state => railReducer(state, event)), []);

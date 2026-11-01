@@ -249,6 +249,8 @@ export function RecentBoutsView({ rows, watched, nowMs, onWatch, onAll }: {
 }
 
 function RecentBouts({ store, clock, onWatch, onAll }: { store: BoutsStore; clock: DisplayClock; onWatch(bout: MyBout): void; onAll(): void }) {
+  // This section mounts only for a genuine Arena opening. Register before load's effect so the first opening reads once.
+  useEffect(() => { store.refresh('all'); }, [store]);
   const list = useBoutList(store, 'all');
   const watched = useWatched();
   const [now, setNow] = useState<number | null>(() => clock.synced() || clock.frozen() !== null ? clock.now() : null);

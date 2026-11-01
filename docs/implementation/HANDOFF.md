@@ -1,6 +1,6 @@
 # Cloudiator development handoff
 
-## Current authority, locations and next work — 2026-10-31
+## Current authority, locations and next work — 2026-11-01
 
 This dated override supersedes older ownership, checkout and next-task statements below; historical handoff text is preserved. Codex took over from Claude at Avi's explicit request on 2026-10-31. Main checkout: `C:\Avi\Studies\Projects\Cloudiator\codex`; Patch 1.4 execution checkout: `C:\Avi\Studies\Projects\Cloudiator\claude` (`claude/task-24`, port 3200). The Cloudiator root is only the parent.
 
@@ -8,7 +8,11 @@ This dated override supersedes older ownership, checkout and next-task statement
 
 Avi's signed-in human journey and attested checks remain pending. The combined **1.3.1 + 1.4 clip and feature-post reminder** was sent; no new video was requested. Future production releases require a fresh explicit go. Evidence: `docs/operations/release-evidence.md`, "Patch 1.4 released — 2026-10-31".
 
-Next: **1.5 Arena replays**, worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`: read its ledger, merge shipped 1.4, preserve/resume Task 5's uncommitted work. Then **1.5.1 NPC re-review/art approval**, then **1.6 economy** (merge 1.4, incorporate at most two Training slots per game day, Tasks 4–9; zero-stamina tournaments). See `CODEX-HANDOFF-2026-10-31.md` for stream ledgers. Only one worktree uses the local Supabase stack; Edge currently serves from `claude`. No package downloads without asking; no secrets in output. The 1.4 go authorizes no 1.5/1.5.1/1.6 production writes.
+Next: **1.5 Arena replays**, worktree `C:\Avi\Studies\Projects\Cloudiator\p15-arena`, branch `claude/p15-arena-replays`: shipped 1.4 is merged; Tasks 1–9 and their independent scoped reviews are complete. Task 5's former WIP was preserved and committed; do not restore or resume it. The whole-branch review's combined integration corrections are implemented locally, awaiting the one scoped re-review, the complete 12-step gate, finalized release drafts and Avi's fresh 1.5 production go. See the local ledger and final-fix-report.md under `.superpowers/sdd/2026-10-29-arena-replays/` for exact evidence. No final gate pass or 1.5 release is claimed.
+
+Only one worktree uses the local Supabase stack. Root audited the cached-only Deno check/3 tests and real local readBouts/PostgREST/RLS smoke; local Edge now serves **p15-arena** (launcher 48536, retained cached image and Deno cache, existing absolute claude env-file path). No backend change is included. Do not dump configuration/secrets or download packages. Root owns the final gate and release metadata; production stays at **1.4** until Avi explicitly authorizes 1.5 writes.
+
+Then **1.5.1 NPC re-review/art approval**, then **1.6 economy** (merge 1.4, incorporate at most two Training slots per game day, Tasks 4–9; zero-stamina tournaments). See `CODEX-HANDOFF-2026-10-31.md` for stream ledgers. Keep the expedition overlay reward-chip design question, inherited unresolved Phaser texture warning, 118px chapter-bar exception and fully rendered camp captures in the release review. Remind Avi about each release's patch clip and feature posts. The 1.4 go authorizes no 1.5/1.5.1/1.6 production writes.
 
 
 Last updated: 2026-10-29, the game-messages patch is released (Tasks 1–8 of its plan; production runs release `d996d59` with migrations M01–M25; see "Game messages patch released" below). The game is public at https://cloudiator-arena.pages.dev (Task 24, "Task 24 complete: the public launch" below). Next: Task 9 (a clip for the players) and Task 10 (expedition replays, design and mockup first).

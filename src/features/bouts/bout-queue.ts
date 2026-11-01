@@ -8,6 +8,8 @@ export type ReplayQueue = {
   readonly list: BoutList;
   ownerName: string;
   currentActivityId: string | null;
+  /** The native address can move before React commits a new queue. */
+  isCurrent?(): boolean;
   open(activityId: string): void;
   /** True only when this invocation applied a page (including a terminal duplicate page). */
   more(): Promise<boolean>;
@@ -16,11 +18,12 @@ export type QueueEntries = { entries: readonly MyBout[]; index: number; more: bo
 export type StepTarget = { kind: 'chapter'; index: number } | { kind: 'bout'; activityId: string } | { kind: 'more' };
 
 /** Kept rows in list order. Only an absent own current bout gets a navigation-only anchor. */
-export function queueEntries(list: BoutList, current: string, nowMs: number): QueueEntries | null {
+export function queueEntries(list: BoutList, current: string, nowMs: number, unsettled = false): QueueEntries | null {
   if (list.status !== 'ready' || !Number.isFinite(nowMs)) return null;
   const entries = list.rows.filter(row => replayKept(row.replayExpiry, nowMs));
   let index = entries.findIndex(row => row.activityId === current);
   if (index < 0) {
+    if (!unsettled) return null;
     // A listed but expired current replay must never be fabricated back into the kept list.
     if (list.rows.some(row => row.activityId === current)) return null;
     // This anchor carries only an id. It is never an authoritative row or an Up next source.
@@ -55,7 +58,7 @@ export async function nextQueuePage(queue: ReplayQueue, current: string, now: ()
     if (!await queue.more() || !active()) return;
     const latest = queue.list;
     if (latest.status !== 'ready' || latest.loadingMore || latest.moreFailed) return;
-    const target = nextTarget(0, 1, queueEntries(latest, current, now()));
+    const target = nextTarget(0, 1, queueEntries(latest, current, now(), current === queue.currentActivityId));
     if (target?.kind === 'bout') { queue.open(target.activityId); return; }
     if (target?.kind !== 'more') return;
   }

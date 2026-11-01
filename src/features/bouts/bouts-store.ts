@@ -13,6 +13,8 @@ export type BoutsStore = {
   list(filter: BoutFilter): BoutList;
   /** The first page, unless the list is loaded or loading (a failed one is read again: Try again). */
   load(filter: BoutFilter): void;
+  /** Refresh one menu's list on opening, joining an existing read/page instead of invalidating it or other filters. */
+  refresh(filter: BoutFilter): void;
   /** True only if this invocation applied a page; false on failure, invalidation or no-op. Rows stay on failure. */
   more(filter: BoutFilter): Promise<boolean>;
   /**
@@ -70,6 +72,10 @@ export function createBoutsStore(reads: Pick<GameGateway, 'bouts'>): BoutsStore 
     load(filter) {
       const { status } = list(filter);
       if (status === 'idle' || status === 'failed') readFirst(filter);
+    },
+    refresh(filter) {
+      const current = list(filter);
+      if (current.status !== 'loading' && !current.loadingMore) readFirst(filter);
     },
     async more(filter) {
       const current = list(filter), entry = wait(filter);

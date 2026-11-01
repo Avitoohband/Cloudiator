@@ -1509,3 +1509,8 @@ metadata is saved in `github-ci-initial.json` beside this release's temporary ev
 Client e570696 / Cloudflare 39b7ea33-74c6-40f7-81ef-b685c4c77520 is live; no schema/Edge change. Local 12/12, both CI runs, nine deployed checks and 22 anonymous denials passed. Note 6 (08:19:17.027 UTC), linked 1.5 record (08:23:14.302 UTC), exact ten features/latest_patch 1.5/unread +1 readbacks and fresh anonymous post-record probe passed. Required post-next-boundary health after 09:20 UTC is pending; no full-operational completion claim.
 
 [Detailed reproducible evidence, preserved failures, scopes and next steps](../implementation/PATCH-1.5-RELEASED-2026-11-01.md). Clip/feature-post reminder sent; no media creation.
+
+
+### Patch1.5 required next-boundary health - 2026-11-01
+
+Passed09:22:11.417UTC: publishedSlot373651, zero open boundaries, zero alerts;142 hosted-check rows. Exact health.mjs SELECT through installedCLI ManagementAPI using verified existingclaude link; no production write or printed secret. Private evidence: C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p15-boundary-health-20261101-ba79c1ae/. This closes the earlier pending health follow-up; signed-in human checks remain unverified. NPC1.5.1 preparation/review/measurements are documented in docs/implementation/PATCH-1.5.1-READINESS-2026-11-01.md; its full gate/publication remain pending.

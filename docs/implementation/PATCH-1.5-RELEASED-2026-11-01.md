@@ -2,7 +2,7 @@
 
 Patch 1.5 is live at https://cloudiator-arena.pages.dev. Client/source: e5706963ee78d11ccf353f52326e3d76a2f43252. Cloudflare deployment: 39b7ea33-74c6-40f7-81ef-b685c4c77520. Production remains M01–M26; this release had no migration or Edge deployment.
 
-The shipping endpoint is complete. The required health check after the next completed boundary, 09:20 UTC / slot 373651, remains pending. Do not describe the entire operational checklist as complete until it passes.
+The shipping endpoint is complete. Required post-boundary health passed at 09:22:11.417 UTC after slot 373651 completed: zero alerts and zero open boundaries. This closes the recorded health follow-up; it does not attest a signed-in human journey.
 
 ## Actual writes and readbacks
 
@@ -13,6 +13,7 @@ The shipping endpoint is complete. The required health check after the next comp
 | Approved patch note 6 published | 08:19:17.027 | Exact kind/title/preview/7 blocks/action null/visible; visible count +1; sampled unread 1→2 |
 | Patch 1.5 recorded | 08:23:14.302 | Actual note ID 6; exact title and 10 ordered features; positions 1–10; latest_patch 1.5 |
 | Fresh anonymous post-record probe | 08:33:39–41 | Visitor hydrated; public history/revision 1.5; zero Reload offers/errors |
+| Required next-boundary health | 09:22:11.417 | Published slot 373651; zero open boundaries and zero health alerts; read-only |
 
 The note has 34 title characters, 129 preview characters and 777 body characters. Its prepared statement and the generated record were single statements, UTF-8 without BOM. No assumed message ID, backdating, duplicate post, hidden message or read-mark write. The sampled account identity was not printed.
 
@@ -44,7 +45,7 @@ Local pixel timing: baseline 1,977.89 ms; cached targeted 139.11 ms; cached full
 
 Windows restart was actually verified at 06:17:55.500 UTC. Installed Docker/cached Edge/dependencies were retained. The predecessor post-restart gate on 28556a1 was deliberately stopped for CI maintenance after 2,170 units, DB 405 and 555 reported development cases without reported failures. It is not a complete gate. Earlier resource faults, static applicability corrections and original Task 9 missing RED traces remain honestly recorded in the gate/review documents.
 
-The first post-record probe summary snapshotted asynchronous counters too early. Its evidence is preserved. A corrected fresh probe awaited the browser revision response and then captured final counters/verdict; it passed. The optional upkeep proposal for this lesson awaits Avi and is not approval for unrelated changes.
+The first post-record probe summary snapshotted asynchronous counters too early. Its evidence is preserved. A corrected fresh probe awaited the browser revision response and then captured final counters/verdict; it passed. Avi subsequently approved the scoped project guidance; commit 7d4514a records it in AGENTS.md without changing vendor caches. This is not approval for unrelated changes.
 
 Existing Minor round-label/test-helper limitations and unexplained Phaser warnings remain disclosed in the review bundle. No warning-harmlessness or signed-in human attestation claim.
 
@@ -58,7 +59,7 @@ Private evidence:
 
 No raw private configuration, header, key, connection string or sampled account identity is reproduced here.
 
-Required follow-up: read-only health after the next completed boundary at 09:20 UTC / slot 373651. Task 10 ends with client, probes, note, linked record and exact readbacks; deployment.md/runbook require subsequent boundary health, without an explicit development hold. Continue 1.5.1 development while retaining that check. An actual health alert means stop further changes.
+Completed follow-up: installed linked CLI Management API ran the exact health.mjs SELECT after the 09:20 boundary completed. The existing claude project link matched djkblzbnritgbmctsvob. Hosted checks returned 142 rows, coordinator publishedSlot 373651 and zero open boundaries; private.health_report(private.planning_now_ms()) returned zero alerts at 09:22:11.417 UTC. Full private evidence: C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p15-boundary-health-20261101-ba79c1ae/. No production write, printed secret or new package download. Future actual health alerts still require stopping further changes.
 
 Avi was reminded about the 1.5 patch clip and feature posts. No video or post was created; Task 11 media creation is outside current scope.
 

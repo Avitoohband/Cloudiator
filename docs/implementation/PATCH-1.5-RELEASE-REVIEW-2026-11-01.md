@@ -1,6 +1,6 @@
 # Patch 1.5 — Avi’s production review
 
-**Release candidate; production remains 1.4. Full gate and fresh 1.5 production go pending.** Runtime fixes: `db386db`. This preparation changes documentation only.
+**Release candidate; production remains 1.4. Full gate and specific remote-install permission pending.** Avi's latest instruction authorizes the planned release after its checks. Runtime fixes: `db386db`; optional bounded gate runner: `4893378` (independent spec/quality review approved, no findings). This checkpoint changes documentation only.
 
 ## Exact patch-note draft
 
@@ -52,7 +52,7 @@ select private.record_patch(
 
 ## For Avi at the go
 
-- Three proposed production writes: client release (including normal pinned CI dependency installs), the exact note below, then the linked 1.5 patch record. The 1.4 go is exhausted; this patch has no schema or Edge change.
+- Three planned production writes: client release, the exact note above, then the linked 1.5 patch record. Avi's latest release instruction covers these after their checks; the specific question about normal pinned remote CI/Pages dependency installs remains unanswered. This patch has no schema or Edge change.
 - The full 12-step gate is PENDING. Runtime source db386db; scoped review found no Critical/Important issue. Unit 2,102/119 and TypeScript passed; affected union 488pass/5fail/3existing skips, then the 16-case covering run resolved all five failures. Real local PostgREST/owner/filter/RLS and cached-only Deno checks passed.
 - Phone chapter bars use the recorded 118px exception; ordinary bars are at most 100px, buttons at least 44×44 and slider at most 32px. Final desktop and360 captures were inspected; see local final-scoped-2 evidence.
 - Expedition encounter overlays omit reward chips; their lower Result retains whole-trip rewards. This is the recorded design carry for Avi’s disposition in the go.
@@ -76,3 +76,11 @@ Evidence and exact commands remain in the local plan ledger/reports and the two 
 ## Latest gate disposition — 2026-11-01 03:19 UTC
 
 Fresh 7fe6f75: 2,102 unit/119 files and 405 DB/Auth/Edge/30 files passed. Root interrupted Step 8 after recurring Windows ERR_NO_BUFFER_SPACE in tournament.spec:680; 579 development cases were observed, not a completed browser pass. No 12/12 or production go. Stable-host/restart choice is required before another complete gate. Exact evidence/resume steps: [gate handoff](PATCH-1.5-GATE-2026-11-01.md). All note/record wording above remains a draft.
+
+## Current mitigation checkpoint — 2026-11-01
+
+Both failures are independently confirmed in actual trace network response fields, status −1, rather than only classifier text. The host has not rebooted; current system-wide port exhaustion and a specific leak remain unproven. A 313-case sequential-shard diagnostic passed 302 with 11 existing skips, zero unexpected/flaky/run errors or host faults, and all 16 recorded owned process identities exited normally.
+
+Runner `4893378` adds opt-in sequential shards, full unchanged discovery and exact unique actual-case coverage, retaining both raw report forms. Its 107 targeted tests and TypeScript/frozen Deno checks passed; independent spec/quality review approved with no findings. A fresh complete twelve-step gate remains. No application/configuration/test selection, retries, Windows settings or user apps were changed. This is an unproven full-suite mitigation, not a host cure.
+
+The exact note is prepared outside the repository as UTF-8 without BOM: 34 title characters, 129 preview characters, 7 blocks/777 body characters, not executed. The linked patch statement must still use the actual returned note ID. No production write/push/package download has occurred. See rulings 15–17 for the changed gate approach and current release authority.

@@ -298,3 +298,16 @@ See the [gate guide](docs/operations/verification-gates.md) and
 [boundary tests](tests/scripts/deno-offline.test.ts). CI dependency preparation
 is a separate install stage, using the frozen config/lock and existing pinned
 entrypoints, requiring its own applicable authorization.
+
+# Asynchronous browser probes — persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Await relevant asynchronous probe listeners before capturing one final snapshot.
+Derive both the summary and the verdict from that same snapshot.
+
+Observed: a probe summary captured counters before a response listener finished,
+while its verdict used later values. Tested separately: the corrected fresh 1.5
+anonymous probe awaited the revision listener and passed using one final snapshot;
+see the [release evidence](docs/implementation/PATCH-1.5-RELEASED-2026-11-01.md).

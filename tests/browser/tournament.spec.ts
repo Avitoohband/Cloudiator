@@ -576,6 +576,28 @@ test.describe('the live Tournaments panel', () => {
     expect(live.count('tournament_views')).toBe(1);
   });
 
+  test('a loaded bracket replay keeps playing at expiry, but an unopened chapter reads nothing', async ({ page, context }) => {
+    const view = VIEWS.completed, expiry = view.endsAtMs + 7 * 86400000, at = expiry - MIN;
+    const final = view.bouts.find(b => b.round === 3)!.id;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    const logReads = () => live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id')).length;
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + final + '&from=tournaments');
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, final);
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), expiry - 1);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    const controls = replay.getByRole('group', { name: 'Replay controls', exact: true });
+    await expect(controls).toBeVisible();
+    expect(logReads()).toBe(1);
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), expiry);
+    await expect(controls).toBeVisible();
+    expect(await page.evaluate(() => window.__cloudiatorReplay?.state().battleId)).toBe(final);
+    expect(logReads()).toBe(1);
+    await controls.getByRole('button', { name: 'Previous bout', exact: true }).click();
+    await expect(replay).toContainText('This replay is no longer kept');
+    await expect(controls).toHaveCount(0);
+    expect(logReads()).toBe(1);
+  });
+
   test('an old bracket says its replays are no longer kept, with no reads', async ({ page, context }) => {
     const view = VIEWS.completed, at = view.endsAtMs + 7 * 86400000, final = view.bouts.find(b => b.round === 3)!.id;
     const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });

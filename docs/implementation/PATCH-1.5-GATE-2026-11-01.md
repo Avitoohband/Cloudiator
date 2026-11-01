@@ -1,5 +1,11 @@
 # Patch 1.5 gate — host recovery checkpoint
 
+## Patch 1.5 LIVE — 2026-11-01
+
+The exact e570696 client passed 12/12 locally, exit 0/no omissions, finished 08:00:26.644 UTC. Development: 1,192 expected + 50 skips; static: 32 literal passes + two expected CSP failures + 1,208 skips. Both modes cover exactly 1,242 unique actual identities with zero missing/extra/duplicate/unexpected/flaky/run errors. Units 2,170/122 files; DB 405/30; Edge 3. Feature and release CI passed, with their explicit development omission kept separate.
+
+Client/approved note 6/linked 1.5 record are live; exact ten features/latest_patch 1.5/unread +1 readbacks and nine deployed checks passed. Fresh anonymous probe passed. Required next-boundary health after 09:20 UTC remains pending; next NPC development may proceed with that follow-up retained. No permanent host-cure or human-attestation claim. All older blocked/retry instructions are historical. See [full release evidence](PATCH-1.5-RELEASED-2026-11-01.md); 22 rulings.
+
 ## CURRENT BED-CACHE CHECKPOINT — 2026-11-01
 
 Production remains **1.4**. Windows restart was verified at `2026-11-01T06:17:55.5000000Z`; cached local stack/M01–M26 and Edge serving p15 were restored. No further restart is required merely to resume. Post-restart candidate `28556a1` passed **2,170 units/122 files** and **405 DB/Auth/Edge checks/30 files**. Root deliberately stopped its full gate at Step8 after **555 reported development cases with no reported failures** for the CI correction below. First shard:302expected/11existing skips/0unexpected/0flaky/0run errors. Owned76812/PID38220 stopped after identity check; PID gone/port3800free. This is incomplete browser coverage, not12/12 or permanent host-cure proof.

@@ -26,6 +26,9 @@ In ledger order. A fresh full gate after verified restart and reviewed PNG-cache
 
 21. **Correct repeated full-atlas work, preserve coverage:** after two actual CI timeouts on unchanged camp-beds113, static analysis found36whole PNG decodes for2immutable images. Stop the owned localgate before any edit; use the existing image-path cache pattern, retaining all12stations×2frames,98304candidate-pixel visits, every opaque-pixel assertion/diagnostic/threshold and5sec budget. c1da8eb passed targeted8/full2170/typecheck and independent review. Local before/after timing is evidence for this host; freshCI/full12 remain required. No third unchanged CI run or application fix is inferred. Cost if wrong: fresh positive checks still block publication; no timeout/coverage reduction masks failure.
 
+22. **Shipping endpoint and required health follow-up:** Task 10 ends with client/probes/note/linked record/exact readbacks/evidence. deployment.md:637/runbook.md:49 require health after the next boundary without an explicit development hold. Mark 1.5 live with 09:20 UTC health pending and continue 1.5.1, retaining the mandatory check and deployment.md:86/92 stop-on-alert. This is a narrow interpretation, not a waived check or complete-operational claim. Cost if wrong: subsequent work pauses on a health concern; no health pass is fabricated.
+
+
 ## Avi's explicit approvals — 2026-11-01
 
 - Normal remote pinned dependency installs and CI container pulls for the planned releases; no new local package downloads.

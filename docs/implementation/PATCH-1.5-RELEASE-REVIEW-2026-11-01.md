@@ -1,5 +1,9 @@
 # Patch 1.5 — Avi’s production review
 
+## Patch 1.5 LIVE — 2026-11-01
+
+The exact drafts below were published unchanged: note 6 at 08:19:17.027 UTC and linked 1.5 record at 08:23:14.302 UTC. Client e570696, all ten ordered features/latest_patch 1.5, local 12/12, both CI runs and nine deployed checks are verified. Fresh anonymous visitor/public-history/object-revision probe passed; no signed-in human claim. Required health after the next completed 09:20 UTC boundary remains pending. Shipping endpoint complete; next NPC stream authorized. [Full evidence](PATCH-1.5-RELEASED-2026-11-01.md). Older pending-go/recovery/CI statements are preserved history.
+
 ## CURRENT BED-CACHE CHECKPOINT — 2026-11-01
 
 The exact note/record drafts below remain unchanged. Production is1.4; actual restart completed at2026-11-01T06:17:55.5000000Z. Postrestart28556a1 passed2170units/405DB and555reported development cases with no reported failures, then root stopped it for independently diagnosed CI maintenance. Both newCI runs failed only unchanged camp-beds113/5000ms; all other executable CI stages passed, development deliberately omitted. Static34expected outcomes include32literal passes and2CSPexpected failures;1208skips, with no uploaded rawstats claim.

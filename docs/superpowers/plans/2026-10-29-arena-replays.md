@@ -1,3 +1,5 @@
+> **Patch 1.5 LIVE — 2026-11-01:** Tasks 1–10 implemented, independently reviewed and shipped as e570696. Exact local 12/12, both CI runs, deployed nine checks, note 6, linked ten-feature record and fresh anonymous probe passed. Required next-boundary health after 09:20 UTC remains pending. Current planned-release go supersedes old fresh-go wording below. Task 11 media creation is outside current scope; reminder only sent. Original Tasks 1–9 procedural checkboxes remain historical; actual completion/evidence is in the ledger. Next NPC development may proceed with health follow-up retained.
+
 # Arena Replays, More Comfortable to Watch: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -904,23 +906,23 @@ expect([bracketChapter('Final', 0, 1), bracketChapter('Semifinal', 1, 2), bracke
 
 Release from p15-arena on port 3800. Finalize docs/CHANGELOG.md and docs/FEATURES.md before the go: built bullets must exactly match the patch-record draft. Present the exact 1.5 title, features and linked-note record draft together with the patch-note draft. Avi must give a fresh explicit 1.5 go; the four-write 1.4 approval is exhausted. This patch changes nothing under supabase/.
 
-- [ ] **Step 1:** With the local stack and `supabase functions serve` running, run the gate of record `node scripts/verify.mjs
+- [x] **Step 1:** With the local stack and `supabase functions serve` running, run the gate of record `node scripts/verify.mjs
   --config node_modules/.cache/pw-p15-arena.config.mjs`; expect every step to pass. The DB-test rule applies (AGENTS.md); no build
   or edit during the browser run.
-- [ ] **Step 2:** A fresh reviewer checks the whole branch against the spec (copy word for word, the Review Focus, owner-only
+- [x] **Step 2:** A fresh reviewer checks the whole branch against the spec (copy word for word, the Review Focus, owner-only
   data, the formatter guard, history replace-not-push); fix what it finds; rerun the affected tests and the gate.
-- [ ] **Step 3:** `git diff --stat origin/release -- supabase` must be empty (client-only release). Stop and ask before
+- [x] **Step 3:** `git diff --stat origin/release -- supabase` must be empty (client-only release). Stop and ask before
   releasing if anything under `supabase/` changed, or if the branch carries other unreleased work (Patch B is planned in
   parallel): choose the commit to release with Avi first.
-- [ ] **Step 4:** Ask Avi in chat for the go, with the spec's "Patch note draft" for his wording. Check the window (not Wed/Sat
+- [x] **Step 4:** Ask Avi in chat for the go, with the spec's "Patch note draft" for his wording. Check the window (not Wed/Sat
   17:20-20:00 UTC) and, read-only, that no boundary is open (`hosted-checks.sql` through `db query --linked --agent no`).
-- [ ] **Step 5:** After the go: the `release` fast-forward from `C:\Avi\Studies\Projects\Cloudiator\p15-arena` (`git merge-base
+- [x] **Step 5:** After the go: the `release` fast-forward from `C:\Avi\Studies\Projects\Cloudiator\p15-arena` (`git merge-base
   --is-ancestor origin/release <deploy-commit>`, then `git push origin <deploy-commit>:refs/heads/release`, never `--force`;
   deployment.md "Client step"); the deployed checks about 2 minutes after Pages is live.
-- [ ] **Step 6:** Post the approved note with `private.post_message('patch-notes', <title>, <preview>, <body>, null)` per the
+- [x] **Step 6:** Post the approved note with `private.post_message('patch-notes', <title>, <preview>, <body>, null)` per the
   runbook ("Posting a game message": one statement, UTF-8 without a byte-order mark, dollar quotes); read back the visible
   messages and one account's inbox (unread up by one).
-- [ ] **Step 7:** Only after the client, deployed probes and approved note succeed, run the approved private.record_patch statement for 1.5 linked to that new note, generated with scripts/patch-statement.mjs from the finalized changelog. Verify the patch record, exact feature wording, note link and world_revision.latest_patch read-only. Record the evidence in `docs/operations/release-evidence.md` and `docs/operations/deployment.md`, update
+- [x] **Step 7:** Only after the client, deployed probes and approved note succeed, run the approved private.record_patch statement for 1.5 linked to that new note, generated with scripts/patch-statement.mjs from the finalized changelog. Verify the patch record, exact feature wording, note link and world_revision.latest_patch read-only. Record the evidence in `docs/operations/release-evidence.md` and `docs/operations/deployment.md`, update
   `docs/implementation/HANDOFF.md` and this plan's status; commit `deploy: ship the Arena replays patch`.
 
 ### Task 11: A players' clip of the Arena replays patch

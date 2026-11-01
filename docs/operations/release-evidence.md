@@ -1502,3 +1502,10 @@ Avi has been asked whether to rerun CI once with its normal pinned dependency in
 choice is pending; no rerun or test-budget change has been made. No local package was installed/downloaded; the approved
 client release triggered the normal GitHub/Pages build pipelines and their pinned dependency setup. The aggregate CI
 metadata is saved in `github-ci-initial.json` beside this release's temporary evidence.
+
+
+## Patch 1.5 released — 2026-11-01
+
+Client e570696 / Cloudflare 39b7ea33-74c6-40f7-81ef-b685c4c77520 is live; no schema/Edge change. Local 12/12, both CI runs, nine deployed checks and 22 anonymous denials passed. Note 6 (08:19:17.027 UTC), linked 1.5 record (08:23:14.302 UTC), exact ten features/latest_patch 1.5/unread +1 readbacks and fresh anonymous post-record probe passed. Required post-next-boundary health after 09:20 UTC is pending; no full-operational completion claim.
+
+[Detailed reproducible evidence, preserved failures, scopes and next steps](../implementation/PATCH-1.5-RELEASED-2026-11-01.md). Clip/feature-post reminder sent; no media creation.

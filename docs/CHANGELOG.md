@@ -22,11 +22,11 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.3.** New since then: 1.3.1 and 1.4, both live.
+**Last video's patch: 1.3.** New since then: 1.3.1, 1.4 and 1.5, all live.
 
 ## 1.5 — Watch your Arena bouts more easily (2026-11-01)
 
-Release candidate for review; not yet published. Final gate and Avi’s fresh production go are pending.
+Released 2026-11-01: Arena replays are live. The exact ten features below are recorded on the server with the patch note.
 
 - Results opens on My bouts: your Arena and tournament bouts by day, with All, Won and Lost filters, rating changes and a dot until watched on this device.
 - The replay bar has play and pause, a track, the time, a remembered speed of 1×, 2× or 4×, and ⚑ Result.

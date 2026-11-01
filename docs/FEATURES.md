@@ -2,7 +2,7 @@
 
 Every player-visible feature, from the launch (1.0) to the planned 1.8, for whoever makes a reel or a video. The exact
 words players see are in [CHANGELOG.md](CHANGELOG.md). This file says what each feature gives a player, where to find it on
-screen, and which video already showed it. Updated 2026-10-31: patch 1.4 is live.
+screen, and which video already showed it. Updated 2026-11-01: patch 1.5 is live.
 
 ## New since the last video
 
@@ -38,6 +38,10 @@ Live in production:
   record.
 
 Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both. The clip/posts reminder was sent after release; no new video was requested or produced.
+
+**Out now: 1.5 (released 2026-11-01)**
+
+My bouts, the shared replay bar/result card, Next bout, named Back, Notifications/Arena/camp Watch links and full-screen tournament chapters are live. The exact feature wording is in CHANGELOG 1.5 and the server record. The clip/feature-post reminder was sent; no video was made or published for this release.
 
 ## How to use this file
 
@@ -78,7 +82,7 @@ Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
 ## Features by area
 
-**Status:** Live (in the game now) · Planned 1.5 / 1.6 / 1.7 / 1.8 (designed, not built: don't film
+**Status:** Live (in the game now) · Planned 1.6 / 1.7 / 1.8 (designed, not built: don't film
 them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
@@ -158,9 +162,9 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Tournaments | Brackets every Wednesday and Saturday. | 1.0 | Live | Tournaments → a sample bracket | Concept trailer |
 | Seasons | Four-week seasons end with awards for the top 3: rewards, titles and badges. | 1.0 | Live | Arena → standings → a season | Concept trailer (as "28 days") |
 | Evening Arena | The Arena runs in the evening part only, and tournaments start in the evening too, at 18:40 UTC. | 1.1 | Live | Schedule: Arena is offered in the evening only | Looks update |
-| Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Built; waiting for 1.5 release | Arena → Your recent bouts; All my bouts opens Results on My bouts (All) | — |
-| Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Built; waiting for 1.5 release | Camp → settled Arena bout button | — |
-| Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Built; waiting for 1.5 release | Tournaments → Watch replay → bracket chapters | — |
+| Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Live | Arena → Your recent bouts; All my bouts opens Results on My bouts (All) | — |
+| Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Live | Camp → settled Arena bout button | — |
+| Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Live | Tournaments → Watch replay → bracket chapters | — |
 | Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Planned 1.6 | Not built | — |
 | Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Planned 1.6 | Not built | — |
 
@@ -172,14 +176,14 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | A fight up close | Watch any bout up close, blow by blow, with health bars. | 1.0 | Live | Replay page, `<Aster vs Varro>`; `<Tie-break bout>` for a close finish | Concept trailer |
 | Replays kept a week | Every replay can be watched for 7 days. | 1.0 | Live | Replay page, `<Expired bout>` shows the "no longer kept" card | — |
 | The whole trip from Results | Replay on an expedition in Results opens the whole-trip replay. | 1.4 | Live | Results → Replay on an expedition row | — |
-| My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch → ⏭; Lost follows only losses | — |
-| Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Built; waiting for 1.5 release | Results → My bouts → Watch; replay page | — |
-| Your Arena result on the camp | After your bout ends, see who won and the credited rewards, Watch the bout, or dismiss it on this device. | 1.5 | Built; waiting for 1.5 release | Live camp after your Arena bout; phone beside ☰ | — |
+| My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Live | Results → My bouts → Watch → ⏭; Lost follows only losses | — |
+| Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| Your Arena result on the camp | After your bout ends, see who won and the credited rewards, Watch the bout, or dismiss it on this device. | 1.5 | Live | Live camp after your Arena bout; phone beside ☰ | — |
 | Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.8 | Planned 1.8 | Not built | — |
 | Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.8 | Planned 1.8 | Not built | — |
 
@@ -202,7 +206,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Notifications | See what your training, expeditions, Arena fights and tournaments earned: XP, level-ups, gear and gold. | 1.3 | Live | Messages → Notifications | Messages update (named as coming in Looks update) |
 | Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | Live | The chip menu: tap or click your name for "Patch 1.4" and Patch history ›; a patch note's number opens the history at that patch | — |
 | New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | Live | Needs a server ahead of the game: in the test camp call `setLatestPatch` with a version strictly above the current client `PATCH` (increment its major number), then focus the window; the notice shows under your name | — |
-| Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Built; waiting for 1.5 release | Messages → Notifications → Watch; Back returns to the Notifications tab | — |
+| Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Live | Messages → Notifications → Watch; Back returns to the Notifications tab | — |
 
 ### Players and community
 
@@ -237,7 +241,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Clearer busy buttons | While a button sends its command, it dims and keeps the keyboard focus, and pressing it again does nothing. | 1.2.1 | Live | Wear, Buy or Queue build (test player) | — |
 | 12- or 24-hour clock | Choose a 12-hour or 24-hour clock in the menu under your name; every time in the game follows it. | 1.4 | Live | Menu under your name → Clock; watch the times in Results change | — |
 | Phone status bar | On a phone, tap your name to see stamina, gold, renown and the time to the next slot. | 1.4 | Live | Fixture camp at phone width → tap your name | — |
-| Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Implemented locally; release/go pending | Open a replay and use its keys | — |
+| Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Live | Open a replay and use its keys | — |
 
 ### Under the hood
 

@@ -1,3 +1,5 @@
+> **2026-11-01 validation checkpoint:** Runtime `db386db`; reviewed test-maintenance `c2a7603`, fresh TypeScript exit0. Units 2,102/119 and DB 405/30 passed, but the previous gate did not: development 1,185 passed/7 failed/50 skipped; static partial setup failures. Stale test assumptions and precise applicability guards are corrected; Windows ERR_NO_BUFFER_SPACE startup failure remains unclaimed as fixed. Next: one fresh complete 12-step gate on current host; if the resource fault recurs, ask for a stable-host/restart choice. Source stays frozen during that gate. Production 1.4; no 1.5 go or push. The ignored p15 .env.edge.local now exists as a byte-identical copy of the existing local configuration, matching the running Edge configuration; never print it. See the release-review bundle and fourteen rulings. This checkpoint supersedes older gate/maintenance status below.
+
 # Handoff to Codex — Cloudiator, 2026-10-31
 
 ## Current authority, locations and next work — 2026-11-01

@@ -61,3 +61,14 @@ select private.record_patch(
 - At execution time recheck release window and open boundaries. After shipping, remind Avi about the 1.5 patch clip and feature posts.
 
 All controller rulings and their costs: [rulings](PATCH-1.5-RULINGS-2026-11-01.md).
+
+## Validation checkpoint — 2026-11-01
+
+Runtime source remains `db386db`; test-only maintenance `c2a7603` passed independent spec/quality review and fresh root TypeScript (exit0). The full gate is still pending.
+
+- Attempt1: local worker configuration absent in p15; DB7 failed/398 passed. Existing local file copied byte-identically to the ignored p15 path; targeted real worker check passed, then fresh full DB405/30 passed. No secret contents or hashes printed.
+- Attempt2: units2,102/119 and DB405/30 passed. Development browser1,185 passed/7 failed/50 skipped. Four verification assumptions were corrected; the fifth distinct scenario is a preserved Windows ERR_NO_BUFFER_SPACE camp-startup failure. Static was interrupted at82 observed cases (1 pass marker/13 failure markers/68 skip markers) after proving new development-only groups lacked their proper guard. This was not a completed12-step gate.
+- Maintenance: targeted56 passed/2 counter-instrumentation failures/4 existing mode skips; after counter correction, both retry cases passed. Static loader verified28 newly guarded development-only cases and retained valid static eligibility. This is not a claim of a clean62-case run or a static runtime pass. Application code and phone-bar test remain unchanged.
+- Next: one fresh complete gate on the current host after these corrections. An optional environment preference remains unanswered; no reboot approval is inferred, and no host recovery is claimed. A recurring resource fault needs a stable-host decision.
+
+Evidence and exact commands remain in the local plan ledger/reports and the two preserved Temp gate directories. Production remains1.4; fresh1.5 go still requires the complete gate result.

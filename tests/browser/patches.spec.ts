@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { PATCH } from '../../src/lib/patch';
 import { expect, test, type Locator, type Page } from './fixtures';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { GameMessage, Inbox, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
@@ -16,6 +17,9 @@ import { chipToggle, cornerChip, expectOwnerShown, openChipMenu, quietArrivals, 
 // a scene or a dialog. Live mode uses the development-only intercepted transport: `setLatestPatch` stands in for the server recording a
 // newer patch, which the page learns on its next revision read (a window `focus` starts one).
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
+// Keep the server ahead of this build, including when the next minor release changes PATCH.
+const NEWER_PATCH = `${Number(PATCH.split('.')[0]) + 1}.0`;
+const LATER_PATCH = `${Number(PATCH.split('.')[0]) + 1}.1`;
 /** A local-noon time on a day of 2026, so a posting date reads the same in every time zone. */
 const at = (month: number, day: number) => new Date(2026, month, day, 12).getTime();
 const note = (id: number, title: string, day: number): GameMessage => ({ id, kind: 'patch-notes', title, preview: `What ${title} changed.`,
@@ -33,7 +37,7 @@ const WOODLAND_TIMELINE = JSON.parse(readFileSync('tests/fixtures/expeditions/wo
 const inbox = (messages: readonly GameMessage[]): Inbox => ({ unread: 0, readIds: messages.map(m => m.id).sort((a, b) => a - b), sinceMs: 0, newNotifications: 0, notificationsSeenMs: 0 });
 
 /** A signed-in player (Aster) in live mode on a server with the patches, the notes and the given newest patch. */
-async function player(page: Page, latestPatch: string | null = '1.4'): Promise<LiveTransport> {
+async function player(page: Page, latestPatch: string | null = PATCH): Promise<LiveTransport> {
   const context = page.context();
   await seedSession(context);
   await quietArrivals(context);
@@ -84,20 +88,20 @@ test.describe('patch numbers in live mode', () => {
     await player(page);
     await openLive(page);
     const menu = await openChipMenu(page);
-    // "Patch 1.5" after the Clock group and before Sign out.
+    // This build's patch after the Clock group and before Sign out.
     const order = await menu.evaluate(root => [...root.children].map(child => (child.getAttribute('aria-label') ?? (child as HTMLElement).innerText).replace(/\s+/g, ' ').trim()));
-    const clockAt = order.findIndex(text => text.startsWith('Clock')), patchAt = order.findIndex(text => /^Patch 1\.5/.test(text)), signOutAt = order.indexOf('Sign out');
+    const clockAt = order.findIndex(text => text.startsWith('Clock')), patchAt = order.findIndex(text => text.startsWith(`Patch ${PATCH} `)), signOutAt = order.indexOf('Sign out');
     expect(clockAt, order.join(' | ')).toBeGreaterThan(-1);
     expect(patchAt, order.join(' | ')).toBe(clockAt + 1);
     expect(signOutAt, order.join(' | ')).toBe(patchAt + 1);
-    await expect(menu.getByText('Patch 1.5', { exact: true })).toBeVisible();
+    await expect(menu.getByText(`Patch ${PATCH}`, { exact: true })).toBeVisible();
     await expect(menu.getByRole('button', { name: 'Reload' })).toHaveCount(0);
     await reviewShot(page, testInfo, 'patch-menu');
     await menu.getByRole('button', { name: /^Patch history/ }).click();
     const panel = panelOf(page);
     await expect(history(panel)).toBeVisible();
     await expect(history(panel)).toBeFocused();
-    await expect(panel.getByText('You are playing Patch 1.5', { exact: true })).toBeVisible();
+    await expect(panel.getByText(`You are playing Patch ${PATCH}`, { exact: true })).toBeVisible();
     // Newest first; the newest is open with its features, the others are closed.
     const buttons = panel.locator('[data-patch]');
     await expect(buttons).toHaveCount(7);
@@ -174,10 +178,10 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     await expect(notice(page)).toHaveCount(0);
     await chipToggle(page).focus();
-    await serverHas(page, live, '1.6');
+    await serverHas(page, live, NEWER_PATCH);
     // The touch layout (the mobile project: no hover) shows the short form.
     const words = async (n: string) => ((await touchLayout(page)) ? `Patch ${n} is out` : `A new patch is out — reload to play Patch ${n}.`);
-    await expect(notice(page)).toContainText(await words('1.6'));
+    await expect(notice(page)).toContainText(await words(NEWER_PATCH));
     await expect(notice(page).getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
     await expect(notice(page).getByRole('button', { name: 'Later', exact: true })).toBeVisible();
     // It never takes the focus.
@@ -189,10 +193,10 @@ test.describe('patch numbers in live mode', () => {
     await expectOwnerShown(page, 'Aster');
     const back = page.getByRole('button', { name: 'Back to Camp', exact: true });
     await expect(back).toBeVisible();
-    await serverHas(page, live, '1.6');
+    await serverHas(page, live, NEWER_PATCH);
     await expect(notice(page)).toHaveCount(0);
     await back.click();
-    await expect(notice(page)).toContainText('Patch 1.6');
+    await expect(notice(page)).toContainText(`Patch ${NEWER_PATCH}`);
     // Not over a modal dialog, whichever it is (here one the test opens; the Change look dialog has its own case below).
     await page.evaluate(() => {
       const dialog = document.createElement('dialog');
@@ -203,14 +207,14 @@ test.describe('patch numbers in live mode', () => {
     });
     await expect(notice(page)).toHaveCount(0);
     await page.evaluate(() => { const dialog = document.querySelector<HTMLDialogElement>('[data-test-modal]')!; dialog.close(); dialog.remove(); });
-    await expect(notice(page)).toContainText('Patch 1.6');
-    // Later hides it for this number, for this page: a later read with 1.6 keeps it hidden, 1.7 shows it again.
+    await expect(notice(page)).toContainText(`Patch ${NEWER_PATCH}`);
+    // Later hides it for this number, for this page: the same patch keeps it hidden, a later patch shows it again.
     await notice(page).getByRole('button', { name: 'Later', exact: true }).click();
     await expect(notice(page)).toHaveCount(0);
-    await serverHas(page, live, '1.6');
+    await serverHas(page, live, NEWER_PATCH);
     await expect(notice(page)).toHaveCount(0);
-    await serverHas(page, live, '1.7');
-    await expect(notice(page)).toContainText(await words('1.7'));
+    await serverHas(page, live, LATER_PATCH);
+    await expect(notice(page)).toContainText(await words(LATER_PATCH));
     // Reload reloads once, at the same address.
     const address = page.url(), before = loads;
     await notice(page).getByRole('button', { name: 'Reload', exact: true }).click();
@@ -227,34 +231,34 @@ test.describe('patch numbers in live mode', () => {
     const look: GameMessage = { ...NOTES[2], action: 'change-look' };
     const messages = [ADMIN, NOTES[0], NOTES[1], look, NOTES[3]];
     const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'patches-1' }, owner: { ...structuredClone(ownerFixture), inbox: inbox(messages) },
-      messages, patches: PATCHES, latestPatch: '1.6' });
+      messages, patches: PATCHES, latestPatch: NEWER_PATCH });
     await openLive(page);
-    await expect(notice(page)).toContainText('Patch 1.6');
+    await expect(notice(page)).toContainText(`Patch ${NEWER_PATCH}`);
     await messagesButton(page).click();
     await panelOf(page).locator('[data-message-row="2"]').click();
     await panelOf(page).getByRole('button', { name: 'Change look', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Change your look', exact: true });
     await expect(dialog).toBeVisible();
     await expect(notice(page)).toHaveCount(0);
-    await serverHas(page, live, '1.7');
+    await serverHas(page, live, LATER_PATCH);
     await expect(notice(page)).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(dialog).toBeHidden();
-    await expect(notice(page)).toContainText('Patch 1.7');
+    await expect(notice(page)).toContainText(`Patch ${LATER_PATCH}`);
   });
 
   test('offers Reload in the menu and the history while behind', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const live = await player(page);
     await openLive(page);
-    await serverHas(page, live, '1.6');
+    await serverHas(page, live, NEWER_PATCH);
     await expect(notice(page)).toBeVisible();
     const menu = await openChipMenu(page);
     const behind = menu.locator('[data-patch-behind]');
     // The open menu offers Reload itself: the notice under it steps aside (the menu's glass would show it through), its controls with it.
     await expect(notice(page)).toHaveCount(0);
     await expect(page.locator('[data-patch-notice] button').first()).toBeHidden();
-    await expect(behind).toContainText('Patch 1.6 is out');
+    await expect(behind).toContainText(`Patch ${NEWER_PATCH} is out`);
     await expect(behind.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
     await expectNamedControls(menu, 'the account menu while behind');
     expect(await contrastIssues(menu), 'the account menu while behind').toEqual([]);
@@ -262,7 +266,7 @@ test.describe('patch numbers in live mode', () => {
     await menu.getByRole('button', { name: /^Patch history/ }).click();
     const panel = panelOf(page);
     await expect(history(panel)).toBeVisible();
-    await expect(panel.getByText('You are playing Patch 1.5 · Patch 1.6 is out', { exact: true })).toBeVisible();
+    await expect(panel.getByText(`You are playing Patch ${PATCH} · Patch ${NEWER_PATCH} is out`, { exact: true })).toBeVisible();
     await expect(panel.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
     await expectNamedControls(panel, 'Patch history');
     expect(await contrastIssues(panel), 'Patch history').toEqual([]);
@@ -279,10 +283,10 @@ test.describe('patch numbers in live mode', () => {
     const live = await player(page);
     await openLive(page);
     const menu = await openChipMenu(page);
-    await serverHas(page, live, '1.6');
-    await expect(menu.locator('[data-patch-behind]')).toContainText('Patch 1.6 is out');
+    await serverHas(page, live, NEWER_PATCH);
+    await expect(menu.locator('[data-patch-behind]')).toContainText(`Patch ${NEWER_PATCH} is out`);
     // The live region holds the words (a screen reader hears them now), drawn nowhere and with no control to reach under the menu.
-    const region = page.getByRole('status').filter({ hasText: 'Patch 1.6' });
+    const region = page.getByRole('status').filter({ hasText: `Patch ${NEWER_PATCH}` });
     await expect(region).toHaveCount(1);
     const box = (await region.boundingBox())!;
     expect(box.width * box.height).toBeLessThanOrEqual(1);
@@ -318,12 +322,12 @@ test.describe('patch numbers in live mode', () => {
   test('shows no notice when up to date or ahead', async ({ page }) => {
     const live = await player(page);
     await openLive(page);
-    for (const latest of ['1.4', '1.3.1', null]) {
+    for (const latest of [PATCH, '1.4', '1.3.1', null]) {
       await serverHas(page, live, latest);
       await expect(notice(page), String(latest)).toHaveCount(0);
       const menu = await openChipMenu(page);
       await expect(menu.locator('[data-patch-behind]'), String(latest)).toHaveCount(0);
-      await expect(menu.getByText('Patch 1.5', { exact: true })).toBeVisible();
+      await expect(menu.getByText(`Patch ${PATCH}`, { exact: true })).toBeVisible();
       await chipToggle(page).click();
     }
   });
@@ -331,21 +335,21 @@ test.describe('patch numbers in live mode', () => {
   test('shows the notice to a visitor', async ({ page }) => {
     const context = page.context();
     await quietArrivals(context);
-    const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'patches-1' }, patches: PATCHES, latestPatch: '1.4' });
+    const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'patches-1' }, patches: PATCHES, latestPatch: PATCH });
     await page.goto('/game/');
     await expect(cornerChip(page).getByRole('button', { name: /^Sign in (with Google )?to join$/ })).toBeVisible();
-    await serverHas(page, live, '1.6');
-    await expect(notice(page)).toContainText('Patch 1.6');
+    await serverHas(page, live, NEWER_PATCH);
+    await expect(notice(page)).toContainText(`Patch ${NEWER_PATCH}`);
   });
 
   test('phone 360 × 740: the notice under the chip, the history in the panel', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 360, height: 740 });
     const live = await player(page);
     await openLive(page);
-    await serverHas(page, live, '1.6');
+    await serverHas(page, live, NEWER_PATCH);
     await expect(notice(page)).toBeVisible();
     // The short form on a phone.
-    expect((await notice(page).locator('p').innerText()).trim()).toBe('Patch 1.6 is out');
+    expect((await notice(page).locator('p').innerText()).trim()).toBe(`Patch ${NEWER_PATCH} is out`);
     const box = (await notice(page).boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(348);
     const chip = (await cornerChip(page).boundingBox())!;
@@ -359,7 +363,7 @@ test.describe('patch numbers in live mode', () => {
     await reviewShot(page, testInfo, 'patch-notice-360');
     // The menu's patch row and its Reload.
     const menu = await openChipMenu(page);
-    await expect(menu.locator('[data-patch-behind]')).toContainText('Patch 1.6 is out');
+    await expect(menu.locator('[data-patch-behind]')).toContainText(`Patch ${NEWER_PATCH} is out`);
     for (const button of await menu.locator('[data-patch-row] button, [data-patch-behind] button').all()) {
       const target = (await button.boundingBox())!;
       expect(target.height).toBeGreaterThanOrEqual(44);
@@ -388,7 +392,7 @@ test.describe('patch numbers in live mode', () => {
     const ursa = { ...aster, gladiatorId: 'a0000000-0000-4000-8000-000000000001', name: 'Ursa', location: 'orientation' as const, activityId: null,
       activityStatus: 'active' as const, startsAtMs: worldFixture.serverNowMs - 60_000, endsAtMs: worldFixture.serverNowMs - 60_000 + 4_800_000 };
     await routeLiveReads(context, { world: { ...worldFixture, revision: 'patches-1', actors: [{ ...aster, location: 'camp' }, ursa] },
-      owner: { ...structuredClone(ownerFixture), inbox: inbox([]) }, latestPatch: '1.6' });
+      owner: { ...structuredClone(ownerFixture), inbox: inbox([]) }, latestPatch: NEWER_PATCH });
     await openLive(page);
     const banner = page.getByTestId('arrival-banner');
     await expect(banner).toBeVisible();

@@ -1,6 +1,6 @@
 # Patch 1.5.1 verification checkpoint - 2026-11-01
 
-Production is still 1.5. The NPC implementation is integrated and reviewed; its full release gate and publication are pending. This document is a recovery checkpoint, not a production-readiness claim.
+Production is still 1.5. The NPC implementation is integrated and reviewed. The first full-gate attempt on862af6e was stopped with three stale browser expectations; its reports are retained. Test maintenance, a fresh complete gate and publication remain pending. This document is a recovery checkpoint, not a production-readiness claim.
 
 ## Exact source and scope
 
@@ -51,3 +51,13 @@ At09:22:11.417UTC required post-boundary health passed with alerts0, publishedSl
 Ruling: use released-P15 as the before baseline, preserving the same UI/world while isolating NPC additions - cost if wrong: limited attribution; raw setup/source facts remain available.
 Ruling: make no performance optimization from display-capped measurements - cost if wrong: slower devices remain unmeasured; no physical-phone claim is made.
 Ruling: retain the ignored historical workspace/artifacts for cross-agent handoff - cost if wrong: disk usage until deliberate cleanup. Do not delete another stream's recovery records.
+
+## First full-gate attempt and subsequent owner decisions
+
+Attempt862af6e started09:40:21.313UTC and was stopped10:19:09UTC after the second development shard reported three unexpected desktop cases in patches.spec.ts. They look for playingPatch1.5; all three retained YAML snapshots correctly show1.5.1. No ERR_NO_BUFFER_SPACE or socket-denial marker occurs in those failures. First shard303expected/11skipped, second302expected/5skipped/3unexpected. Native unit2188 and DB405 summaries were retained, but this stopped attempt has no final consolidated gate JSON and is not a completed or passing12-step gate. Later partial work is not spliced into a new run. Raw evidence: C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p151-gate-20261101-862af6e-400373cd/. Owned gate46256 creation09:40:21.3366480UTC was re-identified before session61725 was stopped; matching gate processes and ports3800/4173 were absent at10:20:24UTC. Edge remains separately owned by hotfix.
+
+Fresh CI41294056960 passed on862af6e:11gate phases plus explicit development-browser omission. Units2178pass+10verified Windows-only skips/124files, Edge3, DB405/30files, static1246cases=32literal passes+2expected CSP controls+1212skips. CI omitted development, so its success did not cover these failures. Private audit: C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-p151-ci-audit-835ff5a9715b440f8c7bd732def4b1fb/ci-audit-41294056960.md.
+
+Avi approved the benchmark-provenance project guidance; it is now in AGENTS.md, with the untested upfront guard distinguished from observed missing initial provenance. Avi also resolved1.6's third-Training policy: automatically Rest, including existing plans, and warn before saving. Carry this into that stream's tracked spec/plan after NPC ships.
+
+Video scope correction: ONE combined1.4+1.5 update video. Do not describe it as a separate1.5-only clip. Its scheduling question is pending; current inventory found no matching brief. Earlier film format/voice/music are historical options, not new-film approvals. No package download, recording, generation or rendering has occurred for this new video. Feature-post reminders remain; publication is not inferred.

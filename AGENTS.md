@@ -311,3 +311,17 @@ Observed: a probe summary captured counters before a response listener finished,
 while its verdict used later values. Tested separately: the corrected fresh 1.5
 anonymous probe awaited the revision listener and passed using one final snapshot;
 see the [release evidence](docs/implementation/PATCH-1.5-RELEASED-2026-11-01.md).
+
+# Benchmark provenance - persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Save benchmark script and setup hashes before the first sample. Retain raw
+samples, protocol changes and explicit exclusions. Do not infer missing initial
+provenance from a later script or journal.
+
+Observed: the first18 usable NPC benchmark samples lacked an initial script
+hash; later attempt journals contain hashes. The proposed upfront guard is
+adopted guidance and has not yet been tested. This documentation change does
+not retroactively verify the missing hash.

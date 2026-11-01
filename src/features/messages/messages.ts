@@ -2,7 +2,25 @@
 // badge, which messages are unread, the tags and dates, and when a list the panel holds no longer agrees with the owner's inbox.
 // No markup anywhere: every title and text here is data, shown by the panel as plain text.
 import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
-import type { NotificationsRead } from '../../lib/api/reads';
+import type { NotificationsRead, ShownMessage } from '../../lib/api/reads';
+import type { PatchEntry } from '../../lib/patch';
+export type { ShownMessage } from '../../lib/api/reads';
+
+/** Undefined while identity loads, null for a known visitor or missing gladiator. */
+type RequestIdentity = string | null | undefined;
+export type MessagesRequest = { tab: 'notifications'; n: number; account: RequestIdentity; owner: RequestIdentity };
+
+/**
+ * The request this account/owner may consume now. Bootstrap may adopt its first authenticated account, then its first owner;
+ * once either is known it cannot be adopted again. Use this during render as well as when settling stored identity, so another
+ * account's first ready render cannot consume a stale request before the cleanup effect runs.
+ */
+export function messagesRequestFor(request: MessagesRequest | null, account: RequestIdentity, owner: RequestIdentity): MessagesRequest | null {
+  if (!request) return null;
+  if (request.account !== account && !(request.account === undefined && typeof account === 'string')) return null;
+  if (request.owner !== owner && !(request.owner === undefined && typeof owner === 'string')) return null;
+  return request.account === account && request.owner === owner ? request : { ...request, account, owner };
+}
 
 /**
  * What the messages button and panel need from the shell: the two lists, and the two marks a player's reading sends. `read` marks a
@@ -10,7 +28,12 @@ import type { NotificationsRead } from '../../lib/api/reads';
  * Both reject when the mark or the re-read fails, and the panel then asks again the next time the same thing happens.
  */
 export type MessagingActions = {
-  load(): Promise<GameMessage[]>;
+  /** Watch uses the shared server clock; the popover closes before open is called. */
+  watch?: { kept(note: GameNotification): boolean; open(note: GameNotification): void };
+  /** The messages, each patch note with its patch number (null when it has none, or the numbers read failed). */
+  load(): Promise<ShownMessage[]>;
+  /** One page of Patch history: 20 patches, newest first, older than `beforeSortKey` when given; `more` when there are older ones. */
+  loadPatches(beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }>;
   /** The results to show, and the newest settled time of every row read (the mark `seeNotifications` is sent up to). */
   loadNotifications(): Promise<NotificationsRead>;
   read(messageId: number): Promise<void>;

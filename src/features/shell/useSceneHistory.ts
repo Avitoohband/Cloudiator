@@ -4,8 +4,10 @@
 // (Next.js's App Router takes `history.pushState` into its router, so `useSearchParams` follows it and Back/Forward
 // restore it); the browser's Back closes it. "Back to camp" goes back to the camp's entry, however many scenes were
 // opened on top of it (an expedition's encounter replay is another entry). A scene opened by a link has no camp entry
-// below it, so "Back to camp" replaces its entry with the camp instead. Both read the address itself, so a request made
-// twice before the page has followed the first acts once (Task 23.5).
+// below it, so "Back to camp" replaces its entry with the camp instead. A step inside a scene (a bout's ⏭, a bracket's
+// chapter: Arena replays Task 3) `replace`s the scene's own entry and keeps its mark, so the camp stays the same number of
+// steps back. All of them read the address itself, so a request made twice before the page has followed the first acts once
+// (Task 23.5).
 import { useCallback, useEffect, useRef } from 'react';
 import { campHref, sameScene, sceneHref, sceneOf, type SceneView } from './scene-url';
 
@@ -22,7 +24,7 @@ const markOf = (state: unknown): number | null => {
  */
 const addressed = () => sceneOf(new URL(window.location.href).searchParams);
 
-/** `open` and `close` change the address (and so the scene the shell shows). */
+/** `open`, `replace` and `close` change the address (and so the scene the shell shows). */
 export function useSceneHistory() {
   /** A Back to camp in flight: its history traversal has not landed yet, so another one would go back past the camp. */
   const leaving = useRef(false);
@@ -41,6 +43,13 @@ export function useSceneHistory() {
     window.history.pushState({ [MARK]: below === null ? null : below + 1 }, '', sceneHref(window.location.href, view));
   }, []);
 
+  /** Shows another scene (or another step of this one) in the entry the current scene has: no step is added, none is lost. */
+  const replace = useCallback((view: SceneView) => {
+    // Only while a scene is open and not on its way out: a late step must not turn the camp into a scene, nor rewrite the entry Back is leaving.
+    if (!addressed() || leaving.current) return;
+    window.history.replaceState({ [MARK]: markOf(window.history.state) }, '', sceneHref(window.location.href, view));
+  }, []);
+
   const close = useCallback(() => {
     if (!addressed() || leaving.current) return;
     const steps = markOf(window.history.state);
@@ -50,5 +59,5 @@ export function useSceneHistory() {
     } else window.history.replaceState(null, '', campHref(window.location.href));
   }, []);
 
-  return { open, close };
+  return { open, replace, close };
 }

@@ -20,6 +20,29 @@ A Next.js build or export and a browser check must not use the same output direc
 
 Never start a build in a worktree whose development browser run or dev server is still active. Run the gate steps in that worktree one after another. Do not edit source files in a worktree while its browser suite runs (Task 23.5 lesson; approved by Avi on 2026-10-20).
 
+## Deno dependency preparation and offline verification
+
+`npm run typecheck` uses `deno test --cached-only --frozen --no-run --check` for
+the two function entrypoints, then `deno test --cached-only --frozen` for Edge tests.
+`--frozen` pins the lockfile; it does not prevent network dependency resolution.
+Cache-only verification fails on an uncached dependency instead of fetching it.
+Stop on a cache miss: preparing uncached dependencies is a separate installation
+action requiring Avi's approval, not a verification retry without the offline flag.
+
+On installed Deno 2.9.6, isolated cold-cache tests observed `deno check --cached-only`
+still requesting loopback HTTP and npm dependencies imported by local entrypoints,
+including with a frozen config/lock. The `test --no-run --check` alternative refused
+those misses with zero fixture requests, rejected a deliberate type error and did
+not execute a top-level throw. Both it and the original default check typecheck local
+code; checking all remote code is a separate opt-in in their CLI help. No dependency
+or binary version changed to work around this observed behavior.
+
+CI explicitly prepares the three existing Deno entrypoints with the installed binary
+(`npx --no-install deno cache --frozen --config supabase/functions/deno.json ...`)
+after pinned `npm ci`, before starting Supabase or serving Edge. The later gate stays
+cache-only. This workflow edit does not authorize remote installation or a push;
+Avi explicitly approved normal remote pinned CI/Pages installs and CI container pulls for the planned releases on2026-11-01. New local package downloads remain unapproved. The two28556a1CI runs executed this preparation successfully; their unrelated bed-pixel timeouts are preserved in the1.5gate handoff.
+
 ## Database tests and the local Edge runtime
 
 Approved by Avi on 2026-10-14 as part of this override.
@@ -60,6 +83,28 @@ A refresh that fails (an error, an entry outside the folder, a changed modificat
 - With folders included it raised 34 lines and one recreation; a full listing and read 40 s later raised none.
 - In a scratch folder: a junction inside is skipped and its target's access time is unchanged; a missing folder fails the refresh with its reason.
 - The gate runs, each with the start time unchanged across the database run, are in `docs/operations/release-evidence.md`.
+
+## Optional bounded browser lifetimes
+
+`npm run verify -- --browser-shards 4 --results <fresh-unique-directory> --json <summary-file>`
+keeps all twelve gate steps and their order. The default (`--browser-shards 1`) still runs each browser phase once.
+For 2–32 shards, each eligible browser phase first discovers its full case manifest with Playwright `--list` and JSON,
+then runs shards 1/N through N/N sequentially, each in a separate process with one worker, no retries and one repetition.
+The CI exception still explicitly leaves out the development phase; the production phase remains required.
+
+The controller must supply a fresh results root per gate. Under each phase, `inventory/` and `shard-K-of-N/` each retain
+their own raw Playwright `report.json`, companion `identities.json` and `results/` directory; existing directories are refused
+rather than overwritten. The companion uses the public Reporter API's actual `TestCase.id` as `spec.id` and the unique public
+project name as `projectId`. Built-in JSON can merge multiple projects into one spec and keep the first project's ID; it
+cannot alone prove exact cross-shard coverage. Ambiguous project names fail closed. Both reports must validate. The gate
+summary retains both report paths and exact case identities, checks complete nonoverlapping coverage, and requires positive case evidence.
+Missing/malformed reports, invalid outcomes, retries/repeats, discovery errors or nonzero exits fail the gate, including an
+exit-zero ordinary browser process whose report is missing or failed. Expected failures and explicitly reported legitimate
+skips remain valid controls. A host fault stays a failure with its existing label; no browser case or shard is retried.
+
+This is an optional mitigation for observed `net::ERR_NO_BUFFER_SPACE` asset failures. A passing bounded diagnostic does
+not establish system-wide port exhaustion, identify a leak or prove that sharding cures the host fault. No Windows setting,
+application code, selection, fixture, assertion or timeout is changed by this option. Full gate evidence is still required.
 
 ## Parallel work
 

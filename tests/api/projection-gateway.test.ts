@@ -159,9 +159,11 @@ describe('public projection reads without a session', () => {
     const { tables } = api(() => null);
     const gateway = createLiveGateway();
     expect(await gateway.world()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, actors: [] });
-    expect(await gateway.revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301 });
+    // The revision read names the newest patch too (M26): null when the server sends none.
+    expect(await gateway.revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, latestPatch: null });
     expect(await gateway.timeline('act')).toMatchObject({ activityId: 'act', completion, stages: [{ id: 's1' }] });
-    expect(await gateway.profile('g1')).toEqual(profile);
+    // A profile from before M26 reads the card's three keys (Task 11c) as null.
+    expect(await gateway.profile('g1')).toEqual({ ...profile, build: null, joinedAtMs: null, arenaRecord: null });
     expect(await gateway.standings('bronze')).toMatchObject({ league: 'bronze', seasonId: '2', rows: [{ rank: 1, gladiatorId: 'g1', name: 'Aster' }] });
     expect(await gateway.tournament(TID)).toMatchObject({ id: TID, status: 'insufficient-entrants', bouts: [], placements: [] });
     expect(await gateway.tournamentLog(BOUT)).toEqual(log);
@@ -203,7 +205,7 @@ describe('public projection reads without a session', () => {
   it('retries a public read once when the account changes during it', async () => {
     let account: Session | null = null, changes = 0;
     const { tables } = api(() => account, table => { if (table === 'world_revision' && changes++ === 0) account = session('first'); });
-    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301 });
+    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, latestPatch: null });
     expect(tables).toEqual(['world_revision', 'world_revision']);
   });
 
@@ -218,10 +220,10 @@ describe('public projection reads without a session', () => {
     vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session: null }, error: null });
     holder.client = client;
     // A slot whose boundary is not yet published is still being prepared: publishedSlotIndex < slotIndex.
-    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301 });
+    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, latestPatch: null });
     published = null;
-    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: null });
-    expect(selects).toEqual(['revision,server_now_ms,slot_index,published_slot_index', 'revision,server_now_ms,slot_index,published_slot_index']);
+    expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: null, latestPatch: null });
+    expect(selects).toEqual(['revision,server_now_ms,slot_index,published_slot_index,latest_patch', 'revision,server_now_ms,slot_index,published_slot_index,latest_patch']);
   });
 
   it('throws unavailable when the account changes again during the retry', async () => {

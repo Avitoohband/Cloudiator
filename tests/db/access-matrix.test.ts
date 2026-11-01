@@ -266,6 +266,10 @@ const SERVICE_ROLE = [
   'relation public.operation_receipts: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.owned_cosmetics: INSERT,SELECT',
   'relation public.owner_state: MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE',
+  // Patch numbers (M26): the backend only reads them (the revision view names latest_patch); private.record_patch is the operator's
+  // only (no client role and not service_role), like post_message.
+  'relation public.patch_features: SELECT',
+  'relation public.patches: SELECT',
   'relation public.pending_build_items: DELETE,INSERT,SELECT,UPDATE',
   'relation public.public_profile_reads: SELECT',
   'relation public.public_profiles: DELETE,INSERT,SELECT,UPDATE',

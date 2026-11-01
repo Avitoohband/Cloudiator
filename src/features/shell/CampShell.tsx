@@ -21,7 +21,11 @@
 // entry on the camp's route (`?view=…`, plan Decision 4, `useSceneHistory`). The bridge carries them: `view-replay` and
 // `view-expedition` open one (the Arena card's Watch replay, the Gladiators list's away rows), `return-camp` closes it
 // (the scene's "Back to camp"); Results opens each result by its kind. The camp pauses beneath a scene, which covers it
-// (Task 23.4, C8), and goes on from the shared clock's time when the scene closes.
+// (Task 23.4, C8), and goes on from the shared clock's time when the scene closes. A scene opened from a menu names it (`from`, Arena
+// replays Task 3): its Back button says so, and when the scene closes and that menu is not open (a reload, a link), the shell opens it.
+// Arena replays Task 4: Results opens on My bouts for a player, one list store per reader and owner (a new account never sees the last
+// one's bouts). Its tab and chip are the shell's state, reset to My bouts and All when the owner changes, and the origin rule sets them:
+// a row of Everyone goes back to Everyone, a My bouts row to My bouts under its chip (`bouts-won` → Won).
 //
 // Task 18.3: the 💰 Marketplace reads the public offers for anyone; only a player gets the command gateway to trade.
 //
@@ -36,7 +40,7 @@
 // the camp (beside ☰ on a phone) says where it is and opens the live view, or offers the whole trip once it is back (`AwayButton`,
 // `useAwayTrip`, `away-trip.ts`). Like the arrival banner it is not mounted while a scene covers the camp; unlike it, it is the player's own
 // (nothing is read for a visitor). The scene it opens gives the focus back to it when the camp returns.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { Phase } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
@@ -61,22 +65,29 @@ import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
 import { ResultsPanel } from '../results/ResultsPanel';
-import type { MessagingActions } from '../messages/messages';
+import { FIRST_RESULTS, choiceFor, choiceOwner, choose, type ResultsChoice } from '../results/results-choice';
+import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
+import type { BoutFilter, MyBout } from '../../lib/api/reads';
+import { replayKept } from '../../lib/replay-retention';
+import { messagesRequestFor, type MessagesRequest, type MessagingActions } from '../messages/messages';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
 import { useClockMode } from '../../lib/clock-setting';
+import { PATCH, noticeFor } from '../../lib/patch';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { MenuSurface } from './MenuSurface';
+import { PatchNotice, reloadPage } from './PatchNotice';
+import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
-import { menusFor, type MenuId } from './menus';
-import { railReducer, type RailEvent, type RailState } from './rail-reveal';
-import { AwayButton } from './AwayButton';
+import { menusFor, originMenu, type MenuId } from './menus';
+import { COMPACT_QUERY, railReducer, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
-import { sceneForResult, type SceneAddress, type SceneView } from './scene-url';
+import { boutFilterOf, boutsFrom, sceneForResult, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneFrom, type SceneView } from './scene-url';
+import { AwayButton } from './AwayButton';
 import { useAwayTrip } from './useAwayTrip';
 import { useCampClicks } from './useCampClicks';
 import { useFocusRescue } from './useFocusRescue';
@@ -103,8 +114,14 @@ const shown = (element: HTMLElement | null): element is HTMLElement => !!element
   ? element.checkVisibility({ visibilityProperty: true })
   : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
 
-/** Whether a modal dialog is open (`:modal`, Safari 15.6+, within the project's Safari 16.4 floor). */
-const modalOpen = () => document.querySelector('dialog:modal') !== null;
+/** The shell's touch layout (the phone's short notice), kept up to date. */
+const subscribeCompact = (onChange: () => void) => {
+  const query = window.matchMedia?.(COMPACT_QUERY);
+  query?.addEventListener('change', onChange);
+  return () => query?.removeEventListener('change', onChange);
+};
+const readCompact = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
+
 /** Gives the keyboard back to the camp view (the menus hand the view to the camp). */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 /**
@@ -144,8 +161,8 @@ function SchedulePreview({ owner }: { owner: OwnerState | null }) {
  * A fixture sample as a link to its scene over the camp (spec "Scenes", Task 13.8 fix round 1): a plain click opens the
  * scene in place; a modified click (a new tab or window) follows the link, which opens the same scene over a new camp.
  */
-function SampleLink({ view, label, onOpen }: { view: SceneView; label: string; onOpen(view: SceneView): void }) {
-  const href = `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}`;
+function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 'bout' }>; label: string; onOpen(view: SceneView): void }) {
+  const href = `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}${view.from ? `&from=${view.from}` : ''}`;
   return <a href={href} onClick={event => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -153,22 +170,27 @@ function SampleLink({ view, label, onOpen }: { view: SceneView; label: string; o
   }}>{label}</a>;
 }
 
-/** Results: the recent results, and in fixture mode the sample replays and expeditions below them, opened as scenes. */
-function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen }: {
+/** Results: the recent results (a player's My bouts first), and in fixture mode the sample replays and expeditions below them, opened as scenes. */
+function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen, bouts, choice, onChoose, onWatchBout }: {
   fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; clock: DisplayClock;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
   onOpen(view: SceneView): void;
+  bouts: BoutsStore | null; choice: ResultsChoice; onChoose(next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>): void;
+  onWatchBout(bout: MyBout, filter: BoutFilter): void;
 }) {
+  // The sample rows sit in the Results menu, which stays open beneath the scene: Back says Results.
+  const sample = (view: Exclude<SceneView, { kind: 'bout' }>): Exclude<SceneView, { kind: 'bout' }> => ({ ...view, from: 'results' });
   return <>
-    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />
+    {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts} view={choice.view} onView={view => onChoose({ view })}
+      filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
-      <ul>{samples.replays.map(r => <li key={r.activityId}><SampleLink view={{ kind: 'replay', activityId: r.activityId }} label={r.label} onOpen={onOpen} /></li>)}</ul>
+      <ul>{samples.replays.map(r => <li key={r.activityId}><SampleLink view={sample({ kind: 'replay', activityId: r.activityId })} label={r.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
     {fixture && samples.expeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
       <p className="eyebrow">SAMPLE EXPEDITIONS</p>
-      <ul>{samples.expeditions.map(e => <li key={e.activityId}><SampleLink view={{ kind: 'expedition', activityId: e.activityId }} label={e.label} onOpen={onOpen} /></li>)}</ul>
+      <ul>{samples.expeditions.map(e => <li key={e.activityId}><SampleLink view={sample({ kind: 'expedition', activityId: e.activityId })} label={e.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
   </>;
 }
@@ -219,6 +241,26 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const nowMs = useMinuteNow(clock);
   const clockMode = useClockMode();
   const menus = menusFor(viewer);
+  // My bouts' lists: one store per reader and owner, a player's only (a visitor, or an account without a gladiator, sees Everyone alone).
+  const boutsOwner = viewer === 'player' ? owner?.gladiatorId ?? null : null;
+  const bouts = useMemo(() => (reads && boutsOwner ? createBoutsStore(reads) : null), [reads, boutsOwner]);
+  // The Results tab and chip (`results-choice.ts`): My bouts and All for each owner until changed; another owner (or none) starts there
+  // again. A choice made while the viewer loads (Back from a scene right after a reload) waits for the first owner that loads (fix round 1).
+  const choiceKey = choiceOwner(viewer, owner?.gladiatorId);
+  // Auth identity can change while both gladiator reads are still loading. Only the initial unknown session may adopt an account.
+  const requestAccount = fixture ? (previewAs === 'visitor' ? null : 'fixture')
+    : game.session.status === 'loading' ? undefined : game.session.status === 'signed-in' ? game.session.userId : null;
+  const [messagesRequest, setMessagesRequest] = useState<MessagesRequest | null>(null);
+  const messageRequests = useRef(0);
+  useEffect(() => {
+    setMessagesRequest(request => messagesRequestFor(request, requestAccount, choiceKey));
+  }, [requestAccount, choiceKey]);
+  const currentMessagesRequest = messagesRequestFor(messagesRequest, requestAccount, choiceKey);
+  const [resultsChoice, setResultsChoice] = useState<ResultsChoice>({ account: undefined, owner: undefined, ...FIRST_RESULTS });
+  const results = choiceFor(resultsChoice, choiceKey, requestAccount);
+  // Bind the account even while its owner loads; render rejects another account before cleanup can run.
+  useEffect(() => { setResultsChoice(state => choiceFor(state, choiceKey, requestAccount)); }, [choiceKey, requestAccount]);
+  const chooseResults = useCallback((next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>) => setResultsChoice(state => choose(state, choiceKey, next, requestAccount)), [choiceKey, requestAccount]);
 
   const [rail, setRail] = useState<RailState>({ revealed: false, open: null });
   const send = useCallback((event: RailEvent) => setRail(state => railReducer(state, event)), []);
@@ -301,17 +343,35 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   useFocusRescue(shellRef, focusCamp);
 
   // Scenes over the camp: a history entry each; the bridge opens and closes them.
-  const { open: openScene, close: closeScene } = useSceneHistory();
-  useEffect(() => bridge.on('view-replay', ({ activityId, stageId }) => openScene(stageId ? { kind: 'replay', activityId, stageId } : { kind: 'replay', activityId })),
+  const { open: openScene, close: closeScene, replace: replaceScene } = useSceneHistory();
+  useEffect(() => bridge.on('view-replay', ({ activityId, stageId, from }) => openScene({ kind: 'replay', activityId, ...(stageId ? { stageId } : {}), ...(from ? { from } : {}) })),
     [bridge, openScene]);
-  useEffect(() => bridge.on('view-expedition', ({ activityId }) => openScene({ kind: 'expedition', activityId })), [bridge, openScene]);
+  useEffect(() => bridge.on('view-expedition', ({ activityId, from }) => openScene({ kind: 'expedition', activityId, ...(from ? { from } : {}) })), [bridge, openScene]);
   useEffect(() => bridge.on('return-camp', () => closeScene()), [bridge, closeScene]);
   // A scene takes the screen: the profile card closes (the menus stay, to come back to).
-  const sceneKey = scene ? `${scene.kind}|${scene.activityId}` : null;
+  const sceneKey = scene ? sceneKeyOf(scene) : null;
   useEffect(() => { if (sceneKey) closeCard(false); }, [sceneKey, closeCard]);
+  // A scene that closes opens its origin if that menu is not open: Back, Escape and the browser's Back all return to the menu the scene came
+  // from, which stays open beneath it; after a reload or a link it is not, and the shell opens it (`show` does nothing when it is).
+  const sceneOpen = scene !== null;
+  const sceneFrom = scene ? sceneFromOf(scene) ?? null : null;
+  const cameFrom = useRef<SceneFrom | null>(null);
+  // Results opens on the tab and chip the scene came from (Task 4): Everyone for its rows, My bouts with the chip for a bout's.
+  useEffect(() => {
+    if (sceneOpen) { cameFrom.current = sceneFrom; return; }
+    const from = cameFrom.current;
+    cameFrom.current = null;
+    if (!from) return;
+    if (from === 'notifications') setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
+    const filter = boutFilterOf(from);
+    if (filter) chooseResults({ view: 'mine', filter });
+    else if (from === 'results') chooseResults({ view: 'everyone' });
+    const menu = originMenu(from);
+    if (menu) show(menu);
+  }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey, requestAccount]);
   // The away button (Patch A item 3): the player's own trip, from the owner state, the world, the owner's results and its timeline. It opens
   // the scene `awayScene` names; when the scene closes, the focus goes back to the button (the scene's own opener is gone with it).
-  const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs });
+  const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs, clock });
   const awayOpened = useRef(false);
   const openFromAway = useCallback((view: SceneView) => { awayOpened.current = true; openScene(view); }, [openScene]);
   useEffect(() => {
@@ -322,8 +382,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // Results open each kept result by its kind: an expedition its expedition, a bout its replay (13.7 review).
   const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind']) => {
     const view = sceneForResult(activityId, kind);
-    if (view) openScene(view);
+    // Everyone's rows: Back returns to Results, on Everyone.
+    if (view) openScene({ ...view, from: 'results' });
   }, [openScene]);
+  // My bouts' rows: the bout's replay (or the saved outcome of one that is gone), from its chip, which Back returns to.
+  const watchBout = useCallback((bout: MyBout, filter: BoutFilter) => openScene({ kind: 'replay', activityId: bout.activityId, from: boutsFrom(filter) }), [openScene]);
 
   // The messages button's reads and marks (Task 6). The lists are read through the gateway the shell reads with (the fixture preview's, once
   // loaded); a mark is a command with no receipt and is followed by an owner read, so the badge drops at once. Both reject when the
@@ -331,8 +394,17 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // opens the same message or tab again.
   const { refreshOwner } = game;
   const messaging = useMemo<MessagingActions | undefined>(() => reads ? {
+    watch: {
+      kept: note => clock.synced() && replayKept(note.summary.replayExpiry, clock.now()),
+      open: note => {
+        if (!clock.synced() || !replayKept(note.summary.replayExpiry, clock.now()) || note.kind === 'training') return;
+        openScene(note.kind === 'expedition' ? { kind: 'expedition', activityId: note.activityId, play: 'trip', from: 'notifications' }
+          : { kind: 'replay', activityId: note.activityId, from: 'notifications' });
+      },
+    },
     load: () => reads.messages(),
     loadNotifications: () => reads.notifications(),
+    loadPatches: beforeSortKey => reads.patches(beforeSortKey),
     read: async messageId => {
       const result = await reads.command({ kind: 'read-message', operationId: crypto.randomUUID(), messageId });
       if (!result.ok) throw new Error(result.code);
@@ -343,7 +415,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       if (!result.ok) throw new Error(result.code);
       await refreshOwner();
     },
-  } : undefined, [reads, refreshOwner]);
+  } : undefined, [reads, refreshOwner, clock, openScene]);
 
   // The change-look dialog (Task 7), opened by the look note's Change look button: the messages panel has closed by then, and the focus
   // goes back to the Messages button when the dialog does. A saved look is said by a status line that stays until it is dismissed, the
@@ -369,6 +441,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const lookOwner = owner?.gladiatorId ?? null;
   useEffect(() => { setLookOpen(false); }, [lookOwner]);
   const savedLook = lookSaved && lookSaved.gladiatorId === lookOwner ? lookSaved.text : null;
+
+  // "A new patch is out — reload" (Patch A, "Patch numbers and the changelog"): when the server's newest patch is ahead of this build. It
+  // waits while a scene or a modal dialog is open (the creation and change-look dialogs are named too, so it never shows for the moment
+  // before they open), and Later hides it for this page's life for that number; a newer number shows it again. Visitors see it too.
+  const modal = useModalOpen();
+  const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
+  const [patchLater, setPatchLater] = useState<string | null>(null);
+  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen, later: patchLater });
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
@@ -403,14 +483,15 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       case 'market': return reads ? <MarketPanel key={ownerId ?? viewer} reads={reads} gateway={viewer === 'player' ? gateway : null} owner={owner} viewer={viewer}
         clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} />
         : <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
-      case 'arena': return <ArenaMenu open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
+      case 'arena': return <ArenaMenu bouts={bouts} onWatchBout={bout => openScene({ kind: 'replay', activityId: bout.activityId, from: 'arena' })}
+        onAllBouts={() => { chooseResults({ view: 'mine', filter: 'all' }); show('results'); }} open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
-        onProfile={row => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }, row.name)} />;
+        onProfile={(row, season) => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses, season }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex}
-        knownLooks={knownLooks} />;
+        onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
-        onWatch={watchResult} onOpen={openScene} />;
+        onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;
@@ -423,13 +504,14 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
-      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging}
-        onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
+      <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging} messagesRequest={currentMessagesRequest}
+        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>
         {arrivalSlot}
         <div className={styles.noticeList}>
+          <PatchNotice number={patchNotice} compact={compact} onReload={reloadPage} onLater={() => setPatchLater(patchNotice)} />
           {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
               signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
           {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))
@@ -450,6 +532,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
+        nowMs={nowMs}
         following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}
@@ -465,7 +548,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
           onStatus={game.setSceneStatus} paused={scene !== null} />
       </main>
-      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
+      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} tournamentSamples={samples.tournaments} onReplace={replaceScene}
+        onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
       )}

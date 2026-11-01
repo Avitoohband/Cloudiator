@@ -40,6 +40,23 @@ describe('the replay bar', () => {
     expect(html.indexOf('0:07 / 0:23')).toBeLessThan(html.indexOf('⚑ Result'));
   });
 
+  // Arena-replays Task 1: where the track, the time and the chapters sit. A phone gives the track and the time a row of their own
+  // above the buttons, which only works while the two are one box (flat, the play button climbed into the track's row).
+  it('keeps the track and the time in one box, with the tail after it', () => {
+    const html = bar({ track: createElement('input', { type: 'range', 'aria-label': 'Replay position' }), tail: '⚑ Result' });
+    expect(html).toMatch(/<div[^>]*><div[^>]*><input[^>]*><\/div><span[^>]*>0:07 \/ 0:23<\/span><\/div><span[^>]*>⚑ Result<\/span>/);
+  });
+
+  it('puts the chapters in the track’s place without a track, and on a row below the tail with one', () => {
+    const chapters = { items: [{ id: 'a', label: 'Heading home' }, { id: 'b', label: 'Back in camp' }], current: 0, onSelect: noop };
+    const trip = bar({ chapters, tail: '● Back to live' });
+    expect(trip).not.toContain('data-track');
+    expect(trip).toMatch(/<\/ol><span[^>]*>0:07 \/ 0:23<\/span><span[^>]*>● Back to live<\/span>/);
+    const bout = bar({ chapters, track: createElement('input', { type: 'range', 'aria-label': 'Replay position' }), tail: '⚑ Result' });
+    expect(bout).toContain('data-track');
+    expect(bout.indexOf('⚑ Result')).toBeLessThan(bout.indexOf('aria-label="Chapters"'));
+  });
+
   // Task 9 fix round 1: a step that becomes unavailable keeps the focus (aria-disabled, not disabled), and every chapter names its
   // whole label on hover, for a label cut short.
   it('keeps a step that is not available focusable, and titles every chapter with its label', () => {

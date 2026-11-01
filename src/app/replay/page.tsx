@@ -55,7 +55,7 @@ function ReplayShell() {
       {!activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
         : game.session.status === 'loading' ? <p role="status">Loading the replay…</p>
           : <ActivityReplay key={`${fixture}|${activityId}|${stageId}|${reader}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock}
-            viewerId={game.owner?.gladiatorId ?? null} />}
+            viewerId={game.owner?.gladiatorId ?? null} endActions="again" />}
     </main>
     <footer className="game-footer">CLOUDIATOR <span>Replays show the recorded fight; they never change its result.</span></footer>
   </div>;

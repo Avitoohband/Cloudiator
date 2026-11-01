@@ -17,11 +17,17 @@ const beds = camp.props.filter(p => p.frame.startsWith('bedroll-'));
 const tiles = (p: { x: number; y: number; w: number; d: number }) =>
   Array.from({ length: p.w * p.d }, (_, i) => ({ x: p.x + (i % p.w), y: p.y + Math.floor(i / p.w) }));
 
+const images = new Map<string, { width: number; height: number; rgba: Uint8Array }>();
+function image(path: string) {
+  if (!images.has(path)) images.set(path, decodePng(readFileSync(join(__dirname, '..', '..', 'public', 'assets', path))));
+  return images.get(path)!;
+}
+
 /** Opaque test for one frame of an atlas, in the frame's own pixel coordinates. */
 function opaque(atlasKey: string, frameName: string) {
   const atlas = manifest.atlases[atlasKey];
   const frame = atlas.frames[frameName];
-  const { width, rgba } = decodePng(readFileSync(join(__dirname, '..', '..', 'public', 'assets', atlas.image)));
+  const { width, rgba } = image(atlas.image);
   return { frame, at: (x: number, y: number) => x >= 0 && y >= 0 && x < frame.w && y < frame.h && rgba[((frame.y + y) * width + frame.x + x) * 4 + 3] > 0 };
 }
 

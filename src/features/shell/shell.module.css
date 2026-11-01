@@ -685,7 +685,8 @@
 
 /*
  * ---- Scenes over the camp (Task 13.8, the mockup's bout scene): a replay or an expedition fills the window as a modal
- * dialog, scrolling inside itself, with "Back to camp" kept in view at its top left. The camp keeps running beneath.
+ * dialog, scrolling inside itself, with its Back button ("← Results", "← Camp") kept in view at its top left. The camp keeps
+ * running beneath.
  */
 .scene {
   position: fixed;
@@ -751,6 +752,13 @@
   outline-offset: 3px;
 }
 
+/* The row that holds Back. Wide, it makes no box of its own: the button floats at the top left, as before. */
+.sceneTop {
+  display: contents;
+}
+
+.sceneCounter { display: none; }
+
 .sceneBody {
   max-width: 1008px;
   margin: 0 auto;
@@ -764,6 +772,45 @@
 
   .sceneBody {
     padding: 8px 12px 24px;
+  }
+}
+
+/*
+ * On a phone the row is a solid bar across the top of the scene, sticky, so nothing floats over the content once it scrolls
+ * (Arena replays Task 3, the mockup's phone header). Its colour is the scene's own, opaque: the scene's 3% see-through would
+ * show the content scrolling beneath it.
+ */
+@media (hover: none), (max-width: 480px) {
+  /* A control the keyboard reaches is scrolled clear of the 65 px bar, not under it (WCAG 2.4.11; Arena replays Task 3 review). */
+  .scene {
+    scroll-padding-top: 72px;
+  }
+
+  .sceneTop {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px;
+    border-bottom: 1px solid var(--glass-line);
+    background: #0d0c12;
+  }
+
+  .sceneCounter {
+    display: block;
+    margin-left: auto;
+    padding-right: 4px;
+    white-space: nowrap;
+  }
+
+  .sceneBack {
+    position: static;
+    margin: 0;
+    box-shadow: none;
   }
 }
 
@@ -997,6 +1044,163 @@
   /* The fixture pill is at 56 px here (fixture only): the column starts below it, so the pill (z-index 9) is never over the banner. */
   .shell[data-pill='shown'] .notices[data-stacked='true'] {
     top: 96px;
+  }
+}
+
+/* ---- Patch numbers (Patch A, "Patch numbers and the changelog"; the approved mockup). The account menu's patch row under the Clock row,
+   the gold line that offers Reload while the server is ahead, and the reload notice in the notice column (the sign-in notice's look, gold). */
+.patchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-line);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.patchRow b {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.chipMenu .patchLink {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #f2c66b;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.chipMenu .patchLink:hover {
+  background: var(--glass-2);
+}
+
+.behindRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid #6b5520;
+  border-radius: 9px;
+  background: #2a2414;
+  color: #ffe1a3;
+}
+
+.reload,
+.chipMenu .reload {
+  flex: none;
+  min-height: 32px;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.reload:focus-visible,
+.chipMenu .reload:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.patchNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  box-sizing: border-box;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid #6b5520;
+  border-left: 3px solid #f2c66b;
+  border-radius: 10px;
+  background: rgba(21, 19, 28, 0.95);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.patchNotice p {
+  margin: 0;
+}
+
+/* While the account menu or the messages panel is open (each offers Reload itself while the server is ahead), the notice under it steps
+   aside: the menu's glass would show it through. It is only visually hidden (the .sr treatment), so a patch that comes out meanwhile is
+   still announced; its two buttons are hidden outright, so the keyboard never reaches a control nobody sees. */
+.chip[data-popover] ~ .notices .patchNotice {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  box-shadow: none;
+}
+
+.chip[data-popover] ~ .notices .patchNotice button {
+  visibility: hidden;
+}
+
+/* The arrival banner stacked in the same column under the chip steps aside likewise (the 1.4 gate shot: at 360 px the open phone bar's
+   glass showed the banner's words and Find through it). Only visually hidden, inside its polite status, so an arrival is still
+   announced; its buttons hidden outright. Its 15 s run on, and it is back when the popover closes if they have not run out. In the top
+   row of a wide window the popover never reaches it, and it stays. */
+.chip[data-popover] ~ .notices[data-stacked='true'] [data-arrival-slot] > * {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  box-shadow: none;
+}
+
+.chip[data-popover] ~ .notices[data-stacked='true'] [data-arrival-slot] button {
+  visibility: hidden;
+}
+
+.patchNotice b {
+  color: #ffe1a3;
+}
+
+/* The touch layout: 44 px targets, and (alone in the column) the notice under the messages button, as the stacked arrival banner is. */
+@media (hover: none), (max-width: 480px) {
+  .patchNotice {
+    padding: 4px 4px 4px 12px;
+    font-size: 14px;
+  }
+
+  .patchNotice .reload,
+  .chipMenu .reload,
+  .chipMenu .patchLink {
+    min-height: 44px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+
+  .patchNotice .dismiss {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .notices:not([data-stacked='true']) .patchNotice {
+    margin-top: 12px;
   }
 }
 

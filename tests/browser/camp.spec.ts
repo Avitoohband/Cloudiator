@@ -130,6 +130,10 @@ test.describe('living isometric camp', () => {
       const at = (await page.evaluate(id => window.__cloudiatorCamp!.screenOf(id), ownerId))!;
       await page.mouse.click(box.x + at.x, box.y + at.y + dy);
       expect((await campState(page)).selected, `${dy} px from the body centre`).toBe(ownerId);
+      const profile = page.getByRole('dialog', { name: 'Profile: Aster', exact: true });
+      await expect(profile).toBeVisible();
+      await profile.getByRole('button', { name: 'Close profile', exact: true }).click();
+      await expect(profile).toHaveCount(0);
     }
   });
 

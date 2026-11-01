@@ -1,7 +1,8 @@
 /*
  * The replay bar (Patch A Task 9, the approved mockup's trip bar): ⏮ ▶ ⏭, the chapters, the time and a tail on one dark row. The
  * touch layout (the shell's `@media (hover: none), (max-width: 480px)`) hides the chapters and names the current one in one line,
- * with 44 px buttons. A bar with a track (the Arena-replays patch) wraps its chapters onto a row of their own.
+ * with 44 px buttons. A bar with a track (the Arena-replays patch) wraps its chapters onto a row of their own; in the touch layout
+ * it takes two rows, the track and the time over the buttons and the tail.
  */
 .bar {
   container-type: inline-size;
@@ -103,10 +104,32 @@
   cursor: not-allowed;
 }
 
+/* With a track: the track and the time are one box, so the touch layout can give them a row of their own. */
+.scrub {
+  display: flex;
+  flex: 1 1 0;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
 .track {
   display: flex;
   flex: 1 1 0;
+  align-items: center;
   min-width: 0;
+}
+
+/* The track fills its row's height, so the control in it can take the row (Arena replays Task 5, Task 1's carry). */
+.bar[data-track] .track {
+  align-self: stretch;
+}
+
+/* The control fills its box, whatever size it was given. */
+.track > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
 }
 
 .time {
@@ -164,13 +187,23 @@
     min-width: 0;
   }
 
-  /* With a track: the track and the time first, then the buttons, the name and the tail. */
-  .bar[data-track] .track {
-    order: -2;
-    flex-basis: calc(100% - 7em);
+  /*
+   * With a track, two rows (at most 100 px): the track and the time, then the buttons and the tail at the right. The name of the
+   * current chapter has no room beside them at 360 px, so it takes a line of its own under them.
+   */
+  .bar[data-track] .scrub {
+    order: -1;
+    flex-basis: 100%;
+    min-height: 32px;
   }
 
-  .bar[data-track] .time {
-    order: -1;
+  .bar[data-track] .tail {
+    margin-left: auto;
+  }
+
+  .bar[data-track] .name {
+    order: 1;
+    line-height: 16px;
+    flex-basis: 100%;
   }
 }

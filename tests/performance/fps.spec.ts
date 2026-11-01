@@ -137,12 +137,12 @@ test('measures the camp, the arena at maximum zoom and 20 scene cycles', async (
       await page.evaluate(id => window.__cloudiatorCamp!.emit('view-replay', { activityId: id }), REPLAY_FIXTURES.pvp.activityId);
       await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 60_000 });
       await page.waitForTimeout(600);
-      await page.getByRole('button', { name: 'Back to camp' }).click();
+      await page.getByRole('button', { name: 'Back to Camp' }).click();
       await expect(dialog('Replay')).toHaveCount(0);
       await page.evaluate(id => window.__cloudiatorCamp!.emit('view-expedition', { activityId: id }), EXPEDITION_FIXTURES.woodland.activityId);
       await page.waitForFunction(() => window.__cloudiatorExpeditionScene?.debug()?.ready === true, null, { timeout: 60_000 });
       await page.waitForTimeout(600);
-      await page.getByRole('button', { name: 'Back to camp' }).click();
+      await page.getByRole('button', { name: 'Back to Camp' }).click();
       await expect(dialog('Expedition')).toHaveCount(0);
     }
   }));

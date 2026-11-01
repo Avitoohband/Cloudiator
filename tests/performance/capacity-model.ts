@@ -110,6 +110,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.game_messages': { retention: 'singleton' }, 'public.message_reads': { retention: 'player' },
   // M25: one "notifications seen up to" time per account that has asked, never more.
   'public.notification_marks': { retention: 'player' },
+  // M26: the patch list and its features (a row per release, recorded by hand and kept; at most 20 features each): tiny, kept.
+  'public.patches': { retention: 'singleton' }, 'public.patch_features': { retention: 'singleton' },
   'private.arena_ratings': { retention: 'season' }, 'public.arena_standings': { retention: 'season' }, 'public.season_standings': { retention: 'season' },
   'private.season_awards': { retention: 'season' }, 'public.seasons': { retention: 'season' },
   'private.command_attempts': { retention: 'operational', windowSlots: 1 }, 'private.dispatch_log': { retention: 'operational', windowSlots: RETENTION.dispatchLogSlots },

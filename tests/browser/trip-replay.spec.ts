@@ -463,7 +463,7 @@ test.describe('the whole-trip replay', () => {
     expect(await page.evaluate(() => window.__cloudiatorExpedition!.reads())).toBe(reads);
     await expect(expeditionDialog(page)).toBeVisible();
     // Back to camp leaves in one step, from the trip opened over the live view.
-    await page.getByRole('button', { name: 'Back to camp', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to Camp', exact: true }).click();
     await expect(expeditionDialog(page)).toHaveCount(0);
     expect(search(page)).toEqual({ mode: 'fixture' });
   });

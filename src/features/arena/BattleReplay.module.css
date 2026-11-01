@@ -5,6 +5,14 @@
 }
 
 /* The title is an h1 on the replay page; an embedding page may choose a lower level (headingLevel). */
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 1rem;
+}
+
+.header > :first-child { grid-column: 1 / -1; }
+
 .header :is(h1, h2, h3, h4, h5, h6) {
   font-family: Georgia, serif;
   font-size: clamp(1.4rem, 4vw, 2rem);
@@ -16,15 +24,41 @@
   margin-bottom: 0.3rem;
 }
 
-.encounters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-bottom: 0.9rem;
+.counter {
+  color: var(--muted);
+  font-size: 0.8rem;
+  align-self: center;
+  text-align: right;
+  margin: 0;
 }
 
-.encounters button,
-.controls button,
+.upNext {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+
+.upNext p { margin: 0; }
+.upNext p:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.upNext button {
+  min-height: 44px;
+  padding: 0 0.8rem;
+  color: var(--gold);
+  border: 1px solid var(--line);
+  background: #ffffff0a;
+  white-space: nowrap;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .header { display: block; }
+  .upNext { display: grid; gap: 0.2rem; font-size: 0.8rem; }
+  .upNext button { display: none; }
+}
+
 .retry {
   min-height: 44px;
   padding: 0 0.95rem;
@@ -36,18 +70,6 @@
 }
 
 .retry:hover {
-  border-color: var(--gold);
-}
-
-.encounters button[aria-pressed='true'],
-.controls button[aria-pressed='true'] {
-  color: #1a1423;
-  background: var(--gold);
-  border-color: #ffe48f;
-}
-
-.encounters button:hover,
-.controls button:hover {
   border-color: var(--gold);
 }
 
@@ -106,33 +128,6 @@
   font: 700 0.8rem/22px system-ui, sans-serif;
   color: #ffffff;
   text-shadow: 0 1px 2px #000, 0 0 2px #000;
-}
-
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.seek {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-
-.seek input {
-  width: 100%;
-  accent-color: var(--gold);
-  min-height: 28px;
-}
-
-.hint {
-  margin: -0.4rem 0 0;
-  font-size: 0.72rem;
-  color: var(--muted);
 }
 
 .columns {
@@ -269,8 +264,200 @@
   .columns {
     grid-template-columns: minmax(0, 1fr);
   }
+}
 
-  .controls button {
-    flex: 1 1 calc(50% - 0.45rem);
+/*
+ * The close-up and the result card over it (Arena replays Task 5, the approved mockup): the card sits at the top of the arena,
+ * inside its box, so who won is in view without scrolling, also on a phone.
+ */
+.arena {
+  position: relative;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.endCard {
+  position: absolute;
+  top: clamp(10px, 6%, 28px);
+  left: 50%;
+  z-index: 1;
+  box-sizing: border-box;
+  width: min(480px, calc(100% - 24px));
+  padding: 14px 18px 16px;
+  transform: translateX(-50%);
+  border: 1px solid #b5a07a;
+  border-radius: 12px;
+  background: rgb(21 19 28 / 93%);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 60%);
+  text-align: center;
+}
+
+.endCard > p:first-child {
+  margin-bottom: 0.2rem;
+}
+
+.endVerdict {
+  margin: 2px 0;
+  color: var(--gold);
+  font: 700 30px/1.15 Georgia, serif;
+}
+
+.endReason {
+  margin: 0;
+  color: #d9dbe4;
+  font-size: 14px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chips li {
+  padding: 2px 10px;
+  border: 1px solid #88683d;
+  border-radius: 999px;
+  background: rgb(71 54 35 / 92%);
+  color: #ffe1a3;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.endActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.endActions button {
+  min-height: 40px;
+  padding: 0 14px;
+  color: var(--ink);
+  background: #ffffff12;
+  border: 1px solid #ffffff2a;
+  border-radius: 9px;
+  font: 650 13.5px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.endActions button.gold {
+  color: #2a1d05;
+  background: var(--gold);
+  border-color: #ffe48f;
+  font-weight: 700;
+}
+
+.endActions button:focus-visible,
+.barText:focus-visible {
+  outline: 3px solid #ffe48f;
+  outline-offset: 1px;
+}
+
+/* The bar's text buttons, the speed and ⚑ Result, in the look of its icon buttons (ReplayBar's `.icon`). */
+.barText {
+  flex: none;
+  min-width: 40px;
+  height: 34px;
+  padding: 0 11px;
+  color: var(--ink);
+  background: #ffffff12;
+  border: 1px solid #ffffff2a;
+  border-radius: 8px;
+  font: 700 13px/1 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* The track: its own rule (the replay bar's carry from Task 1), at most 32 px tall with no vertical margin or padding. */
+.range {
+  display: block;
+  width: 100%;
+  height: 32px;
+  max-height: 32px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+/* The touch layout's closed sections, "▸ Fighters at the start" and "▸ Combat log": a 44 px summary each. */
+.fold {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.fold[open] {
+  padding-bottom: 1.1rem;
+}
+
+.fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The arrow is a picture: its alternative text is empty, so the section's name is its words. */
+.fold > summary::before {
+  content: '▸' / '';
+  color: var(--gold);
+  transition: transform 0.15s;
+}
+
+.fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fold > summary::before {
+    transition: none;
+  }
+}
+
+/* The shell's touch layout (`COMPACT_QUERY`): the mockup's smaller card on the arena, and 44 px targets. */
+@media (hover: none), (max-width: 480px) {
+  .endCard {
+    padding: 10px 12px 12px;
+  }
+
+  .endVerdict {
+    font-size: 24px;
+  }
+
+  .endReason {
+    font-size: 13px;
+  }
+
+  .chips {
+    margin-top: 7px;
+  }
+
+  .endActions {
+    margin-top: 9px;
+  }
+
+  .endActions button {
+    min-height: 44px;
+  }
+
+  .barText {
+    min-width: 44px;
+    height: 44px;
   }
 }

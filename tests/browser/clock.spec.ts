@@ -9,7 +9,7 @@ import type { ResultRow } from '../../supabase/functions/_shared/contracts/reads
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { cornerChip, openChipMenu, openMenu } from './shell-helpers';
+import { cornerChip, everyoneResults, openChipMenu, openMenu } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const KEY = 'cloudiator.clock.v1';
@@ -44,7 +44,7 @@ test.describe('the clock setting in a live camp', () => {
   const starts = (page: Page) => page.locator('.planning-form p').filter({ hasText: /^Estimated next start:/ });
   /** The "kind · day, time" line of each Results row (the time's no-break space read as an ordinary one). */
   async function resultTimes(page: Page) {
-    const lines = (await openMenu(page, 'Results')).locator('p', { hasText: /^(Training|Arena) · / });
+    const lines = (await everyoneResults(page)).locator('p', { hasText: /^(Training|Arena) · / });
     await expect(lines).toHaveCount(2);
     return (await lines.allTextContents()).map(text => text.replace(/\s/g, ' '));
   }

@@ -14,7 +14,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { chipToggle, cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -173,11 +173,17 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(page.getByText('Google sign-in was canceled. You can keep watching the camp.')).toHaveCount(0);
     expect(await focusedElement(page), 'Dismiss leaves the focus on the page').not.toBe('body');
 
-    // A replay scene from Results: Back to camp takes the focus, the replay keys work, Escape returns to the Replay button.
+    // A replay scene from Results: Back ("← Results") takes the focus, the replay keys work, Escape returns to the Replay button.
     for (let n = 0; n < 40 && !(await icon('Results').evaluate(el => el === document.activeElement)); n++) await press('Shift+Tab');
     await expect(icon('Results')).toBeFocused();
     await press('Enter');
     const results = menuDialog(page, 'Results');
+    // A player's Results opens on My bouts (Arena replays Task 4): the tabs are ARIA tabs, so the arrow key selects Everyone.
+    const mine = results.getByRole('tab', { name: /^My bouts/ });
+    for (let n = 0; n < 20 && !(await mine.evaluate(el => el === document.activeElement)); n++) await press('Tab');
+    await expect(mine).toBeFocused();
+    await press('ArrowRight');
+    await expect(results.getByRole('tab', { name: 'Everyone', exact: true })).toBeFocused();
     const replayButton = results.getByRole('button', { name: /^Replay: / }).first();
     await expect(replayButton).toBeVisible();
     for (let n = 0; n < 20 && !(await replayButton.evaluate(el => el === document.activeElement)); n++) await press('Tab');
@@ -185,10 +191,10 @@ test.describe('release accessibility in the fixture preview', () => {
     await press('Enter');
     const replay = scene(page, 'Replay');
     await expect(replay).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Back to camp' })).toBeFocused();
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+    await expect(replay.getByRole('button', { name: 'Pause', exact: true })).toBeFocused();
     // Tab walks the scene's controls (the page behind the modal scene is inert).
-    const skipToResult = replay.getByRole('button', { name: 'Skip to result' });
+    const skipToResult = replay.getByRole('button', { name: 'Skip to the result' });
     for (let n = 0; n < 8 && !(await skipToResult.evaluate(el => el === document.activeElement)); n++) {
       await press('Tab');
       expect(await inside(replay), 'the modal scene keeps the focus').toBe(true);
@@ -702,16 +708,26 @@ test.describe('release accessibility in the fixture preview', () => {
     `);
     // A profile card.
     const roster = await openMenu(page, 'Gladiators');
-    await roster.getByRole('button', { name: 'Profile: Varro', exact: true }).first().click();
-    const card = page.getByRole('dialog', { name: 'Profile: Varro' });
-    await expect(card.getByRole('heading', { name: 'Varro' })).toBeVisible();
+    // An Arena entrant with a public profile (the crowd's gladiators have none): the card in its sections (Task 11c).
+    await roster.getByRole('button', { name: 'Profile: Lucilla', exact: true }).first().click();
+    const card = page.getByRole('dialog', { name: 'Profile: Lucilla' });
+    await expect(card.getByRole('heading', { name: 'Lucilla' })).toBeVisible();
+    await expect(card.getByRole('region', { name: 'Record' })).toContainText('In camp since');
     await expect(card).toMatchAriaSnapshot(`
-      - 'dialog "Profile: Varro"':
+      - 'dialog "Profile: Lucilla"':
         - button "Close profile"
-        - heading "Varro" [level=2]
-        - term: Now
-        - term: Rating
-        - term: Equipped
+        - heading "Lucilla" [level=2]
+        - list:
+          - listitem: Vitality +5%
+          - listitem: Endurance +5%
+        - region "Attributes"
+        - region "Stats"
+        - region "Gear"
+        - region "Record":
+          - term: Now
+          - term: Rating
+          - term: Arena record
+          - term: In camp since
         - button "Follow"
     `);
     // A replay scene over the camp.
@@ -719,7 +735,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
     await expect(scene(page, 'Replay')).toMatchAriaSnapshot(`
       - dialog "Replay":
-        - button "Back to camp"
+        - button "Back to Camp"
         - region "Aster vs Varro":
           - heading "Aster vs Varro" [level=2]
           - img
@@ -727,16 +743,12 @@ test.describe('release accessibility in the fixture preview', () => {
           - meter "Varro health"
           - group "Replay controls":
             - button /^(Pause|Play)$/
-            - button "Fast ×4"
-            - button "Restart"
-            - button "Skip to result"
-          - slider "Replay position"
+            - slider "Replay position"
+            - button "Speed 1×"
+            - button "Skip to the result"
           - region "Result":
             - heading "Result" [level=3]
-          - region "Fighters":
-            - heading "Fighters" [level=3]
-          - region "Combat log":
-            - heading "Combat log" [level=3]
+          ${await touchLayout(page) ? '- group "Fighters at the start"\n          - group "Combat log"' : '- region "Fighters":\n            - heading "Fighters" [level=3]\n          - region "Combat log":\n            - heading "Combat log" [level=3]'}
     `);
     void testInfo;
   });
@@ -775,6 +787,8 @@ test.describe('release accessibility in the fixture preview', () => {
     await shot(page, testInfo, 'roster-filter-focus');
     await roster.getByRole('button', { name: /^Profile: / }).first().click();
     expect(await contrastIssues(await settled(page.getByRole('dialog', { name: /^Profile: / }))), 'a profile card').toEqual([]);
+    // The card closes first: on a phone the taller card (Task 11c) covers the open sheet's own close button, as a player sees it.
+    await page.getByRole('dialog', { name: /^Profile: / }).getByRole('button', { name: 'Close profile' }).click();
     const shops = await settled(await openMenu(page, 'Inventory and shops'));
     // Reached by Tab, so the button shows its focus ring (:focus-visible).
     await shops.getByRole('button', { name: 'Weaponsmith' }).focus();
@@ -824,7 +838,7 @@ test.describe('release accessibility in the fixture preview', () => {
     expect(await page.evaluate(() => window.__cloudiatorCamp!.state()!.reducedMotion)).toBe(true);
     await revealRail(page);
     if (testInfo.project.name === 'desktop') expect(await page.getByTestId('menu-rail').evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0s');
-    const panel = await openMenu(page, 'Results');
+    const panel = await everyoneResults(page);
     expect(await panel.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
     await panel.getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first().click();
     const replay = scene(page, 'Replay');
@@ -833,7 +847,7 @@ test.describe('release accessibility in the fixture preview', () => {
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
     expect(await page.evaluate(() => window.__cloudiatorReplay!.state().reducedMotion)).toBe(true);
     expect(await page.evaluate(() => window.__cloudiatorBattle!.debug()!.reducedMotion)).toBe(true);
-    await page.getByRole('button', { name: 'Back to camp' }).click();
+    await page.getByRole('button', { name: 'Back to Results', exact: true }).click();
     await expect(replay).toHaveCount(0);
     await page.evaluate(id => window.__cloudiatorCamp!.emit('view-expedition', { activityId: id }), EXPEDITION_FIXTURES.woodland.activityId);
     await expect(scene(page, 'Expedition')).toBeVisible();
@@ -866,7 +880,7 @@ test.describe('release accessibility in the fixture preview', () => {
     // The scenes over the camp at 360 px (C20): the replay, after its result, and the expedition.
     await page.goto(`/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}`);
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     await fits(scene(page, 'Replay'), 'the replay scene');
     await shot(page, testInfo, '360-replay');
     await page.goto(`/game/?mode=fixture&view=expedition&activity=${EXPEDITION_FIXTURES.woodland.activityId}`);
@@ -922,7 +936,7 @@ test.describe('release accessibility in the fixture preview', () => {
     const replay = scene(page, 'Replay');
     await expect(replay.getByRole('heading', { name: 'This replay is not available yet' })).toBeVisible({ timeout: 45_000 });
     await expect(replay).toContainText('The fight is still going on. Its replay appears here as soon as it ends.');
-    await expect(replay.getByRole('button', { name: 'Skip to result' })).toHaveCount(0);
+    await expect(replay.getByRole('button', { name: 'Skip to the result' })).toHaveCount(0);
     // Once the display time passes the logged end, the replay is offered.
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), start + 30_000);
     await expect(replay.getByRole('heading', { name: 'Aster vs Cassia' })).toBeVisible();
@@ -933,7 +947,7 @@ test.describe('release accessibility in the fixture preview', () => {
     for (const visitor of [false, true]) {
       await openFixtureCamp(page, `/game/?mode=fixture${visitor ? '&as=visitor' : ''}&view=replay&activity=${REPLAY_FIXTURES.tie.activityId}`);
       const replay = scene(page, 'Replay');
-      await replay.getByRole('button', { name: 'Skip to result' }).click();
+      await replay.getByRole('button', { name: 'Skip to the result' }).click();
       const result = replay.getByRole('region', { name: 'Result' });
       await expect(result).toContainText('Aster wins');
       if (visitor) await expect(result).not.toContainText('Rewards are credited');

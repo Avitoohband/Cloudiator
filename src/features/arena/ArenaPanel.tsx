@@ -24,6 +24,11 @@ import { ARENA_REVEAL_MS, arenaRevealMarks, renderArenaStage, type ArenaStageSta
 import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { NO_INJURY, NPC_DISCLOSURE, REVEAL_MINUTE, SLOT_MINUTES, arenaUnavailableText, className, creditedLines, phaseDetail, phaseTitle, replayHref, resultText } from './arena-text';
+import type { MyBout } from '../../lib/api/reads';
+import { BoutRow } from '../bouts/BoutRow';
+import { recentRow } from '../bouts/bout-text';
+import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
+import { useWatched } from '../bouts/watched';
 import styles from './ArenaPanel.module.css';
 
 /** Reads the card makes: the activity's timeline and, once revealed, the opponent's public profile. */
@@ -226,8 +231,37 @@ function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock
     </article>;
   }
   if (!state) return <p role="status" className={styles.detail}>Loading the Arena bout…</p>;
-  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId }); }}
+  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId, from: 'arena' }); }}
     onClose={onClose} headingRef={heading} />;
+}
+
+/** The first three rows of the owner's shared All list, above the sample cards. */
+export function RecentBoutsView({ rows, watched, nowMs, onWatch, onAll }: {
+  rows: readonly MyBout[]; watched: ReadonlySet<string>; nowMs: number | null; onWatch(bout: MyBout): void; onAll(): void;
+}) {
+  const clock = useClockMode();
+  if (!rows.length) return null;
+  return <section className={styles.recent} aria-label="Your recent bouts">
+    <p className="eyebrow">YOUR RECENT BOUTS</p>
+    <ul className={styles.recentList}>{rows.slice(0, 3).map(bout => <BoutRow key={bout.activityId} text={recentRow(bout, nowMs, clock)} watched={watched.has(bout.activityId)} onOpen={() => onWatch(bout)} />)}</ul>
+    <button type="button" className={styles.allBouts} onClick={onAll}><span className={styles.wide}>All my bouts in Results →</span><span className={styles.narrow}>All my bouts →</span></button>
+  </section>;
+}
+
+function RecentBouts({ store, clock, onWatch, onAll }: { store: BoutsStore; clock: DisplayClock; onWatch(bout: MyBout): void; onAll(): void }) {
+  // This section mounts only for a genuine Arena opening. Register before load's effect so the first opening reads once.
+  useEffect(() => { store.refresh('all'); }, [store]);
+  const list = useBoutList(store, 'all');
+  const watched = useWatched();
+  const [now, setNow] = useState<number | null>(() => clock.synced() || clock.frozen() !== null ? clock.now() : null);
+  useEffect(() => {
+    const update = () => setNow(clock.synced() || clock.frozen() !== null ? clock.now() : null);
+    update();
+    const off = clock.subscribe(update);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') update(); }, TICK_MS);
+    return () => { off(); window.clearInterval(timer); };
+  }, [clock]);
+  return list.status === 'ready' ? <RecentBoutsView rows={list.rows} watched={watched} nowMs={now} onWatch={onWatch} onAll={onAll} /> : null;
 }
 
 /**
@@ -235,7 +269,7 @@ function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock
  * activity (only with an owner), and from the fixture samples. `owner` is null for a spectator. Without a reader it
  * says that the card is not available in this build yet; a real read failure keeps the temporary "right now" message.
  */
-export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, samples = [] }: {
+export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, samples = [], bouts, onWatchBout, onAllBouts }: {
   bridge: SceneBridge;
   reads: ArenaReads | null;
   owner: OwnerState | null;
@@ -243,6 +277,9 @@ export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, sample
   clock: DisplayClock;
   fixture: boolean;
   samples?: readonly ArenaSample[];
+  bouts?: BoutsStore | null;
+  onWatchBout?(bout: MyBout): void;
+  onAllBouts?(): void;
 }) {
   const [selection, setSelection] = useState<OpenSelection | null>(null);
   const focusRequests = useRef(0);
@@ -271,6 +308,7 @@ export function ArenaPanel({ bridge, reads, owner, world, clock, fixture, sample
       <p className="eyebrow">THE ARENA</p>
       <h2 id={titleId} className={styles.title}>Arena bouts</h2>
       {own && owner && <button type="button" className={styles.pick} aria-pressed={selection?.activityId === own.id} onClick={() => pick({ activityId: own.id, gladiatorId: owner.gladiatorId })}>Your arena bout</button>}
+      {owner && bouts && onWatchBout && onAllBouts && <RecentBouts store={bouts} clock={clock} onWatch={onWatchBout} onAll={onAllBouts} />}
       {fixture && samples.length > 0 && (
         <nav aria-labelledby={listId} className={styles.samples}>
           <p id={listId} className="eyebrow">SAMPLE ARENA BOUTS</p>

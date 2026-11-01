@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { ActivitySummary, CreditedRewards } from '@contracts/events';
 import type { GameNotification } from '@contracts/reads';
-import { levelUpLine, notificationLines } from '../../src/features/messages/notifications';
+import { levelUpLine, notificationLines, watchLabel } from '../../src/features/messages/notifications';
 
 // Notifications (2026-10-28, spec "Added 2026-10-28: notifications"): what a settled activity of the player's own earned, as plain
 // text lines. The text says gold (the player-facing word for the `money` fields), never money, and a "Level up!" line only when the
@@ -92,4 +92,11 @@ it('shows text as text: a destination with markup stays characters, and the inpu
   const before = structuredClone(n);
   expect(notificationLines(n).title).toBe('Expedition victory: <b>Woodland</b> & "Path"');
   expect(n).toEqual(before);
+});
+
+it('names notification Watch links by kind and result', () => {
+ expect(watchLabel(note('arena', { result: 'victory' }))).toEqual({ wide: '▶ Watch', narrow: '▶ Watch', name: 'Watch: Arena victory' });
+ expect(watchLabel(note('tournament', { result: 'defeat' }))?.name).toBe('Watch: Tournament defeat');
+ expect(watchLabel(note('expedition', { result: 'victory' }, { destination: 'Ruined Outpost' }))).toEqual({ wide: '▶ Watch the trip', narrow: '▶ The trip', name: 'Watch the trip: Expedition victory: Ruined Outpost' });
+ expect(watchLabel(note('training'))).toBeNull();
 });

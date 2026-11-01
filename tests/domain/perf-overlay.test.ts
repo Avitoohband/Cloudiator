@@ -37,6 +37,18 @@ describe('the frame overlay phases', () => {
     expect(trip.key).not.toBe(live.key);
     expect(perfPhaseOf('ready', { kind: 'expedition', activityId: 'e1', play: 'trip' }).key).toBe(trip.key);
   });
+
+  // Arena replays Task 3 (carried to Task 4): a bracket's bout has no activity; its tournament is the scene, so its chapters are one phase.
+  it('measures a bracket’s bouts as one phase, keyed by its tournament', async () => {
+    const { perfPhaseOf } = await import('@/features/shell/PerfOverlay');
+    const T = 'tournament:373248:bronze';
+    const bout = perfPhaseOf('ready', { kind: 'bout', tournamentId: T, boutId: `${T}:3:0` });
+    expect(bout).toEqual({ label: 'bout', key: `ready|bout|${T}|` });
+    expect(perfPhaseOf('ready', { kind: 'bout', tournamentId: T, boutId: `${T}:2:0` }).key).toBe(bout.key);
+    expect(perfPhaseOf('ready', { kind: 'bout', tournamentId: 'tournament:373249:bronze', boutId: 'tournament:373249:bronze:3:0' }).key).not.toBe(bout.key);
+    // A malformed bout address names nothing: a phase of its own, not a bracket's.
+    expect(perfPhaseOf('ready', { kind: 'bout', activityId: null })).toEqual({ label: 'bout', key: 'ready|bout||' });
+  });
 });
 
 describe('the frame overlay readout', () => {

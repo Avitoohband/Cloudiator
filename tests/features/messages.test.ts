@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
 import {
-  badgeText, buttonName, isNewNotification, isUnread, messageDate, messagesStale, newCount, notificationsStale, tagName,
+  badgeText, buttonName, messagesRequestFor, isNewNotification, isUnread, messageDate, messagesStale, newCount, notificationsStale, tagName,
 } from '../../src/features/messages/messages';
 
 // The pure rules behind the messages button and panel (spec "Decisions": badge, unread, tags, dates), and when a list the panel holds no
@@ -95,4 +95,31 @@ it('marks a result new when it settled after the time the account last saw them'
   expect(isNewNotification(result(1, 5_000), 4_999)).toBe(true);
   expect(isNewNotification(result(1, 5_000), 5_000)).toBe(false);
   expect(isNewNotification(result(1, 5_000), 9_000)).toBe(false);
+});
+
+// Task 7 review fix: the account can change while both gladiator identities are still unknown.
+it('adopts the first bootstrap account, then binds it before the owner resolves', () => {
+  const bootstrap = { tab: 'notifications' as const, n: 1, account: undefined, owner: undefined };
+  expect(messagesRequestFor(bootstrap, undefined, undefined)).toBe(bootstrap);
+  const a = messagesRequestFor(bootstrap, 'account-a', undefined);
+  expect(a).toEqual({ ...bootstrap, account: 'account-a' });
+  expect(messagesRequestFor(a, 'account-a', undefined)).toBe(a);
+  const ready = messagesRequestFor(a, 'account-a', 'gladiator-a');
+  expect(ready).toEqual({ ...bootstrap, account: 'account-a', owner: 'gladiator-a' });
+  // Effective render gating must reject B even before a cleanup effect changes stored state.
+  expect(messagesRequestFor(a, 'account-b', undefined)).toBeNull();
+  expect(messagesRequestFor(a, 'account-b', 'gladiator-b')).toBeNull();
+  expect(messagesRequestFor(ready, 'account-b', 'gladiator-b')).toBeNull();
+});
+
+it('drops a bootstrap visitor and preserves same-account delayed-owner adoption only', () => {
+  const bootstrap = { tab: 'notifications' as const, n: 2, account: undefined, owner: undefined };
+  expect(messagesRequestFor(bootstrap, null, null)).toBeNull();
+  expect(messagesRequestFor(bootstrap, 'account-a', null)).toBeNull();
+  const pending = { ...bootstrap, account: 'account-a' };
+  const ready = messagesRequestFor(pending, 'account-a', 'gladiator-a');
+  expect(ready).toEqual({ ...pending, owner: 'gladiator-a' });
+  expect(messagesRequestFor(pending, null, null)).toBeNull();
+  expect(messagesRequestFor(ready, 'account-a', 'gladiator-b')).toBeNull();
+  expect(messagesRequestFor(null, 'account-b', 'gladiator-b')).toBeNull();
 });

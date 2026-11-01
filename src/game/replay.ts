@@ -6,8 +6,14 @@ import type { ActivitySummary, BattleAction, BattleLog, BattleVictory, RevealedS
 import type { GameGateway } from '../lib/api/gateway';
 import { replayKept } from '../lib/replay-retention';
 
-export const REPLAY_SPEEDS = { normal: 1, fast: 4 } as const;
+/** The replay's speeds, 1×, 2× and 4× (Arena replays Task 5: the speed button cycles them in this order). */
+export const REPLAY_SPEEDS = { normal: 1, double: 2, fast: 4 } as const;
 export type ReplaySpeed = keyof typeof REPLAY_SPEEDS;
+const SPEED_ORDER: readonly ReplaySpeed[] = ['normal', 'double', 'fast'];
+/** The speed after `speed`: 1× → 2× → 4× → 1×. */
+export function nextSpeed(speed: ReplaySpeed): ReplaySpeed {
+  return SPEED_ORDER[(SPEED_ORDER.indexOf(speed) + 1) % SPEED_ORDER.length];
+}
 /** Log time played after the victory so the defeat and victory poses can finish. */
 export const REPLAY_OUTRO_MS = 2000;
 
@@ -104,6 +110,8 @@ export type ReplayController = {
   readonly endMs: number;
   readonly positionMs: number;
   readonly playing: boolean;
+  /** At its last playable position (`endMs`, after the outro): the viewer shows the result card. */
+  readonly ended: boolean;
   readonly speed: ReplaySpeed;
   readonly frame: ReplayFrame;
   /** Plays from the current position, or from the start when the replay has ended. */
@@ -117,7 +125,7 @@ export type ReplayController = {
   skipToResult(): void;
   /** The only clock input: real milliseconds since the previous tick, scaled by the speed. */
   tick(realMs: number): void;
-  /** Called after discrete changes (group, result, play state, speed), not every tick. */
+  /** Called after discrete changes (group, result, play state, speed, reaching or leaving the end), not every tick. */
   subscribe(listener: () => void): () => void;
   listenerCount(): number;
 };
@@ -130,7 +138,7 @@ export function createReplayController(log: BattleLog, options: { speed?: Replay
   let speed: ReplaySpeed = options.speed ?? 'normal';
   let frame = reduceReplay(log, 0);
   let signature = '';
-  const sign = () => `${playing}|${speed}|${frame.groupIndex}|${frame.finished}`;
+  const sign = () => `${playing}|${speed}|${frame.groupIndex}|${frame.finished}|${positionMs >= endMs}`;
   signature = sign();
 
   function moveTo(ms: number) {
@@ -152,6 +160,7 @@ export function createReplayController(log: BattleLog, options: { speed?: Replay
     endMs,
     get positionMs() { return positionMs; },
     get playing() { return playing; },
+    get ended() { return positionMs >= endMs; },
     get speed() { return speed; },
     get frame() { return frame; },
     play() {

@@ -13,7 +13,7 @@ import { awayProgress, awayScene, awayText, type AwayState } from './away-trip';
 import type { SceneView } from './scene-url';
 import styles from './shell.module.css';
 
-const ICON: Record<AwayState['kind'], string> = { running: '🧭', back: '🏕' };
+const ICON: Record<AwayState['kind'], string> = { running: '🧭', back: '🏕', bout: '⚔' };
 
 const subscribeCompact = (onChange: () => void) => {
   const query = window.matchMedia?.(COMPACT_QUERY);
@@ -38,7 +38,7 @@ export function AwayButton({ state, onOpen, onClose }: {
   // A trip that is over can be closed; any later state that is not running (a bout, patch 1.5) is closable the same way.
   const closable = state.kind !== 'running';
   return (
-    <div className={styles.away} role="group" aria-label="Your expedition" data-testid="away-button" data-state={state.kind}>
+    <div className={styles.away} role="group" aria-label={state.kind === 'bout' ? 'Your Arena bout' : 'Your expedition'} data-testid="away-button" data-state={state.kind}>
       <button type="button" className={styles.awayMain} data-away-main="" onClick={() => onOpen(awayScene(state))}>
         {!compact && <span className={styles.awayIcon} aria-hidden="true">{ICON[state.kind]}</span>}
         <span className={styles.awayText}>

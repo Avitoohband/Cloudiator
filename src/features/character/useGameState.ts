@@ -19,6 +19,8 @@ export type GameUiState = {
   revision: string | null; slotIndex: number | null; clock: DisplayClock;
   /** The revision's published slot (Task 23.2, C5): the latest slot whose boundary is published; null before the first coordination. */
   publishedSlotIndex: number | null;
+  /** The server's newest patch from the latest revision read (Patch A, "Patch numbers and the changelog"); null when unknown. */
+  latestPatch: string | null;
   /** The owner's own gladiator rests at home in the shared world (its public actor's `resting`; Task 23.9 fix round 1). */
   ownResting: boolean;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
@@ -40,7 +42,11 @@ export type GameUiState = {
  * give `refreshOwner` a new identity (as a parent re-rendering with a new function would), so panels prove they keep
  * their timers (Task 19 R2).
  */
-export type ShellTestHook = { clock: DisplayClock; renewRefreshOwner(): void };
+export type ShellTestHook = {
+  clock: DisplayClock; renewRefreshOwner(): void;
+  /** How many sync refreshes have succeeded (a revision read that landed), and the newest patch the shell has rendered (11b review). */
+  syncs(): number; latestPatch(): string | null;
+};
 declare global {
   interface Window { __cloudiatorShell?: ShellTestHook }
 }
@@ -127,11 +133,15 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   // The world's revision and slot as the sync last published them: a new revision, or a later server slot, reads the
   // owner at once (not after a render), so a tab return that awaits the sync refresh knows whether it already has.
   const seen = useRef<Seen>({ revision: null, slotIndex: null });
+  /** Test hooks only (fixture-enabled builds): the refreshes that landed, and the newest patch as last rendered. */
+  const syncsLanded = useRef(0);
+  const renderedPatch = useRef<string | null>(null);
   useEffect(() => {
     if (!gateway) return;
     seen.current = { revision: null, slotIndex: null };
     const controller = createSync(gateway, next => {
       if (next.offsetMs !== null) clock.sync(Date.now() + next.offsetMs);
+      if (!next.refreshing && next.error === null && next.lastSyncMs !== null) syncsLanded.current += 1;
       const previous = seen.current;
       const now: Seen = { revision: next.world?.revision ?? null, slotIndex: next.world?.slotIndex ?? null };
       seen.current = now;
@@ -156,6 +166,8 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const revision = syncWorld?.revision ?? null;
   const slotIndex = syncWorld?.slotIndex ?? null;
   const publishedSlotIndex = syncWorld?.publishedSlotIndex ?? null;
+  const latestPatch = sync?.latestPatch ?? null;
+  useEffect(() => { renderedPatch.current = latestPatch; }, [latestPatch]);
 
   useEffect(() => {
     if (!gateway || account === null || clockOnly) return;
@@ -224,7 +236,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED !== 'true') return;
-    window.__cloudiatorShell = { clock, renewRefreshOwner: () => setRenewals(n => n + 1) };
+    window.__cloudiatorShell = { clock, renewRefreshOwner: () => setRenewals(n => n + 1), syncs: () => syncsLanded.current, latestPatch: () => renderedPatch.current };
     return () => { if (window.__cloudiatorShell?.clock === clock) delete window.__cloudiatorShell; };
   }, [clock]);
 
@@ -264,7 +276,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   else viewer = owner ? 'player' : read?.missing ? 'no-gladiator' : read?.failed ? 'unavailable' : 'loading';
 
   return {
-    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, ownResting, clock,
+    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, latestPatch, ownResting, clock,
     sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld,
   };
 }

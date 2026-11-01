@@ -105,10 +105,10 @@ describe('safe projection authorization', () => {
     // Before the first coordination nothing is published.
     await sql`update private.coordinator set published_slot=null where singleton`;
     expect((await visitor()).publishedSlotIndex).toBeNull();
-    // The revision view gains this one column, still read-only for a visitor.
+    // The revision view gains this one column, still read-only for a visitor (and, since M26, the newest patch number).
     const {data,error}=await anonymous.from('world_revision').select('*').single();
     expect(error).toBeNull();
-    expect(Object.keys(data!).sort()).toEqual(['published_slot_index','revision','server_now_ms','slot_index']);
+    expect(Object.keys(data!).sort()).toEqual(['latest_patch','published_slot_index','revision','server_now_ms','slot_index']);
     expect((await anonymous.from('world_revision_state').update({published_slot_index:slot}).eq('singleton',true).select()).error).not.toBeNull();
     await sql`update private.coordinator set published_slot=${previous},lease_token=null,lease_until_ms=0 where singleton`;
     expect((await visitor()).publishedSlotIndex).toBe(previous);

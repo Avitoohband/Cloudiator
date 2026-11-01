@@ -27,3 +27,13 @@ export function tournamentSlotOf(id: string): number | null {
   const match = typeof id === 'string' ? TOURNAMENT_ID.exec(id) : null;
   return match ? Number(match[1]) : null;
 }
+
+/**
+ * The round a tournament bout's stage label is about: the server labels each bout of a run `<round>: <victory|defeat>`, from
+ * that entrant's side (`Final`, `Semifinal`, `Quarterfinal`, `Round r`). Null for any other label, an Arena bout's `Bout:
+ * victory` among them.
+ */
+export function tournamentRound(label: string): string | null {
+  const match = typeof label === 'string' ? /^(Final|Semifinal|Quarterfinal|Round [1-9]\d{0,2}): (?:victory|defeat)$/.exec(label) : null;
+  return match ? match[1] : null;
+}

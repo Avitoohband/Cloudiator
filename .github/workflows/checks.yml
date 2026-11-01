@@ -39,6 +39,9 @@ jobs:
       - name: Install the pinned dependencies (package-lock.json)
         run: npm ci
 
+      - name: Prepare the locked Deno imports (explicit dependency installation)
+        run: npx --no-install deno cache --frozen --config supabase/functions/deno.json supabase/functions/game-command/index.ts supabase/functions/game-worker/index.ts tests/backend/edge.deno.ts
+
       - name: Start a fresh local Supabase stack (every migration replayed)
         run: |
           npx supabase start --exclude studio,realtime,storage-api,imgproxy,mailpit,logflare,vector,supavisor > "$RUNNER_TEMP/supabase-start.log" 2>&1 || {

@@ -526,6 +526,7 @@ test('the Arena menu lists my three latest bouts and links to all of them', asyn
 });
 
 test.describe('My bouts for a signed-in player', () => {
+  test.skip(production, 'These signed-in scenarios require the development test client and routed Data API.');
   // The live read through the routed Data API: the owner Aster's two bouts against Varro, a win one slot back and a loss two slots back.
   async function livePlayer(context: Parameters<typeof seedSession>[0]) {
     await seedSession(context);

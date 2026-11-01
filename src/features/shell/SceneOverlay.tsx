@@ -24,17 +24,20 @@ import { markWatched } from '../bouts/watched';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import type { ReplayQueue } from '../bouts/bout-queue';
 import { backLabel, boutFilterOf, namedScene, sameSceneSource, sceneFromOf, sceneKeyOf, sceneOf, type SceneAddress, type SceneView } from './scene-url';
+import { BracketReplay } from '../tournaments/BracketReplay';
+import type { TournamentSample } from '../tournaments/TournamentPanel';
 import styles from './shell.module.css';
 
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 
-export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch, bouts, onReplace }: {
+export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch, bouts, onReplace, tournamentSamples = [] }: {
   view: SceneAddress;
   /** The camp's reads: the live gateway, or the fixture preview's once it has loaded (null until then). */
   gateway: GameGateway | null;
   state: GameUiState;
   fixture?: boolean;
+  tournamentSamples?: readonly TournamentSample[];
   /** The Back button or Escape: the shell emits `return-camp`. */
   onClose(): void;
   /** An expedition's encounter replay: the shell opens the replay scene. */
@@ -140,8 +143,17 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
         {named === null
           ? view.kind === 'expedition' ? <ExpeditionUnavailable fixture={fixture} reason="not-found" overCamp />
             : <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} headingLevel={2} />
-          // A bracket's bout opens in its own viewer (Task 9); until it does, its address says no replay was found.
-          : named.kind === 'bout' ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} headingLevel={2} />
+          // A bracket's chapters retain the tournament and fixture projection across replacements and reloads.
+          : named.kind === 'bout' ? loading ? <p role="status">Loading the replay…</p>
+            : <BracketReplay key={viewKey} reads={gateway!} tournamentId={named.tournamentId} boutId={named.boutId} clock={clock}
+                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} takeFocus back={{ label, go: onClose }}
+                heldAtMs={fixture ? tournamentSamples.find(sample => sample.id === named.tournamentId)?.asOfMs ?? null : null}
+                onChapter={boutId => {
+                  const source: SceneView = { kind: 'bout', tournamentId: named.tournamentId, boutId: named.boutId, ...origin };
+                  if (!sameSceneSource(sceneOf(new URL(window.location.href).searchParams), source)) return;
+                  back.current?.focus({ preventScroll: true });
+                  onReplace({ kind: 'bout', tournamentId: named.tournamentId, boutId, ...origin });
+                }} />
           : named.kind === 'replay'
             ? loading ? <p role="status">Loading the replay…</p>
               : <QueuedReplay key={viewKey} store={bouts} queue={queue} reads={reads} activityId={named.activityId} stageId={named.stageId ?? null} clock={clock} headingLevel={2} counterHost={counterHost}

@@ -3,7 +3,7 @@
 // The Tournaments panel: the next tournament and its countdown in the viewer's time zone (with UTC beside it), the
 // owner's automatic-entry registration with the entry rules, and a league bracket as the stage core shows it at the
 // display clock: entrants and the bracket shape from the start, round-by-round results only as revealed, each
-// entrant's role, placements after settlement and, for completed bouts, an inline close-up replay of the revealed log
+// entrant's role, placements after settlement and, for completed bouts, a link to the full-screen bracket viewer
 // (tournament bouts have no activity id in the public view, so no /replay/ link). The only command it sends is
 // `set-tournament-opt-in`, when the owner toggles the box; the box always shows the owner's saved setting. Names render
 // as React text. The public view carries nobody's rewards: once settled, the viewer's own credited rewards are read from
@@ -30,18 +30,17 @@
 // the server compacts each log to its fight summary. From then on a decided bout says "Replay no longer kept" (its result
 // and fight summary stay), a watched replay whose log is not loaded says so instead of "cannot be loaded", no log is read,
 // and an old tournament link whose view is gone (its id carries its slot) is "no longer kept" instead of missing.
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { GameCommand, LeagueId } from '@contracts/commands';
-import type { ActivitySummary, BattleLog } from '@contracts/events';
+import type { ActivitySummary } from '@contracts/events';
 import type { OwnerState, TournamentView } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
-import type { LookMap, LookSource } from '../../game/replay-looks';
 import type { Viewer } from '../character/useGameState';
 import { RULES_V1 } from '@domain/rules-v1';
 import {
   TOURNAMENT_PREPARE_FAST_MS, latestTournament, nextTournament, preparingRetryDelay, processingRetryDelay, renderTournament, tournamentPreparing,
-  tournamentRevealMarks, tournamentWindowAt, withTournamentLogs, type TournamentBoutState, type TournamentStageState,
+  tournamentRevealMarks, tournamentWindowAt, type TournamentBoutState, type TournamentStageState,
 } from '../../game/tournament-stage';
 import { useClockMode } from '../../lib/clock-setting';
 import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament-id';
@@ -54,23 +53,21 @@ import {
 import styles from './TournamentPanel.module.css';
 
 /**
- * Reads and the one command the panel uses; `timeline` reads the viewer's own credited summary once it has a place, and
- * `tournamentLog` loads a bout's log when its replay is watched.
+ * Reads and the one command the panel uses; `timeline` reads only the viewer's own credited summary once it has a place.
+ * The full-screen bracket viewer owns the on-demand battle-log and appearance reads.
  */
-export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command' | 'timeline' | 'tournamentLog' | 'looks'>>;
+export type TournamentReads = Pick<GameGateway, 'tournament'> & Partial<Pick<GameGateway, 'command' | 'timeline'>>;
 /** A fixture sample: its view was projected at the server time `asOfMs`, where the preview holds its bracket. */
 export type TournamentSample = { id: string; label: string; asOfMs?: number };
 type OptIn = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
 
 /** Fixture builds only (NEXT_PUBLIC_FIXTURE_ENABLED): browser tests read the open bracket and hold the clock. */
 export type TournamentTestHook = {
-  state(): { id: string; now: number; status: string; round: number | null; replay: string | null; roles: Record<string, string | null>; champion: string | null; placements: number } | null;
+  state(): { id: string; now: number; status: string; round: number | null; roles: Record<string, string | null>; champion: string | null; placements: number } | null;
   /** Holds the shared display clock (null runs on from there); the open sample then follows it instead of its own time. */
   freeze(displayNowMs: number | null): void;
   /** Tournament view reads so far. */
   reads(): number;
-  /** Battle logs asked for on demand so far (one per watched bout). */
-  logReads(): number;
   /** Kinds of every command this panel has sent. */
   commands(): string[];
   /** Opens a tournament as the sample buttons do (a sample is held at its projection time). */
@@ -144,22 +141,15 @@ export type BracketModel = {
   state: TournamentStageState;
   /** The round tab shown. */
   round: number | null;
-  /** The completed bout replayed inline. */
-  replayBoutId: string | null;
-  /** While that bout's log is not merged in yet: loading on demand, or it could not be loaded. */
-  replayStatus?: 'loading' | 'failed' | null;
   /** The signed-in owner's gladiator, if any. */
   viewerId?: string | null;
   /** The viewer's own credited summary for its placement, from its own timeline (null until read). */
   credited?: ActivitySummary | null;
-  /** Where the watched bout's fighters' looks come from (the camp's known looks, and a reader for the rest). */
-  looks?: LookSource;
   timeZone?: string;
 };
 
 /** Seven days after a tournament ends its bout replays are no longer kept; its results stay (Task 22.5). */
 const REPLAYS_GONE = 'These bout replays are no longer kept. Detailed replays are kept for seven days; the results stay.';
-const REPLAY_GONE = 'This replay is no longer kept. Detailed replays are kept for seven days. The result stays in the recent results.';
 
 function BoutCard({ bout, kept, onWatch }: { bout: TournamentBoutState; kept: boolean; onWatch(boutId: string): void }) {
   const names = bout.sides.map(s => s?.name ?? 'To be decided');
@@ -183,21 +173,16 @@ function BoutCard({ bout, kept, onWatch }: { bout: TournamentBoutState; kept: bo
 }
 
 /** Pure view of one tournament at the display time. */
-export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, onRetryReplay }: {
-  model: BracketModel; onRound(round: number): void; onWatch(boutId: string): void; onCloseReplay(): void;
-  /** Asks for the watched bout's log again after its load failed (Task 23.4); without it no Try again is offered. */
-  onRetryReplay?: () => void;
+export function TournamentBracketView({ model, onRound, onWatch }: {
+  model: BracketModel; onRound(round: number): void; onWatch(boutId: string): void;
 }) {
   const { state, timeZone } = model;
   const clockMode = useClockMode();
   const titleId = useId();
   const tabsId = useId();
-  const replayId = useId();
   const round = state.rounds.find(r => r.round === model.round) ?? state.rounds[0] ?? null;
   const champion = state.entrants.find(e => e.gladiatorId === state.championId) ?? null;
   const own = viewerText(state, !!model.viewerId, clockMode, timeZone);
-  const replay = model.replayBoutId ? state.rounds.flatMap(r => r.bouts).find(b => b.id === model.replayBoutId && b.status === 'decided') ?? null : null;
-  const replayRound = replay ? state.rounds.find(r => r.round === replay.round)! : null;
   const kept = tournamentReplayKept(state.endsAtMs, state.displayNowMs);
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -252,34 +237,6 @@ export function TournamentBracketView({ model, onRound, onWatch, onCloseReplay, 
             {!kept && <p className="muted">{REPLAYS_GONE}</p>}
             <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} />)}</ul>
           </div>
-        </section>
-      )}
-
-      {replay && replayRound && (
-        <section className={styles.replay} aria-labelledby={replayId}>
-          <div className={styles.replayHeader}>
-            <h5 id={replayId}>Replay · {replayRound.label}, bout {replay.position + 1}</h5>
-            <button type="button" onClick={onCloseReplay}>Close replay</button>
-          </div>
-          {replay.log ? <>
-            <p className="muted">The replay is the recorded bout. Watching it never changes the result.</p>
-            {/* Under the card's h4 and this section's h5: the replay title is an h6 (its sections stay at h6). Only a fighter
-                in the bout is told its rewards are credited when the activity settles (13.8 review). */}
-            <BattleReplay key={replay.id} headingLevel={6} viewerId={model.viewerId ?? null} looks={model.looks} league={state.league} view={{ kind: 'replay', selected: 0, summary: null, battles: [{
-              log: replay.log,
-              stage: { id: replay.id, kind: 'bout', label: `Tournament · ${replayRound.label}`, revealedAtMs: replay.revealAtMs, startedAtMs: replay.revealAtMs, endsAtMs: replay.fightEndsAtMs! },
-            }] }} />
-          </> : (
-            // The log loads on demand (the polled view carries none) while the replay is kept; the card's own status line
-            // stays the only status. Once it is not kept the log cannot be read any more (Task 22.5).
-            <>
-              <p className="muted" aria-live="polite">{!kept ? REPLAY_GONE
-                : model.replayStatus === 'failed' ? 'This replay cannot be loaded right now. Try again shortly.' : 'Loading the replay…'}</p>
-              {/* Try again replaces itself: the focus moves to Close replay first, never to <body>. */}
-              {kept && model.replayStatus === 'failed' && onRetryReplay && <button type="button" className={styles.retry}
-                onClick={event => { event.currentTarget.closest('section')?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true }); onRetryReplay(); }}>Try again</button>}
-            </>
-          )}
         </section>
       )}
 
@@ -358,17 +315,15 @@ export function TournamentCardNotice({ id, failure, now, processedSlotIndex, pub
  * prepared without a published slot on the revision, a re-read first awaits the owner refresh (R2); with one, a card read
  * before the publication reads again once the revision shows it (C5).
  */
-function TournamentCard({ id, reads, clock, now, viewerId, knownLooks, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onLogRead, hook }: {
+function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onWatchBout, hook }: {
   id: string; reads: TournamentReads; clock: DisplayClock; now: number; viewerId: string | null;
-  /** The looks of the gladiators the camp already holds as world actors: a watched bout's fighters among them are not read. */
-  knownLooks?: LookMap | null;
   /** The viewer's own processed slot (owner state; null without an owner), published with the slot's tournaments. */
   processedSlotIndex: number | null;
   /** The revision's published slot (Task 23.2; null before the first coordination), from the shared sync. */
   publishedSlotIndex: number | null;
   /** Re-reads the owner, so its processed slot is current while the slot is being prepared. */
   refreshOwner?: () => Promise<void>;
-  onRead(): void; onLogRead(): void; hook: { current: TournamentTestHook['state'] | null };
+  onRead(): void; onWatchBout?(tournamentId: string, boutId: string): void; hook: { current: TournamentTestHook['state'] | null };
 }) {
   const [view, setView] = useState<TournamentView | null>(null);
   const [failure, setFailure] = useState<'unavailable' | 'not-found' | null>(null);
@@ -379,13 +334,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, knownLooks, processed
   const publishedNow = useRef(publishedSlotIndex);
   useEffect(() => { publishedNow.current = publishedSlotIndex; });
   const [round, setRound] = useState<number | null>(null);
-  const [replay, setReplay] = useState<string | null>(null);
   const [credited, setCredited] = useState<{ activityId: string; summary: ActivitySummary } | null>(null);
-  /** Logs of watched bouts, loaded on demand (results are immutable; the live gateway also keeps them for the session). */
-  const [logs, setLogs] = useState<ReadonlyMap<string, BattleLog>>(() => new Map());
-  const [logFailed, setLogFailed] = useState<string | null>(null);
-  /** Each Try again on a failed log asks for it once more (Task 23.4). */
-  const [logAttempt, setLogAttempt] = useState(0);
   const request = useRef(0);
   const inFlight = useRef(false);
   const lastRead = useRef(-Infinity);
@@ -462,25 +411,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, knownLooks, processed
     return () => window.clearInterval(timer);
   }, [failure, view, read, clock, id]);
 
-  const merged = useMemo(() => (view ? withTournamentLogs(view, logs) : null), [view, logs]);
-  const state = merged ? renderTournament(merged, now, { viewerId }) : null;
-
-  // The watched bout's log, on demand while its replay is kept: once per bout (a failure can be retried by watching again).
-  const watched = replay && state ? state.rounds.flatMap(r => r.bouts).find(b => b.id === replay && b.status === 'decided') ?? null : null;
-  const needsLog = !!watched && !watched.log && tournamentReplayKept(state!.endsAtMs, state!.displayNowMs);
-  useEffect(() => {
-    if (!replay || !needsLog || logs.has(replay)) return;
-    let current = true;
-    if (!reads.tournamentLog) { setLogFailed(replay); return; }
-    setLogFailed(null);
-    onLogRead();
-    reads.tournamentLog(replay).then(log => {
-      if (current) setLogs(prev => new Map(prev).set(replay, log));
-    }, () => { if (current) setLogFailed(replay); });
-    return () => { current = false; };
-  }, [replay, needsLog, logs, reads, onLogRead, logAttempt]);
-  // A loaded log that does not agree with the published result is never shown.
-  const replayStatus = !needsLog ? null : logFailed === replay || (replay !== null && logs.has(replay)) ? 'failed' as const : 'loading' as const;
+  const state = view ? renderTournament(view, now, { viewerId }) : null;
 
   // Once the viewer has a place, its own credited rewards come from its own activity timeline (owner-only under RLS).
   const placed = state?.viewer.placement?.activityId ?? null;
@@ -514,7 +445,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, knownLooks, processed
   const shownRound = state?.rounds.some(r => r.round === round) ? round : state?.currentRound ?? null;
   useEffect(() => {
     hook.current = () => state && {
-      id: state.id, now: state.displayNowMs, status: state.status, round: shownRound, replay,
+      id: state.id, now: state.displayNowMs, status: state.status, round: shownRound,
       roles: Object.fromEntries(state.entrants.map(e => [e.name, e.role])),
       champion: state.entrants.find(e => e.gladiatorId === state.championId)?.name ?? null, placements: state.placements.length,
     };
@@ -522,10 +453,9 @@ function TournamentCard({ id, reads, clock, now, viewerId, knownLooks, processed
 
   if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} processedSlotIndex={processedSlotIndex} publishedSlotIndex={failedPublished} />;
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
-  return <TournamentBracketView model={{ state, round: shownRound, replayBoutId: replay, replayStatus, viewerId,
-    credited: credited && credited.activityId === placed ? credited.summary : null, looks: { known: knownLooks, read: reads.looks?.bind(reads) ?? null } }}
-    onRound={setRound} onWatch={setReplay} onCloseReplay={() => setReplay(null)}
-    onRetryReplay={replayStatus === 'failed' && logFailed === replay ? () => { setLogFailed(null); setLogAttempt(n => n + 1); } : undefined} />;
+  return <TournamentBracketView model={{ state, round: shownRound, viewerId,
+    credited: credited && credited.activityId === placed ? credited.summary : null }}
+    onRound={setRound} onWatch={boutId => onWatchBout?.(id, boutId)} />;
 }
 
 const LEAGUES: readonly LeagueId[] = ['bronze', 'silver', 'gold', 'champion'];
@@ -541,10 +471,9 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
  * else sees the countdown and the brackets (spec "Menus", the Visitor column).
  */
-export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, knownLooks }: {
+export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, onWatchBout }: {
   reads: TournamentReads | null;
-  /** The looks of the gladiators the camp holds as world actors (`appearancesOf`): a watched bout's replay does not read them again. */
-  knownLooks?: LookMap | null;
+  onWatchBout?(tournamentId: string, boutId: string): void;
   owner: OwnerState | null;
   clock: DisplayClock;
   fixture: boolean;
@@ -573,7 +502,6 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   const mounted = useRef(false);
   const commandLog = useRef<string[]>([]);
   const readCount = useRef(0);
-  const logReadCount = useRef(0);
   const cardState = useRef<TournamentTestHook['state'] | null>(null);
   const titleId = useId();
   const bracketsId = useId();
@@ -587,7 +515,6 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
     return () => window.clearInterval(timer);
   }, [clock]);
   const onRead = useCallback(() => { readCount.current += 1; }, []);
-  const onLogRead = useCallback(() => { logReadCount.current += 1; }, []);
   const pick = useCallback((next: string) => { cardState.current = null; setSelected(next); setHolding(true); }, []);
 
   useEffect(() => {
@@ -596,7 +523,6 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
       state: () => cardState.current?.() ?? null,
       freeze: ms => { setHolding(false); clock.freeze(ms); },
       reads: () => readCount.current,
-      logReads: () => logReadCount.current,
       commands: () => [...commandLog.current],
       open: pick,
     };
@@ -675,9 +601,9 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
               // No server time yet: a failed revision read is said at once, never an endless "Loading" (review M1).
               : syncError ? <TournamentNotice failure="unavailable" preparing={false} />
                 : <p role="status" className={styles.detail}>Loading the tournament…</p>)
-              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null} knownLooks={knownLooks}
+              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null}
                 processedSlotIndex={owner?.processedSlotIndex ?? null} publishedSlotIndex={fixture ? null : publishedSlotIndex}
-                refreshOwner={refresh} onRead={onRead} onLogRead={onLogRead} hook={cardState} />}
+                refreshOwner={refresh} onRead={onRead} onWatchBout={onWatchBout} hook={cardState} />}
       </section>
     </section>
   );

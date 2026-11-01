@@ -159,8 +159,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Seasons | Four-week seasons end with awards for the top 3: rewards, titles and badges. | 1.0 | Live | Arena → standings → a season | Concept trailer (as "28 days") |
 | Evening Arena | The Arena runs in the evening part only, and tournaments start in the evening too, at 18:40 UTC. | 1.1 | Live | Schedule: Arena is offered in the evening only | Looks update |
 | Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Built; waiting for 1.5 release | Arena → Your recent bouts; All my bouts opens Results on My bouts (All) | — |
-| Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Planned 1.5 | Not built | — |
-| Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Planned 1.5 | Not built | — |
+| Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Built; waiting for 1.5 release | Camp → settled Arena bout button | — |
+| Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Built; waiting for 1.5 release | Tournaments → Watch replay → bracket chapters | — |
 | Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Planned 1.6 | Not built | — |
 | Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Planned 1.6 | Not built | — |
 

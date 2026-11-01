@@ -122,7 +122,7 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await expect(scene(page, 'Expedition').getByRole('heading', { level: 2, name: 'This expedition’s replays are no longer kept' })).toBeVisible({ timeout: 45_000 });
   });
 
-  test('says a tournament replay is no longer kept after seven days and when its log was pruned', { tag: '@render' }, async ({ page }, testInfo) => {
+  test('says a tournament replay is no longer kept after seven days and when its log was pruned', { tag: '@render' }, async ({ page, context }, testInfo) => {
     await page.goto('/game/?mode=fixture');
     const panel = await openMenu(page, 'Tournaments');
     await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible({ timeout: 45_000 });
@@ -138,21 +138,26 @@ test.describe('replays older than seven days in the fixture preview', () => {
     await card.getByRole('tabpanel').scrollIntoViewIfNeeded();
     await settled(page);
     await page.screenshot({ path: testInfo.outputPath(`retention-tournament-${testInfo.project.name}.png`) });
-    // A minute before the replays go the final can still be watched; its log, compacted on the server, cannot be read.
-    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), AGED_EXPIRY - MIN);
-    await card.getByRole('tab', { name: 'Final', exact: true }).click();
-    const watch = card.getByRole('button', { name: /^Watch replay of / });
-    await expect(watch).toHaveCount(1);
-    await watch.click();
-    const replay = card.getByRole('region', { name: /^Replay · Final, bout 1$/ });
+    // The full-screen viewer keeps fixture samples at their durable projection time. Check production retention on
+    // the live shared clock instead: this compacted log is missing before expiry, then expired exactly.
+    const at = AGED_EXPIRY - MIN;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [AGED], serverNowMs: () => at });
+    const final = AGED.bouts.find(b => b.round === Math.max(...AGED.bouts.map(b => b.round)))!.id;
+    await page.goto('/game/?view=bout&tournament=' + AGED.id + '&bout=' + final + '&from=tournaments');
+    const replay = scene(page, 'Replay');
+    const logReads = () => live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id')).length;
+    await freezeShellClock(page, at);
     await expect(replay).toContainText('This replay cannot be loaded right now. Try again shortly.');
-    expect(await page.evaluate(() => window.__cloudiatorTournaments!.logReads())).toBe(1);
-    // From the expiry on, the same missing log reads as no longer kept, and nothing is read again.
-    await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), AGED_EXPIRY);
-    await expect(replay).toContainText('This replay is no longer kept. Detailed replays are kept for seven days. The result stays in the recent results.');
-    await expect(card.getByRole('button', { name: /Watch replay/ })).toHaveCount(0);
-    await expect(card.getByRole('tabpanel')).toContainText('Replay no longer kept');
-    expect(await page.evaluate(() => window.__cloudiatorTournaments!.logReads())).toBe(1);
+    expect(logReads()).toBe(1);
+    await freezeShellClock(page, AGED_EXPIRY - 1);
+    await expect(replay).toContainText('This replay cannot be loaded right now. Try again shortly.');
+    expect(logReads()).toBe(1);
+    await freezeShellClock(page, AGED_EXPIRY);
+    await expect(replay).toContainText('This replay is no longer kept');
+    await expect(replay).toContainText('Detailed replays are kept for seven days. The result stays in the recent results.');
+    await expect(replay.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+    await expect(replay.getByRole('group', { name: 'Replay controls', exact: true })).toHaveCount(0);
+    expect(logReads()).toBe(1);
     await replay.scrollIntoViewIfNeeded();
     await settled(page);
     await page.screenshot({ path: testInfo.outputPath(`retention-tournament-replay-gone-${testInfo.project.name}.png`) });

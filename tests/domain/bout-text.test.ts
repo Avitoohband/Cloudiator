@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActivitySummary, BattleLog, RevealedStage } from '@contracts/events';
 import type { MyBout } from '@/lib/api/reads';
 import {
-  RESULT_HINT, againLabel, recentRow, boutEyebrow, boutRow, chapterLabel, counterText, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, upNextText, verdictText,
+  RESULT_HINT, bracketChapter, againLabel, recentRow, boutEyebrow, boutRow, chapterLabel, counterText, dayGroups, emptyText, nextLabel, ratingText, rewardChips, unwatchedCount, upNextText, verdictText,
 } from '@/features/bouts/bout-text';
 import { ARENA_BATTLE_LOGS } from '../fixtures/arena';
 
@@ -190,4 +190,9 @@ describe('recent Arena menu rows', () => {
  expect(recentRow(bout(), null, '12', 'UTC')).toMatchObject({ action: null, sub: { wide: 'Sat 10 Oct, 3:00 AM · Rating +14' } });
  expect(recentRow(bout({ foughtAtMs: Date.UTC(2026, 9, 9, 23) }), NOW, '24', 'Etc/GMT-3').sub.wide).toBe('Today, 02:00 · Rating +14');
  });
+});
+
+it('names bracket chapters without outcomes', () => {
+  expect([bracketChapter('Final', 0, 1), bracketChapter('Semifinal', 1, 2), bracketChapter('Quarterfinal', 2, 4), bracketChapter('Round 1', 4, 8)])
+    .toEqual(['Final', 'SF 2', 'QF 3', 'R1 · 5']);
 });

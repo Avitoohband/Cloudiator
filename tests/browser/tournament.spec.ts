@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { expect, test, type Page } from './fixtures';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
@@ -8,7 +8,8 @@ import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from
 import { largeTournament, tournamentCampActors } from '../fixtures/tournament-build';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
-import { closeMenu, expectOwnerShown, openMenu } from './shell-helpers';
+import { closeMenu, expectOwnerShown, openMenu, quietArrivals } from './shell-helpers';
+import { noHorizontalScroll } from './a11y-helpers';
 import { storeClock } from './slot-time';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -26,6 +27,7 @@ const card = (page: Page) => page.locator('article[data-status]');
 const panelState = (page: Page) => page.evaluate(() => window.__cloudiatorTournaments!.state());
 
 async function openTournaments(page: Page) {
+  await quietArrivals(page.context());
   await page.goto('/game/?mode=fixture');
   // The camp ready and the owner shown first, as every other spec opens the fixture camp: a menu tapped while the page is
   // still starting can be lost or replaced (the phone layout failed this way in two gate runs on 2026-10-24).
@@ -98,7 +100,37 @@ test.describe('tournament registration and brackets', () => {
     expect(remote).toEqual([]);
   });
 
-  test('reveals each round on the display clock, shows the owner’s loss and spectating, and replays a completed bout inline', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
+  test('Watch replay plays the bout full screen with the bracket as chapters, and ← Tournaments returns', async ({ page }) => {
+    await openTournaments(page);
+    await page.getByRole('button', { name: TOURNAMENTS.completed.label, exact: true }).click();
+    await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toBeVisible();
+    await expect(replay).toContainText('TOURNAMENT · BRONZE · FINAL');
+    expect(new URL(page.url()).searchParams.get('from')).toBe('tournaments');
+    expect(new URL(page.url()).searchParams.get('tournament')).toBe(VIEWS.completed.id);
+    expect(new URL(page.url()).searchParams.get('bout')).toMatch(/:3:0$/);
+    if (!(await page.evaluate(() => matchMedia('(hover: none), (max-width: 480px)').matches))) {
+      await expect(replay.getByRole('list', { name: 'Chapters' }).getByRole('button')).toHaveText(['QF 1', 'QF 2', 'QF 3', 'QF 4', 'SF 1', 'SF 2', 'Final']);
+      await expect(replay.getByRole('button', { name: 'Final', exact: true })).toHaveAttribute('aria-current', 'step');
+    }
+    await expect(replay.locator('[data-bout-counter]')).toHaveCount(0);
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 6);
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true);
+    mkdirSync('.superpowers/sdd/2026-10-29-arena-replays/task-9-shots', { recursive: true });
+    await page.screenshot({ path: '.superpowers/sdd/2026-10-29-arena-replays/task-9-shots/bracket-' + test.info().project.name + '.png' });
+    const before = await page.evaluate(() => history.length);
+    await replay.getByRole('button', { name: 'Previous bout', exact: true }).click();
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 5);
+    expect(new URL(page.url()).searchParams.get('bout')).toMatch(/:2:1$/);
+    expect(await page.evaluate(() => history.length)).toBe(before);
+    await page.reload();
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 5);
+    await page.getByRole('button', { name: 'Back to Tournaments', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible();
+  });
+
+  test('reveals each round on the display clock, shows the owner’s loss and spectating, and opens a completed bout full screen', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openAtMinute(page, 'completed', 20 + 5 / 60);
     await expect(card(page).getByText('Bout in progress')).toHaveCount(4);
@@ -113,22 +145,19 @@ test.describe('tournament registration and brackets', () => {
     await card(page).getByRole('tab', { name: 'Semifinals' }).click();
     await expect(page.getByText('Result preparing')).toBeVisible();
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
-    // A spectator watches the final once it is over: an inline close-up replay, no navigation and no rewards.
+    // A spectator watches the same full-screen replay, with no owner rewards.
     await tournamentFlow.openAtMinute(page, 'completed', 79);
     await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
     await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
-    const replay = card(page).getByRole('region', { name: /^Replay · Final, bout 1$/ });
-    // The replay's title sits under the card's h4 and the replay section's h5; the card has no h1.
-    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
-    await expect(card(page).getByRole('heading', { level: 1 })).toHaveCount(0);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay.getByRole('heading', { level: 2, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
     await page.waitForFunction(() => window.__cloudiatorReplay?.state().battleId === 'tournament:373010:bronze:3:0');
     await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(999_999); });
     await expect(replay.getByRole('region', { name: 'Result' })).toContainText('Varro wins');
-    // Aster was eliminated in round 1 and only watches: the rewards line is a fighter's only (13.8 review).
-    await expect(replay).not.toContainText('Rewards are credited when the activity settles.');
+    await expect(replay).not.toContainText(/Rewards are credited|renown|gold|Rating [−+]/);
     expect(new URL(page.url()).pathname).toBe('/game/');
-    await card(page).screenshot({ path: testInfo.outputPath('tournament-spectator-replay.png') });
-    await replay.getByRole('button', { name: 'Close replay' }).click();
+    await replay.screenshot({ path: testInfo.outputPath('tournament-spectator-replay.png') });
+    await replay.getByRole('button', { name: 'Back to Tournaments', exact: true }).click();
     await expect(replay).toHaveCount(0);
     // Placements and the viewer's own credited reward only once settled at minute 80.
     await expect(card(page).getByRole('table')).toHaveCount(0);
@@ -337,26 +366,6 @@ test.describe('tournament registration and brackets', () => {
     await expect.poll(reads).toBe(n + 1);
   });
 
-  test('loads a bout’s battle log only when its replay is watched, and only once', { tag: '@render' }, async ({ page }) => {
-    await tournamentFlow.openAtMinute(page, 'completed', 79);
-    const logReads = () => page.evaluate(() => window.__cloudiatorTournaments!.logReads());
-    // Every round is revealed and decided, and no log has been asked for.
-    await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
-    await expect(card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' })).toBeVisible();
-    expect(await logReads()).toBe(0);
-    await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
-    const replay = card(page).getByRole('region', { name: /^Replay · Final, bout 1$/ });
-    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
-    expect(await logReads()).toBe(1);
-    // Watching it again, and a fresh read of the view after minute 80, keep the loaded log.
-    await replay.getByRole('button', { name: 'Close replay' }).click();
-    await tournamentFlow.openAtMinute(page, 'completed', 85);
-    await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
-    await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
-    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible();
-    expect(await logReads()).toBe(1);
-  });
-
   test('reads the view again when the display clock passes a reveal', async ({ page }) => {
     await tournamentFlow.openAt(page, 'completed', revealOf('completed', 2) - 2000);
     const reads = await page.evaluate(() => window.__cloudiatorTournaments!.reads());
@@ -382,7 +391,12 @@ test.describe('tournament registration and brackets', () => {
     const watch = card(page).getByRole('button', { name: 'Watch replay of Severus vs Aster' });
     await expect(watch).toBeFocused();
     await page.keyboard.press('Enter');
-    const close = card(page).getByRole('button', { name: 'Close replay' });
+    const ownerReplay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await page.waitForFunction(() => window.__cloudiatorReplay !== undefined);
+    await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(999999); });
+    await expect(ownerReplay.locator('[data-end-card]')).toContainText('Aster wins');
+    await expect(ownerReplay).not.toContainText(/Rewards are credited|renown|gold|Rating [−+]/);
+    const close = ownerReplay.getByRole('button', { name: 'Back to Tournaments', exact: true });
     await expect(close).toBeVisible({ timeout: 30_000 });
     await close.focus();
     await page.keyboard.press('Enter');
@@ -394,19 +408,20 @@ test.describe('tournament registration and brackets', () => {
     expect(await page.evaluate(() => window.__cloudiatorTournaments!.commands())).toEqual(['set-tournament-opt-in']);
   });
 
-  test('fits a 360 px phone with the bracket and an inline replay open', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 360, height: 760 });
+  test('fits a 360 px phone with the bracket chapters in the full-screen viewer', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 740 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await tournamentFlow.openAtMinute(page, 'completed', 85);
     const wide = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(await wide()).toBeLessThanOrEqual(0);
-    await card(page).getByRole('tab', { name: 'Quarterfinals' }).click();
+    await card(page).getByRole('tab', { name: 'Final', exact: true }).click();
     await card(page).getByRole('button', { name: /^Watch replay of / }).first().click();
-    await expect(card(page).getByRole('heading', { level: 6 }).first()).toBeVisible({ timeout: 30_000 });
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay.getByRole('heading', { level: 2, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
     expect(await wide()).toBeLessThanOrEqual(0);
     // Every word in the replay's fighter table stays whole ("Endurance", "Equipment"): no word spans two lines.
-    const fighters = card(page).getByRole('table', { name: 'Fighters at the start of the fight' });
-    await card(page).getByRole('group', { name: 'Fighters at the start', exact: true }).locator('summary').click();
+    const fighters = replay.getByRole('table', { name: 'Fighters at the start of the fight' });
+    await replay.getByRole('group', { name: 'Fighters at the start', exact: true }).locator('summary').click();
     await fighters.scrollIntoViewIfNeeded();
     const split = await fighters.evaluate(table => {
       const broken: string[] = [];
@@ -423,8 +438,20 @@ test.describe('tournament registration and brackets', () => {
       return broken;
     });
     expect(split).toEqual([]);
-    await page.getByRole('region', { name: 'Registration' }).screenshot({ path: testInfo.outputPath('width360-registration.png') });
-    await card(page).screenshot({ path: testInfo.outputPath('width360-bracket-replay.png') });
+
+    await replay.evaluate(element => element.scrollTo(0, 0));
+    const controls = replay.getByRole('group', { name: 'Replay controls', exact: true });
+    await expect(controls.getByText('7 / 7 · Final', { exact: true })).toBeVisible();
+    expect((await controls.boundingBox())!.height).toBeLessThanOrEqual(118);
+    expect(await controls.getByRole('slider').evaluate(element => parseFloat(getComputedStyle(element).height))).toBeLessThanOrEqual(32);
+    for (const button of await controls.getByRole('button').all()) if (await button.isVisible()) {
+      const box = (await button.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('width360-bracket-replay.png') });
+    mkdirSync('.superpowers/sdd/2026-10-29-arena-replays/task-9-shots', { recursive: true });
+    await page.screenshot({ path: '.superpowers/sdd/2026-10-29-arena-replays/task-9-shots/bracket-360-' + testInfo.project.name + '.png' });
   });
 });
 
@@ -469,6 +496,143 @@ const tournamentsPanel = async (page: Page) => {
 test.describe('the live Tournaments panel', () => {
   test.skip(production, 'Live mode uses development-only intercepted Supabase transport.');
   test.use({ timezoneId: 'UTC' });
+
+  test('loads a bout’s log only when it is shown, and only once', async ({ page, context }) => {
+    const view = VIEWS.completed, at = view.endsAtMs + 5 * MIN;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    const reads = () => live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id')).map(r => r.query.get('bout_id')!.replace(/^eq\./, ''));
+    const views = () => live.count('tournament_views');
+    const final = view.bouts.find(b => b.round === 3)!.id, semi = view.bouts.find(b => b.round === 2 && b.position === 1)!.id;
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + final + '&from=tournaments');
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, final);
+    expect(reads()).toEqual([final]);
+    expect(views()).toBe(1);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    const lookReads = () => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.has('gladiator_id'));
+    const look0 = lookReads().length;
+    await replay.getByRole('button', { name: 'Previous bout', exact: true }).click();
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, semi);
+    expect(reads()).toEqual([final, semi]);
+    await replay.getByRole('button', { name: 'Next bout', exact: true }).click();
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, final);
+    expect(reads()).toEqual([final, semi]);
+    expect(views()).toBe(1);
+    // All looks asked for on the first visit remain settled, even when the read returned no row (legacy look).
+    expect(lookReads().slice(look0).every(r => !r.query.get('gladiator_id')?.includes(view.bouts.find(b => b.id === final)!.revealedResult!.participants[0].gladiatorId))).toBe(true);
+    await page.evaluate(() => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(999999); });
+    await expect(replay).not.toContainText(/Rewards are credited|renown|gold|Rating [−+]|Bout 1 of/);
+    await expect(replay.locator('[data-end-card]').getByRole('button', { name: 'Tournaments', exact: true })).toBeVisible();
+  });
+
+  test('a failed selected log can be retried without rereading the tournament', async ({ page, context }) => {
+    const view = VIEWS.completed, at = view.endsAtMs + 5 * MIN, final = view.bouts.find(b => b.round === 3)!.id;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    let fail = true;
+    await context.route('**/rest/v1/tournament_bout_results?*', async route => {
+      if (fail && new URL(route.request().url()).searchParams.has('bout_id')) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'XX000', message: 'test failure' }), headers: { 'access-control-allow-origin': '*' } });
+      await route.fallback();
+    });
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + final);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toContainText('This replay cannot be loaded right now. Try again shortly.');
+    await expect(replay.getByRole('group', { name: 'Replay controls', exact: true })).toHaveCount(0);
+    fail = false;
+    await replay.getByRole('button', { name: 'Try again', exact: true }).click();
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, final);
+    expect(live.count('tournament_views')).toBe(1);
+  });
+
+  test('a mismatched selected log is never playable', async ({ page, context }) => {
+    const view = structuredClone(VIEWS.completed), at = view.endsAtMs + 5 * MIN;
+    const final = view.bouts.find(b => b.round === 3)!;
+    final.revealedResult!.battleLog!.winnerId = final.revealedResult!.participants.find(p => p.gladiatorId !== final.revealedResult!.winnerId)!.gladiatorId;
+    await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + final.id);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toContainText('This replay cannot be loaded right now. Try again shortly.');
+    await expect(replay.getByRole('group', { name: 'Replay controls', exact: true })).toHaveCount(0);
+  });
+
+  test('a pending chapter log cannot replace a newly addressed bout', async ({ page, context }) => {
+    const view = VIEWS.completed, at = view.endsAtMs + 5 * MIN, final = view.bouts.find(b => b.round === 3)!.id;
+    const semi = view.bouts.find(b => b.round === 2 && b.position === 1)!.id;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    let held = false;
+    await context.route('**/rest/v1/tournament_bout_results?*', async route => {
+      if (new URL(route.request().url()).searchParams.get('bout_id') === 'eq.' + final) { held = true; await hold; }
+      await route.fallback();
+    });
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + final + '&from=tournaments');
+    await expect.poll(() => held).toBe(true);
+    await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toContainText('Loading the replay…');
+    await page.evaluate(id => { const url = new URL(location.href); url.searchParams.set('bout', id); history.replaceState(null, '', url); }, semi);
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, semi);
+    release();
+    await expect.poll(() => live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.get('bout_id') === 'eq.' + final).length).toBe(1);
+    await page.waitForTimeout(100);
+    expect(await page.evaluate(() => window.__cloudiatorReplay?.state().battleId)).toBe(semi);
+    expect(live.count('tournament_views')).toBe(1);
+  });
+
+  test('an old bracket says its replays are no longer kept, with no reads', async ({ page, context }) => {
+    const view = VIEWS.completed, at = view.endsAtMs + 7 * 86400000, final = view.bouts.find(b => b.round === 3)!.id;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + final);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toContainText('This replay is no longer kept');
+    expect(live.count('tournament_views')).toBe(0);
+    expect(live.count('tournament_bout_results')).toBe(0);
+    await page.goto('/game/?mode=fixture&view=bout&tournament=' + VIEWS.aged.id + '&bout=' + VIEWS.aged.bouts.find(b => b.revealedResult && !b.revealedResult.bye)!.id);
+    await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toContainText('This replay is no longer kept');
+  });
+
+  test('rechecks the loaded fight duration before offering the selected chapter', async ({ page, context }) => {
+    const view = structuredClone(VIEWS.completed), reveal = revealOf('completed', 1), at = reveal + 1;
+    const first = view.bouts.find(b => b.round === 1 && b.position === 0)!;
+    const log = structuredClone(first.revealedResult!.battleLog!);
+    // An incomplete published fight summary cannot make the longer, loaded log playable before its end.
+    first.revealedResult!.battleLog!.durationMs = 0;
+    await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    let logReads = 0;
+    await context.route('**/rest/v1/tournament_bout_results?*', async route => {
+      if (new URL(route.request().url()).searchParams.get('bout_id') === 'eq.' + first.id) {
+        logReads += 1;
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ battleLog: log }), headers: { 'access-control-allow-origin': '*' } });
+      }
+      await route.fallback();
+    });
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + first.id);
+    await page.waitForFunction(() => window.__cloudiatorShell !== undefined);
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), at);
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect.poll(() => logReads).toBe(1);
+    await expect(replay).toContainText('This replay is not available yet');
+    await expect(replay.getByRole('group', { name: 'Replay controls', exact: true })).toHaveCount(0);
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), reveal + log.durationMs - 1);
+    await expect(replay.getByRole('group', { name: 'Replay controls', exact: true })).toHaveCount(0);
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), reveal + log.durationMs);
+    await page.waitForFunction(id => window.__cloudiatorReplay?.state().battleId === id, first.id);
+    expect(logReads).toBe(1);
+  });
+
+  test('only decided fights become chapters, never a bye or a fight still running', async ({ page, context }) => {
+    const view = VIEWS.completed;
+    let at = revealOf('completed', 2) + 1;
+    const live = await routeLiveReads(context, { world: emptyWorld(at), tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/?view=bout&tournament=' + view.id + '&bout=' + view.bouts.find(b => b.round === 1)!.id);
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapters === 4);
+    expect(live.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id')).map(r => r.query.get('bout_id'))).toEqual(['eq.' + view.bouts.find(b => b.round === 1)!.id]);
+    const byes = VIEWS.midway;
+    at = byes.endsAtMs + MIN;
+    live.setTournaments([byes]);
+    const fought = byes.bouts.filter(b => b.revealedResult && !b.revealedResult.bye);
+    expect(byes.bouts.some(b => b.revealedResult?.bye)).toBe(true);
+    await page.goto('/game/?view=bout&tournament=' + byes.id + '&bout=' + fought[0].id);
+    await page.waitForFunction(count => window.__cloudiatorReplay?.state().chapters === count, fought.length);
+    expect(await page.evaluate(() => window.__cloudiatorReplay?.state().chapters)).toBe(fought.length);
+  });
 
   test('keeps one 30 s retry while preparing even when the owner refresh prop changes', async ({ page, context }) => {
     // 40 s after the cutoff: the slot is not published yet, so the view is missing and the owner's processed slot lags.

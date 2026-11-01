@@ -124,9 +124,7 @@
 }
 
 .samples button,
-.watch,
-.replayHeader button,
-.retry {
+.watch {
   min-height: 44px;
   padding: 0.35rem 0.8rem;
   color: var(--ink);
@@ -213,8 +211,7 @@
   color: #ffe48f;
 }
 
-.entrants h5,
-.replay h5 {
+.entrants h5 {
   margin: 0 0 0.4rem;
   font-size: 0.9rem;
 }
@@ -295,20 +292,9 @@
 
 .tabs button:focus-visible,
 .watch:focus-visible,
-.samples button:focus-visible,
-.replayHeader button:focus-visible,
-.retry:focus-visible {
+.samples button:focus-visible {
   outline: 3px solid var(--gold);
   outline-offset: 2px;
-}
-
-/* Try again sits at the start of the replay section's grid, as the Standings' Try again does. */
-.retry {
-  justify-self: start;
-}
-
-.retry:hover {
-  border-color: var(--gold);
 }
 
 .panel {
@@ -376,26 +362,6 @@
   margin-top: 0.25rem;
 }
 
-.replay {
-  display: grid;
-  gap: 0.5rem;
-  min-width: 0;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
-}
-
-.replayHeader {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.replay p {
-  margin: 0;
-}
-
 .tableWrap {
   max-width: 100%;
   overflow-x: auto;
@@ -436,11 +402,6 @@
 
   .card {
     padding: 0.75rem 0.5rem;
-  }
-
-  /* The inline replay runs to the card's edges, so its fighter table keeps whole words in its headers. */
-  .replay {
-    margin-inline: -0.5rem;
   }
 
   .tabs button {

@@ -599,8 +599,8 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
               : frame.result.victoryReason === 'health-fraction' ? `Time ran out and ${winner.name} kept the larger share of health.`
                 : frame.result.tieBreakReason === 'simultaneous-defeat' ? `Both fighters fell at the same moment, so a seeded tie-break chose ${winner.name}.`
                   : `Time ran out with equal shares of health, so a seeded tie-break chose ${winner.name}.`}</p>
-            {summary ? <Rewards summary={summary} scope={stage.kind === 'encounter' ? 'Credited for the whole expedition' : 'Credited rewards'} />
-              : fighter ? <p className={styles.note}>Rewards are credited when the activity settles.</p> : null}
+            {league === null && (summary ? <Rewards summary={summary} scope={stage.kind === 'encounter' ? 'Credited for the whole expedition' : 'Credited rewards'} />
+              : fighter ? <p className={styles.note}>Rewards are credited when the activity settles.</p> : null)}
           </div> : <p className={styles.note}>{RESULT_HINT}</p>}
           {keptUntil !== null && <p className={styles.note}>This replay is kept until {day(keptUntil)}; the result and rewards stay in your history for 90 days.</p>}
         </section>

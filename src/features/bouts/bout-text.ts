@@ -205,3 +205,11 @@ export function upNextText(next: { a: string; b: string | null; kind: 'arena' | 
   const time = timeOfDay(next.foughtAtMs, clock, timeZone);
   return { wide: `${names}${SEP}${KIND_WORD[next.kind]}${SEP}${day}, ${time}`, narrow: `${names}${SEP}${day.split(' ')[0]} ${time}` };
 }
+
+/** Short, outcome-free names for the bracket's canonical round/position chapters. */
+export function bracketChapter(roundLabel: string, position: number, boutsInRound: number): string {
+  if (/^final$/i.test(roundLabel) && boutsInRound === 1) return 'Final';
+  if (/^semifinals?$/i.test(roundLabel)) return `SF ${position + 1}`;
+  if (/^quarterfinals?$/i.test(roundLabel)) return `QF ${position + 1}`;
+  return `${roundLabel.replace(/^Round\s+/i, 'R')} · ${position + 1}`;
+}

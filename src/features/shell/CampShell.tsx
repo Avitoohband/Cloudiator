@@ -489,7 +489,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         onProfile={(row, season) => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses, season }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex}
-        knownLooks={knownLooks} />;
+        onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
@@ -548,7 +548,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
           onStatus={game.setSceneStatus} paused={scene !== null} />
       </main>
-      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} onReplace={replaceScene}
+      {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} tournamentSamples={samples.tournaments} onReplace={replaceScene}
         onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />

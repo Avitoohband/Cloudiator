@@ -642,6 +642,25 @@ new rules version: [runbook, "Retained-rule deployments"](runbook.md#retained-ru
    **[Claude]** the deployed harness.
 6. **[Avi]** `npm run health -- --remote` after the next boundary (runbook: after every deployment).
 
+### Pages proof after a client push
+
+Avi approved this scoped Verification Before Completion / The Gate Function
+guidance on 2026-11-01. Before pushing, retain the release ref, existing Pages
+deployment UUIDs and the canonical production HTML/Next asset-path baseline.
+Afterward require the exact release SHA, a fresh Pages deployment UUID and a
+successful check for that SHA. Independently require the release-branch CI run.
+Compare canonical production content with the new deployment URL and require
+the expected change from the old baseline. Start settling from locally observed
+success, not a potentially skewed provider timestamp.
+
+Do not require a Cloudflare GitHub check suite's `head_branch` to say `release`:
+the actual 1.5 deployment reused its feature-branch suite label. Its canonical
+production/deployment content comparison passed; new-release use remains pending.
+This proves fetched content linkage, not provider environment metadata. If an
+existing authorized provider read is available, separately verify its production
+environment/canonical deployment; never dump environment variables or seek new
+credentials merely to fill that metadata gap.
+
 ### Rollback
 
 - **The client is safe to roll back** when the older client works with the current schema and functions: Pages →

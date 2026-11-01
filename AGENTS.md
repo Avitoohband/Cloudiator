@@ -325,3 +325,32 @@ Observed: the first18 usable NPC benchmark samples lacked an initial script
 hash; later attempt journals contain hashes. The proposed upfront guard is
 adopted guidance and has not yet been tested. This documentation change does
 not retroactively verify the missing hash.
+
+# Pages deployment proof - persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Require a fresh Cloudflare Pages deployment UUID, the exact candidate SHA and a
+successful check; compare canonical production HTML and Next asset paths with
+that deployment and the pre-push baseline. A GitHub check suite's branch label
+alone does not identify the deployed branch. See [deployment.md](docs/operations/deployment.md#pages-proof-after-a-client-push).
+
+Observed: the live 1.5 deployment retained its feature-branch suite label.
+Tested separately: its canonical/deployment content comparison passed. New-release
+use of this guidance is still pending; this note does not clear 1.5.1's failed gate.
+
+# Browser helper preflight - persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Before a full gate, resolve the chosen config in both browser modes and verify
+its referenced local helpers and their dependencies exist. Copying the config
+alone is insufficient. Retain setup hashes before starting; see the
+[gate guide](docs/operations/verification-gates.md#local-browser-setup-preflight).
+
+Observed: the copied NPC config referenced a missing static-server helper.
+Tested correction: the verified helper was restored, both-mode preflight and
+the supplemental static checks passed, and the next full run's static phase
+passed. That full run still failed on a separate Windows transport error.

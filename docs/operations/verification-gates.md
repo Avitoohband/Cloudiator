@@ -20,6 +20,21 @@ A Next.js build or export and a browser check must not use the same output direc
 
 Never start a build in a worktree whose development browser run or dev server is still active. Run the gate steps in that worktree one after another. Do not edit source files in a worktree while its browser suite runs (Task 23.5 lesson; approved by Avi on 2026-10-20).
 
+## Local browser setup preflight
+
+Avi approved this scoped Verification Before Completion / The Gate Function
+guidance on 2026-11-01. Before starting the full gate, resolve the selected private
+config in both development and static modes and check every referenced local
+server/helper entrypoint and its dependencies. Keep the strict project, worker,
+retry and repetition settings, and save setup hashes before the first run.
+
+The NPC config was copied without its ignored `serve-static-3800.mjs` helper,
+so all four static shards could not start. Restoring the verified helper and
+checking both modes passed the supplemental static suite; the next full run's
+static phase also passed. Its separate Windows transport failure remains a
+failed gate. Never splice supplemental checks or earlier partial runs into a
+full-gate success.
+
 ## Deno dependency preparation and offline verification
 
 `npm run typecheck` uses `deno test --cached-only --frozen --no-run --check` for

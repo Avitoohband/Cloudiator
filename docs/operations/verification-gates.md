@@ -41,7 +41,7 @@ CI explicitly prepares the three existing Deno entrypoints with the installed bi
 (`npx --no-install deno cache --frozen --config supabase/functions/deno.json ...`)
 after pinned `npm ci`, before starting Supabase or serving Edge. The later gate stays
 cache-only. This workflow edit does not authorize remote installation or a push;
-those remain subject to Avi's pending explicit permission.
+Avi explicitly approved normal remote pinned CI/Pages installs and CI container pulls for the planned releases on2026-11-01. New local package downloads remain unapproved. The two28556a1CI runs executed this preparation successfully; their unrelated bed-pixel timeouts are preserved in the1.5gate handoff.
 
 ## Database tests and the local Edge runtime
 

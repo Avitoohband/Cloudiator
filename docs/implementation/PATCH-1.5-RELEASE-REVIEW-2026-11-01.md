@@ -1,5 +1,11 @@
 # Patch 1.5 — Avi’s production review
 
+## CURRENT BED-CACHE CHECKPOINT — 2026-11-01
+
+The exact note/record drafts below remain unchanged. Production is1.4; actual restart completed at2026-11-01T06:17:55.5000000Z. Postrestart28556a1 passed2170units/405DB and555reported development cases with no reported failures, then root stopped it for independently diagnosed CI maintenance. Both newCI runs failed only unchanged camp-beds113/5000ms; all other executable CI stages passed, development deliberately omitted. Static34expected outcomes include32literal passes and2CSPexpected failures;1208skips, with no uploaded rawstats claim.
+
+Test-only **c1da8eb** caches2immutable images rather than36whole decodes, retaining every pixel/geometry assertion and timeout. Local baseline8pass(pixel1977.89ms), fixed8pass(139.11ms), full2170/122 andtypecheck/Edge3passed. Independent spec/quality review approved; newcandidateCI and complete local12remain required. No new runtime/asset/dependency changes, no permanent host-cure claim, no production write. Normal remote pinned installs and checked routine release already approved; local downloads and separate1.6go requirements unchanged. This current block supersedes older pending-host/CI-execution statements; gate handoff holds exact resume/evidence.
+
 **Release candidate; production remains 1.4. Full gate awaits host recovery; remote pinned installs are approved.** Avi's latest instruction authorizes the planned release after its checks. Runtime fixes: `db386db`; bounded runner `4893378`, static guard `2aa9158` and offline verification `26b824f` are independently approved. Both approved guidance overrides are persisted in AGENTS.md (`9e6acfa`). This checkpoint changes documentation only.
 
 ## Exact patch-note draft

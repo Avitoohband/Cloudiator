@@ -37,7 +37,10 @@ describe('Task 23.3: worker CPU in pure code (this machine; hosted Edge CPU is T
     }
   });
 
-  it('builds the 50-entrant bracket and its jobs within budget', () => {
+  // 1 pairing probe + 21 pairing samples + 1 final probe + 6 batches = 29 budgeted measurements (43.5 s at 1,500 ms each).
+  // The whole-test deadline also allows construction of 48 prior bout logs and reporting; the per-invocation/batch budget
+  // remains BUDGET_MS in the assertions below.
+  it('builds the 50-entrant bracket and its jobs within budget', { timeout: 60_000 }, () => {
     // The tournament slot's pairing job: partition 50 opted-in candidates, build the bracket and check its graph.
     const pairing = bracketPairingJob(50);
     const { value: built, ms: pairingColdMs } = timeOnce(() => pairing.run('pairing-probe'));

@@ -918,8 +918,9 @@ test.describe('what a Rest gives back', () => {
     const flow = await planningFlow(context, rester(stamina, more));
     if (processedSlotIndex !== undefined) flow.state().processedSlotIndex = processedSlotIndex;
     await page.goto('/game/');
-    const schedule = await openMenu(page, 'Schedule');
+    // This live scenario already needs a synced clock; let the shell finish entry before sending its hover interaction.
     await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+    const schedule = await openMenu(page, 'Schedule');
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), MORNING);
     return { flow, schedule };
   }
@@ -1089,6 +1090,8 @@ test('saves the whole day with one button as one command, and Undo restores the 
   await expect(saveDay(page)).toBeEnabled();
   await expect(undoDay(page)).toBeEnabled();
   // The running notice, the badge, the unsaved line and the enabled buttons all meet the contrast minimums.
+  // Measure the settled panel, as the other contrast cases do; entry animates its opacity for 160 ms.
+  await expect(schedule).toHaveCSS('opacity', '1');
   expect(await contrastIssues(schedule), 'the schedule with unsaved changes').toEqual([]);
   expect(flow.commands).toEqual([]);
   // Undo puts back the saved day.

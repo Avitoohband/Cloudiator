@@ -6,6 +6,7 @@ import { expect, test, type BrowserContext, type Locator, type Page } from './fi
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { screenToWorld } from '../../src/game/iso';
+import { PATCH } from '../../src/lib/patch';
 import { contrastIssues, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { routeLiveReads, seedSession, testUser } from './live-routes';
 import { chipToggle, cornerChip, expectOwnerShown, openMenu, touchLayout } from './shell-helpers';
@@ -615,7 +616,7 @@ test.describe('Patch A: a new player is announced', () => {
     test('steps aside, with the reload notice, under the open phone bar and the messages panel, and comes back when they close', async ({ page, context }) => {
       const world = worldOf(ursa);
       await seedSession(context);
-      await routeLiveReads(context, { world, owner: structuredClone(ownerFixture), latestPatch: '1.5' });
+      await routeLiveReads(context, { world, owner: structuredClone(ownerFixture), latestPatch: `${Number(PATCH.split('.')[0]) + 1}.0` });
       await page.goto('/game/');
       await expectOwnerShown(page, 'Aster');
       await waitForCamp(page, world.actors.length);

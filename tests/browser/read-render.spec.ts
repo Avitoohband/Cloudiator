@@ -377,25 +377,35 @@ test.describe('live reads (C6, C9, C11, C25)', () => {
     await again.click();
     await expect(main.getByRole('heading', { level: 1, name: 'Aster vs Varro' })).toBeVisible({ timeout: 45_000 });
 
-    // A tournament bout's inline replay whose log fails to load.
+    // The shared full-screen tournament replay whose selected log fails to load.
     const start = TOURNAMENTS.completed.startsAtMs, after = start + 85 * MIN;
     const tournaments = await routeLiveReads(context, { world: emptyWorld(after), tournaments: [VIEWS.completed], serverNowMs: () => after });
-    let failing = true;
-    await context.route(url => url.pathname === '/rest/v1/tournament_bout_results', route => (failing && new URL(route.request().url()).searchParams.has('bout_id') ? route.fulfill(serverError) : route.fallback()));
+    let failing = true, logReads = 0;
+    await context.route(url => url.pathname === '/rest/v1/tournament_bout_results', route => {
+      if (new URL(route.request().url()).searchParams.has('bout_id')) {
+        logReads += 1; // Count the failed request here too: it never reaches the successful fixture transport below.
+        if (failing) return route.fulfill(serverError);
+      }
+      return route.fallback();
+    });
     await page.goto('/game/');
     await openMenu(page, 'Tournaments');
     const bracket = page.locator('article[data-status]');
     await bracket.getByRole('tab', { name: 'Final', exact: true }).click({ timeout: 45_000 });
     await bracket.getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
-    const replay = bracket.getByRole('region', { name: /^Replay · Final, bout 1$/ });
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
     await expect(replay).toContainText('This replay cannot be loaded right now. Try again shortly.');
+    expect(logReads).toBe(1);
+    const views = tournaments.count('tournament_views');
     await replay.getByRole('button', { name: 'Try again', exact: true }).scrollIntoViewIfNeeded();
     await reviewShot(page, testInfo, 'reload-tournament-replay-try-again');
     await reviewShot360(page, testInfo, 'reload-tournament-replay-try-again', replay.getByRole('button', { name: 'Try again', exact: true }));
     failing = false;
     await replay.getByRole('button', { name: 'Try again', exact: true }).click();
-    await expect(replay.getByRole('heading', { level: 6, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
-    expect(tournaments.requests.filter(r => r.table === 'tournament_bout_results' && r.query.has('bout_id')).length).toBeGreaterThanOrEqual(1);
+    await expect(replay.getByRole('heading', { level: 2, name: 'Severus vs Varro' })).toBeVisible({ timeout: 30_000 });
+    await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true);
+    expect(logReads).toBe(2);
+    expect(tournaments.count('tournament_views')).toBe(views);
   });
 });
 

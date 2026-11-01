@@ -35,6 +35,8 @@ export async function revealRail(page: Page) {
   } else {
     await page.mouse.move(2, page.viewportSize()!.height / 2);
   }
+  // A translated-offscreen rail still satisfies toBeVisible. Wait for the shell's actual reveal state before clicking an icon.
+  await expect(page.getByTestId('menu-rail')).toHaveAttribute('data-revealed', 'true');
   await expect(railMenus(page)).toBeVisible();
 }
 

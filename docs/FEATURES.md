@@ -201,7 +201,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Messages | A button beside your name, with a count, where patch notes and news from the game arrive. | 1.3 | Live | Fixture camp: the button beside your name | Messages update; Too Tiny (a drawn copy) |
 | Notifications | See what your training, expeditions, Arena fights and tournaments earned: XP, level-ups, gear and gold. | 1.3 | Live | Messages → Notifications | Messages update (named as coming in Looks update) |
 | Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | Live | The chip menu: tap or click your name for "Patch 1.4" and Patch history ›; a patch note's number opens the history at that patch | — |
-| New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | Live | Needs a server ahead of the game: a test camp with `setLatestPatch('1.5')` (the patches spec's hook), then a window focus; the notice shows under your name | — |
+| New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | Live | Needs a server ahead of the game: in the test camp call `setLatestPatch` with a version strictly above the current client `PATCH` (increment its major number), then focus the window; the notice shows under your name | — |
 | Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Built; waiting for 1.5 release | Messages → Notifications → Watch; Back returns to the Notifications tab | — |
 
 ### Players and community

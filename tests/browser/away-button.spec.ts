@@ -534,6 +534,7 @@ test.describe('the away button on the camp', () => {
 });
 
 test.describe('away reads across a signed-in owner lifetime', () => {
+  test.skip(production, 'The away button checks use the development-only intercepted Supabase transport and fixture timelines.');
   test.use({ isMobile: false, hasTouch: false, viewport: { width: 1280, height: 720 } });
   test('drops a cached trip defeat when the owner signs out and returns with its new read held', async ({ page, context }) => {
     const at = startOf('outpost') + 45 * MIN;
@@ -562,6 +563,7 @@ test.describe('away reads across a signed-in owner lifetime', () => {
 });
 
 test.describe('the Arena bout button on the camp', () => {
+  test.skip(production, 'The away button checks use the development-only intercepted Supabase transport and fixture timelines.');
   test.use({ timezoneId: 'Etc/GMT-3', locale: 'en-US' });
   const arenaOwner = (after = false): OwnerState => ({ ...structuredClone(ownerFixture),
     processedSlotIndex: Math.floor(ARENA_START / SLOT_MS) + (after ? 1 : 0),

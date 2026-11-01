@@ -153,3 +153,11 @@ Avi, 2026-11-01, added to the future gear/inventory plan:
     an item shows that item's attributes/stats. Avi also reiterated that these inventory items should have a visual
     appearance later (idea 37). Keep the requested stat preview and the later item-art work linked when the gear UI is
     designed; keyboard/touch behavior and the concrete presentation are to be settled in that design pass.
+
+Avi, 2026-11-01, added a standalone social feature after the economy patch:
+
+46. **Friends list and friend requests.** "Also need to add friends list and friend request". Avi chose to ship this as a
+    standalone feature after the economy patch (1.6), rather than bundle it with party invitations. Link its design to the
+    later [friend-party invitations](2026-10-29-party-dungeons-design.md) so that work can build on the Friends feature.
+    The request lifecycle, discovery, privacy and interface still need their design pass; no specific patch or migration
+    number is assigned yet.

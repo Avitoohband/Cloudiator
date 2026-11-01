@@ -61,6 +61,28 @@ A refresh that fails (an error, an entry outside the folder, a changed modificat
 - In a scratch folder: a junction inside is skipped and its target's access time is unchanged; a missing folder fails the refresh with its reason.
 - The gate runs, each with the start time unchanged across the database run, are in `docs/operations/release-evidence.md`.
 
+## Optional bounded browser lifetimes
+
+`npm run verify -- --browser-shards 4 --results <fresh-unique-directory> --json <summary-file>`
+keeps all twelve gate steps and their order. The default (`--browser-shards 1`) still runs each browser phase once.
+For 2–32 shards, each eligible browser phase first discovers its full case manifest with Playwright `--list` and JSON,
+then runs shards 1/N through N/N sequentially, each in a separate process with one worker, no retries and one repetition.
+The CI exception still explicitly leaves out the development phase; the production phase remains required.
+
+The controller must supply a fresh results root per gate. Under each phase, `inventory/` and `shard-K-of-N/` each retain
+their own raw Playwright `report.json`, companion `identities.json` and `results/` directory; existing directories are refused
+rather than overwritten. The companion uses the public Reporter API's actual `TestCase.id` as `spec.id` and the unique public
+project name as `projectId`. Built-in JSON can merge multiple projects into one spec and keep the first project's ID; it
+cannot alone prove exact cross-shard coverage. Ambiguous project names fail closed. Both reports must validate. The gate
+summary retains both report paths and exact case identities, checks complete nonoverlapping coverage, and requires positive case evidence.
+Missing/malformed reports, invalid outcomes, retries/repeats, discovery errors or nonzero exits fail the gate, including an
+exit-zero ordinary browser process whose report is missing or failed. Expected failures and explicitly reported legitimate
+skips remain valid controls. A host fault stays a failure with its existing label; no browser case or shard is retried.
+
+This is an optional mitigation for observed `net::ERR_NO_BUFFER_SPACE` asset failures. A passing bounded diagnostic does
+not establish system-wide port exhaustion, identify a leak or prove that sharding cures the host fault. No Windows setting,
+application code, selection, fixture, assertion or timeout is changed by this option. Full gate evidence is still required.
+
 ## Parallel work
 
 Separate git worktrees have separate `.next` directories. They may run gates at the same time as long as each uses its own Playwright port and its own static server port.

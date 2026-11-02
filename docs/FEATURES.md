@@ -11,8 +11,7 @@ not uploaded or published. It covers all **30 released changelog bullets** in 1.
 1.5.0 in the video request), and the original 1.5.1. Its brief 1.6–1.8 section names planned themes only.
 
 The original 1.5.1 release is explicitly recorded as live at `ae9d79d47525c1cbc4194fea84805c2e5644f160` in
-`../hotfix/docs/implementation/PATCH-1.5.1-VERIFICATION-HOLD-2026-11-02.md` (relative to the Cloudiator
-worktrees parent: `hotfix/docs/implementation/...`). The later test-maintenance candidate remains on hold;
+[the local verification record](<C:/Avi/Studies/Projects/Cloudiator/hotfix/docs/implementation/PATCH-1.5.1-VERIFICATION-HOLD-2026-11-02.md>). The later test-maintenance candidate remains on hold;
 this film and its bookkeeping do not clear it. 1.5 was released on 1 Nov; 1.4 on 31 Oct; 1.3.1 on 29 Oct.
 
 No newer released player-feature bullets were established by the local records used for this film. Inventory

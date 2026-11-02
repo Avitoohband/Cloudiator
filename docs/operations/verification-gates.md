@@ -121,6 +121,30 @@ This is an optional mitigation for observed `net::ERR_NO_BUFFER_SPACE` asset fai
 not establish system-wide port exhaustion, identify a leak or prove that sharding cures the host fault. No Windows setting,
 application code, selection, fixture, assertion or timeout is changed by this option. Full gate evidence is still required.
 
+## Approved complete Linux CI trial for 1.5.1
+
+Avi explicitly approved this release candidate's complete Linux trial as the gate
+of record on 2026-11-02 after repeated Windows asset-request failures. This is a
+scoped alternative for this trial, not permission to treat ordinary CI as complete.
+The ordinary push/PR/default-manual path still reports development as omitted.
+
+Select the typed manual `full_development_gate=true` input on `checks.yml` for the
+actual reviewed commit/ref. The opt-in explicitly unsets `CLOUDIATOR_CI`, sets the
+process-only unit worker limit to one, and runs all twelve existing controller
+steps with eight sequential browser shards per mode. The merged full-gate config
+keeps the root browser/device/rendering/selection settings and the native profile's
+90-second outer test timeout; individual assertions, waits and CPU budgets remain.
+No new local package download is authorized. Existing pinned remote setup remains.
+
+Accept only one actual completed exact-commit run: all twelve stages passed,
+`notRun` empty, both complete disjoint browser inventory unions, valid raw/identity
+reports and expected CSP controls, unchanged Edge guard and retained run/artifact
+evidence. A timeout, cancellation or failure stays incomplete/failed; never splice
+earlier samples. The unchanged 120-minute runner bound can still end a slow trial.
+Avoid another push to that ref while the full trial is active: the workflow's
+existing concurrency policy cancels an older run on the same ref. Production
+build/deployment/live checks and following-boundary health remain separate.
+
 ## Parallel work
 
 Separate git worktrees have separate `.next` directories. They may run gates at the same time as long as each uses its own Playwright port and its own static server port.

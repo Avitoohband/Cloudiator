@@ -340,6 +340,22 @@ Observed: the live 1.5 deployment retained its feature-branch suite label.
 Tested separately: its canonical/deployment content comparison passed. New-release
 use of this guidance is still pending; this note does not clear 1.5.1's failed gate.
 
+# Audit reader provenance - persistent project override
+
+Avi explicitly approved this supplement on 2026-11-02 for
+`superpowers:verification-before-completion`, **The Gate Function**. Keep the
+vendor skill cache unchanged.
+
+Retain the code for each audit reader beside its output, and hash the saved
+reader before invoking it. Keep source, report and closure readers identifiable
+as separate artifacts; do not infer their provenance from a later copy or log.
+
+Observed: the C2 audit retained stage and report-pair audit outputs without the
+generator/reader source beside them. Tested today: the fresh saved input,
+report-pair and closure readers were hashed before invocation, executed, and
+passed. This improves reproducibility for the audit without changing the gate
+or its result. Approval and evidence: parent `logs/P151-9E41-APPROVED-AUDIT-READER-GUIDANCE-20261102.md`.
+
 # Browser helper preflight - persistent project override
 
 Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,

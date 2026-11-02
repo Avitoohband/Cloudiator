@@ -121,29 +121,38 @@ This is an optional mitigation for observed `net::ERR_NO_BUFFER_SPACE` asset fai
 not establish system-wide port exhaustion, identify a leak or prove that sharding cures the host fault. No Windows setting,
 application code, selection, fixture, assertion or timeout is changed by this option. Full gate evidence is still required.
 
-## Approved complete Linux CI trial for 1.5.1
+## 1.5.1 gate choice — native Windows supersedes Linux
 
-Avi explicitly approved this release candidate's complete Linux trial as the gate
-of record on 2026-11-02 after repeated Windows asset-request failures. This is a
-scoped alternative for this trial, not permission to treat ordinary CI as complete.
-The ordinary push/PR/default-manual path still reports development as omitted.
+The earlier Linux CI option is retained as failed history. Avi later chose native
+Chrome with 32 sequential shards per browser mode and approved the test-only
+`TcpPortRandomizationWin` workaround, preserving the original 17 disabled Chrome
+features. No OS setting, SDK, package, test selection, assertion, timeout, retry,
+per-test wait or CPU budget changed. Preserve all of those limits for any future
+run; a process-only unit worker limit of one remains in force.
 
-Select the typed manual `full_development_gate=true` input on `checks.yml` for the
-actual reviewed commit/ref. The opt-in explicitly unsets `CLOUDIATOR_CI`, sets the
-process-only unit worker limit to one, and runs all twelve existing controller
-steps with eight sequential browser shards per mode. The merged full-gate config
-keeps the root browser/device/rendering/selection settings and the native profile's
-90-second outer test timeout; individual assertions, waits and CPU budgets remain.
-No new local package download is authorized. Existing pinned remote setup remains.
+The earlier Linux trial is not cleared or waived: it reached its 120-minute
+runner limit with only 2 of 8 development shards and 20 failed/timed-out cases.
+That outcome remains failed history, not a product pass or a fixed Linux issue.
+The subsequent fresh native 9e41 gate passed all 12 stages on 2026-11-02
+18:17:13.665–19:11:03.740 UTC; see the [current verification hold](../implementation/PATCH-1.5.1-VERIFICATION-HOLD-2026-11-02.md)
+for the complete accepted evidence and separate release follow-up. This records
+the executed choice; it creates no new approval gate or Linux waiver.
 
-Accept only one actual completed exact-commit run: all twelve stages passed,
-`notRun` empty, both complete disjoint browser inventory unions, valid raw/identity
-reports and expected CSP controls, unchanged Edge guard and retained run/artifact
-evidence. A timeout, cancellation or failure stays incomplete/failed; never splice
-earlier samples. The unchanged 120-minute runner bound can still end a slow trial.
-Avoid another push to that ref while the full trial is active: the workflow's
-existing concurrency policy cancels an older run on the same ref. Production
-build/deployment/live checks and following-boundary health remain separate.
+The reviewed Linux trial configuration is preserved for the record: typed manual
+`full_development_gate=true` on `checks.yml`, process-only unit worker limit one,
+all12 controller steps and eight sequential shards per browser mode. Its merged
+config retained the root browser/device/rendering/selection settings and the
+native profile's90-second outer test timeout. Individual assertions, waits and
+CPU budgets remained unchanged; the runner bound was120 minutes. These settings
+describe the unsuccessful historical trial, not the governing choice now.
+
+The ordinary push/PR/default-manual CI path still explicitly omits development.
+Such CI is not complete local-gate evidence. Any future full run must be one
+actual completed exact-candidate run with all twelve stages, `notRun` empty,
+complete disjoint browser inventory unions, valid raw/identity reports, expected
+CSP controls, an unchanged Edge guard and retained artifacts. Never splice runs.
+Production build/deployment/live checks and following-boundary health remain
+separate obligations.
 
 ## Parallel work
 

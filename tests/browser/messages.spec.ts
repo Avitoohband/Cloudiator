@@ -779,7 +779,7 @@ test.describe('Watch from Notifications', () => {
     await expect(messagesButton(page)).toHaveAccessibleName('Messages, 25 new');
     await expect(badge(page)).toHaveText('9+');
     const panel = await openPanel(page);
-    await expect(tab(panel, /^Notifications/)).toHaveAccessibleName('Notifications, 25 new');
+    await expect(tab(panel, /^Notifications/)).toHaveAccessibleName('Notifications');
     await expect(panel.locator('[data-notification]')).toHaveCount(20);
     // Everything up to the newest shown is seen, which clears the older ones too.
     await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);

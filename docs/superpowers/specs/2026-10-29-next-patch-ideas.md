@@ -43,6 +43,9 @@ More ideas from Avi, 2026-10-29 (collected, not yet designed):
 
 10. **A rotating schedule.** "an option to form a dynamic schedule. Like 3 days different schedule routine": a routine of
     several different days (for example 3) that repeats, instead of one day's plan.
+    Avi reiterated on 2026-11-02: edit a rotation several days ahead for strategy, including when to Rest.
+    Extend this existing idea rather than create a second scheduling system. The planning horizon, whether the days are
+    game days or real-world days, and any level-based unlock still need design.
 11. **Undo a purchase.** "an undo button for buying things": take back a purchase just made (shops; the market needs care,
     since another player was paid).
 12. **How many I already have.** "if I have an item that is showing in the market or shops, show how much I currently have
@@ -167,3 +170,31 @@ Avi, 2026-11-01, added a standalone social feature after the economy patch:
     device, so phone and desktop can differ. Handle [browser autoplay restrictions](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay#autoplay_availability)
     when starting sound. Music/SFX assets, default levels, sound coverage and the concrete interface need their design
     pass; no release number or asset generation/download is assigned or authorized by this planning entry.
+
+More from Avi, 2026-11-02 — future-patch options collected, not implementation approval:
+
+48. **Weapon upgrades using salvage and special materials.** Upgrade weapons using salvage and materials such as copper,
+    iron and gold. Coordinate with the planned 1.6 salvage system and future gear work (19-21, 37, 45). Material sources,
+    recipes, costs, upgrade limits and trading rules need design. Clarify how gold as a crafting material relates to the
+    existing currency named gold; no separate resource or conversion is decided by this entry.
+49. **A meaningful advantage for two-handed weapons.** Two-handed weapons should be stronger or offer another clear edge
+    over one-handed weapons. Evaluate complete loadouts, including the off-hand opportunity cost, when balancing this.
+    The advantage and exact numbers remain to be designed with the weapon expansion (19-21).
+50. **Critical-hit and dodge details.** Show understandable critical-hit chance, critical damage and dodge probability
+    details. Link this to the guide/stat explanations (34) and gear previews (45); use the actual active combat rules and
+    explain any dependence on the opponent. The presentation and formulas are not changed or approved by this note.
+51. **Elemental damage and elemental defence for PvE and dungeons.** Add elemental offensive and defensive mechanics to
+    future PvE/dungeon progression (15, 25 and the party-dungeon design). Elements, sources and interactions need design;
+    this request does not approve an Arena/PvP combat change or new spellcasting classes.
+52. **Maximum character level: 20.** Avi chose a firm maximum level of 20 on 2026-11-02. The level at which advanced
+    features unlock remains open, including the relation to elemental PvE and/or multi-day planning (10, 51). This is a
+    future progression-design decision, not an immediate change to active rules.
+53. **100 base attribute points total.** Avi chose a total cap of 100 base points across Strength, Agility, Vitality,
+    Endurance and Precision; gear and class bonuses are added separately. Reconcile the complete base-point budget and
+    existing Training cap formula with the level-20 maximum during progression design. Handling unspent points and any
+    existing character above the proposed limits also needs design; do not silently reset or clamp existing characters.
+
+These additions are future-patch planning requirements, not an expansion of Patch 1.6's approved economy scope or an
+implementation/release approval. The level-20 and 100-base-point decisions above are confirmed; material/upgrade rules,
+combat balance, elements, unlock levels and multi-day scheduling details still need their design pass. No patch numbers
+are assigned here. Preserve retained rules and define a transition before changing live progression.

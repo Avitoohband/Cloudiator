@@ -354,3 +354,17 @@ Observed: the copied NPC config referenced a missing static-server helper.
 Tested correction: the verified helper was restored, both-mode preflight and
 the supplemental static checks passed, and the next full run's static phase
 passed. That full run still failed on a separate Windows transport error.
+# Fractional browser geometry - persistent project override
+
+Avi approved this supplement on 2026-11-02 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+For browser geometry checks, document a justified fractional-CSS-pixel tolerance
+and DPR; pair accepted residuals with genuine-clipping, disabled and wrong-hit
+regressions. Retain hit tests and manual visual review. This scopes geometry
+only; performance and CPU budgets keep their existing meaning.
+
+Observed: three mockup checks rejected a 0.09375px viewport residual although
+hit/click checks passed. Separately tested: the isolated 0.5px/DPR1 correction
+passed all 14 controlled boundary cases; full browser rerun remains pending.
+See the [gate guide](docs/operations/verification-gates.md#fractional-browser-geometry).

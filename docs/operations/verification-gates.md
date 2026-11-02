@@ -154,3 +154,17 @@ Separate git worktrees have separate `.next` directories. They may run gates at 
 - **Observed 2026-10-14 (Task 15 integration):** a build during a browser run removed `.next/browser-test/dev` and caused 12 infrastructure failures.
 - **Tested fix:** the serialized 22-case rerun passed, and the root build-then-browser production gate passed 8 cases.
 - **How to report:** a failure caused by overlapping output is an infrastructure fault, not product evidence. Rerun the gate in order before reporting results.
+## Fractional browser geometry
+
+Avi approved this scoped Verification Before Completion / The Gate Function
+supplement on 2026-11-02. DOM rectangles can contain fractional CSS pixels.
+State the justified geometry tolerance and DPR, test accepted residuals and
+rejected real clipping, and retain enabled/center-hit checks plus manual
+pixel/text inspection. Keep performance and CPU budgets unchanged.
+
+Observed in the 1.6 mockup QA: three Save checks reported bottom 1000.09375
+against a 1000px viewport; enabled, hit and later click checks passed. The
+separate isolated correction permits 0.5 CSS pixels at pinned DPR1 and passed
+14 boundary/disabled/wrong-hit cases. That is predicate evidence; the full
+browser rerun and visual approval remain pending. A passing tolerance probe
+does not establish full layout fit or product approval.

@@ -205,6 +205,7 @@ More from Avi, 2026-11-02 — future-patch options collected, not implementation
 55. **Clickable NPC detail cards.** Clicking or tapping a camp NPC opens its card and reveals that NPC's details.
     Design the content, interactions and responsive presentation with the existing camp/NPC work (27, 33, 54); this
     request does not specify quests, a shop action or other gameplay rewards for those cards.
+
 These additions are future-patch planning requirements, not an expansion of Patch 1.6's approved economy scope or an
 implementation/release approval. The level-20 and 100-base-point decisions above are confirmed; material/upgrade rules,
 combat balance, elements, unlock levels and multi-day scheduling details still need their design pass. No patch numbers

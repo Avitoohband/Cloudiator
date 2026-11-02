@@ -1,16 +1,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActivityId, GladiatorId, LeagueId } from '@contracts/commands';
-import type { ActivitySummary, BattleLog, CreditedRewards, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type { ActivityId, Attributes, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
+import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  GameMessage, GameNotification, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { applyXp } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
-import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../tournament-id';
-import { tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
+import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID, tournamentRound } from '../tournament-id';
+import { replayKept, tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
+import { patchSortKey, type PatchEntry } from '../patch';
 
 export class GatewayReadError extends Error {
   constructor(public readonly code: 'unavailable' | 'not-found' | 'unauthenticated') { super(code); }
@@ -25,11 +26,22 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   if (!row.state || typeof row.state !== 'object') throw new GatewayReadError('unavailable');
   return row.state;
 }
-export async function readRevision(client: SupabaseClient): Promise<RevisionState> {
-  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null}>(
-    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index').single());
+/**
+ * The revision read as this client reads it: the shared contract's `RevisionState` and the server's newest patch (`latest_patch`, M26;
+ * Patch A spec, "Patch numbers and the changelog"), null unless it is a well-formed patch number. A client-side type: the shared
+ * contracts under supabase/functions/_shared do not change, so the Edge functions need no deploy.
+ */
+export type RevisionRead = RevisionState & { latestPatch: string | null };
+export async function readRevision(client: SupabaseClient): Promise<RevisionRead> {
+  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null;latest_patch:unknown}>(
+    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index,latest_patch').single());
   return { revision: row.revision, serverNowMs: Number(row.server_now_ms), slotIndex: Number(row.slot_index),
-    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index) };
+    publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index),
+    latestPatch: typeof row.latest_patch === 'string' && patchSortKey(row.latest_patch) !== null ? row.latest_patch : null };
+}
+/** A revision read as the world snapshot carries it: without the newest patch, which the sync keeps on its own. */
+export function revisionState({ latestPatch: _latest, ...state }: RevisionRead): RevisionState {
+  return state;
 }
 export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> {
   // A concurrent commit between pages must not be labeled with an earlier revision.
@@ -44,7 +56,7 @@ export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> 
       cursor = rows.at(-1)!.gladiator_id;
     }
     const after = await readRevision(client);
-    if (before.revision === after.revision) return { ...after, actors };
+    if (before.revision === after.revision) return { ...revisionState(after), actors };
   }
   throw new GatewayReadError('unavailable');
 }
@@ -61,11 +73,76 @@ function prestigeAward(entry: unknown): PrestigeAward {
   return { seasonId: String(seasonIndex), league: league as LeagueId, place, badge: badge as PrestigeAward['badge'], title };
 }
 /** A public profile; its prestige is the character's season awards, oldest season first (Task 21), mapped to `PrestigeAward`s. */
-export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<PublicProfile> {
-  const { prestige, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown } }>(
-    await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
+/** One equipped item as the public profile shows it (Task 11c): the fields a market listing shows, never its id, owner or origin. */
+export type PublicGear = Pick<ItemInstance, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'stats'>;
+/** A gladiator's current build as the public profile shows it (Task 11c): never a queued one. */
+export type PublicBuild = { stance: Stance; allocations: Attributes; equipment: Record<EquipmentSlot, PublicGear | null> };
+/** Bouts against players, summed over every season and league as the standings count them. */
+export type ArenaRecord = { wins: number; losses: number };
+/**
+ * The profile read as this client reads it (Task 11c, M26): the shared contract's `PublicProfile` and the current build, the creation
+ * time and the Arena record over all seasons. A client-side type, as `RevisionRead`: the shared contracts do not change. Each is null
+ * when it is missing (a database before M26) or malformed.
+ */
+export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null };
+const STANCES: readonly string[] = ['offensive', 'balanced', 'defensive'];
+const SLOTS: readonly EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
+const ATTRIBUTE_NAMES = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
+const RARITIES: readonly string[] = ['common', 'uncommon', 'rare'];
+const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+/** Five whole numbers from 0, or null. */
+function attributesOf(value: unknown): Attributes | null {
+  if (!record(value)) return null;
+  const out = {} as Attributes;
+  for (const key of ATTRIBUTE_NAMES) {
+    const points = value[key];
+    if (!count(points)) return null;
+    out[key] = points;
+  }
+  return out;
+}
+/** An item's stats: finite non-negative numbers and an attribute bonus each (which may be fractional), or null. */
+function statsOf(value: unknown): PublicGear['stats'] | null {
+  if (!record(value) || !finite(value.damage) || !finite(value.armor) || !finite(value.weight) || !finite(value.intervalMs) || !record(value.attributes)) return null;
+  const bonus = value.attributes, attributes = {} as Attributes;
+  for (const key of ATTRIBUTE_NAMES) {
+    if (!finite(bonus[key])) return null;
+    attributes[key] = bonus[key] as number;
+  }
+  return { damage: value.damage, armor: value.armor, weight: value.weight, intervalMs: value.intervalMs, attributes };
+}
+/** One published item, or null for a malformed one. */
+function gearOf(value: unknown): PublicGear | null {
+  if (!record(value) || typeof value.catalogId !== 'string' || typeof value.catalogVersion !== 'string' || (value.tier !== 1 && value.tier !== 5 && value.tier !== 10)
+    || typeof value.rarity !== 'string' || !RARITIES.includes(value.rarity)) return null;
+  const stats = statsOf(value.stats);
+  return stats ? { catalogId: value.catalogId, catalogVersion: value.catalogVersion, tier: value.tier, rarity: value.rarity as ItemRarity, stats } : null;
+}
+/** The published build, or null when any part of it is malformed (an unknown stance, a bad point, a missing or bad slot). */
+export function publicBuildOf(value: unknown): PublicBuild | null {
+  if (!record(value) || typeof value.stance !== 'string' || !STANCES.includes(value.stance) || !record(value.equipment)) return null;
+  const allocations = attributesOf(value.allocations);
+  if (!allocations) return null;
+  const equipment = {} as Record<EquipmentSlot, PublicGear | null>;
+  for (const slot of SLOTS) {
+    if (!Object.hasOwn(value.equipment, slot)) return null;
+    const item = value.equipment[slot];
+    if (item === null) { equipment[slot] = null; continue; }
+    const gear = gearOf(item);
+    if (!gear) return null;
+    equipment[slot] = gear;
+  }
+  return { stance: value.stance as Stance, allocations, equipment };
+}
+export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<ProfileRead> {
+  const { prestige, build, joinedAtMs, arenaRecord, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
+    joinedAtMs?: unknown; arenaRecord?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
   if (!Array.isArray(prestige)) throw new GatewayReadError('unavailable');
-  return { ...profile, prestige: prestige.map(prestigeAward) };
+  const wins = record(arenaRecord) ? arenaRecord.wins : undefined, losses = record(arenaRecord) ? arenaRecord.losses : undefined;
+  return { ...profile, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
+    arenaRecord: count(wins) && count(losses) ? { wins, losses } : null };
 }
 /**
  * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`
@@ -231,6 +308,57 @@ export async function readMessages(client: SupabaseClient): Promise<GameMessage[
   }
   return messages;
 }
+/** A message as the panel shows it: a patch note carries its patch number, an admin note or a note without a patch row null. */
+export type ShownMessage = GameMessage & { patch: string | null };
+const PATCHES_PAGE = 20;
+type PatchRow = { number: unknown; sort_key: unknown; title: unknown; released_at_ms: unknown; message_id: unknown; patch_features: unknown };
+/** A whole number from the Data API: a bigint may arrive as text (a driver option). Null for anything else. */
+const patchWholeOf = (value: unknown): number | null => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+};
+/** One patch row, or null when any part of it is malformed (the list leaves it out). Its features in position order. */
+function patchEntry(row: PatchRow): PatchEntry | null {
+  const sortKey = patchWholeOf(row.sort_key), releasedAtMs = patchWholeOf(row.released_at_ms);
+  const messageId = row.message_id === null ? null : patchWholeOf(row.message_id);
+  if (typeof row.number !== 'string' || sortKey === null || sortKey !== patchSortKey(row.number) || typeof row.title !== 'string'
+    || releasedAtMs === null || (row.message_id !== null && messageId === null) || !Array.isArray(row.patch_features)) return null;
+  const features: { position: number; text: string }[] = [];
+  for (const feature of row.patch_features as unknown[]) {
+    const { position, text } = (typeof feature === 'object' && feature !== null ? feature : {}) as Record<string, unknown>;
+    const at = patchWholeOf(position);
+    if (at === null || typeof text !== 'string') return null;
+    features.push({ position: at, text });
+  }
+  return { number: row.number, sortKey, title: row.title, releasedAtMs, messageId, features: features.sort((a, b) => a.position - b.position).map(f => f.text) };
+}
+/**
+ * The server's patches with their features (public `patches`, M26), 20 at a time, newest first (`sort_key` descending), older than
+ * `beforeSortKey` when given (the next page). `more` says a next page exists (the read asks for 21 rows and keeps 20). A malformed row
+ * is left out rather than failing the list.
+ */
+export async function readPatches(client: SupabaseClient, beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }> {
+  let query = client.from('patches').select('number,sort_key,title,released_at_ms,message_id,patch_features(position,text)')
+    .order('sort_key', { ascending: false }).limit(PATCHES_PAGE + 1);
+  if (beforeSortKey !== undefined) query = query.lt('sort_key', beforeSortKey);
+  const rows = checked(await query) as unknown as PatchRow[];
+  const items = rows.slice(0, PATCHES_PAGE).map(patchEntry).filter((entry): entry is PatchEntry => entry !== null);
+  return { items, more: rows.length > PATCHES_PAGE };
+}
+/**
+ * The patch numbers of the given patch notes, by message id, in one small read (`message_id=in.(…)`); none is asked for an empty list.
+ * A note without a patch row is absent from the map, as is a malformed row.
+ */
+export async function readPatchNumbers(client: SupabaseClient, messageIds: readonly number[]): Promise<Map<number, string>> {
+  const numbers = new Map<number, string>();
+  if (messageIds.length === 0) return numbers;
+  const rows = checked(await client.from('patches').select('number,message_id').in('message_id', [...messageIds])) as unknown as { number: unknown; message_id: unknown }[];
+  for (const row of rows) {
+    const id = patchWholeOf(row.message_id);
+    if (id !== null && typeof row.number === 'string' && patchSortKey(row.number) !== null) numbers.set(id, row.number);
+  }
+  return numbers;
+}
 const NOTIFICATIONS_PAGE = 20;
 /** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */
 export type NotificationsRead = { items: GameNotification[]; newestSettledMs: number | null };
@@ -320,6 +448,186 @@ export async function readNotifications(client: SupabaseClient): Promise<Notific
   });
   return { items: list, newestSettledMs };
 }
+// ------------------------------------------------------------------ My bouts
+
+export type BoutFilter = 'all' | 'won' | 'lost';
+/** How many bouts one page of My bouts holds. */
+export const BOUTS_PAGE = 20;
+/** One of the owner's own settled Arena or tournament bouts, as the My bouts list shows it. */
+export type MyBout = {
+  activityId: string; kind: 'arena' | 'tournament'; slotIndex: number;
+  /** When it was fought: an Arena slot's start + RULES_V1.arena.revealAfterMs, a tournament's slot start. */
+  foughtAtMs: number; settledAtMs: number;
+  result: 'victory' | 'defeat' | 'completed'; renown: number;
+  /** The owner's rating change; null when the summary has none (an NPC bout). */
+  ratingDelta: number | null;
+  replayExpiry: ActivitySummary['replayExpiry'];
+  /** The run's last bout's opponent, read only while the replay is kept at the read's server time. */
+  opponent: { name: string; npc: boolean } | null;
+  tieBreak: boolean;
+  /** A tournament's last bout's round ("Final", "Semifinal", "Quarterfinal", "Round 1"), else null. */
+  round: string | null;
+};
+export type BoutsPage = { rows: MyBout[]; nextCursor: string | null };
+/** The last bout of a run, as far as My bouts needs it: the server's stage label, the log's tie-break reason and its two participants. */
+export type LastBout = { label: string; tieBreakReason: string | null; participants: { id: string; gladiatorId: string | null; name: string }[] };
+
+/** A whole, non-negative number from a bigint column: a JSON number, or the text a driver may send it as (anything else is null). */
+const wholeOf = (value: unknown): number | null => {
+  const number = typeof value === 'string' && /^\d{1,15}$/.test(value) ? Number(value) : value;
+  return whole(number) ? number : null;
+};
+/** A slot index as the cursor writes it: canonical decimal digits, no sign, padding or space, and a safe integer. */
+const SLOT_INDEX = /^(0|[1-9]\d{0,14})$/;
+/**
+ * The My bouts cursor, the slot index of the last bout fetched: none when absent or null, `unavailable` for anything else that is
+ * not a whole slot index (an empty string included, which no page ever issues), before any query is built from it. The fixture
+ * gateway applies the same rule.
+ */
+export function parseBoutsCursor(cursor?: string | null): number | null {
+  if (cursor === undefined || cursor === null) return null;
+  if (typeof cursor !== 'string' || !SLOT_INDEX.test(cursor)) throw new GatewayReadError('unavailable');
+  return Number(cursor);
+}
+/** The My bouts read's options, checked before any query is built: the cursor, and the filter as the result word it asks the server for (null for All). */
+export function parseBoutsRead(filter: BoutFilter, cursor?: string | null): { before: number | null; result: 'victory' | 'defeat' | null } {
+  const before = parseBoutsCursor(cursor);
+  if (filter !== 'all' && filter !== 'won' && filter !== 'lost') throw new GatewayReadError('unavailable');
+  return { before, result: filter === 'won' ? 'victory' : filter === 'lost' ? 'defeat' : null };
+}
+/**
+ * The cursor after a page: the slot index of the last row FETCHED when a full page was (rows left out of the list included, so a
+ * left-out row never makes the next page repeat), none for a short page. A full page whose last row has no readable slot gives
+ * nothing to continue from: `unavailable`, never a list silently cut short.
+ */
+export function nextBoutsCursor(fetched: number, lastSlotIndex: unknown): string | null {
+  if (fetched < BOUTS_PAGE) return null;
+  const slot = wholeOf(lastSlotIndex);
+  if (slot === null) throw new GatewayReadError('unavailable');
+  return String(slot);
+}
+
+type BoutInput = { activityId: unknown; gladiatorId: string; slotIndex: unknown; startsAtMs: unknown; kind: unknown; summary: unknown; lastBout: LastBout | null };
+/** A bout read and checked, before its opponent: what a row of `activities` says (the replay's state decides whether the names are read). */
+type BoutParts = Omit<MyBout, 'opponent' | 'tieBreak' | 'round'> & { gladiatorId: string };
+const ACTIVITY_ID = GLADIATOR_ID;
+/**
+ * A row of the owner's own `activities` as a bout, or null for one it cannot show faithfully: an id that is not a uuid, a slot or
+ * start that is not a whole number, a kind that is not Arena or tournament or that its summary disagrees with, a result word, a
+ * renown or a settlement time it does not understand, a rating change that is not a whole number, or a replay state it does not know.
+ */
+function boutParts(input: Omit<BoutInput, 'lastBout'>): BoutParts | null {
+  const { activityId, gladiatorId, kind } = input, slotIndex = wholeOf(input.slotIndex), startsAtMs = wholeOf(input.startsAtMs);
+  if (typeof activityId !== 'string' || !ACTIVITY_ID.test(activityId) || typeof gladiatorId !== 'string' || (kind !== 'arena' && kind !== 'tournament')
+    || slotIndex === null || startsAtMs === null || typeof input.summary !== 'object' || input.summary === null || Array.isArray(input.summary)) return null;
+  const summary = input.summary as Partial<ActivitySummary>, rewards = summary.rewards as Partial<CreditedRewards> | null | undefined;
+  const expiry = summary.replayExpiry as { state?: unknown; expiresAtMs?: unknown } | null | undefined, delta: unknown = summary.ratingDelta;
+  const replayExpiry: MyBout['replayExpiry'] | null = expiry?.state === 'expired' ? { state: 'expired' }
+    : expiry?.state === 'available' && whole(expiry.expiresAtMs) ? { state: 'available', expiresAtMs: expiry.expiresAtMs } : null;
+  if (summary.resolvedKind !== kind || (summary.result !== 'victory' && summary.result !== 'defeat' && summary.result !== 'completed') || typeof rewards !== 'object' || rewards === null
+    || !whole(rewards.renown) || !whole(summary.settledAtMs) || (delta !== undefined && delta !== null && !Number.isSafeInteger(delta)) || replayExpiry === null) return null;
+  return { activityId, gladiatorId, kind, slotIndex, foughtAtMs: kind === 'arena' ? startsAtMs + RULES_V1.arena.revealAfterMs : startsAtMs, settledAtMs: summary.settledAtMs,
+    result: summary.result, renown: rewards.renown, ratingDelta: typeof delta === 'number' ? delta : null, replayExpiry };
+}
+const TIE_BREAKS: readonly unknown[] = ['simultaneous-defeat', 'equal-health-fraction'];
+/**
+ * The bout with what its run's last bout says: the opponent (the participant whose gladiator id is not the row's; an NPC fallback
+ * has none), whether a seeded tie-break decided it, and a tournament's round. Nothing of it for a replay that is no longer kept
+ * (`expired`), and nothing of it unless the row's own gladiator is exactly one of the two participants: a bout that is not the owner's
+ * never lends a row its opponent, its tie-break or its round (Arena replays Task 2 review, carried to Task 4).
+ */
+function withLastBout(parts: BoutParts, lastBout: LastBout | null): MyBout {
+  const { gladiatorId, ...bout } = parts;
+  const kept = lastBout !== null && bout.replayExpiry.state === 'available' ? lastBout : null;
+  const mine = kept?.participants.filter(p => p.gladiatorId === gladiatorId) ?? [], other = kept?.participants.filter(p => p.gladiatorId !== gladiatorId) ?? [];
+  const log = kept !== null && kept.participants.length === 2 && mine.length === 1 && other.length === 1 ? kept : null;
+  return { ...bout, tieBreak: log !== null && TIE_BREAKS.includes(log.tieBreakReason), round: log !== null && bout.kind === 'tournament' ? tournamentRound(log.label) : null,
+    opponent: log !== null ? { name: other[0].name, npc: other[0].gladiatorId === null } : null };
+}
+/**
+ * One of the owner's bouts as My bouts shows it, or null for a row it cannot show faithfully. `lastBout` is the run's last bout, read
+ * only while the replay is kept; the fixture gateway builds its rows through this too, so the preview and the live read agree.
+ */
+export function boutOf(input: BoutInput): MyBout | null {
+  const parts = boutParts(input);
+  return parts && withLastBout(parts, input.lastBout);
+}
+
+const NAMES_PAGE = 50;
+/** The stage fields the names read takes: its label, the log's tie-break reason and each participant's id, gladiator id and name; never the stage or the log as a whole. */
+const NAMES_SELECT = 'activity_id,ordinal,label:stage->>label,tieBreakReason:stage->battleLog->>tieBreakReason,'
+  + 'p0id:stage->battleLog->participants->0->>id,p0gladiator:stage->battleLog->participants->0->>gladiatorId,p0name:stage->battleLog->participants->0->>name,'
+  + 'p1id:stage->battleLog->participants->1->>id,p1gladiator:stage->battleLog->participants->1->>gladiatorId,p1name:stage->battleLog->participants->1->>name';
+type NameRow = Record<string, unknown>;
+/** A names row as the last bout it is, or null when a field is missing or not what it should be (a participant needs an id and a name). */
+function lastBoutOf(row: NameRow): LastBout | null {
+  const participant = (i: 0 | 1) => {
+    const id = row[`p${i}id`], gladiatorId = row[`p${i}gladiator`], name = row[`p${i}name`];
+    return typeof id === 'string' && typeof name === 'string' && name !== '' && (gladiatorId === null || typeof gladiatorId === 'string') ? { id, gladiatorId, name } : null;
+  };
+  const first = participant(0), second = participant(1), { label, tieBreakReason } = row;
+  return typeof label === 'string' && (tieBreakReason === null || typeof tieBreakReason === 'string') && first && second ? { label, tieBreakReason, participants: [first, second] } : null;
+}
+/**
+ * The last bout of each of `ids` (activity ids) that has one revealed by `nowMs`, from the public `visible_events` view in the
+ * pages the Data API allows: bout stages of those activities in activity and ordinal order, each page continuing after the last row
+ * of the one before (`or(activity_id.gt.X,and(activity_id.eq.X,ordinal.gt.N))`) until a short page. The bout with the highest
+ * ordinal of an activity is its last (a run's bouts are numbered by round). A read that does not move forward is `unavailable`.
+ */
+async function readLastBouts(client: SupabaseClient, ids: readonly string[], nowMs: number): Promise<Map<string, LastBout>> {
+  const wanted = new Set(ids), latest = new Map<string, { ordinal: number; row: NameRow }>();
+  let after: { id: string; ordinal: number } | null = null;
+  for (;;) {
+    let query = client.from('visible_events').select(NAMES_SELECT).in('activity_id', [...wanted]).eq('stage->>kind', 'bout').lte('reveal_at_ms', nowMs)
+      .order('activity_id').order('ordinal').limit(NAMES_PAGE);
+    if (after) query = query.or(`activity_id.gt.${after.id},and(activity_id.eq.${after.id},ordinal.gt.${after.ordinal})`);
+    const page = (checked(await query) as unknown as NameRow[]).slice(0, NAMES_PAGE);
+    for (const row of page) {
+      const id = row.activity_id, ordinal = wholeOf(row.ordinal);
+      if (typeof id === 'string' && ordinal !== null && wanted.has(id) && (latest.get(id)?.ordinal ?? -1) < ordinal) latest.set(id, { ordinal, row });
+    }
+    if (page.length < NAMES_PAGE) break;
+    const tail = page[page.length - 1], id = tail.activity_id, ordinal = wholeOf(tail.ordinal);
+    if (typeof id !== 'string' || !ACTIVITY_ID.test(id) || ordinal === null || (after !== null && !(id > after.id || (id === after.id && ordinal > after.ordinal)))) {
+      throw new GatewayReadError('unavailable');
+    }
+    after = { id, ordinal };
+  }
+  const lastBouts = new Map<string, LastBout>();
+  for (const [id, { row }] of latest) {
+    const bout = lastBoutOf(row);
+    if (bout) lastBouts.set(id, bout);
+  }
+  return lastBouts;
+}
+type BoutRow = { id: unknown; gladiator_id: unknown; slot_index: unknown; starts_at_ms: unknown; resolved_kind: unknown; settled_at_ms: unknown; summary: unknown };
+/**
+ * One page (20) of the owner's own settled Arena and tournament bouts, newest first by slot, from the owner-only `activities`
+ * table (row security shows a signed-in reader its own rows; a visitor has no access): completed, with a summary, settled at or
+ * before the server's now (the timeline's own reveal rule). Won and Lost are asked of the server (`summary->>result`), and the
+ * cursor is the slot index of the last row fetched (`slot_index <`). Only those columns cross: never a seed, snapshot or receipt.
+ * A row this client cannot show is left out rather than failing the list (the cursor still comes from it).
+ *
+ * The opponents come from ONE more read of the public `visible_events` view, only for the rows whose replay is kept at the server's
+ * now (an expired one never names an opponent): see `readLastBouts`. Either request failing fails the page, so a list is never half
+ * named. A malformed cursor or filter is refused before any request.
+ */
+export async function readBouts(client: SupabaseClient, filter: BoutFilter, cursor?: string): Promise<BoutsPage> {
+  const options = parseBoutsRead(filter, cursor);
+  const clock = await readRevision(client);
+  let query = client.from('activities').select('id,gladiator_id,slot_index,starts_at_ms,resolved_kind,settled_at_ms,summary')
+    .eq('status', 'completed').in('resolved_kind', ['arena', 'tournament']).not('summary', 'is', null).lte('settled_at_ms', clock.serverNowMs);
+  if (options.result) query = query.eq('summary->>result', options.result);
+  if (options.before !== null) query = query.lt('slot_index', options.before);
+  const fetched = (checked(await query.order('slot_index', { ascending: false }).limit(BOUTS_PAGE)) as unknown as BoutRow[]).slice(0, BOUTS_PAGE);
+  const parts = fetched.map(row => (typeof row.gladiator_id === 'string'
+    ? boutParts({ activityId: row.id, gladiatorId: row.gladiator_id, slotIndex: row.slot_index, startsAtMs: row.starts_at_ms, kind: row.resolved_kind, summary: row.summary }) : null));
+  const kept = [...new Set(parts.flatMap(part => (part && replayKept(part.replayExpiry, clock.serverNowMs) ? [part.activityId] : [])))];
+  const lastBouts = kept.length > 0 ? await readLastBouts(client, kept, clock.serverNowMs) : new Map<string, LastBout>();
+  return { rows: parts.flatMap(part => (part ? [withLastBout(part, lastBouts.get(part.activityId) ?? null)] : [])),
+    nextCursor: nextBoutsCursor(fetched.length, fetched.at(-1)?.slot_index) };
+}
+
 const STANDINGS_PAGE = 50;
 const SEASONS_PAGE = 50;
 /** A season id is a canonical non-negative integer string (at most 15 digits, so a safe integer): no sign, padding, space or syntax. */

@@ -286,7 +286,9 @@ describe('protected Data API adapters', () => {
     const profile = await readProfile(seasonApi({ public_profile_reads: { profile: { actor, combatStrength: 410, rating: 1012, prestige } } }, calls), 'g1');
     expect(profile).toEqual({ actor, combatStrength: 410, rating: 1012, prestige: [
       { seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null },
-      { seasonId: '12', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] });
+      { seasonId: '12', league: 'silver', place: 1, badge: 'gold', title: 'champion' }],
+      // A profile from before M26: the card's three keys (Task 11c) read as null.
+      build: null, joinedAtMs: null, arenaRecord: null });
     expect(calls[0]).toContain('/public_profile_reads?select=profile&gladiator_id=eq.g1');
     // No award is an empty list.
     expect((await readProfile(seasonApi({ public_profile_reads: { profile: { actor, combatStrength: null, rating: 1000, prestige: [] } } }, []), 'g1')).prestige).toEqual([]);

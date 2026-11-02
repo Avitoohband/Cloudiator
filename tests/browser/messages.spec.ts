@@ -1,13 +1,19 @@
+import { mkdirSync, readFileSync } from 'node:fs';
+import { buildArenaFixtures } from '../fixtures/arena-build';
+import { ARENA_BOUTS, arenaActivityId, type ArenaBoutKey } from '../fixtures/arena-ids';
+import { touchLayout } from './shell-helpers';
+import { quietArrivals } from './shell-helpers';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from './fixtures';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
+import type { BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { ActivitySummary } from '../../supabase/functions/_shared/contracts/events';
 import type { GameMessage, Inbox, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '../../supabase/functions/_shared/domain/appearance';
 import { legacyAppearance, tintFor } from '../../src/game/actors';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
-import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveNotification } from './live-routes';
+import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, testUser, type LiveNotification } from './live-routes';
 import { chipToggle, cornerChip, expectOwnerShown } from './shell-helpers';
 import { watchSyncPoll } from './sync-poll';
 
@@ -180,6 +186,211 @@ async function openLive(page: Page, url = '/game/') {
 
 test.describe('in live mode', () => {
   test.skip(production, 'Live mode uses the development-only intercepted Supabase transport.');
+
+test.describe('Watch from Notifications', () => {
+  test.beforeEach(async ({ context }) => { await quietArrivals(context); });
+  test('offers Watch on kept bouts and Watch the trip, then returns to Notifications', async ({ page }, testInfo) => {
+    const { arena, tournament, trip } = await watchPlayer(page);
+    await openLive(page);
+    const panel = await openPanel(page);
+    await tab(panel, /^Notifications/).click();
+    await expect(panel.locator('[data-notification]')).toHaveCount(5);
+    await expect(panel.getByRole('button', { name: /^Watch/ })).toHaveCount(3);
+    const expired = panel.locator('[data-notification]').filter({ hasText: '+30 renown' });
+    await expect(expired.getByRole('button')).toHaveCount(0);
+    await expect(panel.locator('[data-notification]').filter({ hasText: 'Training finished' }).getByRole('button')).toHaveCount(0);
+    await watchShot(page, 'notifications-' + testInfo.project.name);
+    await panel.getByRole('button', { name: 'Watch: Arena victory', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(scene.getByRole('heading', { name: 'Aster vs Varro', exact: true })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get('activity')).toBe(arena.activityId);
+    await expect(scene.locator('[data-bout-counter]')).toContainText('1');
+    await expect(scene.getByRole('group', { name: 'Replay controls' }).getByRole('button', { name: 'Next bout', exact: true })).toBeVisible();
+    // The queue really contains the owner's other retained bout, rather than an injected single-row queue.
+    await scene.getByRole('group', { name: 'Replay controls' }).getByRole('button', { name: 'Next bout', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('activity')).toBe(tournament.activityId);
+    await page.getByRole('button', { name: 'Back to Notifications', exact: true }).click();
+    await expect(tab(panel, /^Notifications/)).toHaveAttribute('aria-selected', 'true');
+    await expect(tab(panel, /^Notifications/)).toBeFocused();
+    // Each new return request focuses the tab even after the notifications were marked seen.
+    await panel.getByRole('button', { name: 'Watch: Tournament defeat', exact: true }).click();
+    await expect(scene).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(tab(panel, /^Notifications/)).toBeFocused();
+    await panel.getByRole('button', { name: 'Watch the trip: Expedition victory: Woodland Path', exact: true }).click();
+    await expect.poll(() => Object.fromEntries(new URL(page.url()).searchParams)).toMatchObject({ view: 'expedition', activity: trip.activityId, play: 'trip', from: 'notifications' });
+    await expect(page.getByTestId('replay-badge')).toHaveText(await touchLayout(page) ? '▶ REPLAY' : '▶ REPLAY · THE WHOLE TRIP');
+    await page.getByRole('button', { name: 'Back to Notifications', exact: true }).click();
+    await expect(tab(panel, /^Notifications/)).toBeFocused();
+    await panel.getByRole('button', { name: 'Close messages', exact: true }).click();
+    await expect(messagesButton(page)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(tab(panel, /^Messages/)).toHaveAttribute('aria-selected', 'true');
+    await expect(messagesButton(page)).toBeFocused();
+  });
+
+  test('waits for owner and inbox on return before opening and focusing Notifications', async ({ page }) => {
+    const { live, arena } = await watchPlayer(page);
+    const release = live.hold('owner_state');
+    await page.goto('/game/?view=replay&activity=' + arena.activityId + '&from=notifications');
+    await expect.poll(() => live.count('owner_state')).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Back to Notifications', exact: true }).click();
+    await expect(panelOf(page)).toHaveCount(0);
+    release();
+    await expectOwnerShown(page, 'Aster');
+    await expect(tab(panelOf(page), /^Notifications/)).toHaveAttribute('aria-selected', 'true');
+    await expect(tab(panelOf(page), /^Notifications/)).toBeFocused();
+  });
+
+  test('a notification uses the owned All queue and pages before leaving it in one Back', async ({ page }) => {
+    const setup = await watchPlayer(page);
+    const bouts = Array.from({ length: 21 }, (_, n) => {
+      const bout = structuredClone(setup.arena);
+      const id = randomUUID(), shift = -n * 4_800_000;
+      bout.activityId = id;
+      bout.stages.forEach((stage, i) => { stage.id = id + ':' + i; stage.startedAtMs += shift; stage.endsAtMs += shift; stage.revealedAtMs += shift; });
+      bout.summary!.activityId = id; bout.summary!.settledAtMs += shift;
+      if (bout.completion) { bout.completion.activityId = id; bout.completion.settledAtMs += shift; }
+      return bout;
+    });
+    setup.live.setBouts(bouts);
+    setup.server.notifications = [{ summary: bouts[19].summary! }];
+    setup.sync();
+    await openLive(page);
+    const panel = await openPanel(page);
+    await tab(panel, /^Notifications/).click();
+    await expect(panel.locator('[data-notification]')).toHaveCount(20);
+    await panel.locator('[data-notification]').nth(19).getByRole('button', { name: 'Watch: Arena victory', exact: true }).click();
+    const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(scene.locator('[data-bout-counter]')).toHaveText(await touchLayout(page) ? '20 / 20+' : 'Bout 20 of 20+ in My bouts');
+    await scene.getByRole('group', { name: 'Replay controls' }).getByRole('button', { name: 'Next bout', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('activity')).toBe(bouts[20].activityId);
+    await expect(scene.locator('[data-bout-counter]')).toHaveText(await touchLayout(page) ? '21 / 21' : 'Bout 21 of 21 in My bouts');
+    const pages = setup.live.requests.filter(r => r.table === 'activities' && (r.query.get('select') ?? '').includes('starts_at_ms'));
+    expect(pages.map(r => r.query.get('slot_index'))).toEqual([null, 'lt.' + Math.floor((bouts[19].summary!.settledAtMs - 1) / 4_800_000)]);
+    await page.goBack();
+    await expect(scene).toHaveCount(0);
+    await expect(tab(panel, /^Notifications/)).toBeFocused();
+  });
+
+  test('drops a pending Notifications return when the session ends before the inbox arrives', async ({ page, context }) => {
+    const { live, arena } = await watchPlayer(page);
+    const release = live.hold('owner_state');
+    await page.goto('/game/?view=replay&activity=' + arena.activityId + '&from=notifications');
+    await expect.poll(() => live.count('owner_state')).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Back to Notifications', exact: true }).click();
+    await page.evaluate(() => {
+      localStorage.removeItem('sb-127-auth-token');
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_OUT', session: null }); channel.close();
+    });
+    await expect(page.getByRole('button', { name: 'Sign in with Google to join', exact: true }).or(page.getByRole('button', { name: 'Sign in to join', exact: true }))).toBeVisible();
+    await expect(panelOf(page)).toHaveCount(0);
+    release();
+    const other = testUser('watch-brutus@example.invalid');
+    await seedSession(context, other);
+    live.setOwner({ ...structuredClone(ownerFixture), gladiatorId: randomUUID(), name: 'Brutus', inbox: { unread: 1, readIds: [], sinceMs: SINCE, newNotifications: 0, notificationsSeenMs: NOW } });
+    live.setNotifications([]); live.setBouts([]);
+    await page.evaluate(user => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const token = btoa(JSON.stringify({ alg: 'HS256' })) + '.' + btoa(JSON.stringify({ sub: user.id, exp })) + '.test-only';
+      const session = { access_token: token, refresh_token: 'test-only:' + user.id, token_type: 'bearer', expires_at: exp, expires_in: 3600, user };
+      localStorage.setItem('sb-127-auth-token', JSON.stringify(session));
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_IN', session }); channel.close();
+    }, other);
+    await expectOwnerShown(page, 'Brutus');
+    await expect(panelOf(page)).toHaveCount(0);
+    const panel = await openPanel(page);
+    await expect(tab(panel, /^Messages/)).toHaveAttribute('aria-selected', 'true');
+    await expect(panel.locator('[data-notification]')).toHaveCount(0);
+  });
+
+  test('drops a pending Notifications return on a direct account switch while both owners load', async ({ page, context }) => {
+    const { live, arena } = await watchPlayer(page);
+    const release = live.hold('owner_state');
+    await page.goto('/game/?view=replay&activity=' + arena.activityId + '&from=notifications');
+    await expect.poll(() => live.count('owner_state')).toBeGreaterThan(0);
+    const first = live.requests.find(r => r.table === 'owner_state')!.reader;
+    expect(first).not.toBeNull();
+    await expect(chipToggle(page)).toHaveText('Signed in');
+    await page.getByRole('button', { name: 'Back to Notifications', exact: true }).click();
+    await expect(panelOf(page)).toHaveCount(0);
+    // A stays signed in with its owner unresolved. Switch directly to B: no SIGNED_OUT/visitor step.
+    const other = testUser('watch-direct-brutus@example.invalid');
+    expect(other.id).not.toBe(first);
+    await seedSession(context, other);
+    live.setOwner({ ...structuredClone(ownerFixture), gladiatorId: randomUUID(), name: 'Brutus', inbox: { unread: 1, readIds: [], sinceMs: SINCE, newNotifications: 0, notificationsSeenMs: NOW } });
+    live.setNotifications([]); live.setBouts([]);
+    await page.evaluate(user => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const token = btoa(JSON.stringify({ alg: 'HS256' })) + '.' + btoa(JSON.stringify({ sub: user.id, exp })) + '.test-only';
+      const session = { access_token: token, refresh_token: 'test-only:' + user.id, token_type: 'bearer', expires_at: exp, expires_in: 3600, user };
+      localStorage.setItem('sb-127-auth-token', JSON.stringify(session));
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_IN', session }); channel.close();
+    }, other);
+    await expect.poll(() => live.requests.some(r => r.table === 'owner_state' && r.reader === other.id)).toBe(true);
+    // Both accounts' owner reads are still held; B is authenticated without a gladiator/inbox yet.
+    await expect(chipToggle(page)).toHaveText('Signed in');
+    await expect(page.getByTestId('chip-name')).toHaveCount(0);
+    await expect(panelOf(page)).toHaveCount(0);
+    // Record even a transient focus steal during B's first ready render, before any cleanup could hide it.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { __watchReturnFocus: string[] }).__watchReturnFocus = seen;
+      document.addEventListener('focusin', event => {
+        if (event.target instanceof HTMLElement && event.target.matches('[data-tab="notifications"]')) seen.push('notifications');
+      });
+    });
+    release();
+    await expectOwnerShown(page, 'Brutus');
+    await expect(messagesButton(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(panelOf(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __watchReturnFocus: string[] }).__watchReturnFocus)).toEqual([]);
+    const panel = await openPanel(page);
+    await expect(tab(panel, /^Messages/)).toHaveAttribute('aria-selected', 'true');
+    await expect(panel.locator('[data-notification]')).toHaveCount(0);
+  });
+
+  test('Watch buttons sit beside reward lines with room for the title', async ({ page }) => {
+    await watchPlayer(page);
+    await openLive(page);
+    const panel = await openPanel(page);
+    await tab(panel, /^Notifications/).click();
+    const card = panel.locator('[data-notification]').filter({ hasText: 'Expedition victory: Woodland Path' });
+    await expect(card.getByRole('button')).toBeVisible();
+    const button = await card.getByRole('button').boundingBox();
+    const lines = await card.locator('ul').boundingBox();
+    expect(button!.width).toBeLessThan(160);
+    expect(Math.abs(button!.y - lines!.y)).toBeLessThanOrEqual(1);
+    expect(button!.x).toBeGreaterThanOrEqual(lines!.x + lines!.width);
+  });
+
+  test('phone: The trip fits at 390 and 360 and expires with the shared clock', async ({ page }, testInfo) => {
+    const { trip } = await watchPlayer(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await tab(panel, /^Notifications/).click();
+    const tripButton = panel.getByRole('button', { name: 'Watch the trip: Expedition victory: Woodland Path', exact: true });
+    await expect(tripButton).toHaveText('▶ Watch the trip▶ The trip');
+    await expect(tripButton.locator('span:visible')).toHaveText('▶ The trip');
+    for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
+      await page.setViewportSize(size);
+      await tripButton.scrollIntoViewIfNeeded();
+      expect(await noHorizontalScroll(page)).toBe(true);
+      const buttons = await panel.getByRole('button', { name: /^Watch/ }).evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
+      expect(buttons.every(b => b.w >= 44 && b.h >= 44)).toBe(true);
+      await watchShot(page, 'notifications-' + size.width + '-' + testInfo.project.name);
+    }
+    const expiry = trip.summary!.replayExpiry;
+    if (expiry.state !== 'available') throw new Error('retained trip required');
+    await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), expiry.expiresAtMs);
+    await expect(tripButton).toHaveCount(0);
+  });
+});
 
   test('a visitor sees no messages button and reads no message', async ({ page, context }) => {
     const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'live-1' }, messages: MESSAGES });
@@ -568,7 +779,7 @@ test.describe('in live mode', () => {
     await expect(messagesButton(page)).toHaveAccessibleName('Messages, 25 new');
     await expect(badge(page)).toHaveText('9+');
     const panel = await openPanel(page);
-    await expect(tab(panel, /^Notifications/)).toHaveAccessibleName('Notifications, 25 new');
+    await expect(tab(panel, /^Notifications/)).toHaveAccessibleName('Notifications');
     await expect(panel.locator('[data-notification]')).toHaveCount(20);
     // Everything up to the newest shown is seen, which clears the older ones too.
     await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
@@ -1129,3 +1340,23 @@ test.describe('in the fixture preview', () => {
     await expect(messagesButton(page)).toBeFocused();
   });
 });
+
+// Arena replays Task 7: real retained timelines behind the live owner-only notification read.
+async function watchPlayer(page: Page) {
+  const logs = Object.fromEntries((Object.keys(ARENA_BOUTS) as ArenaBoutKey[]).map(key => [key, JSON.parse(readFileSync('tests/fixtures/arena/' + key + '.json', 'utf8')) as BattleLog])) as Record<ArenaBoutKey, BattleLog>;
+  const arena = buildArenaFixtures(logs).timelines[arenaActivityId('ownerHumanWin')];
+  const tournament = Object.values(JSON.parse(readFileSync('tests/fixtures/tournaments/owner-timelines.json', 'utf8')) as Record<string, RevealedTimeline>).find(t => t.summary?.result === 'defeat')!;
+  const shift = arena.summary!.settledAtMs - 4_800_000 - tournament.summary!.settledAtMs;
+  tournament.stages.forEach(stage => { stage.startedAtMs += shift; stage.revealedAtMs += shift; stage.endsAtMs += shift; });
+  tournament.summary!.settledAtMs += shift;
+  tournament.summary!.replayExpiry = { state: 'available', expiresAtMs: NOW + 86_400_000 };
+  if (tournament.completion) { tournament.completion.settledAtMs += shift; tournament.completion.replayExpiry = tournament.summary!.replayExpiry; }
+  const trip = JSON.parse(readFileSync('tests/fixtures/expeditions/woodland.json', 'utf8')) as RevealedTimeline;
+  const notes: LiveNotification[] = [ { summary: arena.summary! }, { summary: tournament.summary! }, { summary: trip.summary!, expeditionId: 'woodland' }, ...RESULTS.filter(n => n.summary.resolvedKind !== 'expedition') ];
+  const setup = await player(page, { notifications: notes });
+  setup.live.setTimelines(Object.fromEntries([arena, tournament, trip].map(t => [t.activityId, t])));
+  return { ...setup, arena, tournament, trip };
+}
+async function watchShot(page: Page, name: string) {
+  if (process.env.TASK_SHOTS) { mkdirSync(process.env.TASK_SHOTS, { recursive: true }); await page.screenshot({ path: process.env.TASK_SHOTS + '/' + name + '.png' }); }
+}

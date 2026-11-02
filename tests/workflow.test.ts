@@ -83,3 +83,86 @@ describe('the checks workflow', () => {
     }
   });
 });
+
+/** One named step, without assuming whether its condition is true for this run. */
+function namedStep(name: string): string {
+  const lines = text.split('\n');
+  const start = lines.indexOf(`      - name: ${name}`);
+  if (start < 0) return '';
+  let end = start + 1;
+  while (end < lines.length && !/^ {6}- /.test(lines[end])) end++;
+  return lines.slice(start + 1, end).join('\n');
+}
+
+/** Evaluate only the comparisons/boolean operators used by these actual workflow selectors; fail closed on new syntax. */
+function selected(step: string, event: string, fullGate?: boolean): boolean {
+  const expression = /^ {8}if: \$\{\{ (.+) \}\}$/m.exec(step)?.[1];
+  if (!expression) throw new Error('Gate step must have an explicit selector');
+  const values: Record<string, string | boolean | undefined> = {
+    'github.event_name': event,
+    'inputs.full_development_gate': fullGate,
+  };
+  // GitHub gives && higher precedence than ||, matching these two split levels.
+  return expression.split(' || ').some(term => term.split(' && ').every(comparison => {
+    const match = /^(github\.event_name|inputs\.full_development_gate) (==|!=) ('[^']*'|true|false)$/.exec(comparison);
+    if (!match) throw new Error(`Unsupported workflow selector: ${comparison}`);
+    const expected = match[3] === 'true' ? true : match[3] === 'false' ? false : match[3].slice(1, -1);
+    return match[2] === '==' ? values[match[1]] === expected : values[match[1]] !== expected;
+  }));
+}
+
+describe('the optional complete Linux gate', () => {
+  const normal = namedStep('Release gate');
+  const full = namedStep('Complete development release gate (manual opt-in)');
+
+  it('requires a typed manual input that defaults to false', () => {
+    expect(text).toMatch(/^ {2}workflow_dispatch:\n {4}inputs:\n {6}full_development_gate:\n {8}description: [^\n]+\n {8}type: boolean\n {8}required: false\n {8}default: false$/m);
+    expect(normal).not.toBe('');
+    expect(full).not.toBe('');
+  });
+
+  it.each([
+    ['push', undefined, true, false],
+    ['pull_request', undefined, true, false],
+    ['workflow_dispatch', undefined, true, false],
+    ['workflow_dispatch', false, true, false],
+    ['workflow_dispatch', true, false, true],
+    // An input-looking value on an automatic event must never select the opt-in branch.
+    ['push', true, true, false],
+    ['pull_request', true, true, false],
+  ] as const)('selects exactly one gate for event %s / full=%s', (event, input, normalExpected, fullExpected) => {
+    const actual = [selected(normal, event, input), selected(full, event, input)];
+    expect(actual).toEqual([normalExpected, fullExpected]);
+    expect(actual.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('keeps the ordinary 11-step gate and its explicit development omission intact', () => {
+    expect(normal).toMatch(/^ {8}env:\n {10}CLOUDIATOR_CI: github$/m);
+    expect(normal).toMatch(/^ {8}run: \|\n {10}npm run verify -- --json "\$RUNNER_TEMP\/verify\.json"$/m);
+    expect(normal).not.toContain('VITEST_MAX_WORKERS');
+    expect(normal).not.toContain('--config');
+    expect(normal).not.toContain('--browser-shards');
+    expect(text.match(/CLOUDIATOR_CI:/g)).toHaveLength(1);
+  });
+
+  it('unsets the omission switch before the unchanged full controller, with strict process-scoped units', () => {
+    expect(full).toMatch(/^ {8}env:\n {10}VITEST_MAX_WORKERS: '1'$/m);
+    expect(full).toMatch(/^ {8}run: \|\n {10}unset CLOUDIATOR_CI\n {10}npm run verify -- --config playwright\.full-gate\.config\.ts --browser-shards 8 --results "\$RUNNER_TEMP\/full-gate-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}" --json "\$RUNNER_TEMP\/verify\.json"$/m);
+    expect(full).not.toMatch(/^ {10}CLOUDIATOR_CI:/m);
+    expect(full).not.toContain('continue-on-error');
+    expect(full).not.toMatch(/--grep|--grep-invert|--last-failed|--update-snapshots/);
+    expect(runLines().join('\n')).not.toMatch(/\bplaywright install\b/);
+    expect(text).toMatch(/^ {4}timeout-minutes: 120$/m);
+  });
+
+  it('retains the full summary and entire unique browser evidence root, without credential logs or environment files', () => {
+    const paths = /^ {10}path: \|\n((?: {12}.*\n|\n)*)/m.exec(text)?.[1]
+      .split('\n').map(line => line.trim()).filter(Boolean);
+    expect(paths).toEqual([
+      '${{ runner.temp }}/verify.json',
+      'test-results/',
+      '${{ runner.temp }}/full-gate-${{ github.run_id }}-${{ github.run_attempt }}/',
+    ]);
+    expect(text).toMatch(/^ {6}- name: Keep the gate's results and the browser traces\n {8}if: \$\{\{ always\(\) \}\}$/m);
+  });
+});

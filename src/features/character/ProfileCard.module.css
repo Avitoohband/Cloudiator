@@ -1,21 +1,25 @@
 /*
- * The profile card over the camp (the approved mockup): a 272 px glass card beside the clicked gladiator on desktop
- * (placed by ProfileLayer through --card-left and --card-top), a sheet above the ☰ button on touch. It sits over the
- * menus (a list row opens it from inside one) and never covers the corner chip (it starts below the chip row).
+ * The profile card over the camp (the approved mockups): a glass card beside the clicked gladiator on desktop (placed by
+ * ProfileLayer through --card-left and --card-top), a sheet above the ☰ button on touch. It sits over the menus (a list row
+ * opens it from inside one) and never covers the corner chip (it starts below the chip row). Task 11c: 520 px in two columns,
+ * nearly opaque (alpha 0.96), and on touch a flex column whose body scrolls and whose actions stay at its foot.
  */
 .card {
   position: absolute;
   left: var(--card-left, 458px);
   top: var(--card-top, 64px);
   z-index: 11;
-  width: 272px;
+  width: 520px;
+  /* A narrow pointer window (481-597 px): never past the right edge, so × stays in view (fix round). */
+  max-width: calc(100% - 78px);
   max-height: calc(100% - 76px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px 14px 14px;
+  padding: 14px 16px;
+  box-sizing: border-box;
   border: 1px solid var(--glass-line);
   border-radius: 14px;
-  background: var(--glass);
+  background: rgba(21, 19, 28, 0.96);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   color: var(--ink);
   font-size: 13.5px;
@@ -60,11 +64,150 @@
 }
 
 .head {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
   padding-right: 30px;
 }
 
-.head :global(.eyebrow) {
+/* A gladiator outside the world, before its profile arrives: the name alone. */
+.headPlain {
+  padding-right: 30px;
+}
+
+.who {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.who :global(.eyebrow) {
   margin: 0 0 2px;
+}
+
+/* The portrait: the creation preview's green ground, the gladiator at scale 2 with its feet near the bottom. */
+.look {
+  position: relative;
+  width: 104px;
+  height: 124px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse 22px 5px at 50% 112px, rgba(10, 20, 12, 0.5), transparent),
+    radial-gradient(ellipse 90px 36px at 50% 110px, #3f7d48, transparent),
+    #2c5d36;
+}
+
+.lookSprite {
+  position: absolute;
+  left: 50%;
+  top: 112px;
+  width: 128px;
+  height: 128px;
+}
+
+.lookLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  image-rendering: pixelated;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 18px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.section {
+  min-width: 0;
+}
+
+.section :global(.eyebrow) {
+  margin: 0 0 5px;
+}
+
+.state {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 12.8px;
+}
+
+.attributes {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attributes li {
+  display: grid;
+  grid-template-columns: 6.6rem minmax(0, 1fr) 1.6rem;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.8px;
+}
+
+.attributes b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bonus {
+  color: #e7c77f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #2a2f40;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a87e3a, #f2c66b);
+}
+
+.overload {
+  margin: 6px 0 0;
+  color: #ffb9a8;
+  font-size: 12px;
+}
+
+.detail,
+.empty {
+  color: var(--ink-dim);
+}
+
+.detail {
+  font-size: 11.5px;
+}
+
+.rCommon {
+  color: #d6d1c3;
+}
+
+.rUncommon {
+  color: #93d68b;
+}
+
+.rRare {
+  color: #86b6ff;
+}
+
+.see {
+  margin: 8px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
 }
 
 .name {
@@ -114,8 +257,9 @@
 .facts div {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 10px;
-  padding: 6px 0;
+  padding: 3px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -132,8 +276,15 @@
 .facts dd {
   margin: 0;
   min-width: 0;
+  font-size: 12.8px;
+  font-variant-numeric: tabular-nums;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.facts dd small {
+  color: var(--ink-dim);
+  font-size: 11.5px;
 }
 
 .reason {
@@ -146,7 +297,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .actions button {
@@ -197,8 +348,87 @@
     top: auto;
     bottom: 76px;
     width: auto;
+    /* A wide touch screen (a tablet): the sheet keeps the desktop card's width, centred (fix round). */
+    max-width: 520px;
+    margin: 0 auto;
     max-height: calc(100% - 140px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
     animation-name: rise;
+  }
+
+  /* The body scrolls; the actions below it stay in view at the sheet's foot. */
+  .body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 12px 14px 4px;
+  }
+
+  .head {
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .look {
+    width: 80px;
+    height: 104px;
+  }
+
+  .lookSprite {
+    top: 96px;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* STATS as two-column tiles. */
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .facts.stats div {
+    display: block;
+    padding: 6px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .stats dt {
+    font-size: 11.5px;
+  }
+
+  .stats dd {
+    font-size: 14px;
+    font-weight: 650;
+    text-align: left;
+  }
+
+  .actions {
+    flex: none;
+    margin: 0;
+    padding: 8px 14px 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .actions button {
+    min-height: 44px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+
+  .close {
+    z-index: 1;
+    width: 44px;
+    height: 44px;
+    right: 2px;
+    top: 2px;
   }
 
   @keyframes rise {

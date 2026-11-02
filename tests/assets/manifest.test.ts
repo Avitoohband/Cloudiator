@@ -264,15 +264,53 @@ describe('gladiator animation package', () => {
 });
 
 describe('world actors', () => {
-  it('provides six visually distinct NPCs with walk, talk and tend loops', () => {
-    expect(manifest.actors.npcs).toHaveLength(6);
+  it('provides eleven visually distinct NPC looks with walk, talk and tend loops', () => {
+    // Today's six, then patch 1.5.1's night watch (the guard with a torch), water carrier, herald, porter and forester.
+    expect(manifest.actors.npcs.map(npc => npc.id)).toEqual(['smith', 'armorer', 'trainer', 'cook', 'healer', 'guard', 'night-watch', 'water-carrier', 'herald', 'porter', 'forester']);
     const looks = new Set(manifest.actors.npcs.map(npc => framePixels(npc.atlas, manifest.animations[npc.animations.idle!.se].frames[0]).join(',')));
-    expect(looks.size).toBe(6);
+    expect(looks.size).toBe(11);
     for (const npc of manifest.actors.npcs) {
       for (const action of ['idle', 'walk', 'talk', 'tend'] as const) {
         expect(manifest.animations[npc.animations[action]!.se].frames.length, `${npc.id} ${action}`).toBeGreaterThanOrEqual(2);
       }
       expect(npc.animations.walk!.ne, npc.id).toBeDefined();
+    }
+  });
+
+  // Patch 1.5.1: the NPC looks have their own atlas page. Five new looks grow it from 1536 x 448 (six looks) to 1536 x 832,
+  // inside the 2048 px every WebGL device can hold, and today's six keep the cells they had.
+  it('packs the eleven NPC looks on their own page, which still fits, with today\'s six in their old cells', () => {
+    const page = manifest.atlases.npcs;
+    expect([page.width, page.height]).toEqual([1536, 832]);
+    expect(Math.max(page.width, page.height)).toBeLessThanOrEqual(2048);
+    const today = ['smith', 'armorer', 'trainer', 'cook', 'healer', 'guard'];
+    const names = Object.keys(page.frames);
+    expect(names).toHaveLength(11 * 28);
+    names.forEach((name, i) => {
+      const f = page.frames[name];
+      expect([f.x, f.y, f.w, f.h], name).toEqual([(i % 24) * 64, Math.floor(i / 24) * 64, 64, 64]);
+      if (today.includes(name.split('/')[0])) expect(f.y + f.h, name).toBeLessThanOrEqual(448);
+    });
+  });
+
+  it('gives the night watch the gate guard\'s look with a lit torch, in every frame', () => {
+    const FIRE = new Set(['fire1', 'fire2', 'fire3', 'fire4'].map(c => manifest.palette[c].toLowerCase()));
+    const fire = (pixels: number[]) => {
+      let n = 0;
+      for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] && FIRE.has(`#${[pixels[i], pixels[i + 1], pixels[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')}`)) n += 1;
+      return n;
+    };
+    const watch = manifest.actors.npcs.find(n => n.id === 'night-watch')!;
+    const guard = manifest.actors.npcs.find(n => n.id === 'guard')!;
+    for (const [action, dirs] of Object.entries(watch.animations)) {
+      for (const [dir, key] of Object.entries(dirs!)) {
+        const frames = manifest.animations[key].frames;
+        expect(frames.length, `${action} ${dir}`).toBe(manifest.animations[guard.animations[action as 'idle']![dir as 'se']!].frames.length);
+        frames.forEach((frame, i) => {
+          expect(fire(framePixels('npcs', frame)), frame).toBeGreaterThanOrEqual(6);
+          expect(fire(framePixels('npcs', `guard/${action}/${dir}/${i}`)), `guard/${action}/${dir}/${i}`).toBe(0);
+        });
+      }
     }
   });
 

@@ -2,7 +2,7 @@
 
 Every player-visible feature, from the launch (1.0) to the planned 1.8, for whoever makes a reel or a video. The exact
 words players see are in [CHANGELOG.md](CHANGELOG.md). This file says what each feature gives a player, where to find it on
-screen, and which video already showed it. Updated 2026-10-30, while 1.4 is being built.
+screen, and which video already showed it. Updated 2026-11-01: patch 1.5 is live.
 
 ## New since the last video
 
@@ -16,9 +16,9 @@ The last video, `messages-look-and-beds-update` (2026-10-29), covered patch 1.3.
 
 ---
 
-**Coming in 1.4 (not out yet: film it in the local preview, post nothing until 1.4 is live)**
+**Out now: 1.4 (released 2026-10-31)**
 
-Built, waiting for the release:
+Live in production:
 
 - 1.4 · New arrivals: everyone sees a banner when a gladiator arrives, Find goes to the gate, newcomers get a NEW tag.
 - 1.4 · My gladiator shows your class's bonuses and suggested split; in a build, "Suggested" spends points your class's way.
@@ -31,16 +31,17 @@ Built, waiting for the release:
 - 1.4 · Replay a whole trip in about a minute and a quarter: out through the camp gate, the fights, home, and to bed when
   a Rest follows.
 - 1.4 · A replay names and draws your gladiator from its first moment, not only from its first fight.
-
-Still being built:
-
 - 1.4 · Watch your expedition: a button on the camp while your gladiator is away, and the whole trip when it is back.
 - 1.4 · Patch numbers: the patch you play in the menu, a number on each patch note, and Patch history.
 - 1.4 · When a new patch is out, an open game says so, and Reload brings it in.
 - 1.4 · A bigger profile card: click a gladiator's name for its look, class bonuses, attributes, stats, gear and Arena
-  record (it waits for Avi's look at its mockup).
+  record.
 
-Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
+Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both. The clip/posts reminder was sent after release; no new video was requested or produced.
+
+**Out now: 1.5 (released 2026-11-01)**
+
+My bouts, the shared replay bar/result card, Next bout, named Back, Notifications/Arena/camp Watch links and full-screen tournament chapters are live. The exact feature wording is in CHANGELOG 1.5 and the server record. The clip/feature-post reminder was sent; no video was made or published for this release.
 
 ## How to use this file
 
@@ -81,9 +82,8 @@ Avi folded the 1.3.1 clip into the 1.4 clip: one "what's new" video covers both.
 
 ## Features by area
 
-**Status:** Live (in the game now) · In 1.4 / In 1.6 (built, not out yet) · Planned 1.5 / 1.6 / 1.7 / 1.8 (designed, not
-built: don't film them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming
-soon" line.
+**Status:** Live (in the game now) · In 1.6 (built, not out yet) · Planned 1.6 / 1.7 / 1.8 (designed, not built: don't film
+them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
 (2026-10-28) · Too Tiny = `camp-life-too-tiny` (2026-10-29) · Messages update = `messages-look-and-beds-update`
@@ -98,6 +98,9 @@ soon" line.
 | Day and night | Morning, afternoon and evening each have their own light, and torches burn in the evening. | 1.0 | Live | Live game in an evening part (see Filming kit) | Too Tiny |
 | Resting at home | A gladiator whose player is away rests at home, and says when it will be back. | 1.0 | Live | Fixture camp → Gladiators → Otho; `&as=resting` for your own | — |
 | Bigger beds | The camp's beds fit a whole gladiator. Punchy asked for them. | 1.3 | Live | Live camp while gladiators Rest (the Messages update used the fixture camp with test gladiators sent to rest) | Messages update; Too Tiny |
+| More guards | Five guards in all: two at the gate, a lookout at the watchtower and two patrols walking along the inside of the walls. | 1.5.1 | Live | Fixture camp: zoom in at the gate (east side) and follow a wall; names show from zoom 2 | — |
+| Night watch | In the evening the two wall patrols carry torches, and the light goes with them along the walls. | 1.5.1 | Live | An evening part (torches lit; see Filming kit); the fixture camp opens in a morning | — |
+| New camp NPCs | Petra the water carrier, Felix the herald, Quintus the porter (a crate on his shoulder) and Silva the forester (an axe) walk their rounds through the camp. | 1.5.1 | Live | Fixture camp, zoomed in: the well and training yard, the Arena gate, the stalls, the wooded corners | — |
 
 ### Your gladiator: creation, looks, class, attributes and build
 
@@ -115,8 +118,8 @@ soon" line.
 | +1 and +5 buttons | Each attribute has +1 and +5 buttons at creation and in a build, on their own line on a phone. | 1.3.1 | Live | Plan a build at phone width (test player) | — |
 | Type your points | Tap a points number and type; too many is corrected when you leave the box, and the game says why. | 1.3.1 | Live | Plan a build, type a number above what is left (test player) | — |
 | Points that stay | A build has no minus: points that took effect are permanent, and a gray Respec button says a paid respec comes later. | 1.3.1 | Live | Plan a build (test player) | — |
-| Class bonuses | My gladiator shows your class's bonuses and its suggested split of every 10 points. | 1.4 | In 1.4 | Fixture camp → My gladiator (Aster is a Guardian) | — |
-| Suggested build | "Suggested for Guardian" (or your class) spends the points left your class's way, with Undo. | 1.4 | In 1.4 | My gladiator → Plan a build with points left (test player) | — |
+| Class bonuses | My gladiator shows your class's bonuses and its suggested split of every 10 points. | 1.4 | Live | Fixture camp → My gladiator (Aster is a Guardian) | — |
+| Suggested build | "Suggested for Guardian" (or your class) spends the points left your class's way, with Undo. | 1.4 | Live | My gladiator → Plan a build with points left (test player) | — |
 
 ### Schedule and stamina
 
@@ -126,7 +129,7 @@ soon" line.
 | Training | Training earns attribute points for your build; gladiators lift weights and hit dummies in the yard. | 1.0 | Live | The camp's training yard; Schedule | Concept trailer |
 | Stamina | Each activity costs stamina, a Rest refills it, and a part you cannot afford becomes a Rest. | 1.0 | Live | The ⚡ number beside your name; Schedule | — |
 | Plan the whole day | Plan all three parts and save once; the schedule says which part is running now. | 1.1 | Live | Schedule (test player) | Looks update |
-| A Rest shows its stamina | A Rest says how much stamina it gives back, in the Schedule and on My gladiator. | 1.4 | In 1.4 | Schedule, under a Rest (test player) | — |
+| A Rest shows its stamina | A Rest says how much stamina it gives back, in the Schedule and on My gladiator. | 1.4 | Live | Schedule, under a Rest (test player) | — |
 | Training limit | Training gives a point until your gladiator has 10 + 4 × its level in points; at that limit the Schedule says Training is full and until which level, and Notifications say a Training gave no point. | 1.6 | Planned 1.6 | Not built | — |
 
 ### Expeditions and dungeons
@@ -137,11 +140,11 @@ soon" line.
 | Three fights a trip | Fights at minutes 20, 40 and 60; lose one and the gladiator rests at a safe point, keeping all its gear. | 1.0 | Live | Expedition page, `<Outpost defeat>` | Concept trailer |
 | Watch a trip | Follow a gladiator on the trail as it happens, and replay each fight. | 1.0 | Live | Expedition page, `<Woodland trip>`, `&minute=30`; or Gladiators → Watch expedition | Concept trailer |
 | Waiting monsters | Each monster waits at its spot, named over its head, until its fight; a beaten one fades away. | 1.1 | Live | Expedition page, `<Woodland trip>`, `&minute=18`, then the fight at 20 | Looks update |
-| A real search | The gladiator searches slowly around each spot: crouching, shading its eyes and looking around. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&minute=10`; one search lasts about 15 s | — |
-| LIVE with named marks | The live view shows LIVE and the minute, and names each mark: leaving camp, each fight, the way back. "Watch from the start" replays what you missed, never past now. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&minute=30` → ⏪ | — |
-| Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | In 1.4 | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
-| Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | In 1.4 | The first seconds of any whole-trip replay | — |
-| Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | In 1.4 | Still being built: the camp during your own trip (test player) | — |
+| A real search | The gladiator searches slowly around each spot: crouching, shading its eyes and looking around. | 1.4 | Live | Expedition page, `<Woodland trip>`, `&minute=10`; one search lasts about 15 s | — |
+| LIVE with named marks | The live view shows LIVE and the minute, and names each mark: leaving camp, each fight, the way back. "Watch from the start" replays what you missed, never past now. | 1.4 | Live | Expedition page, `<Woodland trip>`, `&minute=30` → ⏪ | — |
+| Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | Live | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
+| Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | Live | The first seconds of any whole-trip replay | — |
+| Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | Live | The camp while the owner's gladiator is on a trip (test player); on a phone it sits beside ☰. Once the trip is back, the same button offers the whole trip | — |
 | Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | In 1.6 | Not in the fixture camp: a trip's rewards once v2 is active (after the economy switch) | — |
 | Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.8 | Planned 1.8 | Not built | — |
 | Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.8 | Planned 1.8 | Not built | — |
@@ -162,9 +165,9 @@ soon" line.
 | Tournaments | Brackets every Wednesday and Saturday. | 1.0 | Live | Tournaments → a sample bracket | Concept trailer |
 | Seasons | Four-week seasons end with awards for the top 3: rewards, titles and badges. | 1.0 | Live | Arena → standings → a season | Concept trailer (as "28 days") |
 | Evening Arena | The Arena runs in the evening part only, and tournaments start in the evening too, at 18:40 UTC. | 1.1 | Live | Schedule: Arena is offered in the evening only | Looks update |
-| Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Planned 1.5 | Not built | — |
-| Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Planned 1.5 | Not built | — |
-| Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Planned 1.5 | Not built | — |
+| Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Live | Arena → Your recent bouts; All my bouts opens Results on My bouts (All) | — |
+| Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Live | Camp → settled Arena bout button | — |
+| Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Live | Tournaments → Watch replay → bracket chapters | — |
 | Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Planned 1.6 | Not built | — |
 | Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Planned 1.6 | Not built | — |
 
@@ -175,14 +178,15 @@ soon" line.
 | Results | Everyone's results, newest first, each fight with its replay. | 1.0 | Live | Results | Concept trailer |
 | A fight up close | Watch any bout up close, blow by blow, with health bars. | 1.0 | Live | Replay page, `<Aster vs Varro>`; `<Tie-break bout>` for a close finish | Concept trailer |
 | Replays kept a week | Every replay can be watched for 7 days. | 1.0 | Live | Replay page, `<Expired bout>` shows the "no longer kept" card | — |
-| The whole trip from Results | Replay on an expedition in Results opens the whole-trip replay. | 1.4 | In 1.4 | Results → Replay on an expedition row | — |
-| My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Planned 1.5 | Not built | — |
-| A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Planned 1.5 | Not built | — |
-| The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Planned 1.5 | Not built | — |
-| Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Planned 1.5 | Not built | — |
-| Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Planned 1.5 | Not built | — |
-| No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Planned 1.5 | Not built | — |
-| Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Planned 1.5 | Not built | — |
+| The whole trip from Results | Replay on an expedition in Results opens the whole-trip replay. | 1.4 | Live | Results → Replay on an expedition row | — |
+| My bouts | Results opens on your own Arena and tournament bouts, by day, with Won or Lost, the rating change and a dot until watched; show All, Won or Lost. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| A new replay bar | Play and pause, a track you can drag, the time, a speed of 1×, 2× or 4× that the device remembers, and ⚑ Result. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| The result on the arena | When a bout ends, its result shows on the arena with Watch again and Next bout. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| Next bout | Watch your bouts one after another, with a counter and "Up next". | 1.5 | Live | Results → My bouts → Watch → ⏭; Lost follows only losses | — |
+| Back where you were | Back names where you came from (My bouts, Arena, Notifications…) and takes you there in one step. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| No spoilers | The replay no longer shows who won above the fight before it plays. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| Replays on a phone | On a phone the replay shows who won without scrolling. | 1.5 | Live | Results → My bouts → Watch; replay page | — |
+| Your Arena result on the camp | After your bout ends, see who won and the credited rewards, Watch the bout, or dismiss it on this device. | 1.5 | Live | Live camp after your Arena bout; phone beside ☰ | — |
 | Party fights up close | Any dungeon fight up close, up to 3 against 3, the boss bigger and sweeping the whole party. | 1.8 | Planned 1.8 | Not built | — |
 | Dungeon results | Results and Notifications say "Wolf Den cleared" or "the party was beaten", with your own rewards. | 1.8 | Planned 1.8 | Not built | — |
 
@@ -203,9 +207,9 @@ soon" line.
 | --- | --- | --- | --- | --- | --- |
 | Messages | A button beside your name, with a count, where patch notes and news from the game arrive. | 1.3 | Live | Fixture camp: the button beside your name | Messages update; Too Tiny (a drawn copy) |
 | Notifications | See what your training, expeditions, Arena fights and tournaments earned: XP, level-ups, gear and gold. | 1.3 | Live | Messages → Notifications | Messages update (named as coming in Looks update) |
-| Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | In 1.4 | Still being built | — |
-| New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | In 1.4 | Still being built | — |
-| Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Planned 1.5 | Not built | — |
+| Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | Live | The chip menu: tap or click your name for "Patch 1.4" and Patch history ›; a patch note's number opens the history at that patch | — |
+| New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | Live | Needs a server ahead of the game: in the test camp call `setLatestPatch` with a version strictly above the current client `PATCH` (increment its major number), then focus the window; the notice shows under your name | — |
+| Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Live | Messages → Notifications → Watch; Back returns to the Notifications tab | — |
 
 ### Players and community
 
@@ -213,9 +217,9 @@ soon" line.
 | --- | --- | --- | --- | --- | --- |
 | Gladiators and profiles | See every gladiator, open its profile, and Find or Follow it in the camp. | 1.0 | Live | Gladiators | — |
 | Visitors welcome | Anyone can watch the camp and the public menus without signing in. | 1.0 | Live | `/game/?mode=fixture&as=visitor` | — |
-| New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | In 1.4 | Fixture camp (it always shows a banner) → Find | — |
-| Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | In 1.4 | Fixture camp → Gladiators, the line on top | — |
-| Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | In 1.4 | Not built yet: it waits for Avi's look at its mockup (`.superpowers/design/2026-10-29-profile-card/`) | — |
+| New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | Live | Fixture camp (it always shows a banner) → Find | — |
+| Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | Live | Fixture camp → Gladiators, the line on top | — |
+| Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | Live | Fixture camp → Gladiators → a name (Lucilla has a sample build); a click on a gladiator in the camp opens it too | — |
 | Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Planned 1.6 | Not built | — |
 | Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.8 | Planned 1.8 | Being designed | — |
 
@@ -238,9 +242,9 @@ soon" line.
 | Desktop and phone | On a desktop the menus slide in from the left edge; on a phone, ☰ opens each menu as a sheet from the bottom. | 1.0 | Live | Any menu; phone width for ☰ | — |
 | Keyboard and reduced motion | Every camp action also works from the keyboard through the menus, everything has screen-reader names, and reduced motion turns off the sliding. | 1.0 | Live | Hard to film | — |
 | Clearer busy buttons | While a button sends its command, it dims and keeps the keyboard focus, and pressing it again does nothing. | 1.2.1 | Live | Wear, Buy or Queue build (test player) | — |
-| 12- or 24-hour clock | Choose a 12-hour or 24-hour clock in the menu under your name; every time in the game follows it. | 1.4 | In 1.4 | Menu under your name → Clock; watch the times in Results change | — |
-| Phone status bar | On a phone, tap your name to see stamina, gold, renown and the time to the next slot. | 1.4 | In 1.4 | Fixture camp at phone width → tap your name | — |
-| Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Planned 1.5 | Not built | — |
+| 12- or 24-hour clock | Choose a 12-hour or 24-hour clock in the menu under your name; every time in the game follows it. | 1.4 | Live | Menu under your name → Clock; watch the times in Results change | — |
+| Phone status bar | On a phone, tap your name to see stamina, gold, renown and the time to the next slot. | 1.4 | Live | Fixture camp at phone width → tap your name | — |
+| Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Live | Open a replay and use its keys | — |
 
 ### Under the hood
 

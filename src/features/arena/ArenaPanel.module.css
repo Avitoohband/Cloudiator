@@ -222,3 +222,11 @@
   outline: 3px solid #ffe48f;
   outline-offset: 1px;
 }
+
+.recent { margin: 18px 0; }
+.recentList { list-style: none; margin: 8px 0; padding: 0; }
+.allBouts { min-width: 44px; min-height: 44px; padding: 6px 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.allBouts:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.wide { display: inline; }
+.narrow { display: none; }
+@media (hover: none), (max-width: 480px) { .wide { display: none; } .narrow { display: inline; } }

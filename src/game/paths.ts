@@ -1,5 +1,5 @@
 // Deterministic grid pathfinding over a map's walkable tiles (8 directions, no corner cutting).
-import type { MapData, TilePoint } from './assets';
+import type { Direction, MapData, TilePoint } from './assets';
 
 export type Grid = { width: number; height: number; walkable(x: number, y: number): boolean };
 
@@ -88,6 +88,15 @@ export function findPath(grid: Grid, from: TilePoint, to: TilePoint): TilePoint[
     }
   }
   return null;
+}
+
+/** The facing of a step (dx, dy) on the map: south-east, south-west, north-east or north-west on screen. */
+export function facingFor(dx: number, dy: number, fallback: Direction = 'se'): Direction {
+  const sx = dx - dy;
+  const sy = dx + dy;
+  if (sx === 0 && sy === 0) return fallback;
+  if (sy >= 0) return sx >= 0 ? 'se' : 'sw';
+  return sx >= 0 ? 'ne' : 'nw';
 }
 
 /** Total length of a tile path in tiles. */

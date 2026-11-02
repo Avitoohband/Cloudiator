@@ -5,7 +5,7 @@ import type { OwnerState, PublicActor, ResultRow } from '../../supabase/function
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
-import { closeMenu, cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
+import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
 // list and the standings), the merchants' shortcuts into Inventory and shops, and the owner's pending build through a
@@ -62,7 +62,10 @@ test.describe('profile cards and merchants in the fixture preview', () => {
       expect(card.x + card.width).toBeLessThanOrEqual(viewport.width);
     } else {
       expect(Math.abs(card.x + card.width / 2 - at.x)).toBeLessThan(card.width);
-      expect(card.y + card.height <= at.y - 40 || card.y >= at.y + 30, 'the card leaves the gladiator visible').toBe(true);
+      // Above or below the gladiator, or (Task 11c: the taller card in a short window) beside them.
+      const clearAboveOrBelow = card.y + card.height <= at.y - 40 || card.y >= at.y + 30;
+      const clearBeside = card.x >= at.x + 30 || card.x + card.width <= at.x - 30;
+      expect(clearAboveOrBelow || clearBeside, 'the card leaves the gladiator visible').toBe(true);
       expect(card.y).toBeGreaterThanOrEqual(60);
     }
     await nextFrames(page);
@@ -95,7 +98,9 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await cassiaRow.getByRole('button', { name: 'Profile: Cassia', exact: true }).click();
     const cassia = profileCard(page, 'Cassia');
     await expect(cassia).toBeVisible();
-    await expect(cassia).toContainText(new RegExp(`Rating · record\\s*\\d+ · ${record}`));
+    // Task 11c: the row's season record has its own line, "This season"; the rating its own.
+    await expect(cassia).toContainText(/Rating\s*\d+/);
+    await expect(cassia).toContainText(new RegExp(`This season\\s*${record}`));
     await expect(cassia).not.toContainText(PRIVATE);
     await cassia.getByRole('button', { name: 'Close profile' }).click();
     await expect(cassia).toBeHidden();
@@ -171,7 +176,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
   test('lists recent results with their replays and the viewer’s own rows, beside the fixture samples', async ({ page }, testInfo) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
-    const results = await openMenu(page, 'Results');
+    const results = await everyoneResults(page);
     const list = results.getByRole('list', { name: 'Recent results' });
     await expect(list.getByRole('listitem').first()).toBeVisible();
     // Training and Rest offer no replay and never say one is no longer kept; the owner's rows say "You".
@@ -189,7 +194,8 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     const replay = list.getByRole('button', { name: /^Replay: Aster won an Arena bout/ }).first();
     await replay.click();
     await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/\/game\/\?mode=fixture&view=replay&activity=[0-9a-f-]{36}$/);
+    // A row of Everyone names Results as its origin (Arena replays Task 3).
+    await expect(page).toHaveURL(/\/game\/\?mode=fixture&view=replay&activity=[0-9a-f-]{36}&from=results$/);
   });
 });
 
@@ -268,7 +274,7 @@ test.describe('live results and a signed-in player through a slot end', () => {
     expect(live.requests.every(r => r.reader === null)).toBe(true);
     await list.getByRole('button', { name: 'Replay: Varro won an Arena bout' }).click();
     await expect(page.getByRole('dialog', { name: 'Replay', exact: true })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/game/\\?view=replay&activity=${bout}$`));
+    await expect(page).toHaveURL(new RegExp(`/game/\\?view=replay&activity=${bout}&from=results$`));
     expect(commands).toEqual([]);
   });
 

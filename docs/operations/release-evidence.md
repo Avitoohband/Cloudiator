@@ -1379,3 +1379,138 @@ All three are visible. Read-back afterwards: each of the 10 owners has 3 unread 
 - **Retained rules:** M25 changes no rules version (no executor change), so there was nothing to retain (runbook,
   "Retained-rule deployments").
 - **Runbook:** the anonymous-probe count of the deployed checks is now 19 (it was 14).
+
+
+## Patch 1.4 released — 2026-10-31
+
+Avi explicitly approved all four named writes: M26 only, reviewed client, exact reviewed note and linked patch record. All completed in order. Production `djkblzbnritgbmctsvob`; site https://cloudiator-arena.pages.dev. [Approved wording](../implementation/PATCH-1.4-RELEASE-REVIEW-2026-10-31.md).
+
+### Gate and scope
+
+Full gate `b7d3651`, 19:49:56.725–20:35:17.068 UTC: **12/12 passed, exit 0, no omitted steps**. Unit 1,994/111 files; DB 405/30 files with Edge unchanged; development browser 1,029 passed/71 skipped; static browser 34 passed/1,066 skipped; typechecks/assets/builds/scans passed. Source/tests unchanged through client candidate `26dd0d7116a1429f4a6b134559f44766b25f9478`; subsequent changes documentation only. Supabase diff exactly M26, `19-patches.sql`, `20-profile-card.sql`; no previous migration or Edge change/deployment, no package download. Earlier failed/aborted gates preserved in [checkpoint](../implementation/PATCH-1.4-GATE-2026-10-31.md).
+
+Windows Tcpip event 4231 remains unresolved: it recurred during the final passing gate without an ERR_NO_BUFFER_SPACE marker or browser failure. No permanent host fix claimed.
+
+### Production sequence and read-backs (UTC)
+
+| Step | Result |
+| --- | --- |
+| Preflight 20:58:11.317432 | 25 migrations ending M25 `20261028165017`; open boundaries 0; search schemas `{public,extensions}`. Saturday exclusion ended 20:00 UTC. Visible notes 1–4 matched exact seed titles. Aggregate **19 registered accounts / 18 created gladiators**; not an active count, no identities recorded. |
+| M26 | Dry-run listed only `20261030055918_patch_1_4.sql`; migration-only push with `--skip-vault` succeeded 20:58 UTC. No Vault update authorized. |
+| Read-back 20:58:35.908214 | 26 migrations ending `20261030055918`; null-profile count 0. Six seed links: 1.0→null, 1.1→1, 1.2→2, 1.2.1→null, 1.3→3, 1.3.1→4. Latest patch 1.3.1 before recording 1.4. |
+| Schema/access | All differences classified below; zero application schema/ACL drift, zero audit findings. |
+| Client | Release fast-forward to `26dd0d7116a1429f4a6b134559f44766b25f9478`; Pages deployment `b49e262c-9dfe-453c-96dd-5989b39c379b` served it. |
+| Automatic acceptance | **9 passed**, 45.2 s, one Chrome worker; **22 internal denial probes**, not 22 Playwright cases; attested excluded, no sign-in. |
+| Exact note | Note **5** published **21:03:56.750** (`1793480636750` ms), read-back matched approved exact note. |
+| Record | Patch **1.4**, **21:04:00.468** (`1793480640468` ms), linked note 5; 14 features matched CHANGELOG exactly; revision latest_patch 1.4. |
+| Inbox sample | Oldest sampled account unread 0→1, delta 1; no identity recorded. |
+| Anonymous browser 21:06:51 | Clean live camp loaded client/history code 1.4, revision 1.4, zero Reload offer buttons. |
+
+First ad-hoc post-record probe incorrectly assumed the revision response was an array. Inspection of reads.ts showed .single(); the probe was corrected to read an object and rerun passed. This was a probe correction, no application/data change. This anonymous check is not an authenticated journey. Avi's signed-in human journey and attested checks remain pending.
+
+### Fingerprint and access differences
+
+Fingerprint **1,240 local / 1,237 hosted**: all **11 difference lines** are expected platform/live-state differences. Realtime platform default ACL pair differs by postgres INSERT/SELECT grant options (2 lines); three local-only supabase_functions defaults (3); live/clean retention pair (2), jobs-retention pair (2), owner-signals 18 hosted/0 clean pair (2). Only the three local-only entries change totals. No application schema/ACL drift. Every difference follows (<= local only, => hosted only):
+
+```text
+=> defacl|supabase_admin|realtime|r|{postgres=a*r*wdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin}
+=> seed-retention|1|373514|372020|1|1
+=> seed-retention-jobs|1|373622
+=> seed-owner-signals|18
+<= defacl|supabase_admin|realtime|r|{postgres=arwdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin}
+<= defacl|supabase_admin|supabase_functions|S|{postgres=rwU/supabase_admin,anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,service_role=rwU/supabase_admin}
+<= defacl|supabase_admin|supabase_functions|f|{postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}
+<= defacl|supabase_admin|supabase_functions|r|{postgres=arwdDxtm/supabase_admin,anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin}
+<= seed-retention|1|-1|-1|0|0
+<= seed-retention-jobs|1|-1
+<= seed-owner-signals|0
+```
+
+Access **648 local / 612 hosted**, findings **0**. All 36 local-only rows are platform defaults: three API roles × (eight table privileges + three sequence privileges + one function privilege). No application relation/column/sequence/function/schema/default/membership/policy differs. These are the runbook accepted platform exception; nothing of ours is created by supabase_admin in supabase_functions. Every audit difference follows:
+
+```text
+<= platform-default | supabase_admin:supabase_functions:functions | anon | EXECUTE |
+<= platform-default | supabase_admin:supabase_functions:functions | authenticated | EXECUTE |
+<= platform-default | supabase_admin:supabase_functions:functions | service_role | EXECUTE |
+<= platform-default | supabase_admin:supabase_functions:sequences | anon | SELECT |
+<= platform-default | supabase_admin:supabase_functions:sequences | anon | UPDATE |
+<= platform-default | supabase_admin:supabase_functions:sequences | anon | USAGE |
+<= platform-default | supabase_admin:supabase_functions:sequences | authenticated | SELECT |
+<= platform-default | supabase_admin:supabase_functions:sequences | authenticated | UPDATE |
+<= platform-default | supabase_admin:supabase_functions:sequences | authenticated | USAGE |
+<= platform-default | supabase_admin:supabase_functions:sequences | service_role | SELECT |
+<= platform-default | supabase_admin:supabase_functions:sequences | service_role | UPDATE |
+<= platform-default | supabase_admin:supabase_functions:sequences | service_role | USAGE |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | DELETE |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | INSERT |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | MAINTAIN |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | REFERENCES |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | SELECT |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | TRIGGER |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | TRUNCATE |
+<= platform-default | supabase_admin:supabase_functions:tables | anon | UPDATE |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | DELETE |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | INSERT |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | MAINTAIN |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | REFERENCES |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | SELECT |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | TRIGGER |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | TRUNCATE |
+<= platform-default | supabase_admin:supabase_functions:tables | authenticated | UPDATE |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | DELETE |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | INSERT |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | MAINTAIN |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | REFERENCES |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | SELECT |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | TRIGGER |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | TRUNCATE |
+<= platform-default | supabase_admin:supabase_functions:tables | service_role | UPDATE |
+```
+
+M25 precedent in this file: fingerprint 1,210 local/1,207 hosted, same realtime/functions/live-state differences; audit 638/602, same 36 platform rows. M26 adds **30 fingerprint lines and 10 audit rows on both sides**. See [runbook](runbook.md#release-access-audit) and scripts/schema-fingerprint.sql comparison notes.
+
+### Deployed evidence
+
+Installed Playwright CLI, config `tests/browser/playwright.deployed.config.ts`, `--grep-invert @attested`, one worker; actual origins `https://cloudiator-arena.pages.dev`, `https://djkblzbnritgbmctsvob.supabase.co`. No credential supplied; public bundle key kept in memory; trace/screenshots/video off, no UI/trace flag.
+
+```text
+deployed evidence | desktop | fixedRoutesReload | 5 of 5 routes loaded and reloaded with 200; problems 0; favicon: /favicon.ico answered 404 on 1 load (recorded, not failed)
+deployed evidence | desktop | securityHeaders | connect-src origin https://djkblzbnritgbmctsvob.supabase.co; 6 paths checked against _headers; 0 problems
+deployed evidence | desktop | connectSrc | connect-src exactly 'self' https://djkblzbnritgbmctsvob.supabase.co on 5 of 5 routes
+deployed evidence | desktop | compression | 34 of 34 responses br or gzip
+deployed evidence | desktop | cors | site preflight 204 (grant the site, Max-Age 7200); foreign preflight 403 (no grant); worker without its secret 401 unauthenticated
+deployed evidence | desktop | anonDenied | 22 of 22 anonymous probes refused as expected
+deployed evidence | desktop | authProvidersGoogleOnly | GET /auth/v1/settings 200; Google only, sign-up open
+deployed evidence | desktop | shippedAssetsClean | scanned 48 assets, 29 of them JavaScript; 0 problems
+deployed evidence | mobile | fixedRoutesReload | 5 of 5 routes loaded and reloaded with 200; problems 0; favicon: /favicon.ico answered 404 on 1 load (recorded, not failed)
+```
+
+### Follow-up and limits
+
+Combined **1.3.1 + 1.4 patch clip and feature posts** reminder sent; no new video requested, made or published. Next 1.5 Arena replays (preserve/resume Task 5 uncommitted work), then 1.5.1 NPC re-review/art approval, then 1.6 economy (at most two Training slots per game day). The go covers 1.4 only; each future production release needs a fresh explicit go.
+
+### Separate GitHub CI result
+
+The [release-gate workflow](https://github.com/Avitoohband/Cloudiator/actions/runs/41241478227) for shipped commit `26dd0d7`
+completed with **failure**: `tests/assets/camp-beds.test.ts:113`, "draws the sleeping gladiator entirely on the bed, in both
+sleep frames", exceeded the default **5,000 ms** test timeout. It reported 1,983 unit passes, 10 CI skips and one failure;
+the geometry assertions did not report a mismatch. This is the previously noted under-load timeout case, not a demonstrated
+gameplay regression. Its remaining CI stages passed, including 405 DB tests and the static-browser gate. CI intentionally
+omits the development-browser stage; the earlier **12/12 local gate** and nine deployed checks remain distinct results.
+
+Avi has been asked whether to rerun CI once with its normal pinned dependency installs or carry the timeout into 1.5. That
+choice is pending; no rerun or test-budget change has been made. No local package was installed/downloaded; the approved
+client release triggered the normal GitHub/Pages build pipelines and their pinned dependency setup. The aggregate CI
+metadata is saved in `github-ci-initial.json` beside this release's temporary evidence.
+
+
+## Patch 1.5 released — 2026-11-01
+
+Client e570696 / Cloudflare 39b7ea33-74c6-40f7-81ef-b685c4c77520 is live; no schema/Edge change. Local 12/12, both CI runs, nine deployed checks and 22 anonymous denials passed. Note 6 (08:19:17.027 UTC), linked 1.5 record (08:23:14.302 UTC), exact ten features/latest_patch 1.5/unread +1 readbacks and fresh anonymous post-record probe passed. Required post-next-boundary health after 09:20 UTC is pending; no full-operational completion claim.
+
+[Detailed reproducible evidence, preserved failures, scopes and next steps](../implementation/PATCH-1.5-RELEASED-2026-11-01.md). Clip/feature-post reminder sent; no media creation.
+
+
+### Patch1.5 required next-boundary health - 2026-11-01
+
+Passed09:22:11.417UTC: publishedSlot373651, zero open boundaries, zero alerts;142 hosted-check rows. Exact health.mjs SELECT through installedCLI ManagementAPI using verified existingclaude link; no production write or printed secret. Private evidence: C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p15-boundary-health-20261101-ba79c1ae/. This closes the earlier pending health follow-up; signed-in human checks remain unverified. NPC1.5.1 preparation/review/measurements are documented in docs/implementation/PATCH-1.5.1-READINESS-2026-11-01.md; its full gate/publication remain pending.

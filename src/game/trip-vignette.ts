@@ -11,8 +11,7 @@
 import type { Direction, MapData, TilePoint } from './assets';
 import type { TripVignette } from './trip-replay';
 import { hashString } from './actors';
-import { facingFor } from './npcs';
-import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
+import { facingFor, findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
 
 export type VignettePose = { x: number; y: number; action: 'walk' | 'idle' | 'sleep'; facing: Direction; alpha: number };
 /**
@@ -80,6 +79,11 @@ function gateRoad(walks: Walks, tiles: number): TilePoint[] {
   }
   walks.paths.set(key, road);
   return road;
+}
+
+/** The longest road the replay walks through the gate (`VIGNETTE.reach` tiles inside it): the camp's NPCs keep off it (patch 1.5.1). */
+export function gateRoadTiles(map: MapData): TilePoint[] {
+  return gateRoad(walksOf(map), VIGNETTE.reach);
 }
 
 /**

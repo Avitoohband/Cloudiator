@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivitySummary } from '@contracts/events';
 import type { GameNotification, OwnerState } from '@contracts/reads';
-import { awayProgress, awayScene, awayState, awayText, type AwayState } from '@/features/shell/away-trip';
+import { awayProgress, awayScene, awayState, awayText, boutAway, type AwayState } from '@/features/shell/away-trip';
+import { ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId } from '../fixtures/arena';
 
 // Patch A Task 11 (spec "Item 3 + Task 10", "The button on the camp"; the approved mockup): the pure core of the away button. While
 // the owner's expedition runs it says where the gladiator is; once back it offers the whole trip with the owner's own result, until
@@ -12,6 +13,49 @@ const SLOT_MS = 4_800_000;
 const start = 373_247 * SLOT_MS;
 const tripEnd = start + SLOT_MS;
 const tripId = 'f6c5b7d9-0eb5-4a1d-8e2f-6d7e8f9a0b16';
+
+describe('the camp button after my Arena bout', () => {
+  const owner = { name: 'Aster', gladiatorId: ARENA_GLADIATORS.aster.id };
+  const settled = ARENA_TIMELINES[arenaActivityId('ownerHumanWin')];
+  const { summary: _summary, ...pending } = settled;
+  const bout = settled.stages[1];
+  const S = settled.stages[0].startedAtMs;
+  // The published end can be stale; only the logged duration decides eligibility.
+  const end = bout.startedAtMs + bout.battleLog!.durationMs;
+  const input = { owner, timeline: pending, nowMs: end, closed: new Set<string>() };
+  it('appears at the logged end, through the next slot, unless dismissed', () => {
+    expect(boutAway({ ...input, nowMs: end - 1 })).toBeNull();
+    const state = boutAway(input)!;
+    expect(awayText(state, false)).toEqual({ name: 'Aster', title: ' beat Varro in the Arena', sub: 'Rewards are credited at minute 80', action: '▶ Watch the bout' });
+    expect(awayText(state, true)).toEqual({ name: 'Aster', title: ' beat Varro', sub: 'Rewards at minute 80', action: '▶ Watch' });
+    expect(boutAway({ ...input, nowMs: S + 2 * SLOT_MS - 1 })).not.toBeNull();
+    expect(boutAway({ ...input, nowMs: S + 2 * SLOT_MS })).toBeNull();
+    expect(boutAway({ ...input, closed: new Set([pending.activityId]) })).toBeNull();
+    expect(awayScene(state)).toEqual({ kind: 'replay', activityId: pending.activityId });
+    expect(awayProgress(state)).toBeNull();
+    expect(boutAway({ ...input, timeline: { ...pending, stages: pending.stages.map(s => s === bout ? { ...s, endsAtMs: end + MIN } : s) } })).not.toBeNull();
+  });
+  it('uses the owner’s credited rewards with compact rating precedence and no zero parts', () => {
+    const text = (key: Parameters<typeof arenaActivityId>[0], compact: boolean) => {
+      const timeline = ARENA_TIMELINES[arenaActivityId(key)];
+      return awayText(boutAway({ ...input, timeline, nowMs: timeline.stages[0].startedAtMs + 85 * MIN })!, compact);
+    };
+    expect(text('ownerHumanWin', false).sub).toBe('+10 renown · Rating +13');
+    expect(text('ownerHumanWin', true).sub).toBe('Rating +13');
+    expect(text('ownerHumanLoss', false)).toMatchObject({ title: ' lost to Cassia in the Arena', sub: '+2 renown · Rating −13' });
+    expect(text('ownerNpcWin', true).sub).toBe('+3 renown');
+    expect(text('ownerNpcLoss', false).sub).toBe('No rewards');
+    const zero = { ...settled, summary: { ...settled.summary!, ratingDelta: 0, rewards: { ...settled.summary!.rewards, renown: 0 } } };
+    expect(awayText(boutAway({ ...input, timeline: zero, nowMs: S + 85 * MIN })!, true).sub).toBe('No rewards');
+  });
+  it('requires a revealed owner-participating bout, never a public completion or future summary', () => {
+    expect(boutAway({ ...input, owner: { ...owner, gladiatorId: ARENA_GLADIATORS.cassia.id } })).toBeNull();
+    expect(boutAway({ ...input, timeline: null })).toBeNull();
+    expect(boutAway({ ...input, timeline: { ...pending, stages: [] } })).toBeNull();
+    expect(boutAway({ ...input, timeline: { ...pending, stages: [{ ...bout, revealedAtMs: end + 1 }] } })).toBeNull();
+    expect(awayText(boutAway({ ...input, timeline: settled })!, false).sub).toBe('Rewards are credited at minute 80');
+  });
+});
 
 const expeditionOwner: Pick<OwnerState, 'name' | 'currentActivity'> = { name: 'Aster',
   currentActivity: { id: tripId, kind: 'expedition', status: 'active', startsAtMs: start, endsAtMs: tripEnd, label: 'Woodland Path' } };

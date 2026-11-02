@@ -1,7 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
-import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import { ARENA_BOUTS, arenaActivityId, type ArenaBoutKey } from '../fixtures/arena-ids';
+import { buildArenaFixtures } from '../fixtures/arena-build';
 import type { OwnerState, PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS, type ExpeditionFixtureKey } from '../fixtures/expedition-ids';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
@@ -18,6 +20,12 @@ import { closeMenu, cornerChip, expectOwnerShown, openChipMenu, openMenu, quietA
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
 const CLOSED_KEY = 'cloudiator.trip-closed.v1';
+const ARENA = buildArenaFixtures(Object.fromEntries(Object.keys(ARENA_BOUTS).map(key =>
+  [key, JSON.parse(readFileSync(`tests/fixtures/arena/${key}.json`, 'utf8'))])) as Record<ArenaBoutKey, BattleLog>).timelines;
+const ARENA_ID = arenaActivityId('ownerHumanWin');
+const ARENA_TIMELINE = ARENA[ARENA_ID];
+const ARENA_START = ARENA_TIMELINE.stages[0].startedAtMs;
+const ARENA_END = ARENA_TIMELINE.stages[1].startedAtMs + ARENA_TIMELINE.stages[1].battleLog!.durationMs;
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const TIMELINES = { woodland: readJson('tests/fixtures/expeditions/woodland.json'), outpost: readJson('tests/fixtures/expeditions/outpost.json') } as Record<'woodland' | 'outpost', RevealedTimeline>;
 type Key = keyof typeof TIMELINES;
@@ -522,5 +530,335 @@ test.describe('the away button on the camp', () => {
     await expect(awayButton(page)).toBeHidden();
     await page.setViewportSize({ width: 830, height: 720 });
     await expect(awayButton(page)).toBeVisible();
+  });
+});
+
+test.describe('away reads across a signed-in owner lifetime', () => {
+  test.skip(production, 'The away button checks use the development-only intercepted Supabase transport and fixture timelines.');
+  test.use({ isMobile: false, hasTouch: false, viewport: { width: 1280, height: 720 } });
+  test('drops a cached trip defeat when the owner signs out and returns with its new read held', async ({ page, context }) => {
+    const at = startOf('outpost') + 45 * MIN;
+    const transport = await live(context, { key: 'outpost', state: 'running', at });
+    await openCamp(page, at);
+    await expect(awayMain(page)).toContainText('Minute 45 of 80 · back at minute 80');
+    const session = await page.evaluate(() => JSON.parse(localStorage.getItem('sb-127-auth-token')!));
+    await page.evaluate(() => {
+      localStorage.removeItem('sb-127-auth-token');
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_OUT', session: null }); channel.close();
+    });
+    await expect(awayButton(page)).toHaveCount(0);
+    transport.setTimelines({ [idOf('outpost')]: { ...TIMELINES.outpost, stages: [] } });
+    const release = transport.hold('visible_events');
+    try {
+      await page.evaluate(session => {
+        localStorage.setItem('sb-127-auth-token', JSON.stringify(session));
+        const channel = new BroadcastChannel('sb-127-auth-token');
+        channel.postMessage({ event: 'SIGNED_IN', session }); channel.close();
+      }, session);
+      await expectOwnerShown(page, 'Aster');
+      await expect(awayMain(page)).toContainText('Minute 45 of 80 · next fight at minute 60');
+    } finally { release(); }
+  });
+});
+
+test.describe('the Arena bout button on the camp', () => {
+  test.skip(production, 'The away button checks use the development-only intercepted Supabase transport and fixture timelines.');
+  test.use({ timezoneId: 'Etc/GMT-3', locale: 'en-US' });
+  const arenaOwner = (after = false): OwnerState => ({ ...structuredClone(ownerFixture),
+    processedSlotIndex: Math.floor(ARENA_START / SLOT_MS) + (after ? 1 : 0),
+    currentActivity: after ? { id: '30000000-0000-4000-8000-000000000001', kind: 'rest', status: 'active', startsAtMs: ARENA_START + SLOT_MS, endsAtMs: ARENA_START + 2 * SLOT_MS, label: 'Resting in camp' }
+      : { id: ARENA_ID, kind: 'arena', status: 'active', startsAtMs: ARENA_START, endsAtMs: ARENA_START + SLOT_MS, label: 'Arena' },
+    inbox: { ...ownerFixture.inbox, newNotifications: after ? 1 : 0 } });
+  async function arenaLive(context: BrowserContext, at: number, after = false) {
+    await seedSession(context); await quietArrivals(context);
+    const transport = await routeLiveReads(context, { world: emptyWorld(at), owner: arenaOwner(after), timelines: ARENA,
+      notifications: after ? [{ summary: ARENA_TIMELINE.summary! }] : [],
+      bouts: Object.values(ARENA).filter(t => t.summary && t.activityId !== ARENA_ID), serverNowMs: () => at });
+    return transport;
+  }
+  const replay = (page: Page) => page.getByRole('dialog', { name: 'Replay', exact: true });
+  const campRendered = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+  async function capture(page: Page, name: string, project: string) {
+    await campRendered(page);
+    await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished)));
+    if (process.env.TASK_SHOTS) {
+      mkdirSync(process.env.TASK_SHOTS, { recursive: true });
+      await page.screenshot({ path: `${process.env.TASK_SHOTS}/${name}-${project}.png` });
+    }
+  }
+  test('offers my bout from its exact end, opens the pending bout first, then shows credited rewards', async ({ page, context }, info) => {
+    let serverNow = ARENA_END - 1;
+    await seedSession(context); await quietArrivals(context);
+    const transport = await routeLiveReads(context, { world: emptyWorld(serverNow), owner: arenaOwner(), timelines: ARENA,
+      bouts: [ARENA[arenaActivityId('ownerHumanLoss')]], serverNowMs: () => serverNow });
+    await openCamp(page, serverNow);
+    await page.waitForTimeout(400);
+    await expect(awayButton(page)).toHaveCount(0);
+    serverNow = ARENA_END;
+    await hold(page, serverNow);
+    const compact = await touchLayout(page);
+    await expect(awayMain(page)).toContainText(compact ? 'Aster beat Varro' : 'Aster beat Varro in the Arena');
+    await expect(awayMain(page)).toContainText(compact ? 'Rewards at minute 80' : 'Rewards are credited at minute 80');
+    await expect(awayMain(page)).toContainText(compact ? '▶ Watch' : '▶ Watch the bout');
+    await watchFocus(page);
+    await awayMain(page).click();
+    await expect(replay(page)).toBeVisible();
+    expect(search(page)).toEqual({ view: 'replay', activity: ARENA_ID });
+    await expect(replay(page).getByRole('button', { name: 'Back to Camp', exact: true })).toBeVisible();
+    await expect(replay(page)).toContainText(compact ? '1 / 2' : 'Bout 1 of 2 in My bouts');
+    await expect(replay(page)).not.toContainText('+10 renown');
+    await expect(awayButton(page)).toHaveCount(0);
+    await replay(page).getByRole('button', { name: 'Back to Camp', exact: true }).click();
+    await expect(awayMain(page)).toBeFocused();
+    serverNow = ARENA_START + 85 * MIN;
+    transport.setNotifications([{ summary: ARENA_TIMELINE.summary! }]);
+    transport.setOwner(arenaOwner(true));
+    transport.setWorld({ ...emptyWorld(serverNow), revision: 'arena-credited' });
+    await hold(page, serverNow);
+    await page.waitForTimeout(2_200);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(awayMain(page)).toContainText(compact ? 'Rating +13' : '+10 renown · Rating +13', { timeout: 15_000 });
+    if (!compact) await capture(page, 'arena-camp-desktop', info.project.name);
+    await hold(page, ARENA_START + 2 * SLOT_MS - 1);
+    await expect(awayButton(page)).toBeVisible();
+    await hold(page, ARENA_START + 2 * SLOT_MS);
+    await expect(awayButton(page)).toHaveCount(0);
+  });
+  test('reads at minute 60 plus one second and minute 80; a late pending read cannot replace settled rewards', async ({ page, context }) => {
+    let serverNow = ARENA_START + 59 * MIN;
+    await seedSession(context); await quietArrivals(context);
+    await routeLiveReads(context, { world: emptyWorld(serverNow), owner: arenaOwner(), timelines: ARENA, serverNowMs: () => serverNow });
+    let reads = 0, release!: () => void, late = false;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await context.route(`${SUPABASE_URL}/rest/v1/activities**`, async route => {
+      const query = new URL(route.request().url()).searchParams;
+      if (query.get('id') !== `eq.${ARENA_ID}`) return route.fallback();
+      reads += 1;
+      if (reads !== 2) return route.fallback();
+      await held; late = true;
+      return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: 'null' });
+    });
+    await openCamp(page, serverNow);
+    await expect.poll(() => reads).toBe(1);
+    serverNow = ARENA_START + 60 * MIN;
+    await hold(page, serverNow);
+    await page.waitForTimeout(150);
+    expect(reads).toBe(1);
+    serverNow += 1_000;
+    await hold(page, serverNow);
+    await expect.poll(() => reads).toBe(2);
+    serverNow = ARENA_START + 80 * MIN;
+    await hold(page, serverNow);
+    await expect.poll(() => reads).toBe(3);
+    await expect(awayMain(page)).toContainText('Rating +13');
+    release(); await expect.poll(() => late).toBe(true);
+    await page.waitForTimeout(300);
+    await expect(awayMain(page)).toContainText('Rating +13');
+  });
+  test('stays dismissed across reload', async ({ page, context }) => {
+    const at = ARENA_START + 85 * MIN;
+    await arenaLive(context, at, true); await openCamp(page, at);
+    await dismiss(page).click(); await expect(awayButton(page)).toHaveCount(0);
+    await page.reload(); await expectOwnerShown(page, 'Aster'); await hold(page, at);
+    await page.waitForTimeout(500); await expect(awayButton(page)).toHaveCount(0);
+  });
+  test('a bout replaces a trip back state, while a running trip keeps priority', async ({ page, context }) => {
+    let now = ARENA_START + 61 * MIN;
+    await seedSession(context); await quietArrivals(context);
+    const oldTrip = { ...TIMELINES.woodland.summary!, settledAtMs: ARENA_START + 1_000 };
+    const transport = await routeLiveReads(context, { world: emptyWorld(now), owner: arenaOwner(), timelines: ARENA,
+      notifications: [{ summary: oldTrip, expeditionId: 'woodland' }], serverNowMs: () => now });
+    await openCamp(page, now);
+    await expect(awayButton(page)).toHaveAttribute('data-state', 'bout');
+    await expect(awayMain(page)).toContainText('Aster beat Varro');
+    now = ARENA_START + 85 * MIN;
+    transport.setOwner({ ...arenaOwner(true), currentActivity: { id: idOf('woodland'), kind: 'expedition', status: 'active', startsAtMs: ARENA_START + SLOT_MS,
+      endsAtMs: ARENA_START + 2 * SLOT_MS, label: 'Woodland Path' } });
+    transport.setNotifications([{ summary: ARENA_TIMELINE.summary! }, { summary: oldTrip, expeditionId: 'woodland' }]);
+    transport.setWorld({ ...emptyWorld(now), revision: 'trip-priority' });
+    await hold(page, now); await page.waitForTimeout(2_200); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(awayButton(page)).toHaveAttribute('data-state', 'running', { timeout: 15_000 });
+    await expect(awayMain(page)).toContainText('Minute 5 of 80');
+  });
+  test('reads and appears on the running shared clock without waiting for another minute', async ({ page, context }) => {
+    let now = ARENA_START + 60 * MIN;
+    await seedSession(context); await quietArrivals(context);
+    const transport = await routeLiveReads(context, { world: emptyWorld(now), owner: arenaOwner(), timelines: ARENA, serverNowMs: () => now });
+    await openCamp(page, now);
+    const reads = () => transport.requests.filter(r => r.table === 'visible_events' && r.query.get('activity_id') === `eq.${ARENA_ID}`).length;
+    await expect.poll(reads).toBe(1);
+    // Freeze at one millisecond before the read boundary: real timers must respect a held clock.
+    await hold(page, now + 999); await page.waitForTimeout(150); expect(reads()).toBe(1);
+    now += 1_000;
+    await page.evaluate(() => window.__cloudiatorShell!.clock.freeze(null));
+    await expect.poll(reads).toBe(2);
+    await expect(awayButton(page)).toHaveCount(0);
+    // Releasing one millisecond before the logged end must show it inside the same minute.
+    now = ARENA_END;
+    await hold(page, now - 1);
+    await expect(awayButton(page)).toHaveCount(0);
+    await page.evaluate(() => window.__cloudiatorShell!.clock.freeze(null));
+    await expect(awayMain(page)).toContainText('Aster beat Varro');
+  });
+  test('re-arms the logged-end timer after an ordinary same-minute clock sync and parent render', async ({ page, context }, info) => {
+    const now = ARENA_START + 60 * MIN + 2_000;
+    const transport = await arenaLive(context, now);
+    await openCamp(page, now);
+    await expect.poll(() => transport.requests.filter(r => r.table === 'activities' && r.query.get('id') === `eq.${ARENA_ID}`).length).toBe(1);
+    // Establish a running-clock timer with over ten seconds left, independently of the later sync path.
+    await page.evaluate(() => window.__cloudiatorShell!.clock.freeze(null));
+    await page.waitForTimeout(200);
+    await expect(awayButton(page)).toHaveCount(0);
+    const sample = await page.evaluate(end => {
+      const shell = window.__cloudiatorShell!;
+      const before = shell.clock.now();
+      const frozen = shell.clock.frozen();
+      // sync does not emit a freeze/release subscription event. Renewing the existing parent callback identity renders
+      // CampShell just as an ordinary server sync's setSync does, while useMinuteNow remains in this same minute.
+      shell.clock.sync(end - 2_000);
+      const after = shell.clock.now();
+      shell.renewRefreshOwner();
+      return { before, after, frozen, end, oldRemainingMs: end - before, correctedRemainingMs: end - after,
+        minuteBefore: Math.floor(before / 60_000), minuteAfter: Math.floor(after / 60_000) };
+    }, ARENA_END);
+    writeFileSync(info.outputPath('ordinary-sync-sample.json'), JSON.stringify(sample, null, 2));
+    expect(sample.frozen).toBeNull();
+    expect(sample.minuteAfter).toBe(sample.minuteBefore);
+    expect(sample.oldRemainingMs).toBeGreaterThan(10_000);
+    expect(sample.correctedRemainingMs).toBeGreaterThan(1_900);
+    expect(sample.correctedRemainingMs).toBeLessThanOrEqual(2_000);
+    // Wide separation from the original deadline makes this a clock scheduling regression, not a sub-frame race.
+    await expect(awayButton(page)).toHaveCount(0);
+    await expect(awayMain(page)).toContainText('Aster beat Varro', { timeout: 5_000 });
+    expect(transport.requests.filter(r => r.table === 'activities' && r.query.get('id') === `eq.${ARENA_ID}`).length).toBe(1);
+  });
+  test('drops cached Arena data on sign-out and does not restore it before the new owner read', async ({ page, context }) => {
+    const at = ARENA_START + 85 * MIN;
+    const transport = await arenaLive(context, at, true); await openCamp(page, at);
+    await expect(awayMain(page)).toContainText('Rating +13');
+    const session = await page.evaluate(() => JSON.parse(localStorage.getItem('sb-127-auth-token')!));
+    await page.evaluate(() => {
+      localStorage.removeItem('sb-127-auth-token');
+      const channel = new BroadcastChannel('sb-127-auth-token');
+      channel.postMessage({ event: 'SIGNED_OUT', session: null }); channel.close();
+    });
+    await expect(awayButton(page)).toHaveCount(0);
+    transport.setNotifications([]);
+    const release = transport.hold('activities');
+    try {
+      await page.evaluate(session => {
+        localStorage.setItem('sb-127-auth-token', JSON.stringify(session));
+        const channel = new BroadcastChannel('sb-127-auth-token');
+        channel.postMessage({ event: 'SIGNED_IN', session }); channel.close();
+      }, session);
+      await expectOwnerShown(page, 'Aster');
+      await page.waitForTimeout(400); await expect(awayButton(page)).toHaveCount(0);
+    } finally { release(); }
+  });
+  test('a candidate that leaves and returns waits for its new timeline rather than reusing its old cache', async ({ page, context }) => {
+    const at = ARENA_START + 85 * MIN;
+    const transport = await arenaLive(context, at); await openCamp(page, at);
+    await expect(awayMain(page)).toContainText('Rating +13');
+    transport.setOwner(arenaOwner(true));
+    transport.setWorld({ ...emptyWorld(at), revision: 'candidate-left' });
+    await page.waitForTimeout(2_200); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(awayButton(page)).toHaveCount(0);
+    transport.setTimelines({ [ARENA_ID]: { ...ARENA_TIMELINE, stages: [] } });
+    const release = transport.hold('visible_events');
+    try {
+      const before = transport.count('visible_events');
+      transport.setOwner(arenaOwner());
+      transport.setWorld({ ...emptyWorld(at), revision: 'candidate-returned' });
+      await page.waitForTimeout(2_200); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect.poll(() => transport.count('visible_events')).toBeGreaterThan(before);
+      await expect(awayButton(page)).toHaveCount(0);
+    } finally { release(); }
+  });
+  for (const receiptFirst of [false, true]) test(`credits late settlement with zero unseen results: receipt ${receiptFirst ? 'before' : 'after'} owner leaves Arena`, async ({ page, context }) => {
+    let now = ARENA_START + 79 * MIN;
+    await seedSession(context); await quietArrivals(context);
+    const { summary: _summary, ...pending } = ARENA_TIMELINE;
+    const transport = await routeLiveReads(context, { world: emptyWorld(now), owner: arenaOwner(), timelines: { [ARENA_ID]: pending }, serverNowMs: () => now });
+    let armed = false, held = 0, release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await context.route(`${SUPABASE_URL}/rest/v1/activities**`, async route => {
+      if (!armed || !new URL(route.request().url()).searchParams.get('select')?.includes('requested')) return route.fallback();
+      held += 1; await gate; return route.fallback();
+    });
+    await openCamp(page, now);
+    await expect(awayMain(page)).toContainText(await touchLayout(page) ? 'Rewards at minute 80' : 'Rewards are credited at minute 80');
+    armed = true; now = ARENA_START + 80 * MIN; await hold(page, now);
+    await expect.poll(() => held).toBe(1);
+    await expect.poll(() => transport.requests.filter(r => r.table === 'activities' && r.query.get('id') === `eq.${ARENA_ID}`).length).toBe(2);
+    // The minute80 timeline snapshot has completed without an owner summary. The concurrent notifications snapshot is still held.
+    await page.waitForTimeout(150);
+    await expect(awayMain(page)).not.toContainText('Rating +13');
+    const leaveArena = async () => {
+      transport.setOwner({ ...arenaOwner(true), inbox: { ...ownerFixture.inbox, newNotifications: 0 } });
+      transport.setWorld({ ...emptyWorld(now), revision: 'late-settlement-rest' });
+      await page.waitForTimeout(2_200); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    };
+    try {
+      if (!receiptFirst) { await leaveArena(); await expect(awayButton(page)).toHaveCount(0); }
+      transport.setNotifications([{ summary: ARENA_TIMELINE.summary! }]);
+      transport.setTimelines(ARENA);
+      const response = page.waitForResponse(response => response.url().includes('/activities?') && new URL(response.url()).searchParams.get('select')?.includes('requested') === true);
+      release(); await (await response).finished();
+      // Let the matching receipt render before the owner projection changes: candidate A stays A in this ordering.
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (receiptFirst) await leaveArena();
+      await expect(awayMain(page)).toContainText('Rating +13');
+    } finally { release(); }
+  });
+  test('stays dismissed for the page when storage throws', async ({ page, context }) => {
+    const at = ARENA_START + 85 * MIN;
+    const transport = await arenaLive(context, at, true);
+    await context.addInitScript(key => {
+      const read = Storage.prototype.getItem, write = Storage.prototype.setItem;
+      Storage.prototype.getItem = function (name) { if (name === key) throw new Error('blocked'); return read.call(this, name); };
+      Storage.prototype.setItem = function (name, value) { if (name === key) throw new Error('blocked'); return write.call(this, name, value); };
+    }, CLOSED_KEY);
+    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+    await openCamp(page, at); await dismiss(page).click();
+    transport.setOwner({ ...arenaOwner(true), currentActivity: null });
+    transport.setWorld({ ...emptyWorld(at), revision: 'arena-dismissed' });
+    await page.waitForTimeout(2_200); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForTimeout(500); await expect(awayButton(page)).toHaveCount(0); expect(errors).toEqual([]);
+  });
+  test('shows nothing to a visitor, or for a revealed bout the owner did not fight', async ({ page, context }) => {
+    const at = ARENA_START + 61 * MIN;
+    await quietArrivals(context);
+    const transport = await routeLiveReads(context, { world: emptyWorld(at), timelines: ARENA, serverNowMs: () => at });
+    await page.goto('/game/'); await campRendered(page);
+    await page.waitForTimeout(400); await expect(awayButton(page)).toHaveCount(0);
+    expect(transport.count('activities')).toBe(0);
+    await seedSession(context);
+    transport.setOwner({ ...arenaOwner(), gladiatorId: '30000000-0000-4000-8000-000000000099', name: 'Other' });
+    await page.reload(); await expectOwnerShown(page, 'Other'); await hold(page, at);
+    await page.waitForTimeout(500); await expect(awayButton(page)).toHaveCount(0);
+  });
+  test('phone: Aster beat Varro, Rating +13 and Watch fit beside menu at 390 and 360', async ({ page, context }, info) => {
+    const at = ARENA_START + 85 * MIN;
+    await arenaLive(context, at, true);
+    await page.setViewportSize({ width: 390, height: 844 }); await openCamp(page, at);
+    await expect(awayMain(page)).toContainText('Aster beat Varro');
+    await expect(awayMain(page)).toContainText('Rating +13'); await expect(awayMain(page)).toContainText('▶ Watch');
+    await expect(awayMain(page)).not.toContainText('renown');
+    const measurements = [];
+    for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
+      await page.setViewportSize(size);
+      const away = await boxOf(awayButton(page)), menu = await boxOf(burger(page));
+      const main = await boxOf(awayMain(page)), cross = await boxOf(dismiss(page));
+      expect(away.x).toBeGreaterThanOrEqual(menu.x + menu.width + 8);
+      expect(away.x + away.width).toBeLessThanOrEqual(size.width - 12);
+      expect(main.width).toBeGreaterThanOrEqual(44); expect(main.height).toBeGreaterThanOrEqual(44);
+      expect(cross.width).toBeGreaterThanOrEqual(44); expect(cross.height).toBeGreaterThanOrEqual(44);
+      expect(await awayMain(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(await noHorizontalScroll(page)).toBe(true);
+      measurements.push({ size, away, menu, main, cross });
+      await capture(page, `arena-camp-${size.width}`, info.project.name);
+    }
+    if (process.env.TASK_SHOTS) writeFileSync(`${process.env.TASK_SHOTS}/arena-camp-geometry-${info.project.name}.json`, JSON.stringify(measurements, null, 2));
   });
 });

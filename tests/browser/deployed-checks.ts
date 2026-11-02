@@ -235,6 +235,9 @@ export const ANON_PROBES: AnonProbe[] = [
   { label: 'insert world_actors', method: 'POST', path: '/rest/v1/world_actors', body: {}, expected: ['42501'] },
   // M25: the public message table is read-only for every API role (the operator posts as postgres).
   { label: 'insert game_messages', method: 'POST', path: '/rest/v1/game_messages', body: {}, expected: ['42501'] },
+  // M26 (patch numbers): the patch list and its features are read-only for every API role (the operator records a patch as postgres).
+  { label: 'insert patches', method: 'POST', path: '/rest/v1/patches', body: {}, expected: ['42501'] },
+  { label: 'insert patch_features', method: 'POST', path: '/rest/v1/patch_features', body: {}, expected: ['42501'] },
   { label: 'update wallets', method: 'PATCH', path: '/rest/v1/wallets?gladiator_id=is.null', body: { money: 0 }, expected: ['42501'] },
   { label: 'delete operation_receipts', method: 'DELETE', path: '/rest/v1/operation_receipts?owner_id=is.null', expected: ['42501'] },
   { label: 'read private.jobs', method: 'GET', path: '/rest/v1/jobs?select=id&limit=1', profile: 'private', expected: ['PGRST106'] },
@@ -242,6 +245,10 @@ export const ANON_PROBES: AnonProbe[] = [
     profile: 'private', expected: ['PGRST106'] },
   // M25: the operator's post function, called with null arguments (it would insert nothing); the private schema is not served at all.
   { label: 'rpc private.post_message', method: 'POST', path: '/rest/v1/rpc/post_message', body: { kind: null, title: null, preview: null, body: null, action: null },
+    profile: 'private', expected: ['PGRST106'] },
+  // M26: the operator's patch record, called with null arguments (an empty list of features is refused, so it records nothing); the
+  // private schema is not served at all.
+  { label: 'rpc private.record_patch', method: 'POST', path: '/rest/v1/rpc/record_patch', body: { number: null, title: null, features: null, message_id: null },
     profile: 'private', expected: ['PGRST106'] },
 ];
 

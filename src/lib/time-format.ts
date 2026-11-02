@@ -59,3 +59,21 @@ export function dayText(ms: number, timeZone?: string): string {
 export function utcClockText(hourUtc: number, minuteUtc: number, clock: ClockMode): string {
   return `${clockWords(hourUtc, minuteUtc, clock)} UTC`;
 }
+
+/**
+ * A date of `ms` in `timeZone` (the runtime's when undefined), with the fixed month names: `2 Oct`, or `2 Oct 2025` when its year is
+ * not the year of `nowMs` there (Task 11c, the profile card's "In camp since"). A date, never a time of day. `''` when either value
+ * is not a time.
+ */
+export function dateText(ms: number, nowMs: number, timeZone?: string): string {
+  const fields = fieldsOf(ms, timeZone), now = fieldsOf(nowMs, timeZone);
+  if (!fields || !now) return '';
+  return `${fields.day} ${MONTHS[fields.month - 1]}${fields.year === now.year ? '' : ` ${fields.year}`}`;
+}
+
+/** Whole calendar days from the date of `fromMs` to the date of `toMs`, both in `timeZone` (0 on the same day); null for a value that is not a time. */
+export function calendarDays(fromMs: number, toMs: number, timeZone?: string): number | null {
+  const from = fieldsOf(fromMs, timeZone), to = fieldsOf(toMs, timeZone);
+  if (!from || !to) return null;
+  return Math.round((Date.UTC(to.year, to.month - 1, to.day) - Date.UTC(from.year, from.month - 1, from.day)) / 86_400_000);
+}

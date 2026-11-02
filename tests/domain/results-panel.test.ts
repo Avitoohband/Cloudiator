@@ -4,7 +4,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { ResultRow, ResultsPage } from '@contracts/reads';
 import { resultLine, resultTime } from '@/features/results/result-text';
-import { ResultsView, readResults, type ResultsModel } from '@/features/results/ResultsPanel';
+import { ResultsPanel, ResultsTabs, ResultsView, readResults, type ResultsModel } from '@/features/results/ResultsPanel';
+import { createBoutsStore } from '@/features/bouts/bouts-store';
+import { createDisplayClock } from '@/game/display-clock';
 import { RESULTS_FIXTURE } from '../fixtures/results';
 import { worldFixture } from '../fixtures/domain';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
@@ -204,6 +206,41 @@ describe('Results', () => {
     expect(waiting).not.toContain('>Replay<');
     expect(waiting).not.toContain('no longer kept');
     expect(resultLine(rows[0], null)).toEqual({ text: 'Aster won an Arena bout', replay: false });
+  });
+
+  // Arena replays Task 4 (spec 1): a player's Results has two tabs, My bouts (the default) and Everyone (today's list); a visitor sees
+  // Everyone alone, with no tabs.
+  it('shows Everyone alone to a visitor, and the tabs to a player', () => {
+    const clock = createDisplayClock(() => 0, () => SETTLED);
+    const reads = reader();
+    const store = createBoutsStore({ bouts: async () => ({ rows: [], nextCursor: null }) });
+    const panel = (props: Partial<Parameters<typeof ResultsPanel>[0]>) =>
+      renderToStaticMarkup(createElement(ResultsPanel, { reads, viewerId: MINE, clock, onWatch: noop, ...props }));
+    const visitor = panel({ bouts: null });
+    expect(visitor).not.toContain('role="tablist"');
+    expect(text(visitor)).toContain('RECENT RESULTS');
+    const everyone = panel({ bouts: store, view: 'everyone', onView: noop, filter: 'all', onFilter: noop, onWatchBout: noop });
+    expect(everyone.match(/role="tablist"/g)).toHaveLength(1);
+    expect(everyone.match(/role="tab"/g)).toHaveLength(2);
+    expect(everyone).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="false"[^>]*>.*?My bouts.*?<\/button>/);
+    expect(everyone).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>.*?Everyone.*?<\/button>/);
+    expect(everyone).toContain('role="tabpanel"');
+    expect(text(everyone)).toContain('RECENT RESULTS');
+    expect(text(everyone)).not.toContain('Replays are kept 7 days');
+    // Today's rows, under the tabs.
+    const rows = [row('arena', 'victory', 'available'), row('training', 'completed', 'expired', { activityId: 'training-1' })];
+    const tabbed = renderToStaticMarkup(createElement(ResultsTabs, { view: 'everyone', onView: noop, unwatched: 0,
+      children: createElement(ResultsView, { model: { rows, nextCursor: null, status: 'ready' }, viewerId: MINE, serverNowMs: SETTLED, onMore: noop, onRetry: noop, onWatch: noop, timeZone: 'UTC' }) }));
+    expect(text(tabbed)).toContain('Aster won an Arena bout');
+    expect(tabbed).toContain('aria-label="Replay: Aster won an Arena bout"');
+    // My bouts is the player's default tab; its count says how many kept bouts are not watched yet.
+    const mine = panel({ bouts: store, view: 'mine', onView: noop, filter: 'all', onFilter: noop, onWatchBout: noop });
+    expect(mine).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>.*?My bouts.*?<\/button>/);
+    expect(text(mine)).not.toContain('RECENT RESULTS');
+    const counted = renderToStaticMarkup(createElement(ResultsTabs, { view: 'mine', onView: noop, unwatched: 12, children: null }));
+    expect(counted).toContain('aria-label="My bouts, 12 not watched"');
+    expect(text(counted)).toContain('9+');
+    expect(renderToStaticMarkup(createElement(ResultsTabs, { view: 'mine', onView: noop, unwatched: 0, children: null }))).toContain('aria-label="My bouts"');
   });
 
   it('says when results are loading, empty or failed', () => {

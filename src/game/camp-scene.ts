@@ -17,7 +17,7 @@ import {
 } from './arena-layout';
 import { assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, spectatorSpots, type CampTournamentRole, type SpectatorSpot } from './tournament-camp';
 import { LABEL_BASE, NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageFrame, type StageLayout, type StagePlan } from './battle-stage';
-import { NPC_ROUTINES, facingFor, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
+import { NPC_ROUTINES, facingFor, npcCarriesTorch, npcLookAt, npcPostTiles, planNpcPosition, type NpcRoutine } from './npcs';
 import { CLICK_TRAVEL_PX, clampView, panBy, stepZoom, zoomAround, type ViewState } from './camera';
 import { mapScreenBounds, worldToScreen, type Point, type Rect } from './iso';
 import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './paths';
@@ -78,6 +78,10 @@ export type CampDebugActor = {
   marker: string | null;
   /** World-space boxes of the nameplate and NPC tag drawn over the actor now. */
   plates: Rect[];
+  /** An ambient NPC's art now (the wall patrols wear the night watch's in the evening), else null. */
+  look: string | null;
+  /** The light of the torch an NPC carries, where and how bright it is drawn now (patch 1.5.1's night watch), else null. */
+  torch: { x: number; y: number; alpha: number } | null;
 };
 export type CampDebugState = {
   ready: boolean;
@@ -132,6 +136,13 @@ const TAG_LIFT = 58;
 const LABEL_GAP = 3;
 /** Arena fights are re-derived this often (display ms), and whenever new data arrives. */
 const ARENA_REFRESH_MS = 1000;
+/**
+ * A night-watch torch's light (patch 1.5.1): its radius in tiles, and where the flame is from the feet (art px; the torch is in
+ * the near hand, screen-left of the body facing se or nw, screen-right facing sw or ne).
+ */
+const HAND_TORCH = { radius: 3, x: 4, y: 28 };
+/** The torch glow texture's size (px); a light of radius r tiles is drawn r * 64 px wide and r * 32 px tall. */
+const GLOW_PX = 128;
 
 type Pose = { x: number; y: number; depth: number; flip: boolean; body: string };
 type ActorView = {
@@ -153,6 +164,12 @@ type ActorView = {
   location: string | null;
   npcRoutine?: NpcRoutine;
   npcAnimations?: AssetManifest['actors']['npcs'][number]['animations'];
+  /** The NPC art it wears now (`npcLookAt`). */
+  npcLook?: string;
+  /** The light of the torch it carries in the evening (a night-watch patrol), hidden otherwise. */
+  torch?: Image | null;
+  /** Its torch's flicker phase, fixed per NPC so the two patrols' lights never flicker in step. */
+  torchSeed?: number;
   frame: string;
   flip: boolean | null;
   depth: number;
@@ -384,7 +401,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     buildLights() {
-      const size = 128;
+      const size = GLOW_PX;
       if (!this.textures.exists('glow')) {
         const canvas = document.createElement('canvas');
         canvas.width = size; canvas.height = size;
@@ -398,11 +415,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
       map.lights.forEach((l, i) => {
         const s = worldToScreen(l.x, l.y);
-        const image = this.add.image(s.x, s.y - 24, 'glow').setBlendMode(P.BlendModes.ADD).setDepth(2_000_001);
-        const base = (l.radius * 32) / size;
-        image.setScale(base * 2, base);
-        lights.push({ image, seed: i * 1.7 });
+        lights.push({ image: this.glow(s.x, s.y - 24, l.radius), seed: i * 1.7 });
       });
+    }
+
+    /** A torch glow of `radius` tiles over the evening tint (the glow texture from buildLights). */
+    glow(x: number, y: number, radius: number) {
+      const base = (radius * 32) / GLOW_PX;
+      return this.add.image(x, y, 'glow').setBlendMode(P.BlendModes.ADD).setDepth(2_000_001).setScale(base * 2, base);
     }
 
     makeLabel(name: string) {
@@ -419,20 +439,47 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       return container;
     }
 
+    /** One view per round (`npc:<npcId>`), in the round's art and name; several guards share the Gate Guard's art. */
     buildNpcs() {
-      for (const routine of NPC_ROUTINES) {
-        const npc = manifest.actors.npcs.find(n => n.id === routine.npcId);
+      for (const [index, routine] of NPC_ROUTINES.entries()) {
+        const look = routine.look ?? routine.npcId;
+        const npc = manifest.actors.npcs.find(n => n.id === look);
         if (!npc) continue;
+        const name = routine.name ?? npc.name;
         const sprite = this.add.sprite(0, 0, npc.atlas, manifest.animations[npc.animations.idle!.se].frames[0]);
         const container = this.makeContainer([sprite]);
         const merchant = npc.role === 'merchant-weapons' ? 'weapons' : npc.role === 'merchant-armor' ? 'armor' : undefined;
         container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer) && merchant) deps.bridge.emit('open-merchant', { merchant }); });
-        views.set(`npc:${npc.id}`, {
-          id: `npc:${npc.id}`, kind: 'npc', name: npc.name, container, layers: [{ id: 'npc', sprite }], look: '', label: this.makeLabel(npc.name).setColor('#ffe48f'),
+        const id = `npc:${routine.npcId}`;
+        views.set(id, {
+          id, kind: 'npc', name, container, layers: [{ id: 'npc', sprite }], look: '', label: this.makeLabel(name).setColor('#ffe48f'),
           x: 0, y: 0, action: 'idle', facing: 'se', offsetMs: 0, walk: null, placement: null, location: null,
-          npcRoutine: routine, npcAnimations: npc.animations, frame: '', flip: null, depth: NaN,
+          npcRoutine: routine, npcAnimations: npc.animations, npcLook: look, frame: '', flip: null, depth: NaN,
+          torch: routine.evening?.torch ? this.glow(0, 0, HAND_TORCH.radius).setVisible(false) : null, torchSeed: index * 2.3,
         });
       }
+    }
+
+    /** An NPC changes into another art (the wall patrols into the night watch at evening, and back in the morning). */
+    wear(v: ActorView, look: string) {
+      const npc = manifest.actors.npcs.find(n => n.id === look);
+      v.npcLook = look;
+      if (!npc) return;
+      v.npcAnimations = npc.animations;
+      v.frame = '';
+    }
+
+    /** A torch-bearer's light: in the evening only, at the flame in its near hand, as bright as the camp's own torches. */
+    carryTorch(v: ActorView, now: number, feet: Point, viewRect: PhaserNS.Geom.Rectangle, torch: number) {
+      const light = v.torch!;
+      const reach = HAND_TORCH.radius * 64;
+      const lit = !!v.npcRoutine && npcCarriesTorch(v.npcRoutine, now)
+        && feet.x > viewRect.x - reach && feet.x < viewRect.right + reach && feet.y > viewRect.y - reach && feet.y < viewRect.bottom + reach;
+      if (light.visible !== lit) light.setVisible(lit);
+      if (!lit) return;
+      const side = v.facing === 'se' || v.facing === 'nw' ? -1 : 1;
+      light.setPosition(feet.x + side * HAND_TORCH.x, feet.y - HAND_TORCH.y);
+      light.setAlpha(reducedMotion ? torch : torch * (0.88 + 0.12 * Math.sin(now / 170 + (v.torchSeed ?? 0))));
     }
 
     playerSprites(placement: Placement): { id: string; sprite: Sprite }[] {
@@ -546,6 +593,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       v.container.destroy();
       v.label.destroy();
       v.marker?.destroy();
+      v.torch?.destroy();
       views.delete(v.id);
       for (const [battleId, npc] of npcFighters) if (npc === v) npcFighters.delete(battleId);
       if (selected === v.id) selected = null;
@@ -646,6 +694,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         } else if (v.npcRoutine) {
           const p = reducedMotion ? stillNpc(v.npcRoutine) : planNpcPosition(v.npcRoutine, map, now, walkTilesPerSecond);
           v.x = p.x; v.y = p.y; v.action = p.action; v.facing = p.facing;
+          const look = npcLookAt(v.npcRoutine, now);
+          if (look !== v.npcLook) this.wear(v, look);
         } else if (v.walk) {
           const walked = (now - v.walk.startedAt) * WALK_SPEED * v.walk.pace;
           const p = pointAlong(v.walk.path, walked);
@@ -667,6 +717,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (v.depth !== depth) { v.depth = depth; v.container.setDepth(depth); }
         const visible = s.x > viewRect.x - margin && s.x < viewRect.right + margin && s.y > viewRect.y - margin && s.y < viewRect.bottom + margin * 1.5;
         if (v.container.visible !== visible) v.container.setVisible(visible);
+        if (v.torch) this.carryTorch(v, now, s, viewRect, torch);
         const showLabel = visible && (v.kind !== 'npc' ? cam.zoom >= 1.4 || selected === v.id || following === v.id : cam.zoom >= 2);
         if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
         if (showLabel) v.label.setPosition(s.x, s.y - PLATE_LIFT);
@@ -1211,6 +1262,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           visible: v.container.visible, depth: v.container.depth, walking: !!v.walk,
           flip: v.flip ?? (v.facing === 'sw' || v.facing === 'nw'), marker: v.marker?.text ?? null,
           plates: [v.label, v.marker].filter((t): t is PhaserNS.GameObjects.Text => !!t && t.visible).map(t => { const b = t.getBounds(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }),
+          look: v.npcLook ?? null,
+          torch: v.torch?.visible ? { x: v.torch.x, y: v.torch.y, alpha: v.torch.alpha } : null,
         })),
         selected,
         following,

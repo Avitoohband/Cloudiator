@@ -20,6 +20,44 @@ A Next.js build or export and a browser check must not use the same output direc
 
 Never start a build in a worktree whose development browser run or dev server is still active. Run the gate steps in that worktree one after another. Do not edit source files in a worktree while its browser suite runs (Task 23.5 lesson; approved by Avi on 2026-10-20).
 
+## Local browser setup preflight
+
+Avi approved this scoped Verification Before Completion / The Gate Function
+guidance on 2026-11-01. Before starting the full gate, resolve the selected private
+config in both development and static modes and check every referenced local
+server/helper entrypoint and its dependencies. Keep the strict project, worker,
+retry and repetition settings, and save setup hashes before the first run.
+
+The NPC config was copied without its ignored `serve-static-3800.mjs` helper,
+so all four static shards could not start. Restoring the verified helper and
+checking both modes passed the supplemental static suite; the next full run's
+static phase also passed. Its separate Windows transport failure remains a
+failed gate. Never splice supplemental checks or earlier partial runs into a
+full-gate success.
+
+## Deno dependency preparation and offline verification
+
+`npm run typecheck` uses `deno test --cached-only --frozen --no-run --check` for
+the two function entrypoints, then `deno test --cached-only --frozen` for Edge tests.
+`--frozen` pins the lockfile; it does not prevent network dependency resolution.
+Cache-only verification fails on an uncached dependency instead of fetching it.
+Stop on a cache miss: preparing uncached dependencies is a separate installation
+action requiring Avi's approval, not a verification retry without the offline flag.
+
+On installed Deno 2.9.6, isolated cold-cache tests observed `deno check --cached-only`
+still requesting loopback HTTP and npm dependencies imported by local entrypoints,
+including with a frozen config/lock. The `test --no-run --check` alternative refused
+those misses with zero fixture requests, rejected a deliberate type error and did
+not execute a top-level throw. Both it and the original default check typecheck local
+code; checking all remote code is a separate opt-in in their CLI help. No dependency
+or binary version changed to work around this observed behavior.
+
+CI explicitly prepares the three existing Deno entrypoints with the installed binary
+(`npx --no-install deno cache --frozen --config supabase/functions/deno.json ...`)
+after pinned `npm ci`, before starting Supabase or serving Edge. The later gate stays
+cache-only. This workflow edit does not authorize remote installation or a push;
+Avi explicitly approved normal remote pinned CI/Pages installs and CI container pulls for the planned releases on2026-11-01. New local package downloads remain unapproved. The two28556a1CI runs executed this preparation successfully; their unrelated bed-pixel timeouts are preserved in the1.5gate handoff.
+
 ## Database tests and the local Edge runtime
 
 Approved by Avi on 2026-10-14 as part of this override.
@@ -60,6 +98,61 @@ A refresh that fails (an error, an entry outside the folder, a changed modificat
 - With folders included it raised 34 lines and one recreation; a full listing and read 40 s later raised none.
 - In a scratch folder: a junction inside is skipped and its target's access time is unchanged; a missing folder fails the refresh with its reason.
 - The gate runs, each with the start time unchanged across the database run, are in `docs/operations/release-evidence.md`.
+
+## Optional bounded browser lifetimes
+
+`npm run verify -- --browser-shards 4 --results <fresh-unique-directory> --json <summary-file>`
+keeps all twelve gate steps and their order. The default (`--browser-shards 1`) still runs each browser phase once.
+For 2–32 shards, each eligible browser phase first discovers its full case manifest with Playwright `--list` and JSON,
+then runs shards 1/N through N/N sequentially, each in a separate process with one worker, no retries and one repetition.
+The CI exception still explicitly leaves out the development phase; the production phase remains required.
+
+The controller must supply a fresh results root per gate. Under each phase, `inventory/` and `shard-K-of-N/` each retain
+their own raw Playwright `report.json`, companion `identities.json` and `results/` directory; existing directories are refused
+rather than overwritten. The companion uses the public Reporter API's actual `TestCase.id` as `spec.id` and the unique public
+project name as `projectId`. Built-in JSON can merge multiple projects into one spec and keep the first project's ID; it
+cannot alone prove exact cross-shard coverage. Ambiguous project names fail closed. Both reports must validate. The gate
+summary retains both report paths and exact case identities, checks complete nonoverlapping coverage, and requires positive case evidence.
+Missing/malformed reports, invalid outcomes, retries/repeats, discovery errors or nonzero exits fail the gate, including an
+exit-zero ordinary browser process whose report is missing or failed. Expected failures and explicitly reported legitimate
+skips remain valid controls. A host fault stays a failure with its existing label; no browser case or shard is retried.
+
+This is an optional mitigation for observed `net::ERR_NO_BUFFER_SPACE` asset failures. A passing bounded diagnostic does
+not establish system-wide port exhaustion, identify a leak or prove that sharding cures the host fault. No Windows setting,
+application code, selection, fixture, assertion or timeout is changed by this option. Full gate evidence is still required.
+
+## 1.5.1 gate choice — native Windows supersedes Linux
+
+The earlier Linux CI option is retained as failed history. Avi later chose native
+Chrome with 32 sequential shards per browser mode and approved the test-only
+`TcpPortRandomizationWin` workaround, preserving the original 17 disabled Chrome
+features. No OS setting, SDK, package, test selection, assertion, timeout, retry,
+per-test wait or CPU budget changed. Preserve all of those limits for any future
+run; a process-only unit worker limit of one remains in force.
+
+The earlier Linux trial is not cleared or waived: it reached its 120-minute
+runner limit with only 2 of 8 development shards and 20 failed/timed-out cases.
+That outcome remains failed history, not a product pass or a fixed Linux issue.
+The subsequent fresh native 9e41 gate passed all 12 stages on 2026-11-02
+18:17:13.665–19:11:03.740 UTC; see the [current verification hold](../implementation/PATCH-1.5.1-VERIFICATION-HOLD-2026-11-02.md)
+for the complete accepted evidence and separate release follow-up. This records
+the executed choice; it creates no new approval gate or Linux waiver.
+
+The reviewed Linux trial configuration is preserved for the record: typed manual
+`full_development_gate=true` on `checks.yml`, process-only unit worker limit one,
+all12 controller steps and eight sequential shards per browser mode. Its merged
+config retained the root browser/device/rendering/selection settings and the
+native profile's90-second outer test timeout. Individual assertions, waits and
+CPU budgets remained unchanged; the runner bound was120 minutes. These settings
+describe the unsuccessful historical trial, not the governing choice now.
+
+The ordinary push/PR/default-manual CI path still explicitly omits development.
+Such CI is not complete local-gate evidence. Any future full run must be one
+actual completed exact-candidate run with all twelve stages, `notRun` empty,
+complete disjoint browser inventory unions, valid raw/identity reports, expected
+CSP controls, an unchanged Edge guard and retained artifacts. Never splice runs.
+Production build/deployment/live checks and following-boundary health remain
+separate obligations.
 
 ## Parallel work
 

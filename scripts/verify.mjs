@@ -48,15 +48,17 @@
  *
  * Options: --config <playwright config> (both browser steps), --dev-port <n>, --static-port <n> (the repository config's
  * ports; defaults 3100 and 4173), --results <dir> (test-results), --json <file> (the results as JSON), --edge-quiet <s> (30),
- * --edge-timeout <s> (300). It prints no credential: the database tests read the local keys in memory (scripts/test-db.mjs).
+ * --edge-timeout <s> (300), --browser-shards <N> (1, maximum 32; opt-in sequential browser/server lifetimes).
+ * It prints no credential: the database tests read the local keys in memory (scripts/test-db.mjs).
  * It never starts, stops or resets the local stack: the Edge step fails (an infrastructure fault) when the worker does not
  * answer, and says to start `supabase functions serve`.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { inspectBrowser } from './browser-gate-report.mjs';
 
 /** The words tests/browser/fixtures.ts adds to a failed test whose request failed in the host's network stack (host-faults.ts). */
 export const HOST_FAULT_MARKER = 'Probable host fault:';
@@ -92,14 +94,14 @@ export const KNOWN_BLOCKERS = Object.freeze([]);
 /**
  * @typedef {{ id: string, title: string, display: string, guide?: string, command?: string, args?: string[], shell?: boolean,
  *   env?: Record<string, string>, unset?: string[], needs?: string[], kind?: 'edge' | 'db' | 'browser', report?: string,
- *   notRun?: { label: string, reason: string } }} Step
+ *   browserShards?: number, results?: string, durable?: boolean, identityReport?: string, notRun?: { label: string, reason: string } }} Step
  */
 
 /**
  * The gate's steps, in order. `guide` is the step as the approved docs/operations/verification-gates.md writes it in its
  * "Safe order in one worktree" (the Edge settle and the database tests follow its database rule instead).
  * `ci` (the CI exception above): the development browser step is marked `notRun`, and runGate reports it without running it.
- * @param {{ config?: string, devPort?: number, staticPort?: number, dbReport?: string, results?: string, ci?: boolean }} options
+ * @param {{ config?: string, devPort?: number, staticPort?: number, dbReport?: string, results?: string, ci?: boolean, browserShards?: number }} options
  * @returns {Step[]}
  */
 export function gateSteps(options = {}) {
@@ -109,6 +111,7 @@ export function gateSteps(options = {}) {
   const playwright = (name) => ['node_modules/@playwright/test/cli.js', 'test', ...config, '--output', `${results}/${name}`, '--reporter=list,json'];
   const report = (name) => join(tmpdir(), `cloudiator-verify-${process.pid}-${name}.json`);
   const dbReport = options.dbReport ?? report('db');
+  const browserOptions = name => options.browserShards > 1 ? { browserShards: validShards(options.browserShards), results: join(results, name) } : {};
   return [
     { id: 'unit', title: 'Unit, backend and asset tests', display: 'npm test', guide: 'npm test', ...npm('test') },
     { id: 'typecheck', title: 'Type checks (TypeScript, Deno)', display: 'npm run typecheck', guide: 'npm run typecheck', ...npm('run', 'typecheck') },
@@ -125,7 +128,7 @@ export function gateSteps(options = {}) {
       ...node('scripts/test-db.mjs', '--reporter=default', `--reporter=${resolve('scripts/vitest-gate-reporter.mjs')}`),
       env: { CAPACITY_GATE: '1', CLOUDIATOR_GATE_REPORT: dbReport }, needs: ['edge'] },
     { id: 'browser', title: 'Development browser suite', display: 'npx playwright test', guide: 'npx playwright test', kind: 'browser', report: report('development'),
-      ...node(...playwright('development')), env: { PLAYWRIGHT_JSON_OUTPUT_NAME: report('development'),
+      ...node(...playwright('development')), ...browserOptions('development'), env: { PLAYWRIGHT_JSON_OUTPUT_NAME: report('development'),
         ...(options.devPort ? { PLAYWRIGHT_DEV_PORT: String(options.devPort) } : {}) },
       ...(options.ci ? { notRun: { label: 'development browser suite', reason: 'runner too slow' } } : {}) },
     { id: 'browser-build', title: 'Isolated production build', display: 'CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true npm run build',
@@ -138,7 +141,7 @@ export function gateSteps(options = {}) {
       ...npm('run', 'verify:static', '--', '.next/browser-test'), needs: ['browser-build'] },
     { id: 'production', title: 'Production browser gate', display: 'PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test',
       guide: 'PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test',
-      kind: 'browser', report: report('production'), ...node(...playwright('production')), env: { PLAYWRIGHT_STATIC: 'true',
+      kind: 'browser', report: report('production'), ...node(...playwright('production')), ...browserOptions('production'), env: { PLAYWRIGHT_STATIC: 'true',
         PLAYWRIGHT_STATIC_ROOT: '.next/browser-test', PLAYWRIGHT_JSON_OUTPUT_NAME: report('production'),
         ...(options.staticPort ? { PLAYWRIGHT_STATIC_PORT: String(options.staticPort) } : {}) }, needs: ['browser-build'] },
     // core.safecrlf=false only silences the line-ending notices of a Windows checkout (core.autocrlf), which are no finding.
@@ -203,8 +206,6 @@ export function classifyDb(report, blockers = KNOWN_BLOCKERS) {
   verdict.status = verdict.failures.length ? 'failed' : verdict.blocked.length ? 'blocked' : 'passed';
   return verdict;
 }
-const firstLine = (text) => String(text).split('\n')[0].trim();
-
 /**
  * A browser run's verdict from Playwright's JSON report: passed or failed. A failed test whose context saw a host network
  * fault (tests/browser/fixtures.ts adds HOST_FAULT_MARKER) keeps its own first error and is labelled with the fault, as a
@@ -212,23 +213,7 @@ const firstLine = (text) => String(text).split('\n')[0].trim();
  * @param {any} report
  */
 export function classifyBrowser(report) {
-  const verdict = { status: 'failed', failed: 0, failures: [] };
-  if (!report || !Array.isArray(report.suites)) return { ...verdict, failures: [{ test: '(no report)', message: 'the browser run wrote no report' }] };
-  for (const error of report.errors ?? []) verdict.failures.push({ test: '(run)', message: firstLine(error.message ?? error.value ?? '') });
-  const walk = (suite, path) => {
-    for (const spec of suite.specs ?? []) for (const test of spec.tests ?? []) {
-      if (test.status !== 'unexpected') continue;
-      verdict.failed++;
-      const messages = (test.results ?? []).flatMap(r => [...(r.errors ?? []), ...(r.error ? [r.error] : [])]).map(e => String(e.message ?? e.value ?? ''));
-      const fault = messages.find(m => m.includes(HOST_FAULT_MARKER));
-      const own = messages.find(m => !m.includes(HOST_FAULT_MARKER)) ?? '';
-      verdict.failures.push({ test: `[${test.projectName}] ${[...path, spec.title].join(' > ')}`, message: firstLine(own),
-        ...(fault ? { hostFault: firstLine(fault.slice(fault.indexOf(HOST_FAULT_MARKER) + HOST_FAULT_MARKER.length)) } : {}) });
-    }
-    for (const child of suite.suites ?? []) walk(child, [...path, child.title]);
-  };
-  for (const suite of report.suites) walk(suite, [suite.title]);
-  verdict.status = verdict.failures.length ? 'failed' : 'passed';
+  const { cases: _cases, ...verdict } = inspectBrowser(report);
   return verdict;
 }
 
@@ -282,13 +267,69 @@ function edgeNote(edge) {
 }
 /** A browser step: one run, never repeated (fix round 1, Important 3). */
 async function runBrowser(step, io) {
-  const code = await io.exec(step);
-  const browser = classifyBrowser(io.readBrowserReport(step));
-  const status = code === 0 ? 'passed' : 'failed';
+  if (step.browserShards > 1) return runBrowserShards(step, io);
+  let code = 127, report = null;
+  try { code = await io.exec(step); report = io.readBrowserReport(step); } catch { /* unreadable reports and failed launches fail closed */ }
+  const browser = classifyBrowser(report);
+  const status = code === 0 && browser.status === 'passed' ? 'passed' : 'failed';
   const faults = browser.failures.filter(f => f.hostFault).length;
   const note = [code !== 0 && `exit ${code}`, browser.failed && `${browser.failed} failed`,
     faults && `${faults} beside a probable host fault`].filter(Boolean).join('; ');
   return { status, note, browser };
+}
+/** Supported CLI sharding: full discovery, then strictly sequential child lifetimes; no shard is retried. */
+async function runBrowserShards(step, io) {
+  const count = step.browserShards;
+  const browser = { status: 'failed', failed: 0, failures: [], inventory: null, shards: [] };
+  const part = (name, extra) => {
+    const root = join(step.results, name), report = join(root, 'report.json'), identityReport = join(root, 'identities.json');
+    const args = [...step.args];
+    args.splice(args.indexOf('--output'), 2, '--output', join(root, 'results'));
+    args.splice(args.indexOf('--reporter=list,json'), 1, '--reporter=' + (name === 'inventory' ? 'json,' : 'list,json,') + resolve('scripts/browser-case-reporter.mjs'));
+    args.push('--workers=1', '--retries=0', '--repeat-each=1', ...extra);
+    return { ...step, args, report, identityReport, durable: true, env: { ...step.env, PLAYWRIGHT_JSON_OUTPUT_NAME: resolve(report), PLAYWRIGHT_JSON_OUTPUT_FILE: resolve(report),
+      CLOUDIATOR_BROWSER_IDENTITY_REPORT: resolve(identityReport) } };
+  };
+  const execute = async (child, inventory = false) => {
+    io.log(`Browser ${step.id}: ${inventory ? 'inventory' : child.args.at(-1)} (no retries)`);
+    let code, parsed, raw;
+    try {
+      code = await io.exec(child);
+      raw = inspectBrowser(io.readBrowserReport(child), { inventory, bounded: true, allowEmpty: !inventory });
+      parsed = inspectBrowser(io.readBrowserReport({ ...child, report: child.identityReport }), { inventory, bounded: true, companion: true, allowEmpty: !inventory });
+    } catch {
+      code = 127; parsed = { cases: [], failed: 0, failures: [{ test: '(run)', message: 'browser child or report read failed' }], status: 'failed' };
+    }
+    browser.failed += Math.max(parsed.failed, raw?.failed ?? 0);
+    browser.failures.push(...parsed.failures);
+    for (const failure of raw?.failures ?? []) if (!browser.failures.some(f => f.message === failure.message && f.hostFault === failure.hostFault)) browser.failures.push(failure);
+    if (raw && raw.cases.length !== parsed.cases.length) browser.failures.push({ test: '(report)', message: 'raw and identity browser reports disagree on case count' });
+    if (code !== 0) browser.failures.push({ test: '(run)', message: `browser ${inventory ? 'inventory' : 'shard'} exit ${code}` });
+    return { code, report: child.report, identityReport: child.identityReport, results: child.args[child.args.indexOf('--output') + 1], identities: parsed.cases.map(c => c.identity),
+      executable: parsed.cases.filter(c => !c.skipped).length, skipped: parsed.cases.filter(c => c.skipped).length,
+      valid: code === 0 && parsed.status === 'passed' && raw?.status === 'passed' && raw.cases.length === parsed.cases.length };
+  };
+  browser.inventory = await execute(part('inventory', ['--list']), true);
+  if (browser.inventory.valid) {
+    for (let n = 1; n <= count; n++) browser.shards.push({ shard: n, ...await execute(part(`shard-${n}-of-${count}`, [`--shard=${n}/${count}`])) });
+  }
+  const encode = identity => JSON.stringify(identity);
+  const expected = new Set(browser.inventory.identities.map(encode));
+  const seen = new Set(), duplicates = new Set();
+  for (const shard of browser.shards) for (const identity of shard.identities) {
+    const key = encode(identity); if (seen.has(key)) duplicates.add(key); seen.add(key);
+  }
+  const decode = keys => [...keys].sort().map(key => JSON.parse(key));
+  const missing = [...expected].filter(key => !seen.has(key)), extra = [...seen].filter(key => !expected.has(key));
+  if (missing.length || extra.length || duplicates.size) browser.failures.push({ test: '(coverage)', message: `browser identity coverage: ${missing.length} missing, ${extra.length} extra, ${duplicates.size} duplicate` });
+  browser.coverage = { complete: browser.inventory.valid && browser.shards.length === count && !browser.failures.length,
+    expected: expected.size, observed: seen.size, executable: browser.shards.reduce((sum, s) => sum + s.executable, 0),
+    skipped: browser.shards.reduce((sum, s) => sum + s.skipped, 0), identities: decode(expected), observedIdentities: decode(seen),
+    missing: decode(missing), extra: decode(extra), duplicates: decode(duplicates) };
+  browser.status = browser.coverage.complete ? 'passed' : 'failed';
+  const faults = browser.failures.filter(f => f.hostFault).length;
+  return { status: browser.status, browser, note: `${count} sequential shards; ${seen.size}/${expected.size} case identities covered`
+    + (faults ? `; ${faults} beside a probable host fault` : '') };
 }
 /** The approved database rerun (verification-gates.md): exactly once, after the Edge container changed during a run. */
 const DB_RERUNS = 1;
@@ -565,7 +606,7 @@ async function settleEdge({ container, probe }, { quietMs, timeoutMs }) {
 
 /** The command line options (see the header). There is no rerun option: the database rerun is the approved single one. */
 export function parseOptions(argv) {
-  const options = { quietMs: 30_000, timeoutMs: 300_000 };
+  const options = { quietMs: 30_000, timeoutMs: 300_000, browserShards: 1 };
   for (let i = 0; i < argv.length; i++) {
     const value = () => { const v = argv[++i]; if (v === undefined) throw new Error(`${argv[i - 1]} needs a value`); return v; };
     const number = (v) => { const n = Number(v); if (!Number.isFinite(n) || n < 0) throw new Error(`Not a number: ${v}`); return n; };
@@ -575,12 +616,17 @@ export function parseOptions(argv) {
       case '--static-port': options.staticPort = number(value()); break;
       case '--json': options.json = value(); break;
       case '--results': options.results = value(); break;
+      case '--browser-shards': options.browserShards = validShards(Number(value())); break;
       case '--edge-quiet': options.quietMs = number(value()) * 1_000; break;
       case '--edge-timeout': options.timeoutMs = number(value()) * 1_000; break;
       default: throw new Error(`Unknown option ${argv[i]}`);
     }
   }
   return options;
+}
+function validShards(value) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 32) throw new Error('--browser-shards must be an integer from 1 to 32');
+  return value;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -591,7 +637,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const report = steps.find(step => step.kind === 'db').report;
   const startedAtIso = new Date().toISOString();
   const results = await runGate(steps, {
-    exec: (step) => { if (step.report) rmSync(step.report, { force: true }); return exec(step); },
+    exec: (step) => {
+      if (step.durable) {
+        // The controller supplies a fresh results root. Refuse collisions rather than delete previous evidence or read stale JSON.
+        if (existsSync(dirname(step.report))) { console.error('Browser artifact directory already exists; supply a fresh --results root.'); return 127; }
+        mkdirSync(dirname(step.report), { recursive: true });
+        mkdirSync(step.args[step.args.indexOf('--output') + 1], { recursive: true });
+      } else if (step.report) rmSync(step.report, { force: true });
+      return exec(step);
+    },
     settleEdge: () => settleEdge(stack, options),
     edgeStartedAt: () => startedAt(stack.container),
     readDbReport: () => { try { return JSON.parse(readFileSync(report, 'utf8')); } catch { return null; } },

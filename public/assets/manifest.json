@@ -133,10 +133,10 @@
    "kind": "actor"
   },
   "npcs": {
-   "image": "actors/npcs.8a1df61477.png",
+   "image": "actors/npcs.7e743ff82c.png",
    "data": "actors/npcs.json",
    "width": 1536,
-   "height": 448,
+   "height": 832,
    "kind": "actor"
   },
   "creatures": {
@@ -1113,6 +1113,526 @@
     "guard/tend/se/1",
     "guard/tend/se/2",
     "guard/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-night-watch/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "night-watch/idle/se/0",
+    "night-watch/idle/se/1",
+    "night-watch/idle/se/2",
+    "night-watch/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-night-watch/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "night-watch/idle/ne/0",
+    "night-watch/idle/ne/1",
+    "night-watch/idle/ne/2",
+    "night-watch/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-night-watch/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "night-watch/walk/se/0",
+    "night-watch/walk/se/1",
+    "night-watch/walk/se/2",
+    "night-watch/walk/se/3",
+    "night-watch/walk/se/4",
+    "night-watch/walk/se/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-night-watch/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "night-watch/walk/ne/0",
+    "night-watch/walk/ne/1",
+    "night-watch/walk/ne/2",
+    "night-watch/walk/ne/3",
+    "night-watch/walk/ne/4",
+    "night-watch/walk/ne/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-night-watch/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "night-watch/talk/se/0",
+    "night-watch/talk/se/1",
+    "night-watch/talk/se/2",
+    "night-watch/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-night-watch/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "night-watch/tend/se/0",
+    "night-watch/tend/se/1",
+    "night-watch/tend/se/2",
+    "night-watch/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-water-carrier/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "water-carrier/idle/se/0",
+    "water-carrier/idle/se/1",
+    "water-carrier/idle/se/2",
+    "water-carrier/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-water-carrier/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "water-carrier/idle/ne/0",
+    "water-carrier/idle/ne/1",
+    "water-carrier/idle/ne/2",
+    "water-carrier/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-water-carrier/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "water-carrier/walk/se/0",
+    "water-carrier/walk/se/1",
+    "water-carrier/walk/se/2",
+    "water-carrier/walk/se/3",
+    "water-carrier/walk/se/4",
+    "water-carrier/walk/se/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-water-carrier/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "water-carrier/walk/ne/0",
+    "water-carrier/walk/ne/1",
+    "water-carrier/walk/ne/2",
+    "water-carrier/walk/ne/3",
+    "water-carrier/walk/ne/4",
+    "water-carrier/walk/ne/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-water-carrier/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "water-carrier/talk/se/0",
+    "water-carrier/talk/se/1",
+    "water-carrier/talk/se/2",
+    "water-carrier/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-water-carrier/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "water-carrier/tend/se/0",
+    "water-carrier/tend/se/1",
+    "water-carrier/tend/se/2",
+    "water-carrier/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-herald/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "herald/idle/se/0",
+    "herald/idle/se/1",
+    "herald/idle/se/2",
+    "herald/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-herald/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "herald/idle/ne/0",
+    "herald/idle/ne/1",
+    "herald/idle/ne/2",
+    "herald/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-herald/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "herald/walk/se/0",
+    "herald/walk/se/1",
+    "herald/walk/se/2",
+    "herald/walk/se/3",
+    "herald/walk/se/4",
+    "herald/walk/se/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-herald/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "herald/walk/ne/0",
+    "herald/walk/ne/1",
+    "herald/walk/ne/2",
+    "herald/walk/ne/3",
+    "herald/walk/ne/4",
+    "herald/walk/ne/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-herald/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "herald/talk/se/0",
+    "herald/talk/se/1",
+    "herald/talk/se/2",
+    "herald/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-herald/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "herald/tend/se/0",
+    "herald/tend/se/1",
+    "herald/tend/se/2",
+    "herald/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-porter/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "porter/idle/se/0",
+    "porter/idle/se/1",
+    "porter/idle/se/2",
+    "porter/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-porter/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "porter/idle/ne/0",
+    "porter/idle/ne/1",
+    "porter/idle/ne/2",
+    "porter/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-porter/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "porter/walk/se/0",
+    "porter/walk/se/1",
+    "porter/walk/se/2",
+    "porter/walk/se/3",
+    "porter/walk/se/4",
+    "porter/walk/se/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-porter/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "porter/walk/ne/0",
+    "porter/walk/ne/1",
+    "porter/walk/ne/2",
+    "porter/walk/ne/3",
+    "porter/walk/ne/4",
+    "porter/walk/ne/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-porter/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "porter/talk/se/0",
+    "porter/talk/se/1",
+    "porter/talk/se/2",
+    "porter/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-porter/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "porter/tend/se/0",
+    "porter/tend/se/1",
+    "porter/tend/se/2",
+    "porter/tend/se/3"
+   ],
+   "durationsMs": [
+    260,
+    160,
+    220,
+    200
+   ],
+   "loop": true
+  },
+  "npc-forester/idle/se": {
+   "atlas": "npcs",
+   "frames": [
+    "forester/idle/se/0",
+    "forester/idle/se/1",
+    "forester/idle/se/2",
+    "forester/idle/se/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-forester/idle/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "forester/idle/ne/0",
+    "forester/idle/ne/1",
+    "forester/idle/ne/2",
+    "forester/idle/ne/3"
+   ],
+   "durationsMs": [
+    260,
+    220,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-forester/walk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "forester/walk/se/0",
+    "forester/walk/se/1",
+    "forester/walk/se/2",
+    "forester/walk/se/3",
+    "forester/walk/se/4",
+    "forester/walk/se/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-forester/walk/ne": {
+   "atlas": "npcs",
+   "frames": [
+    "forester/walk/ne/0",
+    "forester/walk/ne/1",
+    "forester/walk/ne/2",
+    "forester/walk/ne/3",
+    "forester/walk/ne/4",
+    "forester/walk/ne/5"
+   ],
+   "durationsMs": [
+    120,
+    120,
+    120,
+    120,
+    120,
+    120
+   ],
+   "loop": true
+  },
+  "npc-forester/talk/se": {
+   "atlas": "npcs",
+   "frames": [
+    "forester/talk/se/0",
+    "forester/talk/se/1",
+    "forester/talk/se/2",
+    "forester/talk/se/3"
+   ],
+   "durationsMs": [
+    260,
+    200,
+    260,
+    220
+   ],
+   "loop": true
+  },
+  "npc-forester/tend/se": {
+   "atlas": "npcs",
+   "frames": [
+    "forester/tend/se/0",
+    "forester/tend/se/1",
+    "forester/tend/se/2",
+    "forester/tend/se/3"
    ],
    "durationsMs": [
     260,
@@ -2352,6 +2872,116 @@
       "se": "npc-guard/tend/se"
      }
     }
+   },
+   {
+    "id": "night-watch",
+    "name": "Night Watch",
+    "role": "guard",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-night-watch/idle/se",
+      "ne": "npc-night-watch/idle/ne"
+     },
+     "walk": {
+      "se": "npc-night-watch/walk/se",
+      "ne": "npc-night-watch/walk/ne"
+     },
+     "talk": {
+      "se": "npc-night-watch/talk/se"
+     },
+     "tend": {
+      "se": "npc-night-watch/tend/se"
+     }
+    }
+   },
+   {
+    "id": "water-carrier",
+    "name": "Petra the Water Carrier",
+    "role": "water-carrier",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-water-carrier/idle/se",
+      "ne": "npc-water-carrier/idle/ne"
+     },
+     "walk": {
+      "se": "npc-water-carrier/walk/se",
+      "ne": "npc-water-carrier/walk/ne"
+     },
+     "talk": {
+      "se": "npc-water-carrier/talk/se"
+     },
+     "tend": {
+      "se": "npc-water-carrier/tend/se"
+     }
+    }
+   },
+   {
+    "id": "herald",
+    "name": "Felix the Herald",
+    "role": "herald",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-herald/idle/se",
+      "ne": "npc-herald/idle/ne"
+     },
+     "walk": {
+      "se": "npc-herald/walk/se",
+      "ne": "npc-herald/walk/ne"
+     },
+     "talk": {
+      "se": "npc-herald/talk/se"
+     },
+     "tend": {
+      "se": "npc-herald/tend/se"
+     }
+    }
+   },
+   {
+    "id": "porter",
+    "name": "Quintus the Porter",
+    "role": "porter",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-porter/idle/se",
+      "ne": "npc-porter/idle/ne"
+     },
+     "walk": {
+      "se": "npc-porter/walk/se",
+      "ne": "npc-porter/walk/ne"
+     },
+     "talk": {
+      "se": "npc-porter/talk/se"
+     },
+     "tend": {
+      "se": "npc-porter/tend/se"
+     }
+    }
+   },
+   {
+    "id": "forester",
+    "name": "Silva the Forester",
+    "role": "forester",
+    "atlas": "npcs",
+    "animations": {
+     "idle": {
+      "se": "npc-forester/idle/se",
+      "ne": "npc-forester/idle/ne"
+     },
+     "walk": {
+      "se": "npc-forester/walk/se",
+      "ne": "npc-forester/walk/ne"
+     },
+     "talk": {
+      "se": "npc-forester/talk/se"
+     },
+     "tend": {
+      "se": "npc-forester/tend/se"
+     }
+    }
    }
   ],
   "creatures": [
@@ -2759,9 +3389,9 @@
    "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
   },
   {
-   "file": "actors/npcs.8a1df61477.png",
-   "sha256": "8a1df614771d2b7e10c9267a5d8d91e3f4807372a17086db35ccc08cec6082a4",
-   "bytes": 36185,
+   "file": "actors/npcs.7e743ff82c.png",
+   "sha256": "7e743ff82cabd316758b44787fb048d83799aba53ffcf6707e35128a301e0b80",
+   "bytes": 67807,
    "source": "generated",
    "generator": "assets/source/generators/npcs.mjs",
    "inputs": [
@@ -2781,8 +3411,8 @@
   },
   {
    "file": "actors/npcs.json",
-   "sha256": "8ac81ede61fc7ac378beae134288c477c0911fe7d5aa1ad2e9a7dc5f91e83460",
-   "bytes": 38035,
+   "sha256": "b95d43f289edc3bf8798f251ad82363c193d351476640058b84fb836208a72a2",
+   "bytes": 70093,
    "source": "generated",
    "generator": "assets/source/generators/npcs.mjs",
    "inputs": [

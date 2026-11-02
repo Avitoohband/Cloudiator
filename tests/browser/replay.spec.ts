@@ -9,9 +9,44 @@ import { decodePng } from '../../assets/source/tools/png.mjs';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { worldFixture } from '../fixtures/domain';
 import { SUPABASE_URL, emptyWorld, routeLiveReads, type LiveTransport } from './live-routes';
-import { openMenu } from './shell-helpers';
+import { openMenu, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
+test.describe('final review regressions', () => {
+  test.skip(production, 'These regressions require the development fixture or routed transport.');
+test('final R4 standalone retains a future requested stage then respects an intentional selection', async ({ page, context }) => {
+  const at = Date.now(), activityId = REPLAY_FIXTURES.expedition.activityId;
+  const first = structuredClone(LOGS['expedition-1']), second = structuredClone(LOGS['expedition-2']);
+  const secondAt = at - 1000;
+  const timeline: RevealedTimeline = { activityId, serverNowMs: at, visibleThroughMs: at, stages: [
+    { id: 'first', kind: 'encounter', label: 'Encounter 1', revealedAtMs: at - 60000, startedAtMs: at - 60000, endsAtMs: at - 30000, battleLog: first },
+    { id: 'second', kind: 'encounter', label: 'Encounter 2', revealedAtMs: secondAt, startedAtMs: secondAt, endsAtMs: secondAt + second.durationMs, battleLog: second },
+  ] };
+  await routeLiveReads(context, { world: emptyWorld(at), timelines: { [activityId]: timeline }, serverNowMs: () => at });
+  await page.goto(`/replay/?activity=${activityId}&stage=second`);
+  await page.waitForFunction(() => !!window.__cloudiatorReplay);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), secondAt + second.durationMs - 1);
+  expect((await replayState(page)).battleId).toBe(first.battleId);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), secondAt + second.durationMs);
+  await expect.poll(async () => (await replayState(page)).battleId).toBe(second.battleId);
+  const length = await page.evaluate(() => history.length);
+  await page.getByRole('button', { name: 'Previous bout', exact: true }).click();
+  await expect.poll(async () => (await replayState(page)).battleId).toBe(first.battleId);
+  await page.evaluate(t => window.__cloudiatorShell!.clock.freeze(t), secondAt + second.durationMs + 1000);
+  expect((await replayState(page)).battleId).toBe(first.battleId); expect(await page.evaluate(() => history.length)).toBe(length);
+});
+
+test('final R7 standalone multichapter end card is Again only while bar still steps', async ({ page }) => {
+  await openReplay(page, REPLAY_FIXTURES.expedition.activityId, 'woodland-encounter-1');
+  await page.evaluate(() => window.__cloudiatorReplay!.seek(999999));
+  const card = page.locator('[data-end-card]');
+  await expect(card.getByRole('button')).toHaveCount(1);
+  await expect(card.getByRole('button')).toHaveAccessibleName(/Again|Watch again/);
+  await page.getByRole('group', { name: 'Replay controls', exact: true }).getByRole('button', { name: 'Next bout', exact: true }).click();
+  await expect.poll(async () => (await replayState(page)).battleId).toBe(LOGS['expedition-2'].battleId);
+});
+});
+
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const LOGS: Record<string, BattleLog> = Object.fromEntries(['pvp', 'npc', 'tie', 'expedition-1', 'expedition-2', 'expedition-3']
   .map(name => [name, readJson(`tests/fixtures/battles/${name}.json`)]));
@@ -27,6 +62,10 @@ const url = (activity: string, stage: string | null = null) => `/replay/?mode=fi
 async function openReplay(page: Page, activity: string, stage: string | null = null) {
   await page.goto(url(activity, stage));
   await page.waitForFunction(() => !!window.__cloudiatorReplay?.state(), null, { timeout: 45_000 });
+  // These legacy cases inspect the contents of the approved closed phone details.
+  if (await touchLayout(page)) {
+    for (const name of ['Fighters at the start', 'Combat log']) await page.getByRole('group', { name, exact: true }).locator('summary').click();
+  }
 }
 const sceneReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
 const replayState = (page: Page) => page.evaluate(() => window.__cloudiatorReplay!.state());
@@ -97,7 +136,7 @@ test.describe('battle-log replay', () => {
         await expect(table).toContainText(`${(p.attackIntervalMs / 1000).toFixed(2)} s`);
       }
       await expect(hpMeter(page, a.name)).toHaveAttribute('aria-valuenow', `${a.initialHealth}`);
-      await page.getByRole('button', { name: 'Skip to result' }).click();
+      await page.getByRole('button', { name: 'Skip to the result' }).click();
       for (const [i, p] of log.participants.entries()) {
         await expect(hpMeter(page, p.name)).toHaveAttribute('aria-valuenow', `${log.finalHp[i]}`);
         await expect(hpMeter(page, p.name)).toContainText(`${log.finalHp[i]} / ${p.maxHealth}`);
@@ -126,31 +165,32 @@ test.describe('battle-log replay', () => {
   test('labels the NPC opponent, the creature encounter and each credited reward from the summary', async ({ page }) => {
     await openReplay(page, REPLAY_FIXTURES.npc.activityId);
     await expect(page.getByText('NPC opponent', { exact: false }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     const result = page.getByRole('region', { name: 'Result' });
     await expect(result).toContainText('+3 renown');
     await expect(result).toContainText('No rating change');
 
     await openReplay(page, REPLAY_FIXTURES.pvp.activityId);
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     await expect(page.getByRole('region', { name: 'Result' })).toContainText('+10 renown');
     await expect(page.getByRole('region', { name: 'Result' })).toContainText('Rating +14');
 
     await openReplay(page, REPLAY_FIXTURES.expedition.activityId, 'woodland-encounter-2');
-    const encounters = page.getByRole('group', { name: 'Encounters' }).getByRole('button');
+    const encounters = page.getByRole('list', { name: 'Chapters', includeHidden: true }).getByRole('button', { includeHidden: true });
     await expect(encounters).toHaveCount(3);
-    await expect(encounters.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    await expect(encounters.nth(1)).toHaveAttribute('aria-current', 'step');
     await expect(page.getByText('Creature', { exact: true }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     const expedition = page.getByRole('region', { name: 'Result' });
     for (const text of ['+100 XP', '+20 gold', 'Light boots']) await expect(expedition).toContainText(text);
     // Choosing another encounter loads its own log.
-    await encounters.nth(0).click();
-    await expect(encounters.nth(0)).toHaveAttribute('aria-pressed', 'true');
+    if (await touchLayout(page)) await page.getByRole('button', { name: 'Previous bout', exact: true }).click();
+    else await encounters.nth(0).click();
+    await expect(encounters.nth(0)).toHaveAttribute('aria-current', 'step');
     expect((await replayState(page)).battleId).toBe(REPLAY_FIXTURES.expedition.battleIds[0]);
 
     await openReplay(page, REPLAY_FIXTURES.tie.activityId);
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     await expect(page.getByRole('region', { name: 'Result' })).toContainText(/tie-break/i);
     await expect(page.getByRole('region', { name: 'Result' })).toContainText('Rewards are credited when the activity settles');
   });
@@ -162,7 +202,7 @@ test.describe('battle-log replay', () => {
     await expect(saved).toContainText('Defeat');
     await expect(saved).toContainText('+2 renown');
     await expect(saved).toContainText('Rating -9');
-    await expect(page.getByRole('button', { name: 'Skip to result' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Skip to the result' })).toHaveCount(0);
     expect(await page.locator('canvas').count()).toBe(0);
     await page.screenshot({ path: testInfo.outputPath('replay-expired.png'), fullPage: true });
   });
@@ -199,16 +239,18 @@ test.describe('battle-log replay', () => {
   test('fast playback, pause, restart and skip each reach the logged result', async ({ page }) => {
     const log = LOGS.pvp;
     await openReplay(page, REPLAY_FIXTURES.pvp.activityId);
-    const fast = page.getByRole('button', { name: 'Fast ×4' });
-    await expect(fast).toHaveAttribute('aria-pressed', 'false');
+    const fast = page.getByRole('button', { name: /^Speed / });
+    await expect(fast).toHaveAccessibleName('Speed 1×');
     await fast.click();
-    await expect(fast).toHaveAttribute('aria-pressed', 'true');
+    await expect(fast).toHaveAccessibleName('Speed 2×');
+    await fast.click();
+    await expect(fast).toHaveAccessibleName('Speed 4×');
     const started = Date.now();
     await page.waitForFunction(() => !window.__cloudiatorReplay!.state().playing, null, { timeout: 20_000 });
     expect(Date.now() - started).toBeLessThan(((log.durationMs + 2000) / 4) * 1.8 + 1500);
     expect(await replayState(page)).toMatchObject({ speed: 'fast', finished: true, hp: [...log.finalHp], winnerId: log.winnerId });
 
-    await page.getByRole('button', { name: 'Restart' }).click();
+    await page.keyboard.press('r');
     await expect(hpMeter(page, 'Varro')).toHaveAttribute('aria-valuenow', `${log.participants[1].initialHealth}`);
     expect((await replayState(page)).playing).toBe(true);
     await page.getByRole('button', { name: 'Pause' }).click();
@@ -221,25 +263,27 @@ test.describe('battle-log replay', () => {
     await page.waitForFunction(() => !window.__cloudiatorReplay!.state().playing, null, { timeout: 20_000 });
     expect(await replayState(page)).toMatchObject({ finished: true, hp: [...log.finalHp], winnerId: log.winnerId });
 
-    await page.getByRole('button', { name: 'Restart' }).click();
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.keyboard.press('r');
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     expect(await replayState(page)).toMatchObject({ playing: false, finished: true, hp: [...log.finalHp], winnerId: log.winnerId });
   });
 
   test('drives the controls from the keyboard', async ({ page }) => {
     const log = LOGS.npc;
     await openReplay(page, REPLAY_FIXTURES.npc.activityId);
-    await page.getByRole('button', { name: 'Restart' }).focus();
+    await page.getByRole('button', { name: 'Pause', exact: true }).focus();
     await page.keyboard.press('k');
     expect((await replayState(page)).playing).toBe(false);
     await page.keyboard.press('f');
-    await expect(page.getByRole('button', { name: 'Fast ×4' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Speed 2×', exact: true })).toBeVisible();
+    await page.keyboard.press('f');
+    await expect(page.getByRole('button', { name: 'Speed 4×', exact: true })).toBeVisible();
     await page.keyboard.press('End');
     expect(await replayState(page)).toMatchObject({ finished: true, hp: [...log.finalHp] });
     await page.keyboard.press('r');
     expect(await replayState(page)).toMatchObject({ playing: true, finished: false });
     // Buttons work with Enter and Space as usual.
-    await page.getByRole('button', { name: 'Skip to result' }).focus();
+    await page.getByRole('button', { name: 'Skip to the result' }).focus();
     await page.keyboard.press('Enter');
     expect((await replayState(page)).finished).toBe(true);
   });
@@ -358,7 +402,7 @@ test.describe('battle-log replay', () => {
     await openReplay(page, REPLAY_FIXTURES.pvp.activityId);
     await expect(page.getByText(/needs WebGL/)).toBeVisible({ timeout: 30_000 });
     expect(await page.locator('canvas').count()).toBe(0);
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     await expect(hpMeter(page, 'Varro')).toHaveAttribute('aria-valuenow', `${log.finalHp[1]}`);
     await expect(page.getByRole('region', { name: 'Result' })).toContainText('Aster wins');
     await expect(page.getByRole('list', { name: 'Combat log' }).getByRole('listitem')).toHaveCount(log.events.length);
@@ -369,7 +413,7 @@ test.describe('battle-log replay', () => {
     const log = LOGS.npc;
     await openReplay(page, REPLAY_FIXTURES.npc.activityId);
     await expect(page.getByText(/art could not load/)).toBeVisible({ timeout: 30_000 });
-    await page.getByRole('button', { name: 'Skip to result' }).click();
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
     await expect(page.getByRole('list', { name: 'Combat log' }).getByRole('listitem')).toHaveCount(log.events.length);
   });
 
@@ -382,7 +426,7 @@ test.describe('battle-log replay', () => {
     const canvas = (await page.locator('canvas').boundingBox())!;
     expect(canvas.x).toBeGreaterThanOrEqual(0);
     expect(canvas.x + canvas.width).toBeLessThanOrEqual(360);
-    for (const name of ['Pause', 'Fast ×4', 'Restart', 'Skip to result']) {
+    for (const name of ['Pause', 'Speed 1×', 'Skip to the result']) {
       const box = (await page.getByRole('button', { name }).boundingBox())!;
       expect(box.height, name).toBeGreaterThanOrEqual(40);
       expect(box.x >= 0 && box.x + box.width <= 360, name).toBe(true);
@@ -473,7 +517,7 @@ test.describe('battle-log replay', () => {
       const asked = lookReads(live)[0].at;
       // The page, its controls and its log are already there; only the scene waits for the looks (one batched read for both).
       await expect(page.getByRole('heading', { level: 1, name: 'Aster vs Cassia' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Skip to result' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Skip to the result' })).toBeVisible();
       await expect(page.getByText('Setting the stage…')).toBeVisible();
       // Well within the 1.5 s wait, long enough for a scene that was mounted at once to have started (it loads Phaser first).
       await page.waitForTimeout(Math.max(0, asked + 500 - Date.now()));
@@ -533,7 +577,7 @@ test.describe('battle-log replay', () => {
       expectLegacy(left.layers, aster.gladiatorId!);
       expectLegacy(right.layers, cassia.gladiatorId!);
       expect(lookReads(live).length).toBeGreaterThan(0);
-      await page.getByRole('button', { name: 'Skip to result' }).click();
+      await page.getByRole('button', { name: 'Skip to the result' }).click();
       expect(await replayState(page)).toMatchObject({ finished: true, hp: [...log.finalHp], winnerId: log.winnerId });
     });
 

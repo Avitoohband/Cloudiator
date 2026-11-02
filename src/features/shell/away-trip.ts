@@ -8,7 +8,10 @@
 // `AwayState` is a union on `kind`, and every consumer switches on it (the words, the scene, the progress): a new state (the Arena
 // bout of patch 1.5) is a new member, a new case in `awayText` and `awayScene`, and the compiler names what is missing.
 import type { GameNotification, OwnerState } from '@contracts/reads';
+import type { RevealedTimeline } from '@contracts/events';
 import { RULES_V1 } from '@domain/rules-v1';
+import { boutEndMs } from '../../game/replay';
+import { ratingText } from '../bouts/bout-text';
 import type { SceneView } from './scene-url';
 
 /** The device key: a JSON array of the activity ids whose "back" button was closed, the newest 50. */
@@ -22,9 +25,25 @@ const FIGHT_MINUTES = [20, 40, 60] as const;
 
 export type AwayState =
   | { kind: 'running'; activityId: string; name: string; destination: string | null; minute: number; nextFight: 20 | 40 | 60 | null }
-  | { kind: 'back'; activityId: string; name: string; destination: string | null; result: 'success' | 'defeat' | 'processing'; rewards: { money: number; xp: number } | null };
+  | { kind: 'back'; activityId: string; name: string; destination: string | null; result: 'success' | 'defeat' | 'processing'; rewards: { money: number; xp: number } | null }
+  | { kind: 'bout'; activityId: string; name: string; opponent: string; won: boolean; rewards: { renown: number; ratingDelta: number | null } | null };
 
 const slotOf = (ms: number) => Math.floor(ms / SLOT_MS);
+
+/** A revealed owner's bout, from its logged end until the end of the following slot. */
+export function boutAway({ owner, timeline, nowMs, closed }: {
+  owner: Pick<OwnerState, 'name' | 'gladiatorId'>; timeline: RevealedTimeline | null; nowMs: number; closed: ReadonlySet<string>;
+}): AwayState | null {
+  if (!timeline || closed.has(timeline.activityId)) return null;
+  const stage = timeline.stages.find(s => s.kind === 'bout' && s.revealedAtMs <= nowMs
+    && s.battleLog?.participants.some(p => p.gladiatorId === owner.gladiatorId));
+  if (!stage?.battleLog || nowMs < boutEndMs(stage) || nowMs >= (slotOf(stage.startedAtMs) + 2) * SLOT_MS) return null;
+  const me = stage.battleLog.participants.find(p => p.gladiatorId === owner.gladiatorId)!;
+  const opponent = stage.battleLog.participants.find(p => p.id !== me.id)!;
+  const summary = timeline.summary?.activityId === timeline.activityId && timeline.summary.settledAtMs <= nowMs ? timeline.summary : null;
+  return { kind: 'bout', activityId: timeline.activityId, name: owner.name, opponent: opponent.name, won: stage.battleLog.winnerId === me.id,
+    rewards: summary ? { renown: summary.rewards.renown, ratingDelta: summary.ratingDelta ?? null } : null };
+}
 
 /** The back state of a trip whose result the owner's notifications hold; `destination` is the trip's own, else the one the caller knows. */
 const settled = (name: string, trip: GameNotification, fallback: string | null): AwayState => ({ kind: 'back', activityId: trip.activityId, name,
@@ -77,6 +96,14 @@ const place = (destination: string | null) => (destination ? `the ${destination}
  */
 export function awayText(state: AwayState, compact: boolean): AwayText {
   switch (state.kind) {
+    case 'bout': {
+      const rating = state.rewards?.ratingDelta ? ratingText(state.rewards.ratingDelta) : '';
+      const renown = state.rewards?.renown ? `+${state.rewards.renown} renown` : '';
+      const sub = !state.rewards ? compact ? 'Rewards at minute 80' : 'Rewards are credited at minute 80'
+        : compact ? rating || renown || 'No rewards' : [renown, rating].filter(Boolean).join(' · ') || 'No rewards';
+      return { name: state.name, title: ` ${state.won ? 'beat' : 'lost to'} ${state.opponent}${compact ? '' : ' in the Arena'}`,
+        sub, action: compact ? '▶ Watch' : '▶ Watch the bout' };
+    }
     case 'running': {
       const minute = `Minute ${state.minute} of ${TRIP_MINUTES}`;
       return {
@@ -105,6 +132,7 @@ export function awayScene(state: AwayState): SceneView {
   switch (state.kind) {
     case 'running': return { kind: 'expedition', activityId: state.activityId };
     case 'back': return { kind: 'expedition', activityId: state.activityId, play: 'trip' };
+    case 'bout': return { kind: 'replay', activityId: state.activityId };
   }
 }
 
@@ -112,7 +140,7 @@ export function awayScene(state: AwayState): SceneView {
 export function awayProgress(state: AwayState): number | null {
   switch (state.kind) {
     case 'running': return Math.min(1, state.minute / TRIP_MINUTES);
-    case 'back': return null;
+    case 'back': case 'bout': return null;
   }
 }
 

@@ -149,6 +149,10 @@ describe('visitor read access', () => {
     const profile = await readProfile(anonymous, f.gid);
     expect(profile.actor.gladiatorId).toBe(f.gid);
     expect(profile).toEqual(await readProfile(spectator.client, f.gid));
+    // Task 11c (M26): the profile carries the current build, the creation time and the record over all seasons, the same for both.
+    expect(profile.build?.equipment.weapon?.catalogId).toMatch(/^sword:/);
+    expect(profile.joinedAtMs).toEqual(expect.any(Number));
+    expect(profile.arenaRecord).toEqual({ wins: 1, losses: 0 });
     const standings = await readStandings(anonymous, 'bronze');
     expect(standings.rows.map(r => r.gladiatorId)).toEqual([f.gid]);
     expect(standings).toEqual(await readStandings(spectator.client, 'bronze'));

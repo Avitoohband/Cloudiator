@@ -31,14 +31,20 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 function bracket(key: TournamentKey, minute: number, overrides: Partial<BracketModel> = {}, view: TournamentView = TOURNAMENT_VIEWS[key]): string {
   const state = renderTournament(view, TOURNAMENTS[key].startsAtMs + minute * MIN, { viewerId: ASTER });
-  const model: BracketModel = { state, round: state.currentRound, replayBoutId: null, viewerId: ASTER, timeZone: 'UTC', ...overrides };
-  return renderToStaticMarkup(createElement(TournamentBracketView, { model, onRound: noop, onWatch: noop, onCloseReplay: noop }));
+  const model: BracketModel = { state, round: state.currentRound, viewerId: ASTER, timeZone: 'UTC', ...overrides };
+  return renderToStaticMarkup(createElement(TournamentBracketView, { model, onRound: noop, onWatch: noop }));
 }
 function registration(now: number, overrides: Partial<RegistrationModel> = {}): string {
   const model: RegistrationModel = { optIn: ownerFixture.tournamentOptIn, busy: false, message: null, displayNowMs: now, timeZone: 'UTC',
     owner: { evening: ownerFixture.schedule.evening, stamina: ownerFixture.stamina.current }, ...overrides };
   return renderToStaticMarkup(createElement(RegistrationView, { model, onToggle: noop }));
 }
+
+it('Watch replay asks for the full-screen bout, never an inline replay', () => {
+  const html = bracket('completed', 85, { round: 1 });
+  expect(count(html, '>Watch replay<')).toBe(4);
+  for (const old of ['Close replay', 'Replay · ', 'Combat log']) expect(text(html)).not.toContain(old);
+});
 
 describe('tournament registration', () => {
   it('shows the owner’s opt-in, the entry rules and what a change applies to before the cutoff', () => {
@@ -236,7 +242,7 @@ describe('tournament bracket', () => {
     expect(text(tie)).toContain('You are the champion of this tournament!');
   });
 
-  it('shows the owner’s loss and spectating, and replays only completed bouts inline, never through /replay/', () => {
+  it('shows the owner’s loss and spectating, and offers full-screen replays only for completed bouts', () => {
     const html = bracket('completed', 30, { round: 1 });
     const words = text(html);
     expect(words).toContain('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sep, 20:00 UTC; this slot has no other activity for you.');
@@ -245,20 +251,6 @@ describe('tournament bracket', () => {
     expect(words).toMatch(/Eliminated in the Quarterfinals · spectating/);
   });
 
-  it('nests the inline replay’s headings under the panel’s, while BattleReplay keeps its h1 by default', () => {
-    const final = (v: TournamentView) => v.bouts.find(b => b.round === 3)!;
-    const boutId = final(TOURNAMENT_VIEWS.completed).id;
-    const html = bracket('completed', 85, { replayBoutId: boutId });
-    const headings = [...html.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/g)].map(m => [Number(m[1]), text(m[2]).trim()]);
-    // The card title is an h4 (under the tab's h2 and the Brackets h3); the replay section an h5 inside it.
-    expect(headings).toEqual([[4, 'Bronze tournament'], [5, 'Entrants (8)'], [5, 'Replay · Final, bout 1'], [6, 'Severus vs Varro'],
-      [6, 'Result'], [6, 'Fighters'], [6, 'Combat log']]);
-    const log = final(TOURNAMENT_VIEWS.completed).revealedResult!.battleLog!;
-    const stage = { id: boutId, kind: 'bout' as const, label: 'Tournament · Final', revealedAtMs: 0, startedAtMs: 0, endsAtMs: log.durationMs };
-    const standalone = renderToStaticMarkup(createElement(BattleReplay, { view: { kind: 'replay', selected: 0, summary: null, battles: [{ log, stage }] } }));
-    expect([...standalone.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/g)].map(m => [Number(m[1]), text(m[2]).trim()]))
-      .toEqual([[1, 'Severus vs Varro'], [2, 'Result'], [2, 'Fighters'], [2, 'Combat log']]);
-  });
 
   it('places entrants after settlement and shows rewards only for the viewer’s own placement, from its own timeline', () => {
     // No credited summary yet (the owner's timeline is read separately): the place only.
@@ -329,18 +321,6 @@ describe('replays load on demand (2b review I1)', () => {
     expect(text(bracket('pair', 79, {}, polled('pair')))).toContain('Both fell at 0 HP; a seeded tie-break decided it.');
   });
 
-  it('says the replay is loading, or cannot be loaded, until its log arrives, and can be closed either way', () => {
-    const loading = bracket('completed', 85, { replayBoutId: final.id, replayStatus: 'loading' }, polled('completed'));
-    expect(text(loading)).toContain('Replay · Final, bout 1');
-    expect(text(loading)).toContain('Loading the replay…');
-    expect(loading).toContain('>Close replay<');
-    expect(loading).not.toContain('Combat log');
-    const failed = bracket('completed', 85, { replayBoutId: final.id, replayStatus: 'failed' }, polled('completed'));
-    expect(text(failed)).toContain('This replay cannot be loaded right now. Try again shortly.');
-    expect(failed).toContain('>Close replay<');
-    // Once the log is merged the replay plays as before.
-    expect(text(bracket('completed', 85, { replayBoutId: final.id, replayStatus: null }))).toContain('Combat log');
-  });
 });
 
 describe('the tournament being prepared (2b review M4; Task 19 R3 and R5)', () => {
@@ -564,19 +544,6 @@ describe('bout replays older than seven days (Task 22.5)', () => {
     expect(view.placements.every(p => p.completion.replayExpiry.state === 'expired')).toBe(true);
   });
 
-  it('says a watched replay is no longer kept once its log cannot be read after seven days, and cannot be loaded before', () => {
-    const at = expiryMinute('completed');
-    for (const replayStatus of ['loading', 'failed'] as const) {
-      const after = text(bracket('completed', at, { replayBoutId: final.id, replayStatus }, polled('completed')));
-      expect(after).toContain('This replay is no longer kept. Detailed replays are kept for seven days. The result stays in the recent results.');
-      expect(after).not.toContain('cannot be loaded right now');
-      expect(after).not.toContain('Loading the replay…');
-    }
-    const before = text(bracket('completed', at - 1 / MIN, { replayBoutId: final.id, replayStatus: 'failed' }, polled('completed')));
-    expect(before).toContain('This replay cannot be loaded right now. Try again shortly.');
-    // A log already loaded keeps playing: watching it never depends on the clock.
-    expect(text(bracket('completed', at, { replayBoutId: final.id, replayStatus: null }))).toContain('Combat log');
-  });
 
   it('says an old tournament link is no longer kept instead of a missing tournament, by the slot its id carries', () => {
     const tid = tournamentId('completed');

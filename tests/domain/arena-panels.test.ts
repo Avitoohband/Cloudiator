@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { MyBout } from '@/lib/api/reads';
 import type { LeagueId } from '@contracts/commands';
 import type { StandingRow } from '@contracts/reads';
 import { renderArenaStage, ARENA_SLOT_MS } from '@/game/arena-stage';
-import { ArenaCardView, type ArenaCardModel } from '@/features/arena/ArenaPanel';
+import { ArenaCardView, RecentBoutsView, type ArenaCardModel } from '@/features/arena/ArenaPanel';
 import { StandingsView, readStandingsPages, type StandingsModel } from '@/features/arena/StandingsPanel';
 import { NO_INJURY, NPC_DISCLOSURE, arenaUnavailableText, creditedLines, replayHref, resultText } from '@/features/arena/arena-text';
 import { ARENA_ACTIVITIES, ARENA_GLADIATORS, ARENA_STANDINGS, ARENA_TIMELINES, arenaActivityId, arenaStandingsPage, type ArenaActivityKey } from '../fixtures/arena';
@@ -422,4 +423,17 @@ describe('standings pages', () => {
     expect(read.rows.slice(0, 3).map(r => r.awardPlace)).toEqual([1, 2, 3]);
     expect(calls).toEqual([[undefined, undefined], ['1:50', undefined], [undefined, '1'], ['1:50', undefined]]);
   });
+});
+
+it('renders recent bouts in order and nothing for an empty list', () => {
+ const rows: MyBout[] = ['Varro', 'Cassia', 'Iron Warden'].map((name, i) => ({ activityId: String(i), kind: 'arena', slotIndex: i, foughtAtMs: NOW - i * 80 * MIN, settledAtMs: NOW, result: i === 1 ? 'defeat' : 'victory', renown: 3, ratingDelta: null, opponent: { name, npc: i === 2 }, replayExpiry: { state: 'available', expiresAtMs: NOW + MIN }, tieBreak: false, round: null }));
+ const props = { rows, watched: new Set<string>(), nowMs: NOW, onWatch: noop, onAll: noop };
+ const html = renderToStaticMarkup(createElement(RecentBoutsView, props));
+ expect(text(html)).toContain('YOUR RECENT BOUTS');
+ expect(html.indexOf('vs Varro')).toBeLessThan(html.indexOf('vs Cassia'));
+ expect(html.indexOf('vs Cassia')).toBeLessThan(html.indexOf('vs Iron Warden'));
+ expect(html.split('>▶ Watch</button>')).toHaveLength(4);
+ expect(text(html)).toContain('All my bouts in Results →');
+ expect(text(html)).toContain('All my bouts →');
+ expect(renderToStaticMarkup(createElement(RecentBoutsView, { ...props, rows: [] }))).toBe('');
 });

@@ -99,6 +99,19 @@ passed in a normal window. `scripts/set-worker-secret.mjs` matches its count
 with a pattern that reads both shapes, so it needs no change. The rule as a
 general practice is adopted, not separately tested.
 
+## Migration-only pushes — approved local guidance
+
+Avi approved this **Supabase CLI** supplement on 2026-10-31. For a
+migration-only release, pass `--skip-vault` to both `db push --dry-run` and
+`db push`; keep Vault updates separately authorized. Check the installed
+version and command help before use.
+
+Observed: CLI **2.120.0** help states that `db push` updates Vault secrets
+from `config.toml` before migrations unless `--skip-vault` is set. At approval
+time, no default Vault write or hosted release with this flag had been tested;
+the rule is adopted from the documented help, not a verified release fix.
+See the [M26 release steps](docs/operations/migrations.md).
+
 ## Windows Docker startup — approved local guidance
 
 Avi approved this extension on 2026-10-14 for **Supabase CLI**. Before retrying
@@ -245,3 +258,115 @@ stale conflict alert on the next background version. Tested fix `6dc5047` scopes
 the guard to the command's expected version; the ordered
 [planning regression](tests/browser/planning.spec.ts) failed before the fix and
 passed afterward on desktop and mobile.
+
+# Verification modes and offline checks — persistent project overrides
+
+Avi approved these supplements on 2026-11-01 for Verification Before Completion,
+“The Gate Function”. Keep vendor skill caches unchanged.
+
+## Browser groups that need development transport
+
+Give each new sibling describe group its own static-mode guard when its setup
+needs routed backend reads or development-only hooks. A guard in another
+sibling group is not inherited. Key this guard to the gate's `PLAYWRIGHT_STATIC`
+flag (`process.env.PLAYWRIGHT_STATIC === 'true'`). Keep supported static cases active and retain
+the development assertions; verify both applicable behavior and mode selection.
+
+Observed: Away and signed-in My bouts groups used unavailable setup in the
+isolated export. Tested correction: precise group guards retained development
+behavior and supported static checks. Full release evidence stays in the
+[gate handoff](docs/implementation/PATCH-1.5-GATE-2026-11-01.md).
+
+## Deno verification when downloads are not approved
+
+Use the project's `npm run typecheck`; a cache miss stops for separately approved
+preparation. A frozen lock is not an offline guarantee. Validate no-download
+claims with a cold local fixture that observes dependency requests.
+
+Observed on native Windows Deno 2.9.6: `deno check --cached-only --frozen` still requested
+loopback HTTP/npm dependencies from local entrypoints. Tested alternative:
+`deno test --cached-only --frozen --no-run --check` retained local type checking,
+refused cold dependency misses with zero dependency requests, caught a type
+error and did not execute top-level code. In source `26b824f`, the real project's
+`npm run typecheck` passed both function checks and all 3 Edge tests with zero Download
+statuses; these targeted results are separate from a full release gate. The
+actual Edge tests still run afterward. For an already installed tool upgrade, run the existing project offline
+boundary tests against the binary the project actually uses; proceed when the
+same invariants pass, or report the boundary failure. Installing or downgrading
+a binary still needs its own authorization.
+See the [gate guide](docs/operations/verification-gates.md) and
+[boundary tests](tests/scripts/deno-offline.test.ts). CI dependency preparation
+is a separate install stage, using the frozen config/lock and existing pinned
+entrypoints, requiring its own applicable authorization.
+
+# Asynchronous browser probes — persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Await relevant asynchronous probe listeners before capturing one final snapshot.
+Derive both the summary and the verdict from that same snapshot.
+
+Observed: a probe summary captured counters before a response listener finished,
+while its verdict used later values. Tested separately: the corrected fresh 1.5
+anonymous probe awaited the revision listener and passed using one final snapshot;
+see the [release evidence](docs/implementation/PATCH-1.5-RELEASED-2026-11-01.md).
+
+# Benchmark provenance - persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Save benchmark script and setup hashes before the first sample. Retain raw
+samples, protocol changes and explicit exclusions. Do not infer missing initial
+provenance from a later script or journal.
+
+Observed: the first18 usable NPC benchmark samples lacked an initial script
+hash; later attempt journals contain hashes. The proposed upfront guard is
+adopted guidance and has not yet been tested. This documentation change does
+not retroactively verify the missing hash.
+
+# Pages deployment proof - persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Require a fresh Cloudflare Pages deployment UUID, the exact candidate SHA and a
+successful check; compare canonical production HTML and Next asset paths with
+that deployment and the pre-push baseline. A GitHub check suite's branch label
+alone does not identify the deployed branch. See [deployment.md](docs/operations/deployment.md#pages-proof-after-a-client-push).
+
+Observed: the live 1.5 deployment retained its feature-branch suite label.
+Tested separately: its canonical/deployment content comparison passed. New-release
+use of this guidance is still pending; this note does not clear 1.5.1's failed gate.
+
+# Audit reader provenance - persistent project override
+
+Avi explicitly approved this supplement on 2026-11-02 for
+`superpowers:verification-before-completion`, **The Gate Function**. Keep the
+vendor skill cache unchanged.
+
+Retain the code for each audit reader beside its output, and hash the saved
+reader before invoking it. Keep source, report and closure readers identifiable
+as separate artifacts; do not infer their provenance from a later copy or log.
+
+Observed: the C2 audit retained stage and report-pair audit outputs without the
+generator/reader source beside them. Tested today: the fresh saved input,
+report-pair and closure readers were hashed before invocation, executed, and
+passed. This improves reproducibility for the audit without changing the gate
+or its result. Approval and evidence: parent `logs/P151-9E41-APPROVED-AUDIT-READER-GUIDANCE-20261102.md`.
+
+# Browser helper preflight - persistent project override
+
+Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Before a full gate, resolve the chosen config in both browser modes and verify
+its referenced local helpers and their dependencies exist. Copying the config
+alone is insufficient. Retain setup hashes before starting; see the
+[gate guide](docs/operations/verification-gates.md#local-browser-setup-preflight).
+
+Observed: the copied NPC config referenced a missing static-server helper.
+Tested correction: the verified helper was restored, both-mode preflight and
+the supplemental static checks passed, and the next full run's static phase
+passed. That full run still failed on a separate Windows transport error.

@@ -1,17 +1,18 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { GameMessage, MarketPage, OwnerState, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { MarketPage, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readLooks, readMarket, readMessages, readNotifications, readOwner, readWorld, readRevision, readTimeline, readProfile, readRecent, readRestAfter, readSeasons, readStandingOf, readStandings,
-  readTournament, readTournamentLog, type NotificationsRead,
+  GatewayReadError, readBouts, readLooks, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
-export { GatewayReadError, type NotificationsRead } from './reads';
+export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
- * tournament, tournament log, recent results) can be read without a session. `owner()`, `notifications()`, `command()` and
+ * tournament, tournament log, recent results) can be read without a session. `owner()`, `notifications()`, `bouts()`, `command()` and
  * `sendPresence()` require a signed-in account.
  */
 export interface GameGateway {
@@ -25,9 +26,14 @@ export interface GameGateway {
   sendPresence(): Promise<PresenceResult>;
   owner(): Promise<OwnerState>;
   world(): Promise<WorldSnapshot>;
-  revision(): Promise<RevisionState>;
+  /** The world's revision and the server's time, and the server's newest patch (`latestPatch`, null when missing or malformed). */
+  revision(): Promise<RevisionRead>;
   timeline(id: ActivityId): Promise<RevealedTimeline>;
-  profile(id: GladiatorId): Promise<PublicProfile>;
+  /**
+   * A gladiator's public profile with its card data (Task 11c): its current build, creation time and Arena record over all seasons,
+   * each null when missing or malformed.
+   */
+  profile(id: GladiatorId): Promise<ProfileRead>;
   /**
    * One page of open fixed-price offers, newest listing first, at most 50 rows; `cursor` is a page's `nextCursor`, and
    * `seller` keeps only that gladiator's offers. A malformed cursor or seller is `unavailable`. Loaded on demand: offers
@@ -74,9 +80,15 @@ export interface GameGateway {
    * The newest 50 game messages (patch notes and admin notes), newest first, as plain text. They are public: a visitor reads
    * the same list, and a hidden message is not in it. Whether each is unread is the owner read's `inbox`, not this list. A row
    * this client cannot show is left out. Load it when the panel opens, and again when the owner's `inbox` says the list no longer
-   * agrees (a message was posted or hidden); the world revision does not carry it.
+   * agrees (a message was posted or hidden); the world revision does not carry it. Each patch note carries its patch number, found by
+   * one small read after the list (Patch A, "Patch numbers and the changelog"); when that read fails, the notes show without numbers.
    */
-  messages(): Promise<GameMessage[]>;
+  messages(): Promise<ShownMessage[]>;
+  /**
+   * The server's patches with their features, 20 at a time, newest first; `beforeSortKey` (the last shown patch's `sortKey`) reads the
+   * next 20. `more` says there are older ones. Public: a visitor reads the same list.
+   */
+  patches(beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }>;
   /**
    * The owner's newest 20 settled results (training, expedition, Arena, tournament; never a rest) as notifications, newest first,
    * each with its credited summary, an expedition's destination and the level it reached when it raised the level. Owner-only: it needs
@@ -86,6 +98,14 @@ export interface GameGateway {
    * was none): the mark is sent up to it, so a result this client cannot show never keeps the badge on.
    */
   notifications(): Promise<NotificationsRead>;
+  /**
+   * One page (20) of the owner's own settled Arena and tournament bouts, newest first, for My bouts: each with its opponent (read only while
+   * its replay is kept), result, renown and rating change. `filter` asks the server for All, Won or Lost; `cursor` is a page's `nextCursor`
+   * (the slot index of the last bout fetched). Owner-only: it needs a signed-in account, and a bout appears only once it is revealed
+   * (settled at or before the server's now). A malformed cursor or filter is `unavailable`, without a request; a bout this client cannot
+   * show is left out.
+   */
+  bouts(filter: BoutFilter, cursor?: string): Promise<BoutsPage>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -226,13 +246,20 @@ export function createLiveGateway(): GameGateway {
     },
     owner: () => read(readOwner),
     notifications: () => read(readNotifications),
+    bouts: (filter, cursor) => read(client => readBouts(client, filter, cursor)),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),
     timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),
     profile: id => publicRead(client => readProfile(client, id)),
     recent: cursor => publicRead(client => readRecent(client, cursor)),
     looks: ids => publicRead(client => readLooks(client, ids)),
     restAfter: (gladiatorId, tripEndMs) => publicRead(client => readRestAfter(client, gladiatorId, tripEndMs)),
-    messages: () => publicRead(readMessages),
+    messages: () => publicRead(async client => {
+      const list = await readMessages(client);
+      const notes = list.filter(message => message.kind === 'patch-notes').map(message => message.id);
+      const numbers = await readPatchNumbers(client, notes).catch(() => new Map<number, string>());
+      return list.map(message => ({ ...message, patch: message.kind === 'patch-notes' ? numbers.get(message.id) ?? null : null }));
+    }),
+    patches: beforeSortKey => publicRead(client => readPatches(client, beforeSortKey)),
     seasons: () => publicRead(readSeasons),
     standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),
     standingOf: (league, gladiatorId) => publicRead(client => readStandingOf(client, league, gladiatorId)),

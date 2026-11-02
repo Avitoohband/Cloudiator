@@ -92,9 +92,9 @@
       "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
     },
     {
-      "file": "actors/npcs.8a1df61477.png",
-      "sha256": "8a1df614771d2b7e10c9267a5d8d91e3f4807372a17086db35ccc08cec6082a4",
-      "bytes": 36185,
+      "file": "actors/npcs.7e743ff82c.png",
+      "sha256": "7e743ff82cabd316758b44787fb048d83799aba53ffcf6707e35128a301e0b80",
+      "bytes": 67807,
       "source": "generated",
       "generator": "assets/source/generators/npcs.mjs",
       "inputs": [
@@ -114,8 +114,8 @@
     },
     {
       "file": "actors/npcs.json",
-      "sha256": "8ac81ede61fc7ac378beae134288c477c0911fe7d5aa1ad2e9a7dc5f91e83460",
-      "bytes": 38035,
+      "sha256": "b95d43f289edc3bf8798f251ad82363c193d351476640058b84fb836208a72a2",
+      "bytes": 70093,
       "source": "generated",
       "generator": "assets/source/generators/npcs.mjs",
       "inputs": [

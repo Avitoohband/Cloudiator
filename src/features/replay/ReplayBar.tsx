@@ -3,7 +3,8 @@
 // as buttons with the current one marked, a track, the time and a tail. Desktop: one row `⏮ ▶ ⏭ track time tail`, with the
 // chapters on a row below; without a track (the trip) the chapters take the track's place in the row, as the approved mockup
 // draws the trip's bar; a bar too narrow for them takes them onto their own row, at their own widths, wrapping rather than cutting
-// a label short. In the touch layout the chapters are hidden and one line names the current one ("3 / 8 · Fight 1"). A step that
+// a label short. In the touch layout the chapters are hidden and one line names the current one ("3 / 8 · Fight 1"); with a track
+// that layout is two rows, the track and the time, then the buttons and the tail (the name under them). A step that
 // is not available is `aria-disabled` (it keeps the focus it may have, at the first or last chapter) and does nothing. It keeps no
 // state and reads no clock.
 import type { JSX, ReactNode, Ref } from 'react';
@@ -55,6 +56,7 @@ export function ReplayBar({ label, play, previous, next, chapters, track, time, 
 }): JSX.Element {
   const current = chapters ? chapters.items[chapters.current] : undefined;
   const list = chapters ? <Chapters chapters={chapters} /> : null;
+  const clock = <span className={styles.time}>{time}</span>;
   return (
     <div role="group" aria-label={label} className={styles.bar} data-track={track ? '' : undefined}>
       {previous && <StepButton step={previous} icon="⏮" />}
@@ -63,8 +65,8 @@ export function ReplayBar({ label, play, previous, next, chapters, track, time, 
       </button>
       {next && <StepButton step={next} icon="⏭" />}
       {chapters && current && <span className={styles.name}>{`${chapters.current + 1} / ${chapters.items.length} · ${current.label}`}</span>}
-      {track ? <div className={styles.track}>{track}</div> : list}
-      <span className={styles.time}>{time}</span>
+      {/* With a track, the track and the time are one box (a phone gives it a row of its own); without one the chapters take its place. */}
+      {track ? <div className={styles.scrub}><div className={styles.track}>{track}</div>{clock}</div> : <>{list}{clock}</>}
       {tail !== undefined && tail !== null && <span className={styles.tail}>{tail}</span>}
       {track ? list : null}
     </div>

@@ -32,6 +32,13 @@ function titleOf(n: GameNotification): string {
   return n.kind === 'expedition' && n.destination ? `${title}: ${n.destination}` : title;
 }
 
+/** The approved wide, phone and accessible Watch words; training has no replay. */
+export function watchLabel(note: GameNotification): { wide: string; narrow: string; name: string } | null {
+  if (note.kind === 'training') return null;
+  const trip = note.kind === 'expedition';
+  return { wide: trip ? '▶ Watch the trip' : '▶ Watch', narrow: trip ? '▶ The trip' : '▶ Watch', name: `${trip ? 'Watch the trip' : 'Watch'}: ${titleOf(note)}` };
+}
+
 /**
  * A notification as a title and its lines, in the order gold, XP, the level reached, renown, attribute points, the rating change,
  * each item found and the gold for items that did not fit (the result screens' wording). Only what was earned is listed; a result

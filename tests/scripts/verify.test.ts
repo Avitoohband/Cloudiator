@@ -60,8 +60,11 @@ const FIXTURE_BLOCKERS = [{
 
 /** A Playwright JSON report: the failed tests and their error messages (one test per entry). */
 function browserReport(failed: string[][]) {
-  return { stats: { expected: 10, unexpected: failed.length }, suites: [{ title: 'x.spec.ts', specs: failed.map((errors, i) => ({ title: `case ${i}`,
-    tests: [{ projectName: 'desktop', status: 'unexpected', results: [{ status: 'failed', errors: errors.map(message => ({ message })) }] }] })) }] };
+  const cases = failed.length ? failed : [[]];
+  return { errors: [], stats: { expected: failed.length ? 0 : 1, unexpected: failed.length, flaky: 0, skipped: 0 },
+    suites: [{ title: 'x.spec.ts', specs: cases.map((errors, i) => ({ id: `case-${i}`, title: `case ${i}`,
+      tests: [{ projectName: 'desktop', projectId: 'desktop', expectedStatus: 'passed', annotations: [], status: errors.length ? 'unexpected' : 'expected',
+        results: [{ retry: 0, status: errors.length ? 'failed' : 'passed', errors: errors.map(message => ({ message })) }] }] })) }] };
 }
 const HOST = `${HOST_FAULT_MARKER} 1 request failed in the host's network stack (net::ERR_NO_BUFFER_SPACE for http://127.0.0.1:3200/_next/static/chunks/a.js).`;
 
@@ -84,7 +87,7 @@ function fakeIo(options: { codes?: Record<string, number | number[]>; reports?: 
           ...(e.unavailable ? { unavailable: e.unavailable } : {}) }; },
       edgeStartedAt: () => { const next = starts.shift(); if (next !== undefined && next !== null) started = next; return started; },
       readDbReport: () => reports.shift() ?? null,
-      readBrowserReport: (step: Step) => options.browserReports?.[step.id]?.shift() ?? null,
+      readBrowserReport: (step: Step) => options.browserReports?.[step.id]?.shift() ?? browserReport([]),
       log: () => undefined,
     },
   };

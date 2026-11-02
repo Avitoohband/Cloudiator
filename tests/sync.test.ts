@@ -92,4 +92,40 @@ describe('revision synchronization', () => {
     expect(f.states.at(-1)?.world?.actors[0].activityStatus).toBe('processing');
     expect(JSON.stringify(f.states.at(-1))).not.toContain('rewards');f.sync.stop();
   });
+  it('keeps the newest patch from every revision read, a missing one as null, and forgets it on a session change', async () => {
+    // Patch numbers (Patch A spec): the server's newest patch rides the revision read, whatever the revision.
+    const f = fixture();
+    let latest: string | null | undefined = '1.4';
+    const read = vi.mocked(f.gateway.revision).getMockImplementation()!;
+    vi.mocked(f.gateway.revision).mockImplementation(async () => ({ ...(await read()), ...(latest === undefined ? {} : { latestPatch: latest }) }));
+    await f.sync.start();
+    expect(f.states.at(-1)).toMatchObject({ latestPatch: '1.4', error: null });
+    // The world snapshot does not carry it.
+    expect(f.states.at(-1)?.world).not.toHaveProperty('latestPatch');
+    // The same revision with a newer patch: the patch changes, the world is not read again.
+    latest = '1.5';
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.states.at(-1)?.latestPatch).toBe('1.5');
+    expect(f.gateway.world).toHaveBeenCalledTimes(1);
+    // A failed read keeps the last known patch.
+    f.outage(); win.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(0);
+    expect(f.states.at(-1)).toMatchObject({ latestPatch: '1.5', error: 'unavailable' });
+    f.recover();
+    // A read that names none (an older server) is null.
+    latest = undefined;
+    win.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(0);
+    expect(f.states.at(-1)?.latestPatch).toBeNull();
+    // A session change forgets it at once, before the next read lands.
+    latest = '1.6';
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.states.at(-1)?.latestPatch).toBe('1.6');
+    let release!: () => void;
+    vi.mocked(f.gateway.revision).mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({ ...{ revision: '1', serverNowMs: 0, slotIndex: 18 }, latestPatch: '1.6' }); }));
+    f.accountChange();
+    expect(f.states.at(-1)?.latestPatch).toBeNull();
+    await vi.advanceTimersByTimeAsync(0);
+    release(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.states.at(-1)?.latestPatch).toBe('1.6');
+    f.sync.stop();
+  });
 });

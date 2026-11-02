@@ -1,0 +1,86 @@
+# Patch 1.5 gate — host recovery checkpoint
+
+## Patch 1.5 LIVE — 2026-11-01
+
+The exact e570696 client passed 12/12 locally, exit 0/no omissions, finished 08:00:26.644 UTC. Development: 1,192 expected + 50 skips; static: 32 literal passes + two expected CSP failures + 1,208 skips. Both modes cover exactly 1,242 unique actual identities with zero missing/extra/duplicate/unexpected/flaky/run errors. Units 2,170/122 files; DB 405/30; Edge 3. Feature and release CI passed, with their explicit development omission kept separate.
+
+Client/approved note 6/linked 1.5 record are live; exact ten features/latest_patch 1.5/unread +1 readbacks and nine deployed checks passed. Fresh anonymous probe passed. Required next-boundary health after 09:20 UTC remains pending; next NPC development may proceed with that follow-up retained. No permanent host-cure or human-attestation claim. All older blocked/retry instructions are historical. See [full release evidence](PATCH-1.5-RELEASED-2026-11-01.md); 22 rulings.
+
+## CURRENT BED-CACHE CHECKPOINT — 2026-11-01
+
+Production remains **1.4**. Windows restart was verified at `2026-11-01T06:17:55.5000000Z`; cached local stack/M01–M26 and Edge serving p15 were restored. No further restart is required merely to resume. Post-restart candidate `28556a1` passed **2,170 units/122 files** and **405 DB/Auth/Edge checks/30 files**. Root deliberately stopped its full gate at Step8 after **555 reported development cases with no reported failures** for the CI correction below. First shard:302expected/11existing skips/0unexpected/0flaky/0run errors. Owned76812/PID38220 stopped after identity check; PID gone/port3800free. This is incomplete browser coverage, not12/12 or permanent host-cure proof.
+
+Both CI runs on28556a1 —41279900003 and one fresh-runner41281784619— failed only unchanged `camp-beds.test.ts:113` at its5000ms budget (6246ms/6723ms). Exact test, assets, imported helpers, config and lock match shipped1.4; no geometry mismatch or new product regression was evidenced. Each CI had10passed steps/1failed/1explicitly omitted development step; units2159pass/10existing Windows-only skips/1failure, Edge3 and DB405 passed. Static34expected outcomes mean32literal passes plus2expected CSP failures, with1208skips. CI artifacts retain the browser verdict, not raw case stats; control records/reporter semantics support this distinction. Locked remote Deno preparation actually passed. Original failures remain preserved; no third unchanged run was made.
+
+Reviewed test-only fix **c1da8eb0d9f421f80c07ea1e88d7d9dd6cadfbd0** caches PNG decodes by image path:36whole-atlas decodes become2. Every station/frame/pixel assertion, diagnostic, coverage threshold, bounds/index math and5sec budget is unchanged. No runtime, asset, decoder, dependency or lock change. Local baseline8/8(pixel1977.89ms); cached8/8(139.11ms); full2170/122(pixel315.357ms); typecheck0/Edge3/zeroDownload statuses. Static work counts and these local timing samples do not establish CI timing. Fresh independent spec/quality review passed with no findings; parent read the full report and diff.
+
+**Next:** verify current clean HEAD including this metadata, push the reviewed P15 feature checkpoint for normal approved CI, then run a fresh frozen-source full12-step local gate with one-worker Chrome/four sequential shards and a new directory. Re-identify existing Edge session41408/PID43596 rather than trusting old IDs. Do not reuse or combine stopped attempts. Only after fresh positive checks perform the separate production-origin build/scan and authorized release checklist. Routine releases and normal remote pinned installs are approved; new local downloads and the separate1.6warning/irreversible activation remain constrained. Exact release drafts are unchanged. There are21rulings.
+
+This block supersedes older recovery, CI-execution and pending-permission statements below; historical evidence remains preserved.
+
+**2026-11-01: another confirmed host transport failure; fresh 12/12 still required; production remains 1.4.** The fresh frozen-source gate on `a68978e` was stopped at Step 8 after React DOM failed with `net::ERR_NO_BUFFER_SPACE`. Units passed 2,170/122 files and DB/Auth/Edge passed 405/30 files. Development shard 1 passed 302 with 11 existing skips; 609 development result markers were observed before interruption, including one failure. This is not complete browser accounting or a 12/12 pass. All owned runners stopped and port 3800 is free.
+
+Avi approved normal remote pinned GitHub/Cloudflare dependency installs and CI container pulls for the planned releases, the current 1.5.1 south-guard placement, and both scoped verification guidance updates. The latter are persisted in AGENTS.md in `9e6acfa`. New local package downloads remain unapproved. No production write or production-branch push has occurred at this checkpoint. The complete earlier c04e0d0 run passed 11 steps; its six unsupported static scenarios were subsequently guarded and independently reviewed, as was offline verification `26b824f`.
+
+## Latest failure and recovery boundary
+
+Evidence: `C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p15-gate-20261101-shards4-offline`. At `release.spec.ts:71` on desktop, the first prerequisite at line 76 never saw the art-failure notice. The trace proves a required React DOM chunk failed with `net::ERR_NO_BUFFER_SPACE` before hydration: 29 requests, one failed, zero actor-art requests. The injected art abort and Schedule assertions were never reached. The timeout snapshot retained the loading state; the saved last screencast frame is early, not a frame taken at the timeout. Independent diagnosis supports a host transport failure and supplies no evidence for an application change.
+
+Root stopped the exact owned gate session 87306 after verifying PID 10304 and its creation time; it returned 1. Do not reuse those historical identities. No Windows settings or user applications were changed. The Windows boot time still reads `2026-10-31T19:31:23.9418480Z`; current global port exhaustion or a specific leak is not established. Sequential sharding did not prevent this recurrence. Preserve evidence and obtain a meaningful host recovery before another complete gate; do not loop unchanged runs. A user-managed restart and Chrome retry is the recommended next environment step.
+
+## Current checkout and commits
+
+- Worktree: `C:/Avi/Studies/Projects/Cloudiator/p15-arena`, branch `claude/p15-arena-replays`. Runtime fixes: `db386db1ca43a873882e4d545b10f0317828af1f`.
+- Reviewed test-only maintenance: `c2a7603c03d5f1c62786ae099bd6cc15cd105fb6`; interrupted gate candidate: `7fe6f75fdcbfcf87102bef1ff5c4dd39fe6e6e3c`. Bounded runner: `48933789f85698907bab78b8b4187de087e90c00`; later checkpoint commits change documentation only.
+- Complete bounded-run candidate: `c04e0d00ecde2a1d285af7f062e7f3e4d50c637c`. New static applicability guard: `2aa9158195311c6758f505c8d7682664c05127a8`; offline command/CI preparation: `26b824fb512cc63dfca80d246a517620f1000788`. Only later checkpoint commits are documentation-only.
+- Source tree was clean when the gate stopped. All owned test runners are stopped; port 3800 has no listener. Do not reuse old process IDs after reboot.
+
+## Verified results and limits
+
+- Before the new bounded-runner commit, the fresh full unit step passed **2,102 tests/119 files** and Database/Auth/Edge capacity passed **405 tests/30 files**. Root’s separate final maintenance TypeScript command exited0 with an explicit exit file. These are not a full-suite claim for4893378.
+- Maintenance independent spec/quality review approved. Targeted maintenance run: 56 passed/2 counter-instrumentation failures/4 existing skips; corrected retry scenario then 2 passed. The two counters were in test interception, not replay behavior. This is not a clean 62-case claim.
+- Earlier complete development step on 0a2cd93:1,185 passed/7 failed/50 skipped. Stale future-version fixture and inline-viewer locator were repaired; readiness/settled-opacity waits retained all original assertions. Precise guards restore the established development-only applicability of 28 camp scenarios. No application or phone-bar implementation changed in maintenance.
+- Earlier static run was interrupted after 82 observed cases (1 pass marker/13 failure markers/68 skip markers) established missing development-only setup guards. Loader evidence verifies applicability, not a static-runtime pass.
+- Latest fresh run on 7fe6f75 reached 579 development cases before root stopped it after a second positive Windows resource fault. The complete browser and static phases were not attested. No12/12 gate or 1.5 production go is claimed.
+
+## Host evidence and current environment
+
+The earlier mobile phone-bar failure stopped before camp readiness/Clock interaction with `ERR_NO_BUFFER_SPACE` loading React-DOM. On the fresh run, the same resource fault recurred in desktop `tournament.spec.ts:680`, “rechecks the loaded fight duration before offering the selected chapter”. The new trace contains `ERR_NO_BUFFER_SPACE` and `Probable host fault`; root independently confirmed two trace-error records with these markers. No warning suppression, skipped host-fault test, timeout increase, forced click or test retry was used.
+
+Latest trace: `C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p15-gate-20261101-retry2/test-results/development/tournament-the-live-Tourna-51a4d-fering-the-selected-chapter-desktop/trace.zip`.
+
+Local Supabase is project Cloudiator, M01–M26. Edge source is p15-arena; historical launcher IDs must not be reused. The ignored p15 `.env.edge.local` exists as a byte-identical copy of the existing local configuration, so the test runner and runtime agree. Never print these files or values. The initial missing-file mismatch caused 7 DB failures, then the exact worker diagnostic and subsequent full 405-case suites passed. After reboot verify actual processes/mounts; restart Edge from p15 using its local env-file if needed. Local recovery authorizes no reset, volume deletion, linked command or local package download. Planned production operations retain their separate checked release sequence.
+
+The latest read-only diagnosis also confirmed actual `snapshot.response._failureText=net::ERR_NO_BUFFER_SPACE`, status−1, on local React-DOM chunk GETs in both traces. Current socket counts do not establish global port exhaustion; no host settings or user apps were changed. Playwright's worker-scoped browser lifetime is one hypothesis, not an established leak.
+
+A bounded 1/4 diagnostic on clean `c8b9dc8` completed exit 0: 302 passed/11 existing skips of 313, no unexpected/flaky/run errors or host faults. All 16 recorded owned processes exited and port 3800 was free. Its report/log, resource snapshots, process identities and cleanup proof remain in Temp/Cloudiator-Codex-p15-shard-diag-20261101. This does not attest the new orchestration or full-suite recovery.
+
+## Complete bounded run and corrections
+
+The c04e0d0 run finished all 12 steps, exit 1, with no CI omission: 11 passed, production failed. Units: 2,159/121 files; DB/Auth/Edge: 405/30; development: 1,192 expected/50 existing skips, exact 1,242-case coverage. Production: 34 expected (including CSP failure controls), 1,202 skips/6 unexpected/0 flaky, exact 1,242-case coverage. No host fault occurred across either complete browser mode, including both previously failing resource cases. This is one run's evidence, not proof of a cause or permanent cure.
+
+All six unexpected cases were the signed-in My bouts group on desktop/mobile. Its synthetic session and routed reads need the backend configuration deliberately absent from the isolated export. Guard2aa9158 changes one line only; targeted static verification passed10/skipped54 of64 and development passed6/6. Review approved; the targeted colour warning was observed, not called pristine. The original full gate had zero such colour warnings. Fresh full-gate JSON will supply final mode/outcome/artifact accounting.
+
+The old typecheck emitted two npm package-metadata Download statuses; completed transfers/archive downloads remain unproven. Frozen alone was not offline. In installed Deno2.9.6, even check+cached-only requested local fixture dependencies. Commit26b824f uses the empirically validated no-run test/check path instead, preserving default local type checking. Its114 targeted checks and real typecheck passed, Edge3/3 and zero Download statuses. Cold HTTP/npm misses made zero fixture requests; deliberate type errors fail and top-level code does not execute. Independent review approved with no findings. CI's frozen dependency preparation is written before Supabase/Edge and has not yet been executed; Avi has now approved the normal remote pinned installs.
+
+## Resume the bounded gate
+
+1. Read this file, current HANDOFF/AGENTS, and `.superpowers/sdd/2026-10-29-arena-replays/progress.md`. Verify actual host recovery, branch, HEAD and clean source; preserve all stopped Task 5 backup stashes and existing evidence. If restarting, confirm the boot time changed from the baseline above. The next candidate must include the approved guidance and this checkpoint.
+2. Verify Docker/local Cloudiator stack, M01–M26, cached image/dependencies and p15 Edge source. Use only installed tools. If an image/package/cache download is needed, ask Avi first. No keys/status/env/connection strings in output.
+3. Keep private `node_modules/.cache/pw-p15-arena.config.mjs` at one worker, Chrome, port 3800 and canonical deployed-only exclusion. Do not weaken coverage/retries. Only this worktree owns the local stack.
+4. With the reviewed guard and offline correction included, run a **fresh complete gate** with CLOUDIATOR_CI unset and a new evidence directory: `node scripts/verify.mjs --config node_modules/.cache/pw-p15-arena.config.mjs --browser-shards 4 --results <new-private-dir>/test-results --json <new-private-dir>/verify.json`. Freeze source; do not build or run a second browser outside the gate. Every case must appear exactly once in each mode's complete inventory/union; preserve raw JSON and actual-case companion JSON. A Deno cache miss blocks rather than fetching. Do not add partial runs together to claim12/12.
+5. If the resource fault recurs after the environment change, preserve it and diagnose the host; do not loop unchanged full runs. No product defect or host cure is inferred from these interrupted attempts.
+6. Only after all12steps pass may the planned production release proceed. Avi's latest explicit instruction to review, test and release supersedes the old per-patch fresh-go hold for the reviewed1.5client/note/linked record. Normal remote pinned CI/Pages installs are now approved; no new local installation is implied. Preserve the exact note/ten features and disclosed Minor/design carries. Perform the separate production-origin build/scan and hosted/deployed checks in the release checklist. No schema or Edge release.
+7. After 1.5 ships, remind Avi about its clip/feature posts; continue 1.5.1 NPC rereview/art approval, then 1.6 economy (max 2 Training slots per game day, Tasks 4–9). Do not start those streams before 1.5 ships.
+
+## Preserved local evidence
+
+All three Temp attempt directories begin `C:/Users/Avi_OP_PC/AppData/Local/Temp/Cloudiator-Codex-p15-gate-20261101`: base, `-retry1`, `-retry2`. They include original logs, candidate/process identities, screenshots/traces and explicit attempt-status records. They are private local evidence, not tracked by Git. The ignored plan workspace preserves reports and targeted outputs.
+
+The complete bounded run is in the additional `-shards4` directory, with full summary, all eight browser raw/identity report pairs, trace/screenshots and sanitized static diagnosis. Reuse absolute artifact paths returned by the creating process: sandbox and normal Windows TEMP values can differ. Its test process exited1 and port3800 was free at handback.
+
+The latest interrupted attempt is the additional `-shards4-offline` directory: candidate a68978e, verify.log, process identity, partial reports/traces, sanitized diagnosis and attempt-status.json. Do not combine it with the earlier complete run to claim success.
+
+Pending optional questions remain unapproved: the earlier1.4GitHub CI retry; CSS geometry guidance; receipt-key guidance; shared worker-env handoff guidance. The new specific permission for planned releases' normal remote pinned installs is approved. Both scoped verification overrides are applied in AGENTS.md; unrelated proposals remain unapplied. Rulings15–16 authorize the bounded-lifetime experiment and exact coverage audit, which did not prevent the newest host fault. No host cure or automated reboot permission is inferred. The1.6irreversible switch and filled-in day-ahead warning retain their separate explicit-go requirements.
+
+See [release review](PATCH-1.5-RELEASE-REVIEW-2026-11-01.md) and [all twenty rulings](PATCH-1.5-RULINGS-2026-11-01.md).

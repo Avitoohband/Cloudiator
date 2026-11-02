@@ -98,3 +98,72 @@ More from Avi, 2026-10-29:
 28. **A bigger camp map.** "i want to make the map bigger".
 29. **Future facilities where the trees are.** "also where there are trees in the camp, in the future it will be new
     facilities": the wooded parts of the camp are reserved as plots for new buildings later.
+
+More from Avi, 2026-10-30 (collected for the plans, not yet designed):
+
+30. **Player support.** "Add players reach out support option": a way for players to contact support from the game.
+31. **A watch mode for the Arena and tournaments, for streams.** "a button when arena is live which shows different battle
+    and a text narration it, who's fighting, wins, blows and more": while the Arena is live, a button opens a spectator view
+    that moves between bouts, with a running text commentary (who fights, the blows, the winner). It builds on 1.5's replay
+    viewer.
+32. **Stream the game 24/7 on YouTube (to check).** "checking the option to live stream the game 24/7 somehow at YouTube":
+    a feasibility check, likely a headless browser on the watch mode (idea 31) pushed to a YouTube live stream on the Indigo
+    Labs channel; cost and hosting to be checked.
+33. **An NPC "the Champ".** "Add npc 'the champ' - which was the champ of the arena, level unknown": a legendary former Arena
+    champion in the camp, level shown as unknown (fits the 1.5.1 camp NPCs and the bigger camp's plots).
+
+34. **An in-game guide (a small wiki) and an explainer clip (Avi, 2026-10-31).** "all of those should be in the game
+    details somewhere, maybe a little wiki, when it comes out. also a clip should explain that as well. and what each stat does,
+    how agility, precision affect the game, and fights, why someone miss or dodge." Covers: stamina costs per activity and
+    overload; what each attribute does (Strength, Agility, Vitality, Endurance, Precision) in numbers; class bonuses; how a
+    fight resolves (hit, miss, dodge, critical, armour, attack speed); Rest and the Training cap. The numbers must be read from
+    the active rules (v1 now, v2 after 1.6), never typed by hand. A players' explainer clip follows its release.
+
+35. **Class quests that raise the class bonus (Avi, 2026-10-31, future).** "quest per class, that improve their class
+    bonuses, should be very hard to achieve. for example, Berserker has more % STR and Guardian have 10% endurance instead of 5."
+    One long, very hard quest chain per class; finishing it upgrades that class's bonus (Berserker Strength above +10 %,
+    Guardian Endurance +5 % → +10 %, Duelist Agility/Precision up). Endgame; fits with the Deep and titles (a title for each).
+
+More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 30-34):
+
+36. **Videos in the guide.** "In the wiki your links to YouTube videos and explanation and links to the patch notes videos on
+    YouTube": the in-game guide (idea 34) links the explainer videos and each patch's video on YouTube (Indigo Labs).
+37. **A better inventory with item pictures, and in the shops too.** "Better inventory setup with items appearance. Also in
+    shop": each item shown with its picture, in Inventory and in the shops.
+    Avi reiterated on 2026-11-01 that inventory item appearance is still wanted later; coordinate this with idea 45.
+38. **A look-change option.** "appearance look change option": change look from the menu at any time (today only from the 1.3
+    patch note's one free change); maybe priced, or tied to the renown skins shop.
+39. **Support with triage.** Idea 30 plus "with jev to classify those issues": support requests are classified (bug, account,
+    balance, idea…) automatically; Avi's word "jev" to confirm.
+40. **A world tournament with a statue for the winner.** "World tournament for statue for winner": a big all-leagues
+    tournament; the winner gets a statue in the camp (a facility plot, idea 29).
+41. **Events.** "Make events": timed in-game events.
+42. **Potions for stamina and health.** "Potions for stamina and health": consumables (fits the 1.6 economy and the shops).
+43. **Houses, decorations and achievements.** "When camp full, the gladiator rest in house, add decorations and achievements":
+    when the camp's beds are full, a gladiator rests in a house; houses can be decorated; achievements.
+44. **Guilds and raids.** "Guilds in the future with raids. And special items to sell in market": guilds, raid content, and
+    special raid items that can be sold on the market.
+
+Already listed: the watch mode for streams (31), the 24/7 stream (32), the Champ (33), Endurance and load and what each stat
+does (34).
+
+Avi, 2026-11-01, added to the future gear/inventory plan:
+
+45. **Gear attributes on hover in My gladiator.** When choosing or switching gear in the My gladiator menu, hovering over
+    an item shows that item's attributes/stats. Avi also reiterated that these inventory items should have a visual
+    appearance later (idea 37). Keep the requested stat preview and the later item-art work linked when the gear UI is
+    designed; keyboard/touch behavior and the concrete presentation are to be settled in that design pass.
+
+Avi, 2026-11-01, added a standalone social feature after the economy patch:
+
+46. **Friends list and friend requests.** "Also need to add friends list and friend request". Avi chose to ship this as a
+    standalone feature after the economy patch (1.6), rather than bundle it with party invitations. Link its design to the
+    later [friend-party invitations](2026-10-29-party-dungeons-design.md) so that work can build on the Friends feature.
+    The request lifecycle, discovery, privacy and interface still need their design pass; no specific patch or migration
+    number is assigned yet.
+
+47. **Game music, sound effects and Audio settings (Avi, 2026-11-01).** Add music and sound effects, with separate Music
+    and SFX volume sliders and independent mute controls in a Settings menu. Avi chose to remember these preferences per
+    device, so phone and desktop can differ. Handle [browser autoplay restrictions](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay#autoplay_availability)
+    when starting sound. Music/SFX assets, default levels, sound coverage and the concrete interface need their design
+    pass; no release number or asset generation/download is assigned or authorized by this planning entry.

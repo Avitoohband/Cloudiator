@@ -6,8 +6,8 @@ screen, and which video already showed it. Updated 2026-11-02: filming ledger th
 
 ## New since the last video
 
-`patch-1-5-1-update-and-roadmap` was made on **2026-11-02**: a 133-second, locally rendered film,
-not uploaded or published. It covers all **30 released changelog bullets** in 1.3.1, 1.4, 1.5 (also called
+`patch-1-5-1-update-and-roadmap` was made on **2026-11-02**: a 133-second film,
+uploaded as https://youtu.be/vjJBTTAEjww and scheduled for 4 Nov 2026 at 18:00 Israel. It covers all **30 released changelog bullets** in 1.3.1, 1.4, 1.5 (also called
 1.5.0 in the video request), and the original 1.5.1. Its brief 1.6–1.8 section names planned themes only.
 
 The original 1.5.1 release is explicitly recorded as live at `ae9d79d47525c1cbc4194fea84805c2e5644f160` in
@@ -66,7 +66,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
 (2026-10-28) · Too Tiny = `camp-life-too-tiny` (2026-10-29) · Messages update = `messages-look-and-beds-update`
-(2026-10-29) · Patch tour = `patch-1-5-1-update-and-roadmap` (2026-11-02, rendered, unpublished). Folders are under `D:\Avi\Projects\Animation\Cloudiator\`. "—" means no video has shown it yet.
+(2026-10-29) · Patch tour = `patch-1-5-1-update-and-roadmap` (2026-11-02, uploaded; scheduled 4 Nov, 18:00 Israel). Folders are under `D:\Avi\Projects\Animation\Cloudiator\`. "—" means no video has shown it yet.
 
 ### Camp
 

@@ -193,7 +193,18 @@ More from Avi, 2026-11-02 — future-patch options collected, not implementation
     Endurance and Precision; gear and class bonuses are added separately. Reconcile the complete base-point budget and
     existing Training cap formula with the level-20 maximum during progression design. Handling unspent points and any
     existing character above the proposed limits also needs design; do not silently reset or clamp existing characters.
+    With this cap patch, give each existing character one free, optional attribute respec, as Avi chose on 2026-11-02.
+    This redistributes attributes; do not force-reset every character. Link the offer/explanation to idea 22 and settle
+    eligibility, single-use redemption and over-cap transition rules in the cap patch's design.
 
+54. **Pettable camp animals and optional paid pet followers.** Avi chose ambient camp animals such as cats, rabbits and
+    birds, added dogs, and wants players to be able to pet them. Players can also buy their own pet with real money to
+    follow their gladiator. Avi explicitly chose cosmetic companions only: no combat, stat or progression bonuses.
+    Ambient interactions, the pet roster/art, follower presentation, ownership and the purchase flow need their design
+    pass. Prices, payment processing and entitlement delivery are not decided or authorized for implementation here.
+55. **Clickable NPC detail cards.** Clicking or tapping a camp NPC opens its card and reveals that NPC's details.
+    Design the content, interactions and responsive presentation with the existing camp/NPC work (27, 33, 54); this
+    request does not specify quests, a shop action or other gameplay rewards for those cards.
 These additions are future-patch planning requirements, not an expansion of Patch 1.6's approved economy scope or an
 implementation/release approval. The level-20 and 100-base-point decisions above are confirmed; material/upgrade rules,
 combat balance, elements, unlock levels and multi-day scheduling details still need their design pass. No patch numbers

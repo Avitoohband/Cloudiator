@@ -4,7 +4,7 @@ import { freezeDomain } from './types.ts';
 /**
  * Patch 1.6's economy (spec 2026-10-30-economy-1-6-design.md, "RULES_V2 (exact)"): every key of RULES_V1 with the same value,
  * except expedition XP, gold and gear chance (`expeditionRewards`, which overrides the catalog's), the salvage value, the
- * Training cap (10 + 4 × level) and tournament and season prizes by league (`placementsByLeague`, which replaces
+ * Training cap (10 + 4 × level), two actual Trainings per game day, free tournament stamina and tournament and season prizes by league (`placementsByLeague`, which replaces
  * `placements`). It is a separate immutable version: an activity is paid by the version of the boundary that froze it, so
  * RULES_V1 stays unchanged and retained. Read the differences through economy.ts, never here directly.
  */
@@ -12,7 +12,8 @@ export const RULES_V2 = freezeDomain({
   ...RULES_V1,
   version: 'v2',
   progression: { trainingPoints: 1, xpPerCurrentLevel: 100, levelAttributePoints: 0, levelStaminaRefill: 0,
-    trainingCapBase: 10, trainingCapPerLevel: 4 },
+    trainingCapBase: 10, trainingCapPerLevel: 4, maxTrainingActivitiesPerGameDay: 2 },
+  activityStamina: { ...RULES_V1.activityStamina, tournament: 0 },
   inventory: { capacity: 60, salvageStack: 999, salvageSellValue: 4 },
   // Gear drops halved (Avi's answer, 2026-10-30): 10 / 15 / 20 %. Salvage a run and the gear tier stay the catalog's.
   expeditionRewards: { woodland: { xp: 30, money: 4, gearChance: 0.1 }, outpost: { xp: 75, money: 10, gearChance: 0.15 },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LEAGUES } from '@domain/arena.ts';
 import { CATALOG_V1 } from '@domain/catalog-v1.ts';
-import { expeditionReward, salvageSellValue, seasonPrizes, tournamentPlacements, trainingCap, trainingPoints, type ExpeditionId } from '@domain/economy.ts';
+import { expeditionReward, salvageSellValue, seasonPrizes, tournamentPlacements, trainingCap, trainingDailyLimit, trainingPoints, type ExpeditionId } from '@domain/economy.ts';
 import { RULES_V1 } from '@domain/rules-v1.ts';
 import { RULES_V2 } from '@domain/rules-v2.ts';
 import { RETAINED_RULES, requireRetained, retainedRules } from '@domain/rules.ts';
@@ -14,6 +14,10 @@ const EXPEDITIONS: readonly ExpeditionId[] = ['woodland', 'outpost', 'mountain']
 const BAD_COUNTS = [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1, Number.MAX_SAFE_INTEGER + 1, '3', null, undefined];
 
 describe('economy accessors', () => {
+  it('limits actual Training activities per game day in v2 alone', () => {
+    expect(trainingDailyLimit(RULES_V1)).toBeNull();
+    expect(trainingDailyLimit(RULES_V2)).toBe(2);
+  });
   it('answers each expedition reward by version', () => {
     expect(expeditionReward(RULES_V1, 'outpost')).toEqual({ xp: 250, money: 60, salvageQuantity: 2, gearChance: 0.3, gearTier: 5 });
     expect(expeditionReward(RULES_V2, 'outpost')).toEqual({ xp: 75, money: 10, salvageQuantity: 2, gearChance: 0.15, gearTier: 5 });

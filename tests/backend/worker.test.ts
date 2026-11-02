@@ -669,11 +669,115 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
   const SLOT_MS = RULES_V1.clock.slotMs;
   const refused = expect.objectContaining({ code: 'unsupported-rules' });
   const COPY = 'Rules must be the retained constants, never a copy';
-  const unchanged = (result: PreparationResult) => ({ derived: result.derived, costs: result.costs, league: result.league,
+  const unchanged = (result: PreparationResult) => ({ derived: result.derived, costs: { ...result.costs, tournament: undefined }, league: result.league,
     arenaStrength: result.arenaStrength });
 
+  it('v2 daily allowance is independent of point cap', () => {
+    for (const [slotIndex, counts] of [[300, [0]], [301, [0, 1]], [302, [0, 1, 2]]] as const) {
+      for (const count of counts) {
+        const result = prepareActivity(preparation({ rulesVersion: 'v2', slotIndex, trainingActivitiesEarlierInDay: count }), RULES_V2);
+        expect(result.trainingAllowed, `${slotIndex}/${count}`).toBe(count < 2);
+        expect(result.trainingPoints).toBe(1);
+        expect(result.costs.training).toBe(20);
+      }
+    }
+    for (const count of [0, 1, 2]) {
+      for (const [earnedPoints, points] of [[13, 1], [14, 0], [94, 0]]) {
+        const result = prepareActivity(preparation({ rulesVersion: 'v2', slotIndex: 302, trainingActivitiesEarlierInDay: count, earnedPoints }), RULES_V2);
+        expect(result.trainingAllowed, `${count}/${earnedPoints}`).toBe(count < 2);
+        expect(result.trainingPoints).toBe(points);
+        expect(result.costs.training).toBe(20);
+      }
+      for (const [earnedPoints, points] of [[49, 1], [50, 0]]) {
+        const result = prepareActivity(preparation({ rulesVersion: 'v2', slotIndex: 302, trainingActivitiesEarlierInDay: count, earnedPoints, level: 10 }), RULES_V2);
+        expect(result.trainingAllowed).toBe(count < 2);
+        expect(result.trainingPoints).toBe(points);
+        expect(result.costs.training).toBe(20);
+      }
+    }
+  });
+
+  it('rejects invalid v2 daily input', () => {
+    const invalid = expect.objectContaining({ code: 'invalid-input' });
+    const bad = [undefined, null, '0', -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1];
+    for (const slotIndex of bad) {
+      expect(() => prepareActivity(preparation({ rulesVersion: 'v2', slotIndex: slotIndex as number,
+        trainingActivitiesEarlierInDay: 0 }), RULES_V2), `slot ${String(slotIndex)}`).toThrow(invalid);
+    }
+    for (const count of bad) {
+      expect(() => prepareActivity(preparation({ rulesVersion: 'v2', slotIndex: 302,
+        trainingActivitiesEarlierInDay: count as number }), RULES_V2), `count ${String(count)}`).toThrow(invalid);
+    }
+    for (const [slotIndex, count] of [[300, 1], [301, 2], [302, 3]]) {
+      expect(() => prepareActivity(preparation({ rulesVersion: 'v2', slotIndex,
+        trainingActivitiesEarlierInDay: count }), RULES_V2), `${slotIndex}/${count}`).toThrow(invalid);
+    }
+    const missing = { ...preparation({ rulesVersion: 'v2', slotIndex: 302 }) };
+    expect(() => prepareActivity(missing, RULES_V2)).toThrow(invalid);
+    const { slotIndex: _slot, ...noSlot } = missing;
+    expect(() => prepareActivity(noSlot as PreparationInput, RULES_V2)).toThrow(invalid);
+  });
+
+  it('retains historical v1 preparation', () => {
+    const historical = preparation({ slotIndex: 302, earnedPoints: 94 });
+    const result = prepareActivityV1(historical);
+    expect(result).not.toHaveProperty('trainingAllowed');
+    expect(result.trainingPoints).toBe(1);
+    expect(result.costs).toEqual({ training: 20, rest: 0, expedition: 30, arena: 25, tournament: 25 });
+    // No v2 phase/count requirement is retrofitted to jobs already frozen under v1, including a third Training.
+    expect(prepareActivityV1({ ...historical, trainingActivitiesEarlierInDay: 2 })).toEqual(result);
+    const { slotIndex: _slot, ...withoutSlot } = historical;
+    expect(prepareActivityV1(withoutSlot as PreparationInput)).toEqual(result);
+  });
+
+  function v2Preparation(overloaded = false): PreparationResult {
+    const input = preparation({ rulesVersion: 'v2', slotIndex: 302, trainingActivitiesEarlierInDay: 2, earnedPoints: 13 });
+    if (!overloaded) return prepareActivity(input, RULES_V2);
+    const body = itemFixture(CATALOG_V1.items['heavy-armor:1:common']);
+    const head = itemFixture(CATALOG_V1.items['iron-helmet:1:common']);
+    const feet = itemFixture(CATALOG_V1.items['heavy-boots:1:common']);
+    const offHand = itemFixture(CATALOG_V1.items['round-shield:1:common']);
+    return prepareActivity({ ...input, items: [body, head, feet, offHand], build: { ...input.build,
+      equipment: { weapon: null, body: body.id, head: head.id, feet: feet.id, offHand: offHand.id } } }, RULES_V2);
+  }
+
+  it.each([false, true])('pairs free v2 brackets from the full candidate pool (overload %s)', overloaded => {
+    const prepared = v2Preparation(overloaded);
+    expect(prepared.trainingAllowed).toBe(false);
+    expect(prepared.trainingPoints).toBe(1);
+    expect(prepared.costs.training).toBe(overloaded ? 23 : 20);
+    expect(prepared.costs.arena).toBe(overloaded ? 29 : 25);
+    expect(prepared.costs.tournament).toBe(0);
+    const candidates = [0, 24, 25].map(stamina => ({ gladiatorId: `s${stamina}`, choice: { kind: 'arena' as const }, stamina,
+      costs: { arena: prepared.costs.arena, tournament: prepared.costs.tournament },
+      optIn: [{ enabled: true, receivedAtMs: 302 * SLOT_MS - 1 }] }));
+    const entrants = candidates.map(c => ({ gladiatorId: c.gladiatorId, activityId: `activity-${c.gladiatorId}`, seasonId: '0',
+      league: 'bronze' as const, slotIndex: 302, rating: 1000, fighter: prepared.arenaFighter }));
+    const input: PairingInput = { slotIndex: 302, league: 'bronze', seasonId: '0', rulesVersion: 'v2', historyFromSlot: 284, recent: [],
+      entrants: entrants.filter((_, i) => candidates[i].stamina >= prepared.costs.arena), tournament: { bracketSeed: 'v2-bracket-seed',
+        rested: entrants.filter((_, i) => candidates[i].stamina < prepared.costs.arena), candidates } };
+    const before = structuredClone(input);
+    const pair = (value: PairingInput) => DEFAULT_EXECUTORS.v2.pair!(lease('pair', { snapshot: value, rulesVersion: 'v2',
+      seed: 'v2-pair-seed', gladiatorId: null })) as PairingResult;
+    const result = pair(input);
+    expect(result.assignments).toEqual([]);
+    expect(result.tournament!.routes.map(r => [r.gladiatorId, r.route, r.staminaDebit]))
+      .toEqual([['s0', 'tournament', 0], ['s24', 'tournament', 0], ['s25', 'tournament', 0]]);
+    expect(result.tournament!.bracket!.rulesVersion).toBe('v2');
+    expect(result.tournament!.bracket!.entries.map(e => e.gladiatorId).sort()).toEqual(['s0', 's24', 's25']);
+    expect(pair(input)).toEqual(result);
+    expect(input).toEqual(before);
+    expect(Object.isFrozen(input.entrants)).toBe(false);
+    // Both candidates were preliminary Rest: the worker can form the bracket even with no ordinary Arena entrants.
+    const allRested: PairingInput = { ...input, entrants: [], tournament: { ...input.tournament!, rested: entrants.slice(0, 2), candidates: candidates.slice(0, 2) } };
+    expect(pair(allRested)).toMatchObject({ assignments: [], tournament: { bracket: { rulesVersion: 'v2' },
+      routes: [{ gladiatorId: 's0', route: 'tournament', staminaDebit: 0 }, { gladiatorId: 's24', route: 'tournament', staminaDebit: 0 }] } });
+    expect(() => pair({ ...allRested, tournament: { ...allRested.tournament!, candidates: candidates.slice(0, 1) } }))
+      .toThrow(expect.objectContaining({ code: 'invalid-input' }));
+  });
+
   it('prepares a v2 member with the cap', () => {
-    const v2 = (earnedPoints: number, level = 1) => prepareActivity(preparation({ rulesVersion: 'v2', earnedPoints, level }), RULES_V2);
+    const v2 = (earnedPoints: number, level = 1) => prepareActivity(preparation({ rulesVersion: 'v2', trainingActivitiesEarlierInDay: 0, earnedPoints, level }), RULES_V2);
     // Level 1 allows 10 + 4 × 1 = 14 earned points: 13 still trains; 14, and 94 far above the cap, credit nothing.
     expect([13, 14, 94].map(points => v2(points).trainingPoints)).toEqual([1, 0, 0]);
     // Level 10 allows 50.
@@ -681,7 +785,8 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
     const result = v2(13);
     expect([result.rulesVersion, result.snapshot.rulesVersion, result.arenaFighter.rulesVersion, result.npcTemplate.rulesVersion])
       .toEqual(['v2', 'v2', 'v2', 'v2']);
-    // Only the economy differs: the stats, the stamina costs, the league and the visible strength are v1's.
+    // Stats, all other stamina costs, the league and visible strength are v1's; v2 tournaments are free.
+    expect(result.costs.tournament).toBe(0);
     expect(unchanged(result)).toEqual(unchanged(prepareActivity(preparation({ earnedPoints: 13 }), RULES_V1)));
     expect(unchanged(v2(94))).toEqual(unchanged(prepareActivityV1(preparation({ earnedPoints: 94 }))));
     // v1 has no cap.
@@ -705,8 +810,8 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
       expect(Object.keys(DEFAULT_EXECUTORS[version]).sort(), version).toEqual(['pair', 'prepare', 'reveal', 'simulation']);
       expect(Object.isFrozen(DEFAULT_EXECUTORS[version]), version).toBe(true);
     }
-    expect(DEFAULT_EXECUTORS.v2.prepare!(lease('prepare', { snapshot: preparation({ rulesVersion: 'v2' }), rulesVersion: 'v2' })))
-      .toEqual(prepareActivity(preparation({ rulesVersion: 'v2' }), RULES_V2));
+    expect(DEFAULT_EXECUTORS.v2.prepare!(lease('prepare', { snapshot: preparation({ rulesVersion: 'v2', trainingActivitiesEarlierInDay: 0 }), rulesVersion: 'v2' })))
+      .toEqual(prepareActivity(preparation({ rulesVersion: 'v2', trainingActivitiesEarlierInDay: 0 }), RULES_V2));
   });
 
   it('builds executors over the retained constants only, never a copy', () => {
@@ -722,11 +827,11 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
 
   /** One gladiator's Ruined Outpost trip, prepared under `rules` (its build stamped with that version), as the boundary freezes it. */
   function trip(rules: Rules): ActivitySnapshot {
-    const prepared = prepareActivity(preparation({ rulesVersion: rules.version, level: 10, earnedPoints: 200,
+    const prepared = prepareActivity(preparation({ rulesVersion: rules.version, ...(rules.version === 'v2' ? { trainingActivitiesEarlierInDay: 0 } : {}), level: 10, earnedPoints: 200,
       build: { ...preparation().build, allocations: { strength: 150, agility: 5, vitality: 30, endurance: 5, precision: 5 } } }), rules);
     return { activityId: 'activity-trip', gladiatorId: gid, slotIndex: 300, rulesVersion: rules.version, cutoffMs: 300 * SLOT_MS,
       choice: { kind: 'expedition', expeditionId: 'outpost' }, scheduleVersion: 1, build: prepared.snapshot, derived: prepared.derived,
-      costs: prepared.costs, trainingPoints: prepared.trainingPoints, starting: { stamina: { current: 100, maximum: 100 }, level: 10, xp: 0,
+      costs: prepared.costs, trainingPoints: prepared.trainingPoints, ...(rules.version === 'v2' ? { trainingAllowed: prepared.trainingAllowed } : {}), starting: { stamina: { current: 100, maximum: 100 }, level: 10, xp: 0,
         earnedPoints: 200, unspentPoints: 5, league: prepared.league, rating: 1000, peakStrength: 0, tournamentOptIn: false } };
   }
 
@@ -748,7 +853,7 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
   });
 
   it('pairs, fights and runs a tournament bout of a v2 boundary under v2', async () => {
-    const v2Fighter = (strength: number) => prepareActivity(preparation({ rulesVersion: 'v2', earnedPoints: 40,
+    const v2Fighter = (strength: number) => prepareActivity(preparation({ rulesVersion: 'v2', trainingActivitiesEarlierInDay: 0, earnedPoints: 40,
       build: { ...preparation().build, allocations: { strength, agility: 2, vitality: 2, endurance: 0, precision: 2 } } }), RULES_V2).arenaFighter;
     const entrant = (id: string, strength: number, slotIndex = 300) => ({ gladiatorId: id, activityId: `activity-${id}`, seasonId: '0',
       league: 'bronze' as const, slotIndex, rating: 1000, fighter: v2Fighter(strength) });

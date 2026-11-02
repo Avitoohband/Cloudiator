@@ -7,6 +7,7 @@ import { slotAt } from './clock.ts';
 import { tournamentPlacements } from './economy.ts';
 import { simulateBattle, validFighter } from './combat.ts';
 import { RULES_V1 } from './rules-v1.ts';
+import { isRulesV2 } from './rules.ts';
 import { isTournamentSlot } from './tournament-slot.ts';
 import { seededRandom } from './random.ts';
 
@@ -100,8 +101,8 @@ function optedInAt(revisions: readonly OptInRevision[], cutoffMs: number): boole
 
 /**
  * Spec §8.2 eligibility at a common slot cutoff. On a tournament slot, a candidate enters its league's bracket when it
- * has Arena scheduled for the phase, was opted in before the cutoff and has stamina for both the requested Arena activity
- * (checked first, as boundary step 6 does) and the tournament. A league with at least the minimum entrants (v1: two)
+ * has Arena scheduled for the phase, was opted in before the cutoff and can afford the tournament. V1 also requires
+ * paid Arena affordability first; v2 forms its free brackets before that check. A league with at least the minimum entrants (v1: two)
  * gets a bracket; otherwise they run regular Arena, exactly once, with every other affordable Arena entrant (NPC
  * fallback included). No cross-league brackets. Days, time and minimum come from the candidates' one shared retained
  * rules version (v1 when there are no candidates). Any malformed candidate fails closed with a `RangeError`.
@@ -109,6 +110,7 @@ function optedInAt(revisions: readonly OptInRevision[], cutoffMs: number): boole
 export function partitionTournament(slot: SlotWindow, candidates: readonly TournamentCandidate[]): TournamentPartition {
   if (!Array.isArray(candidates)) throw new RangeError('Invalid tournament candidates');
   const rules = candidates.length > 0 ? sharedRules(candidates.map(c => c?.entrant?.fighter)) : RULES_V1;
+  const freeTournament = isRulesV2(rules);
   const tournamentSlot = isTournamentSlot(slot, rules);
   const season = candidates[0]?.entrant?.seasonId;
   const ids = new Set<string>(), activities = new Set<string>();
@@ -124,7 +126,7 @@ export function partitionTournament(slot: SlotWindow, candidates: readonly Tourn
     const arena = c.choice.kind === 'arena';
     const affordsArena = c.stamina >= c.costs.arena;
     const optedIn = optedInAt(c.optIn, slot.startMs);
-    const eligible = tournamentSlot && arena && affordsArena && optedIn && c.stamina >= c.costs.tournament;
+    const eligible = tournamentSlot && arena && (freeTournament || affordsArena) && optedIn && c.stamina >= c.costs.tournament;
     return { entrant, arena, affordsArena, optedIn, eligible, costs: { arena: c.costs.arena, tournament: c.costs.tournament } };
   });
   const bracketLeagues = new Set(LEAGUES.filter(league =>
@@ -132,6 +134,9 @@ export function partitionTournament(slot: SlotWindow, candidates: readonly Tourn
   const routes: TournamentRoute[] = decided.map(d => {
     const base = { gladiatorId: d.entrant.gladiatorId, activityId: d.entrant.activityId, league: d.entrant.league };
     if (!d.arena) return { ...base, route: 'other', reason: 'not-arena', staminaDebit: 0 };
+    if (freeTournament && d.eligible && bracketLeagues.has(d.entrant.league)) {
+      return { ...base, route: 'tournament', reason: 'bracket', staminaDebit: d.costs.tournament };
+    }
     if (!d.affordsArena) return { ...base, route: 'rest', reason: 'insufficient-stamina', staminaDebit: 0 };
     if (d.eligible && bracketLeagues.has(d.entrant.league)) return { ...base, route: 'tournament', reason: 'bracket', staminaDebit: d.costs.tournament };
     const reason = !tournamentSlot ? 'not-tournament-slot' : !d.optedIn ? 'opted-out' : !d.eligible ? 'insufficient-stamina' : 'too-few-entrants';

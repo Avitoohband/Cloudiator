@@ -37,6 +37,11 @@ export function expeditionReward(rules: Rules, id: ExpeditionId): ExpeditionRewa
   return freezeDomain({ xp, money, salvageQuantity: base.salvageQuantity, gearChance, gearTier: base.gearTier });
 }
 
+/** Maximum actual Training activities per game day: unlimited in v1 (null), two in v2, independent of the point cap. */
+export function trainingDailyLimit(rules: Rules): number | null {
+  return isRulesV2(rules) ? rules.progression.maxTrainingActivitiesPerGameDay : null;
+}
+
 /** The most earned attribute points Training adds to at `level`: none in v1 (null), `base + perLevel × level` in v2. */
 export function trainingCap(rules: Rules, level: number): number | null {
   checkCount(level, 1, 'level');

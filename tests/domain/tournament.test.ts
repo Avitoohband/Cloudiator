@@ -6,6 +6,8 @@ import { CATALOG_V1 } from '@domain/catalog-v1.ts';
 import { slotAt } from '@domain/clock.ts';
 import { makeFighter, simulateBattle } from '@domain/combat.ts';
 import { RULES_V1 } from '@domain/rules-v1.ts';
+import { RULES_V2 } from '@domain/rules-v2.ts';
+import { activityCost, deriveStats } from '@domain/stats.ts';
 import type { LeagueId } from '@contracts/commands.ts';
 import type { BattleLog } from '@contracts/events.ts';
 import type { Attributes, BattleParticipant, BuildSnapshot, EquipmentSlot, ItemInstance, Rules } from '@domain/types.ts';
@@ -297,6 +299,68 @@ describe('tournament eligibility', () => {
   });
   it('rejects a malformed slot window', () => {
     expect(() => partitionTournament({ ...wednesday, startMs: WEDNESDAY + 1 }, [candidate('a')])).toThrow(RangeError);
+  });
+});
+
+describe('v2 free tournament eligibility', () => {
+  const wednesday = slotAt(WEDNESDAY);
+  function v2Candidate(id: string, stamina: number, overloaded = false, patch: Partial<TournamentCandidate> = {},
+    entrantPatch: Partial<ArenaEntrant> = {}): TournamentCandidate {
+    const snapshot = { ...build('berserker', 'balanced', { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 },
+      overloaded ? { body: item('heavy-armor:1:common'), head: item('iron-helmet:1:common'),
+        feet: item('heavy-boots:1:common'), offHand: item('round-shield:1:common') } : {}), rulesVersion: 'v2' };
+    const derived = deriveStats(snapshot, RULES_V2);
+    return candidate(id, { stamina, costs: { arena: activityCost(RULES_V2.activityStamina.arena, derived.overload),
+      tournament: activityCost(RULES_V2.activityStamina.tournament, derived.overload) }, ...patch },
+    { fighter: makeFighter(snapshot, 'arena', RULES_V2), ...entrantPatch });
+  }
+  it.each([false, true])('forms a free bracket before paid Arena affordability (overload %s)', overloaded => {
+    const input = [0, 24, 25].map(stamina => v2Candidate(`s${stamina}`, stamina, overloaded));
+    const before = structuredClone(input);
+    const result = partitionTournament(wednesday, input);
+    expect(result.brackets.map(b => [b.league, b.entrants.map(e => e.gladiatorId)]))
+      .toEqual([['bronze', ['s0', 's24', 's25']]]);
+    expect(result.arena).toEqual([]);
+    expect(result.routes.map(r => [r.route, r.reason, r.staminaDebit]))
+      .toEqual(Array(3).fill(['tournament', 'bracket', 0]));
+    expect(result.brackets[0].entrants.every(e => e.fighter.rulesVersion === 'v2')).toBe(true);
+    expect(input).toEqual(before);
+    expect(Object.isFrozen(input[0])).toBe(false);
+    expect(Object.isFrozen(result.brackets[0].entrants[0].fighter)).toBe(true);
+  });
+  it.each([false, true])('keeps every fallback on ordinary Arena affordability (overload %s)', overloaded => {
+    const price = overloaded ? 29 : 25; // Load23/capacity20: ceil(25 × 1.15) =29.
+    for (const reason of ['not-tournament-slot', 'opted-out', 'at-cutoff', 'too-few-entrants'] as const) {
+      const slot = reason === 'not-tournament-slot' ? slotAt(WEDNESDAY + SLOT_MS) : wednesday;
+      const optIn = reason === 'opted-out' ? [] : reason === 'at-cutoff' ? [{ enabled: true, receivedAtMs: WEDNESDAY }]
+        : [{ enabled: true, receivedAtMs: WEDNESDAY - 1 }];
+      // One entrant per league for the minimum case; the other scenarios have two in Bronze.
+      const inputs = [v2Candidate('exact', price, overloaded, { optIn }, { slotIndex: slot.index }),
+        v2Candidate('short', price - 1, overloaded, { optIn }, { slotIndex: slot.index, league: reason === 'too-few-entrants' ? 'silver' : 'bronze' })];
+      const result = partitionTournament(slot, inputs);
+      expect(inputs[0].costs.arena).toBe(price);
+      expect(result.brackets, reason).toEqual([]);
+      expect(result.routes.map(r => [r.route, r.staminaDebit]), reason).toEqual([['arena', price], ['rest', 0]]);
+      expect(result.routes[0].reason).toBe(reason === 'at-cutoff' ? 'opted-out' : reason);
+      expect(result.routes[1].reason).toBe('insufficient-stamina');
+      expect(result.arena.map(e => e.gladiatorId)).toEqual(['exact']);
+    }
+  });
+  it('keeps non-Arena choices outside the bracket and rejects mixed or duplicate v2 candidates', () => {
+    const inputs = [v2Candidate('a', 0), v2Candidate('b', 0),
+      v2Candidate('trainer', 0, false, { choice: { kind: 'training' } })];
+    const result = partitionTournament(wednesday, inputs);
+    expect(result.routes.map(r => r.route)).toEqual(['tournament', 'tournament', 'other']);
+    expect(result.routes[2]).toMatchObject({ reason: 'not-arena', staminaDebit: 0 });
+    expect(() => partitionTournament(wednesday, [...inputs, candidate('v1')])).toThrow(/share one rules version/);
+    expect(() => partitionTournament(wednesday, [...inputs, inputs[0]])).toThrow(/Duplicate/);
+    expect(() => partitionTournament(wednesday, [{ ...inputs[0], stamina: -1 }])).toThrow(RangeError);
+  });
+  it('retains the paid Arena prerequisite for custom retained versions', () => {
+    const custom = (id: string, stamina: number) => candidate(id, { stamina, costs: { arena: 25, tournament: 0 } }, { fighter: customFighter });
+    const result = partitionTournament(wednesday, [custom('a', 25), custom('b', 25), custom('c', 25), custom('short', 24)]);
+    expect(result.brackets[0].entrants.map(e => e.gladiatorId)).toEqual(['a', 'b', 'c']);
+    expect(result.routes[3]).toMatchObject({ route: 'rest', reason: 'insufficient-stamina', staminaDebit: 0 });
   });
 });
 

@@ -26,13 +26,14 @@ describe('RULES_V2', () => {
     expect(hash(CATALOG_V1)).toBe(V1_CATALOG_HASH);
   });
 
-  const ECONOMY = ['version', 'progression', 'inventory', 'expeditionRewards', 'tournament', 'seasons'] as const;
+  const ECONOMY = ['version', 'progression', 'activityStamina', 'inventory', 'expeditionRewards', 'tournament', 'seasons'] as const;
   it('differs from v1 only in the economy keys', () => {
     const rest = (rules: object) => Object.fromEntries(Object.entries(rules).filter(([key]) => !ECONOMY.includes(key as never)));
     expect(Object.keys(rest(RULES_V2)).sort()).toEqual(Object.keys(rest(RULES_V1)).sort());
     expect(rest(RULES_V2)).toEqual(rest(RULES_V1));
-    expect({ ...RULES_V2.progression, trainingCapBase: undefined, trainingCapPerLevel: undefined })
-      .toEqual({ ...RULES_V1.progression, trainingCapBase: undefined, trainingCapPerLevel: undefined });
+    expect({ ...RULES_V2.progression, trainingCapBase: undefined, trainingCapPerLevel: undefined, maxTrainingActivitiesPerGameDay: undefined })
+      .toEqual({ ...RULES_V1.progression, trainingCapBase: undefined, trainingCapPerLevel: undefined, maxTrainingActivitiesPerGameDay: undefined });
+    expect(RULES_V2.activityStamina).toEqual({ ...RULES_V1.activityStamina, tournament: 0 });
     expect({ ...RULES_V2.tournament, placementsByLeague: undefined })
       .toEqual({ ...RULES_V1.tournament, placements: undefined, placementsByLeague: undefined });
     expect({ ...RULES_V2.seasons, placementsByLeague: undefined })
@@ -47,7 +48,7 @@ describe('RULES_V2', () => {
       outpost: { xp: 75, money: 10, gearChance: 0.15 }, mountain: { xp: 150, money: 18, gearChance: 0.2 } });
     expect(RULES_V2.inventory).toEqual({ capacity: 60, salvageStack: 999, salvageSellValue: 4 });
     expect(RULES_V2.progression).toEqual({ trainingPoints: 1, xpPerCurrentLevel: 100, levelAttributePoints: 0, levelStaminaRefill: 0,
-      trainingCapBase: 10, trainingCapPerLevel: 4 });
+      trainingCapBase: 10, trainingCapPerLevel: 4, maxTrainingActivitiesPerGameDay: 2 });
     expect([RULES_V2.progression.trainingCapBase, RULES_V2.progression.trainingCapPerLevel]).toEqual([10, 4]);
     expect(Object.keys(RULES_V2.tournament.placementsByLeague)).toEqual(LEAGUES);
     expect(LEAGUES.map(l => Object.keys(RULES_V2.tournament.placementsByLeague[l]))).toEqual(LEAGUES.map(() => ['winner', 'runnerUp', 'semifinal', 'other']));

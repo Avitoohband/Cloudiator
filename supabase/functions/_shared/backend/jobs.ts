@@ -1,7 +1,7 @@
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { RULES_V2 } from '../domain/rules-v2.ts';
 import { requireRetained } from '../domain/rules.ts';
-import { trainingPoints } from '../domain/economy.ts';
+import { trainingDailyLimit, trainingPoints } from '../domain/economy.ts';
 import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
 import { freezeDomain } from '../domain/types.ts';
@@ -48,12 +48,19 @@ const ACTIVITY_KINDS: readonly ActivityKind[] = ['training', 'rest', 'expedition
  * frozen arena fighter, its NPC fallback template, its visible strength estimate and the league placement, so SQL
  * compares pairing results with these values instead of restating makeFighter, makeFallback or leagueFor. Patch 1.6 applies
  * the Training cap here: `trainingPoints` is the version's answer for the frozen level and earned points (v1: always 1; v2: 1
- * below 10 + 4 × level, else 0), which SQL freezes into the snapshot and credits at settlement.
+ * below 10 + 4 × level, else 0), which SQL freezes into the snapshot and credits at settlement. The v2 daily activity
+ * allowance is separate: the count frozen by SQL must fit the target's phase, even when Training would grant no points.
  */
 export function prepareActivity(input: PreparationInput, rules: Rules): PreparationResult {
   requireRetained(rules);
   if (!input || typeof input !== 'object' || !input.build || !Array.isArray(input.items)) throw new WorkerFailure('invalid-input');
   if (input.rulesVersion !== rules.version) throw new WorkerFailure('unsupported-rules');
+  const dailyLimit = trainingDailyLimit(rules);
+  const earlierTraining = input.trainingActivitiesEarlierInDay;
+  if (dailyLimit !== null && (!Number.isSafeInteger(input.slotIndex) || input.slotIndex < 0
+    || !Number.isSafeInteger(earlierTraining) || earlierTraining! < 0 || earlierTraining! > input.slotIndex % 3)) {
+    throw new WorkerFailure('invalid-input');
+  }
   const build: BuildInput = { classId: input.build.classId, stance: input.build.stance,
     allocation: { ...input.build.allocations }, equipment: { ...input.build.equipment } };
   const validation = validateBuild(build, structuredClone(input.items) as ItemInstance[], input.earnedPoints, input.level, rules);
@@ -64,6 +71,7 @@ export function prepareActivity(input: PreparationInput, rules: Rules): Preparat
   return { rulesVersion: rules.version, snapshot: structuredClone(validation.snapshot) as PreparationResult['snapshot'], derived,
     // The level and earned points were validated above (safe integers, level ≥ 1, earned ≥ the creation points).
     staminaMaximum: derived.maxStamina, costs, trainingPoints: trainingPoints(rules, input.level, input.earnedPoints),
+    ...(dailyLimit === null ? {} : { trainingAllowed: earlierTraining! < dailyLimit }),
     // A job frozen before Task 8 has no gear history. SQL never lowers a placement, so 0 can only delay a promotion.
     league: leagueFor(input.level, input.earnedPoints, input.peakStrength ?? 0, rules),
     arenaFighter: structuredClone(arenaFighter) as FighterSnapshot, npcTemplate: structuredClone(makeFallback(arenaFighter)) as FighterSnapshot,

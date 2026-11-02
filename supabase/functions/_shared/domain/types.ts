@@ -40,11 +40,15 @@ export type PreparationInput = DeepReadonly<{
   build: BuildView; items: ItemInstance[]; level: number; earnedPoints: number;
   /** Historical legal gear-loadout maximum; optional only for jobs frozen before Task 8. */
   peakStrength?: number;
+  /** Actual Training settlements earlier in this target game day; mandatory for v2 at runtime, omitted by historical v1 jobs. */
+  trainingActivitiesEarlierInDay?: number;
 }>;
 /** Canonical TypeScript derivation stored by `complete_job`; SQL never re-implements the stats engine. */
 export type PreparationResult = {
   rulesVersion: string; snapshot: BuildSnapshot; derived: DerivedStats;
   staminaMaximum: number; costs: ActivityCosts; trainingPoints: number;
+  /** Daily activity allowance, independent of trainingPoints; mandatory for v2 at runtime, omitted by historical v1 results. */
+  trainingAllowed?: boolean;
   /** Task 16: league placement from level, every earned point (banked too) and historical gear, never the current loadout. */
   league: LeagueId;
   /** Task 16: the frozen `makeFighter(snapshot, 'arena', rules)`, its `makeFallback` NPC template and its visible strength. */
@@ -55,6 +59,8 @@ export type ActivitySnapshot = DeepReadonly<{
   activityId: string; gladiatorId: string; slotIndex: number; rulesVersion: string; cutoffMs: number;
   choice: ActivityChoice; scheduleVersion: number;
   build: BuildSnapshot; derived: DerivedStats; costs: ActivityCosts; trainingPoints: number;
+  /** Accepted preparation allowance; mandatory for v2 at runtime, omittable for historical v1 snapshots. */
+  trainingAllowed?: boolean;
   starting: {
     stamina: { current: number; maximum: number }; level: number; xp: number; earnedPoints: number; unspentPoints: number;
     league: LeagueId; rating: number; peakStrength: number; tournamentOptIn: boolean;

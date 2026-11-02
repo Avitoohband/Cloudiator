@@ -1,7 +1,8 @@
 # The release gate on a GitHub-hosted runner (Task 23.6, R4, Avi decision 3): a fresh local Supabase stack with every
 # migration replayed, the local Edge functions, then `npm run verify` (scripts/verify.mjs), the same gate as on a
-# development machine except for one step: the development browser suite is not run here (see the Release gate step). No
-# hosted project, key or secret is used: the stack is local to the runner and the worker secret is generated for the run.
+# development machine except for one step by default: the development browser suite is not run here (see the Release gate
+# step). An explicit manual full_development_gate input opts into all twelve steps; it is an optional complete Linux trial.
+# No hosted project, key or secret is used: the stack is local to the runner and the worker secret is generated for the run.
 # Nothing here prints the local keys (`supabase start` writes them only to a file in RUNNER_TEMP).
 # Exit 2 from the gate is reserved for failures that are all named known blockers (still a red run). None is listed
 # (scripts/verify.mjs KNOWN_BLOCKERS is empty since Task 23.8), so today any failure exits 1.
@@ -14,6 +15,12 @@ on:
     branches: ['**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      full_development_gate:
+        description: Run all twelve gate steps, including the development browser suite
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -59,6 +66,7 @@ jobs:
           nohup npx supabase functions serve --env-file .env.edge.local > "$RUNNER_TEMP/edge.log" 2>&1 &
 
       - name: Release gate
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_development_gate != true }}
         # The controller's CI exception (Task 24.0d, 2026-10-21): this free runner is too slow for the development browser suite
         # (next dev compiles each route on demand, and Chrome renders WebGL in software, with no GPU). Run 39452911203 failed 51
         # of its tests there, and run 39588134783, with the 148 render-bound runs already left out, still failed 50 in 52 min,
@@ -71,6 +79,17 @@ jobs:
         run: |
           npm run verify -- --json "$RUNNER_TEMP/verify.json"
 
+      - name: Complete development release gate (manual opt-in)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_development_gate == true }}
+        # Explicitly unset the omission switch: a GitHub expression returning an empty string through &&/|| would fall back.
+        # The existing controller discovers both inventories and runs eight strict, sequential shards per browser phase.
+        # This branch is a complete Linux trial, not a guarantee that the slower runner will pass or a gate-of-record ruling.
+        env:
+          VITEST_MAX_WORKERS: '1'
+        run: |
+          unset CLOUDIATOR_CI
+          npm run verify -- --config playwright.full-gate.config.ts --browser-shards 8 --results "$RUNNER_TEMP/full-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --json "$RUNNER_TEMP/verify.json"
+
       - name: Keep the gate's results and the browser traces
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -79,5 +98,6 @@ jobs:
           path: |
             ${{ runner.temp }}/verify.json
             test-results/
+            ${{ runner.temp }}/full-gate-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: ignore
           retention-days: 14

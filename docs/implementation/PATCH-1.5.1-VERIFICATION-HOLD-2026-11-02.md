@@ -1,0 +1,83 @@
+# Patch 1.5.1 verification hold — 2026-11-02
+
+**The reviewed test-maintenance candidate is not cleared for deployment.** Initial NPC patch 1.5.1 is already live at `ae9d79d47525c1cbc4194fea84805c2e5644f160`, Pages `1660af43-ee66-46f4-b318-1480bcb9719b`. The completed UNIT1 gate on `a285381033da68b172c70a88d2df66d4da8e63a3` finished with eleven stages passed and one failed. Avi's choice between a complete Linux trial as the gate of record and further Windows verification work is pending. The existing local-gate-of-record rule remains in force; ordinary CI is not a substitute.
+
+This checkpoint supersedes active-run, unreleased-NPC and pending-publication instructions in the older handoffs. It authorizes no new test, workflow implementation/dispatch, source correction or production action. Earlier full-release documentation drafts remain historical and must not be applied wholesale.
+
+## Current completed result
+
+UNIT1 ran 2026-11-02 08:13:48.614–09:04:55.987 UTC. Native session 92229 returned exit 1 at **09:04:56.8022352 UTC**; its receipt confirms exact a285381, summary present, tracked-clean, sampler stopped and ledger unchanged. All twelve stages executed: eleven passed, development browsers failed, `notRun` empty. These are receipt/start-end observations, not continuous filesystem monitoring.
+
+| Stage | Actual result from this attempt |
+| --- | --- |
+| Unit tests | 124 passed files / 2,188 passed assertions, no unit or unhandled errors; controller unit status establishes exit 0 |
+| Unit provenance | All 124 unique physical unit input paths/hashes match before sampling and after completion; process-scoped `VITEST_MAX_WORKERS=1` |
+| Typecheck / Edge / assets / builds and scans | Passed; Edge tests 3/3; whitespace passed |
+| DB/Auth/Edge capacity | 405 passed / 30 modules; Edge unchanged during DB at `2026-11-02T08:15:04.50871439Z` after preparation settled |
+| Development browsers | 1,195 literal passes + one literal failed case + 50 skips = 1,246; one unexpected, no flaky outcome |
+| Static browsers | 32 literal passes + two intentional expected CSP failures + 1,212 skips = 1,246; zero unexpected outcomes |
+| Coverage/settings | Both inventories contain 1,246 unique identities; each eight-shard union matches exactly, zero missing/extra/duplicates; raw/identity companions agree; one worker, retries 0, repeatEach 1, no execution retries/repeats or run errors |
+
+The sole unexpected case was desktop `full-screen.spec.ts:219`, “typing in a menu field never moves the camera.” It started 08:28:23.347 UTC, lasted 45,345 ms and has actual status **failed**, not `timedOut`. `openCamp` at line 53 waited 45 seconds for `camp.ready`; owner/menu/camera assertions were not reached. The fixture separately recorded `ERR_NO_BUFFER_SPACE` loading the local React DOM JavaScript chunk. No expected/received camera mismatch occurred. The asset failure and readiness timeout are established; the underlying Windows/resource cause and causal linkage remain unproved. Sampled telemetry does not establish global port/memory exhaustion, a leak or a cure.
+
+Root's 09:05:58 UTC check and the auditor's 09:06:08 UTC snapshot found the designated main/shell/sampler absent and no listeners on ports 3800/4173. Neither stopped processes or proved absence of every possible orphan. Root read the complete independent final report and reconciled its receipts, counts and archive references with the native completion evidence. No new gate is active under this checkpoint.
+
+## Preserved history and scope
+
+- Initial ae9d79d CLEAN8 passed all twelve local stages, then the production-origin build, fresh Pages/content/atlas proof, nine deployed checks / 22 anonymous denials, publication/readbacks, anonymous probe and boundary 373655 health passed. Release CI 41315953135 attempts 1/2 nevertheless failed only the inherited aggregate benchmark deadline at 5,059/5,556 ms versus 5,000; same-head feature run passed at 4,750 ms. No further unchanged CI retry was made.
+- Reviewed `2ac6106e1a684ede87e8fee849d6af2b6e86abee` gives only that aggregate test a reasoned 60-second whole-test deadline. All workload and 1,500 ms invocation/batch assertions remain. Its feature CI passed at 5,420 ms; its full local gate failed 11/12 on a mobile changed-world actor-read expectation (2 expected, 1 observed). All 611 files remain archived. No exact original runtime cause was established.
+- Reviewed a285381 initializes the existing polling observer and waits for initial/end-of-poll idle. Assertions, three unchanged polls, 25-second no-early window, one-second advances and 15-second count wait remain. Focused 2/2 and owning 20/20 passed; independent review PASS. Its earlier complete local gate failed 11/12 on two transport-associated startup prerequisites: development 1,194 passed + one failed + one timedOut + 50 skips; static 32 literal + two expected CSP failures + 1,212 skips. Both 1,246-identity inventories are complete; all 613 files remain archived. The corrected polling case itself passed both projects.
+- Exact a285381 feature CI **41325664880** passed eleven stages with development explicitly omitted; units 2,178 + ten Windows-only skips, Edge 3, DB 405, static 32 literal + two expected CSP failures + 1,212 skips. Benchmark 5,291 ms. It does not exercise the development-only polling correction or replace a complete gate.
+- Avi chose restart/continue; root observed boot `2026-11-01T22:15:08.500Z` and restored cached Docker 29.9.2 / M01–M26 / hotfix Edge. The overnight attempt is **interrupted/incomplete**, with no summary/native exit: five closed development pairs prove 746 passes + 37 skips / 783 identities; 889 partial stdout passes are separate. Its 12,273-file archive remains. Later boot `2026-11-02T07:02:46.500Z` was observed; the original interruption cause/time is unknown. Reboots/restoration do not prove a host cure.
+- The morning attempt was stopped after an actual unit-worker startup error: 123 passed files / 2,176 tests plus one error. It has no consolidated gate summary; native return 1 and 7,816-file archive are retained. Root corrected an earlier count-only interpretation. A subsequent single-worker unit diagnostic passed 124 files / 2,188 tests with zero errors and matching inputs; it supported the controlled process profile, not release readiness. UNIT1's fresh unit result above is separate evidence; its complete browser failure remains failed.
+
+The only committed source changes from initial ae9d79d to a285381 are `tests/performance/simulation.test.ts` and `tests/browser/live-camp.spec.ts`. No app/backend/assets/packages/config runtime change, NPC migration or Edge deployment occurred. UNIT1's single-unit-worker setting was a process-only local launcher profile; no repository test/assertion/timeout or machine environment setting changed. This documentation checkpoint is not a newly executed candidate gate.
+
+## Pending gate-of-record decision and concrete CI proposal
+
+The optional proposal at parent `logs/p151-full-ci-proposal-20261102-a285381-aa632393/` is **v2, static-review PASS only**. Root read its complete independent review. No proposed test, config, workflow, dispatch or remote trial has been executed. Avi's multiple-choice decision is still pending; existing routine CI/install authority does not approve replacing the complete local gate of record. The October Linux development runs failed 51/50 cases under an older 30-second outer profile; a new trial may still fail or time out.
+
+If Avi selects the complete Linux trial, first confirm the controller has ended and ownership is released, preserve inputs, then implement only this reviewed four-file plan under TDD:
+
+1. Add the proposed tests to `tests/workflow.test.ts` and `tests/scripts/playwright-config.test.ts` first. Run installed focused Vitest with one worker and retain meaningful RED for the missing opt-in/selectors/config; an import/tool failure is not the intended RED.
+2. Add the typed default-false `workflow_dispatch` input and mutually exclusive opt-in step in `.github/workflows/checks.yml`, plus `playwright.full-gate.config.ts`. Only manual boolean true selects the complete path; push/PR/manual default or false keep ordinary eleven-stage CI and its explicit development omission unchanged.
+3. Full mode explicitly unsets `CLOUDIATOR_CI`, scopes `VITEST_MAX_WORKERS=1`, uses all twelve existing controller steps and eight sequential shards per browser mode with fresh run-ID/attempt evidence. Its public root-config merge overrides only workers 1, retries 0, repeatEach 1 and the native-matching **90-second outer timeout**. Preserve per-case assertions/waits, browser/device/rendering/server selection, skips, GPU flags and 1,500 ms CPU budgets. Retain complete raw/identity inventories, shard reports and traces through an artifact allowlist without credential/env logs.
+4. Obtain focused GREEN, applicable controller/reporter/type checks and independent exact-diff review, then commit the actual candidate with the required Codex trailer. Any harness commit differs from a285381: use its real SHA for execution and evidence. Only after Avi's explicit choice and review may root push/dispatch the complete trial. Audit all twelve stages/no omission, identities/settings/controls, Edge guard and actual completed artifact; failure/cancellation/incomplete evidence stays failed or incomplete, without splicing.
+
+The v2 tests account for SDK merge normalization and use boolean/key-only comparisons so nested config/env values cannot be printed. Those are source-reviewed draft corrections, not tested fixes. The default branch `codex/gladiator-arena` already has `workflow_dispatch` per root's read-only GitHub check; no default-branch write is proposed. Normal remote pinned CI/Pages installs and CI image pulls remain approved; new local downloads are forbidden without specific approval. If Avi chooses Windows work instead, retain the current rule and perform only the selected recovery/diagnosis; do not silently execute the Linux proposal or loop unchanged gates.
+
+This documentation commit changes HEAD without changing the tested application or test sources. Re-read the actual commit identity before further work; frozen launch/build wrappers bound to a285381 must be rebound and reviewed for the actual subsequent candidate rather than bypassing their identity guards.
+
+## Production obligations and next stream
+
+**Do not repost note 7 or call `record_patch` for 1.5.1 again.** Its exact three-feature record already exists. Original publication times are immutable: note `1793543556030` ms / 2026-11-01 14:32:36.030 UTC; record `1793543688515` ms / 14:34:48.515 UTC. Initial sampled unread 0→1 is historical; never expose its private baseline/fingerprints/generated SQL or assume the count remains unchanged. Authenticated human/Google journey and physical-phone attestation remain unclaimed.
+
+After a genuinely accepted complete gate on the exact reviewed candidate, require the actual production-origin build, fresh pre-push baseline/release fast-forward, fresh successful exact-SHA Pages UUID and canonical/deployment content linkage, distinct release CI, settled deployed checks, existing-note readback/fresh anonymous probe and the first following completed boundary health/hosted checks. Rebind/review inert build preparation if the candidate SHA changes. Test-only public assets may be unchanged; report equality/change honestly. Initial boundary health is not new-deployment health. No production write has been made for the two fixes or this checkpoint.
+
+Keep [Ruling 22](PATCH-1.5-RULINGS-2026-11-01.md) precise: shipping endpoint and still-mandatory boundary health are separate; it is no gate waiver or complete-operational claim, and actual health alerts stop further changes. Finalize the detailed release record only from actual proof, then merge the full released/post-release-doc line into design before adopting economy amendments. Routine reviewed release authority persists; do not ask for a generic go in place of these specific checks.
+
+Economy **v5** is a reviewed parent-log draft, ready but **unapplied**; design remains `5919fa1`, with no Task 4 / SQL21 / M27 implementation. Preserve max two actual Trainings/day → ordinary Rest plus save warning, cap-zero/v1/history semantics, free eligible v2 brackets/paid Arena, population fencing and immutable receipt/audit reconciliation. Both migration-only pushes use `--skip-vault`. The filled D-1 warning/text/time approval, at least 24-hour notice and separate explicit irreversible activation go remain. After activation commits and immediate authoritative readbacks, promptly publish truthful note/record, then perform mandatory next-boundary health; retain earlier post-functions health. Reload is offered, never forced.
+
+All **20 economy mockup views remain unrendered/unshown/unapproved**. The QA harness is inert/unexecuted, with only partial root review; no complete syntax/runtime/visual approval is claimed. Perform actual QA and show the mockup before client Tasks 8–9 land; backend work needs no invented UI approval gate. Only the combined 1.4 + 1.5 film during the 1.6 notice is authorized; no separate NPC/1.6 film or social publication. Retain the clip/feature-post reminder and future gear-hover/art, standalone Friends-after-economy and per-device Music/SFX ideas.
+
+## Artifact index
+
+Paths below are under `C:/Avi/Studies/Projects/Cloudiator/`, outside Git worktrees unless stated. Preserve raw/private artifacts locally; this tracked record carries their safe facts and provenance.
+
+| Evidence | Location / immutable identifier |
+| --- | --- |
+| UNIT1 controller checkpoint | `logs/CODEX-P151-UNIT1-ACTIVE-2026-11-02.md` (its active-run status is superseded here) |
+| UNIT1 full audit/archive | `logs/p151-unit1-gate-audit-20261102-31a467c0/report.md`; `frozen-gate-evidence/`: **613 files / 151,674,926 bytes** |
+| UNIT1 archive/summary/receipt | Manifest SHA256 `be1eee90c456b169ce5e6ed5926776edde9144280974a721713a2197f599078d`; frozen verify SHA256 `9a109eeb19c985980789ecded0ccaf0018ce134b369396391602c74143fecd06`; receipt SHA256 `8ddaff360f2a3b1ff2e6eeee3a0c3a43cb709b04c33af77daa5390e8dcb65c16` |
+| UNIT1 detailed proof | Same audit directory: `unit-inventory-review.json`, `final-input-integrity.json`, `all-settings-and-controls-audit.json`, `final-ports-confirmation.json`, `failure-observations/full-screen-desktop-219/` |
+| Native UNIT1 evidence | `C:/Users/AVI_OP~1/AppData/Local/Temp/Cloudiator-Codex-p151-unit1-20261102-a285381-b3a0c532/` |
+| Single-worker profile/diagnostic review | `logs/p151-unit1-launch-20261102/`; `independent-unit1-audit-20261102.md` SHA256 `ff3325dc72cf91f45dd583b07c0084235c9f1f82dde923f8e151624d81f205da` |
+| Morning stopped run | `logs/p151-morning-gate-audit-20261102-6f4b9032/report.md`; manifest `70505660da79f68d17d0b9162deb6195bb4e7b39be91d921d23f066424217746` |
+| Overnight interrupted run | `logs/p151-postreboot-gate-audit-20261102-81c247ab/`; manifest `82d40c4367daee00282fce201e51e7b194509ac275ffb2f290c8da7c551390e7` |
+| Earlier exact a285/2ac failures and feature CI | `logs/p151-a285-local-gate-audit-20261101-3eeb0f61/`, `logs/p151-2ac-local-gate-audit-20261101-6fb1a842/`, `logs/p151-a285-feature-ci-audit-41325664880-20261101-3eeb0f61/` |
+| Initial live proof / failed release CI | `logs/p151-clean8-audit-20261101-728146e9/`, `logs/p151-production-monitor-20261101-1660af43/`, `logs/p151-publication-runtime-20261101-ae9d79d/`, `logs/p151-release-ci-failure-41315953135-20261101-19f7e6ba/`, `logs/p151-release-ci-attempt2-41315953135-20261101-b13253c8/` |
+| Optional CI proposal v2 | `logs/p151-full-ci-proposal-20261102-a285381-aa632393/`: `README.md`, `IMPLEMENTATION-PLAN.md`, `INDEPENDENT-REVIEW-V2.md`, unexecuted `proposal.diff` SHA256 `c19bea35697abcbb4e693726a220d01f0f51cb37a32a3a47c945078e6bd061b1` |
+| Economy v5 / reviews | `logs/p16-plan-amendment-draft-v5-20261102-3e849c17/`, `logs/P16-V5-INDEPENDENT-DELTA-REVIEW-2026-11-02-90731e42.md`, `logs/P16-V5-ROOT-DELTA-REVIEW-2026-11-02.md` |
+| Unrendered mockup / inert QA harness | `logs/p16-static-mockup-draft-20261101-d4f0be18/mockups.html`; `logs/p16-static-mockup-qa-prepare-20261102-a7438a03/` |
+
+Only this hold record and short links in HANDOFF/readiness change for this documentation checkpoint. AGENTS, changelog/features, test/workflow/controller, runtime, Supabase, assets and character sources remain unchanged. Its commit/push records the hold; it performs no deployment, workflow dispatch, build, browser or DB/stack action. The Git commit carries the detailed checkpoint notes and normal Codex trailer.

@@ -1,3 +1,5 @@
+> **2026-11-02 verification hold:** Initial NPC 1.5.1 is live at ae9d79d; the two reviewed test fixes at a285381 are not deployed or cleared. The completed UNIT1 gate had eleven stages pass and one development-browser stage fail during startup; units 2,188 and DB 405 passed. Avi's full-Linux-trial versus Windows choice is pending; the local gate of record is unchanged. Do not repost note 7 or record 1.5.1. Read the [current verification hold and exact continuation](PATCH-1.5.1-VERIFICATION-HOLD-2026-11-02.md). Older checkpoints below are historical.
+
 # Patch 1.5.1 verification checkpoint - 2026-11-01
 
 Production is still 1.5. The NPC implementation, reviews, measurements and patch-version test maintenance are complete. The latest full gate on63d1204 failed11/12 on a Windows React-load transport error; publication remains pending. All gate processes and the sampler finished, browser ports are free, and raw evidence is preserved. This document is a recovery checkpoint, not a production-readiness claim.

@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { TransactionSql } from 'postgres';
 import { createHash, randomUUID } from 'node:crypto';
 import { sql, account, resetIdentity, admin, anonymous, creation, directEdge, recordingClient, clockedClient } from '../fixtures/db.ts';
 import { recordMeasurement } from '../fixtures/measurements.ts';
@@ -10,6 +11,8 @@ import { buildBracket, isTournamentSlot, readyBouts, recordBout, runBout, tourna
 import type { TournamentGraph } from '../../supabase/functions/_shared/domain/tournament.ts';
 import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
+import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import type { JobLease, PreparationInput, PreparationResult } from '../../supabase/functions/_shared/domain/types.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import type { ActivitySummary, RevealedStage } from '../../supabase/functions/_shared/contracts/events.ts';
@@ -109,11 +112,13 @@ const advance = (target: number, token: string) => rpc('advance_boundary', { tar
 const claim = (kind: string, limit = 20) => rpc<JobLease[]>('claim_jobs', { worker_id: randomUUID(), kind, batch_limit: limit });
 const complete = (job: JobLease, result: unknown) => rpc('complete_job', { job_id: job.id, lease_token: job.token, result });
 type Adjust = (gladiatorId: string, result: PreparationResult) => PreparationResult;
-/** Completes every due preparation through the canonical v1 executor; `adjust` lets a test freeze other (valid) costs. */
+/** Completes every due preparation through its retained executor; `adjust` freezes other valid historical costs. */
 async function completePreparations(adjust: Adjust = (_, result) => result) {
   for (let jobs = await claim('prepare'); jobs.length; jobs = await claim('prepare')) {
     for (const job of jobs) {
-      expect(await complete(job, adjust(job.gladiatorId!, prepareActivityV1(job.snapshot as PreparationInput)))).toMatchObject({ ok: true });
+      const executor = DEFAULT_EXECUTORS[job.rulesVersion];
+      if (!executor?.prepare) throw new Error('unsupported preparation rules: ' + job.rulesVersion);
+      expect(await complete(job, adjust(job.gladiatorId!, await executor.prepare(job) as PreparationResult))).toMatchObject({ ok: true });
     }
   }
 }
@@ -123,7 +128,11 @@ async function toPairing(target: number, token: string, adjust?: Adjust) {
   await completePreparations(adjust);
   expect(await advance(target, token)).toMatchObject({ phase: 7, status: 'waiting', wait: 'pairing' });
 }
-const pairResult = (job: JobLease) => DEFAULT_EXECUTORS.v1.pair!(job) as PairingResult;
+const pairResult = (job: JobLease) => {
+  const executor = DEFAULT_EXECUTORS[job.rulesVersion];
+  if (!executor?.pair) throw new Error('unsupported pairing rules: ' + job.rulesVersion);
+  return executor.pair(job) as PairingResult;
+};
 async function completePairings() {
   const jobs = await claim('pair');
   for (const job of jobs) expect(await complete(job, pairResult(job))).toMatchObject({ ok: true });
@@ -169,6 +178,10 @@ const definitionOf = async (signature: string): Promise<string> =>
 
 describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, settlement and the public view', () => {
   beforeEach(() => resetWorld(T - 1));
+  afterEach(async () => {
+    await sql`update private.rules_versions set active=false where version<>'v1'`;
+    await sql`update private.rules_versions set active=true where version='v1'`;
+  });
   afterAll(() => sql.end());
 
   describe('automatic entry: the opt-in command', () => {
@@ -486,6 +499,225 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       await expect(sql`update private.tournament_entries set rating=1`).rejects.toThrow('immutable tournament_entries');
       await expect(sql`update private.tournament_bouts set seed='forged' where not bye`).rejects.toThrow('immutable tournament_bouts');
       await expect(sql`update private.tournament_bouts set result=null where bye`).rejects.toThrow('immutable tournament_bouts');
+    });
+  });
+
+  describe('v2 free tournament database contracts', () => {
+    type Mutable<T> = { -readonly [P in keyof T]: Mutable<T[P]> };
+    async function activateV2() {
+      await sql.begin(async tx => {
+        await tx`update private.rules_versions set active=false where active`;
+        expect(await tx`update private.rules_versions set active=true where version='v2' returning version`).toHaveLength(1);
+      });
+    }
+    async function overload(owner: Fighter) {
+      const equipment: Record<string, string | null> = { weapon: null };
+      for (const [slot, catalogId] of Object.entries({ body: 'heavy-armor:1:common', head: 'iron-helmet:1:common',
+        feet: 'heavy-boots:1:common', offHand: 'round-shield:1:common' })) {
+        const entry = CATALOG_V1.items[catalogId], id = randomUUID();
+        const item = { id, ownerId: owner.gid, catalogId, catalogVersion: 'v1', tier: entry.tier, rarity: entry.rarity,
+          stats: entry.stats, quantity: 1, origin: 'shop', binding: entry.binding, reservation: { kind: 'equipment', referenceId: owner.gid } };
+        await sql`insert into public.item_instances values(${id},${owner.gid},${sql.json(item as never)})`;
+        equipment[slot] = id;
+      }
+      // Endurance 5 (no allocation) gives capacity 20: this legal load23 has overload .15, so Arena costs29.
+      await sql`update public.builds set current_build=jsonb_set(jsonb_set(current_build,'{equipment}',${sql.json(equipment)}),
+        '{allocations,endurance}','0') where gladiator_id=${owner.gid}`;
+    }
+    const ROLLBACK = new Error('rollback-only tournament fixture');
+    async function rollback(run: (tx: TransactionSql) => Promise<void>) {
+      try { await sql.begin(async tx => { await run(tx); throw ROLLBACK; }); }
+      catch (error) { if (error !== ROLLBACK) throw error; }
+    }
+    const stored = async (tx: TransactionSql) => ({
+      assignments: await tx`select * from private.arena_assignments order by battle_id`,
+      sides: await tx`select * from private.arena_assignment_sides order by activity_id`,
+      tournaments: await tx`select * from private.tournaments order by id`,
+      entries: await tx`select * from private.tournament_entries order by activity_id`,
+      bouts: await tx`select * from private.tournament_bouts order by id`,
+      activities: await tx`select * from public.activities order by id`,
+    });
+    async function reject(job: JobLease, result: unknown, name: string, corrupt?: (tx: TransactionSql) => Promise<void>) {
+      await rollback(async tx => {
+        if (corrupt) await corrupt(tx);
+        const before = await stored(tx);
+        const [{ outcome }] = await tx`select public.complete_job(${job.id},${job.token},${tx.json(result as never)}) as outcome`;
+        expect.soft(outcome, name).toMatchObject({ ok: false, code: 'invalid' });
+        expect.soft(await stored(tx), name + ' writes nothing').toEqual(before);
+      });
+    }
+
+    it('pins the free-entry SQL calendar over an entire week and later weeks', async () => {
+      const rows = await sql`select target::int,private.economy_tournament_slot(target) as eligible
+        from generate_series(-1,126*4-1) target order by target`;
+      for (const row of rows) expect(row.eligible, String(row.target)).toBe(row.target >= 0
+        && isTournamentSlot(slotAt(row.target * RULES_V2.clock.slotMs), RULES_V2));
+      expect(rows.filter(row => row.eligible).map(row => row.target)).toEqual([50, 122, 176, 248, 302, 374, 428, 500]);
+    });
+
+    it.each([false, true])('discovers a real all-Rest candidate pool and settles its free bracket once (overload %s)', async heavy => {
+      const people = [await fighter({ optIn: true, stamina: 0 }), await fighter({ optIn: true, stamina: 24 })];
+      if (heavy) for (const owner of people) await overload(owner);
+      await activateV2();
+      const token = await coordinatorLease();
+      await toPairing(T, token);
+      for (const owner of people) expect(await activityOf(owner.gid)).toMatchObject({ kind: 'rest', debit: 0, fallback: true, debited: false });
+      const [job] = await claim('pair');
+      expect(job.rulesVersion).toBe('v2');
+      const input = job.snapshot as PairingInput;
+      expect(input.entrants).toEqual([]);
+      expect(input.tournament!.rested.map(e => e.gladiatorId).sort()).toEqual(people.map(f => f.gid).sort());
+      expect(input.tournament!.candidates.map(c => c.costs)).toEqual(Array(2).fill({ arena: heavy ? 29 : 25, tournament: 0 }));
+      // Opt-in at acceptance is frozen at cutoff, even if the latest flag is changed after the pair job was created.
+      await sql`update public.gladiators set tournament_opt_in=false`;
+      const valid = pairResult(job);
+      const allRest = { assignments: [], tournament: { bracket: null, routes: valid.tournament!.routes.map(r => ({ ...r,
+        route: 'rest', reason: 'insufficient-stamina', staminaDebit: 0 })) } };
+      await reject(job, allRest, 'eligible all-Rest pool cannot suppress its bracket');
+      expect(await complete(job, valid)).toMatchObject({ ok: true });
+      expect(await complete(job, valid)).toMatchObject({ ok: true, replayed: true });
+      expect(await advance(T, token)).toMatchObject({ phase: 9, status: 'complete' });
+      for (const owner of people) expect(await activityOf(owner.gid)).toMatchObject({ kind: 'tournament', debit: 0, fallback: false, debited: true });
+      const worker = createWorkerDatabase(admin);
+      for (let jobs = await claim('simulation', 5); jobs.length; jobs = await claim('simulation', 5)) {
+        for (const bout of jobs) expect(await complete(bout, await DEFAULT_EXECUTORS[bout.rulesVersion].simulation!(bout, { database: worker })))
+          .toMatchObject({ ok: true });
+      }
+      for (const reveal of await claim('reveal')) expect(await complete(reveal, {})).toMatchObject({ ok: true });
+      const settlements = await claim('settlement');
+      expect(settlements).toHaveLength(2);
+      for (const settlement of settlements) {
+        expect(await worker.settle(settlement.activityId!, settlement.token)).toMatchObject({ ok: true, newGrants: 1 });
+        expect(await worker.settle(settlement.activityId!, settlement.token)).toMatchObject({ ok: true, newGrants: 0, replayed: true });
+      }
+      expect(await people[0].row()).toMatchObject({ stamina: 0 });
+      expect(await people[1].row()).toMatchObject({ stamina: 24 });
+      expect(await sql`select resolved_kind,count(*)::int as n from private.settled_slots group by resolved_kind`).toEqual([{ resolved_kind: 'tournament', n: 2 }]);
+      expect(await sql`select count(*)::int as n from public.wallet_ledger where reason='tournament'`).toEqual([{ n: 2 }]);
+    }, 60_000);
+
+    it('discovers each rested league and includes its affordable entrants without cross-league promotion', async () => {
+      const bronze = [await fighter({ optIn: true, stamina: 0 }), await fighter({ optIn: true, stamina: 25 })];
+      const silver = await many(2, { optIn: true, stamina: 0, league: 'silver' });
+      const alone = await fighter({ optIn: true, stamina: 0, league: 'gold' });
+      const out = await fighter({ optIn: false, stamina: 25 });
+      await activateV2();
+      const { jobs } = await toPublished();
+      expect(jobs.map(j => (j.snapshot as PairingInput).league).sort()).toEqual(['bronze', 'gold', 'silver']);
+      expect((await tournaments()).map(t => t.league)).toEqual(['bronze', 'silver']);
+      for (const [league, people] of [['bronze', bronze], ['silver', silver]] as const) {
+        expect((await entriesOf(`tournament:${T}:${league}`)).map(e => e.gladiator_id).sort()).toEqual(people.map(f => f.gid).sort());
+        for (const owner of people) expect(await activityOf(owner.gid)).toMatchObject({ kind: 'tournament', debit: 0, fallback: false });
+      }
+      expect(await activityOf(alone.gid)).toMatchObject({ kind: 'rest', debit: 0, fallback: true });
+      expect(await activityOf(out.gid)).toMatchObject({ kind: 'arena', debit: 25, fallback: false });
+      expect((await assignments()).flatMap(a => a.assignment.sides.map(s => s.gladiatorId))).toEqual([out.gid]);
+    });
+
+    it.each(['not-tournament-slot', 'opted-out', 'too-few-entrants'] as const)('keeps paid Arena affordability for %s, including overload', async reason => {
+      const target = reason === 'not-tournament-slot' ? T + 1 : T;
+      await resetWorld(target - 1);
+      const exact = await fighter({ firstSlot: target, optIn: reason !== 'opted-out', stamina: 29 });
+      const short = await fighter({ firstSlot: target, optIn: reason !== 'opted-out', stamina: 28,
+        league: reason === 'too-few-entrants' ? 'silver' : 'bronze' });
+      for (const owner of [exact, short]) await overload(owner);
+      await activateV2();
+      await toPublished(target);
+      expect(await tournaments()).toEqual([]);
+      expect(await activityOf(exact.gid, target)).toMatchObject({ kind: 'arena', debit: 29, fallback: false });
+      expect(await exact.row()).toMatchObject({ stamina: 0 });
+      expect(await activityOf(short.gid, target)).toMatchObject({ kind: 'rest', debit: 0, fallback: true });
+      expect(await short.row()).toMatchObject({ stamina: 28 });
+    });
+
+    it('rejects a well-formed subset bracket and forged frozen eligibility before any pairing writes', async () => {
+      const people = await many(3, { optIn: true });
+      const out = await fighter();
+      await activateV2();
+      await toPairing(T, await coordinatorLease());
+      const [job] = await claim('pair'), valid = pairResult(job), input = job.snapshot as PairingInput;
+      const altered = (mutate: (copy: Mutable<PairingInput>) => void) => {
+        const copy = structuredClone(input) as Mutable<PairingInput>; mutate(copy);
+        return pairResult({ ...job, snapshot: copy });
+      };
+      const subset = altered(copy => { copy.tournament!.candidates.find(c => c.gladiatorId === people[0].gid)!.optIn = [{ enabled: false, receivedAtMs: 0 }]; });
+      expect(subset.tournament!.bracket!.entries).toHaveLength(2);
+      expect(() => readyBouts(subset.tournament!.bracket!)).not.toThrow();
+      await reject(job, subset, 'valid subset omits an eligible third entrant');
+      await reject(job, altered(copy => { copy.tournament!.candidates.find(c => c.gladiatorId === out.gid)!.optIn = [{ enabled: true, receivedAtMs: 0 }]; }),
+        'valid bracket includes frozen opted-out candidate');
+      const base = JSON.parse(JSON.stringify(valid));
+      for (const [name, change] of [
+        ['missing route', (c: typeof base) => c.tournament.routes.pop()],
+        ['duplicate route', (c: typeof base) => c.tournament.routes.push(c.tournament.routes[0])],
+        ['nonzero debit', (c: typeof base) => { c.tournament.routes.find((r: { route: string }) => r.route === 'tournament').staminaDebit = 25; }],
+        ['wrong league', (c: typeof base) => { c.tournament.routes[0].league = 'silver'; }],
+        ['wrong version', (c: typeof base) => { c.tournament.bracket.rulesVersion = 'v1'; }],
+        ['foreign entrant', (c: typeof base) => { c.tournament.bracket.entries[0].gladiatorId = randomUUID(); }],
+        ['malformed bracket', (c: typeof base) => { c.tournament.bracket = []; }],
+      ] as const) { const copy = structuredClone(base); change(copy); await reject(job, copy, name); }
+      const entry = input.entrants.find(e => e.gladiatorId === people[0].gid)!;
+      for (const [name, path, value] of [
+        ['snapshot choice', ['choice'], { kind: 'training' }],
+        ['snapshot opt-in', ['starting', 'tournamentOptIn'], false],
+        ['snapshot version', ['rulesVersion'], 'v1'],
+        ['snapshot league', ['starting', 'league'], 'silver'],
+        ['frozen nonzero tournament price', ['costs', 'tournament'], 1],
+        ['frozen cutoff', ['cutoffMs'], CUTOFF + 1],
+      ] as const) await reject(job, valid, name, async tx => {
+        await tx`alter table private.activity_snapshots disable trigger guard_frozen`;
+        await tx`update private.activity_snapshots set snapshot=jsonb_set(snapshot,${[...path]}::text[],${tx.json(value as never)}) where activity_id=${entry.activityId}`;
+        await tx`alter table private.activity_snapshots enable trigger guard_frozen`;
+      });
+      // Independently forged immutable job candidates cannot override the frozen snapshot pool.
+      for (const change of ['omit', 'duplicate', 'choice', 'cutoff', 'version'] as const) await reject(job, valid, 'job input ' + change, async tx => {
+        const copy = structuredClone(input) as Mutable<PairingInput>;
+        if (change === 'omit') copy.tournament!.candidates.pop();
+        if (change === 'duplicate') copy.tournament!.candidates.push(copy.tournament!.candidates[0]);
+        if (change === 'choice') copy.tournament!.candidates[0].choice = { kind: 'rest' };
+        if (change === 'cutoff') copy.tournament!.candidates[0].optIn[0].receivedAtMs = CUTOFF;
+        if (change === 'version') copy.rulesVersion = 'v1';
+        await tx`alter table private.jobs disable trigger guard_job`;
+        await tx`update private.jobs set input=${tx.json(copy as never)} where id=${job.id}`;
+        await tx`alter table private.jobs enable trigger guard_job`;
+      });
+      expect(await complete(job, valid)).toMatchObject({ ok: true });
+    }, 60_000);
+
+    it.each(['v1', 'v2'] as const)('rejects preliminary %s Rest promoted to ordinary Arena and v1 Rest promoted to a bracket', async version => {
+      await many(2, { optIn: true });
+      const tired = await fighter({ optIn: true, stamina: 0 });
+      if (version === 'v2') await activateV2();
+      await toPairing(T, await coordinatorLease());
+      const [job] = await claim('pair'), input = structuredClone(job.snapshot as PairingInput) as Mutable<PairingInput>;
+      input.tournament!.candidates.find(c => c.gladiatorId === tired.gid)!.stamina = 100;
+      input.tournament!.candidates.find(c => c.gladiatorId === tired.gid)!.optIn = [{ enabled: false, receivedAtMs: 0 }];
+      await reject(job, pairResult({ ...job, snapshot: input }), 'Rest cannot become ordinary Arena');
+      if (version === 'v1') {
+        input.tournament!.candidates.find(c => c.gladiatorId === tired.gid)!.optIn = [{ enabled: true, receivedAtMs: 0 }];
+        await reject(job, pairResult({ ...job, snapshot: input }), 'v1 Rest cannot enter bracket');
+      }
+    });
+
+    it('rejects an otherwise valid bracket on a noncalendar slot through completion', async () => {
+      const target = T + 1;
+      await resetWorld(target - 1);
+      await many(2, { firstSlot: target, optIn: true });
+      await activateV2();
+      await toPairing(target, await coordinatorLease());
+      const [job] = await claim('pair'), input = job.snapshot as PairingInput;
+      const graph = structuredClone(buildBracket(input.entrants.map(e => ({ ...e, slotIndex: T })), input.tournament!.bracketSeed)) as Mutable<TournamentGraph>;
+      const delta = (target - T) * SLOT;
+      const reId = (id: string) => id.replace(`tournament:${T}:`, `tournament:${target}:`);
+      graph.id = reId(graph.id); graph.slotIndex = target; graph.startsAtMs += delta; graph.settlesAtMs += delta;
+      graph.revealAtMs = graph.revealAtMs.map(ms => ms + delta);
+      for (const bout of graph.bouts) {
+        bout.id = reId(bout.id); bout.battleId = reId(bout.battleId); bout.revealAtMs += delta;
+        bout.parentBoutIds = bout.parentBoutIds.map(reId);
+      }
+      const result = { assignments: [], tournament: { bracket: graph, routes: input.entrants.map(e => ({ gladiatorId: e.gladiatorId,
+        activityId: e.activityId, league: e.league, route: 'tournament', reason: 'bracket', staminaDebit: 0 })) } };
+      await reject(job, result, 'noncalendar slot cannot form a free bracket');
     });
   });
 

@@ -128,6 +128,7 @@ const SERVICE_ROLE = [
   'function private.boundary_start(bigint): EXECUTE',
   'function private.close_season(bigint, bigint): EXECUTE',
   'function private.dependencies_ready(uuid): EXECUTE',
+  'function private.economy_tournament_slot(bigint): EXECUTE',
   'function private.expedition_rewards(uuid, jsonb): EXECUTE',
   'function private.expire_seller_listings(uuid, bigint): EXECUTE',
   'function private.guard_arena_rating(): EXECUTE',
@@ -313,6 +314,19 @@ async function contents() {
 }
 
 describe('release access matrix', () => {
+  it('keeps the immutable v2 tournament calendar invoker-only and callable only by the backend', async () => {
+    expect(await sql`select p.provolatile,p.prosecdef,p.proconfig from pg_proc p
+      where p.oid='private.economy_tournament_slot(bigint)'::regprocedure`)
+      .toEqual([{ provolatile: 'i', prosecdef: false, proconfig: ['search_path=""'] }]);
+    for (const role of ['anon', 'authenticated', 'service_role']) {
+      expect((await sql`select has_function_privilege(${role},'private.economy_tournament_slot(bigint)','EXECUTE') as allowed`)[0].allowed)
+        .toBe(role === 'service_role');
+    }
+    expect(await rolledBack(['set local role service_role'], tx => tx`select private.economy_tournament_slot(302) as eligible`))
+      .toEqual([{ eligible: true }]);
+    for (const role of ['anon', 'authenticated']) await expect(rolledBack([`set local role ${role}`],
+      tx => tx`select private.economy_tournament_slot(302)`)).rejects.toThrow(/permission denied/);
+  });
   it('keeps economy helpers backend-only and trigger functions uncallable by clients or service_role', async () => {
     const signatures = ['private.season_prizes(text,text)', 'private.mirror_rules_version()', 'private.publish_banner()'];
     for (const signature of signatures) {

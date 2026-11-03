@@ -9,3 +9,5 @@ export const OPEN = ['world_revision_state', 'world_actors', 'public_profiles', 
   'arena_standing_reads', 'tournament_views', 'market_offers', 'seasons', 'season_standings', 'game_messages', 'patches', 'patch_features'];
 /** tournament_views is granted column by column: never its pairing job or publication time (Task 19 review M1). */
 export const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms';
+/** Task 5 (1.6): present in the catalog, absent from every API role's effective privilege snapshot. */
+export const ECONOMY_OWNER_ONLY = { relation: 'private.economy_switches', function: 'private.switch_to_economy_v2()' } as const;

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
-import { OPEN, PUBLIC_TOURNAMENT_COLUMNS } from '../fixtures/access.ts';
+import { OPEN, PUBLIC_TOURNAMENT_COLUMNS, ECONOMY_OWNER_ONLY } from '../fixtures/access.ts';
 
 // Task 23.1 (M17): the release access matrix. Every expectation is derived from the catalog through the exported operator
 // audit (scripts/access-audit.sql, one read-only SELECT), except the OPEN list of visitor projections
@@ -104,6 +104,7 @@ const relationOf = (object: string) => object.split('.').slice(0, 2).join('.');
  * public sequences and MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on new public tables.
  */
 const SERVICE_ROLE = [
+  // Task 5's economy switch/table deliberately add no service_role privilege; pinned separately below.
   'default postgres:public:sequences: UPDATE',
   'default postgres:public:tables: MAINTAIN,REFERENCES,TRIGGER,TRUNCATE',
   'function private.accept_arena_result(uuid, jsonb): EXECUTE',
@@ -429,6 +430,24 @@ describe('release access matrix', () => {
     expect(lines(probe.filter(r => ['rls-disabled', 'not-security-invoker', 'materialized-view'].includes(r.section)))).toEqual([
       'materialized-view public.matrix_probe_mv no row security', 'not-security-invoker public.matrix_probe_view no options',
       'rls-disabled private.matrix_probe row security off', 'rls-disabled public.matrix_probe row security off']);
+  });
+
+  it('keeps the economy activation and audit owner-only, including backend and inherited grants', async () => {
+    expect(await sql`select to_regclass(${ECONOMY_OWNER_ONLY.relation}) is not null as relation,
+      to_regprocedure(${ECONOMY_OWNER_ONLY.function}) is not null as function`).toEqual([{ relation: true, function: true }]);
+    const isEconomy = (row: Row) => row.object === ECONOMY_OWNER_ONLY.function
+      || row.object === ECONOMY_OWNER_ONLY.relation || row.object.startsWith(ECONOMY_OWNER_ONLY.relation + '.');
+    expect((await audit()).filter(isEconomy)).toEqual([]);
+    // A future accidental grant must be visible in the same exported audit, rather than omitted from a hand-list.
+    const probe = await auditAfter('grant select on private.economy_switches to service_role',
+      'grant execute on function private.switch_to_economy_v2() to public');
+    expect(lines(probe.filter(isEconomy))).toEqual([
+      'function private.switch_to_economy_v2() PUBLIC EXECUTE',
+      'function private.switch_to_economy_v2() anon EXECUTE',
+      'function private.switch_to_economy_v2() authenticated EXECUTE',
+      'function private.switch_to_economy_v2() service_role EXECUTE',
+      'relation private.economy_switches service_role SELECT',
+    ].sort());
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {

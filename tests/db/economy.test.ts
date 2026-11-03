@@ -1,15 +1,18 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { TransactionSql } from 'postgres';
-import { sql, admin, account, anonymous, resetIdentity, creation, request } from '../fixtures/db.ts';
+import { sql, admin, account, anonymous, resetIdentity, creation, request, makeLegacyPending } from '../fixtures/db.ts';
 import { SLOT, TRAINING, TTR, resetWorld, fighter as boundaryFighter, coordinatorLease, advance, runBoundary,
   settleDue, claim, completePreparations, rpc } from '../fixtures/boundary.ts';
-import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
+import { createDatabase, prepareCreation, prepareBuild, prepareItemSale, prepareListingPurchase } from '../../supabase/functions/_shared/backend/database.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
 import { DEFAULT_EXECUTORS } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { JobLease, PreparationInput, PreparationResult } from '../../supabase/functions/_shared/domain/types.ts';
+import type { OwnerState, ItemInstance } from '../../supabase/functions/_shared/contracts/reads.ts';
+import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands.ts';
+import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 
 const database = createDatabase(admin);
 beforeEach(async () => {
@@ -108,6 +111,601 @@ async function durableState(tx: TransactionSql, job: JobLease) {
     settled: await tx`select * from private.settled_slots order by gladiator_id,slot_index`,
   };
 }
+
+// Task 5: owner-only activation. Independent reserved sessions expose the real transaction boundaries;
+// no function replacement, trigger hook, clock stand-in or Data API automatic retry drives these races.
+type SwitchResult = { ok: true; version: 'v2'; switchedAtMs: number; walletsScanned: number; walletsCut: number;
+  moneyBefore: number; moneyAfter: number; replayed: boolean };
+type SwitchSession = { q: Awaited<ReturnType<typeof sql.reserve>>; pid: number; pending: Set<Promise<unknown>>;
+  failure?: { error: unknown } };
+type EconomyFighter = Awaited<ReturnType<typeof fighter>>;
+async function withSwitchSessions<T>(count: number, run: (sessions: SwitchSession[]) => Promise<T>,
+  isolation: 'read committed' | 'read uncommitted' | 'repeatable read' | 'serializable' = 'read committed'): Promise<T> {
+  const sessions: SwitchSession[] = [];
+  try {
+    for (let n = 0; n < count; n++) {
+      const q = await sql.reserve();
+      const session: SwitchSession = { q, pid: 0, pending: new Set() };
+      sessions.push(session);
+      // The isolation level must precede even the pg_backend_pid SELECT used to identify this session.
+      await q.unsafe(`begin isolation level ${isolation}`);
+      await q`set local statement_timeout='20s'`;
+      await q`set local lock_timeout='15s'`;
+      session.pid = (await q`select pg_backend_pid() as pid`)[0].pid;
+    }
+    return await run(sessions);
+  } finally {
+    // Cancel all outstanding statements before awaiting any one session: cleanup must not itself
+    // wait behind a holder whose rollback is queued later in this array.
+    await Promise.all(sessions.filter(s => s.pending.size > 0 && s.pid !== 0)
+      .map(s => sql`select pg_cancel_backend(${s.pid})`.catch(() => undefined)));
+    await Promise.all(sessions.flatMap(s => [...s.pending].map(p => p.catch(() => undefined))));
+    await Promise.all(sessions.map(async s => { try { await s.q`rollback`; } finally { s.q.release(); } }));
+  }
+}
+function startSwitchQuery<T>(session: SwitchSession, query: PromiseLike<T>): Promise<T> {
+  const result = Promise.resolve(query);
+  session.failure = undefined;
+  session.pending.add(result);
+  void result.then(() => session.pending.delete(result), error => {
+    session.failure = { error };
+    session.pending.delete(result);
+  });
+  return result;
+}
+async function blockedBy(contender: SwitchSession, holder: SwitchSession) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const [{ blocked }] = await sql`select ${holder.pid}::int=any(pg_blocking_pids(${contender.pid})) as blocked`;
+    if (blocked) return;
+    if (!contender.pending.size) {
+      if (contender.failure) throw contender.failure.error;
+      throw new Error(`backend ${contender.pid} finished before the required lock barrier`);
+    }
+    // Poll spacing only; the assertion is database blocker evidence, never elapsed time.
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  if (contender.failure) throw contender.failure.error;
+  throw new Error(`backend ${contender.pid} did not block on ${holder.pid}`);
+}
+async function populationLock(session: SwitchSession, mode: 'ShareLock' | 'ExclusiveLock', granted: boolean) {
+  expect(await sql`select mode,granted from pg_locks where pid=${session.pid} and locktype='advisory'
+    and classid=1600001::oid and objid=1::oid and objsubid=2`).toEqual([{ mode, granted }]);
+}
+const switchNow = async (): Promise<SwitchResult> => (await sql`select private.switch_to_economy_v2() as r`)[0].r;
+const startSwitch = (s: SwitchSession) => startSwitchQuery(s, s.q<{ r: SwitchResult }[]>`select private.switch_to_economy_v2() as r`.execute());
+const walletMoney = async (gid: string) => Number((await sql`select money::text from public.wallets where gladiator_id=${gid}`)[0].money);
+const databaseNow = async () => Number((await sql`select floor(extract(epoch from clock_timestamp())*1000)::text as ms`)[0].ms);
+const ownerState = async (owner: EconomyFighter): Promise<OwnerState> => {
+  const { data, error } = await owner.client.from('owner_state').select('state').single();
+  expect(error).toBeNull();
+  return data!.state;
+};
+async function currentAccounts(owners: EconomyFighter[]) {
+  // Both participants must pass the real processing guard; historical boundary fighters do not.
+  for (const owner of owners) await sql`update public.gladiators
+    set processed_slot_index=floor(extract(epoch from clock_timestamp())*1000/4800000) where id=${owner.gid}`;
+}
+async function orderedFighters(money = 100) {
+  const owners = [await fighter(), await fighter()].sort((a, b) => a.gid.localeCompare(b.gid));
+  for (const owner of owners) await sql`update public.wallets set money=${money} where gladiator_id=${owner.gid}`;
+  await currentAccounts(owners);
+  return owners;
+}
+async function extraSword(owner: EconomyFighter) {
+  const entry = CATALOG_V1.items['sword:1:common'], id = randomUUID();
+  const item: ItemInstance = { id, ownerId: owner.gid, catalogId: entry.id, catalogVersion: 'v1', tier: entry.tier,
+    rarity: entry.rarity, stats: entry.stats, quantity: 1, origin: 'shop', binding: entry.binding, reservation: null };
+  await sql`insert into public.item_instances(id,gladiator_id,item) values(${id},${owner.gid},${sql.json(item as never)})`;
+  return item;
+}
+async function npcSale(owner: EconomyFighter) {
+  const item = await extraSword(owner);
+  const command = { kind: 'sell-item' as const, operationId: randomUUID(), itemId: item.id, quantity: 1 };
+  const prepared = prepareItemSale(command, await ownerState(owner));
+  expect(prepared).not.toBeNull();
+  return { command, input: { command, prepared }, credit: prepared!.unitValue };
+}
+async function heldBuild(owner: EconomyFighter, fee = 40) {
+  const state = await ownerState(owner);
+  const command: Extract<GameCommand, { kind: 'queue-build' }> = { kind: 'queue-build', operationId: randomUUID(),
+    expectedVersion: state.buildVersion, classId: state.currentBuild.classId, stance: 'offensive',
+    allocation: state.currentBuild.allocations, equipment: state.currentBuild.equipment };
+  const input = { command, prepared: prepareBuild(command, state) };
+  expect((await sql`select public.queue_build(${owner.id},${command.operationId},${sql.json(input as never)}) as r`)[0].r)
+    .toMatchObject({ ok: true, value: { reservedMoney: 0 } });
+  // A paid pending fee is legacy state, not a command that current clients can newly queue.
+  await makeLegacyPending(sql, owner.gid, command.operationId, { fee });
+  const queued = await ownerState(owner);
+  return { command, effectiveSlot: queued.pendingBuild!.effectiveSlotIndex,
+    cancel: { kind: 'cancel-build' as const, operationId: randomUUID(), expectedVersion: queued.buildVersion } };
+}
+const cutRows = async () => (await sql`select r.gladiator_id::text as gid,r.owner_id::text as owner,r.receipt_id::text as receipt,
+  r.request,r.result,encode(r.request_digest,'hex') as digest,
+  encode(sha256(convert_to('economy-cut:v2:'||r.gladiator_id::text,'UTF8')),'hex') as expected_digest
+  from public.operation_receipts r where r.request->>'kind'='economy-cut' order by r.gladiator_id`).map(row => ({ ...row }));
+async function reconcileSwitch(result: SwitchResult) {
+  const audit = await sql`select version,switched_at_ms::float8 as at,wallets_scanned as scanned,wallets_cut as cut,
+    money_before::float8 as before,money_after::float8 as after,result from private.economy_switches`;
+  expect(audit).toEqual([{ version: 'v2', at: result.switchedAtMs, scanned: result.walletsScanned, cut: result.walletsCut,
+    before: result.moneyBefore, after: result.moneyAfter, result: { ...result, replayed: false } }]);
+  const receipts = await cutRows();
+  const ledger = await sql`select gladiator_id::text as gid,receipt_id::text as receipt,money_delta::float8 as money,
+    renown_delta::float8 as renown from public.wallet_ledger where reason='economy-cut' order by gladiator_id`;
+  expect(receipts).toHaveLength(result.walletsCut);
+  expect(ledger).toHaveLength(result.walletsCut);
+  expect(new Set(receipts.map(r => r.receipt)).size).toBe(result.walletsCut);
+  expect(new Set(receipts.map(r => r.gid)).size).toBe(result.walletsCut);
+  for (const receipt of receipts) {
+    expect(receipt.request).toEqual({ kind: 'economy-cut', version: 'v2' });
+    expect(receipt.digest).toBe(receipt.expected_digest);
+    expect(receipt.result).toEqual({ moneyBefore: expect.any(Number), moneyAfter: expect.any(Number), cut: expect.any(Number) });
+    expect(receipt.result.cut).toBeGreaterThan(0);
+    expect(receipt.result.moneyBefore - receipt.result.moneyAfter).toBe(receipt.result.cut);
+    expect(ledger.filter(l => l.receipt === receipt.receipt)).toEqual([
+      { gid: receipt.gid, receipt: receipt.receipt, money: -receipt.result.cut, renown: 0 },
+    ]);
+    expect((await sql`select owner_id::text as owner from public.gladiators where id=${receipt.gid}`)[0].owner).toBe(receipt.owner);
+  }
+  expect(ledger.reduce((total, row) => total + row.money, 0)).toBe(result.moneyAfter - result.moneyBefore);
+  expect(await sql`select private.active_rules_version() as version`).toEqual([{ version: 'v2' }]);
+  expect((await revision()).rules_version).toBe('v2');
+}
+async function switchFootprint() {
+  // Stable committed columns only: public.world_revision contains a live clock, unsuitable for equality.
+  const [{ auditExists }] = await sql`select to_regclass('private.economy_switches') is not null as "auditExists"`;
+  return {
+    wallets: (await sql`select * from public.wallets order by gladiator_id`).map(r => ({ ...r })),
+    receipts: (await sql`select * from public.operation_receipts order by receipt_id`).map(r => ({ ...r })),
+    ledger: (await sql`select * from public.wallet_ledger order by id`).map(r => ({ ...r })),
+    rules: (await sql`select * from private.rules_versions order by version`).map(r => ({ ...r })),
+    mirror: (await sql`select * from public.world_revision_state`).map(r => ({ ...r })),
+    actors: (await sql`select * from public.world_actors order by gladiator_id`).map(r => ({ ...r })),
+    reservations: (await sql`select * from public.reservations order by gladiator_id,operation_id`).map(r => ({ ...r })),
+    profiles: (await sql`select * from public.public_profile_reads order by gladiator_id`).map(r => ({ ...r })),
+    audit: auditExists ? (await sql`select * from private.economy_switches order by version`).map(r => ({ ...r })) : [],
+  };
+}
+async function switchPrecheck() {
+  const source = readFileSync(new URL('../../scripts/economy-switch-check.sql', import.meta.url), 'utf8');
+  const rows = await sql.unsafe(source);
+  expect(rows).toHaveLength(1);
+  const row = rows[0];
+  expect(Object.keys(row).sort()).toEqual(['active_version', 'checked_at_ms', 'copy_matches', 'held', 'money_after_cut',
+    'money_now', 'open_boundary', 'switched', 'v2_row', 'wallets'].sort());
+  return { ...row, checked_at_ms: Number(row.checked_at_ms), open_boundary: Number(row.open_boundary),
+    wallets: Number(row.wallets), money_now: Number(row.money_now), money_after_cut: Number(row.money_after_cut), held: Number(row.held) };
+}
+// Capture before mutation when available; assert its presence after the switch call so an unimplemented
+// switch reports its own SQL RED before this separate, not-yet-authored script. The dedicated script case stays strict.
+const captureSwitchPrecheck = () => existsSync(new URL('../../scripts/economy-switch-check.sql', import.meta.url))
+  ? switchPrecheck() : Promise.resolve(null);
+
+describe('the economy switch', () => {
+  beforeEach(() => resetWorld(null));
+  afterEach(async () => {
+    // Missing Task 5 schema must stay an honest RED; cleanup must not manufacture it or mask the failure.
+    if ((await sql`select to_regclass('private.economy_switches') is not null as present`)[0].present) {
+      await sql`delete from private.economy_switches`;
+    }
+  });
+
+  async function sevenWallets() {
+    const owners: EconomyFighter[] = [];
+    for (const money of [0, 1, 3, 4, 5, 100, 5601]) {
+      const owner = await fighter();
+      await sql`update public.wallets set money=${money} where gladiator_id=${owner.gid}`;
+      owners.push(owner);
+    }
+    return owners;
+  }
+
+  it('cuts every wallet to a quarter rounded up and switches to v2', async () => {
+    const owners = await sevenWallets(), before = await revision(), earliest = await databaseNow();
+    const result = await switchNow(), latest = await databaseNow();
+    expect(result).toEqual({ ok: true, version: 'v2', switchedAtMs: expect.any(Number), walletsScanned: 7,
+      walletsCut: 5, moneyBefore: 5714, moneyAfter: 1431, replayed: false });
+    expect(result.switchedAtMs).toBeGreaterThanOrEqual(earliest);
+    expect(result.switchedAtMs).toBeLessThanOrEqual(latest);
+    expect(await Promise.all(owners.map(owner => walletMoney(owner.gid)))).toEqual([0, 1, 1, 1, 2, 25, 1401]);
+    expect((await sql`select money_delta::int as money from public.wallet_ledger where reason='economy-cut' order by money_delta`)
+      .map(r => r.money)).toEqual([-4200, -75, -3, -3, -2]);
+    expect(Number((await revision()).revision.split(':')[0])).toBeGreaterThan(Number(before.revision.split(':')[0]));
+    await reconcileSwitch(result);
+  });
+
+  it('publishes a zero-cut activation and counts every scanned wallet', async () => {
+    const owners = [await fighter(), await fighter()];
+    await sql`update public.wallets set money=0 where gladiator_id=${owners[0].gid}`;
+    await sql`update public.wallets set money=1 where gladiator_id=${owners[1].gid}`;
+    const before = await revision();
+    const result = await switchNow();
+    expect(result).toMatchObject({ walletsScanned: 2, walletsCut: 0, moneyBefore: 1, moneyAfter: 1 });
+    await reconcileSwitch(result);
+    expect(Number((await revision()).revision.split(':')[0])).toBeGreaterThan(Number(before.revision.split(':')[0]));
+  });
+
+  it('keeps the gold held for a queued fee and consumes that fee exactly once', async () => {
+    const owner = await fighter(), queued = await heldBuild(owner);
+    const check = await captureSwitchPrecheck();
+    const result = await switchNow();
+    expect(check, 'the precheck must exist once the switch is implemented').not.toBeNull();
+    expect(check).toMatchObject({ money_now: 100, money_after_cut: 55, held: 40, wallets: 1 });
+    expect(result).toMatchObject({ walletsScanned: 1, walletsCut: 1, moneyBefore: 100, moneyAfter: 55 });
+    expect(await walletMoney(owner.gid)).toBe(55);
+    expect(await sql`select money::int,status from public.reservations where operation_id=${queued.command.operationId}`)
+      .toEqual([{ money: 40, status: 'held' }]);
+    expect(await sql`select private.apply_pending_build(${owner.gid},${queued.effectiveSlot}) as applied`).toEqual([{ applied: true }]);
+    expect(await sql`select private.apply_pending_build(${owner.gid},${queued.effectiveSlot}) as applied`).toEqual([{ applied: false }]);
+    expect(await walletMoney(owner.gid)).toBe(15);
+    expect(await sql`select money::int,status from public.reservations where operation_id=${queued.command.operationId}`)
+      .toEqual([{ money: 40, status: 'consumed' }]);
+    expect(await sql`select l.money_delta::int as money from public.wallet_ledger l join public.operation_receipts r using(receipt_id)
+      where r.operation_id=${queued.command.operationId} and l.reason='build'`).toEqual([{ money: -40 }]);
+    await reconcileSwitch(result);
+  });
+
+  it('replays without a second cut, including wallets created after activation', async () => {
+    await sevenWallets();
+    const result = await switchNow(), newcomer = await fighter(), before = await switchFootprint();
+    expect(await switchNow()).toEqual({ ...result, replayed: true });
+    expect(await switchFootprint()).toEqual(before);
+    expect(await walletMoney(newcomer.gid)).toBe(100);
+    await reconcileSwitch(result);
+  });
+
+  it('refuses with an open boundary', async () => {
+    await resetWorld(299);
+    await boundaryFighter();
+    const token = await coordinatorLease();
+    expect(await advance(300, token)).toMatchObject({ wait: 'preparation' });
+    const before = await switchFootprint();
+    await expect(switchNow()).rejects.toMatchObject({ code: '55000', message: 'open boundary' });
+    expect(await switchFootprint()).toEqual(before);
+  });
+
+  it('refuses unless v1 is active', async () => {
+    await fighter();
+    await activate('v2');
+    const before = await switchFootprint();
+    await expect(switchNow()).rejects.toMatchObject({ code: '55000', message: 'unexpected rules version' });
+    expect(await switchFootprint()).toEqual(before);
+  });
+
+  it('refuses when the retained v2 row is missing', async () => {
+    await fighter();
+    const before = await switchFootprint();
+    await rollback(async tx => {
+      await tx`delete from private.rules_versions where version='v2'`;
+      await expect(tx.savepoint(sp => sp`select private.switch_to_economy_v2()`))
+        .rejects.toMatchObject({ code: '55000', message: 'missing v2' });
+      expect(await tx`select version from private.rules_versions where active`).toEqual([{ version: 'v1' }]);
+      expect(await tx`select * from private.economy_switches`).toEqual([]);
+    });
+    expect(await switchFootprint()).toEqual(before);
+  });
+
+  it.each(['read uncommitted', 'repeatable read', 'serializable'] as const)(
+    'rejects %s activation without changing any state', async isolation => {
+      await fighter();
+      const before = await switchFootprint();
+      await withSwitchSessions(1, async ([s]) => {
+        await s.q`select count(*) from public.wallets`;
+        await expect(s.q`select private.switch_to_economy_v2()`)
+          .rejects.toMatchObject({ code: '55000', message: 'unsupported transaction isolation' });
+      }, isolation);
+      expect(await switchFootprint()).toEqual(before);
+    });
+
+  it("is the owner's alone", async () => {
+    const owner = await fighter(), before = await switchFootprint();
+    for (const role of ['anon', 'authenticated', 'service_role'] as const) {
+      await rollback(async tx => {
+        await tx.unsafe(`set local role ${role}`);
+        if (role === 'authenticated') await tx`select set_config('request.jwt.claim.sub',${owner.id},true)`;
+        await expect(tx.savepoint(sp => sp`select private.switch_to_economy_v2()`)).rejects.toMatchObject({ code: '42501' });
+        await expect(tx.savepoint(sp => sp`select * from private.economy_switches`)).rejects.toMatchObject({ code: '42501' });
+      });
+    }
+    expect(await sql`select p.prosecdef,p.proconfig from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='private' and p.proname='switch_to_economy_v2'`).toEqual([{ prosecdef: false, proconfig: ['search_path=""'] }]);
+    expect(await sql`select relrowsecurity as rls from pg_class where oid='private.economy_switches'::regclass`).toEqual([{ rls: true }]);
+    // Include PUBLIC's inherited privileges, not only direct grants on named backend roles.
+    expect(await sql`select a.grantee::text as grantee from pg_proc p,
+      lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+      where p.oid='private.switch_to_economy_v2()'::regprocedure and a.grantee<>p.proowner`).toEqual([]);
+    expect(await sql`select a.grantee::text as grantee from pg_class c,
+      lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+      where c.oid='private.economy_switches'::regclass and a.grantee<>c.relowner`).toEqual([]);
+    expect(await switchFootprint()).toEqual(before);
+  });
+
+  it('holds the coordinator while it runs', async () => {
+    await fighter();
+    expect(await sql`select lease_token,lease_until_ms::int from private.coordinator`).toEqual([{ lease_token: null, lease_until_ms: 0 }]);
+    const before = await switchFootprint();
+    await withSwitchSessions(1, async ([s]) => {
+      expect((await s.q`select private.switch_to_economy_v2() as r`)[0].r).toMatchObject({ ok: true });
+      expect((await sql`select public.coordinate_work() as r`)[0].r).toMatchObject({ ok: true, busy: true });
+      expect((await revision()).rules_version).toBe('v1');
+    });
+    expect(await switchFootprint()).toEqual(before);
+  });
+
+  it('reports the timestamped aggregate-only pre-check', async () => {
+    await sevenWallets();
+    const before = await switchFootprint(), earliest = await databaseNow();
+    const check = await switchPrecheck();
+    expect(check).toEqual({ checked_at_ms: expect.any(Number), open_boundary: 0, active_version: 'v1', v2_row: true,
+      switched: false, wallets: 7, money_now: 5714, money_after_cut: 1431, held: 0, copy_matches: true });
+    expect(check.checked_at_ms).toBeGreaterThanOrEqual(earliest);
+    expect(check.checked_at_ms).toBeLessThanOrEqual(await databaseNow());
+    expect(await switchFootprint()).toEqual(before);
+  });
+
+  it.each(['commit', 'rollback'] as const)('drains an in-flight guarded creator on %s', async ending => {
+    const owner = await account(), command = creation('Fence ' + randomUUID().slice(0, 8));
+    await withSwitchSessions(2, async ([creator, activation]) => {
+      const input = prepareCreation(command);
+      const created = (await creator.q`select public.create_gladiator(${owner.id},${command.operationId},${creator.q.json(input as never)}) as r`)[0].r;
+      expect(created).toMatchObject({ ok: true });
+      const gid = created.value.gladiatorId as string;
+      expect(await creator.q`select money::int from public.wallets where gladiator_id=${gid}`).toEqual([{ money: 100 }]);
+      await populationLock(creator, 'ShareLock', true);
+      const switching = startSwitch(activation);
+      await blockedBy(activation, creator);
+      await populationLock(activation, 'ExclusiveLock', false);
+      if (ending === 'commit') await creator.q`commit`; else await creator.q`rollback`;
+      const result = (await switching)[0].r;
+      await activation.q`commit`;
+      expect(result).toMatchObject(ending === 'commit'
+        ? { walletsScanned: 1, walletsCut: 1, moneyBefore: 100, moneyAfter: 25 }
+        : { walletsScanned: 0, walletsCut: 0, moneyBefore: 0, moneyAfter: 0 });
+      expect(await sql`select money::int from public.wallets where gladiator_id=${gid}`)
+        .toEqual(ending === 'commit' ? [{ money: 25 }] : []);
+      expect(await sql`select receipt_id from public.operation_receipts where operation_id=${command.operationId}`)
+        .toHaveLength(ending === 'commit' ? 1 : 0);
+      await reconcileSwitch(result);
+    });
+  }, 45_000);
+
+  it.each(['commit', 'rollback'] as const)('orders a new creator after switch %s', async ending => {
+    const existing = await fighter(), newcomer = await account(), command = creation('After ' + randomUUID().slice(0, 8));
+    const before = await switchFootprint();
+    await withSwitchSessions(3, async ([holder, activation, creator]) => {
+      await holder.q`select pg_advisory_xact_lock(hashtextextended(${existing.id}::text,0))`;
+      const switching = startSwitch(activation);
+      await blockedBy(activation, holder);
+      await populationLock(activation, 'ExclusiveLock', true);
+      const creating = startSwitchQuery(creator, creator.q`select public.create_gladiator(${newcomer.id},${command.operationId},
+        ${creator.q.json(prepareCreation(command) as never)}) as r`.execute());
+      await blockedBy(creator, activation);
+      await populationLock(creator, 'ShareLock', false);
+      expect(await sql`select count(*)::int as n from pg_locks where pid=${creator.pid} and locktype='advisory' and granted`).toEqual([{ n: 0 }]);
+      expect(await sql`select id from public.gladiators where owner_id=${newcomer.id}`).toEqual([]);
+      await holder.q`commit`;
+      const result = (await switching)[0].r;
+      if (ending === 'commit') await activation.q`commit`; else await activation.q`rollback`;
+      const created = (await creating)[0].r;
+      expect(created).toMatchObject({ ok: true });
+      // The new creator has not committed yet, so rollback equality can include every original receipt/projection.
+      if (ending === 'rollback') expect(await switchFootprint()).toEqual(before);
+      await creator.q`commit`;
+      const gid = created.value.gladiatorId as string;
+      expect(await walletMoney(gid)).toBe(100);
+      expect(await sql`select money_delta::int as money,reason from public.wallet_ledger where gladiator_id=${gid}`)
+        .toEqual([{ money: 100, reason: 'creation' }]);
+      expect(await walletMoney(existing.gid)).toBe(ending === 'commit' ? 25 : 100);
+      if (ending === 'commit') {
+        expect(result).toMatchObject({ walletsScanned: 1, walletsCut: 1 });
+        await reconcileSwitch(result);
+      } else {
+        expect(await sql`select * from private.economy_switches`).toEqual([]);
+        expect((await revision()).rules_version).toBe('v1');
+      }
+    });
+  }, 45_000);
+
+  it('rereads both money and held after a later account lock wait', async () => {
+    const [low, high] = await orderedFighters(), queued = await heldBuild(high), sale = await npcSale(high);
+    await withSwitchSessions(2, async ([command, activation]) => {
+      // An earlier real command owns the later account before enumeration. Its writes happen only after
+      // the switch has reached that wait, exposing both a stale money cursor and a stale held aggregate.
+      await command.q`select pg_advisory_xact_lock(hashtextextended(${high.id}::text,0))`;
+      const switching = startSwitch(activation);
+      await blockedBy(activation, command);
+      expect((await command.q`select public.sell_item(${high.id},${sale.command.operationId},${command.q.json(sale.input as never)}) as r`)[0].r)
+        .toMatchObject({ ok: true, value: { moneyCredit: sale.credit } });
+      const cancelInput = { command: queued.cancel, prepared: null };
+      expect((await command.q`select public.cancel_build(${high.id},${queued.cancel.operationId},${command.q.json(cancelInput as never)}) as r`)[0].r)
+        .toMatchObject({ ok: true });
+      // The deferred publication must be free to commit while switch waits on this account.
+      await command.q`commit`;
+      const result = (await switching)[0].r;
+      await activation.q`commit`;
+      expect(await walletMoney(low.gid)).toBe(25);
+      expect(await walletMoney(high.gid)).toBe(Math.ceil((100 + sale.credit) / 4));
+      expect(result.moneyBefore).toBe(200 + sale.credit);
+      expect((await cutRows()).find(r => r.gid === high.gid)!.result.moneyBefore).toBe(100 + sale.credit);
+      expect(await sql`select status from public.reservations where operation_id=${queued.command.operationId}`).toEqual([{ status: 'refunded' }]);
+      await reconcileSwitch(result);
+    });
+  }, 45_000);
+
+  it.each(['before', 'after'] as const)('orders fee cancellation %s the cut', async order => {
+    const [low, high] = await orderedFighters(), queued = await heldBuild(high);
+    await withSwitchSessions(3, async ([holder, activation, cancellation]) => {
+      await holder.q`select pg_advisory_xact_lock(hashtextextended(${high.id}::text,0))`;
+      const switching = startSwitch(activation);
+      await blockedBy(activation, holder);
+      const input = { command: queued.cancel, prepared: null };
+      if (order === 'before') {
+        expect((await holder.q`select public.cancel_build(${high.id},${queued.cancel.operationId},${holder.q.json(input as never)}) as r`)[0].r)
+          .toMatchObject({ ok: true });
+      }
+      await holder.q`commit`;
+      const result = (await switching)[0].r;
+      let cancelling: Promise<unknown> | undefined;
+      if (order === 'after') {
+        cancelling = startSwitchQuery(cancellation, cancellation.q`select public.cancel_build(${high.id},${queued.cancel.operationId},
+          ${cancellation.q.json(input as never)}) as r`.execute());
+        await blockedBy(cancellation, activation);
+      }
+      await activation.q`commit`;
+      if (cancelling) {
+        expect(await cancelling).toMatchObject([{ r: { ok: true } }]);
+        await cancellation.q`commit`;
+      }
+      expect(await walletMoney(low.gid)).toBe(25);
+      expect(await walletMoney(high.gid)).toBe(order === 'before' ? 25 : 55);
+      expect(await sql`select money::int,status from public.reservations where operation_id=${queued.command.operationId}`)
+        .toEqual([{ money: 40, status: 'refunded' }]);
+      await reconcileSwitch(result);
+    });
+  }, 45_000);
+
+  it.each(['lower sells', 'higher sells'] as const)('orders both market directions with switch: %s', async direction => {
+    const [low, high] = await orderedFighters(1000);
+    const [seller, buyer] = direction === 'lower sells' ? [low, high] : [high, low];
+    const item = await extraSword(seller), sale = await npcSale(high);
+    const listing = await database.market({ userId: seller.id }, { kind: 'create-listing', operationId: randomUUID(), itemId: item.id, price: 30 });
+    expect(listing).toMatchObject({ ok: true });
+    if (!listing.ok || !('listingId' in listing.value)) throw new Error('listing fixture failed');
+    const listingId = listing.value.listingId;
+    const buy = { kind: 'buy-listing' as const, operationId: randomUUID(), listingId };
+    const input = { command: buy, prepared: prepareListingPurchase(await ownerState(buyer), item) };
+    await currentAccounts([low, high]);
+    await withSwitchSessions(3, async ([earlier, activation, market]) => {
+      expect((await earlier.q`select public.sell_item(${high.id},${sale.command.operationId},${earlier.q.json(sale.input as never)}) as r`)[0].r)
+        .toMatchObject({ ok: true });
+      const switching = startSwitch(activation);
+      await blockedBy(activation, earlier);
+      const purchasing = startSwitchQuery(market, market.q`select public.buy_listing(${buyer.id},${buy.operationId},${market.q.json(input as never)}) as r`.execute());
+      await blockedBy(market, activation);
+      expect(await sql`select count(*)::int as n from pg_locks where pid=${market.pid} and locktype='advisory' and granted`).toEqual([{ n: 0 }]);
+      expect(await sql`select status,buyer_gladiator_id from private.market_listings where id=${listingId}`)
+        .toEqual([{ status: 'open', buyer_gladiator_id: null }]);
+      expect(await sql`select receipt_id from public.operation_receipts where operation_id=${buy.operationId}`).toEqual([]);
+      expect(await sql`select * from public.wallet_ledger where reason in ('market-purchase','market-sale','economy-cut')`).toEqual([]);
+      await earlier.q`commit`;
+      const result = (await switching)[0].r;
+      await activation.q`commit`;
+      const purchased = (await purchasing)[0].r;
+      expect(purchased).toMatchObject({ ok: true, value: { listingId, itemId: item.id, price: 30, fee: 1 } });
+      await market.q`commit`;
+      const cutMoney = (owner: EconomyFighter) => Math.ceil((1000 + (owner.gid === high.gid ? sale.credit : 0)) / 4);
+      expect(await walletMoney(buyer.gid)).toBe(cutMoney(buyer) - 30);
+      expect(await walletMoney(seller.gid)).toBe(cutMoney(seller) + 29);
+      expect(await sql`select gladiator_id::text as owner,item->>'ownerId' as item_owner,item->'reservation' as reservation
+        from public.item_instances where id=${item.id}`).toEqual([{ owner: buyer.gid, item_owner: buyer.gid, reservation: null }]);
+      expect(await sql`select status,buyer_gladiator_id::text as buyer,terminal_receipt_id::text as receipt
+        from private.market_listings where id=${listingId}`).toEqual([{ status: 'sold', buyer: buyer.gid, receipt: purchased.receiptId }]);
+      expect(await sql`select l.money_delta::int as money,l.reason,r.receipt_id::text as receipt from public.wallet_ledger l
+        join public.operation_receipts r using(receipt_id) where r.operation_id=${buy.operationId}`)
+        .toEqual([{ money: -30, reason: 'market-purchase', receipt: purchased.receiptId }]);
+      expect(await sql`select l.money_delta::int as money,l.reason,r.gladiator_id::text as gid from public.wallet_ledger l
+        join public.operation_receipts r using(receipt_id) where r.request->>'kind'='market-sale' and r.request->>'listingId'=${listingId}`)
+        .toEqual([{ money: 29, reason: 'market-sale', gid: seller.gid }]);
+      const beforeReplay = await switchFootprint();
+      expect((await sql`select public.buy_listing(${buyer.id},${buy.operationId},${sql.json(input as never)}) as r`)[0].r).toEqual(purchased);
+      expect(await switchFootprint()).toEqual(beforeReplay);
+      expect(result.moneyBefore).toBe(2000 + sale.credit);
+      await reconcileSwitch(result);
+    });
+  }, 45_000);
+
+  it('rolls back every side effect after late cancellation, then permits one deliberate call', async () => {
+    const [low, high] = await orderedFighters(), before = await switchFootprint();
+    await withSwitchSessions(4, async ([holder, activation, accountProbe, walletProbe]) => {
+      await holder.q`select pg_advisory_xact_lock(hashtextextended(${high.id}::text,0))`;
+      const switching = startSwitch(activation);
+      await blockedBy(activation, holder);
+      const accountWait = startSwitchQuery(accountProbe,
+        accountProbe.q`select pg_advisory_xact_lock(hashtextextended(${low.id}::text,0))`.execute());
+      const walletWait = startSwitchQuery(walletProbe,
+        walletProbe.q`select money from public.wallets where gladiator_id=${low.gid} for update`.execute());
+      await blockedBy(accountProbe, activation);
+      await blockedBy(walletProbe, activation);
+      expect(await sql`select pg_cancel_backend(${activation.pid}) as cancelled`).toEqual([{ cancelled: true }]);
+      await expect(switching).rejects.toMatchObject({ code: '57014' });
+      await activation.q`rollback`;
+      await accountWait;
+      await walletWait;
+      await holder.q`rollback`;
+    });
+    expect(await switchFootprint()).toEqual(before);
+    const result = await switchNow();
+    expect(result).toMatchObject({ walletsScanned: 2, walletsCut: 2, moneyBefore: 200, moneyAfter: 50, replayed: false });
+    await reconcileSwitch(result);
+    const newcomer = await fighter(), committed = await switchFootprint();
+    expect(await switchNow()).toEqual({ ...result, replayed: true });
+    expect(await switchFootprint()).toEqual(committed);
+    expect(await walletMoney(newcomer.gid)).toBe(100);
+  }, 45_000);
+
+  it('reconciles committed audit despite wallet changes around precheck', async () => {
+    const owner = await fighter(), sale = await npcSale(owner), check = await captureSwitchPrecheck();
+    expect(await database.inventory({ userId: owner.id }, sale.command)).toMatchObject({ ok: true, value: { moneyCredit: sale.credit } });
+    const result = await switchNow();
+    expect(check, 'the precheck must exist once the switch is implemented').not.toBeNull();
+    expect(check).toMatchObject({ money_now: 100 });
+    expect(result.moneyBefore).toBe(100 + sale.credit);
+    expect(result.moneyBefore).not.toBe(check!.money_now);
+    expect(result.moneyAfter).toBe(Math.ceil((100 + sale.credit) / 4));
+    await reconcileSwitch(result);
+    const historicalReceipts = await cutRows(), after = await npcSale(owner);
+    expect(await database.inventory({ userId: owner.id }, after.command)).toMatchObject({ ok: true });
+    expect(await walletMoney(owner.gid)).toBe(result.moneyAfter + after.credit);
+    expect(await cutRows()).toEqual(historicalReceipts);
+    await reconcileSwitch(result);
+  });
+
+  it('settles a v1 activity on v1 after the switch', async () => {
+    await resetWorld(299);
+    const expedition = { kind: 'expedition', expeditionId: 'outpost' };
+    const traveler = await boundaryFighter({ schedule: { morning: expedition, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } } });
+    const trainee = await boundaryFighter({ schedule: TRAINING });
+    // Strong, legitimate operator fixture; the actual boundary freezes and worker executes the retained rules.
+    await sql`update public.gladiators set level=5,earned_points=300,unspent_points=105 where id=${traveler.gid}`;
+    await sql`update public.builds set current_build=jsonb_set(current_build,'{allocations}',
+      '{"strength":150,"agility":5,"vitality":30,"endurance":5,"precision":5}') where gladiator_id=${traveler.gid}`;
+    await sql`update public.gladiators set earned_points=94,unspent_points=84 where id=${trainee.gid}`;
+    const item = CATALOG_V1.items['sword:1:common'];
+    const template = { catalogId: item.id, catalogVersion: 'v1', tier: 1, rarity: 'common', stats: item.stats,
+      quantity: 1, origin: 'shop', binding: 'tradable', reservation: null };
+    await sql`insert into public.item_instances(id,gladiator_id,item) select x.id,${traveler.gid},
+      ${sql.json(template)}::jsonb||jsonb_build_object('id',x.id,'ownerId',${traveler.gid}::text)
+      from (select gen_random_uuid() as id from generate_series(1,58)) x`;
+    const token = await coordinatorLease();
+    expect(await runBoundary(300, token)).toMatchObject({ status: 'complete' });
+    expect(await sql`select rules_version from private.boundaries where slot_index=300`).toEqual([{ rules_version: 'v1' }]);
+    expect(await sql`select count(*)::int as n from public.item_instances where gladiator_id=${traveler.gid}`).toEqual([{ n: 60 }]);
+    expect(await sql`select * from private.settled_slots where slot_index=300`).toEqual([]);
+    await switchNow();
+    // Reveal chains need several worker rounds, but there is no clock manipulation or retry of activation.
+    let settled = false;
+    for (let round = 0; round < 14; round++) {
+      await settleDue(300, token);
+      settled = (await sql`select count(*)::int as n from private.settled_slots where slot_index=300`)[0].n === 2;
+      if (settled) break;
+    }
+    expect(settled).toBe(true);
+    const summary = (await activityRows(traveler.gid))[0].summary;
+    expect(summary).toMatchObject({ success: true, rewards: { xp: 250, money: 60,
+      overflow: expect.arrayContaining([expect.objectContaining({ catalogId: 'salvage', quantity: 2, unitValue: 10, money: 20 })]) } });
+    expect(await walletMoney(traveler.gid)).toBe(25 + 60 + summary.rewards.overflowMoney);
+    expect(await trainee.row()).toMatchObject({ earned: 95 });
+    expect(await runBoundary(301, token)).toMatchObject({ status: 'complete' });
+    expect(await sql`select rules_version from private.boundaries where slot_index=301`).toEqual([{ rules_version: 'v2' }]);
+    expect(await sql`select distinct rules_version from private.jobs where slot_index=301`).toEqual([{ rules_version: 'v2' }]);
+    await settleDue(301, token);
+    expect(await trainee.row()).toMatchObject({ earned: 95 });
+    expect(await sql`select resolved_kind from private.settled_slots where gladiator_id=${trainee.gid} and slot_index=301`)
+      .toEqual([{ resolved_kind: 'training' }]);
+    expect((await activityRows(trainee.gid)).at(-1)).toMatchObject({ slot: 301, version: 'v2', resolved: 'training',
+      status: 'completed', summary: { resolvedKind: 'training', result: 'completed', success: true, rewards: { attributePoints: 0 } } });
+  }, 60_000);
+});
 
 describe('rules versions', () => {
   it('seeds v2 inactive beside the active v1', async () => {

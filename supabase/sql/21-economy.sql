@@ -1,5 +1,6 @@
 -- Reapplicable source; M27 generation/replay is separate, after the remaining economy source lands.
 -- Task 4: retain inactive v2, publish the active version, freeze season prizes, publish banner ownership and limit Training.
+-- Task 5: define the owner-only, population-fenced economy switch; applying this source never invokes it.
 -- Lock order: existing coordinator/boundary, account advisory, gladiator, wallet/receipt locks are preserved;
 -- deferred mirrors/projectors update the global revision last. Trigger functions are not directly executable.
 -- Accepted rules restatement: season_prizes reproduces the retained v1/v2 season tables exactly (unknowns return null).
@@ -562,6 +563,189 @@ revoke all on function private.economy_tournament_slot(bigint),private.boundary_
   from public,anon,authenticated;
 grant execute on function private.economy_tournament_slot(bigint),private.boundary_pair(bigint),private.accept_pairing(uuid,jsonb)
   to service_role;
+
+-- Task 5 population guard: SQL17 creation body, unchanged except the shared two-int transaction fence
+-- immediately before its account lock (including receipt replay). Starting gold/appearance/starter/ACL behavior stays intact.
+create or replace function public.create_gladiator(actor_id uuid, operation_id uuid, input jsonb) returns jsonb
+language plpgsql security invoker set search_path = '' as $$
+declare command jsonb := input->'command'; allocation jsonb; total numeric; value jsonb; stat jsonb;
+  existing public.operation_receipts%rowtype; result jsonb; gid uuid := gen_random_uuid(); receipt uuid := gen_random_uuid();
+  weapon_id uuid := gen_random_uuid(); body_id uuid := gen_random_uuid(); now_ms bigint; slot bigint; item jsonb; item_id uuid; n integer := 0;
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if operation_id is null or jsonb_typeof(input) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (select count(*) from jsonb_object_keys(input)) <> 4 or not (input ?& array['command','starterItems','staminaMaximum','peakStrength'])
+    or jsonb_typeof(command) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  -- One account lock covers all its operation IDs. Name's unique index also serializes different accounts.
+  perform pg_advisory_xact_lock_shared(1600001,1);
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));
+  select * into existing from public.operation_receipts r where r.owner_id=actor_id and r.operation_id=create_gladiator.operation_id;
+  if found then
+    if existing.request <> command then return jsonb_build_object('ok',false,'code','conflict'); end if;
+    return existing.result;
+  end if;
+  -- Gladiator appearance (M24): an optional sixth key, exactly a valid look.
+  if (select count(*) from jsonb_object_keys(command)) <> (case when command ? 'appearance' then 6 else 5 end)
+    or not (command ?& array['kind','operationId','name','classId','allocation'])
+    or (command ? 'appearance' and private.valid_appearance(command->'appearance') is not true)
+    or command->>'kind' is distinct from 'create-character' or command->>'operationId' is distinct from operation_id::text
+    or jsonb_typeof(command->'name') is distinct from 'string' or command->>'name' <> btrim(command->>'name')
+    or not (command->>'name' ~ '^[A-Za-z0-9 _-]{3,20}$')
+    or jsonb_typeof(command->'classId') is distinct from 'string' or command->>'classId' not in ('berserker','guardian','duelist') then
+    return jsonb_build_object('ok',false,'code','invalid');
+  end if;
+  allocation := command->'allocation';
+  if jsonb_typeof(allocation) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (select count(*) from jsonb_object_keys(allocation)) <> 5
+    or not (allocation ?& array['strength','agility','vitality','endurance','precision']) then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  total := 0;
+  for value in select v from jsonb_each(allocation) e(k,v) loop
+    if jsonb_typeof(value) <> 'number' or value::text::numeric < 0 or value::text::numeric > 10 or trunc(value::text::numeric) <> value::text::numeric then
+      return jsonb_build_object('ok',false,'code','invalid');
+    end if;
+    total := total + value::text::numeric;
+  end loop;
+  if total <> 10 or jsonb_typeof(input->'staminaMaximum') is distinct from 'number'
+    or jsonb_typeof(input->'starterItems') is distinct from 'array' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (input->>'staminaMaximum')::numeric not between 90 and 122
+    or trunc((input->>'staminaMaximum')::numeric) <> (input->>'staminaMaximum')::numeric
+    or jsonb_array_length(input->'starterItems') <> 2 then
+    return jsonb_build_object('ok',false,'code','invalid');
+  end if;
+  -- Catalog rolls come only from the backend's canonical v1 domain catalog, never from the player's command.
+  for item in select * from jsonb_array_elements(input->'starterItems') loop
+    if jsonb_typeof(item) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    if (select count(*) from jsonb_object_keys(item)) <> 6 or not (item ?& array['catalogId','catalogVersion','tier','rarity','stats','binding'])
+      or item->>'catalogId' is distinct from (case when n=0 then 'sword:1:common' else 'light-armor:1:common' end)
+      or item->>'catalogVersion' is distinct from 'v1' or item->'tier' is distinct from '1'::jsonb
+      or item->>'rarity' is distinct from 'common' or item->>'binding' is distinct from 'tradable'
+      or jsonb_typeof(item->'stats') is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    stat := item->'stats';
+    if (select count(*) from jsonb_object_keys(stat)) <> 5 or not (stat ?& array['damage','armor','weight','intervalMs','attributes'])
+      or jsonb_typeof(stat->'attributes') is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    if (select count(*) from jsonb_object_keys(stat->'attributes')) <> 5
+      or not ((stat->'attributes') ?& array['strength','agility','vitality','endurance','precision']) then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    for value in select v from jsonb_each(stat-'attributes') e(k,v) union all select v from jsonb_each(stat->'attributes') e(k,v) loop
+      if jsonb_typeof(value) is distinct from 'number' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+      if value::text::numeric not between 0 and 1000000000 or trunc(value::text::numeric*100) <> value::text::numeric*100 then
+        return jsonb_build_object('ok',false,'code','invalid'); end if;
+    end loop;
+    if trunc((stat->>'intervalMs')::numeric) <> (stat->>'intervalMs')::numeric then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    n := n+1;
+  end loop;
+  if input->'peakStrength' is distinct from '28'::jsonb then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  now_ms := floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  slot := now_ms / 4800000;
+  begin
+    -- The look as sent, or null (the legacy look) when the command has none.
+    insert into public.gladiators(id,owner_id,name,stamina_current,stamina_maximum,processed_slot_index,created_at_ms,orientation_end_ms,peak_strength,appearance)
+      values(gid,actor_id,command->>'name',(input->>'staminaMaximum')::bigint,(input->>'staminaMaximum')::bigint,slot,now_ms,(slot+1)*4800000,(input->>'peakStrength')::numeric,
+        command->'appearance');
+    insert into public.builds(gladiator_id,current_build) values(gid,jsonb_build_object('version',1,'classId',command->>'classId','stance','balanced','allocations',allocation,
+      'equipment',jsonb_build_object('weapon',weapon_id,'body',body_id,'offHand',null,'head',null,'feet',null)));
+    insert into public.schedules(gladiator_id,schedule) values(gid,'{"morning":{"kind":"training"},"afternoon":{"kind":"expedition","expeditionId":"woodland"},"evening":{"kind":"rest"}}');
+    insert into public.wallets(gladiator_id) values(gid);
+    n := 0;
+    for item in select * from jsonb_array_elements(input->'starterItems') loop
+      item_id := case when n=0 then weapon_id else body_id end;
+      insert into public.item_instances(id,gladiator_id,item) values(item_id,gid,item || jsonb_build_object('id',item_id,'ownerId',gid,'quantity',1,'origin','starter',
+        'reservation',jsonb_build_object('kind','equipment','referenceId',gid)));
+      n := n+1;
+    end loop;
+    result := jsonb_build_object('ok',true,'receiptId',receipt,'value',jsonb_build_object('gladiatorId',gid));
+  exception when unique_violation then
+    gid := null;
+    result := jsonb_build_object('ok',false,'code','conflict');
+  end;
+  insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(actor_id,operation_id,receipt,gid,command,sha256(convert_to(command::text,'UTF8')),result);
+  if gid is not null then insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason) values(gid,receipt,100,0,'creation'); end if;
+  return result;
+end $$;
+revoke all on function public.create_gladiator(uuid,uuid,jsonb) from public,anon,authenticated;
+grant execute on function public.create_gladiator(uuid,uuid,jsonb) to service_role;
+
+-- Task 5: one committed activation record. No API role (including service_role) may read or mutate it.
+create table if not exists private.economy_switches (
+  version text primary key references private.rules_versions(version),
+  switched_at_ms bigint not null check (switched_at_ms>=0),
+  wallets_scanned integer not null check (wallets_scanned>=0),
+  wallets_cut integer not null check (wallets_cut>=0 and wallets_cut<=wallets_scanned),
+  money_before bigint not null check (money_before>=0),
+  money_after bigint not null check (money_after>=0),
+  result jsonb not null
+);
+alter table private.economy_switches enable row level security;
+revoke all on private.economy_switches from public,anon,authenticated,service_role;
+
+-- The coordinator excludes new boundaries; the population fence drains earlier creators and puts new ones after commit.
+-- Only IDs/owners enter the cursor. Money and holds are read afresh AFTER every account/gladiator/wallet lock wait.
+-- Hold all account guards through commit and publish only at the tail: existing command projectors can then finish while
+-- this loop waits on a later account. No SET CONSTRAINTS or revision/projection work belongs inside the loop.
+create or replace function private.switch_to_economy_v2() returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare prior jsonb; result jsonb; member record; money bigint; held bigint; spendable bigint; cut bigint;
+  scanned integer:=0; cut_count integer:=0; before_total bigint:=0; after_total bigint:=0; switched_at bigint;
+  receipt uuid; request jsonb:='{"kind":"economy-cut","version":"v2"}'::jsonb;
+begin
+  perform 1 from private.coordinator where singleton for update;
+  select e.result into prior from private.economy_switches e where e.version='v2';
+  if found then return prior||jsonb_build_object('replayed',true); end if;
+
+  if exists(select 1 from private.boundaries where status<>'complete') then
+    raise exception using errcode='55000',message='open boundary';
+  end if;
+  if private.active_rules_version() is distinct from 'v1' then
+    raise exception using errcode='55000',message='unexpected rules version';
+  end if;
+  if not exists(select 1 from private.rules_versions where version='v2') then
+    raise exception using errcode='55000',message='missing v2';
+  end if;
+  if current_setting('transaction_isolation')<>'read committed' then
+    raise exception using errcode='55000',message='unsupported transaction isolation';
+  end if;
+
+  perform pg_advisory_xact_lock(1600001,1);
+  -- A separate READ COMMITTED statement after the fence wait includes creators committed during that wait.
+  for member in select w.gladiator_id,g.owner_id from public.wallets w join public.gladiators g on g.id=w.gladiator_id
+    order by w.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(member.owner_id::text,0));
+    perform 1 from public.gladiators where id=member.gladiator_id for update;
+    perform 1 from public.wallets where gladiator_id=member.gladiator_id for update;
+    select w.money into strict money from public.wallets w where w.gladiator_id=member.gladiator_id;
+    select coalesce(sum(r.money),0)::bigint into held from public.reservations r
+      where r.gladiator_id=member.gladiator_id and r.status='held';
+    spendable:=greatest(money-held,0);
+    cut:=spendable-(spendable+3)/4;
+    scanned:=scanned+1;
+    before_total:=before_total+money;
+    after_total:=after_total+money-cut;
+    if cut>0 then
+      receipt:=gen_random_uuid();
+      insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+        values(member.owner_id,gen_random_uuid(),receipt,member.gladiator_id,request,
+          sha256(convert_to('economy-cut:v2:'||member.gladiator_id::text,'UTF8')),
+          jsonb_build_object('moneyBefore',money,'moneyAfter',money-cut,'cut',cut));
+      update public.wallets w set money=w.money-cut where w.gladiator_id=member.gladiator_id;
+      insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason)
+        values(member.gladiator_id,receipt,-cut,0,'economy-cut');
+      cut_count:=cut_count+1;
+    end if;
+  end loop;
+
+  update private.rules_versions set active=false where version='v1';
+  update private.rules_versions set active=true where version='v2';
+  -- mirror_rules_version copies the version at commit but does not increment revision. Activation advances it once,
+  -- including an empty/zero-cut population. MVCC keeps both revision and version invisible until the transaction commits.
+  update public.world_revision_state set revision=revision+1 where singleton;
+  switched_at:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  result:=jsonb_build_object('ok',true,'version','v2','switchedAtMs',switched_at,'walletsScanned',scanned,
+    'walletsCut',cut_count,'moneyBefore',before_total,'moneyAfter',after_total,'replayed',false);
+  insert into private.economy_switches(version,switched_at_ms,wallets_scanned,wallets_cut,money_before,money_after,result)
+    values('v2',switched_at,scanned,cut_count,before_total,after_total,result);
+  return result;
+end $$;
+revoke all on function private.switch_to_economy_v2() from public,anon,authenticated,service_role;
 
 notify pgrst, 'reload schema';
 commit;

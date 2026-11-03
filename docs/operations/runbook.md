@@ -140,19 +140,102 @@ its boundary waits (`waitReason: operator`). Its seed and input are immutable, s
 Never delete or edit a job, a settled slot or a receipt to "unstick" a boundary: the guards refuse it, and the settled-slot
 guard is what prevents a second grant.
 
+## The economy switch (1.6)
+
+This is release step **2.5** of the [adopted economy release procedure](../superpowers/specs/2026-10-30-economy-1-6-design.md).
+Applying M27/source only prepares the inactive `v2` and its worker support. Activation is a separate, irreversible gold cut:
+obtain Avi's explicit go naming the quarter-gold activation, at least 24 hours after the approved, filled warning, and run
+between boundaries at the announced time. Keep the earlier **post-functions next-completed-boundary jobs and health check**;
+it proves the deployed workers before activation and is not replaced by any switch readback below. Use the established
+linked-project and owner-connection checks for the intended environment. There is no undo function or automatic retry loop.
+Complete the migration, both function deployments/probes, that earlier health check, and verification of the exact new
+client live before requesting the separate activation go.
+
+1. As the database owner, run [`scripts/economy-switch-check.sql`](../../scripts/economy-switch-check.sql). It is one
+   read-only, aggregate-only SELECT. Retain its `checked_at_ms`, `open_boundary`, `active_version`, `v2_row`, `switched`,
+   `wallets`, `money_now`, `money_after_cut`, `held` and `copy_matches`. Before a first activation expect no open boundary,
+   active `v1`, a retained `v2`, no switch audit, and a matching public copy. These money totals are advisory at that timestamp:
+   real commands can change them before the cut; equality with the later audit is **not** an activation condition.
+2. In a new owner transaction at **READ COMMITTED** (the usual autocommit statement is sufficient), invoke exactly once:
+
+   ```sql
+   select private.switch_to_economy_v2();
+   ```
+
+   Wait for commit and retain the returned JSON. The function locks the coordinator, checks committed replay/refusals, then
+   takes the exclusive population fence `(1600001,1)`. Creation takes the shared counterpart before any account lock: an
+   earlier creator finishes before enumeration; a later one starts with the ordinary 100 gold after activation. The switch
+   takes accounts by ascending gladiator ID, then gladiator and wallet rows, and rereads both money and held fees after waits.
+   Each wallet retains held money plus `ceil(spendable/4)`; zero-cut wallets still count in scanned totals. All account locks
+   survive until commit. Rules/public revision publication is last, never inside the wallet loop. Arbitrary owner DML or a
+   dump restore is outside this protocol and must not run concurrently.
+
+   SQLSTATE `55000` refuses an `open boundary`, `unexpected rules version`, `missing v2`, or `unsupported transaction
+   isolation`. Any refusal, cancellation, deadlock or failed readback stops the procedure: report the actual state, diagnose,
+   and obtain any separately required go before a deliberate later call. A failed transaction rolls back cuts, receipts,
+   ledgers, rules, mirror/revision and audit together. A committed replay returns the original result with `replayed:true`
+   without cutting again, including wallets created after the original commit. Do not describe a replay as a fresh cut.
+3. Immediately after commit, read the immutable audit and reconcile it with the saved returned JSON:
+
+   ```sql
+   select * from private.economy_switches where version='v2';
+   select private.active_rules_version() as active_version, rules_version, revision
+     from public.world_revision where rules_version='v2';
+   select count(*) as wallets_cut, coalesce(sum(money_delta),0) as delta
+     from public.wallet_ledger where reason='economy-cut';
+   ```
+
+   There must be exactly one audit, with matching timestamp, `wallets_scanned`, `wallets_cut`, `money_before`, `money_after`
+   and result (`replayed:false` in the stored result). Active version and public mirror must both be `v2`; revision must have
+   advanced even if no wallet was cut. The ledger count equals `wallets_cut`, and its signed delta equals
+   `money_after-money_before`. Also reconcile by **receipt identity**, not timestamps:
+
+   ```sql
+   with cuts as (
+     select * from public.operation_receipts where request->>'kind'='economy-cut'
+   ), linked as (
+     select r.*,l.gladiator_id as ledger_gladiator,l.money_delta,l.renown_delta,l.reason
+       from cuts r left join public.wallet_ledger l using(receipt_id)
+   )
+   select (select count(*) from cuts) as cut_receipts,
+     count(money_delta) as linked_ledger_rows,count(distinct receipt_id) as distinct_receipts,
+     count(distinct gladiator_id) as distinct_wallets,coalesce(sum(money_delta),0) as linked_delta,
+     coalesce(bool_and(coalesce(request='{"kind":"economy-cut","version":"v2"}'::jsonb
+       and request_digest=sha256(convert_to('economy-cut:v2:'||gladiator_id::text,'UTF8'))
+       and ledger_gladiator=gladiator_id and reason='economy-cut' and renown_delta=0
+       and (result->>'cut')::bigint>0
+       and (result->>'moneyBefore')::bigint-(result->>'moneyAfter')::bigint=(result->>'cut')::bigint
+       and money_delta=-(result->>'cut')::bigint,false)),true) as each_receipt_matches
+   from linked;
+   ```
+
+   All four counts equal audited `wallets_cut`, the linked delta equals the whole economy-cut delta above, and
+   `each_receipt_matches` is true. Zero-cut wallets have no cut receipt/ledger but are included in the audited scanned count
+   and money totals. After commands resume, do not compare historic `money_after` with the live sum of wallets; the stored
+   result/audit and its uniquely linked receipt/ledger deltas remain the authoritative reconciliation.
+4. After these immediate checks succeed, promptly publish the approved, truthful patch note and patch record through the
+   existing owner-only publication workflow. Publication must accurately distinguish a completed activation from a refusal
+   or an already-committed replay; never announce an unverified cut. Retain the readbacks with the release record.
+5. **After publication**, separately observe the next completed boundary and its jobs using `v2` and run the health check.
+   Record the boundary slot and confirm every job of that slot has `rules_version='v2'`, with no unexpected operator/failure
+   state or growing backlog. This mandatory follow-up does not delay the prompt post-commit patch note, and immediate audit
+   checks do not replace it. Existing `v1` snapshots/jobs continue to settle with retained `v1` rewards and salvage values.
+
 ## Retained-rule deployments
 
-Every boundary, snapshot and job records its rules version (`private.rules_versions`, today only `v1`, active). A job always
+Every boundary, snapshot and job records its rules version (`private.rules_versions`, today `v1` and `v2`; the economy
+source retains `v2` inactive until the separately approved switch). A job always
 runs with the executors of its own version (`DEFAULT_EXECUTORS` in `supabase/functions/_shared/backend/jobs.ts`); a worker
 without that version fails it with `unsupported-rules`, and after three attempts it waits for an operator.
 
 To ship changed rules:
 1. Add the new version (for example `v2`) alongside the old one in the worker's executor registry and deploy the Edge
    function. **Keep `v1`** until no unfinished job, boundary or snapshot uses it.
-2. Insert the version row: `insert into private.rules_versions(version, active) values ('v2', false);`
-3. Switch at a quiet moment, in one transaction and in this order (one version may be active):
-   `begin; update private.rules_versions set active = false where version = 'v1'; update private.rules_versions set active = true where version = 'v2'; commit;`
-   Boundaries opened afterwards use `v2`; jobs already created keep `v1`.
+2. For 1.6, M27 already seeds `v2` inactive; verify that row instead of inserting it again. Add any later inactive version
+   through its reviewed migration.
+3. For 1.6, use [The economy switch](#the-economy-switch-16), including its separate activation go. Do not manually flip the
+   active flags: that bypasses the population fence, gold cut and audit. Boundaries opened afterwards use `v2`; jobs already
+   created keep `v1`. Later version transitions need their own reviewed procedure.
 4. Never delete a `rules_versions` row: boundaries, snapshots and jobs reference it. Remove `v1`'s executors only when
    `select count(*) from private.jobs where rules_version = 'v1' and status <> 'completed';` is `0` and no boundary is open.
 

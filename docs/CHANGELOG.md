@@ -31,6 +31,7 @@ Patch 1.6 (economy rebalance). The title is the draft patch note's; Avi approves
 ### Built
 
 - Expeditions give less XP and gold: 30 XP and 4 gold on the Woodland Path, 75 and 10 on the Ruined Outpost, 150 and 18 on the Mountain Pass. Level 10 takes about three weeks.
+- Everyone's gold was cut to a quarter when 1.6 went live. Levels, items, points and renown stayed, and shop prices did not change.
 
 ### Planned
 
@@ -39,7 +40,6 @@ Patch 1.6 (economy rebalance). The title is the draft patch note's; Avi approves
 - Season gold prizes depend on the league from the next season, up to today's: 200, 300, 400 or 500 gold for first place. The season card shows every league's prizes. Season 1 pays what it promised.
 - Training gives a point until your gladiator has 10 + 4 × its level in points. At that limit it gives nothing until the next level, and the Schedule says so. Points you have stay.
 - A Training that gave no point says so in Notifications.
-- Everyone's gold was cut to a quarter when 1.6 went live. Levels, items, points and renown stayed, and shop prices did not change.
 - The Arena banner shows on your profile card.
 
 ## 1.5.1 — More guards and new faces in the camp (2026-11-01)

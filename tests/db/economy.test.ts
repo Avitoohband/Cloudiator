@@ -707,6 +707,166 @@ describe('the economy switch', () => {
   }, 60_000);
 });
 
+describe('selling salvage', () => {
+  type Sale = Extract<GameCommand, { kind: 'sell-item' }>;
+
+  beforeEach(() => resetWorld(null));
+  afterEach(async () => { await sql`delete from private.economy_switches`; });
+
+  async function addSalvage(owner: EconomyFighter, quantity: number) {
+    const entry = CATALOG_V1.salvage, id = randomUUID();
+    const item: ItemInstance = { id, ownerId: owner.gid, catalogId: entry.id, catalogVersion: CATALOG_V1.version,
+      tier: entry.tier, rarity: entry.rarity, stats: entry.stats, quantity, origin: 'expedition', binding: entry.binding, reservation: null };
+    await sql`insert into public.item_instances(id,gladiator_id,item) values(${id},${owner.gid},${sql.json(item as never)})`;
+    return item;
+  }
+
+  const sell = (itemId: string, quantity = 3): Sale => ({ kind: 'sell-item', operationId: randomUUID(), itemId, quantity });
+  const prepared = (unitValue: number) => ({ catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version, unitValue });
+  const send = (owner: EconomyFighter, command: Sale) => handleCommand(request(owner.token, command), {
+    database, verifyActor: makeVerifier(anonymous), allowedOrigins: ['http://127.0.0.1:3000'],
+  });
+  async function rawSale(owner: EconomyFighter, command: Sale, preparation: unknown) {
+    const { data, error } = await admin.rpc('sell_item', {
+      actor_id: owner.id, operation_id: command.operationId, input: { command, prepared: preparation },
+    });
+    expect(error).toBeNull();
+    return data;
+  }
+
+  async function saleState(owner: EconomyFighter, q = sql) {
+    return {
+      items: await q`select id,item from public.item_instances where gladiator_id=${owner.gid} order by id`,
+      wallet: await q`select money::int,renown::int from public.wallets where gladiator_id=${owner.gid}`,
+      ledger: await q`select receipt_id,money_delta::int,renown_delta::int,reason from public.wallet_ledger
+        where gladiator_id=${owner.gid} order by id`,
+      receipts: await q`select operation_id,receipt_id,request,result from public.operation_receipts
+        where owner_id=${owner.id} order by operation_id`,
+    };
+  }
+
+  it('sells salvage for the active rules value and keeps gear pricing under both versions', async () => {
+    const owner = await fighter(), stack = await addSalvage(owner, 6);
+    const gearPrice = CATALOG_V1.items['sword:1:common'].npcSellValue;
+    if (gearPrice === null) throw new Error('The test sword must be sellable');
+    const credits = new Map<string, number>();
+    for (const [version, credit, remaining] of [['v1', 30, 3], ['v2', 12, 0]] as const) {
+      if (version === 'v2') await activate(version);
+      expect((await revision()).rules_version).toBe(version);
+      const response = await send(owner, sell(stack.id));
+      expect(response.status).toBe(200);
+      const sale = await response.json();
+      expect(sale).toMatchObject({ ok: true, receiptId: expect.any(String), value: {
+        itemId: stack.id, quantity: 3, remainingQuantity: remaining, moneyCredit: credit,
+      } });
+      credits.set(sale.receiptId, credit);
+      const gear = await extraSword(owner);
+      const gearResponse = await send(owner, sell(gear.id, 1));
+      expect(gearResponse.status).toBe(200);
+      const gearSale = await gearResponse.json();
+      expect(gearSale).toMatchObject({ ok: true, receiptId: expect.any(String), value: { moneyCredit: gearPrice } });
+      credits.set(gearSale.receiptId, gearPrice);
+    }
+    const state = await saleState(owner);
+    expect(state.items.some(row => row.id === stack.id)).toBe(false);
+    expect(state.wallet).toEqual([{ money: 142 + 2 * gearPrice, renown: 0 }]);
+    const saleRows = state.ledger.filter(row => row.reason === 'npc-sale');
+    expect(saleRows).toHaveLength(4);
+    expect(new Map(saleRows.map(row => [row.receipt_id, row.money_delta]))).toEqual(credits);
+  });
+
+  it('accepts the unstamped migration-first v1 preparation and replays its receipt after activation', async () => {
+    const owner = await fighter(), stack = await addSalvage(owner, 3), command = sell(stack.id);
+    const original = await rawSale(owner, command, prepared(10));
+    expect(original).toEqual({ ok: true, receiptId: expect.any(String), value: {
+      itemId: stack.id, quantity: 3, remainingQuantity: 0, moneyCredit: 30,
+    } });
+    expect(await walletMoney(owner.gid)).toBe(130);
+    expect(await switchNow()).toMatchObject({ ok: true, moneyBefore: 130, moneyAfter: 33 });
+    const afterSwitch = await saleState(owner);
+    expect(await rawSale(owner, command, { ...prepared(10), rulesVersion: 'v1' })).toEqual(original);
+    expect(await rawSale(owner, command, null)).toEqual(original);
+    expect(await saleState(owner)).toEqual(afterSwitch);
+  });
+
+  it.each([
+    ['legacy v1 at the wrong price', 'v1', prepared(4)],
+    ['stamped v2 at the wrong price', 'v2', { ...prepared(10), rulesVersion: 'v2' }],
+    ['stamped v2 with a fractional price', 'v2', { ...prepared(4.5), rulesVersion: 'v2' }],
+    // Casting first would round 4.1 to the canonical v2 price.
+    ['stamped v2 with a fractional price that rounds to four', 'v2', { ...prepared(4.1), rulesVersion: 'v2' }],
+    ['stamped v2 with a string price', 'v2', { ...prepared(4), unitValue: '4', rulesVersion: 'v2' }],
+    ['unsupported rules stamp at the canonical v2 price', 'v2', { ...prepared(4), rulesVersion: 'v3' }],
+    ['explicit null stamp under v1', 'v1', { ...prepared(10), rulesVersion: null }],
+  ] as const)('rejects a new sale with %s without changing inventory or gold', async (_, version, preparation) => {
+    const owner = await fighter(), stack = await addSalvage(owner, 3);
+    if (version === 'v2') await activate(version);
+    const before = await saleState(owner);
+    expect(await rawSale(owner, sell(stack.id), preparation)).toEqual({ ok: false, code: 'invalid' });
+    const after = await saleState(owner);
+    expect({ items: after.items, wallet: after.wallet, ledger: after.ledger })
+      .toEqual({ items: before.items, wallet: before.wallet, ledger: before.ledger });
+  });
+
+  it.each([
+    ['an unstamped preparation', prepared(4)],
+    ['a stale v1 stamp', { ...prepared(4), rulesVersion: 'v1' }],
+  ] as const)('leaves %s retryable at the canonical v2 price', async (_, preparation) => {
+    const owner = await fighter(), stack = await addSalvage(owner, 3);
+    await activate('v2');
+    const before = await saleState(owner);
+    expect(await rawSale(owner, sell(stack.id), preparation)).toEqual({ ok: false, code: 'unavailable' });
+    expect(await saleState(owner)).toEqual(before);
+  });
+
+  it('waits for the real switch, then retries the stale operation once at the v2 price', async () => {
+    const owner = await fighter(), stack = await addSalvage(owner, 4), command = sell(stack.id);
+    const input = { command, prepared: { ...prepared(10), rulesVersion: 'v1' } };
+    await withSwitchSessions(2, async ([activation, seller]) => {
+      expect((await startSwitch(activation))[0].r).toMatchObject({ ok: true, version: 'v2', moneyBefore: 100, moneyAfter: 25 });
+      expect((await revision()).rules_version).toBe('v1');
+      await seller.q`set local role service_role`;
+      const sale = startSwitchQuery(seller, seller.q`select public.sell_item(${owner.id},${command.operationId},
+        ${seller.q.json(input)}) as r`.execute());
+      await blockedBy(seller, activation);
+      // Check the contender waits on the one-bigint account guard held by this switch, not a row or table lock.
+      expect(await sql`select count(*)::int as n from pg_locks waiting join pg_locks held
+        on held.locktype=waiting.locktype and held.database=waiting.database and held.classid=waiting.classid
+          and held.objid=waiting.objid and held.objsubid=waiting.objsubid
+        where waiting.pid=${seller.pid} and not waiting.granted and held.pid=${activation.pid} and held.granted
+          and waiting.locktype='advisory' and waiting.objsubid=1`).toEqual([{ n: 1 }]);
+      const afterCut = await saleState(owner, activation.q);
+      expect(afterCut.wallet).toEqual([{ money: 25, renown: 0 }]);
+      expect(afterCut.receipts.some(row => row.operation_id === command.operationId)).toBe(false);
+      await activation.q`commit`;
+      const [{ r }] = await sale;
+      await seller.q`commit`;
+      expect(r).toEqual({ ok: false, code: 'unavailable' });
+      expect(await saleState(owner)).toEqual(afterCut);
+    });
+
+    expect((await revision()).rules_version).toBe('v2');
+    const response = await send(owner, command);
+    expect(response.status).toBe(200);
+    const applied = await response.json();
+    expect(applied).toEqual({ ok: true, receiptId: expect.any(String), value: {
+      itemId: stack.id, quantity: 3, remainingQuantity: 1, moneyCredit: 12,
+    } });
+    const afterRetry = await saleState(owner);
+    expect(afterRetry.wallet).toEqual([{ money: 37, renown: 0 }]);
+    expect(afterRetry.items.find(row => row.id === stack.id)?.item.quantity).toBe(1);
+    expect(afterRetry.ledger.filter(row => row.reason === 'npc-sale')).toEqual([
+      { receipt_id: applied.receiptId, money_delta: 12, renown_delta: 0, reason: 'npc-sale' },
+    ]);
+    expect(afterRetry.receipts.filter(row => row.operation_id === command.operationId)).toEqual([
+      { operation_id: command.operationId, receipt_id: applied.receiptId, request: command, result: applied },
+    ]);
+    const replay = await send(owner, command);
+    expect([replay.status, await replay.json()]).toEqual([200, applied]);
+    expect(await saleState(owner)).toEqual(afterRetry);
+  }, 45_000);
+});
+
 describe('rules versions', () => {
   it('seeds v2 inactive beside the active v1', async () => {
     expect(await sql`select version,active from private.rules_versions order by version`)

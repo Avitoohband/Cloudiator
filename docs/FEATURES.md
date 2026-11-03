@@ -198,7 +198,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Player market | Buy from and sell to other players at fixed prices; visitors can browse. | 1.0 | Live | Marketplace (the fixture camp has sample listings) | Concept trailer |
 | A fair market fee | A sale's fee is at least 1 gold and the lowest price is 2 gold; the sell form shows what you receive. | 1.1 | Live | Marketplace → Sell | Looks update |
 | Gold | Money is called gold everywhere; your amount is unchanged. | 1.3 | Live | Marketplace; My gladiator | Messages update |
-| Salvage at 4 gold | Salvage sells to merchants for 4 gold instead of 10 (a game message warns a day before). | 1.6 | Planned 1.6 | Not built | — |
+| Salvage at 4 gold | Salvage sells to merchants for 4 gold instead of 10 (a game message warns a day before). | 1.6 | In 1.6 | A merchant sale after the economy switch | — |
 | A new economy | When 1.6 goes live everyone's gold is cut to a quarter; levels, items, points and renown stay, and shop prices do not change. | 1.6 | In 1.6 | Not visual: the patch note says it | — |
 
 ### Messages and notifications

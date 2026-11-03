@@ -1,9 +1,10 @@
 import { expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { handleCommand, parseCommand, type CommandDependencies } from '../../supabase/functions/_shared/backend/commands.ts';
-import { createDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
+import { createDatabase, prepareBuild, prepareItemSale } from '../../supabase/functions/_shared/backend/database.ts';
 import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
+import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
 import type { Appearance } from '../../supabase/functions/_shared/domain/appearance.ts';
 import { ownerFixture } from '../fixtures/domain.ts';
 
@@ -465,6 +466,71 @@ const itemOf = (catalogId: string, id: string): ItemInstance => {
   return { id, ownerId: ownerFixture.gladiatorId, catalogId, catalogVersion: 'v1', tier: entry.tier, rarity: entry.rarity, stats: structuredClone(entry.stats),
     quantity: 1, origin: 'starter', binding: entry.binding, reservation: null };
 };
+
+const salvageSale = { kind: 'sell-item' as const, operationId: OPERATION, itemId: ITEM, quantity: 3 };
+const salvageState: OwnerState = { ...ownerFixture, inventory: [{
+  id: ITEM, ownerId: ownerFixture.gladiatorId, catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version,
+  tier: CATALOG_V1.salvage.tier, rarity: CATALOG_V1.salvage.rarity, stats: CATALOG_V1.salvage.stats,
+  quantity: 3, origin: 'expedition', binding: CATALOG_V1.salvage.binding, reservation: null,
+}] };
+
+it('stamps the retained salvage price and keeps the tier-five gear preparation unchanged', () => {
+  expect(prepareItemSale(salvageSale, salvageState))
+    .toEqual({ catalogId: 'salvage', catalogVersion: 'v1', unitValue: 10, rulesVersion: 'v1' });
+  expect(prepareItemSale(salvageSale, salvageState, RULES_V2))
+    .toEqual({ catalogId: 'salvage', catalogVersion: 'v1', unitValue: 4, rulesVersion: 'v2' });
+  const sword = itemOf('sword:5:common', ITEM);
+  const state = { ...ownerFixture, inventory: [sword] };
+  const sale = { ...salvageSale, quantity: 1 };
+  const gear = { catalogId: sword.catalogId, catalogVersion: 'v1', unitValue: CATALOG_V1.items[sword.catalogId].npcSellValue };
+  expect(prepareItemSale(sale, state)).toEqual(gear);
+  expect(prepareItemSale(sale, state, RULES_V2)).toEqual(gear);
+});
+
+it('reads the active rules for a sale and keeps the version in the private RPC preparation', async () => {
+  const sent: Sent[] = [];
+  const command = { ...salvageSale, operationId: OPERATION.toLowerCase(), itemId: ITEM.toLowerCase() };
+  const state = { ...salvageState, inventory: [{ ...salvageState.inventory[0], id: command.itemId }] };
+  const stored = { ok: true, receiptId: 'stored', value: { itemId: command.itemId, quantity: 3, remainingQuantity: 0, moneyCredit: 12 } };
+  let rulesVersion = 'v2';
+  const database = createDatabase(backend(name => name === 'owner_state' ? json([{ state }])
+    : name === 'world_revision' ? json({ rules_version: rulesVersion }) : json(stored), sent));
+
+  expect(await database.inventory({ userId: ACTOR }, salvageSale)).toEqual(stored);
+  expect(sent.slice(0, 2).map(r => [r.method, r.path, r.search]).sort()).toEqual([
+    ['GET', '/rest/v1/owner_state', `?select=state&owner_id=eq.${ACTOR}`],
+    ['GET', '/rest/v1/world_revision', '?select=rules_version'],
+  ]);
+  const rpc = (prepared: unknown) => ({ method: 'POST', path: '/rest/v1/rpc/sell_item', search: '',
+    body: { actor_id: ACTOR, operation_id: command.operationId, input: { command, prepared } } });
+  expect(sent[2]).toEqual(rpc({ catalogId: 'salvage', catalogVersion: 'v1', unitValue: 4, rulesVersion: 'v2' }));
+
+  // Unknown versions produce no preparation. The RPC still gets the original command and can replay its receipt.
+  rulesVersion = 'v3';
+  sent.length = 0;
+  expect(await database.inventory({ userId: ACTOR }, salvageSale)).toEqual(stored);
+  expect(sent[2]).toEqual(rpc(null));
+});
+
+it('maps a failed rules read and an inventory RPC refusal to the existing unavailable response', async () => {
+  const sent: Sent[] = [];
+  const unavailable = { ok: false, code: 'unavailable' };
+  let failRulesRead = true;
+  const database = createDatabase(backend(name => name === 'owner_state' ? json([])
+    : name === 'world_revision' ? (failRulesRead ? json({ code: 'XX000', message: 'database detail' }, 500) : json({ rules_version: 'v2' }))
+      : json(unavailable), sent));
+  const routed = { ...deps, database: { ...deps.database, inventory: database.inventory } };
+  const failedRead = await handleCommand(req(salvageSale), routed);
+  expect([failedRead.status, await failedRead.json()]).toEqual([503, unavailable]);
+  expect(sent.map(r => r.path).sort()).toEqual(['/rest/v1/owner_state', '/rest/v1/world_revision']);
+
+  failRulesRead = false;
+  sent.length = 0;
+  const refused = await handleCommand(req(salvageSale), routed);
+  expect([refused.status, await refused.json()]).toEqual([503, unavailable]);
+  expect(sent[2].path).toBe('/rest/v1/rpc/sell_item');
+});
+
 /** The starter loadout: sword 4 x 6 x 1000/1000 = 24 and light armor 2 x 2 = 4, a historical strength of 28. */
 const buyerState: OwnerState = { ...ownerFixture, inventory: [itemOf('sword:1:common', 'starter-sword'), itemOf('light-armor:1:common', 'starter-armor')],
   progression: { ...ownerFixture.progression, peakStrength: 28 } };

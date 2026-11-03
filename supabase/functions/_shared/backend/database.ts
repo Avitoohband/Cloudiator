@@ -76,10 +76,13 @@ export function prepareShopPurchase(command: Extract<InventoryCommand, { kind: '
     origin: offer.currency === 'renown' ? 'renown' : 'shop' }], RULES_V1) };
 }
 /** NPC unit value for the server-read item; null when it is absent or unsellable (bound or renown origin). */
-export function prepareItemSale(command: Extract<InventoryCommand, { kind: 'sell-item' }>, state: OwnerState) {
+export function prepareItemSale(command: Extract<InventoryCommand, { kind: 'sell-item' }>, state: OwnerState, rules: Rules = RULES_V1) {
   const item = state.inventory.find(candidate => candidate.id === command.itemId);
-  const unitValue = item ? npcSaleValue(item, CATALOG_V1) : null;
-  return item && unitValue !== null ? { catalogId: item.catalogId, catalogVersion: item.catalogVersion, unitValue } : null;
+  if (!item) return null;
+  const unitValue = npcSaleValue(item, CATALOG_V1, rules);
+  if (unitValue === null) return null;
+  const sale = { catalogId: item.catalogId, catalogVersion: item.catalogVersion, unitValue };
+  return item.catalogId === CATALOG_V1.salvage.id ? { ...sale, rulesVersion: rules.version } : sale;
 }
 export type MarketCommand = Extract<GameCommand, { kind: 'create-listing' | 'cancel-listing' | 'buy-listing' }>;
 /** `create-listing`: the new listing and when it expires (seven days of database time after it is listed). */
@@ -163,11 +166,19 @@ export function createDatabase(client: SupabaseClient) {
       const command = { ...original, operationId: original.operationId.toLowerCase(), ...('itemId' in original ? { itemId: original.itemId.toLowerCase() } : {}) } as InventoryCommand;
       let prepared = null;
       if (command.kind !== 'discard-item') {
-        const { data, error } = await client.from('owner_state').select('state').eq('owner_id', actor.userId).maybeSingle();
-        if (error) throw new Error('inventory-unavailable');
-        // Malformed stored items cannot produce a canonical plan; SQL still replays a committed receipt first.
-        try { if (data) prepared = command.kind === 'buy-shop' ? prepareShopPurchase(command, data.state as OwnerState) : prepareItemSale(command, data.state as OwnerState); }
-        catch { prepared = null; }
+        const ownerRead = client.from('owner_state').select('state').eq('owner_id', actor.userId).maybeSingle();
+        const [owner, revision] = command.kind === 'sell-item'
+          ? await Promise.all([ownerRead, client.from('world_revision').select('rules_version').single()])
+          : [await ownerRead, null] as const;
+        if (owner.error || revision?.error) throw new Error('inventory-unavailable');
+        // Unknown rules and malformed stored items leave no preparation. SQL still replays a committed receipt first.
+        try {
+          if (owner.data) {
+            const state = owner.data.state as OwnerState;
+            prepared = command.kind === 'buy-shop' ? prepareShopPurchase(command, state)
+              : prepareItemSale(command, state, retainedRules(revision?.data?.rules_version));
+          }
+        } catch { prepared = null; }
       }
       const rpc = command.kind === 'buy-shop' ? 'buy_shop' : command.kind === 'sell-item' ? 'sell_item' : 'discard_item';
       const { data, error } = await client.rpc(rpc, { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });

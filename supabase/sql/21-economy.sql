@@ -747,5 +747,141 @@ begin
 end $$;
 revoke all on function private.switch_to_economy_v2() from public,anon,authenticated,service_role;
 
+-- 7. Latest SQL04 inventory command with the salvage price fence. Retained v1/v2 unit prices match salvageSellValue.
+create or replace function private.inventory_command(actor_id uuid, operation_id uuid, input jsonb, kind text) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare c jsonb:=input->'command'; prep jsonb:=input->'prepared'; prior public.operation_receipts%rowtype;
+  g public.gladiators%rowtype; w public.wallets%rowtype; item jsonb; offer jsonb; result jsonb; applied jsonb;
+  receipt uuid:=gen_random_uuid(); err text; quantity bigint; cost numeric; money_delta bigint:=0; renown_delta bigint:=0;
+  remaining bigint; available numeric; target uuid; unit_value numeric;
+  prepared_version text; active_version text;
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if operation_id is null or jsonb_typeof(c) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));
+  select * into prior from public.operation_receipts r where r.owner_id=actor_id and r.operation_id=inventory_command.operation_id;
+  if found then
+    if prior.request<>c then return jsonb_build_object('ok',false,'code','conflict'); end if;
+    return prior.result;
+  end if;
+  if c->>'kind' is distinct from kind or c->>'operationId' is distinct from operation_id::text
+    or jsonb_typeof(c->'quantity') is distinct from 'number' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (c->>'quantity')::numeric not between 1 and 999 or trunc((c->>'quantity')::numeric)<>(c->>'quantity')::numeric
+    then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  quantity:=(c->>'quantity')::bigint;
+  if kind='buy-shop' then
+    if (select count(*) from jsonb_object_keys(c))<>5 or not(c ?& array['kind','operationId','catalogId','catalogVersion','quantity'])
+      or jsonb_typeof(c->'catalogId') is distinct from 'string' or jsonb_typeof(c->'catalogVersion') is distinct from 'string'
+      then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  elsif kind in ('sell-item','discard-item') then
+    if (select count(*) from jsonb_object_keys(c))<>4 or not(c ?& array['kind','operationId','itemId','quantity'])
+      or jsonb_typeof(c->'itemId') is distinct from 'string' or c->>'itemId' !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    target:=(c->>'itemId')::uuid;
+  else return jsonb_build_object('ok',false,'code','invalid'); end if;
+  select * into g from public.gladiators where owner_id=actor_id for update;
+  if not found then return jsonb_build_object('ok',false,'code','not-found'); end if;
+  if g.processed_slot_index<private.planning_now_ms()/4800000 then return jsonb_build_object('ok',false,'code','processing','retryAfterMs',1000); end if;
+  select * into w from public.wallets where gladiator_id=g.id for update;
+  perform 1 from public.item_instances where gladiator_id=g.id order by id for update;
+  if kind='buy-shop' and c->>'catalogId'='banner' then
+    offer:=prep->'offer';
+    if quantity<>1 or prep->'cosmetic' is distinct from 'true'::jsonb or c->>'catalogVersion'<>'v1'
+      or offer->>'catalogId' is distinct from 'banner' or offer->>'catalogVersion' is distinct from 'v1'
+      or offer->>'currency' is distinct from 'renown' or jsonb_typeof(offer->'unitPrice') is distinct from 'number' then err:='invalid';
+    elsif exists(select 1 from public.owned_cosmetics where gladiator_id=g.id and catalog_id='banner') then err:='conflict';
+    else
+      cost:=(offer->>'unitPrice')::numeric;
+      select w.renown-coalesce(sum(r.renown),0) into available from public.reservations r where r.gladiator_id=g.id and r.status='held';
+      if cost not between 1 and 9007199254740991 or trunc(cost)<>cost then err:='invalid';
+      elsif cost>available then err:='insufficient-funds';
+      else
+        insert into public.owned_cosmetics(gladiator_id,catalog_id,catalog_version) values(g.id,'banner','v1');
+        renown_delta:=-cost::bigint;
+        result:=jsonb_build_object('cosmeticId','banner','catalogVersion','v1','renownDebit',cost,'moneyDebit',0,'bound',true);
+      end if;
+    end if;
+  elsif kind='buy-shop' then
+    offer:=prep->'offer';
+    if prep is null or prep='null'::jsonb or jsonb_typeof(offer) is distinct from 'object'
+      or offer->>'catalogId' is distinct from c->>'catalogId' or offer->>'catalogVersion' is distinct from c->>'catalogVersion'
+      or offer->>'currency' not in ('money','renown') or jsonb_typeof(offer->'unitPrice') is distinct from 'number'
+      or jsonb_typeof(offer->'requiredLevel') is distinct from 'number' then err:='invalid';
+    elsif (offer->>'requiredLevel')::numeric>g.level or (offer->>'unitPrice')::numeric not between 1 and 9007199254740991
+      or trunc((offer->>'unitPrice')::numeric)<>(offer->>'unitPrice')::numeric then err:='invalid';
+    elsif (select count(*) from public.item_instances where gladiator_id=g.id)+quantity>60 then err:='inventory-full';
+    else
+      cost:=(offer->>'unitPrice')::numeric*quantity;
+      if cost>9007199254740991 then err:='invalid';
+      else
+        select (case when offer->>'currency'='money' then w.money else w.renown end)
+          -coalesce(sum(case when offer->>'currency'='money' then r.money else r.renown end),0) into available
+          from public.reservations r where r.gladiator_id=g.id and r.status='held';
+        if cost>available then err:='insufficient-funds'; end if;
+      end if;
+    end if;
+    if err is null then
+      if jsonb_array_length(prep->'plan'->'retained')<>quantity or prep->'plan'->'stacked'<>'[]'::jsonb
+        or prep->'plan'->'overflowMoney'<>'0'::jsonb then err:='invalid';
+      else
+        applied:=private.apply_inventory_plan(g.id,prep);
+        if applied is null then err:='conflict';
+        else
+          if offer->>'currency'='money' then money_delta:=-cost::bigint; else renown_delta:=-cost::bigint; end if;
+          result:=jsonb_build_object('itemIds',applied->'itemIds','catalogId',c->'catalogId','catalogVersion',c->'catalogVersion','quantity',quantity,
+            'currency',offer->'currency','moneyDebit',-money_delta,'renownDebit',-renown_delta,'bound',offer->>'currency'='renown','peakStrength',applied->'peakStrength');
+        end if;
+      end if;
+    end if;
+  else
+    select i.item into item from public.item_instances i where i.id=target and i.gladiator_id=g.id;
+    if not found then err:='not-found';
+    elsif item->'reservation' is distinct from 'null'::jsonb or exists(select 1 from public.pending_build_items where item_id=target)
+      or quantity>(item->>'quantity')::bigint then err:='invalid';
+    elsif kind='sell-item' then
+      if item->>'origin'='renown' or item->>'binding'<>'tradable' or prep is null or prep='null'::jsonb
+        or prep->>'catalogId' is distinct from item->>'catalogId' or prep->>'catalogVersion' is distinct from item->>'catalogVersion'
+        or jsonb_typeof(prep->'unitValue') is distinct from 'number' then err:='invalid';
+      else
+        unit_value:=(prep->>'unitValue')::numeric;
+        if item->>'catalogId'='salvage' then
+          if prep ? 'rulesVersion' and prep->'rulesVersion' not in ('"v1"'::jsonb,'"v2"'::jsonb) then err:='invalid';
+          else
+            -- The legacy unstamped preparation carries v1's price. Only committed receipts replay across versions.
+            prepared_version:=coalesce(prep->>'rulesVersion','v1');
+            -- A separate read after the account guard sees any switch that committed while this sale waited.
+            select private.active_rules_version() into active_version;
+            if active_version is distinct from prepared_version then
+              return jsonb_build_object('ok',false,'code','unavailable');
+            elsif unit_value<>(case active_version when 'v1' then 10 when 'v2' then 4 end) then err:='invalid';
+            end if;
+          end if;
+        end if;
+        if err is null then
+          cost:=unit_value*quantity;
+          if unit_value not between 1 and 9007199254740991 or trunc(unit_value)<>unit_value or cost>9007199254740991
+            or w.money::numeric+cost>9007199254740991 then err:='invalid'; else money_delta:=cost::bigint; end if;
+        end if;
+      end if;
+    end if;
+    if err is null then
+      remaining:=(item->>'quantity')::bigint-quantity;
+      if remaining=0 then delete from public.item_instances where id=target;
+      else update public.item_instances i set item=jsonb_set(i.item,'{quantity}',to_jsonb(remaining)) where i.id=target; end if;
+      result:=jsonb_build_object('itemId',target,'quantity',quantity,'remainingQuantity',remaining);
+      if kind='sell-item' then result:=result||jsonb_build_object('moneyCredit',money_delta); end if;
+    end if;
+  end if;
+  result:=case when err is null then jsonb_build_object('ok',true,'receiptId',receipt,'value',result) else jsonb_build_object('ok',false,'code',err) end;
+  insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(actor_id,operation_id,receipt,g.id,c,sha256(convert_to(c::text,'UTF8')),result);
+  if err is null and kind<>'discard-item' then
+    update public.wallets set money=money+money_delta,renown=renown+renown_delta where gladiator_id=g.id;
+    insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason)
+      values(g.id,receipt,money_delta,renown_delta,case kind when 'buy-shop' then 'shop-purchase' else 'npc-sale' end);
+  end if;
+  return result;
+end $$;
+
 notify pgrst, 'reload schema';
 commit;

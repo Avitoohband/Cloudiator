@@ -210,3 +210,8 @@ These additions are future-patch planning requirements, not an expansion of Patc
 implementation/release approval. The level-20 and 100-base-point decisions above are confirmed; material/upgrade rules,
 combat balance, elements, unlock levels and multi-day scheduling details still need their design pass. No patch numbers
 are assigned here. Preserve retained rules and define a transition before changing live progression.
+
+Avi added this future-patch idea on 2026-11-03.
+
+56. **Seasonal events and holiday themes.** Run events for holidays such as Halloween and Christmas, with themed visuals
+    in the camp. Define the event activities, schedule and visual treatment during the design pass. Patch number TBD.

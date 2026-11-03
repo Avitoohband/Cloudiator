@@ -732,10 +732,13 @@ describe('Task 22.2: robust ticks, season rows and recovery', () => {
         language sql stable security invoker set search_path='' as $stand$
         select (e.epoch_slot+504*season_bounds.index+1)*4800000,(e.epoch_slot+504*(season_bounds.index+1)+1)*4800000
         from private.season_epoch e where e.singleton and season_bounds.index>=0 $stand$`);
-      // Phase 2.
+      // Phase 2 consumes the version frozen when the coordinator opens the boundary, even in this direct phase call.
+      await tx`insert into private.boundaries(slot_index,cutoff_ms,rules_version,opened_at_ms,updated_at_ms)
+        values(${RATED},${RATED * SLOT},'v1',${RATED * SLOT},${RATED * SLOT})`;
       await tx`truncate public.seasons`;
       expect(await tx`select private.boundary_close_season(${RATED}) as wait`).toEqual([{ wait: null }]);
       expect(await seasonRows(tx)).toEqual([seasonOf(RATED, null, 1)]);
+      expect(await tx`select rules_version from public.seasons`).toEqual([{ rules_version: 'v1' }]);
       // The backfill, as written in the source: one row per rated season.
       await tx`truncate public.seasons`;
       const rated = (await tx`select distinct season_index::int as season from private.arena_ratings order by 1`).map(row => row.season as number);

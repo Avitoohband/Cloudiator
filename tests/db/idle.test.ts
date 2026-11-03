@@ -6,8 +6,8 @@ import { sql, account, resetIdentity, admin, anonymous, creation, request, direc
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, createWorkerDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
-import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
-import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
+import { DEFAULT_EXECUTORS } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { JobLease } from '../../supabase/functions/_shared/domain/types.ts';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
@@ -111,7 +111,11 @@ const claim = (kind: string, limit = 20) => rpc<JobLease[]>('claim_jobs', { work
 const complete = (job: JobLease, result: unknown) => rpc('complete_job', { job_id: job.id, lease_token: job.token, result });
 async function completePreparations() {
   for (let jobs = await claim('prepare'); jobs.length; jobs = await claim('prepare')) {
-    for (const job of jobs) expect(await complete(job, prepareActivityV1(job.snapshot as PreparationInput))).toMatchObject({ ok: true });
+    for (const job of jobs) {
+      const executor = DEFAULT_EXECUTORS[job.rulesVersion];
+      if (!executor?.prepare) throw new Error('unsupported preparation rules: ' + job.rulesVersion);
+      expect(await complete(job, await executor.prepare(job))).toMatchObject({ ok: true });
+    }
   }
 }
 /** Runs boundary `target` to its end with canonical preparation and pairing; returns the last report. */
@@ -328,6 +332,41 @@ describe('Task 23.8: idle characters rest at home', () => {
     expect(await slotsOf(stillIdle)).toEqual([]);
     expect(await restOf(viaPresence)).toEqual({ since: S, through: S, signalled: expect.any(Number) });
     expect(await restOf(stillIdle)).toEqual({ since: S, through: S + 1, signalled: null });
+  });
+
+  it('excludes idle slots from v2 Training history when presence resumes the same game day', async () => {
+    const active = await fighter({ signal: (S + 10) * SLOT });
+    const returning = await fighter(), stillIdle = await fighter();
+    await sql.begin(async tx => {
+      await tx`update private.rules_versions set active=false where active`;
+      expect(await tx`update private.rules_versions set active=true where version='v2' returning version`).toHaveLength(1);
+    });
+    const token = await coordinatorLease();
+    expect(await runBoundary(S, token)).toMatchObject({ status: 'complete' });
+    await settleAll();
+    expect(await rowsOf(returning)).toEqual({ members: 0, jobs: 0, activities: 0, snapshots: 0, settled: 0, ratings: 0 });
+    expect(await send(returning.token, presence())).toEqual({ ok: true });
+    for (const slot of [S + 1, S + 2]) {
+      expect(await runBoundary(slot, token)).toMatchObject({ status: 'complete' });
+      await settleAll();
+    }
+    const frozen = (gid: string) => sql`select slot_index::int as slot,input->'trainingActivitiesEarlierInDay' as count,
+      result->'trainingAllowed' as allowed from private.jobs where kind='prepare' and gladiator_id=${gid} order by slot_index`;
+    expect(await frozen(returning.gid)).toEqual([{ slot: 301, count: 0, allowed: true }, { slot: 302, count: 1, allowed: true }]);
+    expect(await frozen(active.gid)).toEqual([
+      { slot: 300, count: 0, allowed: true }, { slot: 301, count: 1, allowed: true }, { slot: 302, count: 2, allowed: false },
+    ]);
+    expect(await sql`select a.slot_index::int as slot,a.resolved_kind as resolved,a.fallback,a.stamina_debit::int as debit,
+      s.snapshot->'trainingAllowed' as allowed,a.summary->'rewards'->'attributePoints' as points
+      from public.activities a join private.activity_snapshots s on s.activity_id=a.id where a.gladiator_id=${returning.gid} order by a.slot_index`)
+      .toEqual([
+        { slot: 301, resolved: 'training', fallback: false, debit: 20, allowed: true, points: 1 },
+        { slot: 302, resolved: 'training', fallback: false, debit: 20, allowed: true, points: 1 },
+      ]);
+    expect(await progressOf(returning)).toMatchObject({ earned: 12, unspent: 2, stamina: 64, settled: 2 });
+    expect(await restOf(returning)).toMatchObject({ since: S, through: S, signalled: expect.any(Number) });
+    expect(await rowsOf(stillIdle)).toEqual({ members: 0, jobs: 0, activities: 0, snapshots: 0, settled: 0, ratings: 0 });
+    expect(await processedOf(stillIdle)).toBe(302);
   });
 
   it('applies changes queued while resting at that first boundary and grants nothing for resting slots', async () => {

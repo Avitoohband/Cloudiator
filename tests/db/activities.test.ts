@@ -2,18 +2,16 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { TransactionSql } from 'postgres';
-import { sql, account, resetIdentity, admin, anonymous, creation, request, makeLegacyPending } from '../fixtures/db.ts';
+import { sql, account, admin, anonymous, request, makeLegacyPending } from '../fixtures/db.ts';
 import { makeVerifier } from '../../supabase/functions/_shared/backend/auth.ts';
 import { createDatabase, createWorkerDatabase, prepareBuild } from '../../supabase/functions/_shared/backend/database.ts';
-import type { WorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1, runWorker } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands.ts';
-import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 
-const SLOT = 4_800_000;
-type Outcome = { ok: boolean; code?: string; [key: string]: unknown };
+import { SLOT, TRAINING, resetWorld, fighter, coordinatorLease, advance, historicalPort, runBoundary, settleDue, claim, completePreparations, rpc } from '../fixtures/boundary.ts';
+import type { Outcome } from '../fixtures/boundary.ts';
 declare module 'vitest' {
   interface Matchers<R extends void | Promise<void> = void | Promise<void>, T = unknown> { toHaveCode(code: string): R }
 }
@@ -27,11 +25,6 @@ expect.extend({
 const commands = createDatabase(admin);
 const deps = { database: commands, verifyActor: makeVerifier(anonymous), allowedOrigins: ['http://127.0.0.1:3000'] };
 const send = async (token: string, body: GameCommand) => (await handleCommand(request(token, body), deps)).json();
-async function rpc<T = Outcome>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await admin.rpc(name, args);
-  if (error) throw new Error(`${name}: ${error.message}`);
-  return data as T;
-}
 const nowSlot = () => Math.floor(Date.now() / SLOT);
 /** Task 23.7: the stubs cleanup compacts a settled job's payloads to. */
 const COMPACTED = { input: { compacted: true }, result: { ok: true, compacted: true } };
@@ -55,75 +48,6 @@ async function stableRealSlot(marginMs = 30_000) {
   return nowSlot();
 }
 
-// Operator-only world controls for the isolated local test database; no player API exposes them.
-async function resetWorld(published: number | null) {
-  await resetIdentity();
-  await sql`truncate private.boundaries, private.boundary_work, private.dispatch_log`;
-  await sql`update private.coordinator set published_slot=${published}, lease_token=null, lease_until_ms=0, last_error=null where singleton`;
-  await sql`update private.rules_versions set active=false where version<>'v1'`;
-  await sql`delete from private.rules_versions where version not in ('v1','v2')`;
-  await sql`update private.rules_versions set active=true where version='v1'`;
-  await sql`update private.scheduler set enabled=false where singleton`;
-}
-type Choices = { morning: unknown; afternoon: unknown; evening: unknown };
-const TTR: Choices = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'rest' } };
-const TRAINING: Choices = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } };
-/** Real creation, then the operator places the character at a historical first activity slot. */
-async function fighter(options: { firstSlot?: number; stamina?: number; schedule?: Choices; name?: string } = {}) {
-  const firstSlot = options.firstSlot ?? 300, schedule = options.schedule ?? TTR;
-  const owner = await account();
-  const created = await commands.createGladiator({ userId: owner.id }, creation(options.name ?? 'Slot ' + randomUUID().slice(0, 8)));
-  if (!created.ok) throw new Error('creation failed');
-  const gid = created.value.gladiatorId;
-  const createdAt = (firstSlot - 1) * SLOT + 1;
-  await sql`update public.gladiators set created_at_ms=${createdAt},orientation_end_ms=${firstSlot * SLOT},processed_slot_index=${firstSlot - 1}
-    ${options.stamina === undefined ? sql`` : sql`,stamina_current=${options.stamina}`} where id=${gid}`;
-  await sql`update public.schedules set schedule=${sql.json(schedule as never)} where gladiator_id=${gid}`;
-  for (const phase of ['morning', 'afternoon', 'evening'] as const) {
-    await sql`update public.schedule_revisions set received_at_ms=${createdAt},effective_slot_index=${firstSlot},choice=${sql.json(schedule[phase] as never)}
-      where gladiator_id=${gid} and phase=${phase}`;
-  }
-  const state = async (): Promise<OwnerState> => {
-    const { data, error } = await owner.client.from('owner_state').select('state').single();
-    if (error) throw new Error(error.message);
-    return data!.state;
-  };
-  const row = async () => (await sql`select earned_points::int as earned, unspent_points::int as unspent, stamina_current::int as stamina,
-    stamina_maximum::int as maximum, processed_slot_index::int as processed from public.gladiators where id=${gid}`)[0];
-  return { ...owner, gid, state, row };
-}
-async function coordinatorLease() {
-  const token = randomUUID();
-  await sql`update private.coordinator set lease_token=${token},lease_until_ms=9007199254740991 where singleton`;
-  return token;
-}
-const advance = (target: number, token: string) => rpc('advance_boundary', { target_slot: target, coordinator_token: token });
-/** The real RPC adapter and real runWorker; only coordination is pinned to an explicit historical target. */
-function historicalPort(target: number, token: string): WorkerDatabase {
-  const real = createWorkerDatabase(admin);
-  return { ...real, coordinate: async () => ({ ok: true, publishedSlot: null, boundaries: [await advance(target, token)] }) };
-}
-async function runBoundary(target: number, token?: string) {
-  const lease = token ?? await coordinatorLease();
-  for (let round = 0; round < 6; round++) {
-    const result = await advance(target, lease);
-    if (result.status === 'complete' || ['integration', 'operator', 'extension', 'straggler'].includes(result.wait as string)) return result;
-    await runWorker({ database: historicalPort(target, lease), workerId: randomUUID() });
-  }
-  return advance(target, lease);
-}
-async function settleDue(target: number, token: string) {
-  return runWorker({ database: historicalPort(target, token), workerId: randomUUID() });
-}
-async function claim(kind: string, limit = 20, worker = randomUUID()) {
-  return rpc<JobLease[]>('claim_jobs', { worker_id: worker, kind, batch_limit: limit });
-}
-/** Completes due preparation through the canonical v1 executor without letting a worker coordinate afterwards. */
-async function completePreparations() {
-  for (const job of await claim('prepare')) {
-    expect(await rpc('complete_job', { job_id: job.id, lease_token: job.token, result: prepareActivityV1(job.snapshot as PreparationInput) })).toMatchObject({ ok: true });
-  }
-}
 const settlementAttempts = () => sql`select a.attempt::int, a.outcome, a.failure_code from private.job_attempts a join private.jobs j on j.id=a.job_id
   where j.kind='settlement' order by a.attempt`;
 const activities = (gid: string) => sql`select slot_index::int as slot, requested->>'kind' as requested, resolved_kind, fallback,

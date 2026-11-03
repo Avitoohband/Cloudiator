@@ -118,6 +118,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'private.operations_events': { retention: 'operational', windowSlots: RETENTION.operationsEventSlots },
   'private.coordinator': { retention: 'singleton' }, 'private.scheduler': { retention: 'singleton' }, 'private.retention_state': { retention: 'singleton' },
   'private.rules_versions': { retention: 'singleton' }, 'private.season_epoch': { retention: 'singleton' }, 'public.world_revision_state': { retention: 'singleton' },
+  // One retained audit per economy activation, independent of player count and elapsed slots.
+  'private.economy_switches': { retention: 'singleton' },
 });
 
 /**

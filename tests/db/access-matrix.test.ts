@@ -169,6 +169,7 @@ const SERVICE_ROLE = [
   'function private.schedule_effective_slot(text, bigint): EXECUTE',
   'function private.season_bounds(bigint): EXECUTE',
   'function private.season_index(bigint): EXECUTE',
+  'function private.season_prizes(text, text): EXECUTE',
   'function private.season_rules(): EXECUTE',
   'function private.settle_activity_core(uuid, uuid, jsonb): EXECUTE',
   'function private.settle_rewards(uuid): EXECUTE',
@@ -312,6 +313,32 @@ async function contents() {
 }
 
 describe('release access matrix', () => {
+  it('keeps economy helpers backend-only and trigger functions uncallable by clients or service_role', async () => {
+    const signatures = ['private.season_prizes(text,text)', 'private.mirror_rules_version()', 'private.publish_banner()'];
+    for (const signature of signatures) {
+      const [row] = await sql`select p.prosecdef as definer,p.proconfig as config,
+        has_function_privilege('anon',p.oid,'EXECUTE') as anon,
+        has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated,
+        has_function_privilege('service_role',p.oid,'EXECUTE') as service
+        from pg_proc p where p.oid=${signature}::regprocedure`;
+      expect(row, signature).toEqual({ definer: false, config: ['search_path=""'], anon: false, authenticated: false,
+        service: signature === signatures[0] });
+    }
+    for (const role of ['anon', 'authenticated', 'service_role']) {
+      for (const [table, column] of [['world_revision_state', 'rules_version'], ['seasons', 'rules_version'], ['public_profiles', 'banner']]) {
+        expect((await sql`select has_column_privilege(${role},${'public.' + table},${column},'SELECT') as allowed`)[0].allowed).toBe(true);
+        if (role !== 'service_role') {
+          for (const privilege of ['INSERT', 'UPDATE', 'REFERENCES']) {
+            expect((await sql`select has_column_privilege(${role},${'public.' + table},${column},${privilege}) as allowed`)[0].allowed).toBe(false);
+          }
+        }
+      }
+    }
+    expect(await sql`select relname,reloptions from pg_class where oid in ('public.world_revision'::regclass,'public.public_profile_reads'::regclass)
+      order by relname`).toEqual([{ relname: 'public_profile_reads', reloptions: ['security_invoker=true'] },
+      { relname: 'world_revision', reloptions: ['security_invoker=true'] }]);
+  });
+
   it('grants visitors SELECT on the open projections only and nothing else on any relation', async () => {
     const rows = await audit();
     // anon's whole effective set outside policies, defaults (both checked below) and the platform's settings: the open

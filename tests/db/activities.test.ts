@@ -61,7 +61,7 @@ async function resetWorld(published: number | null) {
   await sql`truncate private.boundaries, private.boundary_work, private.dispatch_log`;
   await sql`update private.coordinator set published_slot=${published}, lease_token=null, lease_until_ms=0, last_error=null where singleton`;
   await sql`update private.rules_versions set active=false where version<>'v1'`;
-  await sql`delete from private.rules_versions where version<>'v1'`;
+  await sql`delete from private.rules_versions where version not in ('v1','v2')`;
   await sql`update private.rules_versions set active=true where version='v1'`;
   await sql`update private.scheduler set enabled=false where singleton`;
 }
@@ -564,14 +564,14 @@ describe('authoritative ordered boundaries and fenced jobs', () => {
     const owner = await fighter();
     const token = await coordinatorLease();
     await runBoundary(300, token);
-    await sql`insert into private.rules_versions(version,active) values('v2',false)`;
+    await sql`insert into private.rules_versions(version,active) values('v9',false)`;
     await sql`update private.rules_versions set active=false where version='v1'`;
-    await sql`update private.rules_versions set active=true where version='v2'`;
+    await sql`update private.rules_versions set active=true where version='v9'`;
     // Test-only stand-in for a future rules module: canonical v1 derivation with a reduced capacity.
-    const executors = { ...DEFAULT_EXECUTORS, v2: { prepare: (job: JobLease) => {
+    const executors = { ...DEFAULT_EXECUTORS, v9: { prepare: (job: JobLease) => {
       const derived = prepareActivityV1({ ...(job.snapshot as PreparationInput), rulesVersion: 'v1' });
-      return { ...derived, rulesVersion: 'v2', staminaMaximum: 80, snapshot: { ...derived.snapshot, rulesVersion: 'v2' },
-        arenaFighter: { ...derived.arenaFighter, rulesVersion: 'v2' }, npcTemplate: { ...derived.npcTemplate, rulesVersion: 'v2' } };
+      return { ...derived, rulesVersion: 'v9', staminaMaximum: 80, snapshot: { ...derived.snapshot, rulesVersion: 'v9' },
+        arenaFighter: { ...derived.arenaFighter, rulesVersion: 'v9' }, npcTemplate: { ...derived.npcTemplate, rulesVersion: 'v9' } };
     } } };
     for (let round = 0; round < 3 && (await advance(301, token)).status !== 'complete'; round++) {
       await runWorker({ database: historicalPort(301, token), workerId: randomUUID(), executors });

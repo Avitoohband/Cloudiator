@@ -1,10 +1,11 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { DEFAULT_EXECUTORS, prepareActivityV1 } from '../../supabase/functions/_shared/backend/jobs.ts';
 import { slotAt } from '../../supabase/functions/_shared/domain/clock.ts';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
+import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
 import { seasonAt } from '../../supabase/functions/_shared/domain/season.ts';
 import { readProfile, readSeasons, readStandingOf, readStandings } from '../../src/lib/api/reads.ts';
 import { isTournamentSlot, tournamentOutcomes } from '../../supabase/functions/_shared/domain/tournament.ts';
@@ -22,6 +23,10 @@ const LEAGUES = ['bronze', 'silver', 'gold', 'champion'] as const;
 type League = typeof LEAGUES[number];
 
 beforeEach(() => resetIdentity());
+afterEach(async () => {
+  await sql`update private.rules_versions set active=false where version<>'v1'`;
+  await sql`update private.rules_versions set active=true where version='v1'`;
+});
 afterAll(() => sql.end());
 
 /** Real creation through the command database. The trusted local operator then seeds rating rows by SQL. */
@@ -42,9 +47,15 @@ async function rate(f: Fighter, league: League, counters: Counters = {}, season 
     values(${f.gid},${league},${season},${counters.rating ?? 1000},${counters.wins ?? 0},${counters.losses ?? 0})`;
 }
 /** A season row with seasonAt's launch-epoch-0 bounds (504 slots of 80 minutes), as boundary phase 2 writes it. */
-async function openSeason(index = 0) {
+async function openSeason(index = 0, version?: string) {
   const season = seasonAt(index * RULES_V1.seasons.durationSlots, 0);
-  await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms) values(${season.index},${season.startsAtMs},${season.endsAtMs})`;
+  if (version === undefined) {
+    await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms)
+      values(${season.index},${season.startsAtMs},${season.endsAtMs})`;
+  } else {
+    await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms,rules_version)
+      values(${season.index},${season.startsAtMs},${season.endsAtMs},${version})`;
+  }
 }
 async function close(season = 0, now = Date.now()): Promise<number> {
   return (await sql`select private.close_season(${season},${now}) as awards`)[0].awards;
@@ -87,6 +98,58 @@ const prestigeOf = async (f: Fighter) => (await sql`select prestige from public.
 const digest = (season: number, f: Fighter) => createHash('sha256').update(`season:${season}:${f.gid}`).digest('hex');
 /** Five human bouts: the qualifying minimum. */
 const QUALIFIED = { wins: 3, losses: 2 };
+
+describe('retained season prizes', () => {
+  it('season_prizes matches every retained league and refuses unknown versions and leagues', async () => {
+    for (const league of LEAGUES) {
+      expect((await sql`select private.season_prizes('v1',${league}) as prizes`)[0].prizes).toEqual(RULES_V1.seasons.placements);
+      expect((await sql`select private.season_prizes('v2',${league}) as prizes`)[0].prizes).toEqual(RULES_V2.seasons.placementsByLeague[league]);
+    }
+    expect(await sql`select private.season_prizes('v9','bronze') as version,
+      private.season_prizes('v2','diamond') as league`).toEqual([{ version: null, league: null }]);
+    expect(await sql`select provolatile as volatility,prosecdef as definer,proconfig as config
+      from pg_proc where oid='private.season_prizes(text,text)'::regprocedure`)
+      .toEqual([{ volatility: 'i', definer: false, config: ['search_path=""'] }]);
+  });
+
+  it.each([['v1', 'v2', 500], ['v2', 'v1', 300]] as const)
+  ('pays the %s season even while %s is active', async (version, active, money) => {
+    const f = await fighter();
+    await openSeason(0, version);
+    await rate(f, 'silver', { rating: 1300, ...QUALIFIED });
+    await sql.begin(async tx => {
+      await tx`update private.rules_versions set active=false where active`;
+      expect(await tx`update private.rules_versions set active=true where version=${active} returning version`).toHaveLength(1);
+    });
+    const before = await walletOf(f);
+    expect(await close()).toBe(1);
+    expect(await walletOf(f)).toEqual({ money: before.money + money, renown: before.renown + 100 });
+    expect(await ledgerOf(f)).toEqual([{ money, renown: 100, reason: 'season', receipt: expect.any(String) }]);
+    expect(await awards()).toEqual([expect.objectContaining({ league: 'silver', money, renown: 100, title: 'champion', badge: 'gold' })]);
+    expect(await close()).toBe(0);
+    expect(await ledgerOf(f)).toHaveLength(1);
+  });
+
+  it('refuses an unknown season version atomically with a qualifying award', async () => {
+    const f = await fighter();
+    await openSeason(0, 'v9');
+    await rate(f, 'silver', { rating: 1300, ...QUALIFIED });
+    const before = await closeState(), wallet = await walletOf(f);
+    await expect(close()).rejects.toThrow('unknown season prizes');
+    expect(await closeState()).toEqual(before);
+    expect(await walletOf(f)).toEqual(wallet);
+    expect(await receiptsOf(f)).toEqual([]);
+    expect(await ledgerOf(f)).toEqual([]);
+  });
+
+  it('keeps a season version immutable even during its permitted close transition', async () => {
+    await openSeason();
+    await expect(sql`update public.seasons set rules_version='v2' where season_index=0`).rejects.toThrow('immutable season');
+    // The old guard already rejects any update that leaves closed_at_ms null; this catches a missing tuple member.
+    await expect(sql`update public.seasons set rules_version='v2',closed_at_ms=1 where season_index=0`).rejects.toThrow('immutable season');
+    expect(await sql`select rules_version,closed_at_ms from public.seasons`).toEqual([{ rules_version: 'v1', closed_at_ms: null }]);
+  });
+});
 
 describe('closing a season', () => {
   it('season_rules matches RULES_V1.seasons', async () => {
@@ -573,7 +636,7 @@ async function resetBoundaries(published: number) {
   await sql`update private.coordinator set published_slot=${published}, lease_token=null, lease_until_ms=0, last_error=null,
     last_failed_slot=null where singleton`;
   await sql`update private.rules_versions set active=false where version<>'v1'`;
-  await sql`delete from private.rules_versions where version<>'v1'`;
+  await sql`delete from private.rules_versions where version not in ('v1','v2')`;
   await sql`update private.rules_versions set active=true where version='v1'`;
   await sql`update private.scheduler set enabled=false where singleton`;
 }
@@ -683,6 +746,46 @@ async function closeState() {
 }
 
 describe('closing each season at its slot boundary (phase 2)', () => {
+  it.each(['v1', 'v2'])('stamps phase 2 with its frozen %s boundary while another version is active', async version => {
+    await resetBoundaries(503);
+    const rollback = new Error('rollback');
+    await sql.begin(async tx => {
+      // A rollback-only retained row lets M26 exercise the old insertion without masking the real seed test.
+      await tx`insert into private.rules_versions(version,active) values('v2',false) on conflict do nothing`;
+      await tx`insert into private.boundaries(slot_index,cutoff_ms,rules_version,phase,opened_at_ms,updated_at_ms)
+        values(504,${504 * SLOT},${version},2,0,0)`;
+      await tx`update private.rules_versions set active=false where active`;
+      expect(await tx`update private.rules_versions set active=true where version=${version === 'v1' ? 'v2' : 'v1'} returning version`).toHaveLength(1);
+      expect((await tx`select private.boundary_close_season(504) as wait`)[0].wait).toBeNull();
+      expect(await tx`select to_jsonb(s)->>'rules_version' as rules_version from public.seasons s where season_index=1`)
+        .toEqual([{ rules_version: version }]);
+      throw rollback;
+    }).catch(error => { if (error !== rollback) throw error; });
+  });
+
+  it.each(['v1', 'v2'])('stamps the late epoch phase 4 insertion with its frozen %s boundary', async version => {
+    await resetBoundaries(503);
+    const f = await fighter(), rollback = new Error('rollback');
+    await sql.begin(async tx => {
+      await tx`insert into private.rules_versions(version,active) values('v2',false) on conflict do nothing`;
+      await tx`alter table private.season_epoch disable trigger guard_frozen`;
+      await tx`delete from private.season_epoch`;
+      await tx`insert into private.boundaries(slot_index,cutoff_ms,rules_version,phase,opened_at_ms,updated_at_ms)
+        values(504,${504 * SLOT},${version},4,0,0)`;
+      await tx`insert into private.boundary_members(slot_index,gladiator_id,owner_id) values(504,${f.gid},${f.id})`;
+      // Exercise the real phase's epoch wait and insertion, without any synthetic preparation result.
+      expect((await tx`select private.boundary_recompute_leagues(504) as wait`)[0].wait).toBe('epoch');
+      expect(await tx`select season_index from public.seasons`).toEqual([]);
+      await tx`insert into private.season_epoch(singleton,epoch_slot) values(true,0)`;
+      await tx`update private.rules_versions set active=false where active`;
+      expect(await tx`update private.rules_versions set active=true where version=${version === 'v1' ? 'v2' : 'v1'} returning version`).toHaveLength(1);
+      expect((await tx`select private.boundary_recompute_leagues(504) as wait`)[0].wait).toBeNull();
+      expect(await tx`select season_index::int,to_jsonb(s)->>'rules_version' as rules_version,starts_at_ms::float8,ends_at_ms::float8 from public.seasons s`)
+        .toEqual([{ season_index: 1, rules_version: version, starts_at_ms: 504 * SLOT, ends_at_ms: 1008 * SLOT }]);
+      throw rollback;
+    }).catch(error => { if (error !== rollback) throw error; });
+  });
+
   it('creates each season row at its first boundary with seasonAt bounds', async () => {
     await resetBoundaries(502);
     // Rollback-only operator transaction: phase 2 under a nonzero epoch creates no season before the epoch, then
@@ -691,6 +794,8 @@ describe('closing each season at its slot boundary (phase 2)', () => {
     await expect(sql.begin(async tx => {
       await tx`alter table private.season_epoch disable trigger guard_frozen`;
       await tx`update private.season_epoch set epoch_slot=10`;
+      await tx`insert into private.boundaries(slot_index,cutoff_ms,rules_version,opened_at_ms,updated_at_ms)
+        values(9,${9 * SLOT},'v1',0,0),(700,${700 * SLOT},'v1',0,0)`;
       expect((await tx`select private.boundary_close_season(9) as wait`)[0].wait).toBeNull();
       expect((await tx`select count(*)::int as n from public.seasons`)[0].n).toBe(0);
       expect((await tx`select private.boundary_close_season(700) as wait`)[0].wait).toBeNull();

@@ -68,6 +68,20 @@ async function tournament() {
 }
 
 describe('visitor read access', () => {
+  it('reads the public economy version and banner through the existing invoker views', async () => {
+    const f = await fighter(), spectator = await account();
+    for (const client of [anonymous, spectator.client, admin]) {
+      const revision = await client.from('world_revision').select('rules_version,latest_patch,published_slot_index,revision,server_now_ms,slot_index').single();
+      expect(revision.error).toBeNull();
+      expect(revision.data?.rules_version).toMatch(/^v[0-9]+$/);
+      const profile = await client.from('public_profile_reads').select('profile').eq('gladiator_id', f.gid).single();
+      expect(profile.error).toBeNull();
+      expect(profile.data?.profile).toMatchObject({ banner: false, build: expect.any(Object), joinedAtMs: expect.any(Number),
+        arenaRecord: { wins: 0, losses: 0 } });
+      expect(Object.keys(profile.data!.profile).sort()).toEqual(['actor', 'arenaRecord', 'banner', 'build', 'combatStrength', 'joinedAtMs', 'prestige', 'rating']);
+    }
+  });
+
   it('lets visitors select exactly the public projections, read-only', async () => {
     expect(await anonSelectable()).toEqual([...OPEN].sort());
     expect(await anonWritable()).toEqual([]);

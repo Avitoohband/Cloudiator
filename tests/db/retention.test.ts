@@ -233,7 +233,7 @@ async function resetWorld(published: number | null) {
   await sql`update private.coordinator set published_slot=${published}, lease_token=null, lease_until_ms=0, last_error=null,
     last_failed_slot=null where singleton`;
   await sql`update private.rules_versions set active=false where version<>'v1'`;
-  await sql`delete from private.rules_versions where version<>'v1'`;
+  await sql`delete from private.rules_versions where version not in ('v1','v2')`;
   await sql`update private.rules_versions set active=true where version='v1'`;
   await sql`update private.scheduler set enabled=false where singleton`;
 }

@@ -117,6 +117,55 @@
   color: var(--ink);
 }
 
+/* Patch 1.6 (the approved mockup): a v2 season's gold prizes by league, the owner's league highlighted with a gold edge. */
+.prizeTable {
+  width: 100%;
+  margin: 0.2rem 0 0.6rem;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.prizeTable caption {
+  margin-bottom: 0.4rem;
+  color: var(--gold);
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.prizeTable th,
+.prizeTable td {
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid #4d566c;
+  text-align: right;
+}
+
+.prizeTable th:first-child {
+  text-align: left;
+}
+
+.prizeTable thead th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.prizeTable tbody th {
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.prizeTable .yours {
+  color: #ffdf85;
+  background: #493b18;
+  box-shadow: inset 3px 0 var(--gold);
+}
+
+.prizeTable .yours th {
+  font-weight: 700;
+}
+
 .progress {
   height: 8px;
   margin: 0.1rem 0 0.4rem;

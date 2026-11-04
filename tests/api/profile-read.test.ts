@@ -34,7 +34,7 @@ const profile = (over: Record<string, unknown> = {}) => ({ profile: { actor: ACT
 test('maps the build, the creation time and the Arena record', async () => {
   const { client, requests } = api(profile());
   expect(await readProfile(client, ACTOR.gladiatorId)).toEqual({ actor: ACTOR, combatStrength: null, rating: 1040, prestige: [], build: BUILD,
-    joinedAtMs: 1_791_000_000_000, arenaRecord: { wins: 9, losses: 5 } });
+    joinedAtMs: 1_791_000_000_000, arenaRecord: { wins: 9, losses: 5 }, banner: false });
   expect(requests[0].get('select')).toBe('profile');
   // The live gateway's profile is the same read, for a visitor.
   expect((await createLiveGateway().profile(ACTOR.gladiatorId)).build).toEqual(BUILD);
@@ -59,5 +59,18 @@ test('reads a malformed build as null, whatever part of it is wrong', async () =
 test('reads a profile from before M26 (without the three keys) with all three null', async () => {
   const { build: _b, joinedAtMs: _j, arenaRecord: _a, ...older } = profile().profile;
   expect(await readProfile(api({ profile: older }).client, ACTOR.gladiatorId)).toEqual({ actor: ACTOR, combatStrength: null, rating: 1040, prestige: [],
-    build: null, joinedAtMs: null, arenaRecord: null });
+    build: null, joinedAtMs: null, arenaRecord: null, banner: false });
+});
+
+// Patch 1.6 (spec "The Arena banner", M27): the profile read publishes whether the gladiator owns the Arena banner. Only `true` is a banner; a
+// missing key (a database before M27) or any other value is none.
+test('reads the Arena banner: true only for true', async () => {
+  expect((await readProfile(api(profile({ banner: true })).client, ACTOR.gladiatorId)).banner).toBe(true);
+  for (const banner of [false, 'yes', 1, null, 'true']) {
+    expect((await readProfile(api(profile({ banner })).client, ACTOR.gladiatorId)).banner, String(banner)).toBe(false);
+  }
+  expect((await readProfile(api(profile()).client, ACTOR.gladiatorId)).banner).toBe(false);
+  expect((await createLiveGateway().profile(ACTOR.gladiatorId)).banner).toBe(false);
+  api(profile({ banner: true }));
+  expect((await createLiveGateway().profile(ACTOR.gladiatorId)).banner).toBe(true);
 });

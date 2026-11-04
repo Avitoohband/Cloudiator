@@ -52,6 +52,10 @@ test.describe('the richer profile card', () => {
     await expect(lucilla.getByTestId('profile-look')).toHaveAttribute('aria-hidden', 'true');
     for (const label of ['Attributes', 'Stats', 'Gear', 'Record']) await expect(section(page, 'Lucilla', label)).toBeVisible();
     await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Speed', 'Armor', 'Critical']);
+    // Avi, 2026-11-04: Damage is a number, as Health is.
+    await expect(section(page, 'Lucilla', 'Stats').getByRole('definition').nth(1)).toHaveText(/^\d+$/);
+    // Patch 1.6: Lucilla owns no Arena banner, so her card has no banner pill.
+    await expect(lucilla.getByText('Arena banner')).toHaveCount(0);
     await expect(section(page, 'Lucilla', 'Gear')).toContainText('Spear · Level 1 · common');
     await expect(section(page, 'Lucilla', 'Gear')).toContainText('Two-handed weapon');
     const record = section(page, 'Lucilla', 'Record');
@@ -92,7 +96,20 @@ test.describe('the richer profile card', () => {
     await expect(aster.getByRole('button', { name: 'My gladiator', exact: true })).toBeVisible();
     await expect(aster.getByRole('button', { name: 'Schedule', exact: true })).toBeVisible();
     await expect(aster).not.toContainText(PRIVATE);
+    // Patch 1.6 (spec "The Arena banner"): Aster owns the banner, so her card shows the pill after the name line, its flag decorative.
+    const pill = aster.locator('p').filter({ hasText: 'Arena banner' });
+    await expect(pill).toHaveText('🚩 Arena banner');
+    await expect(pill.locator('[aria-hidden="true"]')).toHaveText('🚩');
+    expect(await aster.evaluate(el => {
+      const name = el.querySelector('h2')!, banner = [...el.querySelectorAll('p')].find(p => p.textContent?.includes('Arena banner'))!;
+      return name.nextElementSibling === banner;
+    }), 'the pill right after the name').toBe(true);
     await shot(page, testInfo, 'own');
+    await aster.screenshot({ path: `.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/profile-banner-${testInfo.project.name}.png` });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expect(pill).toBeVisible();
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await page.screenshot({ path: `.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/profile-banner-${testInfo.project.name}-360.png` });
   });
 
   test('says Not available without a profile', async ({ page }, testInfo) => {

@@ -70,8 +70,17 @@ test.describe('seasons in the fixture preview', () => {
     const season = section.getByRole('region', { name: 'Season 2 ends in 13 days 23 h' });
     await expect(season).toBeVisible();
     await expect(season).toContainText('Sat 24 Oct, 03:00 your time (00:00 UTC). Ratings then restart at 1000; level, gear, gold and renown stay.');
-    await expect(season.getByRole('listitem')).toHaveText([
-      /500 gold · 100 renown · Champion title · gold badge/, /300 gold · 60 renown · silver badge/, /200 gold · 40 renown · bronze badge/]);
+    // Patch 1.6: the fixture's current season was opened under rules v2, so its card lists every league's gold prizes, Aster's Bronze marked.
+    const prizes = season.getByRole('table', { name: 'Season prizes in gold' });
+    await expect(prizes.getByRole('columnheader')).toHaveText(['League', '1st', '2nd', '3rd']);
+    await expect(prizes.locator('tbody tr')).toHaveText([/^Bronze · yours\s*200\s*120\s*80$/, /^Silver\s*300\s*180\s*120$/, /^Gold\s*400\s*240\s*160$/,
+      /^Champion\s*500\s*300\s*200$/]);
+    await expect(prizes.getByRole('row', { name: /Bronze · yours/ })).toHaveAttribute('aria-current', 'true');
+    // The owner's row is highlighted: a background of its own, unlike the others.
+    const background = (row: Locator) => row.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(await background(prizes.locator('tbody tr').first())).not.toBe(await background(prizes.locator('tbody tr').nth(1)));
+    await expect(season.getByRole('list', { name: 'Season prizes' })).toHaveCount(0);
+    await expect(season).toContainText('Gold for each place. Every league also pays 100, 60 and 40 renown, the Champion title for 1st, and gold, silver and bronze badges.');
     await expect(season).toContainText('Top 3 in each league among gladiators with at least 5 human bouts. Paid once, in your highest league where you qualify.');
     // The display clock moves the countdown; no read is needed.
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), CURRENT.endsAtMs - 90 * 60_000);
@@ -94,7 +103,20 @@ test.describe('seasons in the fixture preview', () => {
     await expect(table(page, 'Bronze')).not.toContainText(/1st|2nd|3rd/);
     await expect(section).toContainText('✓ Eligible: has 5 or more human bouts and this is their highest qualifying league.');
     await shot(page, testInfo, 'current', { top: section });
+    await season.screenshot({ path: '.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/season-prizes-' + testInfo.project.name + '.png' });
     await shot(page, testInfo, 'current-standing', { top: own });
+    expect(remote).toEqual([]);
+  });
+
+  test('shows a visitor every league’s season prizes with no league marked', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
+    const remote = forbidRemote(page, baseURL);
+    await openStandings(page, true);
+    const season = standings(page).getByRole('region', { name: 'Season 2 ends in 13 days 23 h' });
+    const prizes = season.getByRole('table', { name: 'Season prizes in gold' });
+    await expect(prizes.locator('tbody tr')).toHaveText([/^Bronze\s*200/, /^Silver\s*300/, /^Gold\s*400/, /^Champion\s*500/]);
+    await expect(prizes).not.toContainText('yours');
+    await expect(prizes.locator('[aria-current]')).toHaveCount(0);
+    await season.screenshot({ path: '.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/season-prizes-visitor-' + testInfo.project.name + '.png' });
     expect(remote).toEqual([]);
   });
 
@@ -197,10 +219,20 @@ test.describe('seasons in the fixture preview', () => {
       // The table fits its own box too: no sideways scrolling for the medals or the eligible marks.
       const [scroll, client] = await table(page, 'Bronze').evaluate(el => [el.parentElement!.scrollWidth, el.parentElement!.clientWidth]);
       expect(scroll, `table ${scroll} px in ${client} px`).toBeLessThanOrEqual(client);
+      // Patch 1.6: the current season's prize table fits its card.
+      const prizes = standings(page).getByRole('table', { name: 'Season prizes in gold' });
+      if (await prizes.count()) {
+        const [inner, outer] = await prizes.evaluate(el => [el.getBoundingClientRect().right, el.parentElement!.getBoundingClientRect().right]);
+        expect(inner, 'the prize table inside its card').toBeLessThanOrEqual(outer + 0.5);
+        expect(inner).toBeLessThanOrEqual(360);
+      }
     };
     await expect(standings(page).getByRole('region', { name: 'Season 2 ends in 13 days 23 h' })).toBeVisible();
     await fits();
     await shot(page, testInfo, 'phone-current', { top: standings(page) });
+    await expect(standings(page).getByRole('table', { name: 'Season prizes in gold' })).toBeVisible();
+    await standings(page).getByRole('table', { name: 'Season prizes in gold' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: '.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/season-prizes-360-' + testInfo.project.name + '.png' });
     await shot(page, testInfo, 'phone-standing', { top: standings(page).getByRole('region', { name: 'Your standing' }) });
     await picker(page).selectOption({ label: 'Season 1 · ended Sat 26 Sep' });
     await expect(rowOf(page, 'Bronze', 'Severus')).toContainText('🥇 1st · Champion');
@@ -261,6 +293,33 @@ test.describe('seasons in live mode', () => {
     expect(live.requests.some(r => r.table === 'owner_state' || (r.table === 'arena_standing_reads' && r.query.has('gladiator_id')))).toBe(false);
     expect(live.requests.every(r => r.reader === null)).toBe(true);
   });
+
+  // Patch 1.6: a season's card follows its own rules version (the `seasons` row's, M27), not the active one: season 1 (v1) keeps its list.
+  for (const opened of ['v1', 'v2'] as const) {
+    test(`words a season opened under ${opened} with its own rules, whatever the active version`, async ({ page, context }) => {
+      const world = emptyWorld();
+      const current: StandingsPage = { league: 'bronze', seasonId: '7', archived: false, nextCursor: null, rows: [liveRow(1, '00000000-0000-4000-8000-000000000001', 'Livia')] };
+      const seasons = liveSeasons(world.serverNowMs).map((s, i) => ({ ...s, rulesVersion: i === 0 ? opened : 'v1' }));
+      const live = await routeLiveReads(context, { world, standings: [current], seasons, rulesVersion: opened === 'v1' ? 'v2' : 'v1' });
+      await page.goto('/game/');
+      await openMenu(page, 'Arena');
+      const season = standings(page).getByRole('region', { name: /^Season 8 ends in / });
+      await expect(season).toBeVisible();
+      if (opened === 'v1') {
+        await expect(season.getByRole('list', { name: 'Season prizes' }).getByRole('listitem')).toHaveText([
+          /500 gold · 100 renown · Champion title · gold badge/, /300 gold · 60 renown · silver badge/, /200 gold · 40 renown · bronze badge/]);
+        await expect(season.getByRole('table')).toHaveCount(0);
+      } else {
+        const prizes = season.getByRole('table', { name: 'Season prizes in gold' });
+        await expect(prizes.locator('tbody tr')).toHaveText([/^Bronze\s*200/, /^Silver\s*300/, /^Gold\s*400/, /^Champion\s*500/]);
+        // A visitor: no league is marked.
+        await expect(prizes).not.toContainText('yours');
+      }
+      const lists = live.requests.filter(r => r.table === 'seasons' && r.query.get('limit') === '50');
+      expect(lists.length).toBeGreaterThan(0);
+      expect(lists.every(r => r.query.get('select')!.split(',').includes('rules_version'))).toBe(true);
+    });
+  }
 
   // Task 21.3 review M2: each page costs a season lookup, so the panel must not read more than it needs at a new revision.
   test('reads the current season again at each new revision, a picked finished season never, and the season list only when stale', async ({ page, context }) => {

@@ -915,6 +915,28 @@ test.describe('the whole-trip replay for its owner and for others', () => {
     await expect(sceneBanner(page)).not.toContainText('stamina');
   });
 
+  // Task 8 review minor (patch 1.6): the running Rest's refill comes from the owner's actual stamina and the Rest's frozen end, under rules v2
+  // too; a saved day of three Trainings (which the daily limit may turn into Rests) does not change it.
+  test('shows the owner the stamina of the running Rest under rules v2, whatever the saved day holds', async ({ page, context }) => {
+    await seedSession(context);
+    const owner: OwnerState = {
+      ...structuredClone(ownerFixture), stamina: { current: 74, maximum: 104 }, processedSlotIndex: Math.floor(tripEnd / SLOT_MS),
+      schedule: { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } },
+      currentActivity: { id: randomUUID(), kind: 'rest', status: 'active', startsAtMs: tripEnd, endsAtMs: tripEnd + SLOT_MS, label: 'Resting in camp' },
+    };
+    const world: WorldSnapshot = { ...emptyWorld(tripEnd + 10 * MIN), revision: 'trip-owner-v2' };
+    await routeLiveReads(context, { world, owner, timelines: { [idOf('woodland')]: woodland() }, rulesVersion: 'v2' });
+    await view.open(page, `/expedition/?activity=${idOf('woodland')}&play=trip`);
+    await view.planned(page);
+    const touch = await touchLayout(page);
+    await expect.poll(() => chapterLabels(page)).toEqual(WOODLAND_CHAPTERS);
+    await view.seek(page, (await view.trip(page))!.totalMs - 1);
+    expect((await view.trip(page))!.chapter).toBe('resting');
+    await expect(phase(page)).toContainText('Sleeps through the next slot. Stamina refills to full when it ends: +30.');
+    await view.sceneReady(page);
+    await expect(sceneBanner(page)).toHaveText(touch ? 'Resting · stamina to 104' : /^Resting until \S+.* · stamina refills to 104$/);
+  });
+
   test('asks once whether the next slot was a Rest, and ends at the gate when it cannot tell', async ({ page, context }) => {
     // A visitor: the next slot's public result was a Rest, settled 45 s after that slot ended.
     const restId = randomUUID();

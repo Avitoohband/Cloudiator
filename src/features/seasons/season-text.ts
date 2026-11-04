@@ -1,10 +1,17 @@
 // Words of the seasons UI (Task 21.4, plan Decision 8): Arena standings' season picker, countdown, prizes and medals, and
 // the season titles and badges on profile cards. Everything comes from the reads (SeasonView, StandingRow, PrestigeAward)
 // and RULES_V1's season placements; nothing here decides an award or a placement (SQL is the one authority).
+//
+// Patch 1.6 (spec "Season card (a v2 season)"): a season pays the prizes of the rules version that opened it (its `rulesVersion`, M27's
+// `seasons.rules_version`; absent is v1). A v2 season's card shows every league's gold in a table (`seasonPrizeTable`) and one line for the
+// renown, title and badges (`seasonPrizeNote`); a v1 season (season 1) keeps today's list. The numbers are its own rules', never typed here.
 import type { LeagueId } from '@contracts/commands';
 import type { PrestigeAward, SeasonView, StandingRow } from '@contracts/reads';
+import { seasonPrizes } from '@domain/economy';
+import { isRulesV2 } from '@domain/rules';
 import { RULES_V1 } from '@domain/rules-v1';
 import type { ClockMode } from '../../lib/clock-setting';
+import { displayRules } from '../../lib/rules-version';
 import { dayText, timeOfDay } from '../../lib/time-format';
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
@@ -15,6 +22,33 @@ const MEDALS: Readonly<Record<string, string>> = { gold: '🥇', silver: '🥈',
 /** The medal of a badge (the placements' gold, silver and bronze; RULES_V1 types a badge as text), or nothing for another. */
 export const medalOf = (badge: string): string => MEDALS[badge] ?? '';
 const ORDINALS = ['1st', '2nd', '3rd'] as const;
+/** The season prize table's place headers: "1st", "2nd", "3rd". */
+export const PLACE_HEADERS: readonly string[] = ORDINALS;
+const LEAGUES: readonly LeagueId[] = ['bronze', 'silver', 'gold', 'champion'];
+
+/** A season's gold prizes by league (a v2 season: one row per league, in league order, 1st to 3rd), or none by league (v1). */
+export type SeasonPrizeTable = { byLeague: false } | { byLeague: true; rows: { league: LeagueId; gold: readonly number[] }[] };
+
+/** The gold table of a season opened under `rulesVersion`: by league for 'v2'; for 'v1', an absent or an unknown version, none. */
+export function seasonPrizeTable(rulesVersion: string | undefined): SeasonPrizeTable {
+  const rules = displayRules(rulesVersion);
+  if (!isRulesV2(rules)) return { byLeague: false };
+  return { byLeague: true, rows: LEAGUES.map(league => ({ league, gold: seasonPrizes(rules, league).map(prize => prize.money) })) };
+}
+
+const list = (items: readonly string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+/**
+ * The line under a v2 season's table: the renown, the title and the badges every league pays ("Gold for each place. Every league also pays
+ * 100, 60 and 40 renown, the Champion title for 1st, and gold, silver and bronze badges."), from its rules; null when the table is not shown.
+ */
+export function seasonPrizeNote(rulesVersion: string | undefined): string | null {
+  const rules = displayRules(rulesVersion);
+  if (!isRulesV2(rules)) return null;
+  const places = seasonPrizes(rules, 'bronze');
+  const titled = places.findIndex(place => place.title !== null);
+  const title = titled < 0 ? '' : ` the ${capital(places[titled].title!)} title for ${ORDINALS[titled]},`;
+  return `Gold for each place. Every league also pays ${list(places.map(place => String(place.renown)))} renown,${title} and ${list(places.map(place => place.badge))} badges.`;
+}
 
 /** "Season N" for a season id (its index as text; players count from 1), or "Season" when there is none yet. */
 export function seasonName(seasonId: string): string {

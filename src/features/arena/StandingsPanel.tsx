@@ -12,6 +12,9 @@
 // three prizes and the rule, the owner's season rank and human bouts toward five in "Your standing", and ✓ Eligible marks;
 // a finished season shows its frozen archive with medals and a promotion footnote, and no "Your standing". A finished
 // season never changes, so a new revision re-reads only an open season's pages.
+//
+// Patch 1.6 (spec "Season card (a v2 season)", the approved mockup): a season opened under rules v2 lists every league's gold prizes in a
+// table instead, the owner's league marked "· yours" and highlighted (a visitor sees no mark), then the renown line and the rule.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { GladiatorId, LeagueId } from '@contracts/commands';
 import type { OwnerState, SeasonView, StandingRow, StandingsPage } from '@contracts/reads';
@@ -19,7 +22,9 @@ import type { DisplayClock } from '../../game/display-clock';
 import { useClockMode, type ClockMode } from '../../lib/clock-setting';
 import { RULES_V1 } from '@domain/rules-v1';
 import { leagueName, leagueRules } from './arena-text';
-import { ELIGIBLE_NOTE, medalOf, placeParts, promotionNote, qualifyText, seasonEnds, seasonLabel, seasonName } from '../seasons/season-text';
+import {
+  ELIGIBLE_NOTE, PLACE_HEADERS, medalOf, placeParts, promotionNote, qualifyText, seasonEnds, seasonLabel, seasonName, seasonPrizeNote, seasonPrizeTable,
+} from '../seasons/season-text';
 import styles from './StandingsPanel.module.css';
 
 /**
@@ -106,27 +111,56 @@ function MedalPill({ place }: { place: 1 | 2 | 3 }) {
   return <span className={styles.medal}><span aria-hidden="true">{medal}</span> {words}</span>;
 }
 
+/** A v2 season's gold prizes by league (Patch 1.6): the owner's league (`ownLeague`, null for a visitor) marked and highlighted. */
+function PrizeTable({ rows, ownLeague }: { rows: Extract<ReturnType<typeof seasonPrizeTable>, { byLeague: true }>['rows']; ownLeague: LeagueId | null }) {
+  return (
+    <table className={styles.prizeTable}>
+      <caption>Season prizes in gold</caption>
+      <thead><tr><th scope="col">League</th>{PLACE_HEADERS.map(place => <th key={place} scope="col">{place}</th>)}</tr></thead>
+      <tbody>{rows.map(row => {
+        const mine = row.league === ownLeague;
+        return (
+          <tr key={row.league} className={mine ? styles.yours : undefined} aria-current={mine ? 'true' : undefined}>
+            <th scope="row">{mine ? `${leagueName(row.league)} · yours` : leagueName(row.league)}</th>
+            {row.gold.map((gold, place) => <td key={place}>{gold}</td>)}
+          </tr>
+        );
+      })}</tbody>
+    </table>
+  );
+}
+
 /** The current season's card: countdown, end time (local and UTC), prizes and the rule. */
-function CurrentSeason({ season, nowMs, clockMode, timeZone }: { season: SeasonView; nowMs: number; clockMode: ClockMode; timeZone?: string }) {
+function CurrentSeason({ season, nowMs, clockMode, timeZone, ownLeague }: {
+  season: SeasonView; nowMs: number; clockMode: ClockMode; timeZone?: string; ownLeague: LeagueId | null;
+}) {
   const titleId = useId();
   const name = seasonName(season.seasonId);
   const ends = seasonEnds(season.endsAtMs, nowMs, clockMode, timeZone);
   const over = nowMs >= season.endsAtMs;
   const { minimumHumanBouts, placements } = RULES_V1.seasons;
+  // The prizes of the version that opened the season (season 1: v1, the same in every league).
+  const table = seasonPrizeTable(season.rulesVersion);
+  const note = seasonPrizeNote(season.rulesVersion);
   return (
     <section className={styles.season} aria-labelledby={titleId}>
       <h3 id={titleId}>{over ? `${name} is ending` : `${name} ends in ${ends.countdown}`}</h3>
       <p className="muted">{over
         ? `Ended ${ends.local} your time (${ends.utc}). Final standings and rewards appear once the server closes the season.`
         : `${ends.local} your time (${ends.utc}). Ratings then restart at ${RULES_V1.rating.initial}; level, gear, gold and renown stay.`}</p>
-      <ul className={styles.prizes} aria-label="Season prizes">
-        {placements.map((p, i) => (
-          <li key={p.badge}>
-            <span role="img" aria-label={`${ORDINALS[i]} place`}>{medalOf(p.badge)}</span>
-            <span><b>{p.money}</b> gold · <b>{p.renown}</b> renown{p.title && <> · <b>{capital(p.title)}</b> title</>} · {p.badge} badge</span>
-          </li>
-        ))}
-      </ul>
+      {table.byLeague ? <>
+        <PrizeTable rows={table.rows} ownLeague={ownLeague} />
+        {note && <p>{note}</p>}
+      </> : (
+        <ul className={styles.prizes} aria-label="Season prizes">
+          {placements.map((p, i) => (
+            <li key={p.badge}>
+              <span role="img" aria-label={`${ORDINALS[i]} place`}>{medalOf(p.badge)}</span>
+              <span><b>{p.money}</b> gold · <b>{p.renown}</b> renown{p.title && <> · <b>{capital(p.title)}</b> title</>} · {p.badge} badge</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <p className="muted">Top {placements.length} in each league among gladiators with at least {minimumHumanBouts} human bouts. Paid once, in your highest league where you qualify.</p>
     </section>
   );
@@ -185,7 +219,8 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
         </div>
       )}
 
-      {season && (archived ? <FinalSeason season={season} clockMode={clockMode} timeZone={timeZone} /> : <CurrentSeason season={season} nowMs={model.nowMs} clockMode={clockMode} timeZone={timeZone} />)}
+      {season && (archived ? <FinalSeason season={season} clockMode={clockMode} timeZone={timeZone} /> : <CurrentSeason season={season} nowMs={model.nowMs} clockMode={clockMode} timeZone={timeZone}
+        ownLeague={own?.league ?? null} />)}
 
       {own && !archived && (
         <section className={styles.own} aria-labelledby={ownId}>

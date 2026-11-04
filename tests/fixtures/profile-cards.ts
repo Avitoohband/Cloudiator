@@ -46,9 +46,10 @@ export function ownerBuild(owner: OwnerState): PublicBuild {
 
 /**
  * Each profile with its card data. `standings` gives each gladiator's record (its row in any league; none is 0–0); `owner` is the
- * preview's own gladiator, whose build is its current one.
+ * preview's own gladiator, whose build is its current one. A gladiator in `banners` owns the Arena banner (Patch 1.6); nobody else does.
  */
-export function profileCards(profiles: Readonly<Record<string, PublicProfile>>, standings: readonly StandingRow[], owner: OwnerState, nowMs: number): Record<string, ProfileRead> {
+export function profileCards(profiles: Readonly<Record<string, PublicProfile>>, standings: readonly StandingRow[], owner: OwnerState, nowMs: number,
+  banners: ReadonlySet<string> = new Set()): Record<string, ProfileRead> {
   const records = new Map<string, ArenaRecord>(standings.map(row => [row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses }]));
   return Object.fromEntries(Object.entries(profiles).map(([id, profile]) => {
     const { actor } = profile;
@@ -57,6 +58,6 @@ export function profileCards(profiles: Readonly<Record<string, PublicProfile>>, 
       stance: 'balanced', allocations: suggestedSplit({ strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 }, points, actor.classId),
       equipment: silhouetteGear(actor.equipmentSilhouettes),
     };
-    return [id, { ...profile, build, joinedAtMs: nowMs - actor.level * DAY_MS, arenaRecord: records.get(id) ?? { wins: 0, losses: 0 } }];
+    return [id, { ...profile, build, joinedAtMs: nowMs - actor.level * DAY_MS, arenaRecord: records.get(id) ?? { wins: 0, losses: 0 }, banner: banners.has(id) }];
   }));
 }

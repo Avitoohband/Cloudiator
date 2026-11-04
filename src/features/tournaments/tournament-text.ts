@@ -1,11 +1,19 @@
 // Words and times for the Tournaments panel, from the stage core's state and the viewer's own summary only. Times
 // show in the viewer's time zone with the fixed UTC time beside them (spec §8.2: no local daylight-saving change moves
 // a tournament). Nothing here computes a result, reward, rating or another player's eligibility.
+//
+// Patch 1.6 (spec "Tournaments"): the entry rules and the league prizes are worded with the rules given, the active display rules of the
+// revision read (`displayRules`), never with numbers written here: v2 entry is free and its gold depends on the league. A settled
+// tournament's own credit stays its summary's (`creditedText`), whatever the active rules say.
 import type { ActivityChoice, LeagueId } from '@contracts/commands';
 import type { ActivitySummary } from '@contracts/events';
 import { CATALOG_V1 } from '@domain/catalog-v1';
+import { tournamentPlacements } from '@domain/economy';
+import { isRulesV2 } from '@domain/rules';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { Rules } from '@domain/types';
 import type { ClockMode } from '../../lib/clock-setting';
+import { tournamentEntryText } from '../schedule/schedule-text';
 import { dayText, timeOfDay, utcClockText } from '../../lib/time-format';
 import {
   nextTournament, tournamentWindowAt, type BracketShape, type TournamentBoutState, type TournamentEntrantState, type TournamentRoundState,
@@ -48,18 +56,47 @@ export function countdownText(ms: number): string {
 
 /** The fixed cutoff, the tournament's start (v1: 18:40 UTC), written in the form `clock` asks for: "6:40 PM UTC" or "18:40 UTC". */
 export const cutoffUtc = (clock: ClockMode): string => utcClockText(RULES_V1.tournament.hourUtc, RULES_V1.tournament.minuteUtc, clock);
-/** Stamina needed at the cutoff: the Arena activity and the tournament must both be affordable (Task 19 partition). */
-export const ENTRY_STAMINA = Math.max(RULES_V1.activityStamina.arena, RULES_V1.activityStamina.tournament);
+/**
+ * The stamina tournament entry needs at the cutoff under `rules`. v1: the Arena activity and the tournament must both be affordable (Task 19
+ * partition), the larger of the two. v2: a formed bracket is free (the tournament's own cost, 0); regular Arena keeps its cost.
+ */
+export function entryStamina(rules: Rules): number {
+  const { arena, tournament } = rules.activityStamina;
+  return isRulesV2(rules) ? tournament : Math.max(arena, tournament);
+}
 const DAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+const LEAGUES: readonly LeagueId[] = ['bronze', 'silver', 'gold', 'champion'];
 
-/** Spec §8.2 entry rules, as the registration section states them, the cutoff in the form `clock` asks for. */
-export const entryRules = (clock: ClockMode): readonly string[] => [
-  `Entry needs automatic entry switched on, Arena scheduled for the evening (the tournament phase) and at least ${ENTRY_STAMINA} stamina at the cutoff, the tournament’s ${cutoffUtc(clock)} start.`,
-  `Tournaments run on ${RULES_V1.tournament.utcWeekdays.map(d => DAYS[d]).join(' and ')} at ${cutoffUtc(clock)} for one 80-minute evening slot. Entry works without an open browser.`,
+/**
+ * The prize rule, the last entry rule (spec "Tournament prizes", word for word): the gold for 1st, 2nd and a semifinal place, by league
+ * under v2 and the same in every league under v1, then the placement renown and each bout's renown. Every number is `rules`'s.
+ */
+export function prizeRule(rules: Rules): string {
+  const gold = (league: LeagueId) => {
+    const { winner, runnerUp, semifinal } = tournamentPlacements(rules, league);
+    return `${winner.money} · ${runnerUp.money} · ${semifinal.money}`;
+  };
+  // Renown is the same in every league (pinned by test); the bout renown is the Arena's (domain tournamentOutcomes).
+  const { winner, runnerUp, semifinal, other } = tournamentPlacements(rules, 'bronze');
+  const renown = `${winner.renown}, ${runnerUp.renown}, ${semifinal.renown}, and ${other.renown} for the others, plus ${rules.arena.humanWinRenown} a won bout `
+    + `and ${rules.arena.humanLossRenown} a lost one.`;
+  if (!isRulesV2(rules)) return `Gold prizes for 1st · 2nd · semifinal: ${gold('bronze')} in every league. Renown: ${renown}`;
+  return `Gold prizes by league, for 1st · 2nd · semifinal: ${LEAGUES.map(league => `${leagueName(league)} ${gold(league)}`).join(', ')}. Renown in every league: ${renown}`;
+}
+
+/**
+ * Spec §8.2 entry rules, as the registration section states them, the cutoff in the form `clock` asks for, then the prize rule: seven
+ * entries. Under v2 (Patch 1.6) the first says that tournament entry is free while regular Arena keeps its cost (the Schedule's own
+ * sentence, `tournamentEntryText`), and the sixth that entry costs no stamina; the others are unchanged.
+ */
+export const entryRules = (clock: ClockMode, rules: Rules = RULES_V1): readonly string[] => [
+  tournamentEntryText(rules) ?? `Entry needs automatic entry switched on, Arena scheduled for the evening (the tournament phase) and at least ${entryStamina(rules)} stamina at the cutoff, the tournament’s ${cutoffUtc(clock)} start.`,
+  `Tournaments run on ${rules.tournament.utcWeekdays.map(d => DAYS[d]).join(' and ')} at ${cutoffUtc(clock)} for one 80-minute evening slot. Entry works without an open browser.`,
   'With automatic entry off, an Arena evening stays a normal Arena bout.',
   'A change made after a tournament’s cutoff applies from the next tournament.',
-  `Each league holds its own bracket when at least ${RULES_V1.tournament.minimumEntrants} gladiators qualify; otherwise they fight regular Arena that slot.`,
-  'The whole tournament costs stamina once. Every bout starts at full health, and an eliminated gladiator stays to spectate until the tournament ends.',
+  `Each league holds its own bracket when at least ${rules.tournament.minimumEntrants} gladiators qualify; otherwise they fight regular Arena that slot.`,
+  `${isRulesV2(rules) ? `Tournament entry costs ${entryStamina(rules)} stamina.` : 'The whole tournament costs stamina once.'} Every bout starts at full health, and an eliminated gladiator stays to spectate until the tournament ends.`,
+  prizeRule(rules),
 ];
 
 /** Which tournament a registration change made now applies to; during a tournament, the next one. */

@@ -59,8 +59,9 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
       </article>;
     })}</div>
     {merchant === 'armorer' && <article className="inventory-item cosmetic-offer">
-      <h3>{banner.name}</h3><p>Cosmetic · Account-bound · No inventory slot or combat bonus</p><p>{banner.renownPrice} renown</p>
-      {ownsBanner ? <p>Arena banner · Owned · Account-bound</p> : <button disabled={!preview && owner.wallets.renown - owner.reservedFees.renown < banner.renownPrice} aria-disabled={busy || undefined} onClick={() => { if (!busy) buy(banner.id, 1); }}>Buy Arena banner</button>}
+      {/* Patch 1.6 (spec "The Arena banner"): the banner shows on the owner's profile card, and the shop says so. */}
+      <h3>{banner.name}</h3><p>Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus</p><p>{banner.renownPrice} renown</p>
+      {ownsBanner ? <p>{banner.name} · Owned · Shown on your profile card</p> : <button disabled={!preview && owner.wallets.renown - owner.reservedFees.renown < banner.renownPrice} aria-disabled={busy || undefined} onClick={() => { if (!busy) buy(banner.id, 1); }}>Buy Arena banner</button>}
     </article>}
   </section>;
 }

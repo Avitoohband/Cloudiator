@@ -216,11 +216,13 @@ test('serves the fixture seasons, archive and Aster prestige', async () => {
 
   // Two seasons, newest first, built with seasonAt from one fixture epoch: season '1' is current and holds the fixture world's slot.
   const seasons = await gateway.seasons();
-  expect(seasons).toEqual(FIXTURE_SEASONS);
-  expect(seasons.map(s => s.seasonId)).toEqual(['1', '0']);
+  // Patch 1.6: the current sample season was opened under the economy's rules v2 (its prizes by league), the closed one under v1.
+  const versioned = FIXTURE_SEASONS.map(s => ({ ...s, rulesVersion: s.closedAtMs === null ? 'v2' : 'v1' }));
+  expect(seasons).toEqual(versioned);
+  expect(seasons.map(s => [s.seasonId, s.rulesVersion])).toEqual([['1', 'v2'], ['0', 'v1']]);
   const [current, previous] = [seasonAt(worldFixture.slotIndex, FIXTURE_EPOCH_SLOT), seasonAt(FIXTURE_EPOCH_SLOT, FIXTURE_EPOCH_SLOT)];
   expect([current.index, previous.index]).toEqual([1, 0]);
-  expect(seasons[0]).toEqual({ seasonId: '1', startsAtMs: current.startsAtMs, endsAtMs: current.endsAtMs, closedAtMs: null });
+  expect(seasons[0]).toEqual({ seasonId: '1', startsAtMs: current.startsAtMs, endsAtMs: current.endsAtMs, closedAtMs: null, rulesVersion: 'v2' });
   expect(seasons[1]).toMatchObject({ seasonId: '0', startsAtMs: previous.startsAtMs, endsAtMs: previous.endsAtMs });
   // Season 0 closed at its end (the coordinator closes it just after the boundary); season 1 begins where it ends.
   expect(seasons[1].closedAtMs!).toBeGreaterThanOrEqual(seasons[1].endsAtMs);
@@ -235,7 +237,7 @@ test('serves the fixture seasons, archive and Aster prestige', async () => {
   // Callers get copies.
   seasons[0].closedAtMs = 1;
   seasons.length = 0;
-  expect(await gateway.seasons()).toEqual(FIXTURE_SEASONS);
+  expect(await gateway.seasons()).toEqual(versioned);
 
   // The current season is the default and season '1': the rows the fixture world shows, open, with no award places.
   for (const league of LEAGUES) {
@@ -314,6 +316,10 @@ test('serves the fixture seasons, archive and Aster prestige', async () => {
 
   // Prestige: Aster holds the bronze badge of season '0', which her archive row earned; the champions hold the title.
   const aster = await gateway.profile(ARENA_GLADIATORS.aster.id);
+  // Patch 1.6: Aster owns the Arena banner (her owner state's cosmetic, the shop's Owned line); nobody else in the preview does.
+  expect(aster.banner).toBe(true);
+  for (const g of Object.values(ARENA_GLADIATORS)) if (g.id !== aster.actor.gladiatorId) expect((await gateway.profile(g.id)).banner, g.name).toBe(false);
+  expect((await gateway.owner()).ownedCosmetics).toEqual([{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }]);
   expect(aster.prestige).toEqual([{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }]);
   expect(archive.bronze.find(r => r.gladiatorId === ARENA_GLADIATORS.aster.id)).toMatchObject({ awardPlace: 3, rewardEligible: true, name: 'Aster' });
   const placed = LEAGUES.flatMap(league => archive[league].filter(r => r.awardPlace !== null).map(r => ({ league, row: r })));

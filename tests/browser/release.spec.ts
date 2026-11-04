@@ -904,13 +904,25 @@ test.describe('release accessibility in the fixture preview', () => {
         - option "Season 1 · ended Sat 26 Sep"
       - region "Season 2 ends in 13 days 23 h":
         - heading "Season 2 ends in 13 days 23 h" [level=3]
-        - list "Season prizes":
-          - listitem:
-            - img "First place"
-          - listitem:
-            - img "Second place"
-          - listitem:
-            - img "Third place"
+        - table "Season prizes in gold":
+          - rowgroup:
+            - row:
+              - columnheader "League"
+              - columnheader "1st"
+              - columnheader "2nd"
+              - columnheader "3rd"
+          - rowgroup:
+            - row:
+              - rowheader "Bronze · yours"
+              - cell "200"
+              - cell "120"
+              - cell "80"
+            - row:
+              - rowheader "Silver"
+            - row:
+              - rowheader "Gold"
+            - row:
+              - rowheader "Champion"
     `);
     const progress = own.getByRole('progressbar', { name: 'Human bouts toward season rewards' });
     await expect(progress).toHaveAttribute('aria-valuetext', '3 of 5 human bouts');

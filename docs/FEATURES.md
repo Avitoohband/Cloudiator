@@ -168,9 +168,9 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Live | Arena → Your recent bouts; All my bouts opens Results on My bouts (All) | — |
 | Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Live | Camp → settled Arena bout button | — |
 | Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Live | Tournaments → Watch replay → bracket chapters | — |
-| Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Planned 1.6 | Not built | — |
-| Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Planned 1.6 | Not built | — |
-| Free tournament entry | Tournament entry costs no stamina; regular Arena still costs its stamina when no bracket forms. | 1.6 | Planned 1.6 | Not built (the Schedule's Arena line says it once v2 is active; the Tournaments rules come next) | — |
+| Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | In 1.6 | Fixture camp → Tournaments → Registration: the last rule lists each league's prizes (the preview words the 1.6 rules); live once v2 is active | — |
+| Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | In 1.6 | Fixture camp → Arena → standings: the current sample season's prize table, Aster's Bronze row marked "· yours" (live: the first season opened after the switch) | — |
+| Free tournament entry | Tournament entry costs no stamina; regular Arena still costs its stamina when no bracket forms. | 1.6 | In 1.6 | Fixture camp → Tournaments → Registration: "0 stamina for tournament entry" and the first rule; the Schedule's evening Arena line in the live game once v2 is active | — |
 
 ### Results and replays
 
@@ -221,7 +221,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | Live | Fixture camp (it always shows a banner) → Find | — |
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | Live | Fixture camp → Gladiators, the line on top | — |
 | Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | Live | Fixture camp → Gladiators → a name (Lucilla has a sample build); a click on a gladiator in the camp opens it too | — |
-| Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Planned 1.6 | Not built | — |
+| Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | In 1.6 | Fixture camp → Gladiators → Aster (she owns it): the 🚩 Arena banner pill under her name; Inventory → Armorer: the shop's banner lines | — |
 | Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.8 | Planned 1.8 | Being designed | — |
 
 ### Titles

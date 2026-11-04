@@ -17,6 +17,9 @@
 // "This season" from a standings row, and "In camp since"). 520 px in two columns on a desktop; on touch the sheet's body scrolls and
 // its actions stay at its foot. Before the one profile read arrives the build's sections say "Loading…", and "Not available" when it
 // failed or has no usable build; GEAR then keeps the world's "Equipped" line. The own card shows what others see, and says so.
+//
+// Patch 1.6 (spec "The Arena banner"): a gladiator who owns the Arena banner (the profile read's `banner`) shows the pill "🚩 Arena banner"
+// right after the name line, its flag decorative; every viewer sees the same card.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
@@ -99,6 +102,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
         <div className={styles.who}>
           {own && <p className="eyebrow">YOUR GLADIATOR</p>}
           <h2 className={styles.name}>{actor.name}</h2>
+          {profile?.banner && <p className={styles.banner}><span aria-hidden="true">🚩</span> Arena banner</p>}
           {title && <p className={styles.title}>{title}</p>}
           <p className={styles.class}>{classLine(actor)}</p>
           <ClassChips classId={actor.classId} />

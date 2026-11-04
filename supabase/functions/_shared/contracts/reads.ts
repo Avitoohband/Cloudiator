@@ -132,8 +132,11 @@ export type StandingRow = {
  * (flags and award places as fixed at the close); an open season's rows are live. The cursor `season:rank` stays in its season.
  */
 export type StandingsPage = CursorPage<StandingRow> & { league: LeagueId; seasonId: string; archived: boolean };
-/** A season of 28 days (504 slots). `seasonId` is its index as text; `closedAtMs` is null until the season is closed. */
-export type SeasonView = { seasonId: string; startsAtMs: number; endsAtMs: number; closedAtMs: number | null };
+/**
+ * A season of 28 days (504 slots). `seasonId` is its index as text; `closedAtMs` is null until the season is closed. `rulesVersion` (Patch
+ * 1.6, M27's `seasons.rules_version`) is the rules version that opened it, whose prizes it pays; absent means v1.
+ */
+export type SeasonView = { seasonId: string; startsAtMs: number; endsAtMs: number; closedAtMs: number | null; rulesVersion?: string };
 export type TournamentEntrant = { gladiatorId: GladiatorId; name: string; classId: ClassId };
 /** A fought bout's public facts from its log: how long it plays and how its winner won (Task 19 phase 2b review I1). */
 export type TournamentFightSummary = Pick<BattleLog, 'durationMs' | 'victoryReason' | 'tieBreakReason'>;

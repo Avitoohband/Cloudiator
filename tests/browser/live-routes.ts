@@ -58,7 +58,7 @@ export type LiveData = {
   profiles?: Readonly<Record<string, PublicProfile>>;
   /** Standings pages, one league each: an open season's pages are the live view, an `archived` page's season is closed and its rows the frozen archive. */
   standings?: readonly StandingsPage[];
-  /** The public seasons, in any order; by default one per standings page's season (closed for an archived page). */
+  /** The public seasons, in any order; by default one per standings page's season (closed for an archived page), each opened under 'v1' unless it names its `rulesVersion`. */
   seasons?: readonly SeasonView[];
   /**
    * Public tournament views; their round results, logs and placements become the polled and on-demand rows. A result with
@@ -412,7 +412,9 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
       profile: { ...profile, prestige: (profile.prestige ?? []).map(({ seasonId, ...award }) => ({ seasonIndex: Number(seasonId), ...award })) } })) },
     visible_events: { rows: due(timelines.flatMap(t => t.stages.map((stage, ordinal) => ({ id: stage.id, activity_id: t.activityId, ordinal, reveal_at_ms: stage.revealedAtMs, stage })))) },
     recent_results: { rows: due([...recent.values()]) },
-    seasons: { rows: seasons.map(s => ({ season_index: Number(s.seasonId), starts_at_ms: s.startsAtMs, ends_at_ms: s.endsAtMs, closed_at_ms: s.closedAtMs })) },
+    // Each season's rules version (M27, Patch 1.6): the one that opened it, 'v1' unless a test names another.
+    seasons: { rows: seasons.map(s => ({ season_index: Number(s.seasonId), starts_at_ms: s.startsAtMs, ends_at_ms: s.endsAtMs, closed_at_ms: s.closedAtMs,
+      rules_version: s.rulesVersion ?? 'v1' })) },
     arena_standings: { rows: pages.filter(page => !page.archived).flatMap(page => page.rows.map(() => ({ season_index: Number(page.seasonId), league: page.league }))) },
     arena_standing_reads: { rows: pages.filter(page => !page.archived).flatMap(page => page.rows.map(row => ({ league: page.league, season_index: Number(page.seasonId),
       gladiator_id: row.gladiatorId, name: row.name, rating: row.rating, human_wins: row.humanWins, human_losses: row.humanLosses, rank: row.rank, promoted: row.promoted,

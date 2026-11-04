@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { PrestigeAward } from '@contracts/reads';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { PrestigeAward, SeasonView } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
-import { badgeText, placeText, qualifyText, seasonEnds, seasonLabel, seasonName, titleText } from '@/features/seasons/season-text';
+import { StandingsView, type StandingsModel } from '@/features/arena/StandingsPanel';
+import {
+  badgeText, placeText, qualifyText, seasonEnds, seasonLabel, seasonName, seasonPrizeNote, seasonPrizeTable, titleText,
+} from '@/features/seasons/season-text';
+import { pinDeviceClock } from '../fixtures/clock';
 
 // Task 21.4: the words of the seasons UI (Arena standings and profile cards), from the reads only.
 const HOUR = 3_600_000, DAY = 24 * HOUR, MIN = 60_000;
@@ -87,5 +93,73 @@ describe('season text', () => {
     expect(qualifyText(4, 'bronze')).toBe('1 more human bout in the Bronze league to qualify there. NPC bouts do not count.');
     expect(qualifyText(5, 'silver')).toBe('Qualified: at least 5 human bouts in the Silver league, so a top-three place among its eligible gladiators wins a season reward.');
     expect(qualifyText(9, 'gold')).toBe(qualifyText(5, 'gold'));
+  });
+});
+
+// Patch 1.6 (spec "Season card (a v2 season)"): a season opened under v2 pays its gold by league, and its card shows every league's prizes in a
+// table; a v1 season (season 1) keeps today's list. The numbers come from the season's own rules version, never from the active one.
+describe('season prizes by league (Patch 1.6)', () => {
+  const NOTE = 'Gold for each place. Every league also pays 100, 60 and 40 renown, the Champion title for 1st, and gold, silver and bronze badges.';
+  const RULE = 'Top 3 in each league among gladiators with at least 5 human bouts. Paid once, in your highest league where you qualify.';
+
+  it('lists every league’s gold for 1st, 2nd and 3rd for a v2 season, and nothing by league otherwise', () => {
+    expect(seasonPrizeTable('v2')).toEqual({ byLeague: true, rows: [
+      { league: 'bronze', gold: [200, 120, 80] }, { league: 'silver', gold: [300, 180, 120] },
+      { league: 'gold', gold: [400, 240, 160] }, { league: 'champion', gold: [500, 300, 200] }] });
+    for (const version of ['v1', undefined, 'v3', '', 'V2']) expect(seasonPrizeTable(version), String(version)).toEqual({ byLeague: false });
+    expect(seasonPrizeNote('v2')).toBe(NOTE);
+    expect(seasonPrizeNote('v1')).toBeNull();
+    expect(seasonPrizeNote(undefined)).toBeNull();
+  });
+
+  const NOW = Date.UTC(2026, 9, 10, 12);
+  const season = (rulesVersion?: string): SeasonView => ({ seasonId: '1', startsAtMs: NOW - 14 * DAY, endsAtMs: NOW + 14 * DAY, closedAtMs: null,
+    ...(rulesVersion === undefined ? {} : { rulesVersion }) });
+  const model = (s: SeasonView, own: StandingsModel['own']): StandingsModel => ({ league: 'bronze', rows: [], nextCursor: null, seasonId: s.seasonId,
+    archived: false, status: 'ready', ownerId: own ? 'owner' : null, own, seasons: [s], nowMs: NOW });
+  const OWN: StandingsModel['own'] = { name: 'Lucilla', league: 'silver', rating: 1040, renown: 30, combatStrength: null, season: { status: 'ready', row: null } };
+  const card = (s: SeasonView, own: StandingsModel['own']) => {
+    pinDeviceClock('24');
+    const html = renderToStaticMarkup(createElement(StandingsView, { model: model(s, own), onLeague: () => {}, onMore: () => {}, onRetry: () => {}, timeZone: 'UTC' }));
+    // The current season's card: the section around its heading.
+    const heading = html.indexOf('Season 2 ends in');
+    return html.slice(html.lastIndexOf('<section', heading), html.indexOf('</section>', heading) + '</section>'.length);
+  };
+  const words = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+  it('shows a v2 season’s table, the owner’s league marked and highlighted, then the renown line and the rule', () => {
+    const html = card(season('v2'), OWN);
+    expect(html).toMatch(/<table[^>]*>\s*<caption[^>]*>Season prizes in gold<\/caption>/);
+    expect([...html.matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map(m => m[1])).toEqual(['League', '1st', '2nd', '3rd']);
+    const rows = [...html.matchAll(/<tr([^>]*)><th scope="row"[^>]*>([^<]*)<\/th><td[^>]*>(\d+)<\/td><td[^>]*>(\d+)<\/td><td[^>]*>(\d+)<\/td><\/tr>/g)]
+      .map(m => [m[2], m[3], m[4], m[5], /class="[^"]+"/.test(m[1])]);
+    expect(rows).toEqual([['Bronze', '200', '120', '80', false], ['Silver · yours', '300', '180', '120', true], ['Gold', '400', '240', '160', false],
+      ['Champion', '500', '300', '200', false]]);
+    expect(html).toMatch(/<tr[^>]*aria-current="true"[^>]*><th scope="row"[^>]*>Silver · yours<\/th>/);
+    const text = words(html);
+    expect(text).toContain(`${NOTE} ${RULE}`);
+    // The table replaces the v1 list: no list of three prizes.
+    expect(html).not.toContain('aria-label="Season prizes"');
+    expect(text).not.toContain('500 gold · 100 renown');
+  });
+
+  it('marks no league for a visitor', () => {
+    const html = card(season('v2'), null);
+    expect(html).toContain('Season prizes in gold');
+    expect(html).not.toContain('yours');
+    expect(html).not.toContain('aria-current');
+  });
+
+  it('keeps today’s list and no table for a v1 season, or one whose version is not known', () => {
+    for (const version of ['v1', undefined, 'v3']) {
+      const html = card(season(version), OWN);
+      expect(html, String(version)).not.toContain('<table');
+      expect(html).not.toContain('Season prizes in gold');
+      expect(words(html)).toContain('500 gold · 100 renown · Champion title · gold badge');
+      expect(words(html)).toContain('300 gold · 60 renown · silver badge');
+      expect(words(html)).toContain('200 gold · 40 renown · bronze badge');
+      expect(words(html)).not.toContain(NOTE);
+      expect(words(html)).toContain(RULE);
+    }
   });
 });

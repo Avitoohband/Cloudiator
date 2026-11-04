@@ -8,14 +8,23 @@ import {
   RegistrationView, TournamentBracketView, TournamentCardNotice, TournamentNotice, TournamentPanel, TournamentScheduleView, readTournamentCard,
   type BracketModel, type RegistrationModel,
 } from '@/features/tournaments/TournamentPanel';
-import { cutoffUtc, entryRules, registrationNote, roundNote, statusDetail, timeWithUtc, tournamentTimeText, viewerText } from '@/features/tournaments/tournament-text';
+import {
+  creditedText, cutoffUtc, entryRules, entryStamina, prizeRule, registrationNote, roundNote, statusDetail, timeWithUtc, tournamentTimeText, viewerText,
+} from '@/features/tournaments/tournament-text';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import { makeFighter } from '@domain/combat';
+import { RULES_V1 } from '@domain/rules-v1';
+import { RULES_V2 } from '@domain/rules-v2';
+import { buildBracket, readyBouts, recordBout, runBout, tournamentOutcomes } from '@domain/tournament';
+import type { BuildSnapshot } from '@domain/types';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { pinDeviceClock } from '../fixtures/clock';
-import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
+import { ownerTimeline, projectTournament } from '../fixtures/tournament-build';
 import {
   TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLE_KEYS, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, TOURNAMENTS, tournamentActivityId, tournamentAsOf, tournamentId,
-  type TournamentKey,
+  tournamentSlotIndex, type TournamentKey,
 } from '../fixtures/tournaments';
 
 const MIN = 60_000;
@@ -34,6 +43,13 @@ function bracket(key: TournamentKey, minute: number, overrides: Partial<BracketM
   const model: BracketModel = { state, round: state.currentRound, viewerId: ASTER, timeZone: 'UTC', ...overrides };
   return renderToStaticMarkup(createElement(TournamentBracketView, { model, onRound: noop, onWatch: noop }));
 }
+/** The registration's entry rules, as its list shows them. */
+const rulesOf = (html: string) => [...html.matchAll(/<li>([^<]*)<\/li>/g)].map(m => m[1].replace(/&#x27;/g, '\'').replace(/&amp;/g, '&'));
+const V1_PRIZES = 'Gold prizes for 1st · 2nd · semifinal: 100 · 60 · 30 in every league. Renown: 50, 30, 15, and 5 for the others, plus 10 a won bout and 2 a lost one.';
+const V2_PRIZES = 'Gold prizes by league, for 1st · 2nd · semifinal: Bronze 40 · 24 · 12, Silver 60 · 36 · 18, Gold 80 · 48 · 24, Champion 100 · 60 · 30. '
+  + 'Renown in every league: 50, 30, 15, and 5 for the others, plus 10 a won bout and 2 a lost one.';
+const V2_ENTRY = 'Tournament entry costs 0 stamina. Choose Arena and opt in before the cutoff; a bracket needs at least two entrants in your league. '
+  + 'If no bracket forms, regular Arena still costs 25 stamina and needs enough stamina.';
 function registration(now: number, overrides: Partial<RegistrationModel> = {}): string {
   const model: RegistrationModel = { optIn: ownerFixture.tournamentOptIn, busy: false, message: null, displayNowMs: now, timeZone: 'UTC',
     owner: { evening: ownerFixture.schedule.evening, stamina: ownerFixture.stamina.current }, ...overrides };
@@ -67,6 +83,9 @@ describe('tournament registration', () => {
     expect(words).not.toContain('Afternoon');
     expect(words).toContain('Stamina now 104 (25 needed at the cutoff)');
     expect(/<input[^>]*checked/.test(registration(worldFixture.serverNowMs, { optIn: true }))).toBe(true);
+    // Patch 1.6: the v1 list (the default) keeps its six rules and ends with the v1 prize rule.
+    expect(rulesOf(registration(worldFixture.serverNowMs))).toEqual(entryRules('24', RULES_V1));
+    expect(rulesOf(registration(worldFixture.serverNowMs)).at(-1)).toBe(V1_PRIZES);
   });
 
   it('says a toggle during a running tournament applies only from the next one', () => {
@@ -557,5 +576,87 @@ describe('bout replays older than seven days (Task 22.5)', () => {
     expect(card('not-found', end + 7 * DAY - 1)).toContain('No tournament matches this selection.');
     expect(card('unavailable', end + 7 * DAY)).toContain('Tournament brackets cannot be loaded right now.');
     expect(card('unavailable', end + 7 * DAY)).not.toContain('no longer kept');
+  });
+});
+
+// Patch 1.6 (spec "Tournaments", "Tournament entry stamina" and "Tournament prizes"): Registration words entry and the league prizes with
+// the active rules (the revision read's version); a settled tournament's credit stays its own summary's.
+describe('Registration under the active rules (Patch 1.6)', () => {
+  it('writes the spec’s two prize rules from the rules, word for word', () => {
+    expect(prizeRule(RULES_V1)).toBe(V1_PRIZES);
+    expect(prizeRule(RULES_V2)).toBe(V2_PRIZES);
+  });
+
+  it('says what entry costs: v1 the larger of Arena and the tournament, v2 nothing', () => {
+    expect(entryStamina(RULES_V1)).toBe(25);
+    expect(entryStamina(RULES_V2)).toBe(0);
+  });
+
+  it('keeps seven entry rules: the six v1 rules then the v1 prize rule, and under v2 the free entry and the league prizes', () => {
+    const v1 = entryRules('24', RULES_V1);
+    expect(v1).toHaveLength(7);
+    expect(entryRules('24')).toEqual(v1);
+    expect(v1[0]).toBe('Entry needs automatic entry switched on, Arena scheduled for the evening (the tournament phase) and at least 25 stamina at the cutoff, the tournament’s 18:40 UTC start.');
+    expect(v1[5]).toBe('The whole tournament costs stamina once. Every bout starts at full health, and an eliminated gladiator stays to spectate until the tournament ends.');
+    expect(v1[6]).toBe(V1_PRIZES);
+    expect(entryRules('24', RULES_V2)).toEqual([
+      V2_ENTRY,
+      'Tournaments run on Wednesdays and Saturdays at 18:40 UTC for one 80-minute evening slot. Entry works without an open browser.',
+      'With automatic entry off, an Arena evening stays a normal Arena bout.',
+      'A change made after a tournament’s cutoff applies from the next tournament.',
+      'Each league holds its own bracket when at least 2 gladiators qualify; otherwise they fight regular Arena that slot.',
+      'Tournament entry costs 0 stamina. Every bout starts at full health, and an eliminated gladiator stays to spectate until the tournament ends.',
+      V2_PRIZES,
+    ]);
+    // The cutoff follows the clock setting under v2 too.
+    expect(entryRules('12', RULES_V2)[1]).toContain('Wednesdays and Saturdays at 6:40\xA0PM UTC for one 80-minute evening slot.');
+  });
+
+  it('at 0 stamina under v2 asks for no stamina to enter, and keeps paid regular Arena', () => {
+    const html = registration(worldFixture.serverNowMs, { rules: RULES_V2, optIn: true, owner: { evening: { kind: 'arena' }, stamina: 0 } });
+    const words = text(html);
+    expect(words).toContain('Stamina now 0 · 0 stamina for tournament entry');
+    expect(words).not.toMatch(/needed at the cutoff|at least 25 stamina|costs stamina once/);
+    expect(words).toContain('If no bracket forms, regular Arena still costs 25 stamina and needs enough stamina.');
+    expect(rulesOf(html)).toEqual(entryRules('24', RULES_V2));
+    expect(rulesOf(html).at(-1)).toBe(V2_PRIZES);
+  });
+
+  // The plan's regression: an old tournament's credit is its settled summary's, never today's rules.
+  const ASTER_BUILD: BuildSnapshot = { rulesVersion: 'v2', classId: 'guardian', stance: 'balanced',
+    allocations: { strength: 3, agility: 2, vitality: 3, endurance: 1, precision: 1 },
+    equipment: { weapon: itemFixture(CATALOG_V1.items['sword:1:common']), offHand: itemFixture(CATALOG_V1.items['round-shield:1:common']),
+      head: itemFixture(CATALOG_V1.items['iron-helmet:1:common']), body: itemFixture(CATALOG_V1.items['light-armor:1:common']), feet: null } };
+  /** The `pair` tournament played again with its builds and seeds, its entrants frozen under the retained v2 rules. */
+  function pairUnderV2() {
+    const entrants = (['aster', 'severus'] as const).map(g => ({ gladiatorId: ARENA_GLADIATORS[g].id, activityId: tournamentActivityId('pair', g),
+      seasonId: 'fixture-season-1', league: TOURNAMENTS.pair.league, slotIndex: tournamentSlotIndex('pair'), rating: 1000,
+      fighter: makeFighter(ASTER_BUILD, 'arena', RULES_V2) }));
+    let graph = buildBracket(entrants, 'fixture-pair-placement');
+    for (let jobs = readyBouts(graph); jobs.length; jobs = readyBouts(graph)) {
+      for (const job of jobs) graph = recordBout(graph, job.boutId, runBout(job, `fixture-pair-${job.boutId}-25`));
+    }
+    return graph;
+  }
+
+  it('keeps actual v1 credit beside active v2 registration', () => {
+    const v1Summary = TOURNAMENT_OWNER_TIMELINES[tournamentActivityId('pair', 'aster')].summary!;
+    expect(v1Summary.rewards).toMatchObject({ money: 100, renown: 60 });
+    const registered = registration(worldFixture.serverNowMs, { rules: RULES_V2 });
+    expect(rulesOf(registered).at(-1)).toBe(V2_PRIZES);
+    expect(creditedText(v1Summary)).toBe('+100 gold, +60 renown');
+    expect(text(bracket('pair', 85, { credited: v1Summary }))).toContain('Your placement: 1st. Credited: +100 gold, +60 renown.');
+
+    // The Bronze v2 control: the same pair under v2 pays its Bronze winner 40 gold, and 50 + 10 renown.
+    const graph = pairUnderV2();
+    expect(graph.rulesVersion).toBe('v2');
+    const winner = tournamentOutcomes(graph).find(o => o.place === 1)!;
+    const asOf = tournamentAsOf('pair');
+    const v2Summary = ownerTimeline(graph, winner, asOf).summary!;
+    expect(v2Summary.rewards).toMatchObject({ money: 40, renown: 60 });
+    const state = renderTournament(projectTournament(graph, tournamentOutcomes(graph), asOf), asOf, { viewerId: winner.gladiatorId });
+    const html = renderToStaticMarkup(createElement(TournamentBracketView, { model: { state, round: state.currentRound, viewerId: winner.gladiatorId,
+      credited: v2Summary, timeZone: 'UTC' }, onRound: noop, onWatch: noop }));
+    expect(text(html)).toContain('Your placement: 1st. Credited: +40 gold, +60 renown.');
   });
 });

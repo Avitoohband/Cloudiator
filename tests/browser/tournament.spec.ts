@@ -22,6 +22,13 @@ const revealOf = (key: TournamentKey, round: number) => {
   return startOf(key) + Math.ceil(80 * MIN * round / (rounds + 1));
 };
 const ASTER = ARENA_GLADIATORS.aster.id;
+// Patch 1.6 (spec "Tournament entry stamina" and "Tournament prizes"), word for word: the fixture preview's rules are v2; the live transport's v1 unless a test sets v2.
+const V1_PRIZES = 'Gold prizes for 1st · 2nd · semifinal: 100 · 60 · 30 in every league. Renown: 50, 30, 15, and 5 for the others, plus 10 a won bout and 2 a lost one.';
+const V2_PRIZES = 'Gold prizes by league, for 1st · 2nd · semifinal: Bronze 40 · 24 · 12, Silver 60 · 36 · 18, Gold 80 · 48 · 24, Champion 100 · 60 · 30. '
+  + 'Renown in every league: 50, 30, 15, and 5 for the others, plus 10 a won bout and 2 a lost one.';
+const V2_ENTRY = 'Tournament entry costs 0 stamina. Choose Arena and opt in before the cutoff; a bracket needs at least two entrants in your league. '
+  + 'If no bracket forms, regular Arena still costs 25 stamina and needs enough stamina.';
+const SHOTS = '.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots';
 test.describe('final review regressions', () => {
   test.skip(production, 'These regressions require the development fixture or routed transport.');
 for (const future of [false, true]) test(`final R1 refreshes live bracket publication for ${future ? 'addressed future bout with delayed publication' : 'playing quarterfinal without restarting it'}`, async ({ page, context }) => {
@@ -296,8 +303,34 @@ test.describe('tournament registration and brackets', () => {
     await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('upcoming') - 60 * MIN);
     await expect(registration).toContainText('A change now applies to the next tournament, Sat 10 Oct, 18:40 UTC, if it is saved before that cutoff.');
     await expect(registration).not.toContainText('were fixed');
-    await expect(registration.getByRole('definition')).toHaveText(['Off', 'Rest (not Arena)', '104 (25 needed at the cutoff)']);
+    // The preview's rules are v2 (Patch 1.6): tournament entry needs no stamina.
+    await expect(registration.getByRole('definition')).toHaveText(['Off', 'Rest (not Arena)', '104 · 0 stamina for tournament entry']);
     expect(await page.evaluate(() => window.__cloudiatorTournaments!.commands())).toEqual(['set-tournament-opt-in']);
+    expect(remote).toEqual([]);
+  });
+
+  test('lists the active v2 entry rules ending with the league prizes, beside a settled tournament’s actual v1 credit', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
+    const remote = forbidRemote(page, baseURL);
+    await tournamentFlow.openAtMinute(page, 'pair', 85);
+    const registration = page.getByRole('region', { name: 'Registration' });
+    const rules = registration.getByRole('listitem');
+    await expect(rules).toHaveCount(7);
+    await expect(rules.first()).toHaveText(V2_ENTRY);
+    await expect(rules.nth(5)).toHaveText('Tournament entry costs 0 stamina. Every bout starts at full health, and an eliminated gladiator stays to spectate until the tournament ends.');
+    await expect(rules.last()).toHaveText(V2_PRIZES);
+    await expect(registration).not.toContainText(/needed at the cutoff|at least 25 stamina|costs stamina once/);
+    // The pair final was settled under v1: Aster's credit is her own summary's 100 gold and 60 renown, not today's Bronze 40.
+    await expect(card(page)).toContainText('Your placement: 1st. Credited: +100 gold, +60 renown.');
+    await registration.evaluate(el => el.scrollIntoView({ block: 'start' }));
+    await page.screenshot({ path: `${SHOTS}/registration-${testInfo.project.name}-top.png` });
+    await rules.last().scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${SHOTS}/registration-${testInfo.project.name}.png` });
+    const size = page.viewportSize()!;
+    await page.setViewportSize({ width: 360, height: 740 });
+    await rules.last().scrollIntoViewIfNeeded();
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await page.screenshot({ path: `${SHOTS}/registration-${testInfo.project.name}-360.png` });
+    await page.setViewportSize(size);
     expect(remote).toEqual([]);
   });
 
@@ -721,6 +754,27 @@ test.describe('the live Tournaments panel', () => {
     await page.goto('/game/?view=bout&tournament=' + byes.id + '&bout=' + fought[0].id);
     await page.waitForFunction(count => window.__cloudiatorReplay?.state().chapters === count, fought.length);
     expect(await page.evaluate(() => window.__cloudiatorReplay?.state().chapters)).toBe(fought.length);
+  });
+
+  test('words Registration with the active rules of the revision read: v1 before the switch, v2 after it', async ({ page, context }) => {
+    const at = startOf('upcoming') - 60 * MIN;
+    await seedSession(context);
+    const live = await routeLiveReads(context, { world: emptyWorld(at), owner: structuredClone(ownerFixture), serverNowMs: () => at, rulesVersion: 'v1' });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const panel = await tournamentsPanel(page);
+    const registration = panel.getByRole('region', { name: 'Registration' });
+    const rules = registration.getByRole('listitem');
+    await expect(rules).toHaveCount(7);
+    await expect(rules.first()).toContainText('at least 25 stamina at the cutoff');
+    await expect(rules.last()).toHaveText(V1_PRIZES);
+    await expect(registration.getByRole('definition').last()).toHaveText(`${ownerFixture.stamina.current} (25 needed at the cutoff)`);
+    // The operator's switch: the next revision read names v2.
+    live.setRulesVersion('v2');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(rules.last()).toHaveText(V2_PRIZES);
+    await expect(rules.first()).toHaveText(V2_ENTRY);
+    await expect(registration.getByRole('definition').last()).toHaveText(`${ownerFixture.stamina.current} · 0 stamina for tournament entry`);
   });
 
   test('keeps one 30 s retry while preparing even when the owner refresh prop changes', async ({ page, context }) => {

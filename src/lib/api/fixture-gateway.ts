@@ -1,4 +1,5 @@
 import type { RevealedTimeline } from '@contracts/events';
+import type { OwnerState, SeasonView } from '@contracts/reads';
 import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
@@ -40,10 +41,21 @@ const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARE
  * (Task 23.9: listed, not drawn in the camp).
  */
 const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS, RESTING_ACTOR] };
-/** The public profiles with their card data (Task 11c): sample builds, creation times and each standings row's record. */
-const FIXTURE_PROFILES = profileCards({ ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE }, Object.values(ARENA_STANDINGS).flat(), ARENA_OWNER,
-  worldFixture.serverNowMs);
 const OWNER_ID = RESTING_OWNER.gladiatorId;
+/**
+ * The public profiles with their card data (Task 11c): sample builds, creation times and each standings row's record. Aster, the preview's
+ * own gladiator, owns the Arena banner (Patch 1.6: her card shows its pill, and her shop says Owned).
+ */
+const FIXTURE_PROFILES = profileCards({ ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE }, Object.values(ARENA_STANDINGS).flat(), ARENA_OWNER,
+  worldFixture.serverNowMs, new Set([OWNER_ID]));
+/** The owner's cosmetics: the Arena banner, bound to her account as a bought one is. */
+const OWNER_COSMETICS: OwnerState['ownedCosmetics'] = [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }];
+/**
+ * The seasons newest first, each with the rules version that opened it (Patch 1.6): the current sample season was opened under the
+ * economy's v2 (its card lists every league's prizes), the closed one before it under v1.
+ */
+const FIXTURE_SEASON_VIEWS: readonly SeasonView[] = FIXTURE_SEASONS.map(season => ({ ...season,
+  rulesVersion: season.closedAtMs === null ? RULES_V2.version : RULES_V1.version }));
 /**
  * The one trip the preview says was followed by a Rest: the Woodland sample's gladiator (Aster) at the end of its trip. The
  * Mountain and Outpost samples are followed by another expedition, and nobody else's trips are in the preview.
@@ -95,7 +107,7 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     // The owner fixture with the rating and renown of its credited Arena samples (resting, in the resting preview), and the inbox
     // the sample messages make (tests/fixtures/messages.ts).
     owner: async () => ({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
-      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX) }),
+      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX), ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
     // The sample messages, newest first (a copy each time), each patch note with the number of the patch that links it; no network.
     messages: async () => FIXTURE_MESSAGES.map(m => ({ ...structuredClone(m),
       patch: m.kind === 'patch-notes' ? FIXTURE_PATCHES.find(p => p.messageId === m.id)?.number ?? null : null })),
@@ -131,8 +143,8 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
       return next.gladiatorId === WOODLAND_REST.gladiatorId && tripEndMs === WOODLAND_REST.tripEndMs;
     },
     profile: async id => (Object.hasOwn(profiles, id) ? structuredClone(profiles[id]) : unavailable()),
-    // The seasons newest first: the current one (open) and the closed season before it, built with seasonAt.
-    seasons: async () => structuredClone([...FIXTURE_SEASONS]),
+    // The seasons newest first: the current one (open, rules v2) and the closed season before it (v1), built with seasonAt.
+    seasons: async () => structuredClone([...FIXTURE_SEASON_VIEWS]),
     // Pages of at most 50 rows, with the live read's rules: the season is the cursor's (`season:rank`), else the named one, else
     // the current season; a closed season serves its archive. A malformed league, cursor or season id, or a named season the
     // fixtures lack, is `unavailable`; a well-formed cursor of another season ends the list with an empty page.

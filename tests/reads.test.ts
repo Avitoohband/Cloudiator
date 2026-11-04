@@ -111,15 +111,22 @@ describe('protected Data API adapters', () => {
     expect(seasons[0]).toEqual({ seasonId: '50', startsAtMs: 50 * SEASON_MS, endsAtMs: 51 * SEASON_MS, closedAtMs: null });
     expect(seasons[1]).toEqual({ seasonId: '49', startsAtMs: 49 * SEASON_MS, endsAtMs: 50 * SEASON_MS, closedAtMs: 50 * SEASON_MS + 5_000 });
     expect(seasons.map(s => s.seasonId)).toEqual(Array.from({ length: 50 }, (_, i) => String(50 - i)));
-    // One request to the public seasons table: its four columns, newest first, at most 50 rows.
+    // One request to the public seasons table: its four columns and the rules version that opened it (M27), newest first, at most 50 rows.
     expect(calls).toHaveLength(1);
     const query = new URL(`http://local${calls[0]}`);
     expect(query.pathname).toBe('/rest/v1/seasons');
-    expect(query.searchParams.get('select')).toBe('season_index,starts_at_ms,ends_at_ms,closed_at_ms');
+    expect(query.searchParams.get('select')).toBe('season_index,starts_at_ms,ends_at_ms,closed_at_ms,rules_version');
     expect(query.searchParams.get('order')).toBe('season_index.desc');
     expect(query.searchParams.get('limit')).toBe('50');
     // No season yet: an empty list, not an error.
     expect(await readSeasons(seasonApi({ seasons: [] }, []))).toEqual([]);
+  });
+  it('keeps each season’s rules version as text, and none when the row names none (Patch 1.6)', async () => {
+    const seasons = await readSeasons(seasonApi({ seasons: [{ ...season(2), rules_version: 'v2' }, { ...season(1, 2 * SEASON_MS), rules_version: 'v1' },
+      { ...season(0, SEASON_MS), rules_version: 2 }] }, []));
+    expect(seasons.map(s => s.rulesVersion)).toEqual(['v2', 'v1', undefined]);
+    expect(seasons[2]).not.toHaveProperty('rulesVersion');
+    expect((await readSeasons(seasonApi({ seasons: [season(3)] }, [])))[0]).toEqual({ seasonId: '3', startsAtMs: 3 * SEASON_MS, endsAtMs: 4 * SEASON_MS, closedAtMs: null });
   });
   it('reads the latest season when no season is named, and the archive with awardPlace for a closed one', async () => {
     const calls: string[] = [], rows = Array.from({ length: 51 }, (_, i) => openRow(i));
@@ -288,7 +295,7 @@ describe('protected Data API adapters', () => {
       { seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null },
       { seasonId: '12', league: 'silver', place: 1, badge: 'gold', title: 'champion' }],
       // A profile from before M26: the card's three keys (Task 11c) read as null.
-      build: null, joinedAtMs: null, arenaRecord: null });
+      build: null, joinedAtMs: null, arenaRecord: null, banner: false });
     expect(calls[0]).toContain('/public_profile_reads?select=profile&gladiator_id=eq.g1');
     // No award is an empty list.
     expect((await readProfile(seasonApi({ public_profile_reads: { profile: { actor, combatStrength: null, rating: 1000, prestige: [] } } }, []), 'g1')).prestige).toEqual([]);

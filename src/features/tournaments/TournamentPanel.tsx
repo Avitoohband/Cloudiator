@@ -30,6 +30,10 @@
 // the server compacts each log to its fight summary. From then on a decided bout says "Replay no longer kept" (its result
 // and fight summary stay), a watched replay whose log is not loaded says so instead of "cannot be loaded", no log is read,
 // and an old tournament link whose view is gone (its id carries its slot) is "no longer kept" instead of missing.
+//
+// Patch 1.6 (spec "Tournaments"): Registration's checklist and entry rules follow the active display rules of the revision read (`rules`,
+// RULES_V1 by default): under v2 entry costs no stamina and the last rule lists each league's prizes. A settled bracket's own credit stays
+// its summary's.
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { GameCommand, LeagueId } from '@contracts/commands';
 import type { ActivitySummary } from '@contracts/events';
@@ -38,6 +42,8 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
 import { RULES_V1 } from '@domain/rules-v1';
+import { isRulesV2 } from '@domain/rules';
+import type { Rules } from '@domain/types';
 import {
   TOURNAMENT_PREPARE_FAST_MS, latestTournament, nextTournament, preparingRetryDelay, processingRetryDelay, renderTournament, tournamentPreparing,
   tournamentRevealMarks, tournamentWindowAt, type TournamentBoutState, type TournamentStageState,
@@ -47,7 +53,7 @@ import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
 import {
-  ENTRY_STAMINA, countdownText, creditedText, cutoffUtc, entryRules, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
+  countdownText, creditedText, cutoffUtc, entryRules, entryStamina, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
   roundStatus, shapeText, statusDetail, statusText, timeWithUtc, victoryText, viewerText,
 } from './tournament-text';
 import styles from './TournamentPanel.module.css';
@@ -107,13 +113,21 @@ export type RegistrationModel = {
   displayNowMs: number;
   timeZone?: string;
   owner: { evening: OwnerState['schedule']['evening']; stamina: number } | null;
+  /** The active display rules (the revision read's version, Patch 1.6); RULES_V1 when absent. */
+  rules?: Rules;
 };
+
+/** The checklist's stamina line: v1 the stamina needed at the cutoff, v2 that tournament entry needs none (the approved mockup). */
+function staminaLine(stamina: number, rules: Rules): string {
+  return isRulesV2(rules) ? `${stamina} · ${entryStamina(rules)} stamina for tournament entry` : `${stamina} (${entryStamina(rules)} needed at the cutoff)`;
+}
 
 /** The automatic-entry checkbox, the rules and the owner's own checklist. The box always shows the saved setting. */
 export function RegistrationView({ model, onToggle }: { model: RegistrationModel; onToggle(): void }) {
   const titleId = useId();
   const clockMode = useClockMode();
   const note = registrationNote(model.displayNowMs, clockMode, model.timeZone);
+  const rules = model.rules ?? RULES_V1;
   return (
     <section className={styles.registration} aria-labelledby={titleId}>
       <h3 id={titleId}>Registration</h3>
@@ -129,10 +143,10 @@ export function RegistrationView({ model, onToggle }: { model: RegistrationModel
         <dl className={styles.checklist} aria-label="Your entry checklist">
           <div><dt>Automatic entry</dt><dd>{model.optIn ? 'On' : 'Off'}</dd></div>
           <div><dt>Evening schedule</dt><dd>{eveningText(model.owner.evening)}</dd></div>
-          <div><dt>Stamina now</dt><dd>{model.owner.stamina} ({ENTRY_STAMINA} needed at the cutoff)</dd></div>
+          <div><dt>Stamina now</dt><dd>{staminaLine(model.owner.stamina, rules)}</dd></div>
         </dl>
       )}
-      <ul className={styles.rules}>{entryRules(clockMode).map(rule => <li key={rule}>{rule}</li>)}</ul>
+      <ul className={styles.rules}>{entryRules(clockMode, rules).map(rule => <li key={rule}>{rule}</li>)}</ul>
     </section>
   );
 }
@@ -471,7 +485,7 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
  * else sees the countdown and the brackets (spec "Menus", the Visitor column).
  */
-export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, onWatchBout }: {
+export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, onWatchBout, rules = RULES_V1 }: {
   reads: TournamentReads | null;
   onWatchBout?(tournamentId: string, boutId: string): void;
   owner: OwnerState | null;
@@ -486,6 +500,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   viewer: Viewer;
   /** The revision's published slot (`GameUiState.publishedSlotIndex`, Task 23.2; null before the first coordination). */
   publishedSlotIndex?: number | null;
+  /** The active display rules (`GameUiState.rules`, Patch 1.6), for Registration's entry and prize rules. */
+  rules?: Rules;
 }) {
   /** The shared clock's time, and whether it has the server's time yet (or is held), read together at each tick. */
   const [time, setTime] = useState(() => readClock(clock));
@@ -576,7 +592,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
         <span className="tag">Wed &amp; Sat · {cutoffUtc(clockMode)}</span>
       </div>
       <TournamentScheduleView now={now} />
-      {viewer === 'player' && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now,
+      {viewer === 'player' && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now, rules,
         owner: owner ? { evening: owner.schedule.evening, stamina: owner.stamina.current } : null }} onToggle={() => void toggle()} />}
       <section className={styles.brackets} aria-labelledby={bracketsId}>
         <h3 id={bracketsId}>Brackets</h3>

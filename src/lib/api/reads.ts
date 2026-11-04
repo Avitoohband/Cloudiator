@@ -85,9 +85,10 @@ export type ArenaRecord = { wins: number; losses: number };
 /**
  * The profile read as this client reads it (Task 11c, M26): the shared contract's `PublicProfile` and the current build, the creation
  * time and the Arena record over all seasons. A client-side type, as `RevisionRead`: the shared contracts do not change. Each is null
- * when it is missing (a database before M26) or malformed.
+ * when it is missing (a database before M26) or malformed. `banner` (Patch 1.6, M27) is whether the gladiator owns the Arena banner:
+ * true only for a published `true`, so a missing (before M27) or malformed value is false.
  */
-export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null };
+export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null; banner: boolean };
 const STANCES: readonly string[] = ['offensive', 'balanced', 'defensive'];
 const SLOTS: readonly EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
 const ATTRIBUTE_NAMES = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
@@ -140,12 +141,12 @@ export function publicBuildOf(value: unknown): PublicBuild | null {
   return { stance: value.stance as Stance, allocations, equipment };
 }
 export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<ProfileRead> {
-  const { prestige, build, joinedAtMs, arenaRecord, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
-    joinedAtMs?: unknown; arenaRecord?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
+  const { prestige, build, joinedAtMs, arenaRecord, banner, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
+    joinedAtMs?: unknown; arenaRecord?: unknown; banner?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
   if (!Array.isArray(prestige)) throw new GatewayReadError('unavailable');
   const wins = record(arenaRecord) ? arenaRecord.wins : undefined, losses = record(arenaRecord) ? arenaRecord.losses : undefined;
   return { ...profile, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
-    arenaRecord: count(wins) && count(losses) ? { wins, losses } : null };
+    arenaRecord: count(wins) && count(losses) ? { wins, losses } : null, banner: banner === true };
 }
 /**
  * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`
@@ -650,16 +651,18 @@ export function parseStandingsRead(cursor?: string, seasonId?: string): { cursor
   if (!match) throw new GatewayReadError('unavailable');
   return { cursor: { season: Number(match[1]), after: Number(match[2]) }, seasonId: named };
 }
-type SeasonRead = { season_index: number; starts_at_ms: number; ends_at_ms: number; closed_at_ms: number | null };
+type SeasonRead = { season_index: number; starts_at_ms: number; ends_at_ms: number; closed_at_ms: number | null; rules_version?: unknown };
 /**
  * The seasons from the public `seasons` table, newest first, at most 50 rows (the Data API caps a response there too). A
- * visitor reads it as `anon`. `closedAtMs` is null for the open season; an empty list means no season has started yet.
+ * visitor reads it as `anon`. `closedAtMs` is null for the open season; an empty list means no season has started yet. Each
+ * season's `rulesVersion` (Patch 1.6, M27) is the text of its `rules_version`, absent when the row names none.
  */
 export async function readSeasons(client: SupabaseClient): Promise<SeasonView[]> {
-  const rows = checked(await client.from('seasons').select('season_index,starts_at_ms,ends_at_ms,closed_at_ms')
+  const rows = checked(await client.from('seasons').select('season_index,starts_at_ms,ends_at_ms,closed_at_ms,rules_version')
     .order('season_index', { ascending: false }).limit(SEASONS_PAGE)) as SeasonRead[];
   return rows.slice(0, SEASONS_PAGE).map(row => ({ seasonId: String(row.season_index), startsAtMs: Number(row.starts_at_ms), endsAtMs: Number(row.ends_at_ms),
-    closedAtMs: row.closed_at_ms === null || row.closed_at_ms === undefined ? null : Number(row.closed_at_ms) }));
+    closedAtMs: row.closed_at_ms === null || row.closed_at_ms === undefined ? null : Number(row.closed_at_ms),
+    ...(typeof row.rules_version === 'string' ? { rulesVersion: row.rules_version } : {}) }));
 }
 /** A season's index and whether it is closed, from its `seasons` row (the latest season's when `season` is null); null when there is no row. */
 async function seasonState(client: SupabaseClient, season: number | null): Promise<{ season: number; closed: boolean } | null> {

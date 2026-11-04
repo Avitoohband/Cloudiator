@@ -488,7 +488,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
         onProfile={(row, season) => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses, season }, row.name)} />;
       case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
-        refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex}
+        refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex} rules={game.rules}
         onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;

@@ -6,7 +6,8 @@ import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { ProfileRead, PublicBuild, PublicGear } from '@/lib/api/reads';
 import { ProfileCard, ProfileLayer, placeCard } from '@/features/character/ProfileCard';
-import { worldFixture } from '../fixtures/domain';
+import { ShopPanel } from '@/features/shops/ShopPanel';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
 
 const noop = () => {};
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
@@ -16,7 +17,7 @@ const ACTOR: PublicActor = {
   ...worldFixture.actors[0], name: 'Aster', classId: 'duelist', league: 'bronze', level: 4, location: 'training',
   equipmentSilhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet'],
 };
-const PROFILE: ProfileRead = { actor: ACTOR, combatStrength: 41, rating: 1042, prestige: [], build: null, joinedAtMs: null, arenaRecord: null };
+const PROFILE: ProfileRead = { actor: ACTOR, combatStrength: 41, rating: 1042, prestige: [], build: null, joinedAtMs: null, arenaRecord: null, banner: false };
 /** The card's clock: 10 Oct 2026, noon UTC. */
 const NOW = Date.UTC(2026, 9, 10, 12);
 type Props = Parameters<typeof ProfileCard>[0];
@@ -33,7 +34,7 @@ const LUCILLA_BUILD: PublicBuild = { stance: 'defensive', allocations: { strengt
 const LUCILLA: PublicActor = { ...worldFixture.actors[0], name: 'Lucilla', classId: 'guardian', league: 'silver', level: 6, location: 'arena', activityId: 'arena-activity',
   equipmentSilhouettes: ['weapon-spear', 'head-helmet', 'armor-heavy'] };
 const LUCILLA_PROFILE: ProfileRead = { actor: LUCILLA, combatStrength: null, rating: 1040, prestige: [], build: LUCILLA_BUILD,
-  joinedAtMs: Date.UTC(2026, 9, 2, 12), arenaRecord: { wins: 9, losses: 5 } };
+  joinedAtMs: Date.UTC(2026, 9, 2, 12), arenaRecord: { wins: 9, losses: 5 }, banner: false };
 /** The card's text items in document order: each eyebrow, chip, row (term and value) and line. */
 const items = (html: string) => [...html.matchAll(/<(p|li|div|dt)\b[^>]*>((?:(?!<\/?(?:p|li|div|ul|dl|section)\b)[\s\S])*?)<\/\1>/g)]
   .map(m => text(m[2]).trim()).filter(Boolean);
@@ -194,7 +195,7 @@ describe('profile card', () => {
   // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card in sections.
   it('shows the look, the class chips, the attributes, the stats, the gear and the record, in that order', () => {
     const html = card({ actor: LUCILLA, profile: LUCILLA_PROFILE });
-    const order = ['ATTRIBUTES · 22 POINTS', 'Vitality +5% 9', 'STATS · DEFENSIVE STANCE', 'Health 197', 'Damage 15 a hit', 'Speed every 1.13 s',
+    const order = ['ATTRIBUTES · 22 POINTS', 'Vitality +5% 9', 'STATS · DEFENSIVE STANCE', 'Health 197', 'Damage 15', 'Speed every 1.13 s',
       'Armor 12.3 · blocks 25%', 'Critical 7% of hits', 'GEAR', 'Weapon Spear · Level 5 · uncommon', 'Off-hand Two-handed weapon', 'RECORD', 'Rating 1040',
       'Arena record 9–5 · all seasons', 'In camp since 2 Oct · 8 days'];
     const shown = items(html);
@@ -238,6 +239,41 @@ describe('profile card', () => {
       expect(own, line).toContain(line);
     }
     expect(items(card({ actor: LUCILLA, profile: LUCILLA_PROFILE }))).not.toContain('Other players see this card too.');
+  });
+
+  // Patch 1.6 (spec "The Arena banner"; Avi, 2026-11-04: Damage reads as a number, as Health does).
+  it('writes Damage as a number, as Health is', () => {
+    const shown = items(card({ actor: LUCILLA, profile: LUCILLA_PROFILE }));
+    expect(shown).toContain('Damage 15');
+    expect(shown.join(' ')).not.toContain('a hit');
+  });
+
+  it('shows the Arena banner pill after the name line only when the profile says the gladiator owns it, its flag decorative', () => {
+    const pill = /<p[^>]*>(<span aria-hidden="true">🚩<\/span>) Arena banner<\/p>/;
+    const owned = card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, banner: true, prestige: [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] } });
+    expect(owned).toMatch(pill);
+    expect(text(owned)).toContain('🚩 Arena banner');
+    // After the name, before the title and the class line.
+    const name = owned.indexOf('>Lucilla</h2>'), banner = owned.indexOf('Arena banner'), title = owned.indexOf('Champion · Season 1 Silver');
+    expect(name).toBeGreaterThan(-1);
+    expect([name < banner, banner < title, title < owned.indexOf('Guardian · Level 6')]).toEqual([true, true, true]);
+    // The own card shows it too (what others see).
+    expect(card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, banner: true }, own: true })).toMatch(pill);
+    for (const profile of [LUCILLA_PROFILE, null]) expect(card({ actor: LUCILLA, profile })).not.toContain('Arena banner');
+    expect(card({ actor: LUCILLA, profileFailed: true })).not.toContain('Arena banner');
+  });
+
+  it('says in the shop that the banner shows on the profile card, bought or not', () => {
+    const shop = (owner = ownerFixture) => text(renderToStaticMarkup(createElement(ShopPanel, { owner, busy: false, preview: false, buy: noop, initialMerchant: 'armorer' })));
+    const unowned = shop();
+    expect(unowned).toContain('Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus');
+    expect(unowned).toContain('Buy Arena banner');
+    expect(unowned).not.toContain('Owned');
+    const owned = shop({ ...ownerFixture, ownedCosmetics: [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }] });
+    expect(owned).toContain('Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus');
+    expect(owned).toContain('Arena banner · Owned · Shown on your profile card');
+    expect(owned).not.toContain('Buy Arena banner');
+    expect(owned).not.toContain('Owned · Account-bound');
   });
 
   it('sits above a clicked gladiator, or below when there is no room, right of the rail and below the chip', () => {

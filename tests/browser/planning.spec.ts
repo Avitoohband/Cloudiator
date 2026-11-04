@@ -1221,6 +1221,37 @@ test.describe('the Schedule under the active rules', () => {
     await expect(warning(page)).toHaveCount(0);
   });
 
+  // Task 8 review minor: the switch lands while the player has an unsaved draft. The draft is the player's: nothing in it changes, it stays
+  // unsaved, the v2 warning appears for its Training, and Save sends the edited day.
+  test('keeps an edited draft across the rules version flip: the selects, Unsaved changes, the warning, and Save sends the edited day', async ({ page, context }) => {
+    const flow = await planningFlow(context, undefined, { rulesVersion: 'v1' });
+    await page.goto('/game/');
+    const schedule = await openMenu(page, 'Schedule');
+    await page.getByLabel('afternoon activity').selectOption('training');
+    await page.getByLabel('evening activity').selectOption('arena');
+    await expect(schedule.getByText('Unsaved changes: afternoon, evening.')).toBeVisible();
+    await expect(hintOf(page, 'afternoon')).toHaveText(V1_TRAINING);
+    await expect(warning(page)).toHaveCount(0);
+    const actorReads = flow.publicReads.count('world_actor_reads');
+    flow.publicReads.setRulesVersion('v2');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(warning(page)).toBeVisible();
+    await expect(hintOf(page, 'afternoon')).toHaveText(BELOW);
+    await expect(hintOf(page, 'evening')).toContainText(ENTRY);
+    await expect(page.getByLabel('morning activity')).toHaveValue('training');
+    await expect(page.getByLabel('afternoon activity')).toHaveValue('training');
+    await expect(page.getByLabel('evening activity')).toHaveValue('arena');
+    await expect(schedule.getByText('Unsaved changes: afternoon, evening.')).toBeVisible();
+    await expect(saveDay(page)).toBeEnabled();
+    await expect(saveDay(page)).toHaveAccessibleDescription(/^Only two Training activities can run per game day/);
+    expect(flow.publicReads.count('world_actor_reads')).toBe(actorReads);
+    expect(flow.commands).toEqual([]);
+    await saveDay(page).click();
+    await expect(savedLine(page)).toContainText('Saved.');
+    expect(flow.commands.map(command => command.kind === 'edit-day-schedule' ? command.day : null))
+      .toEqual([{ morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'arena' } }]);
+  });
+
   test("gives no number for a Rest that depends on the day's earlier Training, which the Schedule cannot know", async ({ page, context }, testInfo) => {
     // The afternoon's Training runs (60 of 104 left); the player plans the morning and the afternoon as Rests and the evening as Training.
     // Under v1 the next morning's Rest finds 60 - 20; under v2 the evening may be the day's third Training (a Rest that refills) or not.

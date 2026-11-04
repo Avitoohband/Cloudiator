@@ -231,6 +231,23 @@
   overflow-wrap: anywhere;
 }
 
+/* Patch 1.6 (the approved mockup): the Arena banner pill after the name line. */
+.banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  max-width: 100%;
+  margin: 3px 0 2px;
+  padding: 3px 9px;
+  border: 1px solid #c59843;
+  border-radius: 14px;
+  background: #49381d;
+  color: #ffdc8a;
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
 .badges {
   display: flex;
   flex-wrap: wrap;

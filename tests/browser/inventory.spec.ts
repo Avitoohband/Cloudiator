@@ -113,10 +113,25 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   expect(flow.commands.map(command => command.kind)).toEqual(['buy-shop', 'discard-item']);
   await expect(page.getByText('Available gold: 260')).toBeVisible();
   await page.getByRole('button', { name: 'Armorer', exact: true }).click();
+  // Patch 1.6 (spec "The Arena banner"): the shop says where the banner shows, before and after it is bought.
+  const offer = page.locator('.cosmetic-offer');
+  const DESCRIPTION = 'Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus';
+  await expect(offer.getByText(DESCRIPTION, { exact: true })).toBeVisible();
+  await offer.scrollIntoViewIfNeeded();
+  await offer.screenshot({ path: `.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/shop-banner-${info.project.name}-unowned.png` });
   await page.getByRole('button', { name: 'Buy Arena banner', exact: true }).click();
-  await expect(page.getByText('Arena banner · Owned · Account-bound')).toBeVisible();
+  await expect(offer.getByText('Arena banner · Owned · Shown on your profile card', { exact: true })).toBeVisible();
+  await expect(offer.getByText(DESCRIPTION, { exact: true })).toBeVisible();
+  await expect(page.getByText('Owned · Account-bound')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await menu.screenshot({ path: info.outputPath('inventory-shops.png') });
+  await offer.screenshot({ path: `.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/shop-banner-${info.project.name}-owned.png` });
+  const size = page.viewportSize()!;
+  await page.setViewportSize({ width: 360, height: 740 });
+  await offer.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/shop-banner-${info.project.name}-owned-360.png` });
+  await page.setViewportSize(size);
 });
 
 test('retries the same operation after a lost response and explains processing without optimistic changes', async ({ page, context }) => {

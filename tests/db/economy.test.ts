@@ -799,13 +799,46 @@ describe('selling salvage', () => {
     ['unsupported rules stamp at the canonical v2 price', 'v2', { ...prepared(4), rulesVersion: 'v3' }],
     ['explicit null stamp under v1', 'v1', { ...prepared(10), rulesVersion: null }],
   ] as const)('rejects a new sale with %s without changing inventory or gold', async (_, version, preparation) => {
-    const owner = await fighter(), stack = await addSalvage(owner, 3);
+    const owner = await fighter(), stack = await addSalvage(owner, 3), command = sell(stack.id);
     if (version === 'v2') await activate(version);
     const before = await saleState(owner);
-    expect(await rawSale(owner, sell(stack.id), preparation)).toEqual({ ok: false, code: 'invalid' });
+    expect(await rawSale(owner, command, preparation)).toEqual({ ok: false, code: 'invalid' });
     const after = await saleState(owner);
     expect({ items: after.items, wallet: after.wallet, ledger: after.ledger })
       .toEqual({ items: before.items, wallet: before.wallet, ledger: before.ledger });
+    // The refusal is terminal (unlike a stale version's `unavailable`): its invalid receipt is written, and is the only new one.
+    const written = { operation_id: command.operationId, receipt_id: expect.any(String), request: command,
+      result: { ok: false, code: 'invalid' } };
+    expect(after.receipts.filter(row => row.operation_id === command.operationId)).toEqual([written]);
+    expect(after.receipts).toHaveLength(before.receipts.length + 1);
+    // So the same operation replays it, even with the canonical preparation, and changes nothing.
+    const canonical = version === 'v2' ? { ...prepared(4), rulesVersion: 'v2' } : prepared(10);
+    expect(await rawSale(owner, command, canonical)).toEqual({ ok: false, code: 'invalid' });
+    expect(await saleState(owner)).toEqual(after);
+  });
+
+  it('leaves a v2-stamped preparation retryable while v1 is still active, then credits the v1 price once', async () => {
+    const owner = await fighter(), stack = await addSalvage(owner, 3), command = sell(stack.id);
+    expect((await revision()).rules_version).toBe('v1');
+    const before = await saleState(owner);
+    // A preparation stamped for a version SQL does not see as active is stale, not invalid: no receipt, so the same
+    // operation stays retryable.
+    expect(await rawSale(owner, command, { ...prepared(4), rulesVersion: 'v2' })).toEqual({ ok: false, code: 'unavailable' });
+    expect(await saleState(owner)).toEqual(before);
+    const response = await send(owner, command);
+    expect(response.status).toBe(200);
+    const applied = await response.json();
+    expect(applied).toEqual({ ok: true, receiptId: expect.any(String), value: {
+      itemId: stack.id, quantity: 3, remainingQuantity: 0, moneyCredit: 30,
+    } });
+    const after = await saleState(owner);
+    expect(after.wallet).toEqual([{ money: 130, renown: 0 }]);
+    expect(after.ledger.filter(row => row.reason === 'npc-sale')).toEqual([
+      { receipt_id: applied.receiptId, money_delta: 30, renown_delta: 0, reason: 'npc-sale' },
+    ]);
+    expect(after.receipts.filter(row => row.operation_id === command.operationId)).toEqual([
+      { operation_id: command.operationId, receipt_id: applied.receiptId, request: command, result: applied },
+    ]);
   });
 
   it.each([
@@ -864,6 +897,51 @@ describe('selling salvage', () => {
     const replay = await send(owner, command);
     expect([replay.status, await replay.json()]).toEqual([200, applied]);
     expect(await saleState(owner)).toEqual(afterRetry);
+  }, 45_000);
+
+  it('lets a sale that holds the account guard first credit 30 at v1, then the waiting switch quarters it', async () => {
+    const owner = await fighter(), stack = await addSalvage(owner, 3), command = sell(stack.id);
+    const input = { command, prepared: { ...prepared(10), rulesVersion: 'v1' } };
+    let sale: unknown, activated: SwitchResult | undefined;
+    await withSwitchSessions(2, async ([seller, activation]) => {
+      await seller.q`set local role service_role`;
+      [{ r: sale }] = await startSwitchQuery(seller, seller.q`select public.sell_item(${owner.id},${command.operationId},
+        ${seller.q.json(input)}) as r`.execute());
+      expect(sale).toEqual({ ok: true, receiptId: expect.any(String), value: {
+        itemId: stack.id, quantity: 3, remainingQuantity: 0, moneyCredit: 30,
+      } });
+      const switching = startSwitch(activation);
+      await blockedBy(activation, seller);
+      // The switch waits on the one-bigint account guard the uncommitted sale holds, not a row or table lock.
+      expect(await sql`select count(*)::int as n from pg_locks waiting join pg_locks held
+        on held.locktype=waiting.locktype and held.database=waiting.database and held.classid=waiting.classid
+          and held.objid=waiting.objid and held.objsubid=waiting.objsubid
+        where waiting.pid=${activation.pid} and not waiting.granted and held.pid=${seller.pid} and held.granted
+          and waiting.locktype='advisory' and waiting.objsubid=1`).toEqual([{ n: 1 }]);
+      expect((await revision()).rules_version).toBe('v1');
+      await seller.q`commit`;
+      [{ r: activated }] = await switching;
+      // The switch rereads the wallet after its wait: 100 + 30 = 130, cut to ceil(130 / 4) = 33.
+      expect(activated).toMatchObject({ ok: true, version: 'v2', walletsScanned: 1, walletsCut: 1, moneyBefore: 130,
+        moneyAfter: 33, replayed: false });
+      await activation.q`commit`;
+    });
+
+    await reconcileSwitch(activated!);
+    const state = await saleState(owner);
+    expect(state.wallet).toEqual([{ money: 33, renown: 0 }]);
+    expect(state.items.some(row => row.id === stack.id)).toBe(false);
+    const receiptId = (sale as { receiptId: string }).receiptId;
+    expect(state.ledger.filter(row => row.reason !== 'creation').sort((a, b) => b.money_delta - a.money_delta)).toEqual([
+      { receipt_id: receiptId, money_delta: 30, renown_delta: 0, reason: 'npc-sale' },
+      { receipt_id: expect.any(String), money_delta: -97, renown_delta: 0, reason: 'economy-cut' },
+    ]);
+    expect(state.receipts.filter(row => row.operation_id === command.operationId)).toEqual([
+      { operation_id: command.operationId, receipt_id: receiptId, request: command, result: sale },
+    ]);
+    // The committed v1 receipt replays after activation and credits nothing more.
+    expect(await rawSale(owner, command, { ...prepared(4), rulesVersion: 'v2' })).toEqual(sale);
+    expect(await saleState(owner)).toEqual(state);
   }, 45_000);
 });
 

@@ -145,3 +145,19 @@ More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 3
 
 Already listed: the watch mode for streams (31), the 24/7 stream (32), the Champ (33), Endurance and load and what each stat
 does (34).
+
+More from Avi, 2026-11-04 (for the gear wave and later):
+
+45. **Elemental damage and defence for PvE.** "elemental damage and defense for pve": fire, frost and poison damage and
+    matching resistances, used against monsters in expeditions, dungeons and the Deep (PvP stays plain unless decided otherwise).
+46. **Weapon upgrades by material rank.** "weapon upgrade with bronze, copper, iron, gold and salvages for each rank": a forge
+    (a facility plot) upgrades gear through ranks, each rank paid with its material (bronze, copper, iron, gold) plus salvage.
+    Materials come from expeditions, dungeons and salvaging.
+47. **Plan routines several days ahead.** "an option to plan routine of few days forward and not just same day since max
+    level": schedule several days at once (ties to idea 10, the rotating multi-day routine).
+48. **Potions for health and stamina** (repeats idea 42; Avi asked again).
+49. **Two-handed weapons have an edge.** "two handed weapon like spear should have an edge on one handed weapons": a
+    two-handed weapon (spear, great sword, war hammer) outdamages a one-handed weapon enough to make up for the missing shield.
+    The gear pass already found the sword beats every weapon today; fix the balance in the gear wave.
+50. **Show the odds.** "show probability for crit damage, dodge and so on": the card and the guide show hit, dodge, critical
+    chance and critical damage as percentages, from the same rules as the fights (ties to idea 34, the in-game guide).

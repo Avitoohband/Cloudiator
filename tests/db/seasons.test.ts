@@ -556,8 +556,9 @@ describe('closing a season', () => {
     expect(await close(0, now)).toBe(4);
     const player = await account();
     const [season0, season1] = [seasonAt(0, 0), seasonAt(RULES_V1.seasons.durationSlots, 0)];
-    const seasons = [{ seasonId: '1', startsAtMs: season1.startsAtMs, endsAtMs: season1.endsAtMs, closedAtMs: null },
-      { seasonId: '0', startsAtMs: season0.startsAtMs, endsAtMs: season0.endsAtMs, closedAtMs: now }];
+    // Patch 1.6 (M27): readSeasons also carries each season's rules version, v1 for both here.
+    const seasons = [{ seasonId: '1', startsAtMs: season1.startsAtMs, endsAtMs: season1.endsAtMs, closedAtMs: null, rulesVersion: 'v1' },
+      { seasonId: '0', startsAtMs: season0.startsAtMs, endsAtMs: season0.endsAtMs, closedAtMs: now, rulesVersion: 'v1' }];
     // The archive as the database holds it, in the read's row shape (50 rows or fewer per league here).
     const frozen = async (league: League) => (await archive(0)).filter(r => r.league === league).map(r => ({ rank: r.rank, gladiatorId: r.gid,
       name: r.name, rating: r.rating, humanWins: r.wins, humanLosses: r.losses, promoted: r.promoted, inactive: r.inactive,

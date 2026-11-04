@@ -199,8 +199,8 @@ describe('patch numbers', () => {
     const files = readdirSync(dir).filter(name => name.endsWith(M26_SUFFIX));
     expect(files).toHaveLength(1);
     const all = readdirSync(dir).filter(name => name.endsWith('.sql')).sort();
-    expect(all.at(-1)).toBe(files[0]);
-    expect(all).toHaveLength(26);
+    // The 26th migration (it was the last until M27, patch 1.6, followed it).
+    expect(all[25]).toBe(files[0]);
     const m26 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');
     const source = readFileSync(new URL('../../supabase/sql/19-patches.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
     const at = (needle: string, from = 0) => { const i = m26.indexOf(needle, from); expect(i, needle).toBeGreaterThan(-1); return i; };

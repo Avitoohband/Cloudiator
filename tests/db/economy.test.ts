@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import type { TransactionSql } from 'postgres';
 import { sql, admin, account, anonymous, resetIdentity, creation, request, makeLegacyPending } from '../fixtures/db.ts';
 import { SLOT, TRAINING, TTR, resetWorld, fighter as boundaryFighter, coordinatorLease, advance, runBoundary,
@@ -943,6 +943,118 @@ describe('selling salvage', () => {
     expect(await rawSale(owner, command, { ...prepared(4), rulesVersion: 'v2' })).toEqual(sale);
     expect(await saleState(owner)).toEqual(state);
   }, 45_000);
+});
+
+// M27 is Patch 1.6's one migration (one database change per patch, Avi), generated once from 21-economy.sql with the CLI's
+// bundled pg-delta engine (Avi, 2026-11-04: no Migra image) and completed from that source (docs/operations/migrations.md,
+// the M27 record). The replay's schema fingerprint, byte-equal to the source-applied one, is the proof for everything else.
+it('ships M27 completed from 21-economy.sql: the v2 row inactive, the mirror trigger deferred after its function, season_prizes before close_season, the switch and its table owner-only, the views invoker, the reload last', () => {
+  const dir = new URL('../../supabase/migrations/', import.meta.url);
+  const all = readdirSync(dir).filter(name => name.endsWith('.sql')).sort();
+  const files = all.filter(name => name.endsWith('_patch_1_6.sql'));
+  expect(files).toHaveLength(1);
+  expect(files[0]).toMatch(/^\d{14}_patch_1_6\.sql$/);
+  // The 27th migration, after M26 (Patch 1.4, the patch list and the profile card); Patch 1.5 has none.
+  expect(all).toHaveLength(27);
+  expect(all[25]).toBe('20261030055918_patch_1_4.sql');
+  expect(all[26]).toBe(files[0]);
+  const m27 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');
+  const source = readFileSync(new URL('../../supabase/sql/21-economy.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const at = (needle: string) => { const i = m27.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
+  // The statements outside function bodies, comments and dollar-quoted text removed.
+  const topLevel = (sql: string) => sql.replace(/(\$\w*\$)[^]*?\1/g, '$body$').replace(/--[^\n]*/g, '');
+
+  // The provenance header: the generator, its engine and input.
+  const header = m27.match(/^(?:--[^\n]*\n)+/)?.[0] ?? '';
+  for (const token of ['Supabase CLI 2.120.0', 'db pull patch_1_6 --local --schema public,private --diff-engine pg-delta --yes',
+    'supabase/sql/21-economy.sql', 'M01-M26']) expect(header, token).toContain(token);
+  // One transaction, as every migration: no non-transactional marker, no top-level BEGIN or COMMIT (the source has its own).
+  expect(m27).not.toContain('-- pg-delta: transaction=false');
+  expect(topLevel(m27)).not.toMatch(/^\s*(?:begin|commit|rollback|end)\s*;/im);
+
+  // Every function of the source, each created once, its body the source's character for character; nothing else re-emitted.
+  const definitions = (sql: string) => [...sql.matchAll(/^create (?:or replace )?function "?(\w+)"?\."?(\w+)"?\s*\([^]*?\bas\s+(\$\w*\$)([^]*?)\3\s*;/gim)]
+    .map(match => ({ name: `${match[1]}.${match[2]}`, body: match[4], index: match.index! }));
+  const expected = definitions(source), shipped = definitions(m27);
+  expect(expected).toHaveLength(17);
+  expect(shipped.map(({ name }) => name).sort()).toEqual(expected.map(({ name }) => name).sort());
+  expect(m27.match(/^create (?:or replace )?function /gim)).toHaveLength(17);
+  const fn = new Map(shipped.map(definition => [definition.name, definition] as const));
+  for (const { name, body } of expected) expect(fn.get(name)?.body, name).toBe(body);
+  const pos = (name: string) => fn.get(name)!.index;
+  // Task 6's inventory command: the fresh salvage version read after the account guard and the receipt replay. CREATE OR
+  // REPLACE keeps SQL04's (M05's) grants on it, so nothing is dropped; sell_item and its grant are M05's, unchanged.
+  const inventory = fn.get('private.inventory_command')!.body;
+  const guard = inventory.indexOf('perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));');
+  const replay = inventory.indexOf('select * into prior from public.operation_receipts r where r.owner_id=actor_id');
+  const fence = inventory.indexOf('select private.active_rules_version() into active_version;');
+  expect([guard > -1, guard < replay, replay < fence]).toEqual([true, true, true]);
+  expect(topLevel(m27)).not.toMatch(/\bdrop (?:function|view|table)\b/i);
+  expect(fn.has('public.sell_item')).toBe(false);
+  // The population fence: creators share it before their account lock; the switch takes it exclusively before its accounts.
+  const create = fn.get('public.create_gladiator')!.body;
+  expect(create.indexOf('pg_advisory_xact_lock_shared(1600001,1)')).toBeGreaterThan(-1);
+  expect(create.indexOf('pg_advisory_xact_lock_shared(1600001,1)')).toBeLessThan(create.indexOf('pg_advisory_xact_lock(hashtextextended(actor_id::text,0))'));
+  const activation = fn.get('private.switch_to_economy_v2')!.body;
+  expect(activation.indexOf('pg_advisory_xact_lock(1600001,1)')).toBeGreaterThan(-1);
+  expect(activation.indexOf('pg_advisory_xact_lock(1600001,1)'))
+    .toBeLessThan(activation.indexOf('pg_advisory_xact_lock(hashtextextended(member.owner_id::text,0))'));
+  // Dependency order (AGENTS.md: nothing before what it calls): the prize table and the guard before close_season.
+  expect(pos('private.season_prizes')).toBeLessThan(pos('private.close_season'));
+  expect(pos('private.guard_season')).toBeLessThan(pos('private.close_season'));
+
+  // The v2 row, inactive, and nothing that activates it or cuts a wallet.
+  expect(m27).toContain("insert into private.rules_versions(version,active) values('v2',false) on conflict do nothing;");
+  expect(topLevel(m27)).not.toMatch(/\bupdate\s+"?private"?\."?rules_versions"?/i);
+  expect(topLevel(m27)).not.toMatch(/\b(?:select|perform|call)\s+"?private"?\."?switch_to_economy_v2"?/i);
+  expect(topLevel(m27)).not.toContain('economy-cut');
+  // Both new rules_version columns with the source's own statement and CHECK text (the M25 lesson), no second CHECK.
+  for (const table of ['world_revision_state', 'seasons']) {
+    const add = source.match(new RegExp(`^alter table public\\.${table} add column if not exists rules_version [^;]*;`, 'm'))![0];
+    expect(add).toContain("check (rules_version ~ '^v[0-9]+$')");
+    expect(m27, table).toContain(add);
+  }
+  expect(topLevel(m27).match(/rules_version ~/gi)).toHaveLength(2);
+  // The mirror trigger: deferred, after its function; the banner trigger after its function.
+  const trigger = (name: string) => m27.match(new RegExp(`^create (?:constraint )?trigger "?${name}"?\\s[^;]*;`, 'im'))?.[0] ?? '';
+  expect(trigger('mirror_rules_version')).toMatch(/\bconstraint trigger\b[^;]*\bdeferrable initially deferred\b[^;]*\bwhen \(new\.active\)/i);
+  expect(pos('private.mirror_rules_version')).toBeLessThan(at(trigger('mirror_rules_version')));
+  expect(trigger('publish_banner')).toMatch(/after insert on "?public"?\."?owned_cosmetics"?[^;]*when \(\(?new\.catalog_id ?= ?'banner'/i);
+  expect(pos('private.publish_banner')).toBeLessThan(at(trigger('publish_banner')));
+  // The two backfills, the source's, each after its column, function and trigger.
+  const backfills = source.match(/^update public\.(?:world_revision_state|public_profiles) [^;]*;/gm)!;
+  expect(backfills).toHaveLength(2);
+  expect(at(backfills[0])).toBeGreaterThan(at(trigger('mirror_rules_version')));
+  expect(at(backfills[1])).toBeGreaterThan(at(trigger('publish_banner')));
+
+  // Every ACL statement of the source (revokes before grants), and the switch and its table owner-only.
+  const acls = source.match(/^(?:revoke|grant) [^;]*;/gm)!;
+  expect(acls).toHaveLength(18);
+  for (const statement of acls) expect(m27, statement).toContain(statement);
+  const object = (statement: string, word: string) => statement.slice(statement.indexOf(' on ') + ' on '.length, statement.lastIndexOf(word));
+  for (const grant of acls.filter(statement => statement.startsWith('grant'))) {
+    const revoke = acls.find(statement => statement.startsWith('revoke') && object(statement, ' from ') === object(grant, ' to '));
+    expect(revoke, grant).toBeDefined();
+    expect(at(revoke!), grant).toBeLessThan(at(grant));
+  }
+  const rls = m27.search(/^alter table (?:only )?"?private"?\."?economy_switches"?\s+enable row level security;/im);
+  expect(rls).toBeGreaterThan(-1);
+  expect(rls).toBeLessThan(at('revoke all on private.economy_switches from public,anon,authenticated,service_role;'));
+  expect(at('revoke all on function private.switch_to_economy_v2() from public,anon,authenticated,service_role;'))
+    .toBeGreaterThan(pos('private.switch_to_economy_v2'));
+  expect(topLevel(m27)).not.toMatch(/^\s*grant\b[^;]*\b(?:economy_switches|switch_to_economy_v2)\b/im);
+
+  // The two views, the source's statements with security_invoker, last: after every function, trigger and backfill.
+  const views = source.match(/^create or replace view [^;]*;/gm)!;
+  expect(views).toHaveLength(2);
+  expect(m27.match(/^create (?:or replace )?view\b/gim)).toHaveLength(2);
+  const before = Math.max(...shipped.map(({ index }) => index), at(trigger('mirror_rules_version')), at(trigger('publish_banner')),
+    ...backfills.map(at));
+  for (const view of views) {
+    expect(view).toContain('with(security_invoker=true)');
+    expect(at(view)).toBeGreaterThan(before);
+  }
+  expect(m27.trimEnd().endsWith("notify pgrst, 'reload schema';")).toBe(true);
 });
 
 describe('rules versions', () => {

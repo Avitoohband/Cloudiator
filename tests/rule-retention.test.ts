@@ -41,10 +41,15 @@ const IN_PROGRESS = ['private.jobs', 'private.job_dependencies', 'private.activi
   'private.boundary_work', 'private.rules_versions', 'private.expedition_plans', 'private.arena_assignments', 'private.arena_assignment_sides',
   'private.tournaments', 'private.tournament_entries', 'private.tournament_bouts', 'private.pending_build_preparations', 'private.settled_slots',
   'public.activities', 'public.activity_stages'];
-/** Reviewed top-level backfills: neither touches in-progress state. */
-const REVIEWED_UPDATES = new Map([
-  ['20261013065108_inventory_shops.sql', /^update public\.gladiators set peak_strength=greatest\(peak_strength,28\)$/],
-  ['20261019102324_timing.sql', /^update public\.world_revision_state r set published_slot_index=c\.published_slot from private\.coordinator c /],
+/** Reviewed top-level backfills: none touches in-progress state. */
+const REVIEWED_UPDATES = new Map<string, RegExp[]>([
+  ['20261013065108_inventory_shops.sql', [/^update public\.gladiators set peak_strength=greatest\(peak_strength,28\)$/]],
+  ['20261019102324_timing.sql', [/^update public\.world_revision_state r set published_slot_index=c\.published_slot from private\.coordinator c /]],
+  // M27 (patch 1.6): the public copy of the active version (v1 when it deploys) and existing banner ownership.
+  ['20261104081033_patch_1_6.sql', [
+    /^update public\.world_revision_state r set rules_version=private\.active_rules_version\(\) where r\.singleton and /,
+    /^update public\.public_profiles p set banner=true where not p\.banner and exists\(select 1 from public\.owned_cosmetics c where /,
+  ]],
 ]);
 const name = (raw: string) => raw.replace(/"/g, '').toLowerCase();
 
@@ -65,7 +70,7 @@ function retentionFindings(file: string, sql: string): string[] {
     if (/^update\b/.test(s)) {
       const target = name(/^update (?:only )?("?\w+"?\."?\w+"?)/.exec(s)?.[1] ?? '');
       if (IN_PROGRESS.includes(target)) findings.push(`rewrites in-progress state: ${at}`);
-      else if (!REVIEWED_UPDATES.get(file)?.test(s)) findings.push(`unreviewed backfill: ${at}`);
+      else if (!REVIEWED_UPDATES.get(file)?.some(reviewed => reviewed.test(s))) findings.push(`unreviewed backfill: ${at}`);
     }
     if (/^insert into "?private"?\."?rules_versions"?/.test(s) && !/on conflict do nothing$/.test(s)) findings.push(`changes a rules version: ${at}`);
     const dropped = /^drop trigger (?:if exists )?"?(guard\w*)"? on ("?\w+"?\."?\w+"?)/.exec(s);
@@ -112,7 +117,8 @@ describe('in-progress snapshots across migrations', () => {
   it('gives every rules version a migration seeds the worker executors of each job kind', () => {
     const seeded = MIGRATIONS.flatMap(file => topLevelStatements(read(file))
       .flatMap(s => /^insert into "?private"?\."?rules_versions"?\s*\(version,\s*active\) values\s*\('(\w+)'/i.exec(s)?.[1] ?? []));
-    expect(seeded).toEqual(['v1']);
+    // M27 (patch 1.6) seeds v2 inactive; only the owner's switch activates it.
+    expect(seeded).toEqual(['v1', 'v2']);
     for (const version of seeded) {
       expect(Object.keys(DEFAULT_EXECUTORS), version).toContain(version);
       // Settlements run in SQL (settle_activity); every other kind needs this version's executor.

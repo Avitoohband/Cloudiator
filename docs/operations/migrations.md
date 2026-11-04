@@ -1,5 +1,201 @@
 # Local identity backend and migrations
 
+## Patch 1.6 (M27): the economy rebalance
+
+M27 is `supabase/migrations/20261104081033_patch_1_6.sql`, Patch 1.6's one database change (Avi: one database change per patch).
+Its source is `supabase/sql/21-economy.sql` (SHA-256 `67b8653e…d57d125`), where the design notes are; the spec is
+`docs/superpowers/specs/2026-10-30-economy-1-6-design.md` ("M27", with Task 6's salvage race addendum) and the plan
+`docs/superpowers/plans/2026-10-30-economy-1-6.md` (Tasks 4–7). Deploying it does not activate v2 or cut any wallet: only the
+owner's `private.switch_to_economy_v2()`, run later with Avi's go, does ([runbook, "The economy switch (1.6)"](runbook.md#the-economy-switch-16)).
+
+**What it changes.**
+- **`private.rules_versions`** gains the row `v2`, inactive (`on conflict do nothing`).
+- **`public.world_revision_state.rules_version`** (`not null default 'v1'`, CHECK `^v[0-9]+$`), the public copy of the active
+  version: the deferred constraint trigger `mirror_rules_version` on `private.rules_versions` (`after insert or update of active`,
+  `when (new.active)`) runs `private.mirror_rules_version()` at commit; a backfill sets it to the active version (v1).
+  **`public.world_revision`** is M26's view with `rules_version` appended.
+- **`public.seasons.rules_version`** (same column and CHECK; existing rows are v1). `private.guard_season()` makes it immutable;
+  `private.boundary_close_season` and `private.boundary_recompute_leagues` insert a new season with its boundary's version;
+  `private.season_prizes(version, league)` (immutable SQL, `null` for an unknown version) is the prize table, and
+  `private.close_season` pays from it and raises `unknown season prizes` on null.
+- **The Arena banner:** `public.public_profiles.banner boolean not null default false`, the trigger `publish_banner` on
+  `public.owned_cosmetics` (`private.publish_banner()`), a backfill of existing ownership, and **`public.public_profile_reads`**
+  with `banner` added (M26's build, `joinedAtMs` and `arenaRecord` kept).
+- **Daily Training (v2):** `private.boundary_recompute`, `private.valid_preparation`, `private.boundary_snapshot` and
+  `private.boundary_check_stamina`, restated.
+- **Free v2 tournaments:** `private.economy_tournament_slot(target)`, and `private.boundary_pair` and `private.accept_pairing`
+  restated. No tournament column or read grant changes; the public whitelist and private-column denials are M01–M26's.
+- **The switch:** `private.economy_switches` (the one audit row; RLS on, every privilege revoked from `public`, `anon`,
+  `authenticated` and `service_role`) and `private.switch_to_economy_v2()` (owner-only); **`public.create_gladiator`**, M24's body
+  with only the shared population fence `pg_advisory_xact_lock_shared(1600001,1)` before its account lock.
+- **Salvage (Task 6):** **`private.inventory_command`**, M05's (SQL04's) body with the salvage price fence: after the account guard
+  and the receipt replay it reads the active version afresh, answers `unavailable` to a preparation stamped with another version
+  (unstamped means v1) and `invalid` to a price other than that version's (10 or 4). `public.sell_item` is M05's, unchanged.
+- Function ACLs: the five new functions as the source says (`mirror_rules_version`, `publish_banner` and
+  `switch_to_economy_v2` owner-only; `season_prizes` and `economy_tournament_slot` for `service_role`); the restated ones keep
+  theirs (CREATE OR REPLACE), and the source restates eleven of them. No Edge change and no new command in M27.
+
+**Provenance of the 17 function statements** (programmatic comparison, saved with the evidence): 5 new; the 12 restated ones each
+start from the latest earlier body and change only as above:
+- `guard_season` and `close_season` from M15 (`_seasons.sql`): the version in the immutable tuple; the prize lookup and its refusal;
+- `boundary_close_season` and `boundary_recompute_leagues` from M16 (`_operations.sql`): the season insert takes the boundary's
+  version;
+- `boundary_recompute`, `boundary_snapshot`, `boundary_check_stamina` and `inventory_command` from M05 (`_inventory_shops.sql`);
+- `valid_preparation` from M09 (`_arena.sql`); `boundary_pair` and `accept_pairing` from M11 (`_tournaments.sql`);
+- `create_gladiator` from M24 (`_appearance.sql`): one added line, the shared fence.
+
+SQL09's `pairing_input`, SQL15's `boundary_start` and SQL10's `settle_rewards` are not restated: M27 leaves their latest bodies
+as they are.
+
+**Generation.** CLI 2.120.0,
+`npx --offline --no-install supabase db pull patch_1_6 --local --schema public,private --diff-engine pg-delta --yes`: the CLI's
+bundled pg-delta engine, Avi's choice on 2026-11-04 (the Migra image `migra:3.0.1663481299` is not on this machine and was not
+pulled). Its input was a clean M01–M26 reset (fingerprint 1,240 lines, access audit 648 rows: M26's counts) with
+`21-economy.sql` applied once through the psql fallback, after the container label check.
+- The engine built its shadow database from the local Postgres image already present (`public.ecr.aws/supabase/postgres:17.11.0.004`).
+  `docker events --filter type=image` recorded no event during the pull, and the image list was the same before and after: nothing
+  was downloaded.
+- With `--yes` the CLI also recorded `20261104081033` in the local migration history ("Repaired migration history"). The next
+  clean reset replaced that database.
+- The as-generated draft (1,014 lines) is kept with the evidence.
+
+**Completion.** The as-generated draft failed the file test (`tests/db/economy.test.ts`, "ships M27…"). pg-delta's draft differs
+from migra's in kind:
+- It emits no data and no reload: no `v2` row, no backfill, no `notify`.
+- It emitted no privilege statement for the new table, and function ACLs for the five new functions only, each as a revoke from
+  PUBLIC and from the owner and a grant back to the owner (`postgres`).
+- It dropped and re-created both views (`DROP VIEW`, then `CREATE VIEW … WITH (security_invoker=true)` as deparsed text), with 16
+  owner and API-role revokes and grants in place of the lost ones.
+- It orders the functions by name, so `guard_season` and `season_prizes` came after `close_season`, and emits a column's CHECK as a
+  separate `ADD CONSTRAINT` with the deparsed expression.
+- It begins with `SET local check_function_bodies = off;` and writes no `-- pg-delta: transaction=false` marker: the whole file
+  is one transaction.
+
+It was completed from the source by a saved script that accounts for every generated statement (kept, or named as replaced), and
+M01–M26 are unchanged. The completions:
+1. A provenance header.
+2. The `v2` row, inactive, first.
+3. `private.economy_switches`' revoke, after its RLS (owner-only).
+4. The two `rules_version` columns, the source's statements and CHECK text, in place of the generated `ADD COLUMN` and
+   `ADD CONSTRAINT` pairs (the M25 lesson). The generated expression stores the same CHECK here (no `between`), but the source's
+   text removes the question.
+5. `guard_season` and `season_prizes` moved, unchanged, before `close_season`.
+6. Every function ACL, the source's 13 statements, after the functions, in place of the generated 17.
+7. The two backfills, the source's, after their columns, functions and triggers.
+8. The two views last: the source's `create or replace` statements with `security_invoker` and their revokes and grants, in place
+   of the generated `DROP VIEW` / `CREATE VIEW` and their 16 grants.
+9. `notify pgrst, 'reload schema'` last.
+
+Everything else is as generated: `SET local check_function_bodies = off`, the audit table with its keys and CHECKs, its RLS, the
+banner column, the foreign key, the 17 function statements (each body byte-identical to the source's) and the two triggers (the
+mirror a deferred constraint trigger; both after their functions). No CHECK calls a function. M27 re-emits no unchanged function.
+
+**Tests.**
+- `tests/db/economy.test.ts`, "ships M27 completed from 21-economy.sql…": exactly one `_patch_1_6.sql`, the 27th migration after
+  M26; the header names the engine and command; no non-transactional marker and no top-level BEGIN or COMMIT; the 17 source
+  functions, each once with the source's body, and no other (so no re-emitted unchanged function and no `sell_item`); the
+  salvage fence after the account guard and the receipt replay; the population fence in `create_gladiator` and the switch; no
+  `drop`; `season_prizes` and `guard_season` before `close_season`; the inactive `v2` row and nothing that updates
+  `rules_versions`, calls the switch or writes `economy-cut`; both columns with the source's statement and only those two CHECKs;
+  the mirror trigger deferred and both triggers after their functions; both backfills after them; every source ACL, each revoke
+  before its grant, the table's revoke after its RLS and no grant on the switch or its table; the two views, the source's, with
+  `security_invoker`, after every function, trigger and backfill; the reload last.
+  - RED first: it failed on the absent file, then on the as-generated draft.
+  - Checked by mutation: it failed on each of ten mutants, with the file then restored byte for byte (SHA-256 `7d4384c8…6d6b69`).
+    The ten: no table revoke, a view without `security_invoker`, `season_prizes` after `close_season`, no `v2` row, no
+    `create_gladiator` grant, no banner backfill, the generated CHECK text, no reload, a statement that activates v2, and a
+    restated `sell_item`.
+- The pins: `tests/db/patches.test.ts` (M26 is the 26th migration), `tests/db/restore-hosted.test.ts` (27 migrations) and
+  `tests/rule-retention.test.ts` (M27's two backfills reviewed: neither touches in-progress state; the seeded versions are
+  v1 and v2, each with the worker's four executors).
+- The deployed checks' anonymous probes stay 22. M27 adds no function an API role could call with arguments. The switch takes
+  no argument, so it is never probed. The audit table is in the unexposed `private` schema.
+- Task 6's minors, added before generation (commit `8f4b9f4`): a v2-stamped preparation while v1 is active answers `unavailable`;
+  a sale holding the account guard first is paid 30 at v1 and the waiting switch cuts 130 to 33; each rejected sale writes its
+  terminal `invalid` receipt. RED by a targeted source mutation (9 intended failures), then 66/66.
+
+**Replay evidence** (2026-11-04):
+- **Evidence**: parent `logs/p16-m27-task7-20261104/`: the as-generated draft, the completion, provenance, inspection and
+  mutation scripts (hashed before use in `reader-hashes.txt`), each fingerprint and audit, and the runners' reports.
+- **Source applied once** to the clean M01–M26 reset: fingerprint 1,273 lines. That is M26's 1,240 with 33 added and 14 changed:
+  - added: 5 functions, the audit table (its relation, 7 columns, 7 constraints and key index), the banner and two
+    `rules_version` columns, `world_revision`'s new column, the two triggers (each with its enabled line, and the mirror's
+    constraint), the two CHECKs and the `seed-rules|v2|f` line;
+  - changed: the 12 restated functions' body hashes and the two views' hashes (their ACLs and options unchanged).
+- **Access audit** on the source-applied database: 650 rows, 0 finding rows. That is M26's 648 plus `service_role` EXECUTE on
+  `economy_tournament_slot` and `season_prizes`. The switch, its table and the two trigger functions have no API-role row.
+- **Two clean resets** (`db reset --local --no-seed --yes`) replayed M01–M27 with nothing applied afterwards. Each replay's
+  fingerprint and access audit were byte-equal to the source-applied ones (`cmp`), and 27 migrations were recorded. A third
+  reset, before lint, the advisors and the full run, matched again.
+- **Inspection of the replay** (read-only):
+  - `rules_versions` v1 true, v2 false; the mirror v1; the anonymous `world_revision.rules_version` v1;
+  - `economy_switches` 0 rows, `{postgres=arwdDxtm/postgres}`, RLS on;
+  - no `economy-cut` receipt or ledger row;
+  - the 17 functions and `sell_item` invoker, `search_path=""`, with no carriage return in any body:
+    - `mirror_rules_version`, `publish_banner` and `switch_to_economy_v2`: `{postgres=X/postgres}`;
+    - the 14 others and `sell_item`: `{postgres=X/postgres,service_role=X/postgres}`;
+  - no function in `public` or `private` executable by `anon` or `authenticated`, none security definer;
+  - `world_revision` and `public_profile_reads` keep `{security_invoker=true}` and SELECT for the three API roles;
+  - `mirror_rules_version` a deferrable, initially deferred constraint trigger; 47/47 triggers enabled; both cron jobs active;
+  - every constraint validated.
+- **Lint and advisors** on a fresh replay: lint is empty. The advisors (`--type all --level info --fail-on warn`) gave 38 INFO
+  notices and no warnings or errors: M26's 36 `unused_index` and `message_reads_message_id_fkey`, and one new
+  `rls_enabled_no_policy` for `private.economy_switches`. That one is intended: no API role has any privilege on the table, and
+  RLS with no policy denies every row to anyone but its owner.
+- **`npm run test:db`**: 497/497 in 31 files on the M01–M27 replay (08:22–08:29 UTC), no skips: the baseline's 494, the two Task 6
+  minors and the file test. Before it the Edge source's access times were refreshed and the runtime settled (the Edge function is
+  served from this worktree). The Edge container's start time was the same before and after the run, and the fingerprint and
+  audit were still byte-equal after it.
+- **Baseline** at `2137bd6` (M01–M26 plus the source, before Task 7): 494/494 in 31 files, the Edge start time unchanged across it.
+  Codex's run at that commit had not finished.
+- **Last**: a final clean reset left the local database on M01–M27 (fingerprint byte-equal again).
+- **The backfills on existing rows.** The replays run `--no-seed`, so a replay has no banner owner to backfill, and the mirror
+  already holds its default v1. M27's two backfill statements are the source's, character for character (the file test), and
+  "backfills existing banner ownership and reapplies without activating v2 or changing balances" runs the source's on real rows:
+  a banner bought before the trigger is published, another profile is not, a second run changes nothing, and no balance or
+  rules version moves.
+
+**Release (Task 10).** The spec's "Release" and the runbook's "The economy switch (1.6)" govern; Avi's go is needed for the filled
+warning and its time, and separately for the switch.
+- **Before the push** (each a read, with the linked CLI, as in the runbook's "Schema fingerprint and hosted checks"; check the
+  installed CLI version and help first):
+  1. Production's migration list (`supabase migration list --linked`) ends at M26, `20261030055918_patch_1_4.sql`.
+  2. `npx --no-install supabase db push --dry-run --skip-vault` lists exactly one migration, `20261104081033_patch_1_6.sql`. Use
+     `--skip-vault` on the push too: this release changes migrations only.
+  3. The window: outside Wednesday and Saturday 17:20–20:00 UTC (tournaments), with no open boundary (the hosted checks'
+     `boundaries open` = 0). The switch itself runs between boundaries.
+- **The warning a day ahead.** First the warning message, with the filled text and time Avi approved (spec, release step 1: it
+  says plainly that everyone's gold is cut to a quarter and that salvage then sells for 4). The release day is at least 24 hours
+  after it.
+- **Order** on the release day (spec, release step 2), after the hosted checks:
+  1. M27 (`db push --skip-vault`). Read back `select version, active from private.rules_versions order by version` (v1 true, v2
+     false), `select rules_version from public.world_revision` (v1), `scripts/economy-switch-check.sql` (`active_version` v1,
+     `v2_row` true, `switched` false, `copy_matches` true), and compare the hosted fingerprint and access audit with this replay's
+     (1,273 lines and 650 rows).
+  2. Both functions, `game-worker` and `game-command`; then the client.
+  3. The switch, only after Avi's separate explicit go naming the irreversible quarter-gold activation, at least 24 hours after
+     the warning, between boundaries: the pre-check again, then `select private.switch_to_economy_v2();` and its read-backs (runbook).
+- **On M27 alone**, the 1.5.1 functions and client keep working, all at v1:
+  - the old `game-command` prepares salvage unstamped at 10, which the fence accepts while v1 is active (the migration-first
+    path the tests pin);
+  - the old worker runs v1 jobs, and every boundary stays v1 until the switch;
+  - the old client reads its named revision columns and ignores the profile's new `banner` key.
+- **Rollback.**
+  - There is no down migration. Never revert M27 once the 1.6 functions are live: `game-command`'s sale reads
+    `world_revision.rules_version`. To roll back before the switch, roll back the client and, if needed, the functions. Both
+    work on M27.
+  - The switch has no rollback: there is no wallet undo after it commits, and replaying it changes nothing. The emergency brake is
+    pausing the scheduler (spec, "Rollback").
+- **Locks** (PostgreSQL's documented lock levels, not probed here; all held to the commit):
+  - Adding the three columns takes ACCESS EXCLUSIVE locks on `world_revision_state`, `seasons` and `public_profiles`. The constant
+    defaults need no rewrite. The two CHECKs scan their tables (1 row, and one per season).
+  - Replacing `world_revision` and `public_profile_reads` locks the two views, so revision and profile reads wait for that moment.
+  - The two triggers take SHARE ROW EXCLUSIVE on `private.rules_versions` and `public.owned_cosmetics` (a banner purchase waits),
+    and so does the audit table's foreign key on `rules_versions`.
+  - The banner backfill updates only the profiles of banner owners.
+- **Deadlock risk.** An open boundary writes `world_revision_state` (the revision) and `seasons` (phase 2). If Postgres picks M27
+  as a deadlock's victim, M27 rolls back whole and can be run again. This is why the push waits for a window with no open boundary.
+
 ## Patch 1.4 (M26): patch numbers and the profile card
 
 M26 is `supabase/migrations/20261030055918_patch_1_4.sql`, Patch A's one database change (Avi: one database change per patch). It

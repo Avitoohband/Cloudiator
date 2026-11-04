@@ -6,6 +6,7 @@ import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { npcSaleValue, type Merchant } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { Rules } from '@domain/types';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { useClockMode } from '../../lib/clock-setting';
@@ -24,8 +25,10 @@ const itemName = (item: ItemInstance) => item.catalogId === 'salvage' ? 'Salvage
 /** A piece's level and rarity: two pieces of one kind share a name, and this tells them apart. */
 const itemDetail = (item: ItemInstance) => `Level ${item.tier} · ${item.rarity}`;
 
-export function InventoryPanel({ owner, gateway, refresh, clock, preview = false, initialMerchant, merchantRequest = 0 }: {
+export function InventoryPanel({ owner, gateway, refresh, clock, preview = false, initialMerchant, merchantRequest = 0, rules = RULES_V1 }: {
   owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock; preview?: boolean;
+  /** The active rules (Patch 1.6): what an NPC merchant pays for salvage (10 gold a unit under v1, 4 under v2); gear values stay. */
+  rules?: Rules;
   /** Opens the shops at this merchant's tab (a click on the merchant in the camp). */
   initialMerchant?: Merchant;
   /** Counts merchant clicks: each one opens the shops at `initialMerchant` again, even the same merchant's. */
@@ -144,7 +147,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     <div className="inventory-grid">{owner.inventory.map(item => {
       const reserved = item.reservation !== null || owner.pendingBuild?.reservedItemIds.includes(item.id);
       const quantity = quantities[item.id] ?? 1, valid = Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= item.quantity;
-      const value = npcSaleValue(item, CATALOG_V1);
+      const value = npcSaleValue(item, CATALOG_V1, rules);
       const wearable = isWearable(item), state = wearable ? wearState(owner, item) : null, badge = wearable ? wearBadge(owner, item) : null;
       const blocked = state ? blockedText(state, item) : null, blockedId = `${panelId}-${item.id}-blocked`;
       const wearName = `${itemName(item)}, level ${item.tier} ${item.rarity}`;

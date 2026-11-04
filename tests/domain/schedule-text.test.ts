@@ -2,8 +2,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { ActivityChoice, DayScheduleValue, Phase, Schedule } from '@contracts/commands';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
+import { RULES_V2 } from '@domain/rules-v2';
 import type { Rules } from '@domain/types';
-import { arenaNote, choiceHint, choiceLabel, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from '../../src/features/schedule/schedule-text';
+import { arenaNote, choiceHint, choiceLabel, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary, tournamentEntryText } from '../../src/features/schedule/schedule-text';
+import { trainingRoom } from '../../src/features/schedule/training-cap';
 
 // Launch feedback (2026-10-25): the schedule screen's words. The zone is pinned to New York and the locale to en-US, as
 // slot-time.test.ts does, so no assertion depends on the host; July 2026 is far from any daylight-saving change.
@@ -124,6 +126,32 @@ describe('choiceHint', () => {
     expect(choiceHint(REST, '12', changed)).toBe('Recovers stamina. Costs 3 stamina.');
     expect(choiceHint(ARENA, '24', changed)).toBe('Bout revealed at minute 30, rewards at 60. Mon and Fri 09:05 UTC: the tournament. Costs 9 stamina.');
     expect(choiceHint(ARENA, '12', changed)).toBe('Bout revealed at minute 30, rewards at 60. Mon and Fri 9:05\xA0AM UTC: the tournament. Costs 9 stamina.');
+  });
+});
+
+// Patch 1.6 (spec "The Training line" and "Tournament entry stamina"): under the active rules v2 the Training choice says how far the
+// point cap lets Training go, and Arena says that tournament entry is free while regular Arena still costs its stamina.
+describe('choiceHint under the active rules', () => {
+  const ENTRY = 'Tournament entry costs 0 stamina. Choose Arena and opt in before the cutoff; a bracket needs at least two entrants in your league. '
+    + 'If no bracket forms, regular Arena still costs 25 stamina and needs enough stamina.';
+  it("says the Training line of the owner's room under v2, and the old line under v1", () => {
+    const room = (level: number, earned: number) => trainingRoom({ level, earnedAttributePoints: earned }, RULES_V2);
+    expect(choiceHint(TRAINING, '12', RULES_V2, room(1, 10))).toBe('Practice yard: +1 attribute point, up to 14 at level 1 (you have 10). When Training runs, it costs 20 stamina.');
+    expect(choiceHint(TRAINING, '24', RULES_V2, room(1, 94))).toBe('Training is full: 94 points, and level 1 allows 14. It gives nothing until level 22. When Training runs, it costs 20 stamina.');
+    // No room (v1 has no cap, or the owner's numbers could not be read): the line a v1 Schedule has always shown.
+    expect(choiceHint(TRAINING, '12', RULES_V1)).toBe('Practice yard: builds experience. Costs 20 stamina.');
+    expect(choiceHint(TRAINING, '12', RULES_V1, trainingRoom({ level: 1, earnedAttributePoints: 10 }, RULES_V1))).toBe('Practice yard: builds experience. Costs 20 stamina.');
+    expect(choiceHint(TRAINING, '12', RULES_V2, null)).toBe('Practice yard: builds experience. Costs 20 stamina.');
+  });
+
+  it('says tournament entry is free under v2, and keeps the v1 Arena line', () => {
+    expect(tournamentEntryText(RULES_V2)).toBe(ENTRY);
+    expect(tournamentEntryText(RULES_V1)).toBeNull();
+    expect(choiceHint(ARENA, '24', RULES_V2)).toBe(`Bout revealed at minute 60, rewards at 80. Costs 25 stamina. Wed and Sat 18:40 UTC: the tournament. ${ENTRY}`);
+    expect(choiceHint(ARENA, '12', RULES_V2)).toBe(`Bout revealed at minute 60, rewards at 80. Costs 25 stamina. Wed and Sat 6:40 PM UTC: the tournament. ${ENTRY}`);
+    expect(choiceHint(ARENA, '24', RULES_V1)).toBe('Bout revealed at minute 60, rewards at 80. Wed and Sat 18:40 UTC: the tournament. Costs 25 stamina.');
+    // The other choices read the same under both versions.
+    for (const choice of [REST, WOODLAND]) expect(choiceHint(choice, '12', RULES_V2)).toBe(choiceHint(choice, '12', RULES_V1));
   });
 });
 

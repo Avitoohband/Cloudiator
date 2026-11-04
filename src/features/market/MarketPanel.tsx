@@ -23,6 +23,7 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } f
 import type { GameCommand } from '@contracts/commands';
 import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { Rules } from '@domain/types';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import type { Viewer } from '../character/useGameState';
@@ -104,7 +105,7 @@ function useNow(clock: DisplayClock) {
 
 /** Pure view of a list of offers: Browse's (`action` buy, or null for a viewer who cannot trade) or My listings' (cancel). */
 export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMore, onRetry, loadingMore = false, moreFailed = false,
-  label = 'Open listings', empty = 'No open listings right now.', available = null, full = false }: {
+  label = 'Open listings', empty = 'No open listings right now.', available = null, full = false, rules = RULES_V1 }: {
   model: OffersModel;
   action: 'buy' | 'cancel' | null;
   /** The viewer's gladiator, whose own offers say "Your listing" and offer no Buy; null for a visitor. */
@@ -123,6 +124,8 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
   available?: number | null;
   /** A buyer's inventory has no free slot. */
   full?: boolean;
+  /** The active rules (Patch 1.6): a salvage offer's NPC value is theirs. */
+  rules?: Rules;
 }) {
   const { rows, status } = model;
   const ids = useId();
@@ -143,7 +146,7 @@ export function MarketOffers({ model, action, ownerId, now, busy, onAction, onMo
                   {own && action === 'buy' && <span className={styles.yours}>Your listing</span>}</p>
                 <p className={styles.detail}>{`${row.seller.name} · ${timeLeft(row.expiresAtMs, now)}`}</p>
                 <p className={styles.detail}>{`${itemGrade(row.item)} · ${itemStats(row.item)}`}</p>
-                <p className={styles.detail}>{npcValueText(row.item)}</p>
+                <p className={styles.detail}>{npcValueText(row.item, rules)}</p>
                 {action === 'cancel' && <p className={styles.detail}>{`You receive ${money(sellerReceives(row.price))} after the market fee (${MARKET_FEE_TERMS})`}</p>}
                 {blocked && <p id={blockedId} className={styles.blocked}>{blocked}</p>}
               </div>
@@ -216,7 +219,7 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
 }
 
 /** The Sell tab: choose an item that can be listed, set a whole price, and see the fee, the credit and the NPC value. */
-function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; onList(item: ItemInstance, price: number): void }) {
+function SellForm({ owner, busy, onList, rules }: { owner: OwnerState; busy: boolean; onList(item: ItemInstance, price: number): void; rules: Rules }) {
   const items = listableItems(owner);
   const [chosen, setChosen] = useState<string | null>(null);
   const [price, setPrice] = useState('');
@@ -248,7 +251,7 @@ function SellForm({ owner, busy, onList }: { owner: OwnerState; busy: boolean; o
         <p id={hintId} className="muted">{PRICE_HINT}</p>
         {problem && <p id={errorId} className={styles.blocked} role="status">{problem === 'low' ? LOWEST_PRICE_TEXT : WHOLE_PRICE_TEXT}</p>}
         {item && <div className={styles.terms} aria-live="polite">
-          <p>{npcValueText(item)}</p>
+          <p>{npcValueText(item, rules)}</p>
           {valid && <>
             <p>{`Buyer pays: ${money(value)}`}</p>
             <p>{`Market fee (${MARKET_FEE_TERMS}): ${money(marketFee(value))}`}</p>
@@ -274,7 +277,7 @@ function TradeSignIn({ fixture }: { fixture: boolean }) {
   </div>;
 }
 
-export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner, fixture }: {
+export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner, fixture, rules = RULES_V1 }: {
   reads: MarketReader;
   /** The command gateway: a player's only (null otherwise), so no other viewer can send a command. */
   gateway: GameGateway | null;
@@ -284,6 +287,8 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
   refreshOwner(): Promise<void>;
   /** The fixture preview: browsing works, actions say they are unavailable. */
   fixture: boolean;
+  /** The active rules (Patch 1.6): the NPC values the offers and the Sell form compare against. */
+  rules?: Rules;
 }) {
   const trader = viewer === 'player' && owner !== null;
   const [tab, setTab] = useState<Tab>('browse');
@@ -384,14 +389,14 @@ export function MarketPanel({ reads, gateway, owner, viewer, clock, refreshOwner
     </div>}
     <div className={styles.panel} id={`${tabsId}-panel`} role={trader ? 'tabpanel' : undefined} aria-labelledby={trader ? `${tabsId}-${shown}` : undefined}>
       {shown === 'browse' && <OfferList reads={reads} seller={null} version={version} action={trader ? 'buy' : null} ownerId={owner?.gladiatorId ?? null}
-        now={now} busy={busy} onAction={buy} available={trader ? available : null} full={trader && full} onRefresh={refreshTrader} />}
+        now={now} busy={busy} onAction={buy} available={trader ? available : null} full={trader && full} onRefresh={refreshTrader} rules={rules} />}
       {shown === 'mine' && owner && <>
         <p className="muted">{`A listing lasts ${LISTING_DAYS} days. Cancel it, or let it expire, to return the item to your inventory.`}</p>
         <OfferList reads={reads} seller={owner.gladiatorId} version={version} action="cancel" ownerId={owner.gladiatorId} now={now} busy={busy}
-          label="Your open listings" empty="You have no open listings." onRefresh={refreshTrader}
+          label="Your open listings" empty="You have no open listings." onRefresh={refreshTrader} rules={rules}
           onAction={listing => void send({ kind: 'cancel-listing', listingId: listing.listingId }, offerName(listing.item), listing.price)} />
       </>}
-      {shown === 'sell' && owner && <SellForm owner={owner} busy={busy} onList={(item, price) => void send({ kind: 'create-listing', itemId: item.id, price }, itemName(item), price)} />}
+      {shown === 'sell' && owner && <SellForm owner={owner} busy={busy} rules={rules} onList={(item, price) => void send({ kind: 'create-listing', itemId: item.id, price }, itemName(item), price)} />}
     </div>
     {message && <p ref={outcome} className={styles.message} role="status" tabIndex={-1} {...target}>{message}</p>}
     {error && <p ref={outcome} className={styles.error} role="alert" tabIndex={-1} {...target}>{error}</p>}

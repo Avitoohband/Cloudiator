@@ -78,6 +78,11 @@ export type LiveData = {
   /** The revision read's newest patch (`latest_patch`, M26); null (no patch recorded) by default. */
   latestPatch?: string | null;
   /**
+   * The revision read's active rules version (`rules_version`, M27; Patch 1.6): 'v1' (before the economy switch) unless a test sets
+   * it, 'v2' after it; null answers a malformed row.
+   */
+  rulesVersion?: string | null;
+  /**
    * The owner's settled results the Notifications tab lists (the owner-only `activities` rows `readNotifications` reads), in any order.
    * The level each reached comes from the owner state's level and XP, as the real read derives it, and an expedition's destination
    * from `expeditionId`. Only a signed-in reader sees them; none by default.
@@ -133,6 +138,8 @@ export type LiveTransport = {
   setPatches(patches: readonly PatchEntry[]): void;
   /** Replaces the newest patch the revision read names (a newer patch is out), or none with null. */
   setLatestPatch(latest: string | null): void;
+  /** Replaces the active rules version the revision read names (the operator's economy switch), or restores 'v1' with undefined. */
+  setRulesVersion(version: string | null | undefined): void;
   /** Replaces the owner's settled results the Notifications tab lists (a result was credited). */
   setNotifications(notifications: readonly LiveNotification[]): void;
   /** Replaces the owner's settled bouts My bouts lists (another account's, or a bout was credited). */
@@ -257,6 +264,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setMessages: messages => { data.messages = messages; },
     setPatches: patches => { data.patches = patches; },
     setLatestPatch: latest => { data.latestPatch = latest; },
+    setRulesVersion: version => { data.rulesVersion = version; },
     setNotifications: notifications => { data.notifications = notifications; },
     setBouts: bouts => { data.bouts = bouts; },
     setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
@@ -396,7 +404,8 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
     .map(([seasonId, archived]) => ({ seasonId, startsAtMs: 0, endsAtMs: RULES_V1.seasons.durationMs, closedAtMs: archived ? RULES_V1.seasons.durationMs : null }));
   return {
     world_revision: { rows: [{ revision: world.revision, server_now_ms: now, slot_index: Math.floor(now / SLOT_MS),
-      published_slot_index: data.publishedSlotIndex ? data.publishedSlotIndex(now) : Math.floor(now / SLOT_MS), latest_patch: data.latestPatch ?? null }] },
+      published_slot_index: data.publishedSlotIndex ? data.publishedSlotIndex(now) : Math.floor(now / SLOT_MS), latest_patch: data.latestPatch ?? null,
+      rules_version: data.rulesVersion === undefined ? 'v1' : data.rulesVersion }] },
     world_actor_reads: { rows: world.actors.map(actor => ({ gladiator_id: actor.gladiatorId, actor })) },
     // The projection keeps each award with its season index (a number); the read maps it to a PrestigeAward with a string season id.
     public_profile_reads: { rows: Object.entries(data.profiles ?? {}).map(([gladiator_id, profile]) => ({ gladiator_id,

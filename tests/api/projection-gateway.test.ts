@@ -223,7 +223,7 @@ describe('public projection reads without a session', () => {
     expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: 301, latestPatch: null });
     published = null;
     expect(await createLiveGateway().revision()).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 302, publishedSlotIndex: null, latestPatch: null });
-    expect(selects).toEqual(['revision,server_now_ms,slot_index,published_slot_index,latest_patch', 'revision,server_now_ms,slot_index,published_slot_index,latest_patch']);
+    expect(selects).toEqual(['revision,server_now_ms,slot_index,published_slot_index,latest_patch,rules_version', 'revision,server_now_ms,slot_index,published_slot_index,latest_patch,rules_version']);
   });
 
   it('throws unavailable when the account changes again during the retry', async () => {

@@ -128,4 +128,122 @@ describe('revision synchronization', () => {
     expect(f.states.at(-1)?.latestPatch).toBe('1.6');
     f.sync.stop();
   });
+
+  // Patch 1.6 (spec "Client", "The active version"): the active rules version rides every revision read, beside the newest patch, and
+  // never the world snapshot; only the newest read of the newest session lands (AGENTS.md, React async state).
+  it('takes rules from the revision even when only the version changes or disappears', async () => {
+    const f = fixture();
+    let version: string | undefined = 'v1';
+    const read = vi.mocked(f.gateway.revision).getMockImplementation()!;
+    vi.mocked(f.gateway.revision).mockImplementation(async () => {
+      const revision = await read();
+      return version === undefined ? revision : { ...revision, rulesVersion: version };
+    });
+
+    try {
+      await f.sync.start();
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v1', world: { revision: '1' } });
+
+      version = 'v2';
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', world: { revision: '1' } });
+      expect(f.states.at(-1)?.world).not.toHaveProperty('rulesVersion');
+      expect(f.gateway.world).toHaveBeenCalledTimes(1);
+
+      f.outage();
+      await f.sync.refresh();
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', error: 'unavailable' });
+
+      f.recover();
+      version = undefined;
+      await f.sync.refresh();
+      expect(f.states.at(-1)).toMatchObject({ world: { revision: '1' }, error: null });
+      expect(Reflect.get(f.states.at(-1)!, 'rulesVersion') ?? null).toBeNull();
+      expect(f.states.at(-1)?.world).not.toHaveProperty('rulesVersion');
+      expect(f.gateway.world).toHaveBeenCalledTimes(1);
+    } finally {
+      f.sync.stop();
+    }
+  });
+
+  it('keeps the newest generation rules when an old revision resolves last', async () => {
+    const f = fixture();
+    const older = { revision: '1', serverNowMs: Date.now(), slotIndex: 18, latestPatch: null, rulesVersion: 'v1' };
+    const newer = { ...older, revision: '2', rulesVersion: 'v2' };
+    let releaseOlder!: (value: typeof older) => void;
+    const held = new Promise<typeof older>(resolve => { releaseOlder = resolve; });
+    vi.mocked(f.gateway.revision).mockImplementationOnce(() => held).mockResolvedValueOnce(newer);
+
+    try {
+      const oldRefresh = f.sync.start();
+      expect(f.gateway.revision).toHaveBeenCalledTimes(1);
+      f.change();
+      f.accountChange();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.gateway.revision).toHaveBeenCalledTimes(2);
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', world: { revision: '2' } });
+      const published = f.states.length;
+
+      releaseOlder(older);
+      await oldRefresh;
+      expect(f.states).toHaveLength(published);
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', world: { revision: '2' } });
+      expect(f.gateway.world).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseOlder(older);
+      f.sync.stop();
+    }
+  });
+
+  it('keeps the newest generation rules when an old actor load resolves last', async () => {
+    const f = fixture();
+    const older = { revision: '1', serverNowMs: Date.now(), slotIndex: 18, latestPatch: null, rulesVersion: 'v1' };
+    const newer = { ...older, revision: '2', rulesVersion: 'v2' };
+    const oldWorld = { revision: '1', serverNowMs: older.serverNowMs, slotIndex: older.slotIndex, actors: [] };
+    let releaseOlder!: (value: typeof oldWorld) => void;
+    const held = new Promise<typeof oldWorld>(resolve => { releaseOlder = resolve; });
+    vi.mocked(f.gateway.revision).mockResolvedValueOnce(older).mockResolvedValueOnce(newer);
+    vi.mocked(f.gateway.world).mockImplementationOnce(() => held);
+
+    try {
+      const oldRefresh = f.sync.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.gateway.world).toHaveBeenCalledTimes(1);
+      f.change();
+      f.accountChange();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.gateway.world).toHaveBeenCalledTimes(2);
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', world: { revision: '2' } });
+      const published = f.states.length;
+
+      releaseOlder(oldWorld);
+      await oldRefresh;
+      expect(f.states).toHaveLength(published);
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', world: { revision: '2' } });
+      expect(f.states.at(-1)?.world).not.toHaveProperty('rulesVersion');
+    } finally {
+      releaseOlder(oldWorld);
+      f.sync.stop();
+    }
+  });
+
+  it('keeps the last known rules through a session change: they are the world\'s, not the account\'s', async () => {
+    const f = fixture();
+    const read = vi.mocked(f.gateway.revision).getMockImplementation()!;
+    vi.mocked(f.gateway.revision).mockImplementation(async () => ({ ...(await read()), rulesVersion: 'v2' }));
+    try {
+      await f.sync.start();
+      expect(f.states.at(-1)?.rulesVersion).toBe('v2');
+      let release!: () => void;
+      vi.mocked(f.gateway.revision).mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({ revision: '1', serverNowMs: 0, slotIndex: 18, rulesVersion: 'v2' } as never); }));
+      f.accountChange();
+      // The world and the patch are forgotten at once; the rules stay v2 (no flash of v1 copy) until the next read answers.
+      expect(f.states.at(-1)).toMatchObject({ world: null, latestPatch: null, rulesVersion: 'v2' });
+      await vi.advanceTimersByTimeAsync(0);
+      release(); await vi.advanceTimersByTimeAsync(0);
+      expect(f.states.at(-1)).toMatchObject({ rulesVersion: 'v2', world: { revision: '1' } });
+    } finally {
+      f.sync.stop();
+    }
+  });
 });

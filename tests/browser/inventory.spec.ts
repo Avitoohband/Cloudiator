@@ -14,7 +14,8 @@ const GEAR = ['sword:1:common', 'sword:1:uncommon', 'spear:1:common', 'round-shi
 type GearName = 'sword' | 'sword2' | 'spear' | 'shield' | 'helmet' | 'armor';
 const GEAR_NAMES: GearName[] = ['sword', 'sword2', 'spear', 'shield', 'helmet', 'armor'];
 
-async function inventoryFlow(context: BrowserContext, options: { gear?: boolean } = {}) {
+/** `rulesVersion`: the active rules version the revision read names (Patch 1.6; the live transport's 'v1' when left out). */
+async function inventoryFlow(context: BrowserContext, options: { gear?: boolean; rulesVersion?: string } = {}) {
   const state = structuredClone(ownerFixture);
   state.wallets = { money: 300, renown: 100 };
   state.inventory = ['axe:1:common', 'sword:1:renown', 'light-armor:1:common'].map(id => ({ ...itemFixture(CATALOG_V1.items[id]), id: randomUUID() }));
@@ -38,7 +39,7 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean 
     localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test-only', token_type: 'bearer', expires_at: exp, expires_in: 3600, user }));
   }, { user });
   // The live camp's public reads; this spec's own handler (registered next, so it runs first) hands it everything else.
-  await routeLiveReads(context, { world: emptyWorld() });
+  await routeLiveReads(context, { world: emptyWorld(), rulesVersion: options.rulesVersion });
   await context.route('http://127.0.0.1:54321/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
@@ -162,6 +163,27 @@ test('explains Marketplace outcomes for an item in words, with nothing to retry'
     await expect(page.getByRole('button', { name: 'Retry request' })).toHaveCount(0);
   }
 });
+
+// Patch 1.6 (spec "Inventory and market"): a salvage stack's NPC value is the active rules' (10 gold a unit under v1, 4 after the economy
+// switch); gear values do not change.
+for (const [rulesVersion, unit] of [['v1', 10], ['v2', 4]] as const) {
+  test(`values a salvage stack at ${unit} gold a unit under rules ${rulesVersion}, and gear the same`, async ({ page, context }, info) => {
+    const flow = await inventoryFlow(context, { rulesVersion });
+    const salvage: ItemInstance = { id: randomUUID(), ownerId: flow.state.gladiatorId, catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version,
+      tier: 1, rarity: 'common', stats: structuredClone(CATALOG_V1.salvage.stats), quantity: 12, origin: 'expedition', binding: 'tradable', reservation: null };
+    flow.state.inventory.push(salvage);
+    await page.goto('/game/');
+    await openMenu(page, 'Inventory and shops');
+    const stack = page.getByTestId(`item-${salvage.id}`);
+    await expect(stack).toContainText(`NPC sell value: ${unit} gold each`);
+    await expect(page.getByTestId(`item-${flow.state.inventory[0].id}`)).toContainText(`NPC sell value: ${CATALOG_V1.items['axe:1:common'].npcSellValue} gold each`);
+    if (rulesVersion === 'v2') {
+      await stack.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: info.outputPath(`economy-salvage-${info.project.name}.png`) });
+      if (process.env.PERF_SHOTS) await page.screenshot({ path: `${process.env.PERF_SHOTS}/economy-${info.project.name}-salvage.png` });
+    }
+  });
+}
 
 test('fixture inventory and shops remain read-only alongside the camp', async ({ page }) => {
   await page.goto('/game/?mode=fixture');

@@ -76,8 +76,13 @@ test('fixture public actors omit private owner management state', async () => {
   const revision = await gateway.revision();
   // The fixture world's slot is published (Task 23.2's published slot; Task 23.4, C5).
   expect(world.publishedSlotIndex).toBe(world.slotIndex);
-  // The preview is up to date with this build's patch (Patch A, "Patch numbers and the changelog").
-  expect(revision).toEqual({ revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex, publishedSlotIndex: world.slotIndex, latestPatch: PATCH });
+  // The preview is up to date with this build's patch (Patch A, "Patch numbers and the changelog"), and words its texts with the 1.6
+  // economy (Patch 1.6: the fixture world answers rules version v2).
+  expect(revision).toStrictEqual({
+    revision: world.revision, serverNowMs: world.serverNowMs, slotIndex: world.slotIndex,
+    publishedSlotIndex: world.slotIndex, latestPatch: PATCH, rulesVersion: 'v2',
+  });
+  expect(world).not.toHaveProperty('rulesVersion');
 });
 
 test('unimplemented fixture reads reject explicitly as unavailable', async () => {

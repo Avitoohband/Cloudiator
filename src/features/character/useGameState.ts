@@ -5,12 +5,14 @@
 // The camp and the panels only consume it. Fixture previews read the fixture gateway the same way, with the demo crowd.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OwnerState, WorldSnapshot } from '@contracts/reads';
+import type { Rules } from '@domain/types';
 import type { GameGateway } from '../../lib/api/gateway';
 import { refreshSession, signOut, useSession, type SessionState } from '../../lib/api/session';
 import { createSync, type SyncController, type SyncState } from '../../lib/api/sync';
 import { createPresence, type Presence, type PresenceInput } from '../../lib/api/presence';
 import { createDisplayClock, type DisplayClock } from '../../game/display-clock';
 import { withDemoCrowd } from '../../game/demo-world';
+import { displayRules } from '../../lib/rules-version';
 
 export type Viewer = 'loading' | 'unavailable' | 'visitor' | 'no-gladiator' | 'player';
 export type GameUiState = {
@@ -21,6 +23,11 @@ export type GameUiState = {
   publishedSlotIndex: number | null;
   /** The server's newest patch from the latest revision read (Patch A, "Patch numbers and the changelog"); null when unknown. */
   latestPatch: string | null;
+  /**
+   * The rules the economy's texts are worded with (Patch 1.6): `displayRules` of the active rules version the latest revision read
+   * named (v1 until one names 'v2'). A retained constant, so its identity changes only with the version.
+   */
+  rules: Rules;
   /** The owner's own gladiator rests at home in the shared world (its public actor's `resting`; Task 23.9 fix round 1). */
   ownResting: boolean;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
@@ -168,6 +175,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const publishedSlotIndex = syncWorld?.publishedSlotIndex ?? null;
   const latestPatch = sync?.latestPatch ?? null;
   useEffect(() => { renderedPatch.current = latestPatch; }, [latestPatch]);
+  const rules = displayRules(sync?.rulesVersion);
 
   useEffect(() => {
     if (!gateway || account === null || clockOnly) return;
@@ -276,7 +284,7 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   else viewer = owner ? 'player' : read?.missing ? 'no-gladiator' : read?.failed ? 'unavailable' : 'loading';
 
   return {
-    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, latestPatch, ownResting, clock,
+    viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, latestPatch, rules, ownResting, clock,
     sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld,
   };
 }

@@ -475,13 +475,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
         onCreate={joining.offer} resting={game.ownResting} />;
-      case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} />
+      case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} rules={game.rules} />
         : <SchedulePreview owner={owner} />;
-      case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture}
+      case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture} rules={game.rules}
         initialMerchant={shop?.merchant} merchantRequest={shop?.request} /> : null;
       // Anyone browses; the command gateway is a player's only, so a visitor's or a new account's panel cannot send one.
       case 'market': return reads ? <MarketPanel key={ownerId ?? viewer} reads={reads} gateway={viewer === 'player' ? gateway : null} owner={owner} viewer={viewer}
-        clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} />
+        clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} rules={game.rules} />
         : <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
       case 'arena': return <ArenaMenu bouts={bouts} onWatchBout={bout => openScene({ kind: 'replay', activityId: bout.activityId, from: 'arena' })}
         onAllBouts={() => { chooseResults({ view: 'mine', filter: 'all' }); show('results'); }} open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}

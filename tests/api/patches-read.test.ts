@@ -42,7 +42,7 @@ test('reads the newest patch with the revision, and only a well-formed number', 
   const { client, requests } = api(() => json(revisionRow(latest)));
   expect(await readRevision(client)).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 373_604, publishedSlotIndex: 373_604, latestPatch: '1.4' });
   expect(requests[0].table).toBe('world_revision');
-  expect(requests[0].query.get('select')).toBe('revision,server_now_ms,slot_index,published_slot_index,latest_patch');
+  expect(requests[0].query.get('select')).toBe('revision,server_now_ms,slot_index,published_slot_index,latest_patch,rules_version');
   for (const value of [null, 'junk', '1.3.0', 5, undefined]) {
     latest = value;
     expect((await readRevision(client)).latestPatch, String(value)).toBeNull();
@@ -52,10 +52,34 @@ test('reads the newest patch with the revision, and only a well-formed number', 
   expect((await createLiveGateway().revision()).latestPatch).toBe('1.5');
 });
 
-test('keeps the world snapshot free of the patch: the world is the revision and its actors', async () => {
-  api(table => (table === 'world_revision' ? json(revisionRow('1.4')) : json([])));
-  const world = await createLiveGateway().world();
-  expect(world).toEqual({ revision: '1', serverNowMs: NOW, slotIndex: 373_604, publishedSlotIndex: 373_604, actors: [] });
+// Patch 1.6 (spec "Client", "The active version"): the revision read also names the active rules version (M27's public
+// `rules_version`), as its text; a read without a text version (an older server, a malformed row) has no `rulesVersion` at all.
+test('preserves revision version text and omits the property when the read names no version', async () => {
+  const row = revisionRow('1.4');
+  const expected = { revision: '1', serverNowMs: NOW, slotIndex: 373_604, publishedSlotIndex: 373_604, latestPatch: '1.4' };
+  let response: typeof row & { rules_version?: unknown } = row;
+  const { client, requests } = api(() => json(response));
+
+  for (const version of ['v1', 'v2', 'v3']) {
+    response = { ...row, rules_version: version };
+    expect(await readRevision(client)).toStrictEqual({ ...expected, rulesVersion: version });
+  }
+
+  response = row;
+  expect(await readRevision(client)).toStrictEqual(expected);
+  for (const version of [null, 2]) {
+    response = { ...row, rules_version: version };
+    expect(await readRevision(client)).toStrictEqual(expected);
+  }
+  expect(requests.map(request => request.table)).toEqual(Array(6).fill('world_revision'));
+});
+
+test('keeps the world snapshot to its existing projection when the revision includes patch and rules', async () => {
+  const { requests } = api(table => table === 'world_revision' ? json({ ...revisionRow('1.4'), rules_version: 'v2' }) : json([]));
+  expect(await createLiveGateway().world()).toStrictEqual({
+    revision: '1', serverNowMs: NOW, slotIndex: 373_604, publishedSlotIndex: 373_604, actors: [],
+  });
+  expect(requests.map(request => request.table)).toEqual(['world_revision', 'world_actor_reads', 'world_revision']);
 });
 
 test('reads 20 patches at a time, newest first, with their features in position order', async () => {

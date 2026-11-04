@@ -130,7 +130,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Stamina | Each activity costs stamina, a Rest refills it, and a part you cannot afford becomes a Rest. | 1.0 | Live | The ⚡ number beside your name; Schedule | — |
 | Plan the whole day | Plan all three parts and save once; the schedule says which part is running now. | 1.1 | Live | Schedule (test player) | Looks update |
 | A Rest shows its stamina | A Rest says how much stamina it gives back, in the Schedule and on My gladiator. | 1.4 | Live | Schedule, under a Rest (test player) | — |
-| Training limit | Training gives a point until your gladiator has 10 + 4 × its level in points; at that limit the Schedule says Training is full and until which level, and Notifications say a Training gave no point. | 1.6 | Planned 1.6 | Not built | — |
+| Training limit | Training gives a point until your gladiator has 10 + 4 × its level in points; at that limit the Schedule says Training is full and until which level, and Notifications say a Training gave no point. At most two Training activities run per game day: another request becomes a Rest, and the Schedule warns before saving. | 1.6 | In 1.6 | Schedule, under a Training choice and above Save, once v2 is active (after the economy switch) | — |
 
 ### Expeditions and dungeons
 
@@ -170,6 +170,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Live | Tournaments → Watch replay → bracket chapters | — |
 | Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Planned 1.6 | Not built | — |
 | Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Planned 1.6 | Not built | — |
+| Free tournament entry | Tournament entry costs no stamina; regular Arena still costs its stamina when no bracket forms. | 1.6 | Planned 1.6 | Not built (the Schedule's Arena line says it once v2 is active; the Tournaments rules come next) | — |
 
 ### Results and replays
 

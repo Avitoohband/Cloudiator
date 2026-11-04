@@ -9,6 +9,12 @@ export type SyncState = {
    * null, which shows no notice. A failed read keeps the last one; a session change forgets it until the next read.
    */
   latestPatch: string | null;
+  /**
+   * The active rules version from every revision read (Patch 1.6 spec, "Client"): its text, or null when a successful read names none
+   * (`displayRules` words both). A failed read keeps the last one; so does a session change, since the active rules are the world's, not
+   * the account's. Only the newest read of the newest session lands.
+   */
+  rulesVersion: string | null;
 };
 export type SyncController = {
   start(): Promise<void>; stop(): void;
@@ -29,7 +35,7 @@ export type SyncController = {
  */
 export function createSync(gateway: GameGateway, listener: (state: SyncState) => void, options: { actors?: boolean } = {}): SyncController {
   const actors = options.actors ?? true;
-  let state: SyncState = { world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null };
+  let state: SyncState = { world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null, rulesVersion: null };
   let running = false, generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: Promise<void> | null = null;
@@ -46,11 +52,12 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
     const work = (async () => {
       try {
         const began = Date.now();
-        const { latestPatch: latest, ...clock } = await gateway.revision();
+        const { latestPatch: latest, rulesVersion: rules, ...clock } = await gateway.revision();
         const ended = Date.now();
         if (ticket !== generation || !running) return;
         // The gateway's read keeps only a well-formed number (readRevision); an older server's read names none.
         const latestPatch = typeof latest === 'string' ? latest : null;
+        const rulesVersion = typeof rules === 'string' ? rules : null;
         const offsetMs = clock.serverNowMs - (began + ended) / 2;
         let world: WorldSnapshot;
         if (!actors) world = { ...clock, actors: [] };
@@ -59,7 +66,7 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
           world = await gateway.world();
           if (ticket !== generation || !running) return;
         }
-        publish({ world, offsetMs, lastSyncMs: Date.now(), refreshing: false, latestPatch,
+        publish({ world, offsetMs, lastSyncMs: Date.now(), refreshing: false, latestPatch, rulesVersion,
           processing: world.actors.some(actor => actor.activityStatus === 'processing' || actor.activityStatus === 'queued'), error: null });
       } catch (error) {
         if (ticket !== generation || !running) return;
@@ -82,7 +89,7 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
     start() {
       if (running) return pending ?? Promise.resolve();
       running = true; generation++;
-      publish({ world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null });
+      publish({ world: null, offsetMs: null, lastSyncMs: null, processing: false, refreshing: false, error: null, latestPatch: null, rulesVersion: null });
       if (typeof window !== 'undefined') window.addEventListener('focus', focus);
       if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visibility);
       unsubscribe = gateway.subscribeSession?.(changedSession);

@@ -1,6 +1,7 @@
 import type { RevealedTimeline } from '@contracts/events';
 import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
+import { RULES_V2 } from '@domain/rules-v2';
 import type { GameGateway } from './gateway';
 import { BOUTS_PAGE, GatewayReadError, boutOf, nextBoutsCursor, parseBoutsRead, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout } from './reads';
 import { replayKept } from '../replay-retention';
@@ -115,9 +116,9 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     },
     // The fixture world's slot is published (Task 23.2's published slot, C5).
     world: async () => ({ ...structuredClone(world), publishedSlotIndex: worldFixture.slotIndex }),
-    // The preview is up to date: the newest patch is this build's.
+    // The preview is up to date: the newest patch is this build's, and its texts are the 1.6 economy's (rules version v2, Patch 1.6).
     revision: async () => ({ revision: worldFixture.revision, serverNowMs: worldFixture.serverNowMs, slotIndex: worldFixture.slotIndex, publishedSlotIndex: worldFixture.slotIndex,
-      latestPatch: PATCH }),
+      latestPatch: PATCH, rulesVersion: RULES_V2.version }),
     // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Expedition and Arena
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),

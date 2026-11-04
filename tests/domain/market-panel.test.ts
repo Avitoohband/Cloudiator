@@ -4,10 +4,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
+import { RULES_V2 } from '@domain/rules-v2';
 import { createDisplayClock } from '@/game/display-clock';
 import {
-  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MINIMUM_PRICE, PRICE_HINT, listableItems, marketErrorText, marketFee, priceProblem, sellerReceives,
-  timeLeft, validPrice, WHOLE_PRICE_TEXT,
+  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MINIMUM_PRICE, PRICE_HINT, listableItems, marketErrorText, marketFee, npcValue, npcValueText, priceProblem,
+  sellerReceives, timeLeft, validPrice, WHOLE_PRICE_TEXT,
 } from '@/features/market/market-text';
 import { MarketOffers, MarketPanel, ownerReads, type OffersModel } from '@/features/market/MarketPanel';
 import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
@@ -278,7 +279,7 @@ describe('the Marketplace panel', () => {
       const html = offers({ model: { ...model, rows: [stack] }, action: 'buy', ownerId: null });
       expect(text(html)).toContain(`${units} × Salvage`);
       expect(html).toContain(`aria-label="Buy ${units} × Salvage for 150 gold"`);
-      expect(text(html)).toContain(`NPC sale value: ${units * unitValue} gold (${unitValue} each)`);
+      expect(text(html)).toContain(`NPC sale value: ${units * unitValue} gold (${unitValue} gold each)`);
       expect(text(html)).not.toContain('NPC merchants do not buy');
       // A neutral glyph, not a weapon's.
       expect(html).not.toContain('🗡');
@@ -289,6 +290,23 @@ describe('the Marketplace panel', () => {
       expect(text(spearRow)).not.toContain('×');
       expect(text(spearRow)).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} gold`);
       expect(text(spearRow)).not.toContain(' each)');
+    });
+
+    // Patch 1.6 (spec "Inventory and market"): salvage's NPC value is the active rules' (10 under v1, 4 under v2); gear values stay.
+    it('values salvage by the active rules, and gear the same under both', () => {
+      const salvage = { catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version, tier: 1 as const, rarity: 'common' as const, quantity: 12 };
+      expect(npcValueText(salvage, RULES_V2)).toBe('NPC sale value: 48 gold (4 gold each)');
+      expect(npcValueText(salvage, RULES_V1)).toBe('NPC sale value: 120 gold (10 gold each)');
+      expect(npcValueText(salvage)).toBe('NPC sale value: 120 gold (10 gold each)');
+      expect(npcValue({ ...salvage, quantity: 1 }, RULES_V2)).toBe(4);
+      const gear = { ...spear.item };
+      expect(npcValue(gear, RULES_V2)).toBe(CATALOG_V1.items['spear:10:rare'].npcSellValue);
+      expect(npcValueText(gear, RULES_V2)).toBe(npcValueText(gear, RULES_V1));
+      // A Browse row of a salvage stack says the active value.
+      const stack: MarketListing = { listingId: 'salvage-offer', seller: { gladiatorId: 'cassia-id', name: 'Cassia' },
+        item: { ...salvage, stats: structuredClone(CATALOG_V1.salvage.stats) }, price: 150, listedAtMs: NOW - HOUR, expiresAtMs: NOW + DAY };
+      expect(text(offers({ model: { ...model, rows: [stack] }, rules: RULES_V2 }))).toContain('NPC sale value: 48 gold (4 gold each)');
+      expect(text(offers({ model: { ...model, rows: [stack] } }))).toContain('NPC sale value: 120 gold (10 gold each)');
     });
 
     it('says when there are no offers, and when they could not be loaded', () => {

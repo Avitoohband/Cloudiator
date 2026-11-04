@@ -31,7 +31,8 @@ describe('the currency is called gold', () => {
     expect(LOWEST_PRICE_TEXT).toMatch(/^The lowest price is \d+ gold, /);
     expect(marketErrorText('insufficient-funds', 'buy-listing')).toBe('Not enough available gold for this purchase. Held fees cannot be spent.');
     expect(marketErrorText('invalid', 'create-listing')).toMatch(/at least \d+ gold, with at most/);
-    expect(npcValueText({ catalogId: 'salvage', catalogVersion: 'v1', tier: 1, rarity: 'common', quantity: 12 })).toMatch(/^NPC sale value: [\d,]+ gold \([\d,]+ each\)$/);
+    // Patch 1.6 (plan Task 8): a stack's unit value says gold too, "(4 gold each)".
+    expect(npcValueText({ catalogId: 'salvage', catalogVersion: 'v1', tier: 1, rarity: 'common', quantity: 12 })).toMatch(/^NPC sale value: [\d,]+ gold \([\d,]+ gold each\)$/);
   });
 
   it('says gold in the refusal of a build change and of a gear change', () => {

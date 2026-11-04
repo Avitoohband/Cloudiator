@@ -5,6 +5,7 @@ import type { ActivityChoice, DayScheduleValue, GameCommand, Phase, Schedule } f
 import type { OwnerState } from '@contracts/reads';
 import { nextPhaseStart } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { Rules } from '@domain/types';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { DisplayClock } from '../../game/display-clock';
 import { useClockMode } from '../../lib/clock-setting';
@@ -13,6 +14,7 @@ import { RestGainText } from './RestGainText';
 import { activityCosts, projectRest, restHint } from './rest-stamina';
 import { PHASES, arenaNote, choiceHint, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from './schedule-text';
 import { slotTimeText } from './slot-time';
+import { trainingLimitWarning, trainingRoom } from './training-cap';
 import { useMinuteNow } from './use-minute-now';
 
 const choiceKey = (choice: ActivityChoice) => choice.kind === 'expedition' ? `expedition:${choice.expeditionId}` : choice.kind;
@@ -36,8 +38,16 @@ const NOT_THE_CHOICE = ['processing', 'conflict', 'unavailable', 'rate-limited']
  * follow it: past a slot boundary, or when the clock is held or moved, they move with it, so the panel never shows a start
  * that has already passed or the wrong part as running (the Task 6 stale-clock gate). Its times are short (`slotTimeText`,
  * Task 23.10) and shown against the same clock by the minute, so "tomorrow" and the weekday follow it too.
+ *
+ * Patch 1.6: the words follow `rules`, the active rules the revision read names (v1 until the economy switch): the Training line says
+ * how far the point cap lets Training go, Arena says tournament entry is free, a Rest's number allows for the daily Training limit, and a
+ * v2 draft holding any Training shows the generic daily-limit warning before Save, which describes Save and never blocks it.
  */
-export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock }) {
+export function SchedulePanel({ owner, gateway, refresh, clock, rules = RULES_V1 }: {
+  owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock;
+  /** The active rules (`displayRules` of the latest revision read's version). */
+  rules?: Rules;
+}) {
   const [draft, setDraft] = useState<Schedule>(owner.schedule);
   /** The saved day the status line answers: the server's answer and the day sent are kept, not their text, so the wording follows the clock. */
   const [message, setMessage] = useState<{ value: DayScheduleValue; day: Schedule } | null>(null);
@@ -45,7 +55,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
   /** Whether the server refused the day's choices (not a retry or a reload answering a conflict): the changed parts are then marked invalid. */
   const [refused, setRefused] = useState(false);
   const [busy, setBusy] = useState(false);
-  const panelId = useId(), outcomeId = `${panelId}-outcome`, noteId = `${panelId}-note`;
+  const panelId = useId(), outcomeId = `${panelId}-outcome`, noteId = `${panelId}-note`, warningId = `${panelId}-training-limit`;
   /** The shared clock's time to the minute, the "now" every time on this panel is shown against. */
   const nowMs = useMinuteNow(clock);
   const clockMode = useClockMode();
@@ -127,16 +137,20 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
     return time ? <p>Estimated next start: {time}</p> : null;
   };
   const level = owner.progression.level, locked = lockedChoices(level);
-  /** What each kind of activity costs the current build (null when it cannot be derived): a Rest's number is walked from them. */
-  const costs = useMemo(() => activityCosts({ currentBuild: owner.currentBuild, inventory: owner.inventory, progression: owner.progression }),
-    [owner.currentBuild, owner.inventory, owner.progression]);
+  /** What each kind of activity costs the current build under the active rules (null when it cannot be derived): a Rest's number is walked from them. */
+  const costs = useMemo(() => activityCosts({ currentBuild: owner.currentBuild, inventory: owner.inventory, progression: owner.progression }, rules),
+    [owner.currentBuild, owner.inventory, owner.progression, rules]);
+  /** How far the point cap lets Training go (null under v1, which has none). */
+  const room = trainingRoom(owner.progression, rules);
+  /** The generic daily-limit warning, for a v2 draft holding any Training (null otherwise). */
+  const warning = trainingLimitWarning(draft, rules);
   /**
    * The line under a part's select. A Rest says how much stamina it will give (Patch A item 6), projected from the draft day against the
    * shared clock (null until mounted: no number then, and the same words as when no number can be told); the other choices say what they cost.
    */
   const hintFor = (phase: Phase) => draft[phase].kind === 'rest'
-    ? <RestGainText text={restHint(slot === null ? null : projectRest({ phase, nowMs: slotStart, owner, day: draft, costs }))} />
-    : choiceHint(draft[phase], clockMode);
+    ? <RestGainText text={restHint(slot === null ? null : projectRest({ phase, nowMs: slotStart, owner, day: draft, costs, rules, tournamentOptIn: owner.tournamentOptIn }))} />
+    : choiceHint(draft[phase], clockMode, rules, room);
   return <div className="planning-form">
     <h2>Repeating schedule</h2>
     <p className="muted">Edits apply to the next occurrence that has not started. Your current activity continues.</p>
@@ -163,13 +177,14 @@ export function SchedulePanel({ owner, gateway, refresh, clock }: { owner: Owner
     {dirty && <p className="schedule-unsaved">Unsaved changes: {changed.join(', ')}.</p>}
     {message && <p ref={outcome} id={outcomeId} role="status" className="schedule-saved" tabIndex={-1} {...target}>{savedSummary(message.value, message.day, nowMs, clockMode)}</p>}
     {error && <p ref={outcome} id={outcomeId} role="alert" className="form-error" tabIndex={-1} {...target}>{error}</p>}
+    {warning && <p id={warningId} role="note" className="schedule-warning">{warning}</p>}
     <div className="schedule-actions">
       {/* Save stays focusable while the day is sent (aria-disabled; save() ignores a press then): Chrome drops the focus of a
           control that becomes disabled at its next frame, after the shell's focus rescue has looked, and a keyboard player
           would be left on <body> for the whole save. A saved day then disables it and the saved line takes the focus
           (`useOutcomeFocus`); after a refusal the focus stays on Save. */}
       <button type="button" className="primary-button" onClick={() => void save()} disabled={!busy && !dirty} aria-disabled={busy || undefined}
-        aria-describedby={[noteId, outcomeShown ?? ''].filter(Boolean).join(' ')}>Save schedule</button>
+        aria-describedby={[warning ? warningId : '', noteId, outcomeShown ?? ''].filter(Boolean).join(' ')}>Save schedule</button>
       <button type="button" ref={undoButton} onClick={undo} disabled={busy || !dirty}>Undo changes</button>
     </div>
     <p id={noteId} className="muted">One save for the whole day: all three parts are saved together, or none is.</p>

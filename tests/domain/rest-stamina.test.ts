@@ -4,6 +4,7 @@ import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { validateBuild } from '@domain/build';
 import { RULES_V1 } from '@domain/rules-v1';
+import { RULES_V2 } from '@domain/rules-v2';
 import { activityCost, deriveStats } from '@domain/stats';
 import { activityCosts, projectRest, restHint, restingGain, restingGainText, type ActivityCosts } from '../../src/features/schedule/rest-stamina';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
@@ -146,10 +147,14 @@ describe('a slot the server has not processed yet', () => {
     expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT), day, costs: BASE })).toEqual({ before: 44, maximum: 104 });
     expect(restHint(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT - 1), day, costs: BASE }))).toBe('Refills stamina to full. Costs nothing.');
   });
-  it('is behind by any number of slots, and never when the server is ahead of the clock', () => {
+  it('is behind by any number of slots, and gives no number either when the server is ahead of the clock', () => {
     expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT - 40), day, costs: BASE })).toBeNull();
-    // A display clock that lags the server (held or not yet synced) is not a slot waiting to be processed.
-    expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT + 1), day, costs: BASE })).toEqual({ before: 44, maximum: 104 });
+    // Patch 1.6 (spec "Rest projections"): a display clock that lags the server (held or not yet synced) would walk a slot the server has
+    // already paid, whose debit the stamina read already holds: no number is told rather than charging it twice, under either version.
+    for (const rules of [RULES_V1, RULES_V2]) {
+      expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT + 1), day, costs: BASE, rules }), rules.version).toBeNull();
+      expect(projectRest({ phase: 'evening', nowMs: morning, owner: wait(MORNING_SLOT + 5), day, costs: BASE, rules }), rules.version).toBeNull();
+    }
   });
   it('follows the clock into the next slot: the afternoon reads nothing until the owner read has caught up', () => {
     const afternoon = AFTERNOON_SLOT * SLOT + 25 * 60_000;
@@ -162,7 +167,125 @@ describe('a slot the server has not processed yet', () => {
   });
 });
 
+// Patch 1.6 (spec "Rest projections"; plan Task 8): under v2 only two actual Training activities run per game day, and an excess Training
+// request is an ordinary Rest (refills, costs nothing); a tournament evening's Arena may be a free bracket, a paid Arena or a Rest. The
+// projection never takes the day's earlier Training from the edited draft (the parts already played are history the client does not
+// read): where the number depends on what it cannot know, it gives none (`restHint(null)`'s generic words).
+describe('projectRest under the rules v2', () => {
+  const T = { kind: 'training' } as const, R = { kind: 'rest' } as const, A = { kind: 'arena' } as const, W = { kind: 'expedition', expeditionId: 'woodland' } as const;
+  const afternoon = AFTERNOON_SLOT * SLOT + 25 * 60_000;
+  const v2 = { costs: activityCosts(ownerFixture, RULES_V2)!, rules: RULES_V2 };
+  /** An owner at `stamina` of `maximum` with an activity of `kind` running (resolved and paid) in slot `slot`. */
+  const at = (stamina: number, kind: 'training' | 'rest' | 'expedition', slot: number, maximum = 104) =>
+    ({ ...owner(stamina, kind, slot), stamina: { current: stamina, maximum } });
+
+  it('cannot claim the old +60 after two actual earlier Trainings, whatever the edited elapsed parts say', () => {
+    // The morning and the afternoon were Trainings (100 - 20 - 20 = 60, the afternoon one running now); the player now plans the morning
+    // and the afternoon as Rests and the evening as Training. v1 walks the evening (60 - 20) and claims +60 for the next morning's Rest.
+    const edited: Schedule = { morning: R, afternoon: R, evening: T };
+    const now = at(60, 'training', AFTERNOON_SLOT, 100);
+    expect(projectRest({ phase: 'morning', nowMs: afternoon, owner: now, day: edited, costs: BASE })).toEqual({ before: 40, maximum: 100 });
+    // Under v2 the evening is a third Training (an ordinary Rest, refilling to 100) or a second one (60 - 20): the morning is history.
+    expect(projectRest({ phase: 'morning', nowMs: afternoon, owner: now, day: edited, ...v2 })).toBeNull();
+    expect(restHint(projectRest({ phase: 'morning', nowMs: afternoon, owner: now, day: edited, ...v2 }))).toBe('Refills stamina to full. Costs nothing.');
+    // The draft's parts that are already played (the morning) or running (the afternoon) never stand for the day's actual Training.
+    for (const playedAfternoon of [T, R, W]) {
+      expect(projectRest({ phase: 'morning', nowMs: afternoon, owner: now, day: { ...edited, afternoon: playedAfternoon }, ...v2 }), playedAfternoon.kind).toBeNull();
+    }
+    // What the running afternoon actually is comes from the paid activity, not the draft: if it is not Training, the evening's is the
+    // day's first or second whatever the morning was, and runs (a running Rest refills first: 100 - 20).
+    expect(projectRest({ phase: 'morning', nowMs: afternoon, owner: at(60, 'expedition', AFTERNOON_SLOT, 100), day: edited, ...v2 })).toEqual({ before: 40, maximum: 100 });
+    expect(projectRest({ phase: 'morning', nowMs: afternoon, owner: at(60, 'rest', AFTERNOON_SLOT, 100), day: edited, ...v2 })).toEqual({ before: 80, maximum: 100 });
+  });
+
+  it("keeps the number when the day's Training so far is known: the running part is the morning, read from the paid activity", () => {
+    // The running morning Training is the day's first; the afternoon's is the second and runs (74 - 20), as in v1.
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: owner(74, 'training'), day: { morning: T, afternoon: T, evening: R }, ...v2 })).toEqual({ before: 54, maximum: 104 });
+    // With a third Training in the evening, that one is an ordinary Rest and refills to full: the next morning's Rest adds nothing.
+    const triple: Schedule = { morning: R, afternoon: T, evening: T };
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: owner(74, 'training'), day: triple, ...v2 })).toEqual({ before: 104, maximum: 104 });
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: owner(74, 'training'), day: triple, costs: BASE })).toEqual({ before: 34, maximum: 104 });
+    // A running morning that is not Training leaves both later Trainings to run (74 - 20 - 20).
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: owner(74, 'rest'), day: triple, ...v2 })).toEqual({ before: 64, maximum: 104 });
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: owner(74, 'expedition'), day: triple, ...v2 })).toEqual({ before: 34, maximum: 104 });
+  });
+
+  it("gives no number when the running part's own activity is not known", () => {
+    // The owner read's activity is another slot's: the running morning may or may not have been Training.
+    const base = owner(74, 'training');
+    const stale = { ...base, currentActivity: { ...base.currentActivity!, startsAtMs: (MORNING_SLOT - 3) * SLOT, endsAtMs: (MORNING_SLOT - 2) * SLOT } };
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: stale, day: { morning: R, afternoon: T, evening: T }, ...v2 })).toBeNull();
+    // A day it does not depend on keeps its number.
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: stale, day: { morning: T, afternoon: W, evening: R }, ...v2 })).toEqual({ before: 44, maximum: 104 });
+  });
+
+  it('starts the count again with a new game day', () => {
+    // The evening Rest runs; the next morning and afternoon are the new day's first two Trainings (full 104 - 20 - 20).
+    expect(projectRest({ phase: 'evening', nowMs: evening, owner: owner(10, 'rest', EVENING_SLOT), day: { morning: T, afternoon: T, evening: R }, ...v2 })).toEqual({ before: 64, maximum: 104 });
+  });
+
+  it('counts a Training at the point cap but not a Training that became a Rest for want of stamina', () => {
+    // The running morning Training is the first; the afternoon's cannot be afforded (15 < 20) and rests instead, so it is not counted,
+    // and the evening's is the second and runs: 104 - 20 before the next morning's Rest.
+    const day2: Schedule = { morning: R, afternoon: T, evening: T };
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: owner(15, 'training'), day: day2, ...v2 })).toEqual({ before: 84, maximum: 104 });
+    // A Training gives no point at the cap but still runs and costs its stamina: the projection never reads the cap.
+    const capped = { ...structuredClone(ownerFixture), progression: { ...ownerFixture.progression, earnedAttributePoints: 94 } };
+    expect(activityCosts(capped, RULES_V2)).toEqual(v2.costs);
+  });
+
+  describe('a tournament evening', () => {
+    // Written apart from the code: Unix-epoch slots with index mod 126 of 50 or 122 are the Saturday and Wednesday 18:40 UTC evenings.
+    const TOURNAMENT = MORNING_SLOT + ((50 - (MORNING_SLOT % 126) + 126) % 126);
+    const DAY_START = TOURNAMENT - 2;
+    const dayMorning = DAY_START * SLOT + 25 * 60_000, dayAfternoon = (DAY_START + 1) * SLOT + 25 * 60_000;
+    const arenaDay: Schedule = { morning: R, afternoon: W, evening: A };
+    it('is an evening', () => { expect(TOURNAMENT % 3).toBe(2); });
+
+    it('gives no number while the opted-in Arena may be a free bracket or a paid Arena', () => {
+      const now = owner(74, 'training', DAY_START);
+      // 74 - 30 for the afternoon's expedition; then the bracket is free (44) or regular Arena costs 25 (19).
+      for (const tournamentOptIn of [true, undefined]) {
+        expect(projectRest({ phase: 'morning', nowMs: dayMorning, owner: now, day: arenaDay, ...v2, tournamentOptIn }), String(tournamentOptIn)).toBeNull();
+      }
+      // Opted out, it is a regular Arena at its cost.
+      expect(projectRest({ phase: 'morning', nowMs: dayMorning, owner: now, day: arenaDay, ...v2, tournamentOptIn: false })).toEqual({ before: 19, maximum: 104 });
+      // v1's tournament costs what Arena does: the number stays.
+      expect(projectRest({ phase: 'morning', nowMs: dayMorning, owner: now, day: arenaDay, costs: BASE, tournamentOptIn: true })).toEqual({ before: 19, maximum: 104 });
+    });
+
+    it('keeps the number when a Rest after the tournament evening refills either way, and on an evening with no tournament', () => {
+      // The running afternoon; the evening may be free or paid, and the next morning's Rest refills either way: the next afternoon's Rest finds 104.
+      expect(projectRest({ phase: 'afternoon', nowMs: dayAfternoon, owner: owner(74, 'expedition', DAY_START + 1), day: { morning: R, afternoon: R, evening: A }, ...v2, tournamentOptIn: true }))
+        .toEqual({ before: 104, maximum: 104 });
+      // The day before the tournament day has no tournament evening: Arena is regular.
+      const before = (DAY_START - 3) * SLOT + 25 * 60_000;
+      expect(projectRest({ phase: 'morning', nowMs: before, owner: owner(74, 'training', DAY_START - 3), day: arenaDay, ...v2, tournamentOptIn: true })).toEqual({ before: 19, maximum: 104 });
+    });
+  });
+
+  it("gives no number while the gladiator rests at home (idle), whose slots are not the draft's", () => {
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: { ...owner(74, 'training'), restingUntilSlot: MORNING_SLOT + 1 }, day, costs: BASE })).toBeNull();
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: { ...owner(74, 'training'), currentActivity: null }, day, ...v2 })).toBeNull();
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: { ...owner(74, 'training'), currentActivity: null, restingUntilSlot: null }, day, costs: BASE })).toBeNull();
+    // Back on its schedule (no idle rest): the number.
+    expect(projectRest({ phase: 'evening', nowMs: morning, owner: { ...owner(74, 'training'), restingUntilSlot: null }, day, costs: BASE })).toEqual({ before: 44, maximum: 104 });
+  });
+
+  it('keeps the v1 walk unchanged when no rules are given', () => {
+    const triple: Schedule = { morning: R, afternoon: T, evening: T };
+    expect(projectRest({ phase: 'morning', nowMs: morning, owner: owner(74, 'training'), day: triple, costs: BASE }))
+      .toEqual(projectRest({ phase: 'morning', nowMs: morning, owner: owner(74, 'training'), day: triple, costs: BASE, rules: RULES_V1 }));
+  });
+});
+
 describe('activityCosts', () => {
+  it('derives the costs under the rules it is given: a v2 tournament entry costs nothing, even overloaded', () => {
+    expect(activityCosts(ownerFixture, RULES_V2)).toEqual({ ...BASE, tournament: 0 });
+    expect(activityCosts(ownerFixture, RULES_V1)).toEqual(BASE);
+    expect(activityCosts(overloaded, RULES_V2)).toEqual({ training: 24, expedition: 36, arena: 30, tournament: 0, rest: 0 });
+  });
+
   it('uses the build overload in the costs, as the boundary does', () => {
     expect(activityCosts(ownerFixture)).toEqual(BASE);
     expect(activityCosts(overloaded)!.expedition).toBe(activityCost(30, deriveStats(snapshotOf(overloaded), RULES_V1).overload));
@@ -217,6 +340,13 @@ describe('no wrong rest number', () => {
 
 describe('restingGain', () => {
   const resting = (stamina: number) => owner(stamina, 'rest');
+  // Patch 1.6: the running Rest's refill (My gladiator, the trip replay) is the actual stamina now and the frozen end, under either rules
+  // version: a schedule edit or the v2 daily Training limit, which only reach later slots, never change it, and it takes no rules.
+  it('reads only the running Rest itself: no rules, no schedule, no daily history', () => {
+    expect(restingGain.length).toBe(1);
+    const planned = { ...resting(74), schedule: { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } } };
+    expect(restingGain(planned)).toEqual({ before: 74, maximum: 104 });
+  });
   it('is the running Rest\'s own refill: from the stamina now to the maximum', () => {
     expect(restingGain(resting(74))).toEqual({ before: 74, maximum: 104 });
     expect(restingGain(resting(104))).toEqual({ before: 104, maximum: 104 });

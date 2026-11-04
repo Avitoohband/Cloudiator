@@ -1,6 +1,8 @@
 import { test, expect, type BrowserContext, type Locator, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
+import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2';
+import { trainingHint, trainingRoom } from '../../src/features/schedule/training-cap';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
 import type { GameCommand, Phase } from '../../supabase/functions/_shared/contracts/commands';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads';
@@ -10,7 +12,8 @@ import { openMenu } from './shell-helpers';
 import { expectTimeOnOneLine, slotTime, storeClock } from './slot-time';
 import { contrastIssues, expectPointsFit, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 
-async function planningFlow(context: BrowserContext, setup?: (state: OwnerState) => void) {
+/** `rulesVersion`: the active rules version the revision read names (Patch 1.6; the live transport's 'v1' when left out). */
+async function planningFlow(context: BrowserContext, setup?: (state: OwnerState) => void, options: { rulesVersion?: string | null } = {}) {
   let state = structuredClone(ownerFixture);
   state.wallets.money = 300;
   setup?.(state);
@@ -28,7 +31,7 @@ async function planningFlow(context: BrowserContext, setup?: (state: OwnerState)
     localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test-only', token_type: 'bearer', expires_at: exp, expires_in: 3600, user }));
   }, { user });
   // The live camp's public reads; this spec's own handler (registered next, so it runs first) hands it everything else.
-  const publicReads = await routeLiveReads(context, { world: emptyWorld() });
+  const publicReads = await routeLiveReads(context, { world: emptyWorld(), rulesVersion: options.rulesVersion });
   await context.route('http://127.0.0.1:54321/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
@@ -86,7 +89,7 @@ async function planningFlow(context: BrowserContext, setup?: (state: OwnerState)
   });
   return { commands, processedSlotIndex: state.processedSlotIndex, loseNext: () => { lose = true; }, processing: (value: boolean) => { processing = value; }, conflictNext: () => { conflict = true; },
     scheduleConflictNext: () => { scheduleConflict = true; }, receivedAt: (ms: number | null) => { receivedAt = ms; }, state: () => state,
-    publish: () => publicReads.setWorld({ ...emptyWorld(), revision: randomUUID() }) };
+    publish: () => publicReads.setWorld({ ...emptyWorld(), revision: randomUUID() }), publicReads };
 }
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.'); });
@@ -913,10 +916,13 @@ test.describe('what a Rest gives back', () => {
     state.currentActivity = { ...state.currentActivity!, kind: 'training', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
     more?.(state);
   };
-  /** Opens the Schedule with the clock held in the morning; `processedSlotIndex` is the slot the owner read says the server has processed (the real current one when left out). */
-  async function openAtMorning(page: Page, context: BrowserContext, stamina: number, more?: (state: OwnerState) => void, processedSlotIndex?: number) {
+  /**
+   * Opens the Schedule with the clock held in the morning; `processedSlotIndex` is the slot the owner read says the server has processed
+   * (the held morning when left out: a clock behind the processed slot gives no number, Patch 1.6).
+   */
+  async function openAtMorning(page: Page, context: BrowserContext, stamina: number, more?: (state: OwnerState) => void, processedSlotIndex = MORNING_SLOT) {
     const flow = await planningFlow(context, rester(stamina, more));
-    if (processedSlotIndex !== undefined) flow.state().processedSlotIndex = processedSlotIndex;
+    flow.state().processedSlotIndex = processedSlotIndex;
     await page.goto('/game/');
     // This live scenario already needs a synced clock; let the shell finish entry before sending its hover interaction.
     await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
@@ -972,8 +978,12 @@ test.describe('what a Rest gives back', () => {
     // A Rest in the morning looks to the next morning, after the afternoon's training and the evening's Rest (74 - 20, then full).
     await page.getByLabel('morning activity').selectOption('rest');
     await expect(hintOf(page, 'morning')).toHaveText('Stamina will already be full (104): this rest adds nothing. Costs nothing.');
-    // The number follows the clock: in the afternoon the evening's Rest comes straight after the running, paid, afternoon.
+    // The number follows the clock: in the afternoon the evening's Rest comes straight after the running, paid, afternoon (the owner read
+    // says the server has processed it).
     await undoDay(page).click();
+    flow.state().processedSlotIndex = MORNING_SLOT + 1;
+    flow.publish();
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), (MORNING_SLOT + 1) * SLOT_MS + 25 * 60_000);
     await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +30 (74 → 104). Costs nothing.');
     expect(flow.commands).toEqual([]);
@@ -1071,6 +1081,194 @@ test.describe('what a Rest gives back', () => {
     await openAtMorning(page, context, 74, state => { state.currentBuild = { ...state.currentBuild, equipment: { ...state.currentBuild.equipment, weapon: 'item-that-is-gone' } }; });
     await expect(hintOf(page, 'evening')).toHaveText(NO_NUMBER);
     await expect(hintOf(page, 'morning')).toHaveText('Practice yard: builds experience. Costs 20 stamina.');
+  });
+});
+
+// Patch 1.6 (spec "Client": the Training line, the generic daily-limit warning, tournament entry and Rest projections): the Schedule words its
+// choices with the active rules version that the revision read names (M27's public `rules_version`), never with numbers of its own. The
+// live transport answers 'v1' (before the economy switch) unless a test sets 'v2'.
+test.describe('the Schedule under the active rules', () => {
+  const MORNING_SLOT = 373_248, AFTERNOON_SLOT = MORNING_SLOT + 1;
+  const MORNING = MORNING_SLOT * SLOT_MS + 25 * 60_000, AFTERNOON = AFTERNOON_SLOT * SLOT_MS + 25 * 60_000;
+  const NO_NUMBER = 'Refills stamina to full. Costs nothing.';
+  const V1_TRAINING = 'Practice yard: builds experience. Costs 20 stamina.';
+  /** The fixture owner's line (level 1, 10 points): below the cap. */
+  const BELOW = trainingHint(trainingRoom(ownerFixture.progression, RULES_V2), RULES_V2.activityStamina.training);
+  const FULL = 'Training is full: 94 points, and level 1 allows 14. It gives nothing until level 22. When Training runs, it costs 20 stamina.';
+  const WARNING = 'Only two Training activities can run per game day (morning, afternoon and evening). After two, another Training request becomes Rest, '
+    + 'costs no Training stamina and refills stamina when it ends. Training at the point cap still uses one of the two activities.';
+  const ENTRY = 'Tournament entry costs 0 stamina. Choose Arena and opt in before the cutoff; a bracket needs at least two entrants in your league. '
+    + 'If no bracket forms, regular Arena still costs 25 stamina and needs enough stamina.';
+  const warning = (page: Page) => page.locator('.planning-form [role="note"]').filter({ hasText: WARNING });
+  const savedLine = (page: Page) => page.locator('.schedule-saved');
+  /** Opens the Schedule with the clock held at `at`, the server having processed that slot. */
+  async function openHeld(page: Page, context: BrowserContext, at: number, setup: (state: OwnerState) => void, rulesVersion: string) {
+    const flow = await planningFlow(context, setup, { rulesVersion });
+    flow.state().processedSlotIndex = Math.floor(at / SLOT_MS);
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+    const schedule = await openMenu(page, 'Schedule');
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), at);
+    return { flow, schedule };
+  }
+
+  test('says how far the point cap lets Training go, and warns before Save without blocking it', async ({ page, context }, testInfo) => {
+    const flow = await planningFlow(context, undefined, { rulesVersion: 'v2' });
+    await page.goto('/game/');
+    const schedule = await openMenu(page, 'Schedule');
+    expect(BELOW).toBe('Practice yard: +1 attribute point, up to 14 at level 1 (you have 10). When Training runs, it costs 20 stamina.');
+    await expect(hintOf(page, 'morning')).toHaveText(BELOW);
+    // The saved day (training, expedition, rest) holds a Training: the warning shows before anything is sent, describes Save, and Save
+    // stays a plain Save (no dialog, no error styling).
+    await expect(warning(page)).toBeVisible();
+    await expect(warning(page)).not.toHaveClass(/form-error/);
+    await expect(saveDay(page)).toHaveAccessibleDescription(/^Only two Training activities can run per game day/);
+    // A three-Training draft: still warned, Save is enabled and saves the whole day as one command, accepted as planned.
+    await page.getByLabel('afternoon activity').selectOption('training');
+    await page.getByLabel('evening activity').selectOption('training');
+    await expect(warning(page)).toBeVisible();
+    await expect(saveDay(page)).toBeEnabled();
+    await expect(hintOf(page, 'evening')).toHaveText(BELOW);
+    await expect(schedule).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
+    expect(await contrastIssues(schedule), 'the schedule with the daily-limit warning').toEqual([]);
+    await warning(page).scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, 'economy-training-warning');
+    await reviewShot360(page, testInfo, 'economy-training-warning', warning(page));
+    expect(flow.commands).toEqual([]);
+    // The Schedule's own sheet is the one dialog open; Save opens no confirmation over it.
+    const dialogs = await page.getByRole('dialog').count();
+    await saveDay(page).click();
+    await expect(savedLine(page)).toContainText('Saved.');
+    await expect(page.getByRole('dialog')).toHaveCount(dialogs);
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    expect(flow.commands.map(command => command.kind === 'edit-day-schedule' ? command.day : null))
+      .toEqual([{ morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } }]);
+    // A mid-day replan with one Training: the warning stays (the earlier Training of the day is not known here), and Save still saves.
+    await page.getByLabel('morning activity').selectOption('rest');
+    await page.getByLabel('afternoon activity').selectOption('expedition:woodland');
+    await expect(warning(page)).toBeVisible();
+    await expect(saveDay(page)).toHaveAccessibleDescription(/^Only two Training activities can run per game day/);
+    await saveDay(page).click();
+    await expect(savedLine(page)).toContainText('Saved.');
+    expect(flow.commands).toHaveLength(2);
+    // A day with no Training has no warning, and Save is described by its own note only.
+    await page.getByLabel('evening activity').selectOption('rest');
+    await expect(warning(page)).toHaveCount(0);
+    await expect(saveDay(page)).toHaveAccessibleDescription('One save for the whole day: all three parts are saved together, or none is.');
+  });
+
+  test('says Training is full at the cap, and the line and the warning wrap at 360 × 740 with no sideways scroll', async ({ page, context }, testInfo) => {
+    await planningFlow(context, state => { state.progression.earnedAttributePoints = 94; state.progression.unspentAttributePoints = 84; }, { rulesVersion: 'v2' });
+    await page.goto('/game/');
+    await openMenu(page, 'Schedule');
+    await expect(hintOf(page, 'morning')).toHaveText(FULL);
+    await hintOf(page, 'morning').scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, 'economy-training-full');
+    await reviewShot360(page, testInfo, 'economy-training-full', hintOf(page, 'morning'));
+    const size = page.viewportSize()!;
+    await page.setViewportSize({ width: 360, height: 740 });
+    for (const line of [hintOf(page, 'morning'), warning(page)]) {
+      await line.scrollIntoViewIfNeeded();
+      expect(await noHorizontalScroll(page), 'no sideways scroll at 360 px').toBe(true);
+      expect(await line.evaluate(el => el.scrollWidth <= el.clientWidth && el.getBoundingClientRect().right <= window.innerWidth), 'the line fits at 360 px').toBe(true);
+      // It wraps: more than two lines of text.
+      expect(await line.evaluate(el => el.getBoundingClientRect().height > 2 * parseFloat(getComputedStyle(el).lineHeight)), 'the line wraps').toBe(true);
+    }
+    await page.setViewportSize(size);
+  });
+
+  test('keeps every v1 line on a live world still on rules v1', async ({ page, context }) => {
+    await storeClock(context, '24');
+    await planningFlow(context, undefined, { rulesVersion: 'v1' });
+    await page.goto('/game/');
+    const schedule = await openMenu(page, 'Schedule');
+    await expect(hintOf(page, 'morning')).toHaveText(V1_TRAINING);
+    await expect(schedule.getByText('Only two Training activities')).toHaveCount(0);
+    await expect(saveDay(page)).not.toHaveAccessibleDescription(/Only two Training/);
+    await page.getByLabel('evening activity').selectOption('arena');
+    await expect(hintOf(page, 'evening')).toHaveText('Bout revealed at minute 60, rewards at 80. Wed and Sat 18:40 UTC: the tournament. Costs 25 stamina.');
+  });
+
+  test('says tournament entry is free under v2, while regular Arena keeps its cost', async ({ page, context }, testInfo) => {
+    await storeClock(context, '24');
+    await planningFlow(context, undefined, { rulesVersion: 'v2' });
+    await page.goto('/game/');
+    await openMenu(page, 'Schedule');
+    await page.getByLabel('evening activity').selectOption('arena');
+    await expect(hintOf(page, 'evening')).toHaveText(`Bout revealed at minute 60, rewards at 80. Costs 25 stamina. Wed and Sat 18:40 UTC: the tournament. ${ENTRY}`);
+    await expect(page.getByLabel('evening activity')).toHaveAccessibleDescription(/Tournament entry costs 0 stamina\./);
+    await hintOf(page, 'evening').scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, 'economy-arena-entry');
+    await reviewShot360(page, testInfo, 'economy-arena-entry', hintOf(page, 'evening'));
+  });
+
+  test('follows the rules version of the revision read alone: the same revision, no actor reload', async ({ page, context }) => {
+    const flow = await planningFlow(context, undefined, { rulesVersion: 'v1' });
+    await page.goto('/game/');
+    await openMenu(page, 'Schedule');
+    await expect(hintOf(page, 'morning')).toHaveText(V1_TRAINING);
+    const actorReads = flow.publicReads.count('world_actor_reads');
+    // The operator's switch: the next revision read names v2, with the world's revision unchanged.
+    flow.publicReads.setRulesVersion('v2');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(hintOf(page, 'morning')).toHaveText(BELOW);
+    await expect(warning(page)).toBeVisible();
+    expect(flow.publicReads.count('world_actor_reads')).toBe(actorReads);
+    // A read that names no version (a malformed row) words everything as v1 again.
+    flow.publicReads.setRulesVersion(null);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(hintOf(page, 'morning')).toHaveText(V1_TRAINING);
+    await expect(warning(page)).toHaveCount(0);
+  });
+
+  test("gives no number for a Rest that depends on the day's earlier Training, which the Schedule cannot know", async ({ page, context }, testInfo) => {
+    // The afternoon's Training runs (60 of 104 left); the player plans the morning and the afternoon as Rests and the evening as Training.
+    // Under v1 the next morning's Rest finds 60 - 20; under v2 the evening may be the day's third Training (a Rest that refills) or not.
+    const { flow } = await openHeld(page, context, AFTERNOON, state => {
+      state.stamina = { current: 60, maximum: 104 };
+      state.schedule = { morning: { kind: 'rest' }, afternoon: { kind: 'rest' }, evening: { kind: 'training' } };
+      state.currentActivity = { ...state.currentActivity!, kind: 'training', startsAtMs: AFTERNOON_SLOT * SLOT_MS, endsAtMs: (AFTERNOON_SLOT + 1) * SLOT_MS };
+    }, 'v2');
+    await expect(hintOf(page, 'morning')).toHaveText(NO_NUMBER);
+    await expect(hintOf(page, 'morning').locator('b')).toHaveCount(0);
+    // The next afternoon's Rest comes after the next morning's, which refills either way: its number is known.
+    await expect(hintOf(page, 'afternoon')).toHaveText('Stamina will already be full (104): this rest adds nothing. Costs nothing.');
+    await expect(hintOf(page, 'evening')).toHaveText(BELOW);
+    await hintOf(page, 'morning').scrollIntoViewIfNeeded();
+    await reviewShot(page, testInfo, 'economy-rest-unknown');
+    await reviewShot360(page, testInfo, 'economy-rest-unknown', hintOf(page, 'morning'));
+    // On rules v1 the same day has its number.
+    flow.publicReads.setRulesVersion('v1');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(hintOf(page, 'morning')).toHaveText('Refills stamina to full: +64 (40 → 104). Costs nothing.');
+    expect(flow.commands).toEqual([]);
+  });
+
+  test("keeps the Rest number under v2 when the day's Training so far is the running morning", async ({ page, context }) => {
+    // The morning's Training runs and is the day's first; the afternoon's is the second and runs: 74 - 20 before the evening's Rest.
+    await openHeld(page, context, MORNING, state => {
+      state.stamina = { current: 74, maximum: 104 };
+      state.schedule = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'rest' } };
+      state.currentActivity = { ...state.currentActivity!, kind: 'training', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
+    }, 'v2');
+    await expect(hintOf(page, 'evening')).toHaveText('Refills stamina to full: +50 (54 → 104). Costs nothing.');
+    // A third Training in the evening would be a Rest: the next morning's Rest then adds nothing (v1 would claim +70).
+    await page.getByLabel('morning activity').selectOption('rest');
+    await page.getByLabel('evening activity').selectOption('training');
+    await expect(hintOf(page, 'morning')).toHaveText('Stamina will already be full (104): this rest adds nothing. Costs nothing.');
+  });
+
+  test('says on My gladiator what the running Rest gives under v2, whatever the saved day holds', async ({ page, context }) => {
+    await planningFlow(context, state => {
+      state.stamina = { current: 74, maximum: 104 };
+      state.schedule = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } };
+      state.currentActivity = { ...state.currentActivity!, kind: 'rest', label: 'Resting in camp', startsAtMs: MORNING_SLOT * SLOT_MS, endsAtMs: (MORNING_SLOT + 1) * SLOT_MS };
+    }, { rulesVersion: 'v2' });
+    await page.goto('/game/');
+    await openMenu(page, 'My gladiator');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true);
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), MORNING);
+    await expect(page.getByTestId('rest-gain')).toHaveText('Stamina refills to 104 when it ends: +30');
   });
 });
 

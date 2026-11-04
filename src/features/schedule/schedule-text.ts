@@ -1,16 +1,18 @@
 // The words and choices of the Schedule panel (launch feedback, 2026-10-25): which choices a part of the day offers, what each
 // one costs and does, which part is running, and what a saved day says. Pure, so the panel only lays them out. The rules
-// come from `RULES_V1` (stamina costs, the Arena bout's timing, the tournament's days and hour, the parts Arena may take),
-// never from numbers written here.
+// come from the rules given (`RULES_V1` by default; the active rules' since Patch 1.6: stamina costs, the Arena bout's timing,
+// the tournament's days, hour and entry, the parts Arena may take), never from numbers written here.
 import type { ActivityChoice, DayScheduleValue, Phase, Schedule } from '@contracts/commands';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { slotAt } from '@domain/clock';
 import { RULES_V1 } from '@domain/rules-v1';
+import { isRulesV2 } from '@domain/rules';
 import { choiceAllowedInPhase } from '@domain/schedule-choice';
 import type { Rules } from '@domain/types';
 import type { ClockMode } from '../../lib/clock-setting';
 import { utcClockText } from '../../lib/time-format';
 import { slotTimeText } from './slot-time';
+import { countWord, trainingHint, type TrainingRoom } from './training-cap';
 
 /** The parts of the day, in order. */
 export const PHASES: readonly Phase[] = RULES_V1.clock.phases;
@@ -61,22 +63,38 @@ export function optionLabel(choice: ActivityChoice): string {
 const staminaText = (cost: number) => cost === 0 ? 'Costs nothing.' : `Costs ${cost} stamina.`;
 
 /**
+ * What tournament entry costs under `rules` v2 (spec "Tournament entry stamina"): a formed bracket is free, and regular Arena keeps its
+ * cost. Null under v1, whose tournament costs what Arena does (the Arena line's own cost). Every number is `rules`'s.
+ */
+export function tournamentEntryText(rules: Rules): string | null {
+  if (!isRulesV2(rules)) return null;
+  const { tournament, arena } = rules.activityStamina;
+  return `Tournament entry costs ${tournament} stamina. Choose Arena and opt in before the cutoff; a bracket needs at least `
+    + `${countWord(rules.tournament.minimumEntrants)} entrants in your league. If no bracket forms, regular Arena still costs ${arena} stamina and needs enough stamina.`;
+}
+
+/**
  * One line about a choice, under its select: what it does and what it costs in stamina. Arena also says when its bout is
  * revealed and rewarded within the slot, and that the Wednesday and Saturday evening at the tournament's hour is the tournament.
  * All numbers are `rules`'s: the stamina costs, the reveal minute, the slot's length, the tournament's days and hour (UTC); the
  * hour is written in the form `clock` asks for (the device's clock setting): "6:40 PM UTC" or "18:40 UTC".
+ *
+ * Patch 1.6: Training says how far the point cap lets it go (`trainingHint` of the owner's `room`, which is null under v1: the old
+ * line); under v2 Arena keeps its own cost and then says that tournament entry is free (`tournamentEntryText`).
  */
-export function choiceHint(choice: ActivityChoice, clock: ClockMode, rules: Rules = RULES_V1): string {
+export function choiceHint(choice: ActivityChoice, clock: ClockMode, rules: Rules = RULES_V1, room: TrainingRoom = null): string {
   const cost = staminaText(rules.activityStamina[choice.kind]);
   switch (choice.kind) {
-    case 'training': return `Practice yard: builds experience. ${cost}`;
+    case 'training': return trainingHint(room, rules.activityStamina.training);
     case 'rest': return `Recovers stamina. ${cost}`;
     case 'expedition': return `Gathers loot and gold over the slot. ${cost}`;
     case 'arena': {
       const { utcWeekdays, hourUtc, minuteUtc } = rules.tournament;
       const days = utcWeekdays.map(day => WEEKDAYS[day]).join(' and ');
-      return `Bout revealed at minute ${rules.arena.revealAfterMs / MINUTE_MS}, rewards at ${rules.clock.slotMs / MINUTE_MS}. `
-        + `${days} ${utcClockText(hourUtc, minuteUtc, clock)}: the tournament. ${cost}`;
+      const bout = `Bout revealed at minute ${rules.arena.revealAfterMs / MINUTE_MS}, rewards at ${rules.clock.slotMs / MINUTE_MS}.`;
+      const tournament = `${days} ${utcClockText(hourUtc, minuteUtc, clock)}: the tournament.`;
+      const entry = tournamentEntryText(rules);
+      return entry === null ? `${bout} ${tournament} ${cost}` : `${bout} ${cost} ${tournament} ${entry}`;
     }
   }
 }

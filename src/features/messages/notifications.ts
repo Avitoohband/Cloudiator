@@ -39,10 +39,15 @@ export function watchLabel(note: GameNotification): { wide: string; narrow: stri
   return { wide: trip ? '▶ Watch the trip' : '▶ Watch', narrow: trip ? '▶ The trip' : '▶ Watch', name: `${trip ? 'Watch the trip' : 'Watch'}: ${titleOf(note)}` };
 }
 
+/** Patch 1.6 (spec "Notification of a Training at the cap"): a Training that gave no point was full for the gladiator's level. */
+export const TRAINING_FULL_LINE = 'No point: Training was full for your level';
+
 /**
  * A notification as a title and its lines, in the order gold, XP, the level reached, renown, attribute points, the rating change,
  * each item found and the gold for items that did not fit (the result screens' wording). Only what was earned is listed; a result
- * that earned nothing says so in one line. `levelUp` is the level reached (the same one the "Level up!" line names) when this result raised the level, else null.
+ * that earned nothing says so in one line. A Training that gave no attribute point (the point cap, Patch 1.6) says so in its place,
+ * never "No rewards"; an excess Training request settles as a Rest, which is no notification. `levelUp` is the level reached (the
+ * same one the "Level up!" line names) when this result raised the level, else null.
  */
 export function notificationLines(n: GameNotification): { title: string; lines: string[]; levelUp: number | null } {
   const r = n.summary.rewards, rating = n.summary.ratingDelta;
@@ -51,7 +56,7 @@ export function notificationLines(n: GameNotification): { title: string; lines: 
     r.xp ? `+${r.xp} XP` : null,
     n.levelAfter !== null ? levelUpLine(n.levelAfter) : null,
     r.renown ? `+${r.renown} renown` : null,
-    r.attributePoints ? `+${r.attributePoints} attribute point${r.attributePoints === 1 ? '' : 's'}` : null,
+    r.attributePoints ? `+${r.attributePoints} attribute point${r.attributePoints === 1 ? '' : 's'}` : n.kind === 'training' ? TRAINING_FULL_LINE : null,
     rating === undefined ? null : rating === 0 ? 'Rating unchanged' : `Rating ${rating > 0 ? '+' : '−'}${Math.abs(rating)}`,
     ...(r.items ?? []).map(itemLine),
     r.overflowMoney ? `+${r.overflowMoney} gold for items that did not fit` : null,

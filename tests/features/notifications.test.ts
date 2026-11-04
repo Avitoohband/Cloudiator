@@ -19,8 +19,13 @@ it('lists what training earned: XP and attribute points, with the singular for o
   expect(notificationLines(note('training', { rewards: rewards({ xp: 40, attributePoints: 1 }) }))).toEqual({
     title: 'Training finished', lines: ['+40 XP', '+1 attribute point'], levelUp: null });
   expect(notificationLines(note('training', { rewards: rewards({ attributePoints: 3 }) })).lines).toEqual(['+3 attribute points']);
-  // A training that credited nothing (the attribute points were capped) says so rather than showing an empty card.
-  expect(notificationLines(note('training')).lines).toEqual(['No rewards']);
+  // Patch 1.6 (spec "Notification of a Training at the cap"): a Training that gave no point (the point cap was reached) says why, in one
+  // line under the unchanged title, rather than "No rewards".
+  expect(notificationLines(note('training'))).toEqual({ title: 'Training finished', lines: ['No point: Training was full for your level'], levelUp: null });
+  // One with points keeps its "+1 attribute point".
+  expect(notificationLines(note('training', { rewards: rewards({ attributePoints: 1 }) })).lines).toEqual(['+1 attribute point']);
+  // Other kinds that earned nothing still say "No rewards".
+  expect(notificationLines(note('arena', { result: 'defeat' })).lines).toEqual(['No rewards']);
 });
 
 it('lists an expedition: the destination and result, gold, XP, each item with its rarity and tier, and the gold for items that did not fit', () => {

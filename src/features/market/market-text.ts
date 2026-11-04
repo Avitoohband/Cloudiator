@@ -4,7 +4,9 @@
 import type { ApiErrorCode, GameCommand } from '@contracts/commands';
 import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
+import { salvageSellValue } from '@domain/economy';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { Rules } from '@domain/types';
 
 /**
  * The sale fee, a whole percent of the price kept from the seller's credit (spec §9: 5%, rounded down), from the rules'
@@ -95,22 +97,26 @@ export function itemIcon(item: Pick<OfferItem, 'catalogId'>): string {
   const slot = CATALOG_V1.items[item.catalogId]?.slot;
   return slot === 'offHand' ? '🛡' : slot === 'head' ? '⛑' : slot === 'body' ? '🥋' : slot === 'feet' ? '🥾' : slot === 'weapon' ? '🗡' : '📦';
 }
-/** What an NPC merchant pays for one unit of this catalog variant (salvage too), or null when NPCs do not buy it. */
-function npcUnitValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity'>): number | null {
+/**
+ * What an NPC merchant pays for one unit of this catalog variant, or null when NPCs do not buy it. Salvage's value is `rules`'s (the
+ * active rules', Patch 1.6: 10 gold under v1, 4 under v2); gear values are the catalog's, the same under every version.
+ */
+function npcUnitValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity'>, rules: Rules): number | null {
   if (item.catalogVersion !== CATALOG_V1.version) return null;
-  if (item.catalogId === CATALOG_V1.salvage.id) return CATALOG_V1.salvage.npcSellValue;
+  if (item.catalogId === CATALOG_V1.salvage.id) return salvageSellValue(rules);
   const entry = CATALOG_V1.items[item.catalogId];
   return entry && entry.tier === item.tier && entry.rarity === item.rarity ? entry.npcSellValue : null;
 }
 /** What an NPC merchant pays for the whole offer (per unit times quantity), for comparison (spec §9), or null when NPCs do not buy it. */
-export function npcValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'quantity'>): number | null {
-  const unit = npcUnitValue(item);
+export function npcValue(item: Pick<OfferItem, 'catalogId' | 'catalogVersion' | 'tier' | 'rarity' | 'quantity'>, rules: Rules = RULES_V1): number | null {
+  const unit = npcUnitValue(item, rules);
   return unit === null ? null : unit * item.quantity;
 }
-export const npcValueText = (item: Parameters<typeof npcValue>[0]): string => {
-  const value = npcValue(item);
+/** The offer's NPC value in words: "NPC sale value: 48 gold (4 gold each)" for a stack, "NPC sale value: 95 gold" for one piece. */
+export const npcValueText = (item: Parameters<typeof npcValue>[0], rules: Rules = RULES_V1): string => {
+  const value = npcValue(item, rules);
   return value === null ? 'NPC merchants do not buy this item'
-    : `NPC sale value: ${money(value)}${item.quantity > 1 ? ` (${amount(value / item.quantity)} each)` : ''}`;
+    : `NPC sale value: ${money(value)}${item.quantity > 1 ? ` (${money(value / item.quantity)} each)` : ''}`;
 };
 
 /**

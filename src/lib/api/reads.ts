@@ -28,19 +28,22 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
 }
 /**
  * The revision read as this client reads it: the shared contract's `RevisionState` and the server's newest patch (`latest_patch`, M26;
- * Patch A spec, "Patch numbers and the changelog"), null unless it is a well-formed patch number. A client-side type: the shared
- * contracts under supabase/functions/_shared do not change, so the Edge functions need no deploy.
+ * Patch A spec, "Patch numbers and the changelog"), null unless it is a well-formed patch number, and the active rules version
+ * (`rules_version`, M27; Patch 1.6 spec, "Client"): the column's text as it is (an unknown 'v3' too; `displayRules` words it), absent when
+ * the row names none or a value that is not text. A client-side type: the shared contracts under supabase/functions/_shared do not
+ * change, so the Edge functions need no deploy.
  */
-export type RevisionRead = RevisionState & { latestPatch: string | null };
+export type RevisionRead = RevisionState & { latestPatch: string | null; rulesVersion?: string };
 export async function readRevision(client: SupabaseClient): Promise<RevisionRead> {
-  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null;latest_patch:unknown}>(
-    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index,latest_patch').single());
+  const row = checked<{revision:string;server_now_ms:number;slot_index:number;published_slot_index:number|null;latest_patch:unknown;rules_version?:unknown}>(
+    await client.from('world_revision').select('revision,server_now_ms,slot_index,published_slot_index,latest_patch,rules_version').single());
   return { revision: row.revision, serverNowMs: Number(row.server_now_ms), slotIndex: Number(row.slot_index),
     publishedSlotIndex: row.published_slot_index === null || row.published_slot_index === undefined ? null : Number(row.published_slot_index),
-    latestPatch: typeof row.latest_patch === 'string' && patchSortKey(row.latest_patch) !== null ? row.latest_patch : null };
+    latestPatch: typeof row.latest_patch === 'string' && patchSortKey(row.latest_patch) !== null ? row.latest_patch : null,
+    ...(typeof row.rules_version === 'string' ? { rulesVersion: row.rules_version } : {}) };
 }
-/** A revision read as the world snapshot carries it: without the newest patch, which the sync keeps on its own. */
-export function revisionState({ latestPatch: _latest, ...state }: RevisionRead): RevisionState {
+/** A revision read as the world snapshot carries it: without the newest patch and the rules version, which the sync keeps on its own. */
+export function revisionState({ latestPatch: _latest, rulesVersion: _rules, ...state }: RevisionRead): RevisionState {
   return state;
 }
 export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> {

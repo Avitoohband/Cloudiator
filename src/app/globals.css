@@ -51,6 +51,8 @@ main[tabindex="-1"]:focus { outline: none; }
 .schedule-slot p:last-child { margin-bottom: 0; }
 .schedule-running { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: var(--ink); background: #23304a; border: 1px solid #5b7bb5; border-left-width: 3px; }
 .schedule-unsaved { margin: 1rem 0 0; font-size: .85rem; color: var(--gold); }
+/* Patch 1.6: the generic daily Training limit, a note before Save (the approved mockup's amber box), never an error. */
+.schedule-warning { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: #f5e4b8; background: #373326; border: 1px solid #a58f57; border-left-width: 3px; }
 .schedule-saved { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: #c9f2dd; background: #1f4a3a; border: 1px solid #4fb58a; }
 .schedule-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
 .schedule-actions .primary-button { flex: 1 1 10rem; width: auto; margin: 0; }

@@ -175,44 +175,34 @@ client live before requesting the separate activation go.
    and obtain any separately required go before a deliberate later call. A failed transaction rolls back cuts, receipts,
    ledgers, rules, mirror/revision and audit together. A committed replay returns the original result with `replayed:true`
    without cutting again, including wallets created after the original commit. Do not describe a replay as a fresh cut.
-3. Immediately after commit, read the immutable audit and reconcile it with the saved returned JSON:
+3. Immediately after commit, as the database owner, run [`scripts/economy-switch-readback.sql`](../../scripts/economy-switch-readback.sql)
+   and reconcile it with the saved returned JSON. It is one read-only SELECT with one row: the immutable audit, the active
+   version and public mirror, the economy-cut ledger, and the cut receipts by **receipt identity**, not timestamps. Retain the
+   whole row. `tests/db/economy.test.ts` runs it in a read-only transaction after a switch with a held fee and after one
+   without.
+   - Every boolean column is true:
+     - `one_audit`: exactly one audit;
+     - `audit_matches_result`: its timestamp, `wallets_scanned`, `wallets_cut`, `money_before` and `money_after` equal its
+       stored result, with `replayed:false` there;
+     - `active_is_v2` and `mirror_is_v2`: the active version and the public mirror;
+     - `ledger_matches_audit`: the ledger count (`ledger_rows`) equals `wallets_cut`, and its signed delta (`ledger_delta`)
+       equals `money_after-money_before`;
+     - `receipts_match_audit`: `cut_receipts`, `linked_ledger_rows`, `distinct_receipts` and `distinct_wallets` all equal
+       `wallets_cut`, and `linked_delta` equals `ledger_delta`;
+     - `each_receipt_matches`: each cut receipt's request, digest, ledger row and cut, as before;
+     - `each_receipt_at_least_quarter`: each cut wallet kept at least a quarter, rounded up:
+       `(result->>'moneyAfter')::bigint >= ((result->>'moneyBefore')::bigint+3)/4`.
+   - The audit's values equal the saved returned JSON (`switchedAtMs`, `walletsScanned`, `walletsCut`, `moneyBefore`,
+     `moneyAfter`).
+   - `exact_quarter_receipts` counts the cut receipts left with exactly that quarter. A wallet that held no gold for a queued
+     fee is always cut to exactly a quarter, so the count equals `wallets_cut` when the precheck's `held` was 0; a receipt
+     above an exact quarter is always a wallet that kept held gold.
+   - `revision` is printed only: its first number must be above the one in `select revision from public.world_revision` read
+     just before step 2, even if no wallet was cut.
 
-   ```sql
-   select * from private.economy_switches where version='v2';
-   select private.active_rules_version() as active_version, rules_version, revision
-     from public.world_revision where rules_version='v2';
-   select count(*) as wallets_cut, coalesce(sum(money_delta),0) as delta
-     from public.wallet_ledger where reason='economy-cut';
-   ```
-
-   There must be exactly one audit, with matching timestamp, `wallets_scanned`, `wallets_cut`, `money_before`, `money_after`
-   and result (`replayed:false` in the stored result). Active version and public mirror must both be `v2`; revision must have
-   advanced even if no wallet was cut. The ledger count equals `wallets_cut`, and its signed delta equals
-   `money_after-money_before`. Also reconcile by **receipt identity**, not timestamps:
-
-   ```sql
-   with cuts as (
-     select * from public.operation_receipts where request->>'kind'='economy-cut'
-   ), linked as (
-     select r.*,l.gladiator_id as ledger_gladiator,l.money_delta,l.renown_delta,l.reason
-       from cuts r left join public.wallet_ledger l using(receipt_id)
-   )
-   select (select count(*) from cuts) as cut_receipts,
-     count(money_delta) as linked_ledger_rows,count(distinct receipt_id) as distinct_receipts,
-     count(distinct gladiator_id) as distinct_wallets,coalesce(sum(money_delta),0) as linked_delta,
-     coalesce(bool_and(coalesce(request='{"kind":"economy-cut","version":"v2"}'::jsonb
-       and request_digest=sha256(convert_to('economy-cut:v2:'||gladiator_id::text,'UTF8'))
-       and ledger_gladiator=gladiator_id and reason='economy-cut' and renown_delta=0
-       and (result->>'cut')::bigint>0
-       and (result->>'moneyBefore')::bigint-(result->>'moneyAfter')::bigint=(result->>'cut')::bigint
-       and money_delta=-(result->>'cut')::bigint,false)),true) as each_receipt_matches
-   from linked;
-   ```
-
-   All four counts equal audited `wallets_cut`, the linked delta equals the whole economy-cut delta above, and
-   `each_receipt_matches` is true. Zero-cut wallets have no cut receipt/ledger but are included in the audited scanned count
-   and money totals. After commands resume, do not compare historic `money_after` with the live sum of wallets; the stored
-   result/audit and its uniquely linked receipt/ledger deltas remain the authoritative reconciliation.
+   Zero-cut wallets have no cut receipt/ledger but are included in the audited scanned count and money totals. After commands
+   resume, do not compare historic `money_after` with the live sum of wallets; the stored result/audit and its uniquely linked
+   receipt/ledger deltas remain the authoritative reconciliation.
 4. After these immediate checks succeed, promptly publish the approved, truthful patch note and patch record through the
    existing owner-only publication workflow. Publication must accurately distinguish a completed activation from a refusal
    or an already-committed replay; never announce an unverified cut. Retain the readbacks with the release record.

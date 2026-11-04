@@ -276,6 +276,28 @@ async function switchPrecheck() {
   return { ...row, checked_at_ms: Number(row.checked_at_ms), open_boundary: Number(row.open_boundary),
     wallets: Number(row.wallets), money_now: Number(row.money_now), money_after_cut: Number(row.money_after_cut), held: Number(row.held) };
 }
+// The runbook's post-switch read-back (step 3) as one read-only script: one row of values to retain and checks that must all be true.
+const READBACK_CHECKS = ['one_audit', 'audit_matches_result', 'active_is_v2', 'mirror_is_v2', 'ledger_matches_audit',
+  'receipts_match_audit', 'each_receipt_matches', 'each_receipt_at_least_quarter'];
+const READBACK_VALUES = ['audits', 'switched_at_ms', 'wallets_scanned', 'wallets_cut', 'money_before', 'money_after', 'result',
+  'active_version', 'rules_version', 'revision', 'ledger_rows', 'ledger_delta', 'cut_receipts', 'linked_ledger_rows',
+  'distinct_receipts', 'distinct_wallets', 'linked_delta', 'exact_quarter_receipts'];
+/** Runs scripts/economy-switch-readback.sql in a read-only transaction; every check true, the audit the switch's. The exact-quarter count. */
+async function switchReadback(result: SwitchResult) {
+  const source = readFileSync(new URL('../../scripts/economy-switch-readback.sql', import.meta.url), 'utf8');
+  const rows = [...await sql.begin('read only', tx => tx.unsafe(source))];
+  expect(rows).toHaveLength(1);
+  const row = rows[0];
+  expect(Object.keys(row).sort()).toEqual([...READBACK_CHECKS, ...READBACK_VALUES].sort());
+  expect(Object.fromEntries(READBACK_CHECKS.map(check => [check, row[check]])))
+    .toEqual(Object.fromEntries(READBACK_CHECKS.map(check => [check, true])));
+  expect({ audits: Number(row.audits), at: Number(row.switched_at_ms), scanned: Number(row.wallets_scanned), cut: Number(row.wallets_cut),
+    before: Number(row.money_before), after: Number(row.money_after), result: row.result, active: row.active_version, mirror: row.rules_version,
+    receipts: Number(row.cut_receipts), delta: Number(row.ledger_delta) }).toEqual({ audits: 1, at: result.switchedAtMs,
+    scanned: result.walletsScanned, cut: result.walletsCut, before: result.moneyBefore, after: result.moneyAfter,
+    result: { ...result, replayed: false }, active: 'v2', mirror: 'v2', receipts: result.walletsCut, delta: result.moneyAfter - result.moneyBefore });
+  return Number(row.exact_quarter_receipts);
+}
 // Capture before mutation when available; assert its presence after the switch call so an unimplemented
 // switch reports its own SQL RED before this separate, not-yet-authored script. The dedicated script case stays strict.
 const captureSwitchPrecheck = () => existsSync(new URL('../../scripts/economy-switch-check.sql', import.meta.url))
@@ -312,6 +334,8 @@ describe('the economy switch', () => {
       .map(r => r.money)).toEqual([-4200, -75, -3, -3, -2]);
     expect(Number((await revision()).revision.split(':')[0])).toBeGreaterThan(Number(before.revision.split(':')[0]));
     await reconcileSwitch(result);
+    // No fee is held, so every cut wallet keeps exactly a quarter, rounded up.
+    expect(await switchReadback(result)).toBe(result.walletsCut);
   });
 
   it('publishes a zero-cut activation and counts every scanned wallet', async () => {
@@ -343,6 +367,8 @@ describe('the economy switch', () => {
     expect(await sql`select l.money_delta::int as money from public.wallet_ledger l join public.operation_receipts r using(receipt_id)
       where r.operation_id=${queued.command.operationId} and l.reason='build'`).toEqual([{ money: -40 }]);
     await reconcileSwitch(result);
+    // The held 40 stays whole: 55 is above a quarter of 100 (25), so the one cut wallet is not an exact quarter.
+    expect(await switchReadback(result)).toBe(result.walletsCut - 1);
   });
 
   it('replays without a second cut, including wallets created after activation', async () => {
@@ -999,7 +1025,7 @@ it('ships M27 completed from 21-economy.sql: the v2 row inactive, the mirror tri
   expect(activation.indexOf('pg_advisory_xact_lock(1600001,1)')).toBeGreaterThan(-1);
   expect(activation.indexOf('pg_advisory_xact_lock(1600001,1)'))
     .toBeLessThan(activation.indexOf('pg_advisory_xact_lock(hashtextextended(member.owner_id::text,0))'));
-  // Dependency order (AGENTS.md: nothing before what it calls): the prize table and the guard before close_season.
+  // Dependency order (AGENTS.md: each trigger and CHECK after the functions it calls): the prize table and the guard before close_season.
   expect(pos('private.season_prizes')).toBeLessThan(pos('private.close_season'));
   expect(pos('private.guard_season')).toBeLessThan(pos('private.close_season'));
 

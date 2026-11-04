@@ -156,45 +156,95 @@ mirror a deferred constraint trigger; both after their functions). No CHECK call
   rules version moves.
 
 **Release (Task 10).** The spec's "Release" and the runbook's "The economy switch (1.6)" govern; Avi's go is needed for the filled
-warning and its time, and separately for the switch.
+warning and its time, and separately for the switch. Every npx command here is `npx --offline --no-install` (spec, "Release": no
+package download).
 - **Before the push** (each a read, with the linked CLI, as in the runbook's "Schema fingerprint and hosted checks"; check the
   installed CLI version and help first):
-  1. Production's migration list (`supabase migration list --linked`) ends at M26, `20261030055918_patch_1_4.sql`.
-  2. `npx --no-install supabase db push --dry-run --skip-vault` lists exactly one migration, `20261104081033_patch_1_6.sql`. Use
-     `--skip-vault` on the push too: this release changes migrations only.
-  3. The window: outside Wednesday and Saturday 17:20–20:00 UTC (tournaments), with no open boundary (the hosted checks'
-     `boundaries open` = 0). The switch itself runs between boundaries.
+  1. Production's migration list (`npx --offline --no-install supabase migration list --linked`) ends at M26,
+     `20261030055918_patch_1_4.sql`.
+  2. `npx --offline --no-install supabase db push --dry-run --skip-vault` lists exactly one migration,
+     `20261104081033_patch_1_6.sql`. Use `--skip-vault` on the push too: this release changes migrations only.
+  3. The window: outside Wednesday and Saturday 17:20–20:00 UTC (tournaments), 20–60 minutes after a slot cutoff (cutoffs fall
+     every 80 minutes: …, 09:20, 10:40, 12:00 … UTC), with no open boundary (the hosted checks' `boundaries open` = 0). The
+     switch itself runs between boundaries.
+  4. Right before the push, long transactions, in the SQL editor as the owner (it prints no query text):
+
+     ```sql
+     select pid,usename,application_name,state,wait_event_type,now()-xact_start as xact_age
+       from pg_stat_activity where xact_start is not null and pid<>pg_backend_pid() order by xact_start;
+     ```
+
+     Push only when no transaction is older than a few seconds. M27's ACCESS EXCLUSIVE locks wait behind any transaction that
+     holds one of its tables, and every later read or write of those tables queues behind M27.
 - **The warning a day ahead.** First the warning message, with the filled text and time Avi approved (spec, release step 1: it
   says plainly that everyone's gold is cut to a quarter and that salvage then sells for 4). The release day is at least 24 hours
   after it.
 - **Order** on the release day (spec, release step 2), after the hosted checks:
-  1. M27 (`db push --skip-vault`). Read back `select version, active from private.rules_versions order by version` (v1 true, v2
-     false), `select rules_version from public.world_revision` (v1), `scripts/economy-switch-check.sql` (`active_version` v1,
-     `v2_row` true, `switched` false, `copy_matches` true), and compare the hosted fingerprint and access audit with this replay's
-     (1,273 lines and 650 rows).
-  2. Both functions, `game-worker` and `game-command`; then the client.
-  3. The switch, only after Avi's separate explicit go naming the irreversible quarter-gold activation, at least 24 hours after
-     the warning, between boundaries: the pre-check again, then `select private.switch_to_economy_v2();` and its read-backs (runbook).
+  1. M27 (`npx --offline --no-install supabase db push --skip-vault`). Read back
+     `select version, active from private.rules_versions order by version` (v1 true, v2 false),
+     `select rules_version from public.world_revision` (v1), `scripts/economy-switch-check.sql` (`active_version` v1, `v2_row`
+     true, `switched` false, `copy_matches` true), and compare the hosted fingerprint and access audit with this replay's (1,273
+     lines and 650 rows).
+     - If the push fails as a deadlock's victim (SQLSTATE `40P01`, "Deadlock risk" below), M27 rolled back whole. Read the
+       migration list again: it must still end at M26. Then push once more. If that fails too, stop and diagnose.
+  2. Both functions, `game-worker` and `game-command`, and their probes. Then the **post-functions health check** (spec, release
+     step 2.3): after the next completed boundary, its jobs completed with no `unsupported-rules`, and `npm run health -- --remote`
+     healthy. It proves the deployed functions before the client and the switch; the later checks do not replace it.
+  3. The client, only after step 1's `rules_version` read-back. The 1.6 client needs M27: it selects
+     `world_revision.rules_version` and `seasons.rules_version` (`src/lib/api/reads.ts`), with no fallback for a missing column,
+     so on a database without M27 its reads fail closed into "unavailable". Then the deployed checks.
+  4. The switch, only after Avi's separate explicit go naming the irreversible quarter-gold activation, at least 24 hours after
+     the warning, between boundaries: the pre-check again, then `select private.switch_to_economy_v2();` and its read-back,
+     `scripts/economy-switch-readback.sql` (runbook).
 - **On M27 alone**, the 1.5.1 functions and client keep working, all at v1:
   - the old `game-command` prepares salvage unstamped at 10, which the fence accepts while v1 is active (the migration-first
     path the tests pin);
   - the old worker runs v1 jobs, and every boundary stays v1 until the switch;
   - the old client reads its named revision columns and ignores the profile's new `banner` key.
+- **v1-time client changes.** The 1.6 client ships these while v1 is still active, before the switch (accepted in the Task 8 and
+  Task 9 reviews):
+  - `src/features/schedule/rest-stamina.ts:131` and `:133`: no Rest number, the generic words instead, when the clock is behind
+    the server's processed slot, and when the gladiator rests at home (the idle rest);
+  - `src/features/market/market-text.ts:119`: a stack's NPC value reads "(N gold each)", with "gold" added;
+  - `src/features/tournaments/tournament-text.ts:99`: a seventh Registration rule, the prizes (under v1 the same gold in every
+    league, and the renown);
+  - `src/features/character/ProfileCard.tsx:105`: the "🚩 Arena banner" line on a banner owner's profile card;
+  - `src/features/shops/ShopPanel.tsx:63-64`: the armorer's banner offer and its owned line say "Shown on your profile card";
+  - `src/features/character/profile-card.ts:58`: the Damage row shows just the number, "Damage 14" (Avi, 2026-11-04).
 - **Rollback.**
   - There is no down migration. Never revert M27 once the 1.6 functions are live: `game-command`'s sale reads
     `world_revision.rules_version`. To roll back before the switch, roll back the client and, if needed, the functions. Both
     work on M27.
+  - Never roll the functions back after the switch. The 1.5.1 worker has no v2 executors, so every v2 job would fail
+    (`unsupported-rules`); and the 1.5.1 `game-command` prepares salvage unstamped (v1), which the fence answers `unavailable`
+    while v2 is active.
   - The switch has no rollback: there is no wallet undo after it commits, and replaying it changes nothing. The emergency brake is
     pausing the scheduler (spec, "Rollback").
-- **Locks** (PostgreSQL's documented lock levels, not probed here; all held to the commit):
-  - Adding the three columns takes ACCESS EXCLUSIVE locks on `world_revision_state`, `seasons` and `public_profiles`. The constant
-    defaults need no rewrite. The two CHECKs scan their tables (1 row, and one per season).
-  - Replacing `world_revision` and `public_profile_reads` locks the two views, so revision and profile reads wait for that moment.
-  - The two triggers take SHARE ROW EXCLUSIVE on `private.rules_versions` and `public.owned_cosmetics` (a banner purchase waits),
-    and so does the audit table's foreign key on `rules_versions`.
-  - The banner backfill updates only the profiles of banner owners.
-- **Deadlock risk.** An open boundary writes `world_revision_state` (the revision) and `seasons` (phase 2). If Postgres picks M27
-  as a deadlock's victim, M27 rolls back whole and can be run again. This is why the push waits for a window with no open boundary.
+- **Locks** (probed 2026-11-04: M27 in one rolled-back transaction on a clean M01–M26 reset, then its own backend's granted
+  relation locks from `pg_locks`; all are held to the commit). Evidence: parent `logs/p16-final-fixwave-20261104/`,
+  `probe-output.txt` (48 rows) and `probe-summary.txt`. The rollback left the M26 fingerprint and audit unchanged (`cmp`).
+  - ACCESS EXCLUSIVE on `world_revision_state`, `seasons` and `public_profiles` (the three columns, M27:54–62), and on the views
+    `world_revision` and `public_profile_reads` (M27:982 and :994). The constant defaults need no rewrite. The two CHECKs scan
+    their tables (1 row, and one per season). The rest are M27's own new relations: `economy_switches`, its key, and the new
+    toast tables of `economy_switches`, `world_revision_state` and `seasons`.
+  - SHARE ROW EXCLUSIVE on `private.rules_versions` (the mirror trigger and the audit table's foreign key) and
+    `public.owned_cosmetics` (`publish_banner`; a banner purchase waits).
+  - ROW EXCLUSIVE on `rules_versions` (the `v2` row) and on `world_revision_state` and `public_profiles` (the backfills). The
+    banner backfill updates only the profiles of banner owners.
+  - ACCESS SHARE on `arena_standings`, `patches`, `visible_events` and `world_actor_reads` (the two views read them), and on
+    `owned_cosmetics`.
+  - No other table: wallets, gladiators, reservations, receipts, the ledger, jobs, activities, boundaries and tournaments are
+    not locked. The probe confirms the documented levels this record listed before it.
+- **Deadlock risk.** M27 takes ACCESS EXCLUSIVE on `public_profiles` (M27:54) and `world_revision_state` (:61) long before it
+  replaces the two views (:982, :994). A revision read (`world_revision`) or a profile read (`public_profile_reads`) in that
+  window locks the view and then waits for the table, and M27 then waits for the view: a deadlock. Postgres aborts one side. If
+  that side is M27, it rolls back whole and can be run again (Order, step 1). Every revision-bumping command, one that advances
+  `world_revision_state` such as a boundary's publication, also waits until M27 commits, and an open boundary writes `seasons`
+  too (phase 2). This is why the push waits for a window 20–60 minutes after a cutoff, with no open boundary and no long
+  transaction.
+- **After the switch**, the hosted fingerprint's `seed-rules` lines read `seed-rules|v1|f` and `seed-rules|v2|t`, where this
+  replay's read `v1|t` and `v2|f`. M28's hosted comparison must expect those two lines. The fingerprint's other seed lines count
+  rows or compare the published slot, which the switch leaves alone.
 
 ## Patch 1.4 (M26): patch numbers and the profile card
 

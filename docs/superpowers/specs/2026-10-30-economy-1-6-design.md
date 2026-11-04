@@ -448,6 +448,16 @@ This remains a draft for release wording review. Gear halving is already confirm
 8. `The Arena banner shows on your profile card.`
 
 9. `Tournament entry costs no stamina. Regular Arena still costs its normal stamina when no bracket forms.`
+10. `The profile card's Damage row shows just the number, as Health does.` The Damage row reads "Damage 14", no longer "14 a hit"
+    (Avi, 2026-11-04).
+
+**Release copy review for Avi** (builder copy and late additions, for Avi to confirm with the patch note wording at release):
+- bullet 10 above (Avi asked for the change; the bullet's words are the builder's);
+- `src/features/schedule/schedule-text.ts:97`: the Arena line's order under v2: the bout, the cost, then the tournament and
+  its free entry;
+- `src/features/tournaments/tournament-text.ts:98`: v2 Registration rule 6, "Tournament entry costs 0 stamina.";
+- `src/features/tournaments/TournamentPanel.tsx:122`: the checklist's stamina line under v2,
+  "<stamina> · 0 stamina for tournament entry".
 
 Patch title (the 1.6 row and CHANGELOG heading): `A new economy: slower levels and prizes by league`.
 

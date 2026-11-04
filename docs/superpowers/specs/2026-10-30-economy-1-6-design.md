@@ -182,7 +182,8 @@ as built (runbook, "Retained-rule deployments"):
 - **The switch is one owner-only statement** (`private.switch_to_economy_v2()`, below), run with Avi's go between
   boundaries. Deploying M27 and the functions does not activate the v2 economy or quarter wallets: v2 is inactive until the switch. The separately deployed new client may already show its banner and non-economy copy; economy values remain v1 until activation.
 - **What reads the active version, and only these:** a new boundary (SQL, as today); an NPC sale of salvage (Edge, at
-  command time); the client's texts (from the public revision read).
+  command time, and SQL's salvage price fence when the sale is applied: the salvage race addendum below); the client's
+  texts (from the public revision read).
 - **A season pays the version that opened it.** Boundary phase 2 stores its boundary's version on the new season row;
   season 1's row is `v1`.
 - **The catalog stays `CATALOG_V1`** for both versions: SQL accepts only catalog `v1` items and plans, and no item changes.
@@ -269,8 +270,15 @@ SQL09's latest pairing functions need restatement in SQL21. Keep phase 6's preli
 ### Edge (`game-command`)
 
 - **Selling salvage** reads the active version (`world_revision.rules_version`, a public column, read beside the owner
-  state) and prepares the unit value with it: 4 under v2. SQL keeps trusting the Edge's unit value, as today (it checks
-  only its range). A sale prepared a moment before the switch and applied a moment after is paid 10: accepted.
+  state) and prepares the unit value with it: 4 under v2, stamping the preparation privately with that version.
+  **Salvage race addendum (Task 6):** SQL no longer trusts the Edge's unit value for salvage. After the account guard
+  and the receipt replay, `private.inventory_command` (`supabase/sql/21-economy.sql`) reads the active version afresh;
+  a preparation stamped with another version (or unstamped, which means v1) returns the transient `unavailable` before
+  any write, so the same operation can be retried, and a price other than that version's (10 under v1, 4 under v2) is
+  `invalid`. A sale prepared a moment before the switch and applied a moment after is therefore **not** paid 10: it
+  returns `unavailable`, and its retry is paid 4. A sale that holds the account guard before the switch reaches it is
+  paid 10 at v1, and the switch, waiting for that guard, then cuts the credited wallet. A committed receipt still
+  replays unchanged across the switch.
 - Creation, builds, shops and the market keep `RULES_V1` / `CATALOG_V1`: their rules are equal in both versions.
 
 ### M27 (from `supabase/sql/21-economy.sql`; Patch 1.4's M26 is the patch list and profile card, Patch 1.5 has none)

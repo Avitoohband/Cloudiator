@@ -26,6 +26,22 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; nothing released since.
 
+## 1.7 — Wearable titles: show what your gladiator has done (in progress, not yet released)
+
+Patch 1.7 (wearable titles). The title is the draft patch note's; Avi approves the wording at release.
+
+### Built
+
+### Planned
+
+- Titles: your gladiator earns titles for expeditions, Training, the Arena, tournaments, seasons, gear owned and gold earned, and wears one beside its name.
+- Everything you did before 1.7 counts: a notice in Notifications lists the titles your history earned.
+- Founder: every gladiator made in Season 1 has it, and it is never given again.
+- Choose your title, or none, on My gladiator: free, any time. Locked titles show how close you are.
+- Your title shows with your name in the camp, the Gladiators list, the profile card, Arena bouts, replays and tournament brackets.
+- New titles arrive in Notifications; one earned by a result shows in that result, with Wear.
+- The profile card counts the titles a gladiator has earned.
+
 ## 1.6 — A new economy: slower levels and prizes by league (2026-11-05)
 
 Released 2026-11-05: the economy patch. The database, the server code and the client went live first, on the old economy; the gold cut and the new economy followed at the announced time, after a warning a day ahead.

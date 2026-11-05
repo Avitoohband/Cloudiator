@@ -1,0 +1,52 @@
+// Words for the titles: names, a locked title's progress, and a season place. The rules and thresholds are the shared catalog's
+// (@domain/titles); the counts come from the owner's reads (OwnerState.titleProgress). Nothing here decides who has earned what.
+import type { LeagueId } from '@contracts/commands';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import { titleById, type TitleDefinition } from '@domain/titles';
+
+export type TitleProgress = Readonly<Record<string, number>>;
+
+/** The picker's and the menus' words for wearing nothing. */
+export const NO_TITLE = 'No title';
+
+export function titleName(id: unknown): string | null {
+  return titleById(id)?.name ?? null;
+}
+
+const count = (n: number) => n.toLocaleString('en-US');
+
+/** The expedition trips a title counts, with the level each opens at (the catalog's required levels). */
+const TRIP_LEVEL: Partial<Record<TitleDefinition['measure'], number>> = {
+  'woodland-won': CATALOG_V1.expeditions.woodland.requiredLevel,
+  'outpost-won': CATALOG_V1.expeditions.outpost.requiredLevel,
+  'mountain-won': CATALOG_V1.expeditions.mountain.requiredLevel,
+};
+
+/** A locked title's progress line in the picker: "34 of 50", "Best run 3 of 5", "Opens at level 5". */
+export function progressText(title: TitleDefinition, progress: TitleProgress, level: number): string {
+  const value = progress[title.measure] ?? 0;
+  const opens = TRIP_LEVEL[title.measure];
+  if (opens !== undefined && value === 0 && level < opens) return `Opens at level ${opens}`;
+  switch (title.measure) {
+    case 'arena-best-streak': return `Best run ${count(value)} of ${count(title.threshold)}`;
+    case 'tiers-of-one': return `Best item: ${count(value)} of ${count(title.threshold)} tiers`;
+    case 'rarities-of-one': return `Best item: ${count(value)} of ${count(title.threshold)} rarities`;
+    case 'days-in-camp': return `${count(value)} of ${count(title.threshold)} days`;
+    case 'banner': return `Renown shop · ${count(CATALOG_V1.cosmetics.banner.renownPrice)} renown`;
+    case 'founder': return 'Only gladiators made in Season 1';
+    default: return `${count(value)} of ${count(title.threshold)}`;
+  }
+}
+
+/** How full the progress bar is: value ÷ threshold, at most 1. */
+export function progressShare(title: TitleDefinition, progress: TitleProgress): number {
+  return Math.min(1, (progress[title.measure] ?? 0) / title.threshold);
+}
+
+const ORDINAL = { 1: '1st', 2: '2nd', 3: '3rd' } as const;
+
+/** A season title's small line in a notice: "3rd in Season 1 · Bronze" (the season index counts from 0). */
+export function placeInSeasonText(detail: { seasonIndex: number; league: LeagueId; place: 1 | 2 | 3 }): string {
+  const league = detail.league.charAt(0).toUpperCase() + detail.league.slice(1);
+  return `${ORDINAL[detail.place]} in Season ${detail.seasonIndex + 1} · ${league}`;
+}

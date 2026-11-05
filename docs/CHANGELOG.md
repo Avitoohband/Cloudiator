@@ -22,13 +22,11 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.3.** New since then: 1.3.1, 1.4, 1.5 and 1.5.1 are live; 1.6 is in progress.
+**Last video's patch: 1.3.** New since then: 1.3.1, 1.4, 1.5, 1.5.1 and 1.6 are live.
 
-## 1.6 — A new economy: slower levels and prizes by league (in progress, not yet released)
+## 1.6 — A new economy: slower levels and prizes by league (2026-11-05)
 
-Patch 1.6 (economy rebalance). The title is the draft patch note's; Avi approves the wording at release.
-
-### Built
+Released 2026-11-05: the economy patch. The database, the server code and the client went live first, on the old economy; the gold cut and the new economy followed at the announced time, after a warning a day ahead.
 
 - Expeditions give less XP and gold: 30 XP and 4 gold on the Woodland Path, 75 and 10 on the Ruined Outpost, 150 and 18 on the Mountain Pass. Level 10 takes about three weeks.
 - Gear is found half as often on expeditions, and salvage sells to merchants for 4 gold.

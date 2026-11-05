@@ -27,7 +27,10 @@ export const TITLE_FUNCTIONS = ['private.title_rules()', 'private.founder_cutoff
  */
 export const TITLE_TRIGGER_FUNCTIONS = ['private.titles_on_gladiator()', 'private.titles_on_activity()', 'private.titles_on_ledger()',
   'private.titles_on_item()', 'private.titles_on_season_award()', 'private.titles_on_banner()'] as const;
-/** M28: the release back-fill's record, owner-only like the economy switch: absent from every API role's privileges. */
-export const TITLES_OWNER_ONLY = { relation: 'private.title_backfills' } as const;
+/**
+ * M28: the release back-fill (Task 5) and its record, owner-only like the economy switch: absent from every API role's
+ * privileges, service_role included.
+ */
+export const TITLES_OWNER_ONLY = { relation: 'private.title_backfills', function: 'private.backfill_titles()' } as const;
 /** Task 5 (1.6): present in the catalog, absent from every API role's effective privilege snapshot. */
 export const ECONOMY_OWNER_ONLY = { relation: 'private.economy_switches', function: 'private.switch_to_economy_v2()' } as const;

@@ -32,11 +32,12 @@ Patch 1.7 (wearable titles). The title is the draft patch note's; Avi approves t
 
 ### Built
 
+- Founder: every gladiator made in Season 1 has it, and it is never given again.
+
 ### Planned
 
 - Titles: your gladiator earns titles for expeditions, Training, the Arena, tournaments, seasons, gear owned and gold earned, and wears one beside its name.
 - Everything you did before 1.7 counts: a notice in Notifications lists the titles your history earned.
-- Founder: every gladiator made in Season 1 has it, and it is never given again.
 - Choose your title, or none, on My gladiator: free, any time. Locked titles show how close you are.
 - Your title shows with your name in the camp, the Gladiators list, the profile card, Arena bouts, replays and tournament brackets.
 - New titles arrive in Notifications; one earned by a result shows in that result, with Wear.

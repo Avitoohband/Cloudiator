@@ -491,14 +491,28 @@ describe('release access matrix', () => {
       expect(row, signature).toEqual({ definer: false, config: ['search_path=""'], anon: false, authenticated: false,
         service: (TITLE_FUNCTIONS as readonly string[]).includes(signature) });
     }
-    // The back-fill's record: present, row security on, and no API role (service_role included) holds anything on it.
-    const isBackfill = (row: Row) => row.object === TITLES_OWNER_ONLY.relation || row.object.startsWith(TITLES_OWNER_ONLY.relation + '.');
+    // The back-fill (Task 5) and its record: present, row security on, an invoker function with a pinned path, and no API role
+    // (service_role included) holds anything on either: only the owner runs it, inside M28.
+    expect(await sql`select to_regclass(${TITLES_OWNER_ONLY.relation}) is not null as relation,
+      to_regprocedure(${TITLES_OWNER_ONLY.function}) is not null as function`).toEqual([{ relation: true, function: true }]);
+    const isBackfill = (row: Row) => row.object === TITLES_OWNER_ONLY.function || row.object === TITLES_OWNER_ONLY.relation
+      || row.object.startsWith(TITLES_OWNER_ONLY.relation + '.');
     expect(await sql`select c.relrowsecurity as rls from pg_class c where c.oid=${TITLES_OWNER_ONLY.relation}::regclass`)
       .toEqual([{ rls: true }]);
+    expect(await sql`select p.prosecdef as definer, p.proconfig as config,
+      has_function_privilege('service_role',p.oid,'EXECUTE') as service from pg_proc p where p.oid=${TITLES_OWNER_ONLY.function}::regprocedure`)
+      .toEqual([{ definer: false, config: ['search_path=""'], service: false }]);
     expect(rows.filter(isBackfill)).toEqual([]);
     // A future accidental grant would show in the same exported audit.
-    const probe = await auditAfter(`grant select on ${TITLES_OWNER_ONLY.relation} to service_role`);
-    expect(lines(probe.filter(isBackfill))).toEqual([`relation ${TITLES_OWNER_ONLY.relation} service_role SELECT`]);
+    const probe = await auditAfter(`grant select on ${TITLES_OWNER_ONLY.relation} to service_role`,
+      `grant execute on function ${TITLES_OWNER_ONLY.function} to public`);
+    expect(lines(probe.filter(isBackfill))).toEqual([
+      `function ${TITLES_OWNER_ONLY.function} PUBLIC EXECUTE`,
+      `function ${TITLES_OWNER_ONLY.function} anon EXECUTE`,
+      `function ${TITLES_OWNER_ONLY.function} authenticated EXECUTE`,
+      `function ${TITLES_OWNER_ONLY.function} service_role EXECUTE`,
+      `relation ${TITLES_OWNER_ONLY.relation} service_role SELECT`,
+    ].sort());
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {

@@ -1,8 +1,8 @@
 -- Wearable titles (patch 1.7) reapplicable source. Committed M01-M27 are immutable; deploy only the separately generated
 -- migration M28 (supabase/migrations/*_patch_1_7.sql, Task 7). Spec: docs/superpowers/specs/2026-10-30-titles-1-7-design.md,
 -- "Server: M28 from supabase/sql/22-titles.sql" ("Tables", "Functions", "Triggers", "Lock order", "Time", "The command
--- wear-title", "Public and owner reads"); plan: docs/superpowers/plans/2026-10-30-titles-1-7.md, Tasks 2-5. Later tasks add their
--- sections below section 4.
+-- wear-title", "Public and owner reads", "The back-fill"); plan: docs/superpowers/plans/2026-10-30-titles-1-7.md, Tasks 2-5.
+-- Later tasks add their sections above section 5's closing call.
 --
 -- Purpose: a gladiator earns a title when one of its measures (what it has done: expeditions won, Trainings, Arena wins, gold
 -- earned from play, items ever owned, days in camp, Season 1...) reaches the rule's threshold. Titles are kept forever, never
@@ -25,6 +25,8 @@
 --    20-profile-card.sql with the actor's `title` and the profile's titles_earned, public.public_profile_reads restated from
 --    21-economy.sql with titlesEarned, public.owner_state restated from 18-messages.sql with wornTitle, titles, titleProgress and
 --    the title notices in inbox.newNotifications, and refresh_projections() so every actor and profile carries them at once.
+-- 5. The release back-fill: private.backfill_titles() (the owner's only) counts the history the database still proves, once,
+--    and its one call is the last statement (after every trigger), so M28 runs it at the release.
 --
 -- Accepted restatements: private.title_rules() restates TITLES_V1's id, measure, threshold and tier
 -- (supabase/functions/_shared/domain/titles.ts) in catalog order, and private.title_measures restates its 18 stored counters
@@ -37,7 +39,8 @@
 -- rows, so the counters, the title rows and the worn_title update follow the shared order (coordinator, account lock, gladiator
 -- row, wallet, items) without a new wait. The auto-wear update takes the gladiator row last. Creation inserts the gladiator
 -- itself in the same transaction. The deferred projectors run at commit and take the global revision lock last. Trigger
--- functions are not directly executable.
+-- functions are not directly executable. The back-fill (section 5) takes table locks instead of account locks; its comment
+-- says why.
 --
 -- Every statement is reapplicable.
 begin;
@@ -622,6 +625,157 @@ from public.gladiators g join public.builds b on b.gladiator_id=g.id join public
 
 -- Every actor carries its title and every profile its count at once (the new projector, run after its restatement).
 select public.refresh_projections();
+
+-- 5. The release back-fill (spec "The back-fill", and the "Back-fill" column of "What each measure counts"). Its one call is
+-- the last statement of this source (and of M28, Task 7): after every trigger above exists. Later sections go above it.
+--
+-- private.backfill_titles() counts what the database still proves, once. Its private.title_backfills row records the result;
+-- any later call returns that record with replayed true and writes nothing. At one database time T, sampled after its locks,
+-- for each gladiator in id order:
+--   1. The counters from history, each set (never added), and absent when 0:
+--        expeditions-won        completed expeditions whose summary.success is true; woodland-won, outpost-won and
+--                               mountain-won by requested.expeditionId (any other trip counts toward expeditions-won only);
+--        trainings              the greater of the completed Trainings and earned_points - 10 (every earned point came from a
+--                               Training, and the points outlive the activities' 90 days);
+--        arena-wins             completed Arena activities won; in slot order, arena-streak is the wins since the last loss
+--                               and arena-best-streak the longest run of wins (the live trigger's reading of the same bouts);
+--        tournament-finals,     public.tournament_placements of completed activities: places 1 and 2, and place 1 (each
+--        tournament-wins        settlement writes its placement and completes its activity in one transaction);
+--        season-top-three,      private.season_awards: every award, and the first places;
+--        season-firsts
+--        gold-v1, gold-v2       wallet_ledger credits above 0 with reason expedition, arena, tournament, season or npc-sale,
+--                               into gold-v1 when credited before private.economy_switches' v2 switched_at_ms (or when no
+--                               switch is recorded), else gold-v2 (ruling S1: the live trigger buckets the same credits by the
+--                               active rules version, which the switch flips in its own commit); an npc-sale of an item id
+--                               listed in the gladiator's own successful buy-shop receipts never counts (the live trigger's
+--                               test); market sales, the 1.6 cut and the starting 100 have other reasons.
+--   2. The ownership history, every row at T: the two starter items every gladiator was given (sword:1:common,
+--      light-armor:1:common); the items held now; the items of its completed activities' summary.rewards.items; the catalog
+--      ids of its own successful buy-shop receipts (an item purchase: the banner's has no itemIds); and its market purchases
+--      (sold listings with it as buyer), identified by the item if it still exists or else by the buy-shop receipt that made
+--      it (a market-bought find gone since cannot be identified: missed). Only item catalog ids count (salvage, cosmetics and
+--      anything else that is not one never do). Then private.refresh_item_counters.
+--   3. private.award_titles(gid, T, null, 'history', null): every title its measures meet (days-in-camp, founder and banner
+--      at T), and the first title worn (Founder, else the highest tier, else the catalog order). All of a gladiator's history
+--      titles share one source and time: one release notice.
+-- Result {ok: true, ranAtMs: T, gladiators (processed), titles (granted by this call), founders (gladiators holding Founder),
+-- worn (gladiators wearing a title), replayed: false}; the release reads it back (spec "Release", step 3).
+--
+-- History it reads, and how long it lasts (14-operations.sql's retention matrix, 15-release.sql's cleanup): kept forever:
+-- gladiators (earned_points), item_instances, private.season_awards, private.economy_switches and every operation receipt
+-- (buy-shop and sell-item receipts are command receipts, never compacted; only settlement receipts' results are, and none is
+-- read here); ninety days: completed activities with their summaries and tournament_placements (the ninety-day slot pass),
+-- wallet_ledger rows (folded into wallet_checkpoints by created_at), and terminal market listings (deleted 90 days after
+-- their expiry, itself 7 days after listing). The launch week's history leaves from 23 Jan 2027 09:20 UTC (its first credits),
+-- so M28 runs before then (spec "Deadline").
+--
+-- Locks (Review Focus 4: run twice, or with a write waiting on the migration, nothing is counted twice).
+--   - private.title_backfills EXCLUSIVE first: a second call waits for the first to commit, then reads its record and replays.
+--   - public.gladiators EXCLUSIVE: every writer of a gladiator row, every insert that references one (a FOR KEY SHARE) and
+--     wear_title wait; plain reads go on. So no other transaction holds a gladiator row the auto-wear updates, and none can
+--     grant a title or change worn_title until the commit (award_titles' held -> auto-wear step relies on that, as it relies
+--     on the account lock elsewhere).
+--   - SHARE ROW EXCLUSIVE, the lock CREATE TRIGGER takes, on the other five tables a counting trigger watches
+--     (public.activities, public.wallet_ledger, public.item_instances, public.owned_cosmetics, private.season_awards): no
+--     counted write is in flight or can start until the commit; plain reads go on.
+--   Inside M28 these are no-ops: the migration already holds them (its worn_title column on public.gladiators, its seven
+--   triggers). Every counted write either committed before them, so this call reads it and the counters it sets include it
+--   (counted once, here), or waits for this commit and then fires the triggers above, which add to the counters this call
+--   set (counted once, there). Retention cleanup, which deletes history, waits too (its 500 ms lock_timeout makes it retry
+--   in the next hour). No account lock is taken: in M28 the table locks come first, and an account lock after them could
+--   deadlock with a command that holds its account lock and waits on those tables.
+create or replace function private.backfill_titles() returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare prior jsonb; run_at bigint; switch_at bigint; who uuid; tally record; processed integer:=0; granted integer:=0; answer jsonb;
+begin
+  lock table private.title_backfills in exclusive mode;
+  select b.result into prior from private.title_backfills b where b.singleton;
+  if found then return prior||jsonb_build_object('replayed',true); end if;
+  lock table public.gladiators in exclusive mode;
+  lock table public.activities,public.wallet_ledger,public.item_instances,public.owned_cosmetics,private.season_awards
+    in share row exclusive mode;
+  run_at:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  select e.switched_at_ms into switch_at from private.economy_switches e where e.version='v2';
+  for who in select g.id from public.gladiators g order by g.id loop
+    -- 1. The counters.
+    for tally in
+      with done as (
+        select a.slot_index,a.resolved_kind,a.requested->>'expeditionId' as trip,coalesce(a.summary->>'success'='true',false) as won
+        from public.activities a where a.gladiator_id=who and a.status='completed'
+      ), bouts as (
+        -- Each loss opens a new run: the bouts that share a count of losses so far are one loss and the wins after it.
+        select d.won,count(*) filter (where not d.won) over (order by d.slot_index) as losses
+        from done d where d.resolved_kind='arena'
+      ), runs as (
+        select r.losses,count(*) filter (where r.won) as wins from bouts r group by r.losses
+      ), places as (
+        select p.place from public.tournament_placements p
+          join public.activities a on a.id=p.activity_id and a.status='completed'
+        where p.gladiator_id=who
+      ), credits as (
+        select l.money_delta,switch_at is null or floor(extract(epoch from l.created_at)*1000)<switch_at as early
+        from public.wallet_ledger l
+        where l.gladiator_id=who and l.money_delta>0 and l.reason in ('expedition','arena','tournament','season','npc-sale')
+          and not (l.reason='npc-sale' and exists(select 1 from public.operation_receipts sale join public.operation_receipts bought
+            on bought.gladiator_id=who and bought.request->>'kind'='buy-shop' and bought.result->>'ok'='true'
+            where sale.receipt_id=l.receipt_id and bought.result->'value'->'itemIds' ? (sale.request->>'itemId')))
+      )
+      select x.counter,x.amount from (values
+        ('expeditions-won',(select count(*) from done d where d.resolved_kind='expedition' and d.won)),
+        ('woodland-won',(select count(*) from done d where d.resolved_kind='expedition' and d.won and d.trip='woodland')),
+        ('outpost-won',(select count(*) from done d where d.resolved_kind='expedition' and d.won and d.trip='outpost')),
+        ('mountain-won',(select count(*) from done d where d.resolved_kind='expedition' and d.won and d.trip='mountain')),
+        ('trainings',greatest((select count(*) from done d where d.resolved_kind='training'),
+          (select g.earned_points-10 from public.gladiators g where g.id=who))),
+        ('arena-wins',(select count(*) from done d where d.resolved_kind='arena' and d.won)),
+        ('arena-streak',coalesce((select r.wins from runs r order by r.losses desc limit 1),0)),
+        ('arena-best-streak',coalesce((select max(r.wins) from runs r),0)),
+        ('tournament-finals',(select count(*) from places p where p.place in (1,2))),
+        ('tournament-wins',(select count(*) from places p where p.place=1)),
+        ('season-top-three',(select count(*) from private.season_awards s where s.gladiator_id=who)),
+        ('season-firsts',(select count(*) from private.season_awards s where s.gladiator_id=who and s.place=1)),
+        ('gold-v1',coalesce((select sum(c.money_delta) from credits c where c.early),0)::bigint),
+        ('gold-v2',coalesce((select sum(c.money_delta) from credits c where not c.early),0)::bigint)
+      ) x(counter,amount) where x.amount>0
+    loop
+      perform private.set_title_count(who,tally.counter,tally.amount);
+    end loop;
+    -- 2. The ownership history.
+    insert into public.item_firsts(gladiator_id,catalog_id,first_at_ms)
+      select who,s.catalog_id,run_at from (
+        select unnest(array['sword:1:common','light-armor:1:common']) as catalog_id
+        union select i.item->>'catalogId' from public.item_instances i where i.gladiator_id=who
+        union select e.entry->>'catalogId' from public.activities a
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(a.summary->'rewards'->'items')='array'
+            then a.summary->'rewards'->'items' else '[]'::jsonb end) e(entry)
+          where a.gladiator_id=who and a.status='completed'
+        union select o.request->>'catalogId' from public.operation_receipts o
+          where o.gladiator_id=who and o.request->>'kind'='buy-shop' and o.result->>'ok'='true'
+            and jsonb_typeof(o.result->'value'->'itemIds')='array'
+        union select coalesce(held.item->>'catalogId',(select o.request->>'catalogId' from public.operation_receipts o
+            where o.request->>'kind'='buy-shop' and o.result->>'ok'='true' and o.result->'value'->'itemIds' ? m.item_id::text limit 1))
+          from private.market_listings m left join public.item_instances held on held.id=m.item_id
+          where m.status='sold' and m.buyer_gladiator_id=who
+      ) s
+      where s.catalog_id ~ '^[a-z][a-z-]*:(1|5|10):(common|uncommon|rare|renown)$'
+    on conflict do nothing;
+    perform private.refresh_item_counters(who);
+    -- 3. The titles.
+    granted:=granted+private.award_titles(who,run_at,null,'history',null);
+    processed:=processed+1;
+  end loop;
+  answer:=jsonb_build_object('ok',true,'ranAtMs',run_at,'gladiators',processed,'titles',granted,
+    'founders',(select count(*) from public.gladiator_titles t where t.title_id='founder'),
+    'worn',(select count(*) from public.gladiators g where g.worn_title is not null),'replayed',false);
+  insert into private.title_backfills(singleton,ran_at_ms,result) values(true,run_at,answer);
+  return answer;
+end $$;
+
+-- The owner's only, like private.switch_to_economy_v2(): no API role (service_role included) may run it.
+revoke all on function private.backfill_titles() from public,anon,authenticated,service_role;
+
+-- The back-fill, once (a reapply replays its record). Last: every trigger it must precede exists above.
+select private.backfill_titles();
 
 notify pgrst, 'reload schema';
 commit;

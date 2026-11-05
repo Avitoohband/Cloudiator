@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { TransactionSql } from 'postgres';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { SLOT, TRAINING, resetWorld, fighter as placedFighter, coordinatorLease, runBoundary, settleDue, claim }
@@ -300,12 +301,13 @@ const complete = (id: string, summary: Record<string, unknown>, settledAtMs: num
   sql`update public.activities set status='completed',summary=${sql.json(summary as never)},settled_at_ms=${settledAtMs} where id=${id}`;
 const result = (success: boolean, rewards: Record<string, unknown> = {}) => ({ result: success ? 'victory' : 'defeat', success, rewards });
 const trained = { result: 'completed', success: true, rewards: { attributePoints: 1 } };
-/** A wallet ledger row with its own receipt, as each writer records one. */
-async function credit(f: Fighter, reason: string, money: number, request: Record<string, unknown> = { kind: reason }) {
+/** A wallet ledger row with its own receipt, as each writer records one; `atMs` dates a history row (Task 5). */
+async function credit(f: Fighter, reason: string, money: number, request: Record<string, unknown> = { kind: reason }, atMs?: number) {
   const receipt = randomUUID();
   await sql`insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
     values(${f.id},${randomUUID()},${receipt},${f.gid},${sql.json(request as never)},sha256(convert_to(${receipt},'UTF8')),'{"ok":true}')`;
-  await sql`insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason) values(${f.gid},${receipt},${money},0,${reason})`;
+  await sql`insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason${atMs === undefined ? sql`` : sql`,created_at`})
+    values(${f.gid},${receipt},${money},0,${reason}${atMs === undefined ? sql`` : sql`,to_timestamp(${atMs}::float8/1000)`})`;
 }
 /** An item placed by the operator; `origin` 'expedition' is a find. */
 async function giveItem(gid: string, catalogId: string, origin: ItemInstance['origin'] = 'expedition', quantity = 1) {
@@ -1048,5 +1050,403 @@ describe('wear-title', () => {
     // Not vacuous: the values move as the measures say (the statement's clock is at or after `now`).
     expect(seen.map(([gold]) => gold)).toEqual([0, 0, 5, 6, 1, 4, 12]);
     expect(seen.map(([, days]) => days)).toEqual([0, 0, 1, 1, 99, 100, 400]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Task 5: the release back-fill (spec "The back-fill" and the "Back-fill" column of "What each measure counts"; Review
+// Focus 4). History is seeded as rows while the seven title triggers are disabled, so it is history no trigger counted (as
+// production holds it before M28: no title, no counter and no ownership-history row); they are enabled again before the
+// back-fill runs, and after each case in any case.
+const TITLE_TRIGGERS = [['public.gladiators', 'titles_on_gladiator'], ['public.activities', 'titles_on_activity'],
+  ['public.wallet_ledger', 'titles_on_ledger'], ['public.item_instances', 'titles_on_item'], ['public.item_instances', 'titles_on_item_move'],
+  ['private.season_awards', 'titles_on_season_award'], ['public.owned_cosmetics', 'titles_on_banner']] as const;
+const titleTriggers = (state: 'enable' | 'disable') => sql.begin(async tx => {
+  for (const [table, trigger] of TITLE_TRIGGERS) await tx.unsafe(`alter table ${table} ${state} trigger ${trigger}`);
+});
+/** Runs `seed` with the seven title triggers disabled: what it writes is history the triggers never counted. */
+async function history<T>(seed: () => Promise<T>): Promise<T> {
+  await titleTriggers('disable');
+  try {
+    return await seed();
+  } finally {
+    await titleTriggers('enable');
+  }
+}
+/** The source's own statements for the seven counting triggers (titles_on_gladiator and section 3), as M28 runs them. */
+const TRIGGER_STATEMENTS = readFileSync(new URL('../../supabase/sql/22-titles.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  .match(/^(?:drop trigger if exists titles_on_\w+ on [\w.]+;|create trigger titles_on_\w+[^;]*;)$/gm) ?? [];
+type Backfill = { ok: boolean; ranAtMs: number; gladiators: number; titles: number; founders: number; worn: number; replayed: boolean };
+const backfill = async () => (await sql`select private.backfill_titles() as result`)[0].result as Backfill;
+const HOUR = 3_600_000;
+/** No title worn and no title, counter or ownership-history row left: the world as M28 finds it (the gladiators stay). */
+async function wipeTitles() {
+  await sql.begin(async tx => {
+    await tx`update public.gladiators set worn_title=null where worn_title is not null`;
+    await tx`alter table public.gladiator_titles disable trigger guard_frozen`;
+    await tx`alter table public.item_firsts disable trigger guard_frozen`;
+    await tx`delete from public.gladiator_titles`;
+    await tx`delete from public.item_firsts`;
+    await tx`delete from public.title_counters`;
+    // The deferred republication and worn-title check run now: a table with pending trigger events cannot be altered.
+    await tx`set constraints all immediate`;
+    await tx`alter table public.gladiator_titles enable trigger guard_frozen`;
+    await tx`alter table public.item_firsts enable trigger guard_frozen`;
+  });
+}
+/** An entry of a settlement summary's rewards.items, as private.expedition_rewards records one. */
+const loot = (catalogId: string, quantity = 1) => {
+  const entry = catalogId === 'salvage' ? CATALOG_V1.salvage : CATALOG_V1.items[catalogId];
+  return { catalogId, catalogVersion: CATALOG_V1.version, tier: entry.tier, rarity: entry.rarity, quantity };
+};
+/** A placement in its own operator-written tournament (its pairing job a completed private job), as phase 8 writes one. */
+async function placement(gid: string, activityId: string, place: number) {
+  const slot = nextSlot++, tournament = `tournament:${slot}:bronze`;
+  const [{ job }] = await sql`insert into private.jobs(kind,dedupe_key,slot_index,input,rules_version,due_at_ms,status)
+    values('pair',${'titles-pair:' + randomUUID()},${slot},'{}','v1',0,'completed') returning id as job`;
+  await sql`insert into public.tournament_views(id,pairing_job_id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,
+    bouts,reveal_at_ms,published_at_ms) values(${tournament},${job},${slot},'bronze',${slot * SLOT},${(slot + 1) * SLOT},
+    'insufficient-entrants','[]',null,'[]','[]',0)`;
+  await sql`insert into public.tournament_placements(tournament_id,gladiator_id,activity_id,place) values(${tournament},${gid},${activityId},${place})`;
+}
+/** A season award with its receipt, as private.close_season records one. */
+async function seasonAward(f: Fighter, seasonIndex: number, place: 1 | 2 | 3) {
+  const receipt = randomUUID();
+  await sql`insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(${f.id},${randomUUID()},${receipt},${f.gid},${sql.json({ kind: 'season-award', seasonIndex } as never)},
+      sha256(convert_to(${receipt},'UTF8')),'{"ok":true}')`;
+  await sql`insert into private.season_awards(season_index,gladiator_id,league,place,money,renown,title,badge,receipt_id,awarded_at_ms)
+    values(${seasonIndex},${f.gid},'bronze',${place},0,0,${place === 1 ? 'champion' : null},${['gold', 'silver', 'bronze'][place - 1]},
+      ${receipt},${await dbNow()})`;
+}
+/** A successful buy-shop receipt of `f` that made `itemIds` of `catalogId` (the items may be gone since). */
+async function shopReceipt(f: Fighter, catalogId: string, itemIds: string[]) {
+  const operationId = randomUUID(), receipt = randomUUID();
+  const request = { kind: 'buy-shop', operationId, catalogId, catalogVersion: CATALOG_V1.version, quantity: itemIds.length };
+  await sql`insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(${f.id},${operationId},${receipt},${f.gid},${sql.json(request as never)},sha256(convert_to(${receipt},'UTF8')),
+      ${sql.json({ ok: true, receiptId: receipt, value: { itemIds, catalogId, catalogVersion: CATALOG_V1.version, quantity: itemIds.length } } as never)})`;
+}
+/** A listing of `itemId` by `seller`: sold to `buyer` (with the buyer's receipt), or cancelled when no buyer is given. */
+async function listing(seller: Fighter, itemId: string, buyer?: Fighter) {
+  const receipt = randomUUID(), id = randomUUID(), listedAt = (await dbNow()) - 3 * DAY, by = buyer ?? seller;
+  await sql`insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(${by.id},${randomUUID()},${receipt},${by.gid},${sql.json({ kind: buyer ? 'buy-listing' : 'cancel-listing', listingId: id } as never)},
+      sha256(convert_to(${receipt},'UTF8')),'{"ok":true}')`;
+  await sql`insert into private.market_listings(id,seller_gladiator_id,item_id,price,listed_at_ms,expires_at_ms,status,terminal_receipt_id,
+    buyer_gladiator_id) values(${id},${seller.gid},${itemId},40,${listedAt},${listedAt + 7 * DAY},${buyer ? 'sold' : 'cancelled'},${receipt},
+    ${buyer?.gid ?? null})`;
+}
+/** The advisory key a gate session holds to pause the back-fill at its first counter write, after its history reads. */
+const PAUSE = 7_317_005;
+/**
+ * With `pause`, a test-only trigger holds every insert into public.title_counters until the gate session it passes to `run`
+ * releases PAUSE; the trigger and its function are dropped afterwards, whatever happens. Without it, `run` gets no gate.
+ */
+async function withPause<T>(pause: boolean, run: (gate: Session | null) => Promise<T>): Promise<T> {
+  if (!pause) return run(null);
+  const q = await sql.reserve();
+  try {
+    const pid = (await q`select pg_backend_pid() as pid`)[0].pid as number;
+    await q`select pg_advisory_lock(${PAUSE})`;
+    await sql.unsafe(`create or replace function private.test_titles_pause() returns trigger language plpgsql set search_path='' as $$
+      begin perform pg_catalog.pg_advisory_xact_lock_shared(${PAUSE}); return new; end $$`);
+    await sql`drop trigger if exists test_titles_pause on public.title_counters`;
+    await sql`create trigger test_titles_pause before insert on public.title_counters for each row
+      execute function private.test_titles_pause()`;
+    return await run({ q, pid });
+  } finally {
+    await sql`drop trigger if exists test_titles_pause on public.title_counters`;
+    await sql`drop function if exists private.test_titles_pause()`;
+    try {
+      await q`select pg_advisory_unlock_all()`;
+    } finally {
+      q.release();
+    }
+  }
+}
+const firstsAt = async (gid: string) => (await sql`select catalog_id, first_at_ms::bigint as at from public.item_firsts
+  where gladiator_id=${gid} order by catalog_id`).map(r => ({ id: r.catalog_id as string, at: Number(r.at) }));
+/** Absent and 0 read alike (private.title_measures, owner_state's titleProgress). */
+const nonzero = (counters: Record<string, number>) => Object.fromEntries(Object.entries(counters).filter(([, value]) => value !== 0));
+const historyTitles = (ids: string[], at: number) => ids.map(id => ({ id, at, activity: null, source: 'history', detail: null }));
+
+describe('the history back-fill', () => {
+  afterEach(async () => {
+    await titleTriggers('enable');
+    await sql`delete from private.title_backfills`;
+    await sql`delete from private.economy_switches`;
+    await sql`update private.rules_versions set active=false where version<>'v1'`;
+    await sql`update private.rules_versions set active=true where version='v1'`;
+  });
+
+  it('counts every measure from history', async () => {
+    const f = await history(() => fighter());
+    // 1.6's switch, as private.economy_switches records it: credits before it are v1 gold, credits from it v2 gold.
+    const switchedAt = (await dbNow()) - DAY;
+    await sql`insert into private.economy_switches(version,switched_at_ms,wallets_scanned,wallets_cut,money_before,money_after,result)
+      values('v2',${switchedAt},1,0,100,100,'{}')`;
+    await history(async () => {
+      let at = await createdAt(f.gid);
+      const done = async (kind: string, summary: Record<string, unknown>, requested: Record<string, unknown> = { kind }) => {
+        const id = await activity(f.gid, kind, requested);
+        await complete(id, summary, at += 1000);
+        return id;
+      };
+      for (const expeditionId of [...Array(7).fill('woodland'), ...Array(5).fill('outpost')]) {
+        await done('expedition', result(true), { kind: 'expedition', expeditionId });
+      }
+      await done('expedition', result(false), { kind: 'expedition', expeditionId: 'mountain' });
+      for (let n = 0; n < 3; n++) await done('training', trained);
+      // Ten points from Training (earned_points 20): more than the three Trainings still in the activities.
+      await sql`update public.gladiators set earned_points=20,unspent_points=10 where id=${f.gid}`;
+      for (const won of [true, false, true, true]) await done('arena', result(won));
+      for (const place of [2, 1]) {
+        const id = await activity(f.gid, 'tournament');
+        await placement(f.gid, id, place);
+        await complete(id, result(true), at += 1000);
+      }
+      await seasonAward(f, 0, 1);
+      await credit(f, 'expedition', 40, { kind: 'activity-settlement' }, switchedAt - HOUR);
+      await credit(f, 'npc-sale', 8, { kind: 'sell-item', itemId: randomUUID() }, switchedAt - HOUR);
+      await credit(f, 'expedition', 10, { kind: 'activity-settlement' }, switchedAt + HOUR);
+      await credit(f, 'market-sale', 30, { kind: 'market-sale' }, switchedAt + HOUR);
+      await sql`insert into public.owned_cosmetics(gladiator_id,catalog_id,catalog_version,binding) values(${f.gid},'banner','v1','bound')`;
+    });
+    expect([await titlesOf(f.gid), await countersOf(f.gid), await firstsOf(f.gid)]).toEqual([[], {}, []]);
+    const before = await dbNow();
+    const outcome = await backfill();
+    const after = await dbNow(), at = outcome.ranAtMs;
+    expect(outcome).toEqual({ ok: true, ranAtMs: at, gladiators: 1, titles: 8, founders: 0, worn: 1, replayed: false });
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThanOrEqual(after);
+    // No mountain-won (the one Mountain trip was lost: absent when 0); the starter pair's four ownership measures.
+    expect(await countersOf(f.gid)).toEqual({ 'expeditions-won': 12, 'woodland-won': 7, 'outpost-won': 5, trainings: 10, 'arena-wins': 3,
+      'arena-streak': 2, 'arena-best-streak': 2, 'tournament-finals': 2, 'tournament-wins': 1, 'season-top-three': 1, 'season-firsts': 1,
+      'gold-v1': 48, 'gold-v2': 10, 'items-owned': 2, 'rare-items': 0, 'tiers-of-one': 1, 'rarities-of-one': 1 });
+    expect(await titlesOf(f.gid)).toEqual(historyTitles(['bannerman', 'bloodied', 'champion', 'finalist', 'medalist', 'tiro', 'victor',
+      'wanderer'], at));
+    // No season 0 row, so no Founder; the first tier-I title in catalog order is worn.
+    expect(await wornOf(f.gid)).toBe('wanderer');
+    // 10 + floor(48 / 4): no wealth title.
+    expect((await measuresOf(f.gid, at))['gold-earned']).toBe(22);
+  });
+
+  it('rebuilds the ownership history from five sources', async () => {
+    const [f, seller, holder] = await history(async () => [await fighter(), await fighter(), await fighter()]);
+    await history(async () => {
+      // The starter pair, parted with since (equipment released, then gone): every gladiator was given them.
+      await sql`update public.item_instances set item=jsonb_set(item,'{reservation}','null') where gladiator_id=${f.gid}`;
+      await sql`delete from public.item_instances where gladiator_id=${f.gid}`;
+      // Held now.
+      await giveItem(f.gid, 'axe:5:uncommon');
+      // Found (sold since): only its expedition's summary names it; the salvage beside it never counts.
+      await complete(await activity(f.gid, 'expedition', { kind: 'expedition', expeditionId: 'outpost' }),
+        result(true, { money: 60, items: [loot('spear:5:rare'), loot('salvage', 2)] }), (await createdAt(f.gid)) + 1000);
+      // Bought in a shop (discarded since): its own receipt.
+      await shopReceipt(f, 'iron-helmet:1:common', [randomUUID()]);
+      // Bought on the market: the item, held by another gladiator now.
+      await listing(seller, await giveItem(holder.gid, 'bow:1:common'), f);
+      // Not identifiable: a market-bought find gone since (no item, no shop receipt). Not its own: a listing sold to another
+      // gladiator, and a cancelled one.
+      await listing(seller, randomUUID(), f);
+      await listing(seller, await giveItem(seller.gid, 'heavy-boots:5:rare'), holder);
+      await listing(holder, await giveItem(holder.gid, 'round-shield:10:uncommon'));
+    });
+    const { ranAtMs: at } = await backfill();
+    expect(await firstsAt(f.gid)).toEqual(['axe:5:uncommon', 'bow:1:common', 'iron-helmet:1:common', 'light-armor:1:common', 'spear:5:rare',
+      'sword:1:common'].map(id => ({ id, at })));
+    expect(await countersOf(f.gid)).toMatchObject({ 'items-owned': 6, 'rare-items': 1 });
+    // The boots sold to another gladiator are that buyer's (the listing names it, though the seller holds the row in this seed).
+    expect(await firstsOf(holder.gid)).toEqual(['bow:1:common', 'heavy-boots:5:rare', 'light-armor:1:common', 'round-shield:10:uncommon',
+      'sword:1:common']);
+  });
+
+  it('makes Season 1 gladiators Founders and wears Founder', async () => {
+    const now = await dbNow();
+    const [first, second, late] = await history(async () => [await fighter(), await fighter(), await fighter()]);
+    // Season 1 (season 0's row) ended a day ago; two were made before it ended, the third after.
+    await openSeason(now - DAY);
+    await history(async () => {
+      await sql`update public.gladiators set created_at_ms=${now - 2 * DAY} where id in ${sql([first.gid, second.gid])}`;
+      await sql`update public.gladiators set earned_points=20,unspent_points=10 where id=${first.gid}`;
+      await sql`update public.gladiators set earned_points=110 where id=${late.gid}`;
+    });
+    const outcome = await backfill(), at = outcome.ranAtMs;
+    expect(outcome).toEqual({ ok: true, ranAtMs: at, gladiators: 3, titles: 5, founders: 2, worn: 3, replayed: false });
+    expect(await titlesOf(first.gid)).toEqual(historyTitles(['founder', 'tiro'], at));
+    expect(await titlesOf(second.gid)).toEqual(historyTitles(['founder'], at));
+    expect(await titlesOf(late.gid)).toEqual(historyTitles(['disciplined', 'tiro'], at));
+    // Founder before any tier; the third wears its highest tier.
+    expect([await wornOf(first.gid), await wornOf(second.gid), await wornOf(late.gid)]).toEqual(['founder', 'founder', 'disciplined']);
+  });
+
+  it('runs once', async () => {
+    const f = await history(() => fighter());
+    await history(() => sql`update public.gladiators set earned_points=20,unspent_points=10 where id=${f.gid}`);
+    // Two calls at once: the second waits for the first's commit, then answers its record.
+    const [first, waited] = await withSessions(async (a, b) => {
+      const [{ result: ran }] = await a.q`select private.backfill_titles() as result`;
+      const again = b.q`select private.backfill_titles() as result`.execute();
+      await blockedBy(b, a);
+      await a.q`commit`;
+      const [{ result: replay }] = await again;
+      await b.q`commit`;
+      return [ran, replay] as Backfill[];
+    });
+    expect(first).toEqual({ ok: true, ranAtMs: first.ranAtMs, gladiators: 1, titles: 1, founders: 0, worn: 1, replayed: false });
+    expect(waited).toEqual({ ...first, replayed: true });
+    const state = async () => ({ counters: await countersOf(f.gid), firsts: await firstsAt(f.gid), titles: await titlesOf(f.gid),
+      worn: await wornOf(f.gid) });
+    const counted = await state();
+    expect([counted.counters.trainings, counted.titles, counted.worn]).toEqual([10, historyTitles(['tiro'], first.ranAtMs), 'tiro']);
+    // More history afterwards (none of it counted by a trigger): a later call replays the record and counts none of it.
+    await history(async () => {
+      await sql`update public.gladiators set earned_points=110 where id=${f.gid}`;
+      await giveItem(f.gid, 'axe:5:uncommon');
+      await complete(await activity(f.gid, 'expedition', { kind: 'expedition', expeditionId: 'woodland' }), result(true),
+        (await createdAt(f.gid)) + 1000);
+      await credit(f, 'expedition', 40, { kind: 'activity-settlement' });
+    });
+    expect(await backfill()).toEqual({ ...first, replayed: true });
+    expect(await state()).toEqual(counted);
+    expect((await sql`select ran_at_ms::bigint as at, result from private.title_backfills`).map(r => ({ at: Number(r.at), result: r.result })))
+      .toEqual([{ at: first.ranAtMs, result: first }]);
+  });
+
+  it.each(["the source's trigger statements, then the back-fill", 'the back-fill alone, paused after its reads'] as const)(
+    'never counts a waiting write twice (%s)', async variant => {
+      expect(TRIGGER_STATEMENTS.filter(s => s.startsWith('create trigger'))).toHaveLength(7);
+      const paused = variant.startsWith('the back-fill alone');
+      await resetWorld(299);
+      const trainee = await placedFighter({ schedule: TRAINING });
+      // Its history before 1.7: nine points from Training (earned_points 19).
+      await sql`update public.gladiators set earned_points=19,unspent_points=9 where id=${trainee.gid}`;
+      const token = await coordinatorLease();
+      expect(await runBoundary(300, token)).toMatchObject({ status: 'complete' });
+      const [{ id: training }] = await sql`select id from public.activities where gladiator_id=${trainee.gid} and slot_index=300`;
+      const leases = await claim('settlement');
+      expect(leases.map(l => l.activityId)).toEqual([training]);
+      // The world as M28 finds it: no title, counter or ownership-history row.
+      await wipeTitles();
+      const { counted, inside } = await withPause(paused, gate => withSessions(async (a, b) => {
+        // M28's transaction: the seven triggers, then the back-fill, not yet committed. In the second variant only the
+        // back-fill, its own locks alone, held at its first counter (its history already read) while the write arrives.
+        if (!paused) await a.q.unsafe(TRIGGER_STATEMENTS.join('\n'));
+        const running = a.q`select private.backfill_titles() as result`.execute();
+        if (gate) await blockedBy(a, gate);
+        // The worker's settlement of the Training, on another connection, waits for the back-fill's commit.
+        const settling = b.q`select public.settle_activity(${training},${leases[0].token}) as outcome`.execute();
+        await blockedBy(b, a);
+        if (gate) await gate.q`select pg_advisory_unlock(${PAUSE})`;
+        const [{ result: ran }] = await running;
+        const seen = Object.fromEntries((await a.q`select counter, value::bigint as value from public.title_counters
+          where gladiator_id=${trainee.gid}`).map(r => [r.counter as string, Number(r.value)]));
+        await a.q`commit`;
+        expect((await settling)[0].outcome).toMatchObject({ ok: true });
+        await b.q`commit`;
+        return { counted: ran as Backfill, inside: seen };
+      }));
+      // Placed in 1970 within season 0 (the boundary's): a Founder and an Old Guard from history, and nine Trainings.
+      expect(counted).toEqual({ ok: true, ranAtMs: counted.ranAtMs, gladiators: 1, titles: 2, founders: 1, worn: 1, replayed: false });
+      expect(inside).toEqual({ trainings: 9, 'items-owned': 2, 'rare-items': 0, 'tiers-of-one': 1, 'rarities-of-one': 1 });
+      // The settlement counted once, by the trigger, after the commit: exactly its own Training, and its title with its result.
+      expect(await countersOf(trainee.gid)).toEqual({ ...inside, trainings: 10 });
+      const [{ at }] = await sql`select settled_at_ms::bigint as at from public.activities where id=${training}`;
+      expect(await titlesOf(trainee.gid)).toEqual([...historyTitles(['founder', 'old-guard'], counted.ranAtMs),
+        { id: 'tiro', at: Number(at), activity: training, source: 'result', detail: null }]);
+      expect(await wornOf(trainee.gid)).toBe('founder');
+    }, 90_000);
+
+  it('leaves one history notice per gladiator', async () => {
+    const [champion, bannerman, quiet] = await history(async () => [await fighter(), await fighter(), await fighter()]);
+    await history(async () => {
+      await seasonAward(champion, 0, 1);
+      await sql`insert into public.owned_cosmetics(gladiator_id,catalog_id,catalog_version,binding) values(${bannerman.gid},'banner','v1','bound')`;
+    });
+    const notices = async () => Promise.all([champion, bannerman, quiet].map(async f => (await ownerState(f)).inbox.newNotifications));
+    expect(await notices()).toEqual([0, 0, 0]);
+    await backfill();
+    // Medalist and Champion arrive together: one notice. A gladiator with no history title has none.
+    expect(await idsOf(champion.gid)).toEqual(['champion', 'medalist']);
+    expect(await notices()).toEqual([1, 1, 0]);
+  });
+
+  it('counts the same events as the live triggers (ruling R2)', async () => {
+    // A finished season 0 (1970) for a real close; nobody made now is a founder.
+    const season = seasonAt(0, 0);
+    await sql`insert into public.seasons(season_index,starts_at_ms,ends_at_ms) values(${season.index},${season.startsAtMs},${season.endsAtMs})`;
+    const f = await fighter(), seller = await fighter();
+    await sql`update public.wallets set money=1000,renown=${RULES_V1.shops.bannerRenownPrice} where gladiator_id in ${sql([f.gid, seller.gid])}`;
+    await current(f.gid, seller.gid);
+    let at = await createdAt(f.gid);
+    const done = async (kind: string, summary: Record<string, unknown>, requested: Record<string, unknown> = { kind }) => {
+      const id = await activity(f.gid, kind, requested);
+      await complete(id, summary, at += 1000);
+      return id;
+    };
+    const trip = (expeditionId: string) => ({ kind: 'expedition', expeditionId });
+    // Live, under v1, every trigger on: results by trip, an Arena run that ends in a loss, three placements, two Trainings.
+    for (const id of ['woodland', 'woodland', 'woodland', 'woodland', 'woodland', 'woodland', 'outpost', 'outpost', 'outpost', 'mountain']) {
+      await done('expedition', result(true), trip(id));
+    }
+    await done('expedition', result(false), trip('woodland'));
+    // A won trip that found a Rare spear and salvage: the settlement credits its gold and inserts its items before it completes.
+    const spear = await giveItem(f.gid, 'spear:5:rare'), scrap = await giveItem(f.gid, 'salvage', 'expedition', 3);
+    await credit(f, 'expedition', 12, { kind: 'activity-settlement' });
+    await done('expedition', result(true, { money: 12, items: [loot('spear:5:rare'), loot('salvage', 3)] }), trip('outpost'));
+    for (const won of [true, true, false, true, true, true, false]) await done('arena', result(won));
+    for (const place of [2, 1, 3]) {
+      const id = await activity(f.gid, 'tournament');
+      await placement(f.gid, id, place);
+      await complete(id, result(true), at += 1000);
+    }
+    for (let n = 0; n < 2; n++) await done('training', trained);
+    // Real commands: the find sold to a merchant (counts), a shop sword sold back (never counts), the banner; a market sale
+    // credit (never counts); the seller's shop bow bought on the market and sold on to a merchant (counts: not the buyer's own
+    // shop item; identified by the seller's shop receipt, the item being gone).
+    expect(await sell(f, spear)).toMatchObject({ ok: true });
+    const sword = await buy(f, 'sword:1:common');
+    expect(await sell(f, (sword.value!.itemIds as string[])[0])).toMatchObject({ ok: true });
+    expect(await buy(f, 'banner')).toMatchObject({ ok: true });
+    await credit(f, 'market-sale', 30);
+    const bow = await buy(seller, 'bow:1:common'), bowId = (bow.value!.itemIds as string[])[0];
+    const offer = await list(seller, bowId, 40);
+    expect(await buyListing(f, offer.value!.listingId as string)).toMatchObject({ ok: true });
+    expect(await sell(f, bowId)).toMatchObject({ ok: true });
+    // The switch to v2, recorded as 1.6 records it, then v2 gold: a result, salvage sold, a season first place (a real close).
+    const switchedAt = await dbNow();
+    await sql`insert into private.economy_switches(version,switched_at_ms,wallets_scanned,wallets_cut,money_before,money_after,result)
+      values('v2',${switchedAt},2,0,0,0,'{}')`;
+    await activate('v2');
+    await current(f.gid, seller.gid);
+    await credit(f, 'expedition', 10, { kind: 'activity-settlement' });
+    expect(await sell(f, scrap, 3)).toMatchObject({ ok: true, value: { moneyCredit: 12 } });
+    await sql`insert into private.arena_ratings(gladiator_id,league,season_index,rating,human_wins,human_losses) values(${f.gid},'bronze',0,1100,3,2)`;
+    expect((await sql`select private.close_season(0,${await dbNow()}) as awards`)[0].awards).toBe(1);
+    // A last result awards what the credits and the purchases added since the one before.
+    await done('training', trained);
+    const live = { f: await countersOf(f.gid), seller: await countersOf(seller.gid) };
+    const liveTitles = { f: await idsOf(f.gid), seller: await idsOf(seller.gid) };
+    const liveFirsts = { f: await firstsOf(f.gid), seller: await firstsOf(seller.gid) };
+    // Not vacuous: every measure moved, the Arena run ended in a loss (a stored 0), and both gold buckets hold gold.
+    expect(live.f).toMatchObject({ 'expeditions-won': 11, 'woodland-won': 6, 'outpost-won': 4, 'mountain-won': 1, trainings: 3,
+      'arena-wins': 5, 'arena-streak': 0, 'arena-best-streak': 3, 'tournament-finals': 2, 'tournament-wins': 1, 'season-top-three': 1,
+      'season-firsts': 1, 'items-owned': 4, 'rare-items': 1, 'tiers-of-one': 1, 'rarities-of-one': 1 });
+    expect(live.f['gold-v1']).toBeGreaterThan(12);
+    expect(live.f['gold-v2']).toBeGreaterThan(22);
+    expect(liveFirsts.f).toEqual(['bow:1:common', 'light-armor:1:common', 'spear:5:rare', 'sword:1:common']);
+    expect(liveTitles.f).toEqual(['bannerman', 'bloodied', 'champion', 'finalist', 'medalist', 'rare-find', 'victor', 'wanderer']);
+    expect([live.seller['items-owned'], liveTitles.seller]).toEqual([3, []]);
+    // The same events, counted from history alone.
+    await wipeTitles();
+    expect(await sql`select (select count(*) from public.title_counters)::int as counters,
+      (select count(*) from public.gladiator_titles)::int as titles, (select count(*) from public.item_firsts)::int as firsts`)
+      .toEqual([{ counters: 0, titles: 0, firsts: 0 }]);
+    expect(await backfill()).toMatchObject({ ok: true, gladiators: 2, replayed: false });
+    expect(nonzero(await countersOf(f.gid))).toEqual(nonzero(live.f));
+    expect(nonzero(await countersOf(seller.gid))).toEqual(nonzero(live.seller));
+    expect({ f: await firstsOf(f.gid), seller: await firstsOf(seller.gid) }).toEqual(liveFirsts);
+    expect({ f: await idsOf(f.gid), seller: await idsOf(seller.gid) }).toEqual(liveTitles);
   });
 });

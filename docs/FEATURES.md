@@ -230,7 +230,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | --- | --- | --- | --- | --- | --- |
 | Titles to earn | 31 titles for expeditions won, Trainings, Arena wins, tournaments, season places, gear ever owned, gold earned and a few special ones; a gladiator wears one beside its name. | 1.7 | Planned 1.7 | Not built | — |
 | Your history counts | Everything done before 1.7 counts: a notice in Notifications lists the titles a gladiator's history earned. | 1.7 | Planned 1.7 | Not built | — |
-| Founder | Every gladiator made in Season 1 (it ends on 22 Nov 2026) is a Founder; nobody gets it again. | 1.7 | Planned 1.7 | Not built | — |
+| Founder | Every gladiator made in Season 1 (it ends on 22 Nov 2026) is a Founder; nobody gets it again. | 1.7 | Built | Not on screen yet: the server grants it (at creation, and to Season 1's gladiators by the release back-fill); it shows once the title shows with the name | — |
 | Choose your title | A Title button on My gladiator opens "Choose your title": one title or none, free, any time; locked titles show how close you are. | 1.7 | Planned 1.7 | Not built | — |
 | Your title with your name | A gold line over the name in the camp, and the title in the Gladiators list, on the profile card, in Arena bouts and replays, and in tournament brackets. | 1.7 | Planned 1.7 | Not built | — |
 | New-title notices | New titles arrive in Notifications; one earned by a result shows inside that result, with Wear. | 1.7 | Planned 1.7 | Not built | — |

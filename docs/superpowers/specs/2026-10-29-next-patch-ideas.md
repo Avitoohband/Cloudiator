@@ -152,7 +152,9 @@ More from Avi, 2026-11-04 (for the gear wave and later):
     matching resistances, used against monsters in expeditions, dungeons and the Deep (PvP stays plain unless decided otherwise).
 46. **Weapon upgrades by material rank.** "weapon upgrade with bronze, copper, iron, gold and salvages for each rank": a forge
     (a facility plot) upgrades gear through ranks, each rank paid with its material (bronze, copper, iron, gold) plus salvage.
-    Materials come from expeditions, dungeons and salvaging.
+    Materials come from expeditions, dungeons and salvaging. Avi, 2026-11-05: "mateirals for weapon upgrades are received
+    from expeditions(bronze, cooper, iron, gold, platinum and so on)": the ranks go past gold (platinum, then higher), and
+    expeditions drop the materials (higher expeditions, higher materials; ties to idea 52).
 47. **Plan routines several days ahead.** "an option to plan routine of few days forward and not just same day since max
     level": schedule several days at once (ties to idea 10, the rotating multi-day routine).
 48. **Potions for health and stamina** (repeats idea 42; Avi asked again).
@@ -161,3 +163,12 @@ More from Avi, 2026-11-04 (for the gear wave and later):
     The gear pass already found the sword beats every weapon today; fix the balance in the gear wave.
 50. **Show the odds.** "show probability for crit damage, dodge and so on": the card and the guide show hit, dodge, critical
     chance and critical damage as percentages, from the same rules as the fights (ties to idea 34, the in-game guide).
+
+More from Avi, 2026-11-05 (for the PvE and gear waves):
+
+51. **A little follower for PvE.** "little follower for dungeons and pve stuff": a small companion that goes with the
+    gladiator into dungeons, expeditions and other PvE and helps there (PvP left out unless decided otherwise). To design with
+    1.8's party dungeons and bot team; close to the future summoner class (idea 1), which should stay different.
+52. **Expeditions for higher levels.** "add expeditions for more lvls maybe 12,15,18,20": today the top expedition is the
+    Mountain Pass at level 10 (Woodland Path 1, Ruined Outpost 5). New ones open at about levels 12, 15, 18 and 20, with
+    pay set by the 1.6 economy, and they drop the higher upgrade materials (idea 46).

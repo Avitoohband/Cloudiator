@@ -385,7 +385,9 @@ describe('closing a season', () => {
     const before = { winner: await state(winner), bystander: await state(bystander) };
     expect(before.winner.items.length).toBeGreaterThan(0);
     expect(await close()).toBe(1);
-    expect(await state(winner)).toEqual({ ...before.winner, wallet: { money: 777 + 500, renown: 33 + 100 } });
+    // Patch 1.7: the first place also earns Medalist and Champion (tests/db/titles.test.ts), and a first title is worn at once.
+    expect(await state(winner)).toEqual({ ...before.winner, gladiator: { ...before.winner.gladiator, worn_title: 'medalist' },
+      wallet: { money: 777 + 500, renown: 33 + 100 } });
     expect(await state(bystander)).toEqual(before.bystander);
   });
 

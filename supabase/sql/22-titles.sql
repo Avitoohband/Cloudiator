@@ -1,7 +1,7 @@
 -- Wearable titles (patch 1.7) reapplicable source. Committed M01-M27 are immutable; deploy only the separately generated
 -- migration M28 (supabase/migrations/*_patch_1_7.sql, Task 7). Spec: docs/superpowers/specs/2026-10-30-titles-1-7-design.md,
 -- "Server: M28 from supabase/sql/22-titles.sql" ("Tables", "Functions", "Triggers", "Lock order", "Time"); plan:
--- docs/superpowers/plans/2026-10-30-titles-1-7.md, Tasks 2-5. Later tasks add their sections below section 2.
+-- docs/superpowers/plans/2026-10-30-titles-1-7.md, Tasks 2-5. Later tasks add their sections below section 3.
 --
 -- Purpose: a gladiator earns a title when one of its measures (what it has done: expeditions won, Trainings, Arena wins, gold
 -- earned from play, items ever owned, days in camp, Season 1...) reaches the rule's threshold. Titles are kept forever, never
@@ -17,16 +17,20 @@
 --    public.seasons row season_index 0, read from the table, never a typed date), private.title_measures(gid, at_ms),
 --    private.add_title_count and private.set_title_count (one upsert each), private.award_titles (grants every rule met and not
 --    held; the first title ever earned is worn at once) and the titles_on_gladiator trigger (Founder at creation).
+-- 3. Counting: private.refresh_item_counters and six trigger functions for the spec's counting triggers (titles_on_item serves
+--    titles_on_item and titles_on_item_move). Each runs in its writer's own transaction; no settlement, executor or worker
+--    function is restated or changed.
 --
 -- Accepted restatement: private.title_rules() restates TITLES_V1's id, measure, threshold and tier
 -- (supabase/functions/_shared/domain/titles.ts) in catalog order, and private.title_measures restates its 18 stored counters
 -- (STORED_COUNTERS); tests/db/titles.test.ts compares both with the TypeScript catalog, as private.season_rules() is pinned.
 --
--- Lock order: every writer that awards (commands, settlements, the season close; Task 3's triggers) already holds the gladiator's
--- account advisory lock (hashtextextended(owner_id::text,0)) and touches only that gladiator's rows, so the counters, the title
--- rows and the worn_title update follow the shared order (coordinator, account lock, gladiator row, wallet, items) without a new
--- wait. The auto-wear update takes the gladiator row last. Creation inserts the gladiator itself in the same transaction. The
--- deferred projectors run at commit and take the global revision lock last. Trigger functions are not directly executable.
+-- Lock order: every writer that awards (commands, settlements, the season close; section 3's triggers, path by path there)
+-- already holds the gladiator's account advisory lock (hashtextextended(owner_id::text,0)) and touches only that gladiator's
+-- rows, so the counters, the title rows and the worn_title update follow the shared order (coordinator, account lock, gladiator
+-- row, wallet, items) without a new wait. The auto-wear update takes the gladiator row last. Creation inserts the gladiator
+-- itself in the same transaction. The deferred projectors run at commit and take the global revision lock last. Trigger
+-- functions are not directly executable.
 --
 -- Every statement is reapplicable.
 begin;
@@ -230,6 +234,173 @@ grant execute on function private.title_rules(),private.founder_cutoff_ms(),priv
   private.add_title_count(uuid,text,bigint),private.set_title_count(uuid,text,bigint),
   private.award_titles(uuid,bigint,uuid,text,jsonb) to service_role;
 revoke all on function private.titles_on_gladiator() from public,anon,authenticated,service_role;
+
+-- 3. Counting (spec "Triggers", "What each measure counts", "Gold", "Time"). Each trigger counts its writer's event in that
+-- writer's own transaction (a failing trigger rolls the whole write back) and awards at the end of the write that earned
+-- something: a settlement when its activity completes, with that activity at its settled_at_ms (the loot found and the gold
+-- credited earlier in the same settlement are already counted, so their titles join the result); a season award at its
+-- awarded_at_ms; a purchase or an NPC sale at the database time, sampled once per trigger call.
+--
+-- Lock order (Task 2 review ruling: award_titles relies on its caller holding the gladiator's account lock for the held ->
+-- auto-wear step). No trigger takes a lock of its own before its writer's; every writer that fires an awarding trigger has
+-- already taken the gladiator's account advisory lock:
+--   titles_on_activity       private.settle_activity_core, the only writer that completes an activity: the account lock, then
+--                            the gladiator row, the wallet and the items, before any grant.
+--   titles_on_ledger         an NPC sale: private.inventory_command 'sell-item' (the account lock, the gladiator row, the wallet,
+--                            the items). Settlement and season credits only count here.
+--   titles_on_item           private.apply_inventory_plan (the account lock, then the gladiator row) from 'buy-shop'
+--                            (inventory_command, which took the same lock first) and from an expedition settlement (counted
+--                            only); public.create_gladiator's starter items (the actor's account lock; the gladiator row is its
+--                            own new row).
+--   titles_on_item_move      private.market_command 'buy-listing': both accounts' locks in gladiator order, then both rows.
+--   titles_on_season_award   private.close_season: each awarded account's lock, then its wallet. The auto-wear then takes the
+--                            gladiator row last; every other holder of a gladiator row takes its account lock first, so none
+--                            can hold or wait for that row here (spec "Lock order").
+--   titles_on_banner         private.inventory_command 'buy-shop' of the banner (the account lock, the gladiator row).
+-- tests/db/titles.test.ts runs each path end to end under a lock probe that fails any title written without the lock.
+
+-- The four ownership measures from public.item_firsts: its rows; its rare rows; the most distinct tiers (1, 5, 10) held by one
+-- item template (a renown variant is a tier of its template); the most distinct of common, uncommon and rare held by one template
+-- at one tier. The history only grows, so these only grow.
+create or replace function private.refresh_item_counters(gid uuid) returns void
+language sql security invoker set search_path='' as $$
+  with f as (
+    select split_part(x.catalog_id,':',1) as template,split_part(x.catalog_id,':',2) as tier,split_part(x.catalog_id,':',3) as kind
+    from public.item_firsts x where x.gladiator_id=refresh_item_counters.gid
+  )
+  insert into public.title_counters as c(gladiator_id,counter,value)
+    select refresh_item_counters.gid,m.counter,m.value from (values
+      ('items-owned',(select count(*) from f)),
+      ('rare-items',(select count(*) from f where f.kind='rare')),
+      ('tiers-of-one',(select coalesce(max(t.n),0) from (select count(distinct f.tier) as n from f group by f.template) t)),
+      ('rarities-of-one',(select coalesce(max(r.n),0) from (select count(distinct f.kind) as n from f
+        where f.kind in ('common','uncommon','rare') group by f.template,f.tier) r))
+    ) m(counter,value)
+  on conflict (gladiator_id,counter) do update set value=excluded.value
+$$;
+
+-- A result (after update of status, when an activity first becomes completed). A Training counts with or without a point; an
+-- expedition counts when won (summary.success: all three fights), by trip for the three the server knows (any other counts toward
+-- expeditions-won only); an Arena bout won adds a win and to the run, raising the best run to it, and a loss ends the run; a
+-- tournament counts from its placement (1: a win and a final, 2: a final). A Rest counts and awards nothing. The award's time
+-- is the result's settled_at_ms (settle_activity_core always sets it); an activity an operator completes without one is awarded
+-- at the database time.
+create or replace function private.titles_on_activity() returns trigger language plpgsql security invoker set search_path='' as $$
+declare won boolean:=new.summary->>'success'='true'; placed integer; streak bigint;
+begin
+  if new.resolved_kind='training' then
+    perform private.add_title_count(new.gladiator_id,'trainings',1);
+  elsif new.resolved_kind='expedition' and won then
+    perform private.add_title_count(new.gladiator_id,'expeditions-won',1);
+    if new.requested->>'expeditionId' in ('woodland','outpost','mountain') then
+      perform private.add_title_count(new.gladiator_id,(new.requested->>'expeditionId')||'-won',1);
+    end if;
+  elsif new.resolved_kind='arena' and won then
+    perform private.add_title_count(new.gladiator_id,'arena-wins',1);
+    streak:=private.add_title_count(new.gladiator_id,'arena-streak',1);
+    if streak>coalesce((select c.value from public.title_counters c
+        where c.gladiator_id=new.gladiator_id and c.counter='arena-best-streak'),0) then
+      perform private.set_title_count(new.gladiator_id,'arena-best-streak',streak);
+    end if;
+  elsif new.resolved_kind='arena' then
+    perform private.set_title_count(new.gladiator_id,'arena-streak',0);
+  elsif new.resolved_kind='tournament' then
+    select p.place into placed from public.tournament_placements p where p.activity_id=new.id;
+    if placed=1 then perform private.add_title_count(new.gladiator_id,'tournament-wins',1); end if;
+    if placed in (1,2) then perform private.add_title_count(new.gladiator_id,'tournament-finals',1); end if;
+  end if;
+  if new.resolved_kind is distinct from 'rest' then
+    perform private.award_titles(new.gladiator_id,
+      coalesce(new.settled_at_ms,floor(extract(epoch from clock_timestamp())*1000)::bigint),new.id,'result',null);
+  end if;
+  return null;
+end $$;
+drop trigger if exists titles_on_activity on public.activities;
+create trigger titles_on_activity after update of status on public.activities for each row
+  when (old.status is distinct from 'completed' and new.status='completed') execute function private.titles_on_activity();
+
+-- Gold earned from play (spec "Gold"; the trigger's WHEN: a credit above 0 from a result, a season or an NPC sale). Ruling S1:
+-- into gold-v2 while rules v2 are active, else gold-v1, read through private.active_rules_version() at write time, never from
+-- private.economy_switches (no API role may read it, and settlements and sales run as service_role). The switch flips the active
+-- version in its own commit, so this is the spec's "before switched_at_ms" (the back-fill reads switched_at_ms for history). An
+-- NPC sale of an item the gladiator bought in a shop itself (its id in the gladiator's own successful buy-shop receipts) never
+-- counts. Only an NPC sale awards here; a settlement's or a season's gold is awarded with its result or its award.
+create or replace function private.titles_on_ledger() returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+  if new.reason='npc-sale' and exists(select 1 from public.operation_receipts sale join public.operation_receipts bought
+      on bought.gladiator_id=new.gladiator_id and bought.request->>'kind'='buy-shop' and bought.result->>'ok'='true'
+      where sale.receipt_id=new.receipt_id and bought.result->'value'->'itemIds' ? (sale.request->>'itemId')) then
+    return null;
+  end if;
+  perform private.add_title_count(new.gladiator_id,
+    case when private.active_rules_version()='v2' then 'gold-v2' else 'gold-v1' end,new.money_delta);
+  if new.reason='npc-sale' then
+    perform private.award_titles(new.gladiator_id,floor(extract(epoch from clock_timestamp())*1000)::bigint,null,'sale',null);
+  end if;
+  return null;
+end $$;
+drop trigger if exists titles_on_ledger on public.wallet_ledger;
+create trigger titles_on_ledger after insert on public.wallet_ledger for each row
+  when (new.money_delta>0 and new.reason in ('expedition','arena','tournament','season','npc-sale'))
+  execute function private.titles_on_ledger();
+
+-- The ownership history (spec "The ownership history"): an item inserted for a gladiator (a find, a shop purchase, a starter
+-- item) or moved to it by a market purchase adds its catalog id the first time only; salvage never counts (the triggers' WHEN).
+-- A new id refreshes the four ownership measures and then awards at the database time: 'market' for a purchase moved to the
+-- gladiator, else 'shop', except a find (origin expedition), which is awarded with its result. An id seen before earns nothing.
+-- One function serves both triggers (ruling D1).
+create or replace function private.titles_on_item() returns trigger language plpgsql security invoker set search_path='' as $$
+declare at_ms bigint:=floor(extract(epoch from clock_timestamp())*1000)::bigint; added integer;
+begin
+  insert into public.item_firsts(gladiator_id,catalog_id,first_at_ms) values(new.gladiator_id,new.item->>'catalogId',at_ms)
+    on conflict do nothing;
+  get diagnostics added=row_count;
+  if added=0 then return null; end if;
+  perform private.refresh_item_counters(new.gladiator_id);
+  if tg_op='UPDATE' then
+    perform private.award_titles(new.gladiator_id,at_ms,null,'market',null);
+  elsif new.item->>'origin' is distinct from 'expedition' then
+    perform private.award_titles(new.gladiator_id,at_ms,null,'shop',null);
+  end if;
+  return null;
+end $$;
+drop trigger if exists titles_on_item on public.item_instances;
+create trigger titles_on_item after insert on public.item_instances for each row
+  when (new.item->>'catalogId' is distinct from 'salvage') execute function private.titles_on_item();
+drop trigger if exists titles_on_item_move on public.item_instances;
+create trigger titles_on_item_move after update of gladiator_id on public.item_instances for each row
+  when (old.gladiator_id is distinct from new.gladiator_id and new.item->>'catalogId' is distinct from 'salvage')
+  execute function private.titles_on_item();
+
+-- A season award (places 1-3): a top-three place, and a first place at place 1; awarded at awarded_at_ms with the award's
+-- {seasonIndex, league, place}. The season's gold was credited (and counted) just before, in the same close.
+create or replace function private.titles_on_season_award() returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+  perform private.add_title_count(new.gladiator_id,'season-top-three',1);
+  if new.place=1 then perform private.add_title_count(new.gladiator_id,'season-firsts',1); end if;
+  perform private.award_titles(new.gladiator_id,new.awarded_at_ms,null,'season',
+    jsonb_build_object('seasonIndex',new.season_index,'league',new.league,'place',new.place));
+  return null;
+end $$;
+drop trigger if exists titles_on_season_award on private.season_awards;
+create trigger titles_on_season_award after insert on private.season_awards for each row
+  execute function private.titles_on_season_award();
+
+-- The Arena banner bought (its measure reads public.owned_cosmetics): awarded at the database time, source 'shop'.
+create or replace function private.titles_on_banner() returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+  perform private.award_titles(new.gladiator_id,floor(extract(epoch from clock_timestamp())*1000)::bigint,null,'shop',null);
+  return null;
+end $$;
+drop trigger if exists titles_on_banner on public.owned_cosmetics;
+create trigger titles_on_banner after insert on public.owned_cosmetics for each row when (new.catalog_id='banner')
+  execute function private.titles_on_banner();
+
+-- The ownership measures are the backend's, like the other helpers; the trigger functions are executable by nobody.
+revoke all on function private.refresh_item_counters(uuid) from public,anon,authenticated;
+grant execute on function private.refresh_item_counters(uuid) to service_role;
+revoke all on function private.titles_on_activity(),private.titles_on_ledger(),private.titles_on_item(),
+  private.titles_on_season_award(),private.titles_on_banner() from public,anon,authenticated,service_role;
 
 notify pgrst, 'reload schema';
 commit;

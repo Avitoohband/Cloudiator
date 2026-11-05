@@ -17,9 +17,13 @@ export const TITLE_TABLES = ['gladiator_titles', 'title_counters', 'item_firsts'
 /** M28: the title helpers, executable by the backend only (the trigger functions are executable by nobody). */
 export const TITLE_FUNCTIONS = ['private.title_rules()', 'private.founder_cutoff_ms()', 'private.title_measures(uuid,bigint)',
   'private.add_title_count(uuid,text,bigint)', 'private.set_title_count(uuid,text,bigint)',
-  'private.award_titles(uuid,bigint,uuid,text,jsonb)'] as const;
-/** M28: the trigger functions that count and award titles: no EXECUTE for any API role, service_role included. */
-export const TITLE_TRIGGER_FUNCTIONS = ['private.titles_on_gladiator()'] as const;
+  'private.award_titles(uuid,bigint,uuid,text,jsonb)', 'private.refresh_item_counters(uuid)'] as const;
+/**
+ * M28: the trigger functions that count and award titles: no EXECUTE for any API role, service_role included. Six functions serve
+ * the seven counting triggers (titles_on_item serves titles_on_item and titles_on_item_move; ruling D1).
+ */
+export const TITLE_TRIGGER_FUNCTIONS = ['private.titles_on_gladiator()', 'private.titles_on_activity()', 'private.titles_on_ledger()',
+  'private.titles_on_item()', 'private.titles_on_season_award()', 'private.titles_on_banner()'] as const;
 /** M28: the release back-fill's record, owner-only like the economy switch: absent from every API role's privileges. */
 export const TITLES_OWNER_ONLY = { relation: 'private.title_backfills' } as const;
 /** Task 5 (1.6): present in the catalog, absent from every API role's effective privilege snapshot. */

@@ -74,8 +74,12 @@ export function recordingClient(token: string, options: { serverNowMs?: number }
 }
 export async function resetIdentity() {
   // No schema creation here: missing schema must produce an honest RED result.
+  // The cascade also empties the three title tables (M28), which reference public.gladiators. Never truncate
+  // public.gladiator_titles with cascade on its own: the worn-title foreign key would cascade back into public.gladiators.
   await sql`truncate public.gladiators cascade`;
   await sql`truncate private.command_attempts`;
+  // M28: the release back-fill's singleton record (no foreign key to characters, so the cascade does not reach it).
+  await sql`truncate private.title_backfills`;
   // Task 23.8: owners' activity signals are keyed by the account, outside the gladiators cascade.
   await sql`truncate private.owner_signals`;
   // Season rows and the standings archive have no foreign key to characters (Task 21), so the cascade does not reach them.

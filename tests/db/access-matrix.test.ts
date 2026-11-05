@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
-import { OPEN, PUBLIC_TOURNAMENT_COLUMNS, ECONOMY_OWNER_ONLY } from '../fixtures/access.ts';
+import { OPEN, PUBLIC_TOURNAMENT_COLUMNS, ECONOMY_OWNER_ONLY, TITLE_TABLES, TITLE_FUNCTIONS, TITLE_TRIGGER_FUNCTIONS,
+  TITLES_OWNER_ONLY } from '../fixtures/access.ts';
 
 // Task 23.1 (M17): the release access matrix. Every expectation is derived from the catalog through the exported operator
 // audit (scripts/access-audit.sql, one read-only SELECT), except the OPEN list of visitor projections
@@ -113,10 +114,14 @@ const SERVICE_ROLE = [
   'function private.accept_tournament_result(uuid, jsonb): EXECUTE',
   'function private.active_rules_version(): EXECUTE',
   'function private.activity_executor_ready(text): EXECUTE',
+  // Titles (M28): the counters' upserts, the measures, the restated rules, the Founder cutoff and awarding, run by the counting
+  // triggers inside the backend's writes. The trigger functions themselves are executable by nobody.
+  'function private.add_title_count(uuid, text, bigint): EXECUTE',
   'function private.apply_inventory_plan(uuid, jsonb): EXECUTE',
   'function private.apply_pending_build(uuid, bigint): EXECUTE',
   'function private.arena_rewards(uuid): EXECUTE',
   'function private.arena_settlement_failure(uuid): EXECUTE',
+  'function private.award_titles(uuid, bigint, uuid, text, jsonb): EXECUTE',
   'function private.boundary_apply_changes(bigint): EXECUTE',
   'function private.boundary_check_stamina(bigint): EXECUTE',
   'function private.boundary_close_season(bigint): EXECUTE',
@@ -132,6 +137,7 @@ const SERVICE_ROLE = [
   'function private.economy_tournament_slot(bigint): EXECUTE',
   'function private.expedition_rewards(uuid, jsonb): EXECUTE',
   'function private.expire_seller_listings(uuid, bigint): EXECUTE',
+  'function private.founder_cutoff_ms(): EXECUTE',
   'function private.guard_arena_rating(): EXECUTE',
   'function private.guard_cosmetic(): EXECUTE',
   'function private.guard_frozen(): EXECUTE',
@@ -173,10 +179,13 @@ const SERVICE_ROLE = [
   'function private.season_index(bigint): EXECUTE',
   'function private.season_prizes(text, text): EXECUTE',
   'function private.season_rules(): EXECUTE',
+  'function private.set_title_count(uuid, text, bigint): EXECUTE',
   'function private.settle_activity_core(uuid, uuid, jsonb): EXECUTE',
   'function private.settle_rewards(uuid): EXECUTE',
   'function private.slot_phase(bigint): EXECUTE',
   'function private.sweep_exhausted_leases(bigint): EXECUTE',
+  'function private.title_measures(uuid, bigint): EXECUTE',
+  'function private.title_rules(): EXECUTE',
   'function private.tournament_graph(text): EXECUTE',
   'function private.tournament_rewards(uuid): EXECUTE',
   'function private.tournament_settlement_failure(uuid): EXECUTE',
@@ -259,7 +268,11 @@ const SERVICE_ROLE = [
   'relation public.character_rests: INSERT,SELECT,UPDATE',
   // Game messages (M25): the backend only reads them (the owner read's inbox, read_message); the operator writes as postgres.
   'relation public.game_messages: SELECT',
+  // Titles (M28): earned titles and the ownership history are only ever inserted (guard_frozen refuses update and delete);
+  // the counters are upserted. The release back-fill's record (private.title_backfills) is the owner's only.
+  'relation public.gladiator_titles: INSERT,SELECT',
   'relation public.gladiators: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
+  'relation public.item_firsts: INSERT,SELECT',
   'relation public.item_instances: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.market_offers: DELETE,INSERT,SELECT',
   // Game messages (M25): each account's read marks, written by read_message and read by the owner read (owner_state).
@@ -282,6 +295,7 @@ const SERVICE_ROLE = [
   'relation public.schedules: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.season_standings: INSERT,SELECT',
   'relation public.seasons: INSERT,SELECT,UPDATE',
+  'relation public.title_counters: INSERT,SELECT,UPDATE',
   'relation public.tournament_bout_results: DELETE,INSERT,SELECT',
   'relation public.tournament_placements: DELETE,INSERT,SELECT',
   'relation public.tournament_views: DELETE,INSERT,SELECT',
@@ -448,6 +462,39 @@ describe('release access matrix', () => {
       'function private.switch_to_economy_v2() service_role EXECUTE',
       'relation private.economy_switches service_role SELECT',
     ].sort());
+  });
+
+  it('keeps the title tables owner-read, the title helpers backend-only and the back-fill record owner-only (M28)', async () => {
+    const rows = await audit();
+    // Each title table: row security on (the RLS case above), read by a signed-in player through its owner_read policy only,
+    // nothing for visitors or PUBLIC; the backend's privileges are pinned in SERVICE_ROLE.
+    for (const table of TITLE_TABLES) {
+      expect(OPEN, table).not.toContain(table);
+      expect(lines(rows.filter(r => relationOf(r.object) === `public.${table}` && r.grantee !== 'service_role'))
+        .map(l => l.replace(/ md5:[0-9a-f]{32}$/, '')), table).toEqual([
+        `policy public.${table}.owner_read authenticated SELECT permissive`, `relation public.${table} authenticated SELECT`]);
+      const [{ policy }] = await sql`select pg_get_expr(p.polqual, p.polrelid) as policy from pg_policy p
+        where p.polrelid=${'public.' + table}::regclass and p.polname='owner_read'`;
+      expect(policy, table).toContain('auth.uid()');
+    }
+    // The helpers: invoker, search_path pinned, EXECUTE for the backend only; the trigger functions: EXECUTE for nobody.
+    for (const signature of [...TITLE_FUNCTIONS, ...TITLE_TRIGGER_FUNCTIONS]) {
+      const [row] = await sql`select p.prosecdef as definer,p.proconfig as config,
+        has_function_privilege('anon',p.oid,'EXECUTE') as anon,
+        has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated,
+        has_function_privilege('service_role',p.oid,'EXECUTE') as service
+        from pg_proc p where p.oid=${signature}::regprocedure`;
+      expect(row, signature).toEqual({ definer: false, config: ['search_path=""'], anon: false, authenticated: false,
+        service: (TITLE_FUNCTIONS as readonly string[]).includes(signature) });
+    }
+    // The back-fill's record: present, row security on, and no API role (service_role included) holds anything on it.
+    const isBackfill = (row: Row) => row.object === TITLES_OWNER_ONLY.relation || row.object.startsWith(TITLES_OWNER_ONLY.relation + '.');
+    expect(await sql`select c.relrowsecurity as rls from pg_class c where c.oid=${TITLES_OWNER_ONLY.relation}::regclass`)
+      .toEqual([{ rls: true }]);
+    expect(rows.filter(isBackfill)).toEqual([]);
+    // A future accidental grant would show in the same exported audit.
+    const probe = await auditAfter(`grant select on ${TITLES_OWNER_ONLY.relation} to service_role`);
+    expect(lines(probe.filter(isBackfill))).toEqual([`relation ${TITLES_OWNER_ONLY.relation} service_role SELECT`]);
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {
@@ -653,6 +700,12 @@ describe('release access matrix', () => {
       await sql`insert into public.owned_cosmetics(gladiator_id,catalog_id,catalog_version,binding) values(${gid},'banner','v1','bound')`;
       // Task 23.8: a rest at home, as boundary phase 3 writes it.
       await sql`insert into public.character_rests(gladiator_id,since_slot,through_slot) values(${gid},${slot},${slot})`;
+      // Titles (M28): a counter, an earned title and an ownership-history row, owner-only like the builds (a counting trigger
+      // may already have written some of them).
+      await sql`insert into public.title_counters(gladiator_id,counter,value) values(${gid},'trainings',10) on conflict do nothing`;
+      await sql`insert into public.gladiator_titles(gladiator_id,title_id,earned_at_ms,source) values(${gid},'tiro',0,'result')
+        on conflict do nothing`;
+      await sql`insert into public.item_firsts(gladiator_id,catalog_id,first_at_ms) values(${gid},'sword:1:common',0) on conflict do nothing`;
       return [activityId];
     };
     const [ownerActivities, otherActivities] = [await seed(owner.gid, owner.owner.id), await seed(other.gid, other.owner.id)];

@@ -9,5 +9,18 @@ export const OPEN = ['world_revision_state', 'world_actors', 'public_profiles', 
   'arena_standing_reads', 'tournament_views', 'market_offers', 'seasons', 'season_standings', 'game_messages', 'patches', 'patch_features'];
 /** tournament_views is granted column by column: never its pairing job or publication time (Task 19 review M1). */
 export const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends_at_ms,status,entrants,bracket,bouts,reveal_at_ms';
+/**
+ * Patch 1.7 (M28): the three title tables. Owner-only reads (the owner_read policy through auth.uid(), never OPEN); the backend
+ * reads and inserts them (and updates the counters); nobody deletes.
+ */
+export const TITLE_TABLES = ['gladiator_titles', 'title_counters', 'item_firsts'] as const;
+/** M28: the title helpers, executable by the backend only (the trigger functions are executable by nobody). */
+export const TITLE_FUNCTIONS = ['private.title_rules()', 'private.founder_cutoff_ms()', 'private.title_measures(uuid,bigint)',
+  'private.add_title_count(uuid,text,bigint)', 'private.set_title_count(uuid,text,bigint)',
+  'private.award_titles(uuid,bigint,uuid,text,jsonb)'] as const;
+/** M28: the trigger functions that count and award titles: no EXECUTE for any API role, service_role included. */
+export const TITLE_TRIGGER_FUNCTIONS = ['private.titles_on_gladiator()'] as const;
+/** M28: the release back-fill's record, owner-only like the economy switch: absent from every API role's privileges. */
+export const TITLES_OWNER_ONLY = { relation: 'private.title_backfills' } as const;
 /** Task 5 (1.6): present in the catalog, absent from every API role's effective privilege snapshot. */
 export const ECONOMY_OWNER_ONLY = { relation: 'private.economy_switches', function: 'private.switch_to_economy_v2()' } as const;

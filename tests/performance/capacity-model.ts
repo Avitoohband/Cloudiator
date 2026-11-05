@@ -112,6 +112,10 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.notification_marks': { retention: 'player' },
   // M26: the patch list and its features (a row per release, recorded by hand and kept; at most 20 features each): tiny, kept.
   'public.patches': { retention: 'singleton' }, 'public.patch_features': { retention: 'singleton' },
+  // M28: titles, kept forever with the player: at most 31 earned titles, 18 counters and one ownership-history row per catalog
+  // id (132 today) per character. The release back-fill's one record.
+  'public.gladiator_titles': { retention: 'player' }, 'public.title_counters': { retention: 'player' },
+  'public.item_firsts': { retention: 'player' }, 'private.title_backfills': { retention: 'singleton' },
   'private.arena_ratings': { retention: 'season' }, 'public.arena_standings': { retention: 'season' }, 'public.season_standings': { retention: 'season' },
   'private.season_awards': { retention: 'season' }, 'public.seasons': { retention: 'season' },
   'private.command_attempts': { retention: 'operational', windowSlots: 1 }, 'private.dispatch_log': { retention: 'operational', windowSlots: RETENTION.dispatchLogSlots },

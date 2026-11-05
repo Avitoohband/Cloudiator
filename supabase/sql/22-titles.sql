@@ -1,7 +1,8 @@
 -- Wearable titles (patch 1.7) reapplicable source. Committed M01-M27 are immutable; deploy only the separately generated
 -- migration M28 (supabase/migrations/*_patch_1_7.sql, Task 7). Spec: docs/superpowers/specs/2026-10-30-titles-1-7-design.md,
--- "Server: M28 from supabase/sql/22-titles.sql" ("Tables", "Functions", "Triggers", "Lock order", "Time"); plan:
--- docs/superpowers/plans/2026-10-30-titles-1-7.md, Tasks 2-5. Later tasks add their sections below section 3.
+-- "Server: M28 from supabase/sql/22-titles.sql" ("Tables", "Functions", "Triggers", "Lock order", "Time", "The command
+-- wear-title", "Public and owner reads"); plan: docs/superpowers/plans/2026-10-30-titles-1-7.md, Tasks 2-5. Later tasks add their
+-- sections below section 4.
 --
 -- Purpose: a gladiator earns a title when one of its measures (what it has done: expeditions won, Trainings, Arena wins, gold
 -- earned from play, items ever owned, days in camp, Season 1...) reaches the rule's threshold. Titles are kept forever, never
@@ -20,10 +21,16 @@
 -- 3. Counting: private.refresh_item_counters and six trigger functions for the spec's counting triggers (titles_on_item serves
 --    titles_on_item and titles_on_item_move). Each runs in its writer's own transaction; no settlement, executor or worker
 --    function is restated or changed.
+-- 4. Wearing and the reads: public.wear_title (the command wear-title, backend only), private.project_character restated from
+--    20-profile-card.sql with the actor's `title` and the profile's titles_earned, public.public_profile_reads restated from
+--    21-economy.sql with titlesEarned, public.owner_state restated from 18-messages.sql with wornTitle, titles, titleProgress and
+--    the title notices in inbox.newNotifications, and refresh_projections() so every actor and profile carries them at once.
 --
--- Accepted restatement: private.title_rules() restates TITLES_V1's id, measure, threshold and tier
+-- Accepted restatements: private.title_rules() restates TITLES_V1's id, measure, threshold and tier
 -- (supabase/functions/_shared/domain/titles.ts) in catalog order, and private.title_measures restates its 18 stored counters
 -- (STORED_COUNTERS); tests/db/titles.test.ts compares both with the TypeScript catalog, as private.season_rules() is pinned.
+-- public.owner_state restates title_measures' gold-earned and days-in-camp (ruling R3: the owner may not execute the private
+-- helper); tests/db/titles.test.ts compares them with title_measures in one statement.
 --
 -- Lock order: every writer that awards (commands, settlements, the season close; section 3's triggers, path by path there)
 -- already holds the gladiator's account advisory lock (hashtextextended(owner_id::text,0)) and touches only that gladiator's
@@ -402,6 +409,219 @@ revoke all on function private.refresh_item_counters(uuid) from public,anon,auth
 grant execute on function private.refresh_item_counters(uuid) to service_role;
 revoke all on function private.titles_on_activity(),private.titles_on_ledger(),private.titles_on_item(),
   private.titles_on_season_award(),private.titles_on_banner() from public,anon,authenticated,service_role;
+
+-- 4. Wearing, and the reads (spec "The command wear-title", "Public and owner reads", "Access matrix and probes"). Only the worn
+-- id (the world actor's `title`) and a count (the profile's `titlesEarned`) are ever public; the owner reads its titles, their
+-- sources and times, and its progress. The three restated objects come from the latest sources (global constraints: "Restate
+-- from the latest source") and change only what the spec names.
+
+-- public.wear_title(actor_id, operation_id, input): the caller's own gladiator wears an earned title or none, free, any time.
+-- Shaped like public.change_appearance (18-messages.sql): the account lock; the receipt replay (a replay returns the stored
+-- result, another body under the same operation is `conflict`, both before any shape check); exactly the keys `kind`,
+-- `operationId` (the operation id as text, which the backend sends lowercased like every command) and `titleId`; `titleId`
+-- null or a string of the id pattern, else `invalid`; the caller's own gladiator `for update` (`not-found` without one: the
+-- command names no gladiator, so no other can change); a title it does not hold (a catalog title not earned, or an id no
+-- catalog has) is `invalid`; the update only when it differs, which fires the deferred project_changed_character trigger, so
+-- the world actor is republished and the world revision rises at commit (an unchanged title publishes nothing); then the
+-- receipt. No refusal writes a receipt. It never answers `processing`: a title does not depend on the world clock. The held
+-- check is the command's own; the deferred gladiators_worn_title_fkey is the table's guarantee (titles are never deleted, so
+-- a title held here is still held at commit).
+-- Result: {ok:true, receiptId, value:{titleId, receivedAtMs}}. Backend only (EXECUTE for service_role).
+create or replace function public.wear_title(actor_id uuid, operation_id uuid, input jsonb) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare c jsonb:=input->'command'; prior public.operation_receipts%rowtype; g public.gladiators%rowtype; wanted text; now_ms bigint;
+  receipt uuid:=gen_random_uuid(); result jsonb;
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if operation_id is null or jsonb_typeof(c) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));
+  select * into prior from public.operation_receipts r where r.owner_id=actor_id and r.operation_id=wear_title.operation_id;
+  if found then
+    if prior.request<>c then return jsonb_build_object('ok',false,'code','conflict'); end if;
+    return prior.result;
+  end if;
+  -- Each term is true or false, never null (a null term would let the OR chain fall through).
+  if (select array_agg(k order by k collate "C") from jsonb_object_keys(c) k) is distinct from array['kind','operationId','titleId']
+    or c->>'kind' is distinct from 'wear-title' or c->>'operationId' is distinct from operation_id::text
+    or coalesce(jsonb_typeof(c->'titleId') not in ('null','string'),true)
+    or coalesce(c->>'titleId' !~ '^[a-z][a-z-]{1,30}$',false) then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  select * into g from public.gladiators where owner_id=actor_id for update;
+  if not found then return jsonb_build_object('ok',false,'code','not-found'); end if;
+  wanted:=c->>'titleId';
+  if wanted is not null and not exists(select 1 from public.gladiator_titles t where t.gladiator_id=g.id and t.title_id=wanted) then
+    return jsonb_build_object('ok',false,'code','invalid');
+  end if;
+  now_ms:=private.planning_now_ms();
+  update public.gladiators set worn_title=wanted where id=g.id and worn_title is distinct from wanted;
+  result:=jsonb_build_object('ok',true,'receiptId',receipt,'value',jsonb_build_object('titleId',wanted,'receivedAtMs',now_ms));
+  insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(actor_id,operation_id,receipt,g.id,c,sha256(convert_to(c::text,'UTF8')),result);
+  return result;
+end $$;
+
+revoke all on function public.wear_title(uuid,uuid,jsonb) from public,anon,authenticated;
+grant execute on function public.wear_title(uuid,uuid,jsonb) to service_role;
+
+-- private.project_character: 20-profile-card.sql's projector (M26; no later source restates it), unchanged except
+--   - the actor's `title`: the worn id or null (g.worn_title), after `appearance`. Every client reads it within one poll; an
+--     older client ignores it;
+--   - the public_profiles upsert's titles_earned: the count of the gladiator's title rows, in its insert, update and
+--     is-distinct check (an unchanged profile is still not written).
+-- Its triggers are today's, plus section 1's deferred trigger on public.gladiator_titles: a wear (the gladiators row) or a new
+-- title (its row) republishes the gladiator at commit. Its ACL is restated as 20-profile-card.sql grants it.
+create or replace function private.project_character(gid uuid) returns void
+language plpgsql security invoker set search_path='' as $$
+declare g public.gladiators%rowtype; b jsonb; a public.activities%rowtype; actor jsonb; silhouettes jsonb; awarded_prestige jsonb;
+  resting boolean; card jsonb;
+begin
+  select * into g from public.gladiators where id=gid;
+  if not found then return; end if;
+  select current_build into b from public.builds where gladiator_id=gid;
+  if b is null then return; end if;
+  -- Only an authoritative published activity is visible. Preparing snapshots remain private.
+  select * into a from public.activities where gladiator_id=gid and status<>'preparing'
+    and published_at_ms is not null and published_at_ms<=floor(extract(epoch from clock_timestamp())*1000)::bigint
+    order by slot_index desc limit 1;
+  -- Task 23.8: resting in its processed slot, it shows no activity, whatever its latest one was.
+  resting:=exists(select 1 from public.character_rests r where r.gladiator_id=gid and r.since_slot<=g.processed_slot_index
+    and g.processed_slot_index<=r.through_slot);
+  select coalesce(jsonb_agg(silhouette order by silhouette),'[]'::jsonb) into silhouettes from (
+    select case split_part(i.item->>'catalogId',':',1)
+      when 'sword' then 'weapon-sword' when 'axe' then 'weapon-axe' when 'spear' then 'weapon-spear' when 'bow' then 'weapon-bow'
+      when 'round-shield' then 'offhand-shield' when 'leather-hood' then 'head-hood' when 'iron-helmet' then 'head-helmet'
+      when 'light-armor' then 'armor-light' when 'heavy-armor' then 'armor-heavy' when 'light-boots' then 'feet-light'
+      when 'heavy-boots' then 'feet-heavy' end as silhouette
+    from public.item_instances i where i.gladiator_id=gid
+      and i.id in (select value::uuid from jsonb_each_text(b->'equipment') where value is not null)
+  ) equipment where silhouette is not null;
+  -- M24: the chosen look, null for the legacy look. M28: the worn title, null for none.
+  actor:=jsonb_build_object('gladiatorId',g.id,'name',g.name,'classId',b->'classId','equipmentSilhouettes',silhouettes,'appearance',g.appearance,
+    'title',g.worn_title,'league',g.league,'level',g.level,
+    'phase',private.slot_phase(case when resting then g.processed_slot_index else coalesce(a.slot_index,g.processed_slot_index) end),
+    'location',case when resting then 'camp' when a.id is null then 'orientation' when a.resolved_kind='expedition' then 'expedition:'||(a.requested->>'expeditionId') else a.resolved_kind end,
+    'activityId',case when not resting then a.id end,'activityStatus',case when resting then 'idle' when a.id is null then 'active' else a.status end,
+    'startsAtMs',case when not resting then coalesce(a.starts_at_ms,g.created_at_ms) end,
+    'endsAtMs',case when not resting then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
+  insert into public.world_actors(gladiator_id,actor,processed_slot_index) values(gid,actor,g.processed_slot_index)
+    on conflict(gladiator_id) do update set actor=excluded.actor,processed_slot_index=excluded.processed_slot_index
+    where (world_actors.actor,world_actors.processed_slot_index) is distinct from (excluded.actor,excluded.processed_slot_index);
+  -- Task 21: prestige, one entry per season award.
+  select coalesce(jsonb_agg(jsonb_build_object('seasonIndex',x.season_index,'league',x.league,'place',x.place,'badge',x.badge,'title',x.title)
+    order by x.season_index),'[]'::jsonb) into awarded_prestige from private.season_awards x where x.gladiator_id=gid;
+  -- Task 11c: the profile card's build, from the CURRENT build only (never pending_build): the stance, the points and each worn item's
+  -- public fields, never its id, owner, origin, binding or reservation; a slot with nothing worn is null.
+  card:=jsonb_build_object('stance',b->'stance','allocations',b->'allocations','equipment',
+    (select jsonb_object_agg(s.slot,(select jsonb_build_object('catalogId',i.item->'catalogId','catalogVersion',
+       i.item->'catalogVersion','tier',i.item->'tier','rarity',i.item->'rarity','stats',i.item->'stats')
+       from public.item_instances i where i.gladiator_id=gid and i.id=(b->'equipment'->>s.slot)::uuid))
+     from unnest(array['weapon','offHand','head','body','feet']) as s(slot)));
+  -- Combined combat strength/league score belongs to Task 16. Never label gear history as that score.
+  -- M28: titles_earned, the count of the gladiator's titles (never which, how or when).
+  insert into public.public_profiles(gladiator_id,rating,prestige,build,joined_at_ms,titles_earned)
+    values(gid,g.rating,awarded_prestige,card,g.created_at_ms,(select count(*) from public.gladiator_titles t where t.gladiator_id=gid))
+    on conflict(gladiator_id) do update
+    set rating=excluded.rating,prestige=excluded.prestige,build=excluded.build,joined_at_ms=excluded.joined_at_ms,titles_earned=excluded.titles_earned
+    where (public_profiles.rating,public_profiles.prestige,public_profiles.build,public_profiles.joined_at_ms,public_profiles.titles_earned)
+      is distinct from (excluded.rating,excluded.prestige,excluded.build,excluded.joined_at_ms,excluded.titles_earned);
+  -- Task 22 (exception 4b): only new or changed rows reach the upsert; an unchanged row is neither written nor locked.
+  insert into public.recent_results(activity_id,gladiator_id,name,reveal_at_ms,summary)
+    select p.activity_id,p.gladiator_id,p.name,p.reveal_at_ms,p.summary from (
+      select x.id as activity_id,gid as gladiator_id,g.name as name,x.settled_at_ms as reveal_at_ms,jsonb_build_object('activityId',x.id,'resolvedKind',x.resolved_kind,
+        'result',x.summary->'result','success',x.summary->'success','settledAtMs',x.settled_at_ms,
+        'replayExpiry',case when x.summary->'replayExpiry'->>'state'='available' then jsonb_build_object('state','available','expiresAtMs',x.summary->'replayExpiry'->'expiresAtMs') else jsonb_build_object('state','expired') end) as summary
+      from public.activities x where x.gladiator_id=gid and x.status='completed' and x.summary is not null and x.settled_at_ms is not null
+    ) p
+    where not exists(select 1 from public.recent_results r where r.activity_id=p.activity_id
+      and (r.name,r.summary,r.reveal_at_ms) is not distinct from (p.name,p.summary,p.reveal_at_ms))
+    on conflict(activity_id) do update set name=excluded.name,summary=excluded.summary,reveal_at_ms=excluded.reveal_at_ms
+    where (recent_results.name,recent_results.summary,recent_results.reveal_at_ms) is distinct from (excluded.name,excluded.summary,excluded.reveal_at_ms);
+  -- Task 16: every league-season rating record of the character, as public standings (rating and human counters only).
+  insert into public.arena_standings(gladiator_id,league,season_index,name,rating,human_wins,human_losses)
+    select r.gladiator_id,r.league,r.season_index,g.name,r.rating,r.human_wins,r.human_losses from private.arena_ratings r where r.gladiator_id=gid
+    on conflict(gladiator_id,league,season_index) do update set name=excluded.name,rating=excluded.rating,
+      human_wins=excluded.human_wins,human_losses=excluded.human_losses
+    where (arena_standings.name,arena_standings.rating,arena_standings.human_wins,arena_standings.human_losses)
+      is distinct from (excluded.name,excluded.rating,excluded.human_wins,excluded.human_losses);
+end $$;
+
+-- Restated as 20-profile-card.sql grants it: the backend's (service_role) only.
+revoke all on function private.project_character(uuid) from public, anon, authenticated;
+grant execute on function private.project_character(uuid) to service_role;
+
+-- public.public_profile_reads: 21-economy.sql's complete invoker read (M27: build, joinedAtMs, arenaRecord and banner), with
+-- titlesEarned added. The WITH clause restates security_invoker (CREATE OR REPLACE VIEW replaces a view's options with the ones
+-- it names), and the grants are restated after it, revokes first.
+create or replace view public.public_profile_reads with(security_invoker=true) as
+  select p.gladiator_id,jsonb_build_object('actor',w.actor,'combatStrength',p.combat_strength,'rating',p.rating,'prestige',p.prestige,
+    'build',p.build,'joinedAtMs',p.joined_at_ms,'arenaRecord',(select jsonb_build_object(
+      'wins',coalesce(sum(s.human_wins),0)::bigint,'losses',coalesce(sum(s.human_losses),0)::bigint)
+      from public.arena_standings s where s.gladiator_id=p.gladiator_id),'banner',p.banner,'titlesEarned',p.titles_earned) as profile
+  from public.public_profiles p join public.world_actor_reads w using(gladiator_id);
+revoke all on public.public_profile_reads from public,anon,authenticated,service_role;
+grant select on public.public_profile_reads to anon,authenticated,service_role;
+
+-- public.owner_state: 18-messages.sql's view (section 4, the last statement there; no later source restates it), unchanged except
+--   wornTitle       the worn id or null;
+--   titles          [{id, earnedAtMs, activityId, source, detail}], by earnedAtMs then id;
+--   titleProgress   every stored counter of the gladiator (an absent one reads 0), plus gold-earned and days-in-camp now;
+--   inbox.newNotifications  the results counted as before plus the title notices: the distinct (source, earned_at_ms) among its
+--                   titles with no activity and a source other than `joined`, after greatest(mark, created_at_ms), the results'
+--                   own rule (a title with an activity joins its result's notification; Founder at creation has no notice).
+-- Accepted restatement (ruling R3): titleProgress's gold-earned (gold-v2 + one floor of gold-v1 / 4) and days-in-camp (whole
+-- days from created_at_ms to the statement time) restate private.title_measures (section 2): the view is an invoker view that
+-- the owner (authenticated) reads, and no client role may execute the private helper. tests/db/titles.test.ts compares both
+-- with title_measures in one statement. Like the rest of the view it filters by the account itself (the owner's own
+-- gladiator), because the backend (service_role) reads it past row security. create or replace keeps the grants; the WITH clause
+-- restates security_invoker.
+create or replace view public.owner_state with (security_invoker=true) as
+select g.owner_id,jsonb_build_object(
+  'gladiatorId',g.id,'name',g.name,'appearance',g.appearance,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,
+  'schedule',s.schedule,'scheduleVersion',s.version,'wallets',jsonb_build_object('money',w.money,'renown',w.renown),
+  'reservedFees',jsonb_build_object('money',coalesce((select sum(r.money) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0),
+    'renown',coalesce((select sum(r.renown) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0)),
+  'inventory',coalesce((select jsonb_agg(i.item order by i.id) from public.item_instances i where i.gladiator_id=g.id),'[]'::jsonb),'inventoryCapacity',60,
+  'ownedCosmetics',coalesce((select jsonb_agg(jsonb_build_object('catalogId',c.catalog_id,'catalogVersion',c.catalog_version,'binding',c.binding) order by c.catalog_id) from public.owned_cosmetics c where c.gladiator_id=g.id),'[]'::jsonb),
+  'progression',jsonb_build_object('level',g.level,'xp',g.xp,'earnedAttributePoints',g.earned_points,'unspentAttributePoints',g.unspent_points,'league',g.league,'peakStrength',g.peak_strength,'rating',g.rating),
+  'stamina',jsonb_build_object('current',g.stamina_current,'maximum',g.stamina_maximum),'tournamentOptIn',g.tournament_opt_in,'processedSlotIndex',g.processed_slot_index,
+  'currentActivity',case when rest.gladiator_id is null then coalesce((select jsonb_build_object('id',a.id,'kind',coalesce(a.resolved_kind,a.requested->>'kind'),
+      'status',case when a.status='completed' then 'completed' when a.status='preparing' then 'queued'
+        when extract(epoch from statement_timestamp())*1000<a.ends_at_ms then 'active' else 'processing' end,
+      'startsAtMs',a.starts_at_ms,'endsAtMs',a.ends_at_ms,
+      'label',case coalesce(a.resolved_kind,a.requested->>'kind') when 'training' then 'Training'
+        when 'rest' then case when a.fallback then 'Resting (not enough stamina)' else 'Resting' end
+        when 'expedition' then 'Expedition' when 'arena' then 'Arena' else 'Tournament' end)
+    from public.activities a where a.gladiator_id=g.id order by a.slot_index desc limit 1),
+    jsonb_build_object('id',g.id,'kind','orientation','status',case when extract(epoch from statement_timestamp())*1000<g.orientation_end_ms then 'active' else 'processing' end,
+      'startsAtMs',g.created_at_ms,'endsAtMs',g.orientation_end_ms,'label','Orientation')) end,
+  'restingUntilSlot',case when rest.signalled_at_ms is not null then rest.through_slot+1 end,
+  'wornTitle',g.worn_title,
+  'titles',coalesce((select jsonb_agg(jsonb_build_object('id',t.title_id,'earnedAtMs',t.earned_at_ms,'activityId',t.activity_id,
+      'source',t.source,'detail',t.detail) order by t.earned_at_ms,t.title_id)
+    from public.gladiator_titles t where t.gladiator_id=g.id),'[]'::jsonb),
+  'titleProgress',coalesce((select jsonb_object_agg(c.counter,c.value) from public.title_counters c where c.gladiator_id=g.id),'{}'::jsonb)
+    ||jsonb_build_object('gold-earned',
+      coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v2'),0)
+      +coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v1'),0)/4,
+      'days-in-camp',(floor(extract(epoch from statement_timestamp())*1000)::bigint-g.created_at_ms)/86400000),
+  'inbox',jsonb_build_object(
+    'unread',(select count(*) from public.game_messages m where not m.hidden and m.published_at_ms>g.created_at_ms
+      and not exists(select 1 from public.message_reads r where r.owner_id=g.owner_id and r.message_id=m.id)),
+    'readIds',coalesce((select jsonb_agg(r.message_id order by r.message_id) from public.message_reads r
+      join public.game_messages m on m.id=r.message_id and not m.hidden where r.owner_id=g.owner_id),'[]'::jsonb),
+    'sinceMs',g.created_at_ms,
+    'newNotifications',(select count(*) from public.activities a where a.gladiator_id=g.id and a.status='completed'
+      and a.resolved_kind in ('training','expedition','arena','tournament') and a.summary is not null and a.settled_at_ms is not null
+      and a.settled_at_ms<=floor(extract(epoch from statement_timestamp())*1000)::bigint
+      and a.settled_at_ms>greatest(coalesce(nm.seen_ms,0),g.created_at_ms))
+      +(select count(*) from (select distinct t.source,t.earned_at_ms from public.gladiator_titles t where t.gladiator_id=g.id
+        and t.activity_id is null and t.source<>'joined' and t.earned_at_ms>greatest(coalesce(nm.seen_ms,0),g.created_at_ms)) n),
+    'notificationsSeenMs',greatest(coalesce(nm.seen_ms,0),g.created_at_ms))) as state
+from public.gladiators g join public.builds b on b.gladiator_id=g.id join public.schedules s on s.gladiator_id=g.id join public.wallets w on w.gladiator_id=g.id
+  left join public.character_rests rest on rest.gladiator_id=g.id and rest.since_slot<=g.processed_slot_index and g.processed_slot_index<=rest.through_slot
+  left join public.notification_marks nm on nm.owner_id=g.owner_id;
+
+-- Every actor carries its title and every profile its count at once (the new projector, run after its restatement).
+select public.refresh_projections();
 
 notify pgrst, 'reload schema';
 commit;

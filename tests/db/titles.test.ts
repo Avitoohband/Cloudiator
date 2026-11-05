@@ -806,3 +806,247 @@ describe('counting', () => {
     expect(await wornOf(f.gid)).toBeNull();
   }, 60_000);
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Task 4: the command wear-title (spec "The command wear-title"), the public reads (the world actor's `title`, the profile's
+// `titlesEarned`) and the owner read's titles (spec "Public and owner reads"). public.wear_title is shaped like
+// public.change_appearance (tests/db/change-appearance.test.ts): the account lock, the receipt replay and conflict, the exact keys,
+// the caller's own gladiator `for update`, the update only when it differs, a receipt; no receipt for a refusal.
+type WearCommand = { kind: 'wear-title'; operationId: string; titleId: unknown };
+const wear = (titleId: unknown, operationId: string = randomUUID()): WearCommand => ({ kind: 'wear-title', operationId, titleId });
+/** public.wear_title as the backend calls it (service_role). */
+const wearRpc = async (actor: string | null, operationId: string | null, command: unknown) => {
+  const { data, error } = await admin.rpc('wear_title', { actor_id: actor, operation_id: operationId, input: { command } });
+  expect(error).toBeNull();
+  return data;
+};
+const wearReceipts = async (ownerId: string) => (await sql`select count(*)::int as n from public.operation_receipts
+  where owner_id=${ownerId} and request->>'kind'='wear-title'`)[0].n as number;
+const worldRevision = async () => (await sql`select revision::int as revision from public.world_revision_state where singleton`)[0].revision as number;
+/** The row's transaction id: any UPDATE of it, even one that changes nothing, gives it a new one. */
+const rowVersion = async (gid: string) => (await sql`select xmin::text as xmin from public.gladiators where id=${gid}`)[0].xmin as string;
+/** A gladiator holding Tiro (worn: its first title) and Wanderer. */
+async function holder() {
+  const f = await fighter(), created = await createdAt(f.gid);
+  await setCount(f.gid, 'trainings', 10);
+  await award(f.gid, created + 1000);
+  await setCount(f.gid, 'expeditions-won', 10);
+  await award(f.gid, created + 2000);
+  expect([await idsOf(f.gid), await wornOf(f.gid)]).toEqual([['tiro', 'wanderer'], 'tiro']);
+  return f;
+}
+/** A visitor's raw reads of one gladiator: its world actor and its public profile. */
+async function visitorReads(gid: string) {
+  const actor = await anonymous.from('world_actor_reads').select('actor').eq('gladiator_id', gid).single();
+  const profile = await anonymous.from('public_profile_reads').select('profile').eq('gladiator_id', gid).single();
+  expect([actor.error, profile.error]).toEqual([null, null]);
+  return { actor: actor.data!.actor as Record<string, unknown>, profile: profile.data!.profile as Record<string, unknown> };
+}
+
+describe('wear-title', () => {
+  it('wears a held title or none, answering with a receipt, and writes nothing for the title already worn', async () => {
+    const f = await holder(), command = wear('wanderer'), sentAt = await dbNow();
+    const saved = await wearRpc(f.id, command.operationId, command);
+    const answeredAt = await dbNow();
+    expect(saved).toEqual({ ok: true, receiptId: expect.any(String), value: { titleId: 'wanderer', receivedAtMs: expect.any(Number) } });
+    expect(saved.value.receivedAtMs).toBeGreaterThanOrEqual(sentAt);
+    expect(saved.value.receivedAtMs).toBeLessThanOrEqual(answeredAt);
+    expect(await wornOf(f.gid)).toBe('wanderer');
+    // The receipt keeps the whole command and the answer, and is the account's own.
+    expect(await sql`select gladiator_id, receipt_id, request, result from public.operation_receipts
+      where owner_id=${f.id} and operation_id=${command.operationId}`)
+      .toEqual([{ gladiator_id: f.gid, receipt_id: saved.receiptId, request: command, result: saved }]);
+    // No title.
+    const none = wear(null), bare = await wearRpc(f.id, none.operationId, none);
+    expect(bare).toEqual({ ok: true, receiptId: expect.any(String), value: { titleId: null, receivedAtMs: expect.any(Number) } });
+    expect(await wornOf(f.gid)).toBeNull();
+    // No title again: answered with its own receipt, the row is not updated and the world revision does not move.
+    const [version, before] = [await rowVersion(f.gid), await worldRevision()];
+    const again = wear(null);
+    expect(await wearRpc(f.id, again.operationId, again)).toMatchObject({ ok: true, value: { titleId: null } });
+    expect([await rowVersion(f.gid), await worldRevision(), await wearReceipts(f.id)]).toEqual([version, before, 3]);
+    // And back to a held title.
+    const back = wear('tiro');
+    expect(await wearRpc(f.id, back.operationId, back)).toMatchObject({ ok: true, value: { titleId: 'tiro' } });
+    expect(await wornOf(f.gid)).toBe('tiro');
+  });
+
+  it('replays the stored answer for the same operation and refuses another title under it, writing nothing', async () => {
+    const f = await holder(), operationId = randomUUID(), command = wear('wanderer', operationId);
+    const saved = await wearRpc(f.id, operationId, command);
+    expect(saved).toMatchObject({ ok: true, value: { titleId: 'wanderer' } });
+    const later = wear('tiro');
+    expect(await wearRpc(f.id, later.operationId, later)).toMatchObject({ ok: true });
+    const [version, before] = [await rowVersion(f.gid), await worldRevision()];
+    // The replay answers the stored result and never puts the old title back.
+    expect(await wearRpc(f.id, operationId, command)).toEqual(saved);
+    expect(await wornOf(f.gid)).toBe('tiro');
+    // Another body under the used operation is a conflict, checked before any shape.
+    for (const other of [wear('tiro', operationId), wear(null, operationId), wear('Founder', operationId), { ...command, extra: 1 }]) {
+      expect(await wearRpc(f.id, operationId, other), JSON.stringify(other)).toEqual({ ok: false, code: 'conflict' });
+    }
+    expect(await wornOf(f.gid)).toBe('tiro');
+    expect([await rowVersion(f.gid), await worldRevision(), await wearReceipts(f.id)]).toEqual([version, before, 2]);
+  });
+
+  it('refuses an unheld, unknown or malformed title and a wrong shape as invalid, with no receipt', async () => {
+    const f = await holder(), operationId = randomUUID();
+    const [version, before] = [await rowVersion(f.gid), await worldRevision()];
+    // Croesus is a catalog title it does not hold; den-breaker is no title at all; the rest are not ids.
+    for (const titleId of ['croesus', 'den-breaker', 'Founder', 7, '', 'a', 'tiro ', true, [], {}, ['tiro'], { id: 'tiro' }]) {
+      expect(await wearRpc(f.id, operationId, wear(titleId, operationId)), JSON.stringify(titleId)).toEqual({ ok: false, code: 'invalid' });
+    }
+    const valid = wear('wanderer', operationId), { titleId: _titleId, ...withoutTitle } = valid;
+    for (const command of [withoutTitle, { ...valid, extra: 1 }, { ...valid, gladiatorId: f.gid }, { ...valid, ownerId: f.id },
+      { ...valid, kind: 'change-appearance' }, { kind: valid.kind, titleId: 'wanderer' }, { ...valid, operationId: randomUUID() },
+      { ...valid, operationId: 'x' }, null, 'wear-title', [valid], {}]) {
+      expect(await wearRpc(f.id, operationId, command), JSON.stringify(command)).toEqual({ ok: false, code: 'invalid' });
+    }
+    // A missing envelope or operation id, and no actor.
+    const { data, error } = await admin.rpc('wear_title', { actor_id: f.id, operation_id: operationId, input: {} });
+    expect([error, data]).toEqual([null, { ok: false, code: 'invalid' }]);
+    expect(await wearRpc(f.id, null, valid)).toEqual({ ok: false, code: 'invalid' });
+    expect(await wearRpc(null, operationId, valid)).toEqual({ ok: false, code: 'unauthenticated' });
+    expect(await wornOf(f.gid)).toBe('tiro');
+    expect([await rowVersion(f.gid), await worldRevision(), await wearReceipts(f.id)]).toEqual([version, before, 0]);
+    // Nothing was stored, so the same operation still applies with a held title.
+    expect(await wearRpc(f.id, operationId, valid)).toMatchObject({ ok: true, value: { titleId: 'wanderer' } });
+    expect(await wearReceipts(f.id)).toBe(1);
+  });
+
+  it('gives an account without a gladiator not-found, and writes nothing', async () => {
+    const stranger = await account();
+    for (const titleId of [null, 'tiro']) {
+      const command = wear(titleId);
+      expect(await wearRpc(stranger.id, command.operationId, command)).toEqual({ ok: false, code: 'not-found' });
+    }
+    expect(await sql`select count(*)::int as n from public.operation_receipts where owner_id=${stranger.id}`).toEqual([{ n: 0 }]);
+  });
+
+  it("never changes another gladiator's title", async () => {
+    const owner = await holder(), victim = await holder();
+    // Bloodied is the victim's alone.
+    await setCount(victim.gid, 'arena-wins', 1);
+    await award(victim.gid, (await createdAt(victim.gid)) + 3000);
+    const [version, before] = [await rowVersion(victim.gid), await worldRevision()];
+    for (const authority of [{ gladiatorId: victim.gid }, { ownerId: victim.id }, { actorId: victim.id }]) {
+      const command = { ...wear('wanderer'), ...authority };
+      expect(await wearRpc(owner.id, command.operationId, command), JSON.stringify(authority)).toEqual({ ok: false, code: 'invalid' });
+    }
+    const theirs = wear('bloodied');
+    expect(await wearRpc(owner.id, theirs.operationId, theirs)).toEqual({ ok: false, code: 'invalid' });
+    const mine = wear('wanderer');
+    expect(await wearRpc(owner.id, mine.operationId, mine)).toMatchObject({ ok: true });
+    expect([await wornOf(owner.gid), await wornOf(victim.gid)]).toEqual(['wanderer', 'tiro']);
+    expect([await rowVersion(victim.gid), await wearReceipts(victim.id)]).toEqual([version, 0]);
+    expect(await worldRevision()).toBeGreaterThan(before);
+  });
+
+  it('is a backend-only security-invoker function: no client role can run it', async () => {
+    expect(await sql`select p.prosecdef as definer, p.proconfig as config, p.proacl::text as acl, l.lanname as language,
+      has_function_privilege('anon',p.oid,'EXECUTE') as anon, has_function_privilege('authenticated',p.oid,'EXECUTE') as player,
+      has_function_privilege('service_role',p.oid,'EXECUTE') as backend
+      from pg_proc p join pg_language l on l.oid=p.prolang where p.oid=to_regprocedure('public.wear_title(uuid,uuid,jsonb)')`)
+      .toEqual([{ definer: false, config: ['search_path=""'], acl: '{postgres=X/postgres,service_role=X/postgres}', language: 'plpgsql',
+        anon: false, player: false, backend: true }]);
+    const f = await holder();
+    for (const [who, client] of [['player', f.client], ['visitor', anonymous]] as const) {
+      const command = wear('wanderer');
+      const { error } = await client.rpc('wear_title', { actor_id: f.id, operation_id: command.operationId, input: { command } });
+      expect(error?.code, who).toBe('42501');
+    }
+    expect([await wornOf(f.gid), await wearReceipts(f.id)]).toEqual(['tiro', 0]);
+  });
+
+  it('publishes the worn title and the count', async () => {
+    const f = await holder(), bare = await fighter();
+    const titles = await titlesOf(f.gid);
+    expect((await visitorReads(f.gid)).actor.title).toBe('tiro');
+    const before = await worldRevision(), command = wear('wanderer');
+    // Committed when the backend's call returns: a visitor's next read carries it, and the world revision rose.
+    expect(await wearRpc(f.id, command.operationId, command)).toMatchObject({ ok: true });
+    expect(await worldRevision()).toBeGreaterThan(before);
+    const reads = await visitorReads(f.gid);
+    expect(reads.actor.title).toBe('wanderer');
+    expect((reads.profile.actor as Record<string, unknown>).title).toBe('wanderer');
+    expect(reads.profile.titlesEarned).toBe(2);
+    // A gladiator with no title: the key is there, null, and the count is 0.
+    const none = await visitorReads(bare.gid);
+    expect(none.actor).toHaveProperty('title', null);
+    expect(none.profile.titlesEarned).toBe(0);
+    // Only the worn id and a count are public: no counter, no source, no time of a title.
+    for (const read of [reads.actor, reads.profile]) {
+      const text = JSON.stringify(read);
+      for (const secret of ['trainings', 'expeditions-won', 'titleProgress', 'earnedAtMs', '"titles"', 'history', 'source',
+        ...titles.map(t => String(t.at))]) expect(text, secret).not.toContain(secret);
+    }
+    expect(Object.keys(reads.profile).sort()).toEqual(['actor', 'arenaRecord', 'banner', 'build', 'combatStrength', 'joinedAtMs',
+      'prestige', 'rating', 'titlesEarned']);
+    // A newly earned title republishes the count.
+    await setCount(f.gid, 'arena-wins', 1);
+    await award(f.gid, (await createdAt(f.gid)) + 3000);
+    expect((await visitorReads(f.gid)).profile.titlesEarned).toBe(3);
+  });
+
+  it("reads the owner's titles and progress", async () => {
+    const f = await fighter(), other = await holder();
+    // Made five days and an hour ago: five whole days in camp.
+    const made = (await dbNow()) - 5 * DAY - 3_600_000;
+    await sql`update public.gladiators set created_at_ms=${made} where id=${f.gid}`;
+    const result = randomUUID(), detail = { seasonIndex: 0, league: 'bronze', place: 3 };
+    await setCount(f.gid, 'trainings', 10);
+    await sql`select private.award_titles(${f.gid}, ${made + 3000}, ${result}, 'result', null)`;
+    await setCount(f.gid, 'expeditions-won', 10);
+    await sql`select private.award_titles(${f.gid}, ${made + 1000}, null, 'history', null)`;
+    await setCount(f.gid, 'season-top-three', 1);
+    await sql`select private.award_titles(${f.gid}, ${made + 2000}, null, 'season', ${sql.json(detail)})`;
+    await setCount(f.gid, 'gold-v1', 7);
+    await setCount(f.gid, 'gold-v2', 10);
+    const state = await ownerState(f) as OwnerState & Record<string, unknown>;
+    expect(state.wornTitle).toBe('tiro');
+    // By earnedAtMs, then id.
+    expect(state.titles).toEqual([
+      { id: 'wanderer', earnedAtMs: made + 1000, activityId: null, source: 'history', detail: null },
+      { id: 'medalist', earnedAtMs: made + 2000, activityId: null, source: 'season', detail },
+      { id: 'tiro', earnedAtMs: made + 3000, activityId: result, source: 'result', detail: null }]);
+    // Every stored counter (the starter items' four too), plus gold-earned (10 + floor(7/4)) and days-in-camp (now).
+    const stored = await countersOf(f.gid);
+    expect(stored).toMatchObject({ trainings: 10, 'expeditions-won': 10, 'season-top-three': 1, 'items-owned': 2 });
+    expect(state.titleProgress).toEqual({ ...stored, 'gold-earned': 11, 'days-in-camp': 5 });
+    // The owner's alone: another account reads its own, never these.
+    const theirs = await ownerState(other) as OwnerState & Record<string, unknown>;
+    expect([theirs.wornTitle, (theirs.titles as { id: string }[]).map(t => t.id)]).toEqual(['tiro', ['tiro', 'wanderer']]);
+    // A new gladiator: no title, an empty list and its starter items' counters.
+    const fresh = await fighter();
+    const empty = await ownerState(fresh) as OwnerState & Record<string, unknown>;
+    expect([empty.wornTitle, empty.titles]).toEqual([null, []]);
+    expect(empty.titleProgress).toEqual({ ...(await countersOf(fresh.gid)), 'gold-earned': 0, 'days-in-camp': 0 });
+  });
+
+  it("states gold-earned and days-in-camp as private.title_measures does (ruling R3's accepted restatement)", async () => {
+    // owner_state is an invoker view and the owner may not execute private.title_measures, so the view restates its two derived
+    // measures. In one statement (one statement_timestamp) both must agree, at every v1 remainder and at ages of 0 to 400 days.
+    // Each age keeps an hour or more from a day's edge, so the expected days below hold however late the statement runs.
+    const f = await fighter(), now = await dbNow(), HOUR = 3_600_000;
+    const compare = async () => {
+      const [{ progress, measures }] = await sql`select o.state->'titleProgress' as progress,
+        private.title_measures(g.id, floor(extract(epoch from statement_timestamp())*1000)::bigint) as measures
+        from public.owner_state o join public.gladiators g on g.owner_id=o.owner_id where g.id=${f.gid}`;
+      expect(progress).not.toBeNull();
+      for (const key of Object.keys(progress)) expect(progress[key], key).toBe(measures[key]);
+      return progress as Record<string, number>;
+    };
+    const seen: [number, number][] = [];
+    for (const [v1, v2, age] of [[0, 0, 0], [1, 0, DAY - 2 * HOUR], [3, 5, DAY + HOUR], [4, 5, 2 * DAY - HOUR],
+      [7, 0, 99 * DAY + HOUR], [8, 2, 100 * DAY + HOUR], [15, 9, 400 * DAY + HOUR]] as const) {
+      await setCount(f.gid, 'gold-v1', v1);
+      await setCount(f.gid, 'gold-v2', v2);
+      await sql`update public.gladiators set created_at_ms=${now - age} where id=${f.gid}`;
+      const progress = await compare();
+      seen.push([progress['gold-earned'], progress['days-in-camp']]);
+    }
+    // Not vacuous: the values move as the measures say (the statement's clock is at or after `now`).
+    expect(seen.map(([gold]) => gold)).toEqual([0, 0, 5, 6, 1, 4, 12]);
+    expect(seen.map(([, days]) => days)).toEqual([0, 0, 1, 1, 99, 100, 400]);
+  });
+});

@@ -78,7 +78,33 @@ describe('visitor read access', () => {
       expect(profile.error).toBeNull();
       expect(profile.data?.profile).toMatchObject({ banner: false, build: expect.any(Object), joinedAtMs: expect.any(Number),
         arenaRecord: { wins: 0, losses: 0 } });
-      expect(Object.keys(profile.data!.profile).sort()).toEqual(['actor', 'arenaRecord', 'banner', 'build', 'combatStrength', 'joinedAtMs', 'prestige', 'rating']);
+      expect(Object.keys(profile.data!.profile).sort()).toEqual(['actor', 'arenaRecord', 'banner', 'build', 'combatStrength', 'joinedAtMs', 'prestige', 'rating',
+        'titlesEarned']);
+    }
+  });
+
+  // Patch 1.7 (M28; spec "Public and owner reads"): a visitor reads the worn title's id on the world actor and the count of titles on the
+  // profile, and nothing else of titles: none of the three owner-only tables.
+  it("reads an actor's title and a profile's titlesEarned, and none of the title tables", async () => {
+    const f = await fighter(), bare = await fighter(), spectator = await account();
+    const [{ created }] = await sql`select created_at_ms::bigint as created from public.gladiators where id=${f.gid}`;
+    await sql`select private.set_title_count(${f.gid}, 'trainings', 10)`;
+    await sql`select private.set_title_count(${f.gid}, 'expeditions-won', 10)`;
+    await sql`select private.award_titles(${f.gid}, ${Number(created) + 1000}, null, 'history', null)`;
+    for (const client of [anonymous, spectator.client]) {
+      const actors = await client.from('world_actor_reads').select('gladiator_id,actor').in('gladiator_id', [f.gid, bare.gid]);
+      expect(actors.error).toBeNull();
+      expect(Object.fromEntries(actors.data!.map(r => [r.gladiator_id, r.actor.title]))).toEqual({ [f.gid]: 'wanderer', [bare.gid]: null });
+      const profiles = await client.from('public_profile_reads').select('gladiator_id,profile').in('gladiator_id', [f.gid, bare.gid]);
+      expect(profiles.error).toBeNull();
+      expect(Object.fromEntries(profiles.data!.map(r => [r.gladiator_id, [r.profile.titlesEarned, r.profile.actor.title]])))
+        .toEqual({ [f.gid]: [2, 'wanderer'], [bare.gid]: [0, null] });
+    }
+    for (const table of ['gladiator_titles', 'title_counters', 'item_firsts']) {
+      // A visitor is refused; a signed-in spectator reads no row of another account's.
+      expect((await anonymous.from(table).select('*')).error?.code, table).toBe('42501');
+      const spectated = await spectator.client.from(table).select('*');
+      expect([spectated.error, spectated.data], table).toEqual([null, []]);
     }
   });
 

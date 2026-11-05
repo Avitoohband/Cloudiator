@@ -14,10 +14,13 @@ export const PUBLIC_TOURNAMENT_COLUMNS = 'id,slot_index,league,starts_at_ms,ends
  * reads and inserts them (and updates the counters); nobody deletes.
  */
 export const TITLE_TABLES = ['gladiator_titles', 'title_counters', 'item_firsts'] as const;
-/** M28: the title helpers, executable by the backend only (the trigger functions are executable by nobody). */
+/**
+ * M28: the title helpers and the command wear-title (public.wear_title), executable by the backend only (the trigger functions are
+ * executable by nobody).
+ */
 export const TITLE_FUNCTIONS = ['private.title_rules()', 'private.founder_cutoff_ms()', 'private.title_measures(uuid,bigint)',
   'private.add_title_count(uuid,text,bigint)', 'private.set_title_count(uuid,text,bigint)',
-  'private.award_titles(uuid,bigint,uuid,text,jsonb)', 'private.refresh_item_counters(uuid)'] as const;
+  'private.award_titles(uuid,bigint,uuid,text,jsonb)', 'private.refresh_item_counters(uuid)', 'public.wear_title(uuid,uuid,jsonb)'] as const;
 /**
  * M28: the trigger functions that count and award titles: no EXECUTE for any API role, service_role included. Six functions serve
  * the seven counting triggers (titles_on_item serves titles_on_item and titles_on_item_move; ruling D1).

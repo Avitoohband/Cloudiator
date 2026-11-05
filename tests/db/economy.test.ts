@@ -54,6 +54,17 @@ async function reapply(source: string) {
     connection.release();
   }
 }
+/**
+ * 21-economy.sql reapplied, then every later reapplicable source in order (22-titles.sql on), so the database is always left at
+ * the latest source. Patch 1.7 restates public.public_profile_reads (with titlesEarned): 21-economy.sql alone would put M27's view
+ * back for every test that runs after this file.
+ */
+async function reapplyEconomy() {
+  const folder = new URL('../../supabase/sql/', import.meta.url);
+  const later = readdirSync(folder).filter(name => /^\d{2}-[a-z0-9-]+\.sql$/.test(name) && name > '21-economy.sql').sort();
+  expect(later[0]).toBe('22-titles.sql');
+  for (const name of ['21-economy.sql', ...later]) await reapply(readFileSync(new URL(name, folder), 'utf8'));
+}
 
 const ROLLBACK = new Error('rollback-only');
 async function rollback<T>(run: (tx: TransactionSql) => Promise<T>): Promise<T> {
@@ -1131,7 +1142,8 @@ describe('the Arena banner', () => {
     { database, verifyActor: makeVerifier(anonymous), allowedOrigins: ['http://127.0.0.1:3000'] });
     expect(await response.json()).toMatchObject({ ok: true, value: { cosmeticId: 'banner', renownDebit: 50 } });
     expect(await sql`select renown::int from public.wallets where gladiator_id=${owner.gid}`).toEqual([{ renown: 0 }]);
-    expect(await profile(owner.gid)).toEqual({ ...beforeProfile, banner: true });
+    // Patch 1.7 (M28): the banner also earns Bannerman, its first title, worn at once; the profile shows the worn id and the count.
+    expect(await profile(owner.gid)).toEqual({ ...beforeProfile, banner: true, titlesEarned: 1, actor: { ...beforeProfile.actor, title: 'bannerman' } });
     expect((await profile(other.gid)).banner).toBe(false);
     expect(Number((await revision()).revision.split(':')[0])).toBeGreaterThan(Number(beforeRevision.revision.split(':')[0]));
     // Existing projection upserts must retain ownership without re-purchasing.
@@ -1153,12 +1165,11 @@ describe('the Arena banner', () => {
     });
     expect((await profile(owner.gid)).banner).toBe(false);
     const balances = await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`;
-    const source = readFileSync(new URL('../../supabase/sql/21-economy.sql', import.meta.url), 'utf8');
-    await reapply(source);
+    await reapplyEconomy();
     expect((await profile(owner.gid)).banner).toBe(true);
     expect((await profile(other.gid)).banner).toBe(false);
     const filled = await profile(owner.gid);
-    await reapply(source);
+    await reapplyEconomy();
     expect(await profile(owner.gid)).toEqual(filled);
     expect(await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`).toEqual(balances);
     expect(await sql`select version,active from private.rules_versions order by version`)
@@ -1168,7 +1179,7 @@ describe('the Arena banner', () => {
       await tx`update private.rules_versions set active=false where version='v1'`;
       await tx`update private.rules_versions set active=true where version='v2'`;
     });
-    await reapply(source);
+    await reapplyEconomy();
     expect(await sql`select version from private.rules_versions where active`).toEqual([{ version: 'v2' }]);
     expect((await revision()).rules_version).toBe('v2');
     expect(await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`).toEqual(balances);

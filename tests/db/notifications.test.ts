@@ -200,6 +200,49 @@ describe('notifications', () => {
     expect(Object.values(await levels()).every(level => level === null)).toBe(true);
   });
 
+  // Patch 1.7 (M28; spec "Earning, wearing and notices"): titles earned without an activity are noticed in groups of one source and one
+  // time, new by the results' own rule (after greatest(mark, creation)); a title with an activity joins its result's notification, and
+  // Founder at creation (`joined`) has no notice.
+  it('counts title notices as new results do', async () => {
+    const owner = await player('Title Notes'), other = await player('Other Notes');
+    const grant = (gid: string, titleId: string, at: number, source: string, activityId: string | null = null, detail: object | null = null) =>
+      sql`insert into public.gladiator_titles(gladiator_id,title_id,earned_at_ms,activity_id,source,detail)
+        values(${gid},${titleId},${at},${activityId},${source},${detail ? sql.json(detail as never) : null})`;
+    const count = async () => {
+      const read = (await readOwner(owner.client)).inbox.newNotifications;
+      expect((await inboxOf(owner.id)).newNotifications).toBe(read);
+      return read;
+    };
+    expect(await count()).toBe(0);
+    // A season grant of two titles at one time, then a sale grant: two notices.
+    const t1 = await dbNow(); await sleep(8);
+    await grant(owner.gid, 'medalist', t1, 'season', null, { seasonIndex: 0, league: 'bronze', place: 1 });
+    await grant(owner.gid, 'champion', t1, 'season', null, { seasonIndex: 0, league: 'bronze', place: 1 });
+    const t2 = await dbNow(); await sleep(8);
+    await grant(owner.gid, 'moneyed', t2, 'sale');
+    expect(await count()).toBe(2);
+    // A result and the title it earned: one notification, the result's.
+    const t3 = await dbNow(); await sleep(8);
+    const training = await activity(owner.gid, 'training', { settledAt: t3, earned: { attributePoints: 1 } });
+    await grant(owner.gid, 'tiro', t3, 'result', training);
+    expect(await count()).toBe(3);
+    // Founder at creation has no notice, whenever it is stamped; another gladiator's notices are its own.
+    const t4 = await dbNow(); await sleep(8);
+    await grant(owner.gid, 'founder', t4, 'joined');
+    await grant(other.gid, 'bannerman', t4, 'shop');
+    expect(await count()).toBe(3);
+    expect((await readOwner(other.client)).inbox.newNotifications).toBe(1);
+    // A title stamped at or before the gladiator's creation is not after it.
+    await grant(owner.gid, 'rare-find', owner.createdAt, 'shop');
+    expect(await count()).toBe(3);
+    // Seen up to the season grant: it is no longer new (strictly after the mark counts), the sale and the result still are.
+    expect(await see(owner.id, t1)).toEqual({ ok: true, value: { seenMs: t1 } });
+    expect(await count()).toBe(2);
+    // Seen up to the later time: nothing is new.
+    expect(await see(owner.id, t4)).toEqual({ ok: true, value: { seenMs: t4 } });
+    expect(await count()).toBe(0);
+  });
+
   it('refuses a missing account or a bad time, stores nothing, and cannot be called by any client role', async () => {
     const owner = await player('Refused');
     expect(await see(null, 5)).toEqual({ ok: false, code: 'unauthenticated' });
@@ -246,9 +289,10 @@ describe('notifications', () => {
     const owner = await player('Keys');
     const { data } = await owner.client.from('owner_state').select('state').single();
     const state = data!.state as Record<string, unknown>;
+    // Patch 1.7 (M28) adds the owner's titles: wornTitle, titles and titleProgress.
     expect(Object.keys(state).sort()).toEqual(['appearance', 'buildVersion', 'currentActivity', 'currentBuild', 'gladiatorId', 'inbox', 'inventory', 'inventoryCapacity', 'name',
-      'ownedCosmetics', 'pendingBuild', 'processedSlotIndex', 'progression', 'reservedFees', 'restingUntilSlot', 'schedule', 'scheduleVersion', 'stamina', 'tournamentOptIn',
-      'wallets']);
+      'ownedCosmetics', 'pendingBuild', 'processedSlotIndex', 'progression', 'reservedFees', 'restingUntilSlot', 'schedule', 'scheduleVersion', 'stamina', 'titleProgress',
+      'titles', 'tournamentOptIn', 'wallets', 'wornTitle']);
     expect(Object.keys(state.inbox as object).sort()).toEqual(['newNotifications', 'notificationsSeenMs', 'readIds', 'sinceMs', 'unread']);
     // And the view is still an invoker view: the owner sees only its own row.
     expect((await owner.client.from('owner_state').select('owner_id')).data).toEqual([{ owner_id: owner.id }]);

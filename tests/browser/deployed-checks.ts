@@ -214,7 +214,8 @@ const rpc = (name: string, args: string[]): AnonProbe => ({ label: `rpc ${name}`
  * with them), inserts of an empty row, an update and a delete filtered on `is.null` of a NOT NULL primary-key column (so no
  * row can match), and the private schema, which the Data API must not serve at all: a table read, a call of the STRICT
  * private.schedule_effective_slot with null arguments (STRICT returns null without running) and, since M25, a call of
- * private.post_message with null arguments (it would insert no row: every column it fills is NOT NULL). No function that acts without
+ * private.post_message with null arguments (it would insert no row: every column it fills is NOT NULL), and since M28 a read of each
+ * owner-only title table (a read changes nothing). No function that acts without
  * arguments is called (coordinate_work, refresh_projections, private.cleanup_tick). tests/deployed.test.ts checks each rule
  * against the migrations.
  */
@@ -238,6 +239,11 @@ export const ANON_PROBES: AnonProbe[] = [
   // M26 (patch numbers): the patch list and its features are read-only for every API role (the operator records a patch as postgres).
   { label: 'insert patches', method: 'POST', path: '/rest/v1/patches', body: {}, expected: ['42501'] },
   { label: 'insert patch_features', method: 'POST', path: '/rest/v1/patch_features', body: {}, expected: ['42501'] },
+  // M28 (titles): the three title tables are the owner's only (read through auth.uid()); a visitor reads none of them. The wear_title
+  // rpc probe comes with M28 itself (tests/deployed.test.ts checks every rpc probe against the migrations).
+  { label: 'read gladiator_titles', method: 'GET', path: '/rest/v1/gladiator_titles?select=gladiator_id&limit=1', expected: ['42501'] },
+  { label: 'read title_counters', method: 'GET', path: '/rest/v1/title_counters?select=gladiator_id&limit=1', expected: ['42501'] },
+  { label: 'read item_firsts', method: 'GET', path: '/rest/v1/item_firsts?select=gladiator_id&limit=1', expected: ['42501'] },
   { label: 'update wallets', method: 'PATCH', path: '/rest/v1/wallets?gladiator_id=is.null', body: { money: 0 }, expected: ['42501'] },
   { label: 'delete operation_receipts', method: 'DELETE', path: '/rest/v1/operation_receipts?owner_id=is.null', expected: ['42501'] },
   { label: 'read private.jobs', method: 'GET', path: '/rest/v1/jobs?select=id&limit=1', profile: 'private', expected: ['PGRST106'] },

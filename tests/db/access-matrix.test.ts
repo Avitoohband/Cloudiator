@@ -230,6 +230,8 @@ const SERVICE_ROLE = [
   'function public.settle_activity(uuid, uuid): EXECUTE',
   'function public.settle_expedition(uuid, uuid, jsonb): EXECUTE',
   'function public.tournament_bout_input(uuid, uuid): EXECUTE',
+  // Titles (M28): the command wear-title, the caller's own gladiator wearing an earned title or none, backend only like change_appearance.
+  'function public.wear_title(uuid, uuid, jsonb): EXECUTE',
   'relation private.activity_snapshots: DELETE,INSERT,SELECT,UPDATE',
   'relation private.arena_assignment_sides: DELETE,INSERT,SELECT',
   'relation private.arena_assignments: DELETE,INSERT,SELECT',

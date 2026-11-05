@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { TransactionSql } from 'postgres';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { SLOT, TRAINING, resetWorld, fighter as placedFighter, coordinatorLease, runBoundary, settleDue, claim }
   from '../fixtures/boundary.ts';
@@ -267,6 +268,17 @@ const countersOf = async (gid: string) => Object.fromEntries((await sql`select c
   where gladiator_id=${gid}`).map(r => [r.counter as string, Number(r.value)])) as Record<string, number>;
 const firstsOf = async (gid: string) =>
   (await sql`select catalog_id from public.item_firsts where gladiator_id=${gid} order by catalog_id`).map(r => r.catalog_id as string);
+const ROLLBACK = new Error('rollback-only');
+/** Runs `run` in a transaction that is always rolled back, returning its value. */
+async function rolledBack<T>(run: (tx: TransactionSql) => Promise<T>): Promise<T> {
+  let value: T | undefined;
+  try {
+    await sql.begin(async tx => { value = await run(tx); throw ROLLBACK; });
+  } catch (error) {
+    if (error !== ROLLBACK) throw error;
+  }
+  return value as T;
+}
 async function activate(version: 'v1' | 'v2') {
   await sql.begin(async tx => {
     await tx`update private.rules_versions set active=false where active`;
@@ -567,6 +579,24 @@ describe('counting', () => {
     expect(counted['gold-v1']).toBe(15);
     expect(counted).not.toHaveProperty('gold-v2');
     expect((await measuresOf(g.gid, created))['gold-earned']).toBe(3);
+    // Only the pre-1.6 economy (v1) counts at a quarter: a later rules version (a third row, active only inside this
+    // rolled-back transaction, so neither the row nor the world revision's mirror survives) counts unscaled, as v2 does.
+    const later = await rolledBack(async tx => {
+      await tx`insert into private.rules_versions(version,active) values('v9',false)`;
+      await tx`update private.rules_versions set active=false where active`;
+      await tx`update private.rules_versions set active=true where version='v9'`;
+      const receipt = randomUUID();
+      await tx`insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+        values(${g.id},${randomUUID()},${receipt},${g.gid},'{"kind":"arena"}',sha256(convert_to(${receipt},'UTF8')),'{"ok":true}')`;
+      await tx`insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason) values(${g.gid},${receipt},6,0,'arena')`;
+      return {
+        counters: Object.fromEntries((await tx`select counter, value::bigint as value from public.title_counters where gladiator_id=${g.gid}
+          and counter like 'gold-%'`).map(r => [r.counter as string, Number(r.value)])),
+        earned: Number((await tx`select private.title_measures(${g.gid},${created})->>'gold-earned' as earned`)[0].earned),
+      };
+    });
+    expect(later).toEqual({ counters: { 'gold-v1': 15, 'gold-v2': 6 }, earned: 9 });
+    expect(await sql`select version from private.rules_versions where version='v9'`).toEqual([]);
   });
 
   it('buckets a credit written as service_role by the active rules version (ruling S1)', async () => {

@@ -319,8 +319,9 @@ drop trigger if exists titles_on_activity on public.activities;
 create trigger titles_on_activity after update of status on public.activities for each row
   when (old.status is distinct from 'completed' and new.status='completed') execute function private.titles_on_activity();
 
--- Gold earned from play (spec "Gold"; the trigger's WHEN: a credit above 0 from a result, a season or an NPC sale). Ruling S1:
--- into gold-v2 while rules v2 are active, else gold-v1, read through private.active_rules_version() at write time, never from
+-- Gold earned from play (spec "Gold"; the trigger's WHEN: a credit above 0 from a result, a season or an NPC sale). Ruling S1
+-- (refined): into gold-v1 while the pre-1.6 rules v1 are active, else gold-v2, so only v1 gold counts at a quarter and any later
+-- version counts unscaled. The version is read through private.active_rules_version() at write time, never from
 -- private.economy_switches (no API role may read it, and settlements and sales run as service_role). The switch flips the active
 -- version in its own commit, so this is the spec's "before switched_at_ms" (the back-fill reads switched_at_ms for history). An
 -- NPC sale of an item the gladiator bought in a shop itself (its id in the gladiator's own successful buy-shop receipts) never
@@ -333,7 +334,7 @@ begin
     return null;
   end if;
   perform private.add_title_count(new.gladiator_id,
-    case when private.active_rules_version()='v2' then 'gold-v2' else 'gold-v1' end,new.money_delta);
+    case when private.active_rules_version()='v1' then 'gold-v1' else 'gold-v2' end,new.money_delta);
   if new.reason='npc-sale' then
     perform private.award_titles(new.gladiator_id,floor(extract(epoch from clock_timestamp())*1000)::bigint,null,'sale',null);
   end if;

@@ -172,3 +172,16 @@ More from Avi, 2026-11-05 (for the PvE and gear waves):
 52. **Expeditions for higher levels.** "add expeditions for more lvls maybe 12,15,18,20": today the top expedition is the
     Mountain Pass at level 10 (Woodland Path 1, Ruined Outpost 5). New ones open at about levels 12, 15, 18 and 20, with
     pay set by the 1.6 economy, and they drop the higher upgrade materials (idea 46).
+
+UI ideas from Avi, 2026-11-05 (for a later UI patch; mockup over real screenshots first, his rule):
+
+53. **Character creation in steps.** "sections for the character creation visual, class, attribues, can go forward and
+    backward in the form": the creation form becomes three steps, Look, Class and Attributes, with Back and Next between
+    them, so a player can go back and change an earlier choice before creating. Fits the 2026-10-25 points rework (reset,
+    class suggestion) already in the Attributes part.
+54. **Wider menu screens, adjustable.** "wider menu screens maybe adjustable in some fixed range": the menu panels (Schedule,
+    Inventory, Arena and the rest) open wider, and a player can resize them between a fixed narrowest and widest width,
+    remembered per device. A phone keeps its full-width panels.
+55. **A sticky menu, placed where I want.** "sticky option for the menu so it won't disapear, also option to choose where it
+    would be, bottom, top, left, or right": a setting keeps the menu always shown (it does not hide), and a second setting
+    puts it at the bottom, top, left or right of the screen. Per device, like the 12/24-hour clock (idea 7).

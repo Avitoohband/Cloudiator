@@ -82,7 +82,7 @@ My bouts, the shared replay bar/result card, Next bout, named Back, Notification
 
 ## Features by area
 
-**Status:** Live (in the game now) · In 1.6 (built, not out yet) · Planned 1.6 / 1.7 / 1.8 (designed, not built: don't film
+**Status:** Live (in the game now) · Planned 1.7 / 1.8 (designed, not built: don't film
 them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
@@ -130,7 +130,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Stamina | Each activity costs stamina, a Rest refills it, and a part you cannot afford becomes a Rest. | 1.0 | Live | The ⚡ number beside your name; Schedule | — |
 | Plan the whole day | Plan all three parts and save once; the schedule says which part is running now. | 1.1 | Live | Schedule (test player) | Looks update |
 | A Rest shows its stamina | A Rest says how much stamina it gives back, in the Schedule and on My gladiator. | 1.4 | Live | Schedule, under a Rest (test player) | — |
-| Training limit | Training gives a point until your gladiator has 10 + 4 × its level in points; at that limit the Schedule says Training is full and until which level, and Notifications say a Training gave no point. At most two Training activities run per game day: another request becomes a Rest, and the Schedule warns before saving. | 1.6 | In 1.6 | Schedule, under a Training choice and above Save, once v2 is active (after the economy switch) | — |
+| Training limit | Training gives a point until your gladiator has 10 + 4 × its level in points; at that limit the Schedule says Training is full and until which level, and Notifications say a Training gave no point. At most two Training activities run per game day: another request becomes a Rest, and the Schedule warns before saving. | 1.6 | Live | Schedule, under a Training choice and above Save, once v2 is active (after the economy switch) | — |
 
 ### Expeditions and dungeons
 
@@ -145,7 +145,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Whole-trip replay | Replay a whole trip in about a minute and a quarter: out through the camp gate, the trail, the fights at real speed, home through the gate, and to bed when a Rest follows. | 1.4 | Live | Expedition page, `<Woodland trip>`, `&play=trip` → ▶; it opens at the camp gate and ends in bed | — (named as coming in Looks update) |
 | Your gladiator from the start | A replay names and draws your gladiator from its first moment, not only from its first fight. | 1.4 | Live | The first seconds of any whole-trip replay | — |
 | Watch your expedition | While your gladiator is away, a button on the camp shows where it is and opens the live view; once back, it offers the whole trip with your rewards. | 1.4 | Live | The camp while the owner's gladiator is on a trip (test player); on a phone it sits beside ☰. Once the trip is back, the same button offers the whole trip | — |
-| Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | In 1.6 | Not in the fixture camp: a trip's rewards once v2 is active (after the economy switch) | — |
+| Slower levels | Expeditions pay less: 30, 75 and 150 XP and 4, 10 and 18 gold, so level 10 takes about three weeks; gear is found half as often. | 1.6 | Live | Not in the fixture camp: a trip's rewards once v2 is active (after the economy switch) | — |
 | Dungeons | Choose a dungeon for the afternoon: Wolf Den (level 3), Raider Stronghold (level 7) or Troll Hall (level 12). | 1.8 | Planned 1.8 | Not built | — |
 | Team up | Everyone who chose the same dungeon is put in a party of up to 3; hired fighters fill empty seats, so you can always go, even alone. | 1.8 | Planned 1.8 | Not built | — |
 | Rooms, then the boss | A run is 3 rooms, then the boss, in one afternoon; health carries from fight to fight. | 1.8 | Planned 1.8 | Not built | — |
@@ -168,9 +168,9 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Your recent bouts | The Arena menu lists your three latest bouts, each with ▶ Watch. | 1.5 | Live | Arena → Your recent bouts; All my bouts opens Results on My bouts (All) | — |
 | Watch from the camp | After your bout, a button on the camp says who won and plays it. | 1.5 | Live | Camp → settled Arena bout button | — |
 | Full-screen tournament bouts | Tournament bouts play full screen, and Next bout walks through the bracket. | 1.5 | Live | Tournaments → Watch replay → bracket chapters | — |
-| Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | In 1.6 | Fixture camp → Tournaments → Registration: the last rule lists each league's prizes (the preview words the 1.6 rules); live once v2 is active | — |
-| Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | In 1.6 | Fixture camp → Arena → standings: the current sample season's prize table, Aster's Bronze row marked "· yours" (live: the first season opened after the switch) | — |
-| Free tournament entry | Tournament entry costs no stamina; regular Arena still costs its stamina when no bracket forms. | 1.6 | In 1.6 | Fixture camp → Tournaments → Registration: "0 stamina for tournament entry" and the first rule; the Schedule's evening Arena line in the live game once v2 is active | — |
+| Tournament prizes by league | A win pays 40, 60, 80 or 100 gold in Bronze, Silver, Gold or Champion, the other places scaled the same way; the Tournaments rules list them. | 1.6 | Live | Fixture camp → Tournaments → Registration: the last rule lists each league's prizes (the preview words the 1.6 rules); live once v2 is active | — |
+| Season prizes by league | From the first season after 1.6, gold prizes depend on the league (200 to 500 for first place); the season card shows every league's prizes. | 1.6 | Live | Fixture camp → Arena → standings: the current sample season's prize table, Aster's Bronze row marked "· yours" (live: the first season opened after the switch) | — |
+| Free tournament entry | Tournament entry costs no stamina; regular Arena still costs its stamina when no bracket forms. | 1.6 | Live | Fixture camp → Tournaments → Registration: "0 stamina for tournament entry" and the first rule; the Schedule's evening Arena line in the live game once v2 is active | — |
 
 ### Results and replays
 
@@ -199,8 +199,8 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Player market | Buy from and sell to other players at fixed prices; visitors can browse. | 1.0 | Live | Marketplace (the fixture camp has sample listings) | Concept trailer |
 | A fair market fee | A sale's fee is at least 1 gold and the lowest price is 2 gold; the sell form shows what you receive. | 1.1 | Live | Marketplace → Sell | Looks update |
 | Gold | Money is called gold everywhere; your amount is unchanged. | 1.3 | Live | Marketplace; My gladiator | Messages update |
-| Salvage at 4 gold | Salvage sells to merchants for 4 gold instead of 10 (a game message warns a day before). | 1.6 | In 1.6 | A merchant sale after the economy switch | — |
-| A new economy | When 1.6 goes live everyone's gold is cut to a quarter; levels, items, points and renown stay, and shop prices do not change. | 1.6 | In 1.6 | Not visual: the patch note says it | — |
+| Salvage at 4 gold | Salvage sells to merchants for 4 gold instead of 10 (a game message warns a day before). | 1.6 | Live | A merchant sale after the economy switch | — |
+| A new economy | When 1.6 goes live everyone's gold is cut to a quarter; levels, items, points and renown stay, and shop prices do not change. | 1.6 | Live | Not visual: the patch note says it | — |
 
 ### Messages and notifications
 
@@ -221,7 +221,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | Live | Fixture camp (it always shows a banner) → Find | — |
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | Live | Fixture camp → Gladiators, the line on top | — |
 | Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | Live | Fixture camp → Gladiators → a name (Lucilla has a sample build); a click on a gladiator in the camp opens it too | — |
-| Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | In 1.6 | Fixture camp → Gladiators → Aster (she owns it): the 🚩 Arena banner pill under her name; Inventory → Armorer: the shop's banner lines | — |
+| Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Live | Fixture camp → Gladiators → Aster (she owns it): the 🚩 Arena banner pill under her name; Inventory → Armorer: the shop's banner lines | — |
 | Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.8 | Planned 1.8 | Being designed | — |
 
 ### Titles

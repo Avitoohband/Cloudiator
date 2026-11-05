@@ -1,5 +1,13 @@
 # Deployment checklist
 
+## Patch 1.6 LIVE — 2026-11-05
+
+Client 94abb63845a8d7d4acef915633f6ae40330d492c / Pages 7e26de8e-ddf8-4d77-baa7-3dcb9e0d1546; Supabase M01–M27; functions
+`game-worker` and `game-command` from 55ea870. The economy switch ran at 14:24:16 UTC (rules v2 active; 20 wallets cut to a
+quarter, 16,436 → 4,112 gold). Note 9 at 14:27:24 UTC; patch 1.6 recorded at 14:27:46 UTC with 10 features, `latest_patch` 1.6.
+Gate 12/12, both CI runs, nine deployed checks and the post-functions boundary health passed. Never roll the functions back now
+that v2 is active (migrations.md, M27 "Rollback"). [Evidence](release-evidence.md#patch-16-released--2026-11-05).
+
 ## Patch 1.5 LIVE — 2026-11-01
 
 Client e5706963ee78d11ccf353f52326e3d76a2f43252 / Pages 39b7ea33-74c6-40f7-81ef-b685c4c77520, M01–M26 unchanged. Note 6 at 08:19:17.027 UTC; linked 1.5 record at 08:23:14.302 UTC, exact ten features/latest_patch 1.5. Local 12/12, feature/release CI, real-origin build/scan, nine deployed checks/22 anonymous denials and fresh anonymous post-record probe passed. No schema/Edge deployment or signed-in human attestation.

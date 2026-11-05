@@ -25,6 +25,11 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.5.1 (original release).** The 2 Nov film covers 1.3.1–1.5.1; it is uploaded and scheduled for 3 Nov 2026 at 10:00 Israel. Newer release scope must still be checked against the latest local release records. The later 1.5.1 maintenance candidate's verification hold is unchanged.
 
+**New since that video: 1.6, released 2026-11-05** ("A new economy: slower levels and prizes by league", 10 features). This
+branch's code is 1.4, so this file stops at 1.4; the released 1.5, 1.5.1 and 1.6 sections, word for word, are in the release
+line's changelog: `git show origin/release:docs/CHANGELOG.md`, or `C:\Avi\Studies\Projects\Cloudiator\design\docs\CHANGELOG.md`
+(branch `claude/p16-economy`).
+
 ## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)
 
 Released 2026-10-31: M26, client `26dd0d7`, note 5 and the linked 14-feature record are live.

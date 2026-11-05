@@ -17,18 +17,16 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 | Video | Made | Covers |
 | --- | --- | --- |
+| [patch-1-6-economy](https://youtu.be/WrzLvSFmEpQ) | 2026-11-05 (82.4 s; published about 16:35 Israel) | 1.6: all ten released bullets ("A new economy: slower levels and prizes by league"). |
 | [patch-1-5-1-update-and-roadmap](https://youtu.be/vjJBTTAEjww) | 2026-11-02 (133 s; scheduled 3 Nov, 10:00 Israel) | 1.3.1, 1.4, 1.5 and original 1.5.1: 30 released feature bullets. Brief 1.6–1.8 preview is explicitly planned. |
 | `messages-look-and-beds-update` | 2026-10-29 (rendered 09:41 UTC) | 1.3. It was rendered before 1.3.1 shipped. |
 | `camp-life-too-tiny` | 2026-10-29 | No patch: a comedy episode. It shows 1.3's bigger beds. |
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.5.1 (original release).** The 2 Nov film covers 1.3.1–1.5.1; it is uploaded and scheduled for 3 Nov 2026 at 10:00 Israel. Newer release scope must still be checked against the latest local release records. The later 1.5.1 maintenance candidate's verification hold is unchanged.
-
-**New since that video: 1.6, released 2026-11-05** ("A new economy: slower levels and prizes by league", 10 features). This
-branch's code is 1.4, so this file stops at 1.4; the released 1.5, 1.5.1 and 1.6 sections, word for word, are in the release
-line's changelog: `git show origin/release:docs/CHANGELOG.md`, or `C:\Avi\Studies\Projects\Cloudiator\design\docs\CHANGELOG.md`
-(branch `claude/p16-economy`).
+**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; nothing released since. This branch's code is 1.4, so
+this file stops at 1.4: the released 1.5, 1.5.1 and 1.6 sections, word for word, are in the release line's changelog
+(`git show origin/release:docs/CHANGELOG.md`).
 
 ## 1.4 — Watch your expedition, gladiator cards and a clock (2026-10-31)
 

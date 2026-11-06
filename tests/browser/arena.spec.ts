@@ -293,6 +293,39 @@ test.describe('arena staging and sparring rings in the camp', () => {
     await page.locator('canvas').screenshot({ path: testInfo.outputPath('arena-labels-clear-of-nameplates.png') });
   });
 
+  test('starts a damage label above a titled fighter’s title', { tag: '@render' }, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openArena(page, 60);
+    const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    const ids = [ARENA_GLADIATORS.bellator.id, ARENA_GLADIATORS.valeria.id];
+    await page.evaluate(wear => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, revision: 'titled-fighters', actors: world.actors.map(a => wear.includes(a.gladiatorId) ? { ...a, title: 'lion' } : a) });
+    }, ids);
+    let seen = 0;
+    for (const [key, gladiator] of [['campOne', 'bellator'], ['campNpcOne', 'valeria']] as const) {
+      await page.evaluate(id => window.__cloudiatorCamp!.emit('find-character', { gladiatorId: id }), ARENA_GLADIATORS[gladiator].id);
+      const fighter = (await campState(page)).actors.find(a => a.id === ARENA_GLADIATORS[gladiator].id)!;
+      await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2.4), { x: fighter.x, y: fighter.y });
+      const fight = (await campState(page)).arena.fights.find(f => f.battleId === arenaBattleId(key))!;
+      for (let t = fight.boutStartMs + 900; t < fight.boutStartMs + LOGS[key].durationMs && seen < 40; t += 150) {
+        await freezeAt(page, t);
+        const state = await campState(page);
+        for (const label of state.arena.labels.filter(l => l.battleId === fight.battleId)) {
+          // A label starts above its own target's title (its target's column; the pair stand side by side).
+          const target = state.actors.find(a => a.id === fight.fighters[label.target]);
+          if (!target?.title?.visible) continue;
+          seen += 1;
+          expect(overlaps(label.box, target.title.box), `${label.text} over ${target.name}'s title at ${t - fight.boutStartMs} ms`).toBe(false);
+          expect(label.box.y + label.box.height, `${label.text} starts above ${target.name}'s title`).toBeLessThanOrEqual(target.title.box.y + target.title.box.height);
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(5);
+  });
+
   test('walks pairs into their rings within the walk-in time and back to staging after the result', { tag: '@render' }, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openArena(page, 59);

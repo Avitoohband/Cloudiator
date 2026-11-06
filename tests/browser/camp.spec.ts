@@ -608,3 +608,115 @@ test.describe('living isometric camp', () => {
     await expect(page.getByRole('button', { name: 'Schedule', exact: true })).toBeEnabled();
   });
 });
+
+// Patch 1.7: a worn title in gold over the name in the camp (spec "Where a title shows").
+test.describe('worn titles in the camp', () => {
+  test.skip(production, 'The camp harness runs on the fixture preview only.');
+
+  const TITLES: Record<string, string> = {
+    Atticus: 'Pathfinder', Brennus: 'Tiro', Eira: 'Invictus', Jovan: 'Crowd-Pleaser', Mira: 'Collector', Pax: 'Bloodied',
+    Quintus: 'Trailblazer', Wren: 'Rare Find', Xanthe: 'Victor', Octavia: 'Lion of the Arena',
+  };
+  type Box = { x: number; y: number; width: number; height: number };
+  const closeUpOn = async (page: Page, name: string, zoom: number) => {
+    const actor = (await campState(page)).actors.find(a => a.kind === 'player' && a.name === name)!;
+    await page.evaluate(({ x, y, z }) => window.__cloudiatorCamp!.centerOn(x, y, z), { x: actor.x, y: actor.y, z: zoom });
+    await nextFrames(page);
+    return (await campState(page)).actors.find(a => a.id === actor.id)!;
+  };
+
+  test('shows titles over the names when close', async ({ page }) => {
+    await openCamp(page);
+    for (const [name, text] of Object.entries(TITLES)) {
+      const actor = await closeUpOn(page, name, 2.4);
+      expect(actor.visible, `${name} is in camp`).toBe(true);
+      expect(actor.title, `${name} has a title`).toMatchObject({ text, visible: true });
+      const nameBox = actor.plates[0];
+      const box = actor.title!.box as Box;
+      expect(box.y + box.height, `${name}'s title ends where the name starts`).toBeCloseTo(nameBox.y, 0);
+      expect(box.x + box.width / 2, `${name}'s title is centred over the name`).toBeCloseTo(nameBox.x + nameBox.width / 2, 0);
+    }
+    expect((await closeUpOn(page, 'Ilaria', 2.4)).title).toBeNull();
+  });
+
+  test('never moves the name', async ({ page }) => {
+    await openCamp(page);
+    const nameBoxes = async (stripTitles: boolean) => {
+      await page.evaluate(strip => {
+        const hook = window.__cloudiatorCamp!;
+        const world = hook.world()!;
+        hook.setWorld({ ...world, revision: `titles-${strip}`, actors: world.actors.map(a => { const { title: _title, ...rest } = a; return strip ? rest : { ...a }; }) as typeof world.actors });
+      }, stripTitles);
+      const out: Record<string, Box> = {};
+      for (const name of Object.keys(TITLES)) out[name] = (await closeUpOn(page, name, 2.4)).plates[0];
+      return out;
+    };
+    const withTitles = await nameBoxes(false);
+    const without = await nameBoxes(true);
+    for (const name of Object.keys(TITLES)) {
+      // The same view of the same camp (the actor only walks a little between frames).
+      expect(without[name].width, name).toBeCloseTo(withTitles[name].width, 0);
+      expect(without[name].height, name).toBeCloseTo(withTitles[name].height, 0);
+    }
+    const actor = await closeUpOn(page, 'Atticus', 2.4);
+    expect(actor.title).toBeNull();
+    expect(actor.plates[0].height).toBeCloseTo(withTitles.Atticus.height, 0);
+  });
+
+  test("shows only the followed gladiator's title at medium zoom", async ({ page }) => {
+    await openCamp(page);
+    const ids = await page.evaluate(() => Object.fromEntries(window.__cloudiatorCamp!.world()!.actors.map(a => [a.name, a.gladiatorId])));
+    await page.evaluate(() => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, revision: 'titles-follow', actors: world.actors.map(a => a.name === 'Aster' ? { ...a, title: 'founder' } : a) });
+    });
+    // Close up on Atticus (a crowd gladiator both in camp and titled) at 1.6, then follow him: his title shows, a neighbour's does not.
+    await closeUpOn(page, 'Atticus', 1.6);
+    await page.evaluate(id => window.__cloudiatorCamp!.emit('follow-character', { gladiatorId: id }), ids.Atticus);
+    await nextFrames(page);
+    const state = await campState(page);
+    expect(state.camera.zoom).toBeCloseTo(1.6, 1);
+    expect(state.following).toBe(ids.Atticus);
+    const byName = (n: string) => state.actors.find(a => a.name === n)!;
+    expect(byName('Atticus').plates.length, 'the name shows').toBeGreaterThan(0);
+    expect(byName('Atticus').title).toMatchObject({ text: 'Pathfinder', visible: true });
+    // Everyone else with a title in view shows the name but not the title.
+    const others = state.actors.filter(a => a.kind === 'player' && a.id !== ids.Atticus && a.plates.length > 0);
+    expect(others.length, 'other names show at 1.6').toBeGreaterThan(0);
+    for (const a of others) expect(a.title?.visible ?? false, `${a.name}'s title is hidden`).toBe(false);
+  });
+
+  test('keeps no title at zoom 1', async ({ page }) => {
+    await openCamp(page);
+    await page.evaluate(() => window.__cloudiatorCamp!.emit('follow-character', { gladiatorId: null }));
+    await page.evaluate(() => { const h = window.__cloudiatorCamp!; const c = h.state()!.camera; h.centerOn(c.centerX, c.centerY, 1); });
+    await nextFrames(page);
+    const state = await campState(page);
+    expect(state.camera.zoom).toBeCloseTo(1, 1);
+    expect(state.following).toBeNull();
+    expect(state.selected).toBeNull();
+    expect(state.actors.filter(a => a.title?.visible)).toEqual([]);
+  });
+
+  test('keeps the NEW tag above the title and the title above the name', async ({ page }) => {
+    await openCamp(page);
+    // Every new Founder is also NEW: a titled crowd gladiator arrives at the gate.
+    await page.evaluate(() => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, revision: 'titles-new', actors: world.actors.map(a => a.name === 'Atticus' ? { ...a, location: 'orientation' as const, resting: false, title: 'founder' } : a) });
+    });
+    await nextFrames(page);
+    const actor = await closeUpOn(page, 'Atticus', 2.4);
+    expect(actor.marker).toBe('NEW');
+    expect(actor.title).toMatchObject({ text: 'Founder', visible: true });
+    const [name, tag] = actor.plates;
+    const title = actor.title!.box as Box;
+    expect(actor.plates).toHaveLength(2);
+    // Name at the bottom, the title directly above it, the tag over the title: no two touch.
+    expect(title.y + title.height).toBeCloseTo(name.y, 0);
+    expect(tag.y + tag.height, 'the tag ends where the title starts').toBeLessThanOrEqual(title.y + 0.5);
+    expect(tag.y + tag.height, 'one line above the title').toBeGreaterThan(title.y - title.height);
+  });
+});

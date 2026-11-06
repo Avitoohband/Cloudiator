@@ -10,6 +10,7 @@ import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/reads';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
+import { titleById } from '@domain/titles';
 import { isNewcomer, layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import {
@@ -78,6 +79,8 @@ export type CampDebugActor = {
   marker: string | null;
   /** World-space boxes of the nameplate and NPC tag drawn over the actor now. */
   plates: Rect[];
+  /** The worn title over the name (patch 1.7): its words, whether it is drawn now and its world-space box; null for none. */
+  title: { text: string; visible: boolean; box: Rect } | null;
   /** An ambient NPC's art now (the wall patrols wear the night watch's in the evening), else null. */
   look: string | null;
   /** The light of the torch an NPC carries, where and how bright it is drawn now (patch 1.5.1's night watch), else null. */
@@ -132,6 +135,8 @@ const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', cri
 /** Nameplates sit this far over the feet, and an NPC tag this far when its nameplate shows too (art px). */
 const PLATE_LIFT = 46;
 const TAG_LIFT = 58;
+/** The title's own lettering: one size under the name (patch 1.7). */
+const TITLE_STYLE = { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'italic', color: '#f2c66b', stroke: '#1a1423', strokeThickness: 3 };
 /** Fight damage labels keep this gap over their target's nameplate or NPC tag. */
 const LABEL_GAP = 3;
 /** Arena fights are re-derived this often (display ms), and whenever new data arrives. */
@@ -153,6 +158,8 @@ type ActorView = {
   layers: { id: string; sprite: Sprite }[];
   look: string;
   label: PhaserNS.GameObjects.Text;
+  /** The worn title (a known id's name) in gold over the name, or null; players only. */
+  titleLabel?: PhaserNS.GameObjects.Text | null;
   x: number;
   y: number;
   action: string;
@@ -430,6 +437,24 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2).setVisible(false);
     }
 
+    /** A worn title: the name's lettering one size smaller, gold, italic, sitting on the name's top edge. */
+    makeTitle(text: string) {
+      return this.add.text(0, 0, text, TITLE_STYLE).setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2).setVisible(false);
+    }
+
+    /** Keeps the title over a player's name in step with the world: made, retexted or taken down. An unknown id shows none. */
+    syncTitle(v: ActorView, id: string | null | undefined) {
+      const text = titleById(id)?.name ?? null;
+      if (text === null) {
+        v.titleLabel?.destroy();
+        v.titleLabel = null;
+      } else if (!v.titleLabel) {
+        v.titleLabel = this.makeTitle(text);
+      } else if (v.titleLabel.text !== text) {
+        v.titleLabel.setText(text);
+      }
+    }
+
     makeContainer(sprites: Sprite[]) {
       const container = this.add.container(0, 0, sprites);
       container.setSize(26, 46);
@@ -538,10 +563,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           const v = this.createPlayer(actor, placement);
           views.set(actor.gladiatorId, v);
           this.tagNewcomer(v, isNewcomer(actor));
+          this.syncTitle(v, actor.title);
           if (!initial) this.walkTo(v, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing }, { from: GATE });
           continue;
         }
         this.tagNewcomer(existing, isNewcomer(actor));
+        this.syncTitle(existing, actor.title);
         if (lookKey(placement) !== existing.look) this.restyle(existing, placement);
         existing.placement = placement;
         existing.location = actor.location;
@@ -592,6 +619,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     removeView(v: ActorView) {
       v.container.destroy();
       v.label.destroy();
+      v.titleLabel?.destroy();
       v.marker?.destroy();
       v.torch?.destroy();
       views.delete(v.id);
@@ -721,9 +749,17 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const showLabel = visible && (v.kind !== 'npc' ? cam.zoom >= 1.4 || selected === v.id || following === v.id : cam.zoom >= 2);
         if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
         if (showLabel) v.label.setPosition(s.x, s.y - PLATE_LIFT);
+        // The title sits on the name's top edge when the name shows and the camera is close (or this one is selected or followed).
+        const title = v.titleLabel;
+        const showTitle = !!title && showLabel && (cam.zoom >= 2 || selected === v.id || following === v.id);
+        if (title) {
+          if (title.visible !== showTitle) title.setVisible(showTitle);
+          if (showTitle) title.setPosition(s.x, s.y - PLATE_LIFT - v.label.displayHeight);
+        }
         if (v.marker) {
           if (v.marker.visible !== visible) v.marker.setVisible(visible);
-          if (visible) v.marker.setPosition(s.x, s.y - (showLabel ? TAG_LIFT : PLATE_LIFT));
+          // A tag never covers a title: with one showing, the tag stands on the title's top edge.
+          if (visible) v.marker.setPosition(s.x, s.y - (showTitle ? PLATE_LIFT + v.label.displayHeight + title!.displayHeight : showLabel ? TAG_LIFT : PLATE_LIFT));
         }
         if (visible) {
           if (pose) this.applyPose(v, pose);
@@ -1092,8 +1128,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     const id = fight.fighters[side];
     const v = id ? views.get(id) : npcFighters.get(fight.battleId);
     if (!v) return feetY - PLATE_LIFT;
-    const plate = feetY - PLATE_LIFT - v.label.displayHeight;
-    return v.marker ? Math.min(plate, feetY - TAG_LIFT - v.marker.displayHeight) : plate;
+    const name = feetY - PLATE_LIFT - v.label.displayHeight;
+    const title = v.titleLabel?.visible ? name - v.titleLabel.displayHeight : null;
+    const plate = title ?? name;
+    if (!v.marker) return plate;
+    // The tag stands on the title's top edge when a title shows, else at its usual lift over the name.
+    return Math.min(plate, (title ?? feetY - TAG_LIFT) - v.marker.displayHeight);
   }
 
   /**
@@ -1104,6 +1144,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     let room = Infinity;
     for (const v of views.values()) {
       room = Math.min(room, roomUnder(v.label, x, width, top));
+      if (v.titleLabel) room = Math.min(room, roomUnder(v.titleLabel, x, width, top));
       if (v.marker) room = Math.min(room, roomUnder(v.marker, x, width, top));
     }
     return room;
@@ -1261,6 +1302,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           action: v.action, frame: v.pose ? v.pose.body.slice(v.pose.body.indexOf('/') + 1) : frameFor(v, now).frame, layers: v.layers.map(l => l.id), tint: v.placement ? { ...v.placement.routine.tint } : null,
           visible: v.container.visible, depth: v.container.depth, walking: !!v.walk,
           flip: v.flip ?? (v.facing === 'sw' || v.facing === 'nw'), marker: v.marker?.text ?? null,
+          title: v.titleLabel ? { text: v.titleLabel.text, visible: v.titleLabel.visible, box: (() => { const b = v.titleLabel.getBounds(); return { x: b.x, y: b.y, width: b.width, height: b.height }; })() } : null,
           plates: [v.label, v.marker].filter((t): t is PhaserNS.GameObjects.Text => !!t && t.visible).map(t => { const b = t.getBounds(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }),
           look: v.npcLook ?? null,
           torch: v.torch?.visible ? { x: v.torch.x, y: v.torch.y, alpha: v.torch.alpha } : null,

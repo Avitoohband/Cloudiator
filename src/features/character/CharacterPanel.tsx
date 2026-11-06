@@ -2,6 +2,7 @@
 
 // The "My gladiator" menu. A player sees a summary (name, class, level, league, stamina, wallets and the activity line
 // from `activityStatus`) and the build planner; with a refresh that failed it keeps the last loaded summary and says so.
+// Patch 1.7: beside the name, the Title button (the worn title; it opens "Choose your title"), and under it the status after a wear.
 // Without a gladiator it holds the joining path (Task 13.6): a visitor is told everything is open to watch and offered
 // "Sign in with Google to create your gladiator"; signed in without one, "Create your gladiator" reopens the creation
 // dialog over the camp; and the session and owner-load states. Names render as React text.
@@ -16,6 +17,7 @@ import { useClockMode } from '../../lib/clock-setting';
 import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
 import { slotTimeText } from '../schedule/slot-time';
+import { TitleButton } from '../titles/TitlePicker';
 import { activityStatus } from './activity-status';
 import { ClassCard } from './ClassCard';
 import type { Viewer } from './useGameState';
@@ -36,8 +38,15 @@ function useNow(clock: DisplayClock) {
   return now;
 }
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry }: {
+/**
+ * The owner's title on My gladiator (patch 1.7): the title shown as worn (the shell's, which a wear answer sets at once), the status line
+ * after a wear ("You now wear Wanderer."), and what the Title button opens.
+ */
+export type TitleControls = { worn: string | null; status: string | null; onOpen(): void };
+
+function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
+  titles?: TitleControls;
 }) {
   const now = useNow(clock);
   const clockMode = useClockMode();
@@ -53,8 +62,13 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   return (
     <section className={styles.summary} aria-labelledby={headingId}>
       <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
-      <h2 id={headingId} className={styles.name}>{owner.name}</h2>
+      <div className={styles.nameRow}>
+        <h2 id={headingId} className={styles.name}>{owner.name}</h2>
+        {titles && <TitleButton wornTitle={titles.worn} onOpen={titles.onOpen} />}
+      </div>
       <p className={styles.class}>{title(owner.currentBuild.classId)} · Level {owner.progression.level} · {title(owner.progression.league)} league</p>
+      {/* The status after a wear: always there (empty and boxless until then), so the line is announced when it arrives. */}
+      {titles && <p className={styles.titleStatus} role="status" data-testid="title-status">{titles.status ?? ''}</p>}
       {stale && (
         <div className={styles.stale} role="status">
           <p>Your gladiator could not be refreshed. Showing the last loaded details.</p>
@@ -76,7 +90,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
 }
 
 export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
-  resting = false }: {
+  resting = false, titles }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -92,13 +106,16 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   refreshOwner(): Promise<void>;
   /** Opens the "Create your gladiator" dialog over the camp (signed in without a gladiator). */
   onCreate(): void;
+  /** The own gladiator's Title button and status line (patch 1.7); a visitor, who has no gladiator, has neither. */
+  titles?: TitleControls;
   /** The owner's own gladiator rests at home in the shared world (Task 23.9 fix round 1). */
   resting?: boolean;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   if (owner) {
     return <>
-      <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry} />
+      <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
+        titles={titles} />
       {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
         : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
     </>;

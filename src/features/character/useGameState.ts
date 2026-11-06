@@ -31,6 +31,14 @@ export type GameUiState = {
   /** The owner's own gladiator rests at home in the shared world (its public actor's `resting`; Task 23.9 fix round 1). */
   ownResting: boolean;
   sceneStatus: 'loading' | 'ready' | 'unavailable';
+  /**
+   * Owner reads are numbered as they start (patch 1.7, Review Focus 5): `ownerReadStart` is the number of the read whose owner is shown (0
+   * before one), and `ownerReadsStarted()` the number of the latest read started so far. A command's answer that the owner will carry (a
+   * worn title) is shown until a read numbered after the answer lands: a read that started before it can still land when none started
+   * since, and must not undo it.
+   */
+  ownerReadStart: number;
+  ownerReadsStarted(): number;
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
   /**
    * Reads the world's revision (and a changed world) now, after any refresh in flight, for a command that changed what the camp draws (a
@@ -66,9 +74,9 @@ type Seen = { revision: string | null; slotIndex: number | null };
 /**
  * The last owner read of one account: its owner, or that it has none (`missing`), and whether the latest read failed. A
  * failed refresh keeps an owner already shown (with `failed`), but never a "no gladiator" answer, so a failed read never
- * offers creation.
+ * offers creation. `start` is the number the shown read got when it started (a creation's own read gets one when it is shown).
  */
-type OwnerRead = { account: string; owner: OwnerState | null; missing: boolean; failed: boolean };
+type OwnerRead = { account: string; owner: OwnerState | null; missing: boolean; failed: boolean; start: number };
 const codeOf = (error: unknown) => (error && typeof error === 'object' && 'code' in error ? error.code : null);
 
 /**
@@ -118,11 +126,11 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
     ownerReads.current.inFlight += 1;
     try {
       const owner = await gateway.owner();
-      if (mine === ticket.current) setOwnerRead({ account, owner, missing: false, failed: false });
+      if (mine === ticket.current) setOwnerRead({ account, owner, missing: false, failed: false, start: mine });
     } catch (error) {
       if (mine !== ticket.current) return;
-      if (codeOf(error) === 'not-found') { setOwnerRead({ account, owner: null, missing: true, failed: false }); return; }
-      setOwnerRead(previous => previous?.account === account && previous.owner ? { ...previous, failed: true } : { account, owner: null, missing: false, failed: true });
+      if (codeOf(error) === 'not-found') { setOwnerRead({ account, owner: null, missing: true, failed: false, start: mine }); return; }
+      setOwnerRead(previous => previous?.account === account && previous.owner ? { ...previous, failed: true } : { account, owner: null, missing: false, failed: true, start: mine });
       throw error;
     } finally {
       ownerReads.current.inFlight -= 1;
@@ -200,14 +208,15 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const ownerCreated = useCallback((owner: OwnerState) => {
     if (account === null) return;
     // Reads in flight (started before the creation) would say there is no gladiator: they no longer land.
-    ticket.current++;
-    setOwnerRead({ account, owner, missing: false, failed: false });
+    const start = ++ticket.current;
+    setOwnerRead({ account, owner, missing: false, failed: false, start });
     // The creation changed the world: read its revision now, after any refresh in flight; the new revision reads the
     // owner once more, and the camp shows the new gladiator without waiting for the next poll.
     void controllerRef.current?.refresh({ fresh: true });
   }, [account]);
 
   const refreshWorld = useCallback((): Promise<void> => controllerRef.current?.refresh({ fresh: true }) ?? Promise.resolve(), []);
+  const ownerReadsStarted = useCallback(() => ticket.current, []);
 
   const syncError = sync?.error ?? null;
   // A rejected stored session: one refresh first; then one local sign-out attempt per completed sync publish that still
@@ -285,6 +294,6 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   return {
     viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, latestPatch, rules, ownResting, clock,
-    sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld,
+    sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld, ownerReadStart: read?.start ?? 0, ownerReadsStarted,
   };
 }

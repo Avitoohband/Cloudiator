@@ -1,0 +1,488 @@
+/*
+ * The Title button on My gladiator and "Choose your title" (patch 1.7, spec "My gladiator: the Title button", "The picker" and "Phone";
+ * the approved mockup, section 4). The dialog is a modal over the running camp like Change look: a column whose top (the heading, the
+ * preview, Earned and All) and foot (Wear title, Cancel) stay in view while the titles scroll between them. Desktop: 400 px wide and up
+ * to 808 px tall; the phone's touch layout fills the screen less 10 px at the sides and 14 px above and below, with 44 px targets.
+ * Text on the dark fills is 4.5:1 or better.
+ */
+
+/* The Title button: the eyebrow, the worn title (or No title) under it, and a chevron. */
+.titleButton {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
+  max-width: min(180px, 52%);
+  min-height: 38px;
+  padding: 3px 10px 4px;
+  border: 1px solid rgba(230, 180, 80, 0.45);
+  border-radius: 9px;
+  background: rgba(230, 180, 80, 0.1);
+  color: var(--ink);
+  line-height: 1.25;
+  text-align: left;
+}
+
+.titleButton:hover {
+  background: rgba(230, 180, 80, 0.18);
+}
+
+.titleButton:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.titleEyebrow {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--gold);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  line-height: 1.3;
+}
+
+.chevron {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--gold);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.titleValue,
+.titleNone {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleValue {
+  color: #e6b450;
+  font: italic 600 14px/1.25 Georgia, 'Palatino Linotype', serif;
+}
+
+.titleNone {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* The dialog. */
+.dialog {
+  width: min(400px, calc(100% - 20px));
+  height: min(808px, calc(100% - 28px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 16px;
+  background: rgba(21, 19, 28, 0.97);
+  color: var(--ink);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dialog[open] {
+  animation: appear 0.16s ease;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog[open] {
+    animation: none;
+  }
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin: 0;
+}
+
+.top {
+  position: relative;
+  flex: none;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.heading {
+  margin: 0 44px 8px 0;
+  font: 700 19px/1.2 Georgia, 'Palatino Linotype', serif;
+}
+
+.heading:focus {
+  outline: none;
+}
+
+.close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
+.close:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+
+/* The preview: the camp's label and the menus' lines, for the title chosen now. */
+.preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.previewBox {
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--gold);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  line-height: 1.3;
+}
+
+/* The camp label: the nameplate's monospace lettering with its dark outline, the title (gold, italic, smaller) over the name, on sand. */
+.camp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 4px 2px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #c9a46a;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  text-shadow:
+    -1.5px -1.5px 0 #1a1423, 1.5px -1.5px 0 #1a1423, -1.5px 1.5px 0 #1a1423, 1.5px 1.5px 0 #1a1423, 0 1.5px 0 #1a1423, 0 -1.5px 0 #1a1423,
+    1.5px 0 0 #1a1423, -1.5px 0 0 #1a1423;
+}
+
+.campTitle,
+.campName {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campTitle {
+  color: #f2c66b;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.15;
+}
+
+.campName {
+  color: #f4e8cb;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.menuName,
+.menuTitle,
+.menuNone {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.menuName {
+  font: 600 16px/1.2 Georgia, 'Palatino Linotype', serif;
+}
+
+.menuTitle {
+  color: #e6b450;
+  font: italic 600 13px/1.3 Georgia, 'Palatino Linotype', serif;
+}
+
+.menuNone {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+
+/* Earned or All. */
+.views {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+}
+
+.views button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.views button[aria-pressed='true'] {
+  background: #2a2414;
+  color: var(--gold);
+}
+
+.views button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+
+/* The titles: they alone scroll. */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 16px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.family {
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.familyName {
+  padding: 0 0 4px;
+  color: var(--gold);
+  font-size: 10.4px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.option {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: start;
+  margin: 0 -8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+
+label.option {
+  cursor: pointer;
+}
+
+label.option:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.option input {
+  grid-column: 1;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: #e6b450;
+}
+
+.option input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.name,
+.plain {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.name {
+  color: #e6b450;
+  font: italic 600 15px/1.25 Georgia, 'Palatino Linotype', serif;
+}
+
+.plain {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.earned {
+  grid-column: 3;
+  grid-row: 1;
+  color: #8fd18a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rule {
+  grid-column: 2 / span 2;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* A locked title (All). */
+.locked .name {
+  color: #b9ab8a;
+}
+
+.lock {
+  grid-column: 1;
+  grid-row: 1;
+  margin-top: 1px;
+  font-size: 13px;
+}
+
+.progress {
+  display: grid;
+  grid-column: 2 / span 2;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #2a2f40;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #6f5a35, #b8955a);
+}
+
+.later {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* The foot: Wear title and Cancel, always in view. */
+.foot {
+  flex: none;
+  padding: 10px 16px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgb(24, 22, 31);
+}
+
+/* Why the title was not worn, in view beside the button that sent it. */
+.error {
+  margin: 0 0 8px;
+  color: #ffb4a8;
+  font-size: 0.85rem;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wear,
+.cancel {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.wear {
+  border: 1px solid transparent;
+  background: #e6b450;
+  color: #2a1d05;
+  font-weight: 650;
+}
+
+.wear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.cancel {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+}
+
+.wear:focus-visible,
+.cancel:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.why {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The phone (the shell's touch layout): the dialog fills the screen less its margin, and every target is 44 px. */
+@media (hover: none), (max-width: 480px) {
+  .dialog {
+    height: calc(100% - 28px);
+  }
+
+  .titleButton,
+  .views button,
+  .wear,
+  .cancel {
+    min-height: 44px;
+  }
+
+  .close {
+    top: 2px;
+    right: 2px;
+    width: 44px;
+    height: 44px;
+  }
+
+  label.option {
+    min-height: 44px;
+  }
+}

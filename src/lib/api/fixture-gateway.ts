@@ -1,5 +1,5 @@
 import type { RevealedTimeline } from '@contracts/events';
-import type { EarnedTitle, OwnerState, PublicActor, SeasonView } from '@contracts/reads';
+import type { OwnerState, PublicActor, SeasonView } from '@contracts/reads';
 import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
@@ -20,6 +20,7 @@ import { FIXTURE_INBOX, FIXTURE_MESSAGES, FIXTURE_NOTIFICATIONS } from '../../..
 import { myBoutTimelines } from '../../../tests/fixtures/my-bouts';
 import { PATCH_1_4, SEED_PATCHES, linkNotes } from '../../../tests/fixtures/patches';
 import { profileCards } from '../../../tests/fixtures/profile-cards';
+import { withAsterTitles } from '../../../tests/fixtures/titles';
 import { PATCH } from '../patch';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 import { FIXTURE_TITLES } from '../../game/demo-world';
@@ -59,14 +60,6 @@ const FIXTURE_PROFILES: typeof BASE_PROFILES = Object.fromEntries(Object.entries
   const actor = titled(profile.actor);
   return [id, { ...profile, actor, titlesEarned: id === OWNER_ID ? 8 : actor.name === 'Lucilla' ? 9 : actor.title ? 1 : 0 }];
 }));
-/**
- * Aster's 8 earned titles, all counted from her history at one time (the release's back-fill), and the mockup's progress toward the rest
- * (Patch 1.7 spec "Client", "Progress"). She wears Founder.
- */
-const OWNER_TITLES: EarnedTitle[] = ['founder', 'wanderer', 'tiro', 'bloodied', 'finalist', 'collector', 'rare-find', 'moneyed']
-  .map(id => ({ id, earnedAtMs: worldFixture.serverNowMs, activityId: null, source: 'history', detail: null }));
-const OWNER_TITLE_PROGRESS: Record<string, number> = { 'expeditions-won': 34, 'outpost-won': 13, 'woodland-won': 21, trainings: 46, 'arena-wins': 18, 'arena-best-streak': 3,
-  'tournament-finals': 1, 'items-owned': 14, 'tiers-of-one': 2, 'rarities-of-one': 2, 'gold-earned': 1240, 'days-in-camp': 21 };
 /** The owner's cosmetics: the Arena banner, bound to her account as a bought one is. */
 const OWNER_COSMETICS: OwnerState['ownedCosmetics'] = [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }];
 /**
@@ -124,10 +117,10 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     command: async () => ({ ok: false, code: 'unavailable' }),
     sendPresence: async () => { signalled = true; return { ok: true }; },
     // The owner fixture with the rating and renown of its credited Arena samples (resting, in the resting preview), and the inbox
-    // the sample messages make (tests/fixtures/messages.ts).
-    owner: async () => ({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
-      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX), ownedCosmetics: structuredClone(OWNER_COSMETICS),
-      wornTitle: 'founder', titles: structuredClone(OWNER_TITLES), titleProgress: { ...OWNER_TITLE_PROGRESS } }),
+    // the sample messages make (tests/fixtures/messages.ts). Patch 1.7: Aster's 8 titles and the mockup's progress, wearing Founder
+    // (tests/fixtures/titles.ts).
+    owner: async () => withAsterTitles({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
+      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX), ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
     // The sample messages, newest first (a copy each time), each patch note with the number of the patch that links it; no network.
     messages: async () => FIXTURE_MESSAGES.map(m => ({ ...structuredClone(m),
       patch: m.kind === 'patch-notes' ? FIXTURE_PATCHES.find(p => p.messageId === m.id)?.number ?? null : null })),

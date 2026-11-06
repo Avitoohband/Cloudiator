@@ -5,6 +5,7 @@ import type { GameCommand } from '@contracts/commands';
 import type { OwnerState } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
 import { legacyAppearance } from '../../game/actors';
+import { attemptOf, keepsAttempt } from '../../lib/api/command-attempt';
 
 export type ChangeLookCommand = Extract<GameCommand, { kind: 'change-appearance' }>;
 
@@ -35,9 +36,9 @@ export type LookAttempt = { look: Appearance; command: ChangeLookCommand };
  * operation id the server then replays), else a new one with a new operation id (the server refuses another look under a used id).
  */
 export function attemptFor(previous: LookAttempt | null, look: Appearance, newOperationId: () => string): LookAttempt {
-  if (previous && sameLook(previous.look, look)) return previous;
-  return { look: { ...look }, command: { kind: 'change-appearance', operationId: newOperationId(), appearance: { ...look } } };
+  return attemptOf(previous, attempt => sameLook(attempt.look, look),
+    operationId => ({ look: { ...look }, command: { kind: 'change-appearance', operationId, appearance: { ...look } } }), newOperationId);
 }
 
 /** Whether the next send of the same look reuses the operation id: after an answer that decided nothing (the world busy, the answer lost, a rate limit). */
-export const keepsAttempt = (code: string): boolean => code === 'processing' || code === 'unavailable' || code === 'rate-limited';
+export { keepsAttempt };

@@ -17,6 +17,38 @@
   margin-bottom: 1rem;
 }
 
+/* The name and, for the player's own gladiator, the Title button beside it (patch 1.7; the button's own look is TitlePicker.module.css). */
+.nameRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-width: 0;
+  margin: 0.25rem 0;
+}
+
+.nameRow .name {
+  min-width: 0;
+  margin: 0;
+}
+
+/* After a wear: "You now wear {name}." A polite live region, there from the start and boxless while empty. */
+.titleStatus {
+  margin: -0.4rem 0 1rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #5d8f5a;
+  border-radius: 8px;
+  background: rgba(36, 52, 38, 0.95);
+  color: #d8f3d3;
+  font-size: 0.8rem;
+}
+
+.titleStatus:empty {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .stale {
   display: flex;
   flex-wrap: wrap;

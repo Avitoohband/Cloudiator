@@ -53,6 +53,8 @@ import { CreateCharacter } from '../character/CreateCharacter';
 import { ChangeLookDialog } from '../character/ChangeLookDialog';
 import { lookSavedLine } from '../character/look-change';
 import { RosterPanel, type Roster } from '../character/RosterPanel';
+import { TitlePicker } from '../titles/TitlePicker';
+import { shownWornTitle, type WornAnswer } from '../titles/title-wear';
 import { ArrivalBannerView, ArrivalSlot } from '../arrivals/ArrivalBanner';
 import { useArrivals } from '../arrivals/useArrivals';
 import { useBannerPlace } from '../arrivals/useBannerPlace';
@@ -137,6 +139,13 @@ const focusOffer = () => {
 /** Where the focus goes when the change-look dialog closes: the Messages button that led to it (the native dialog gives it back there too), else the camp. */
 const focusMessages = () => {
   const button = document.querySelector<HTMLElement>('[data-messages-button]');
+  if (shown(button)) button.focus({ preventScroll: true });
+  else focusCamp();
+};
+
+/** Where the focus goes when "Choose your title" closes: the Title button on My gladiator (the native dialog gives it back there too), else the camp. */
+const focusTitleButton = () => {
+  const button = document.querySelector<HTMLElement>('[data-title-button]');
   if (shown(button)) button.focus({ preventScroll: true });
   else focusCamp();
 };
@@ -442,13 +451,42 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   useEffect(() => { setLookOpen(false); }, [lookOwner]);
   const savedLook = lookSaved && lookSaved.gladiatorId === lookOwner ? lookSaved.text : null;
 
+  // Patch 1.7: the title worn now and "Choose your title". A wear's answer is shown as worn at once, until an owner read that started after
+  // the answer lands; a read that started before it never puts the old title back (Review Focus 5, `shownWornTitle`). The picker opens over
+  // My gladiator (from its Title button, or from elsewhere with `openTitlePicker`); when it closes the focus goes to the Title button, and a
+  // wear's status line shows under the name until the picker opens again or another gladiator is shown.
+  const { ownerReadStart, ownerReadsStarted } = game;
+  const [titleOpen, setTitleOpen] = useState(false);
+  const [titleStatus, setTitleStatus] = useState<{ gladiatorId: string; text: string } | null>(null);
+  const [wornAnswer, setWornAnswer] = useState<WornAnswer | null>(null);
+  const wornTitle = owner ? shownWornTitle(owner, ownerReadStart, wornAnswer) : null;
+  const pickerOwner = useMemo(() => (owner ? { ...owner, wornTitle } : null), [owner, wornTitle]);
+  const openTitlePicker = useCallback(() => { setTitleStatus(null); show('gladiator'); setTitleOpen(true); }, [show]);
+  const titleAnswered = useCallback((titleId: string | null) => {
+    const current = ownerRef.current;
+    if (current) setWornAnswer({ gladiatorId: current.gladiatorId, titleId, afterRead: ownerReadsStarted() });
+  }, [ownerReadsStarted]);
+  const refreshTitle = useCallback(() => {
+    void refreshWorld();
+    void refreshOwner().catch(() => undefined);
+  }, [refreshWorld, refreshOwner]);
+  const closeTitle = useCallback((status: string | null) => {
+    setTitleOpen(false);
+    const current = ownerRef.current;
+    if (status && current) setTitleStatus({ gladiatorId: current.gladiatorId, text: status });
+    focusTitleButton();
+  }, []);
+  useEffect(() => { setTitleOpen(false); }, [lookOwner]);
+  const shownTitleStatus = titleStatus && titleStatus.gladiatorId === lookOwner ? titleStatus.text : null;
+
   // "A new patch is out — reload" (Patch A, "Patch numbers and the changelog"): when the server's newest patch is ahead of this build. It
   // waits while a scene or a modal dialog is open (the creation and change-look dialogs are named too, so it never shows for the moment
   // before they open), and Later hides it for this page's life for that number; a newer number shows it again. Visitors see it too.
   const modal = useModalOpen();
   const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
   const [patchLater, setPatchLater] = useState<string | null>(null);
-  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen, later: patchLater });
+  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen || titleOpen,
+    later: patchLater });
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
@@ -474,7 +512,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
-        onCreate={joining.offer} resting={game.ownResting} />;
+        onCreate={joining.offer} resting={game.ownResting} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} rules={game.rules} />
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture} rules={game.rules}
@@ -555,6 +593,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       )}
       {lookOpen && owner && reads && (
         <ChangeLookDialog key={owner.gladiatorId} owner={owner} gateway={reads} refresh={refreshLook} preview={fixture} onClose={closeLook} />
+      )}
+      {titleOpen && pickerOwner && reads && (
+        <TitlePicker key={pickerOwner.gladiatorId} owner={pickerOwner} gateway={reads} refresh={refreshTitle} preview={fixture} onWorn={titleAnswered}
+          onClose={closeTitle} />
       )}
       {perf && <PerfOverlay phase={perfPhase.label} phaseKey={perfPhase.key} />}
     </div>

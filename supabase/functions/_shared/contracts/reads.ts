@@ -51,8 +51,8 @@ export type OwnerState = {
   /** Patch 1.7 (M28): the title worn now (an id of TITLES_V1) or null; every title held, by `earnedAtMs` then id; the counters the titles measure. */
   wornTitle: string | null; titles: EarnedTitle[]; titleProgress: Record<string, number>;
 };
-/** Where an earned title came from: the release back-fill, a result, a season award, a shop, a market buy, an NPC sale or creation. */
-export type TitleSource = 'history' | 'result' | 'season' | 'shop' | 'market' | 'sale' | 'joined';
+/** Where an earned title came from: the release back-fill, a result, a season award, a shop, a market buy, an NPC sale, creation or the Game Master's hand (patch 1.7.1). */
+export type TitleSource = 'history' | 'result' | 'season' | 'shop' | 'market' | 'sale' | 'joined' | 'award';
 /** One title a gladiator holds; `detail` names the season place of a season title, null otherwise. */
 export type EarnedTitle = { id: string; earnedAtMs: number; activityId: string | null; source: TitleSource;
   detail: { seasonIndex: number; league: LeagueId; place: 1 | 2 | 3 } | null };

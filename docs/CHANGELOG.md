@@ -26,6 +26,12 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; 1.7 (released 2026-11-06) is new since.
 
+## 1.7.1 — Hand-given titles (in progress, not yet released)
+
+### Built
+
+- The Game Master can now give special titles; a given title arrives in Notifications with Wear.
+
 ## 1.7 — Wearable titles: show what your gladiator has done (2026-11-06)
 
 Released 2026-11-06: M28 with the one-time history back-fill (every gladiator got the titles its history earned, and Founder), the game-command function and the client.

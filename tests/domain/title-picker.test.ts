@@ -8,7 +8,7 @@ import { WEAR_REFUSED, keepsWearAttempt, shownWornTitle, wearAttemptFor, type Wo
 import { TitleButton } from '@/features/titles/TitlePicker';
 import { keepsAttempt } from '@/features/character/look-change';
 import { ownerFixture } from '../fixtures/domain';
-import { withAsterTitles } from '../fixtures/titles';
+import { withAsterAward, withAsterTitles } from '../fixtures/titles';
 
 // Patch 1.7 Task 10: the pure rules behind the Title button and "Choose your title" (spec "My gladiator: the Title button", "The picker",
 // "Progress"): which titles each view lists and how far a locked one is, the words after a wear, which operation id a wear uses, and which
@@ -22,12 +22,26 @@ const aster = (level = 1): OwnerState => {
 const names = (rows: readonly { name: string }[]) => rows.map(row => row.name);
 
 describe('the picker', () => {
-  // Patch 1.7.1 Task 1 grew the catalog to 33 (two hand-given titles); All counts the whole catalog until the picker hides an
-  // unheld hand-given title (the plan's Task 2).
-  it('counts the earned titles and the 33 that exist', () => {
-    expect(pickerCounts(aster())).toEqual({ earned: 8, all: 33 });
-    expect(pickerCounts({ titles: [] })).toEqual({ earned: 0, all: 33 });
+  // Patch 1.7.1: a hand-given (`award`) title is shown only to its holder, and All counts what is shown: 31 for most players.
+  it('counts the earned titles and the titles shown: 31, or 32 for a holder of a hand-given one', () => {
+    expect(pickerCounts(aster())).toEqual({ earned: 8, all: 31 });
+    expect(pickerCounts({ titles: [] })).toEqual({ earned: 0, all: 31 });
+    expect(pickerCounts(withAsterAward(aster()))).toEqual({ earned: 9, all: 32 });
     expect(TITLES_V1).toHaveLength(33);
+  });
+
+  it('shows a hand-given title only to its holder, in Earned and in All', () => {
+    const rowsOf = (owner: OwnerState, view: 'earned' | 'all') => pickerGroups(owner, view).flatMap(g => g.rows);
+    for (const view of ['earned', 'all'] as const) {
+      expect(rowsOf(aster(), view).some(r => r.id === 'game-master' || r.id === 'high-ground'), view).toBe(false);
+    }
+    const holder = withAsterAward(aster());
+    expect(rowsOf(holder, 'earned').find(r => r.id === 'game-master')).toEqual({ id: 'game-master', name: 'Game Master', rule: "The game's Game Master",
+      earned: true, progress: null, share: 1 });
+    expect(rowsOf(holder, 'all').filter(r => r.id === 'game-master' || r.id === 'high-ground').map(r => r.id)).toEqual(['game-master']);
+    // The other hand-given title stays hidden, and Special keeps its catalog order (Game Master after Bannerman).
+    expect(pickerGroups(holder, 'all')[0].rows.map(r => r.name)).toEqual(['Founder', 'Old Guard', 'Bannerman', 'Game Master']);
+    expect(rowsOf(holder, 'all')).toHaveLength(32);
   });
 
   it('lists the earned titles by family, in the families\' order, leaving out empty families', () => {
@@ -50,7 +64,7 @@ describe('the picker', () => {
     const groups = pickerGroups(aster(6), 'all');
     expect(groups.map(g => g.family)).toEqual(['Special', 'Expeditions', 'Training', 'Arena', 'Tournaments', 'Seasons', 'Gear collection', 'Wealth']);
     const rows = groups.flatMap(g => g.rows);
-    expect(rows.map(r => r.id)).toEqual(TITLES_V1.map(t => t.id));
+    expect(rows.map(r => r.id)).toEqual(TITLES_V1.map(t => t.id).filter(id => id !== 'game-master' && id !== 'high-ground'));
     const row = (id: string) => rows.find(r => r.id === id)!;
     expect(row('pathfinder')).toEqual({ id: 'pathfinder', name: 'Pathfinder', rule: '50 expeditions won', earned: false, progress: '34 of 50', share: 0.68 });
     expect(row('troll-slayer').progress).toBe('Opens at level 10');
@@ -76,7 +90,7 @@ describe('the picker', () => {
     const owner = aster();
     owner.titles = [...owner.titles, { id: 'dungeoneer', earnedAtMs: 1, activityId: null, source: 'history', detail: null },
       { id: 'founder', earnedAtMs: 2, activityId: null, source: 'joined', detail: null }];
-    expect(pickerCounts(owner)).toEqual({ earned: 8, all: 33 });
+    expect(pickerCounts(owner)).toEqual({ earned: 8, all: 31 });
     expect(pickerGroups(owner, 'earned').flatMap(g => g.rows)).toHaveLength(8);
     expect(pickerGroups(owner, 'all').flatMap(g => g.rows).some(r => r.id === 'dungeoneer')).toBe(false);
   });

@@ -27,7 +27,7 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   if (!row.state || typeof row.state !== 'object') throw new GatewayReadError('unavailable');
   return withTitles(row.state);
 }
-const TITLE_SOURCES: readonly string[] = ['history', 'result', 'season', 'shop', 'market', 'sale', 'joined'];
+const TITLE_SOURCES: readonly string[] = ['history', 'result', 'season', 'shop', 'market', 'sale', 'joined', 'award'];
 /** The shown title of a published id: the id when this client's catalog knows it, else null (a newer server's id, junk, an older server's missing key). */
 export function knownTitleId(value: unknown): string | null {
   return typeof value === 'string' && titleById(value) ? value : null;

@@ -47,6 +47,14 @@ test('keeps the well-formed titles and drops a malformed row or an id this clien
   expect((await readOwner(api(() => ownerRow({ titles: 'tiro' })).client)).titles).toEqual([]);
 });
 
+// Patch 1.7.1: a title the Game Master gave carries source `award`; the client keeps it (the server counts it in newNotifications).
+test('keeps a hand-given title (source award)', async () => {
+  const given = { id: 'game-master', earnedAtMs: 9, activityId: null, source: 'award', detail: null };
+  const owner = await readOwner(api(() => ownerRow({ titles: [TIRO, given], wornTitle: 'game-master' })).client);
+  expect(owner.titles.map(t => [t.id, t.source])).toEqual([['tiro', 'history'], ['game-master', 'award']]);
+  expect(owner.wornTitle).toBe('game-master');
+});
+
 test('reads a worn title that is not a held 1.7 id as null', async () => {
   for (const [wornTitle, titles] of [['den-breaker', [TIRO]], [42, [TIRO]], ['lion', [TIRO]], ['tiro', []], [undefined, [TIRO]]] as const) {
     expect((await readOwner(api(() => ownerRow({ wornTitle, titles })).client)).wornTitle, String(wornTitle)).toBeNull();

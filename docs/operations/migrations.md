@@ -65,8 +65,9 @@ function.
   holding the account lock, and stamps the time after the wait); owner-only (no API role, the Data API does not serve
   `private`); the widened CHECK; never awarded by any measure, by a real settlement, or by the back-fill, and a back-fill replay
   keeps a given title.
-  - RED first: every case failed against M01–M28 (no `give_title`, 31 rules, the old CHECK), except the three "never earned by
-    play" cases, which hold vacuously there. Those three were checked by mutation: with `title_rules` giving `game-master` the
+  - RED first: every case failed against M01–M28 (no `give_title`, 31 rules, the old CHECK), except two of the three "never
+    earned by play" cases, which hold vacuously there (no `award` rule exists at M28); the back-fill case calls `give_title` and
+    so failed. Those three were checked by mutation: with `title_rules` giving `game-master` the
     measure `trainings`, all three failed; the function was then restored from its captured `pg_get_functiondef` text, byte for
     byte, and the fingerprint matched the source-applied one.
 - `tests/db/awards.test.ts`, "ships M29 completed from 23-awards.sql…" (the shape of M28's test): exactly one

@@ -49,6 +49,14 @@ describe('titleNotices', () => {
     expect(titleNotices([title('medalist', 1, 'season')])[0].rows[0].detail).toBe('A season top-three place');
   });
 
+  // Patch 1.7.1: a title the Game Master gave (source `award`) is an own-title notice: "New title: {name}", then its rule line.
+  it('words a given title as an own-title notice with its rule', () => {
+    expect(titleNotices([title('game-master', 7_000, 'award'), title('high-ground', 8_000, 'award')])).toEqual<TitleNotice[]>([
+      { key: 'award:8000', kind: 'earned', atMs: 8_000, heading: 'New title: High Ground', rows: [{ id: 'high-ground', name: 'High Ground', detail: 'Given by the Game Master' }] },
+      { key: 'award:7000', kind: 'earned', atMs: 7_000, heading: 'New title: Game Master', rows: [{ id: 'game-master', name: 'Game Master', detail: "The game's Game Master" }] },
+    ]);
+  });
+
   it('shows no title this client does not know, and never throws (Review Focus 1)', () => {
     const unknown = [title('legend-bearer', 1_000, 'history'), title('', 2_000, 'sale'), { ...title('tiro', 3_000, 'history'), id: 42 as unknown as string }];
     expect(() => titleNotices(unknown)).not.toThrow();

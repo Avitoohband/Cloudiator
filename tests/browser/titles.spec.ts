@@ -5,7 +5,7 @@ import type { ActivitySummary } from '../../supabase/functions/_shared/contracts
 import type { OwnerState, PrestigeAward, PublicProfile } from '../../supabase/functions/_shared/contracts/reads';
 import { titleText } from '../../src/features/seasons/season-text';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
-import { withAsterTitles } from '../fixtures/titles';
+import { ASTER_AWARD, withAsterTitles } from '../fixtures/titles';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveNotification } from './live-routes';
 import { cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals } from './shell-helpers';
@@ -253,6 +253,9 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await expect(dialog.getByRole('group', { name: 'Seasons', exact: true })).toContainText('A season first place');
     await expect(dialog.getByRole('radio')).toHaveCount(9);
     await expect(dialog.getByTestId('locked-title')).toHaveCount(23);
+    // Patch 1.7.1: a title nobody can earn by play is shown only to its holder.
+    await expect(dialog.getByText('Game Master', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
     await expect(expeditions.getByTestId('locked-title').filter({ hasText: 'Troll-Slayer' })).toContainText('Opens at level 10');
     await expect(dialog.getByRole('group', { name: 'Wealth', exact: true }).getByTestId('locked-title').filter({ hasText: 'Patrician' })).toContainText('1,240 of 4,000');
     // The list ends with the titles that arrive later.
@@ -440,6 +443,67 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
         release();
         reads?.stop();
       }
+    });
+  });
+
+  // Patch 1.7.1: a title the Game Master gave (source `award`) is listed only for its holder; All counts what is shown.
+  test.describe('a hand-given title', () => {
+    const holder = { extra: [structuredClone(ASTER_AWARD)] };
+
+    test('is listed for its holder: All · 32, Earned · 9, a title to wear', async ({ page }, testInfo) => {
+      const { commands } = await player(page, holder);
+      await openLive(page);
+      const { dialog } = await openPicker(page);
+      const which = dialog.getByRole('group', { name: 'Which titles', exact: true });
+      await expect(which.getByRole('button', { name: 'Earned · 9', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(which.getByRole('button', { name: 'All · 32', exact: true })).toBeVisible();
+      const special = dialog.getByRole('group', { name: 'Special', exact: true });
+      await expect(special.getByRole('radio', { name: 'Game Master', exact: true })).toBeVisible();
+      await expect(special).toContainText("The game's Game Master");
+      await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
+      await which.getByRole('button', { name: 'All · 32', exact: true }).click();
+      await expect(dialog.getByRole('radio')).toHaveCount(10);
+      await expect(dialog.getByTestId('locked-title')).toHaveCount(23);
+      await expect(dialog.getByRole('group', { name: 'Special', exact: true }).getByRole('radio', { name: 'Game Master', exact: true })).toBeVisible();
+      await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
+      await a11yShot(page, testInfo, 'title-picker-holder-all');
+      // It can be worn like any held title.
+      await dialog.getByRole('radio', { name: 'Game Master', exact: true }).check();
+      await wearButton(dialog).click();
+      await expect(dialog).toBeHidden();
+      await expect(status(page)).toHaveText('You now wear Game Master.');
+      expect(wears(commands)).toMatchObject([{ kind: 'wear-title', titleId: 'game-master' }]);
+    });
+
+    test('arrives in Notifications as an own-title notice with Wear', async ({ page }, testInfo) => {
+      const { commands } = await player(page, holder);
+      await openLive(page);
+      await cornerChipMessages(page).click();
+      const panel = page.getByRole('region', { name: 'Messages', exact: true });
+      await panel.getByRole('tab', { name: /^Notifications/ }).click();
+      const notice = panel.locator(`[data-title-notice="award:${ASTER_AWARD.earnedAtMs}"]`);
+      await expect(notice).toBeVisible();
+      await expect(notice.locator('[data-notice-title]')).toHaveText('New title: Game Master');
+      await expect(notice.locator('[data-title-line="game-master"]')).toContainText("The game's Game Master");
+      const wear = notice.getByRole('button', { name: 'Wear Game Master', exact: true });
+      await expect(wear).toHaveAttribute('aria-pressed', 'false');
+      await a11yShot(page, testInfo, 'title-notice-award');
+      await wear.click();
+      await expect(wear).toHaveText('Worn ✓');
+      expect(wears(commands)).toMatchObject([{ kind: 'wear-title', titleId: 'game-master' }]);
+    });
+
+    test('fits a phone for a holder', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 360, height: 740 });
+      await player(page, holder);
+      await openLive(page);
+      const { dialog } = await openPicker(page);
+      await settled(dialog);
+      await dialog.getByRole('button', { name: 'All · 32', exact: true }).click();
+      await expect(dialog.getByRole('radio', { name: 'Game Master', exact: true })).toBeAttached();
+      expect(await noHorizontalScroll(page)).toBe(true);
+      expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await a11yShot(page, testInfo, 'title-picker-holder-360');
     });
   });
 

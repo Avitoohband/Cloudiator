@@ -1,5 +1,5 @@
 // The rows of "Choose your title" (patch 1.7, spec "The picker" and "Progress"; the approved mockup, section 4): the titles by family in
-// the catalog's order, Earned (the titles held) or All (the 31 that exist, a locked one with its progress), the counts on the two buttons,
+// the catalog's order, Earned (the titles held) or All (the titles shown: 31, or one more for a holder of a hand-given title, a locked one with its progress), the counts on the two buttons,
 // and the status line after a wear. Held ids this client does not know are shown nowhere (Review Focus 1); a counter the owner read
 // leaves out counts 0 (`progressText`).
 import type { OwnerState } from '@contracts/reads';
@@ -14,6 +14,9 @@ export const NO_TITLE_LINE = 'Show your name only.';
 /** All's last line: the titles of the later patches. */
 export const LATER_TITLES = '8 more arrive later: 4 with party dungeons, 2 in the Deep, Outfitter with the new gear, and Legend-Bearer if a Legendary rarity ever comes.';
 
+/** The titles this owner sees: all of them, but a hand-given (`award`) one only when held (patch 1.7.1). */
+const shownTo = (held: ReadonlySet<string>) => TITLES_V1.filter(title => title.measure !== 'award' || held.has(title.id));
+
 /** The ids of the 1.7 titles the owner holds. */
 const heldIds = (owner: Pick<OwnerState, 'titles'>): Set<string> => new Set(owner.titles.map(title => title.id).filter(id => titleById(id) !== null));
 
@@ -26,7 +29,7 @@ export function pickerGroups(owner: Pick<OwnerState, 'titles' | 'titleProgress' 
   const progress = owner.titleProgress ?? {};
   return TITLE_FAMILIES.map(family => ({
     family: family.name,
-    rows: TITLES_V1.filter(title => title.family === family.id && (view === 'all' || held.has(title.id))).map(title => {
+    rows: shownTo(held).filter(title => title.family === family.id && (view === 'all' || held.has(title.id))).map(title => {
       const earned = held.has(title.id);
       return { id: title.id, name: title.name, rule: title.rule, earned, progress: earned ? null : progressText(title, progress, owner.progression.level),
         share: earned ? 1 : progressShare(title, progress) };
@@ -34,9 +37,9 @@ export function pickerGroups(owner: Pick<OwnerState, 'titles' | 'titleProgress' 
   })).filter(group => group.rows.length > 0);
 }
 
-/** The numbers on Earned and All: the titles held, and the 31 that exist. */
+/** The numbers on Earned and All: the titles held, and the titles shown (31 for most players; a hand-given title counts for its holder). */
 export function pickerCounts(owner: Pick<OwnerState, 'titles'>): { earned: number; all: number } {
-  return { earned: heldIds(owner).size, all: TITLES_V1.length };
+  return { earned: heldIds(owner).size, all: shownTo(heldIds(owner)).length };
 }
 
 /** The status line after a wear: "You now wear {name}." or "You now wear no title." (an id this client does not know is none). */

@@ -82,7 +82,7 @@ My bouts, the shared replay bar/result card, Next bout, named Back, Notification
 
 ## Features by area
 
-**Status:** Live (in the game now) · Planned 1.8 (designed, not built: don't film
+**Status:** Live (in the game now) · In 1.7.1 (built, not out yet) · Planned 1.8 (designed, not built: don't film
 them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
@@ -235,6 +235,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Your title with your name | A gold line over the name in the camp, and the title in the Gladiators list, on the profile card, in Arena bouts and replays, and in tournament brackets. | 1.7 | Live | In the camp: zoom in (2 or more) and a gold italic line stands over each name; the selected or followed gladiator's shows from zoom 1.4; also the Gladiators list and the profile card; the Arena card's header and its Opponent row, the replay header (under each fighter's name; an NPC has none) and each fighter in a tournament bracket's bout cells show the title too | — |
 | New-title notices | New titles arrive in Notifications; one earned by a result shows inside that result, with Wear. | 1.7 | Live | Messages → Notifications: a result that earned a title (an expedition that was the 10th won) has a gold line "New title: Wanderer · 10 expeditions won" with Wear; press it and it reads "Worn ✓" (the Title button agrees). A title earned elsewhere (a season place, a shop) is its own card, "New title: {name}" or "New titles"; each counts on the Messages badge | — |
 | Titles on the card | The profile card counts the titles a gladiator has earned. | 1.7 | Live | A gladiator's profile card: RECORD → Titles, "{n} earned" or "None yet"; the worn title also shows under the name there and in the Gladiators list | — |
+| Hand-given titles | The Game Master can give a special title to a gladiator (Game Master, High Ground); only its holder sees it in the picker, and it arrives in Notifications with Wear. | 1.7.1 | In 1.7.1 | Messages → Notifications: a card "New title: Game Master" with its rule line ("The game's Game Master") and Wear. My gladiator → Title → "Choose your title": the holder's All · 32 lists it under Special and Earned counts it; everyone else still sees All · 31 and no such title. No patch note is shown | — |
 
 ### Settings and accessibility
 

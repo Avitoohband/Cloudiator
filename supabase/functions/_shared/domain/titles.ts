@@ -1,24 +1,32 @@
 import { freezeDomain } from './types.ts';
 
 // The wearable titles of patch 1.7 (spec docs/superpowers/specs/2026-10-30-titles-1-7-design.md, "The titles" and "What each
-// measure counts"). The SQL (supabase/sql/22-titles.sql) restates these rules and counts; this is the shared name, rule and order
-// every client and Edge command binds to. A title is earned when its measure reaches its threshold.
+// measure counts"). The SQL (supabase/sql/22-titles.sql; its rules restated with 1.7.1's two rows by 23-awards.sql) restates these
+// rules and counts; this is the shared name, rule and order every client and Edge command binds to. A title is earned when its measure
+// reaches its threshold; a hand-given one (measure `award`) never is.
 
 export type TitleFamily = 'special' | 'expeditions' | 'training' | 'arena' | 'tournaments' | 'seasons' | 'gear' | 'wealth';
 export type TitleMeasure = 'founder' | 'days-in-camp' | 'banner' | 'expeditions-won' | 'woodland-won' | 'outpost-won'
   | 'mountain-won' | 'trainings' | 'arena-wins' | 'arena-best-streak' | 'tournament-finals' | 'tournament-wins'
-  | 'season-top-three' | 'season-firsts' | 'items-owned' | 'tiers-of-one' | 'rarities-of-one' | 'rare-items' | 'gold-earned';
+  | 'season-top-three' | 'season-firsts' | 'items-owned' | 'tiers-of-one' | 'rarities-of-one' | 'rare-items' | 'gold-earned'
+  // Patch 1.7.1: a hand-given title. No counter, trigger or back-fill produces it; only the owner's private.give_title grants one.
+  | 'award';
 export type TitleDefinition = { id: string; name: string; family: TitleFamily; rule: string; measure: TitleMeasure;
   threshold: number; tier: 1 | 2 | 3 | null };
 
 const row = (id: string, name: string, family: TitleFamily, rule: string, measure: TitleMeasure, threshold: number,
   tier: 1 | 2 | 3 | null = null): TitleDefinition => ({ id, name, family, rule, measure, threshold, tier });
 
-/** The spec's rows 1-31, in the picker's order (also the catalog order the awarding uses). */
+/**
+ * The spec's rows 1-31, and patch 1.7.1's two hand-given titles after Bannerman (plan
+ * docs/superpowers/plans/2026-11-06-hand-given-titles-1-7-1.md), in the picker's order (also the catalog order the awarding uses).
+ */
 export const TITLES_V1: readonly TitleDefinition[] = freezeDomain([
   row('founder', 'Founder', 'special', 'Made in Season 1', 'founder', 1),
   row('old-guard', 'Old Guard', 'special', '100 days in camp', 'days-in-camp', 100),
   row('bannerman', 'Bannerman', 'special', 'Own the Arena banner', 'banner', 1),
+  row('game-master', 'Game Master', 'special', "The game's Game Master", 'award', 1),
+  row('high-ground', 'High Ground', 'special', 'Given by the Game Master', 'award', 1),
   row('wanderer', 'Wanderer', 'expeditions', '10 expeditions won', 'expeditions-won', 10, 1),
   row('pathfinder', 'Pathfinder', 'expeditions', '50 expeditions won', 'expeditions-won', 50, 2),
   row('trailblazer', 'Trailblazer', 'expeditions', '200 expeditions won', 'expeditions-won', 200, 3),

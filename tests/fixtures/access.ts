@@ -32,5 +32,10 @@ export const TITLE_TRIGGER_FUNCTIONS = ['private.titles_on_gladiator()', 'privat
  * privileges, service_role included.
  */
 export const TITLES_OWNER_ONLY = { relation: 'private.title_backfills', function: 'private.backfill_titles()' } as const;
+/**
+ * Patch 1.7.1 (M29): the owner's step that gives a hand-given title (Game Master, High Ground), owner-only like the back-fill: absent
+ * from every API role's privileges, service_role included. Named as the access audit names it (scripts/access-audit.sql).
+ */
+export const AWARDS_OWNER_ONLY = { function: 'private.give_title(uuid, text)' } as const;
 /** Task 5 (1.6): present in the catalog, absent from every API role's effective privilege snapshot. */
 export const ECONOMY_OWNER_ONLY = { relation: 'private.economy_switches', function: 'private.switch_to_economy_v2()' } as const;

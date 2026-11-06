@@ -133,6 +133,8 @@ const wearCommand = { kind: 'wear-title' as const, operationId, titleId: 'pathfi
 it('accepts wear-title only with exactly a 1.7 title id or null', () => {
   expect(parseCommand(wearCommand)).toEqual(wearCommand);
   expect(parseCommand({ ...wearCommand, titleId: null })).toEqual({ ...wearCommand, titleId: null });
+  // Patch 1.7.1: the two hand-given titles are catalog ids too, so a holder can put one back on (the database refuses anyone else).
+  for (const given of ['game-master', 'high-ground']) expect(parseCommand({ ...wearCommand, titleId: given })).toEqual({ ...wearCommand, titleId: given });
   for (const bad of ['den-breaker', 'Pathfinder', '', 7, true, [], {}, ['pathfinder'], undefined])
     expect(parseCommand({ ...wearCommand, titleId: bad }), JSON.stringify(bad)).toBeNull();
   const { titleId: _titleId, ...missing } = wearCommand;

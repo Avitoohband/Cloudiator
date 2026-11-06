@@ -40,8 +40,9 @@ describe('the hosted restore SQL', () => {
       return JSON.parse(results[results.length - 1][0].jsonb_build_object);
     });
     expect(Object.keys(facts).sort()).toEqual(['accounts', 'characters', 'epochSet', 'identities', 'migrations', 'schedulerEnabled']);
-    // M01-M28 (M26: patch 1.4, the patch list and the profile card; M27: patch 1.6, the economy; M28: patch 1.7, titles).
-    expect(facts.migrations).toHaveLength(28);
+    // M01-M29 (M26: patch 1.4, the patch list and the profile card; M27: patch 1.6, the economy; M28: patch 1.7, titles; M29:
+    // patch 1.7.1, hand-given titles).
+    expect(facts.migrations).toHaveLength(29);
     for (const key of ['accounts', 'identities', 'characters']) expect(Number.isSafeInteger(facts[key])).toBe(true);
   });
 

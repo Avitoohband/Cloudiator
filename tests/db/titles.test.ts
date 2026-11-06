@@ -80,7 +80,10 @@ describe('the titles catalog and awarding', () => {
     const [{ rules, volatility, definer, config }] = await sql`select private.title_rules() as rules, p.provolatile as volatility,
       p.prosecdef as definer, p.proconfig as config from pg_proc p where p.oid='private.title_rules()'::regprocedure`;
     expect(rules).toEqual(TITLES_V1.map(({ id, measure, threshold, tier }) => ({ id, measure, threshold, tier })));
-    expect(rules).toHaveLength(31);
+    // 1.7's 31, and patch 1.7.1's two hand-given rules after Bannerman (23-awards.sql restates the function; measure 'award').
+    expect(rules).toHaveLength(33);
+    expect(rules.slice(2, 5)).toEqual([{ id: 'bannerman', measure: 'banner', threshold: 1, tier: null },
+      { id: 'game-master', measure: 'award', threshold: 1, tier: null }, { id: 'high-ground', measure: 'award', threshold: 1, tier: null }]);
     expect({ volatility, definer, config }).toEqual({ volatility: 'i', definer: false, config: ['search_path=""'] });
   });
 
@@ -1470,8 +1473,7 @@ it('ships M28 completed from 22-titles.sql: the tables before the foreign key, e
   const files = all.filter(name => name.endsWith('_patch_1_7.sql'));
   expect(files).toHaveLength(1);
   expect(files[0]).toMatch(/^\d{14}_patch_1_7\.sql$/);
-  // The 28th migration, after M27 (Patch 1.6, the economy).
-  expect(all).toHaveLength(28);
+  // The 28th migration, after M27 (Patch 1.6, the economy). It was the last until M29 (patch 1.7.1, hand-given titles) followed it.
   expect(all[26]).toBe('20261104081033_patch_1_6.sql');
   expect(all[27]).toBe(files[0]);
   const m28 = readFileSync(new URL(files[0], dir), 'utf8');

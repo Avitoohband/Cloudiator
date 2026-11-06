@@ -22,10 +22,12 @@ const aster = (level = 1): OwnerState => {
 const names = (rows: readonly { name: string }[]) => rows.map(row => row.name);
 
 describe('the picker', () => {
-  it('counts the earned titles and the 31 that exist', () => {
-    expect(pickerCounts(aster())).toEqual({ earned: 8, all: 31 });
-    expect(pickerCounts({ titles: [] })).toEqual({ earned: 0, all: 31 });
-    expect(TITLES_V1).toHaveLength(31);
+  // Patch 1.7.1 Task 1 grew the catalog to 33 (two hand-given titles); All counts the whole catalog until the picker hides an
+  // unheld hand-given title (the plan's Task 2).
+  it('counts the earned titles and the 33 that exist', () => {
+    expect(pickerCounts(aster())).toEqual({ earned: 8, all: 33 });
+    expect(pickerCounts({ titles: [] })).toEqual({ earned: 0, all: 33 });
+    expect(TITLES_V1).toHaveLength(33);
   });
 
   it('lists the earned titles by family, in the families\' order, leaving out empty families', () => {
@@ -74,7 +76,7 @@ describe('the picker', () => {
     const owner = aster();
     owner.titles = [...owner.titles, { id: 'dungeoneer', earnedAtMs: 1, activityId: null, source: 'history', detail: null },
       { id: 'founder', earnedAtMs: 2, activityId: null, source: 'joined', detail: null }];
-    expect(pickerCounts(owner)).toEqual({ earned: 8, all: 31 });
+    expect(pickerCounts(owner)).toEqual({ earned: 8, all: 33 });
     expect(pickerGroups(owner, 'earned').flatMap(g => g.rows)).toHaveLength(8);
     expect(pickerGroups(owner, 'all').flatMap(g => g.rows).some(r => r.id === 'dungeoneer')).toBe(false);
   });

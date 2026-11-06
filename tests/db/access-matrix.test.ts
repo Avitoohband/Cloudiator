@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { OPEN, PUBLIC_TOURNAMENT_COLUMNS, ECONOMY_OWNER_ONLY, TITLE_TABLES, TITLE_FUNCTIONS, TITLE_TRIGGER_FUNCTIONS,
-  TITLES_OWNER_ONLY } from '../fixtures/access.ts';
+  TITLES_OWNER_ONLY, AWARDS_OWNER_ONLY } from '../fixtures/access.ts';
 
 // Task 23.1 (M17): the release access matrix. Every expectation is derived from the catalog through the exported operator
 // audit (scripts/access-audit.sql, one read-only SELECT), except the OPEN list of visitor projections
@@ -513,6 +513,20 @@ describe('release access matrix', () => {
       `function ${TITLES_OWNER_ONLY.function} service_role EXECUTE`,
       `relation ${TITLES_OWNER_ONLY.relation} service_role SELECT`,
     ].sort());
+  });
+
+  it("keeps the hand-given titles' give_title owner-only, including backend and inherited grants (M29)", async () => {
+    // Present, an invoker function with a pinned path, and no API role (service_role included) may run it: only the owner gives a title.
+    expect(await sql`select p.prosecdef as definer, p.proconfig as config, p.proacl::text as acl from pg_proc p
+      where p.oid=to_regprocedure(${AWARDS_OWNER_ONLY.function})`).toEqual([{ definer: false, config: ['search_path=""'], acl: '{postgres=X/postgres}' }]);
+    const isGive = (row: Row) => row.object === AWARDS_OWNER_ONLY.function;
+    expect((await audit()).filter(isGive)).toEqual([]);
+    // A future accidental grant would show in the same exported audit.
+    const probe = await auditAfter(`grant execute on function ${AWARDS_OWNER_ONLY.function} to public`,
+      `grant execute on function ${AWARDS_OWNER_ONLY.function} to service_role`);
+    expect(lines(probe.filter(isGive))).toEqual([`function ${AWARDS_OWNER_ONLY.function} PUBLIC EXECUTE`,
+      `function ${AWARDS_OWNER_ONLY.function} anon EXECUTE`, `function ${AWARDS_OWNER_ONLY.function} authenticated EXECUTE`,
+      `function ${AWARDS_OWNER_ONLY.function} service_role EXECUTE`].sort());
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {

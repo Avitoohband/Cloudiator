@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { STORED_COUNTERS, TITLES_V1, TITLE_FAMILIES, titleById } from '@domain/titles';
 
-// The spec's table "The titles", rows 1-31: [id, name, family id, rule, measure, threshold, tier].
+// The spec's table "The titles", rows 1-31, and patch 1.7.1's two hand-given titles after Bannerman (plan
+// docs/superpowers/plans/2026-11-06-hand-given-titles-1-7-1.md, "Global constraints"): [id, name, family id, rule, measure, threshold,
+// tier]. The measure `award` is produced by no counter, trigger or back-fill: only the owner's private.give_title grants them.
 const SPEC_ROWS = [
   ['founder', 'Founder', 'special', 'Made in Season 1', 'founder', 1, null],
   ['old-guard', 'Old Guard', 'special', '100 days in camp', 'days-in-camp', 100, null],
   ['bannerman', 'Bannerman', 'special', 'Own the Arena banner', 'banner', 1, null],
+  ['game-master', 'Game Master', 'special', "The game's Game Master", 'award', 1, null],
+  ['high-ground', 'High Ground', 'special', 'Given by the Game Master', 'award', 1, null],
   ['wanderer', 'Wanderer', 'expeditions', '10 expeditions won', 'expeditions-won', 10, 1],
   ['pathfinder', 'Pathfinder', 'expeditions', '50 expeditions won', 'expeditions-won', 50, 2],
   ['trailblazer', 'Trailblazer', 'expeditions', '200 expeditions won', 'expeditions-won', 200, 3],
@@ -37,8 +41,8 @@ const SPEC_ROWS = [
 ];
 
 describe('the titles catalog of patch 1.7', () => {
-  it('lists the 31 titles of 1.7 in the picker order', () => {
-    expect(TITLES_V1.map(t => t.id)).toEqual(['founder', 'old-guard', 'bannerman', 'wanderer', 'pathfinder', 'trailblazer',
+  it('lists the 33 titles (1.7\'s 31 and 1.7.1\'s two hand-given) in the picker order', () => {
+    expect(TITLES_V1.map(t => t.id)).toEqual(['founder', 'old-guard', 'bannerman', 'game-master', 'high-ground', 'wanderer', 'pathfinder', 'trailblazer',
       'wolfbane', 'raiders-bane', 'troll-slayer', 'tiro', 'disciplined', 'doctore', 'bloodied', 'crowd-pleaser', 'lion',
       'invictus', 'finalist', 'victor', 'triumphator', 'medalist', 'champion', 'thrice-crowned', 'collector', 'curator',
       'antiquarian', 'tempered', 'connoisseur', 'rare-find', 'moneyed', 'patrician', 'croesus']);
@@ -55,6 +59,13 @@ describe('the titles catalog of patch 1.7', () => {
     expect(row('croesus')).toEqual(['Croesus', '12,000 gold earned', 'gold-earned', 12000, 3]);
     expect(row('founder')).toEqual(['Founder', 'Made in Season 1', 'founder', 1, null]);
     expect(TITLES_V1.map(t => [t.id, t.name, t.family, t.rule, t.measure, t.threshold, t.tier])).toEqual(SPEC_ROWS);
+  });
+  it('earns 31 by play and gives two by hand', () => {
+    expect(TITLES_V1.filter(t => t.measure === 'award').map(t => [t.id, t.name, t.rule])).toEqual([
+      ['game-master', 'Game Master', "The game's Game Master"], ['high-ground', 'High Ground', 'Given by the Game Master']]);
+    expect(TITLES_V1.filter(t => t.measure !== 'award')).toHaveLength(31);
+    // No stored counter is named after the hand-given measure, so private.title_measures never yields it.
+    expect(STORED_COUNTERS).not.toContain('award');
   });
   it('names unknown ids as nothing', () => { for (const id of ['', 'den-breaker', 'Founder', null, 7]) expect(titleById(id)).toBeNull(); });
   it('stores exactly the spec counters', () => expect([...STORED_COUNTERS].sort()).toEqual(['arena-best-streak', 'arena-streak',

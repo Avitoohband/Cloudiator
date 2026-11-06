@@ -14,7 +14,7 @@ const create = { kind: 'create-character', operationId, name: 'Avi Fighter', cla
 const deps: CommandDependencies = { allowedOrigins: ['http://127.0.0.1:3000'], verifyActor: async () => ({ userId: operationId }),
   database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }),
     market: async () => ({ ok: false, code: 'unavailable' }), setTournamentOptIn: async () => ({ ok: false, code: 'unavailable' }),
-    changeAppearance: async () => ({ ok: false, code: 'unavailable' }), readMessage: async () => ({ ok: false, code: 'unavailable' }),
+    changeAppearance: async () => ({ ok: false, code: 'unavailable' }), wearTitle: async () => ({ ok: false, code: 'unavailable' }), readMessage: async () => ({ ok: false, code: 'unavailable' }),
     seeNotifications: async () => ({ ok: false, code: 'unavailable' }) } };
 function req(body: unknown, origin = 'http://127.0.0.1:3000') { return new Request('http://local', { method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) }); }
@@ -25,7 +25,7 @@ it('rejects missing identity before any command executes', async () => {
     verifyActor: async () => { throw new Error('unauthenticated'); },
     database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); },
       market: async () => { throw new Error('must not execute'); }, setTournamentOptIn: async () => { throw new Error('must not execute'); },
-      changeAppearance: async () => { throw new Error('must not execute'); }, readMessage: async () => { throw new Error('must not execute'); },
+      changeAppearance: async () => { throw new Error('must not execute'); }, wearTitle: async () => { throw new Error('must not execute'); }, readMessage: async () => { throw new Error('must not execute'); },
       seeNotifications: async () => { throw new Error('must not execute'); } },
   });
   expect(response.status).toBe(401);
@@ -121,6 +121,43 @@ it('routes change-appearance to its own transaction with the verified actor and 
   expect(calls).toEqual(Array(3).fill({ actor: { userId: operationId }, command: change }));
   // An invalid look (or a command with extra authority) is refused at the boundary and never reaches the transaction.
   for (const bad of [{ ...change, appearance: { ...look, hair: 'mohawk' } }, { ...change, gladiatorId: operationId }, { kind: 'change-appearance', operationId }]) {
+    const refused = await handleCommand(req(bad), routed);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ ok: false, code: 'invalid' });
+  }
+  expect(calls).toHaveLength(3);
+});
+
+const wearCommand = { kind: 'wear-title' as const, operationId, titleId: 'pathfinder' as string | null };
+
+it('accepts wear-title only with exactly a 1.7 title id or null', () => {
+  expect(parseCommand(wearCommand)).toEqual(wearCommand);
+  expect(parseCommand({ ...wearCommand, titleId: null })).toEqual({ ...wearCommand, titleId: null });
+  for (const bad of ['den-breaker', 'Pathfinder', '', 7, true, [], {}, ['pathfinder'], undefined])
+    expect(parseCommand({ ...wearCommand, titleId: bad }), JSON.stringify(bad)).toBeNull();
+  const { titleId: _titleId, ...missing } = wearCommand;
+  expect(parseCommand(missing)).toBeNull();
+  for (const extra of [{ gladiatorId: operationId }, { ownerId: operationId }, { expectedVersion: 1 }])
+    expect(parseCommand({ ...wearCommand, ...extra }), JSON.stringify(extra)).toBeNull();
+  expect(parseCommand({ ...wearCommand, operationId: 'bad' })).toBeNull();
+});
+
+it('routes wear-title to its own transaction with the verified actor and the parsed command only', async () => {
+  const calls: unknown[] = [];
+  const results = [{ ok: true as const, receiptId: operationId, value: { titleId: 'pathfinder', receivedAtMs: 7 } },
+    { ok: false as const, code: 'invalid' as const }, { ok: false as const, code: 'not-found' as const }];
+  const never = (what: string) => async () => { throw new Error(`a title wear must not reach ${what}`); };
+  const routed = { ...deps, database: { ...deps.database, plan: never('planning'), inventory: never('the inventory'), market: never('the market'),
+    createGladiator: never('creation'), setTournamentOptIn: never('the opt-in'), changeAppearance: never('a look change'),
+    wearTitle: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return results.shift()!; } } };
+  const worn = await handleCommand(req(wearCommand), routed);
+  expect(worn.status).toBe(200);
+  expect(await worn.json()).toEqual({ ok: true, receiptId: operationId, value: { titleId: 'pathfinder', receivedAtMs: 7 } });
+  expect((await handleCommand(req(wearCommand), routed)).status).toBe(400);
+  expect((await handleCommand(req({ ...wearCommand, titleId: null }), routed)).status).toBe(404);
+  expect(calls).toEqual([wearCommand, wearCommand, { ...wearCommand, titleId: null }].map(command => ({ actor: { userId: operationId }, command })));
+  // An unknown id or a command with extra authority is refused at the boundary and never reaches the transaction.
+  for (const bad of [{ ...wearCommand, titleId: 'den-breaker' }, { ...wearCommand, gladiatorId: operationId }, { kind: 'wear-title', operationId }]) {
     const refused = await handleCommand(req(bad), routed);
     expect(refused.status).toBe(400);
     expect(await refused.json()).toEqual({ ok: false, code: 'invalid' });
@@ -352,7 +389,7 @@ it('answers presence with ok after the rate check, writing nothing else (Task 23
   const refuse = (name: string) => async () => { calls.push(name); throw new Error('must not execute'); };
   const database = { consumeRateLimit: async (_: unknown, creation: boolean) => { calls.push(`rate:${creation}`); return null; },
     plan: refuse('plan'), inventory: refuse('inventory'), createGladiator: refuse('createGladiator'), market: refuse('market'),
-    setTournamentOptIn: refuse('setTournamentOptIn'), changeAppearance: refuse('changeAppearance'), readMessage: refuse('readMessage'),
+    setTournamentOptIn: refuse('setTournamentOptIn'), changeAppearance: refuse('changeAppearance'), wearTitle: refuse('wearTitle'), readMessage: refuse('readMessage'),
     seeNotifications: refuse('seeNotifications') } as unknown as CommandDependencies['database'];
   const answer = await handleCommand(req({ kind: 'presence', operationId }), { ...deps, database });
   expect(answer.status).toBe(200);
@@ -669,6 +706,25 @@ it('sends a look change to the change_appearance RPC with the actor, the operati
   const failing = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
   await expect(failing.changeAppearance({ userId: ACTOR }, change)).rejects.toThrow('appearance-unavailable');
   const response = await handleCommand(req(change), { ...deps, database: { ...deps.database, changeAppearance: failing.changeAppearance } });
+  expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
+});
+
+it('sends a title to the wear_title RPC with the actor, the operation id and the command only', async () => {
+  const sent: Sent[] = [];
+  const stored = { ok: true, receiptId: 'r1', value: { titleId: 'pathfinder', receivedAtMs: 5 } };
+  const database = createDatabase(backend(() => json(stored), sent));
+  const id = OPERATION.toLowerCase();
+  expect(await database.wearTitle({ userId: ACTOR }, { kind: 'wear-title', operationId: OPERATION, titleId: 'pathfinder' })).toEqual(stored);
+  // The operation id is the lower-case identity PostgreSQL stores, in the command as well as the argument (the receipt compares the command).
+  expect(sent).toEqual([{ method: 'POST', path: '/rest/v1/rpc/wear_title', search: '',
+    body: { actor_id: ACTOR, operation_id: id, input: { command: { kind: 'wear-title', operationId: id, titleId: 'pathfinder' } } } }]);
+  // No title is sent as JSON null.
+  await database.wearTitle({ userId: ACTOR }, { kind: 'wear-title', operationId: OPERATION, titleId: null });
+  expect(sent[1].body).toEqual({ actor_id: ACTOR, operation_id: id, input: { command: { kind: 'wear-title', operationId: id, titleId: null } } });
+  // A database error stays unavailable and never forwards the driver's message.
+  const failing = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
+  await expect(failing.wearTitle({ userId: ACTOR }, wearCommand)).rejects.toThrow('title-unavailable');
+  const response = await handleCommand(req(wearCommand), { ...deps, database: { ...deps.database, wearTitle: failing.wearTitle } });
   expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
 });
 

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, ReadMessageResult, SeeNotificationsResult } from '../contracts/commands.ts';
+import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, WearTitleValue, ReadMessageResult, SeeNotificationsResult } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
 import { WorkerFailure } from './failure.ts';
@@ -116,6 +116,7 @@ export function prepareListingPurchase(state: OwnerState, listed: Pick<ItemInsta
 const RETRYABLE_ABORTS: readonly string[] = ['40P01', '40001'];
 export type OptInCommand = Extract<GameCommand, { kind: 'set-tournament-opt-in' }>;
 export type AppearanceCommand = Extract<GameCommand, { kind: 'change-appearance' }>;
+export type WearTitleCommand = Extract<GameCommand, { kind: 'wear-title' }>;
 export type ReadMessageCommand = Extract<GameCommand, { kind: 'read-message' }>;
 export type SeeNotificationsCommand = Extract<GameCommand, { kind: 'see-notifications' }>;
 /** The saved automatic-entry setting and the database time it was received (Task 19). */
@@ -228,6 +229,17 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc('change_appearance', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
       if (error) throw new Error('appearance-unavailable');
       return data as CommandResult<ChangeAppearanceValue>;
+    },
+    /**
+     * Wear title: the caller's own gladiator wears one of its earned titles, or none. SQL replays a committed receipt first, refuses an
+     * unheld or malformed title as `invalid` and answers `not-found` for an account without a gladiator; it is not tied to the world
+     * clock, so it never answers `processing`.
+     */
+    async wearTitle(actor: Actor, original: WearTitleCommand): Promise<CommandResult<WearTitleValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase() };
+      const { data, error } = await client.rpc('wear_title', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
+      if (error) throw new Error('title-unavailable');
+      return data as CommandResult<WearTitleValue>;
     },
     /**
      * Messages: marks a visible message read for the caller's own account (the verified actor; the command names no other). It is

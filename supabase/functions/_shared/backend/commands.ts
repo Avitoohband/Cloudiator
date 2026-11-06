@@ -1,9 +1,10 @@
 import type { ActivityChoice, GameCommand, Attributes, Phase } from '../contracts/commands.ts';
 import type { Actor } from './auth.ts';
-import type { AppearanceCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand, SeeNotificationsCommand } from './database.ts';
+import type { AppearanceCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand, SeeNotificationsCommand, WearTitleCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { validAppearance } from '../domain/appearance.ts';
+import { titleById } from '../domain/titles.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
 import { choiceAllowedInPhase } from '../domain/schedule-choice.ts';
 import { jsonResponse, preflightResponse, readCommandBody, statusFor } from './http.ts';
@@ -61,6 +62,9 @@ export function parseCommand(value: unknown): GameCommand | null {
     case 'set-tournament-opt-in': valid = shape('enabled') && typeof value.enabled === 'boolean'; break;
     // The look is exactly a valid one (as at creation); no gladiator is named, so only the caller's own can change.
     case 'change-appearance': valid = shape('appearance') && validAppearance(value.appearance); break;
+    // A title id of the catalog, or null for none, and nothing else; no gladiator is named, so only the caller's own can change.
+    // Whether the gladiator holds that title is SQL's check.
+    case 'wear-title': valid = shape('titleId') && (value.titleId === null || titleById(value.titleId) !== null); break;
     // A message id and nothing else: the account is the verified session's, so a read mark is always the caller's own.
     case 'read-message': valid = shape('messageId') && integer(value.messageId, 1); break;
     // A time (server milliseconds, from 0) and nothing else; the account is the verified session's, so a mark is always the caller's own.
@@ -76,7 +80,7 @@ const INVENTORY_KINDS: readonly string[] = ['buy-shop', 'sell-item', 'discard-it
 const MARKET_KINDS: readonly string[] = ['create-listing', 'cancel-listing', 'buy-listing'];
 export type CommandDependencies = {
   verifyActor(request: Request): Promise<Actor>;
-  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn' | 'changeAppearance' | 'readMessage' | 'seeNotifications'>;
+  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn' | 'changeAppearance' | 'wearTitle' | 'readMessage' | 'seeNotifications'>;
   allowedOrigins: readonly string[];
 };
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
@@ -100,13 +104,14 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'change-appearance', 'read-message', 'see-notifications', 'presence'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'change-appearance', 'wear-title', 'read-message', 'see-notifications', 'presence'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
     // Task 23.8: the rate check above recorded the owner's activity signal (consume_command_rate). Presence writes nothing
     // else: no operation receipt, which would be permanent.
     if (command.kind === 'presence') return jsonResponse({ ok: true }, 200, origin);
     const result = command.kind === 'create-character' ? await deps.database.createGladiator(actor, command)
       : command.kind === 'set-tournament-opt-in' ? await deps.database.setTournamentOptIn(actor, command as OptInCommand)
         : command.kind === 'change-appearance' ? await deps.database.changeAppearance(actor, command as AppearanceCommand)
+          : command.kind === 'wear-title' ? await deps.database.wearTitle(actor, command as WearTitleCommand)
           // A read mark and a notifications mark write no receipt (like presence), so their answers carry none.
           : command.kind === 'read-message' ? await deps.database.readMessage(actor, command as ReadMessageCommand)
             : command.kind === 'see-notifications' ? await deps.database.seeNotifications(actor, command as SeeNotificationsCommand)

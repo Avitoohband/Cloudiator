@@ -16,7 +16,7 @@ Deno.test('Edge runtime loads canonical domain modules and enforces the command 
     database: { plan: async () => { throw new Error('Untrusted command reached mutation'); }, inventory: async () => { throw new Error('Untrusted command reached mutation'); },
       consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('Untrusted command reached mutation'); },
       market: async () => { throw new Error('Untrusted command reached mutation'); }, setTournamentOptIn: async () => { throw new Error('Untrusted command reached mutation'); },
-      changeAppearance: async () => { throw new Error('Untrusted command reached mutation'); }, readMessage: async () => { throw new Error('Untrusted command reached mutation'); },
+      changeAppearance: async () => { throw new Error('Untrusted command reached mutation'); }, wearTitle: async () => { throw new Error('Untrusted command reached mutation'); }, readMessage: async () => { throw new Error('Untrusted command reached mutation'); },
       seeNotifications: async () => { throw new Error('Untrusted command reached mutation'); } },
   });
   if (response.status !== 400 || (await response.json()).code !== 'invalid') throw new Error('Authority rejection failed');
@@ -44,4 +44,24 @@ Deno.test('Edge runtime loads canonical activity preparation and enforces the pr
     secret: 'deno-runtime-worker-secret-0123456789abcdef', run: async () => { throw new Error('Unauthenticated worker reached the database'); },
   });
   if (response.status !== 401) throw new Error('Worker authority rejection failed');
+});
+
+// Patch 1.7: the wear-title route in the Edge runtime itself: only a 1.7 title id or null reaches the transaction, with the parsed command only.
+Deno.test('Edge runtime routes wear-title to its own transaction and refuses an unknown title id', async () => {
+  const id = '8d2f0216-c41a-4056-89aa-8f0c1da612e0';
+  const calls: unknown[] = [];
+  const refuse = async () => { throw new Error('A title wear reached another transaction'); };
+  const deps = { allowedOrigins: [], verifyActor: async () => ({ userId: id }),
+    database: { plan: refuse, inventory: refuse, market: refuse, consumeRateLimit: async () => null, createGladiator: refuse, setTournamentOptIn: refuse,
+      changeAppearance: refuse, readMessage: refuse, seeNotifications: refuse,
+      wearTitle: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return { ok: true as const, receiptId: id, value: { titleId: 'pathfinder', receivedAtMs: 1 } }; } } };
+  const send = (body: unknown) => handleCommand(new Request('http://local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), deps);
+  const command = { kind: 'wear-title', operationId: id, titleId: 'pathfinder' };
+  const worn = await send(command);
+  if (worn.status !== 200 || (await worn.json()).value.titleId !== 'pathfinder') throw new Error('Wear-title routing failed');
+  const unknown = await send({ ...command, titleId: 'den-breaker' });
+  if (unknown.status !== 400 || (await unknown.json()).code !== 'invalid') throw new Error('Unknown title id was not refused');
+  const extra = await send({ ...command, gladiatorId: id });
+  if (extra.status !== 400) throw new Error('Extra authority was not refused');
+  if (JSON.stringify(calls) !== JSON.stringify([{ actor: { userId: id }, command }])) throw new Error('The transaction got more than the parsed command');
 });

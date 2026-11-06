@@ -121,6 +121,28 @@ test('sends the look change to the authenticated command endpoint and keeps its 
   expect(sent).toEqual(Array(4).fill({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body: command }));
 });
 
+// Patch 1.7: wearing a title (or none) goes out like any command and answers with its receipt.
+test('sends a wear-title command like any command, and answers its receipt or refusal', async () => {
+  api({ user: { id: 'first' }, access_token: 'first', expires_at: Math.floor(Date.now() / 1000) + 3600 } as Session);
+  const sent: { url: string; body: unknown }[] = [];
+  const answers = [{ status: 200, body: { ok: true, receiptId: 'r1', value: { titleId: 'pathfinder', receivedAtMs: 1_791_591_300_000 } } },
+    { status: 200, body: { ok: true, receiptId: 'r2', value: { titleId: null, receivedAtMs: 1_791_591_301_000 } } }, { status: 400, body: { ok: false, code: 'invalid' } }];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    sent.push({ url: String(url), body: JSON.parse(String(init.body)) });
+    const { status, body } = answers.shift()!;
+    return new Response(JSON.stringify(body), { status });
+  });
+  const operationId = 'd43f7844-52e0-4302-b8e4-740035047765';
+  const commands = [{ kind: 'wear-title' as const, operationId, titleId: 'pathfinder' }, { kind: 'wear-title' as const, operationId, titleId: null },
+    { kind: 'wear-title' as const, operationId, titleId: 'pathfinder' }];
+  const gateway = createLiveGateway();
+  const results = [];
+  for (const command of commands) results.push(await gateway.command(command));
+  expect(results).toEqual([{ ok: true, receiptId: 'r1', value: { titleId: 'pathfinder', receivedAtMs: 1_791_591_300_000 } },
+    { ok: true, receiptId: 'r2', value: { titleId: null, receivedAtMs: 1_791_591_301_000 } }, { ok: false, code: 'invalid' }]);
+  expect(sent).toEqual(commands.map(body => ({ url: expect.stringMatching(/\/functions\/v1\/game-command$/), body })));
+});
+
 // Task 21.3: seasons are public reads too.
 const SEASON_MS = 2_419_200_000;
 const seasonRows = [{ season_index: 1, starts_at_ms: SEASON_MS, ends_at_ms: 2 * SEASON_MS, closed_at_ms: null },

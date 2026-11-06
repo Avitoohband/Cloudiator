@@ -34,6 +34,8 @@ export type PresenceResult = { ok: true } | { ok: false; code: ApiErrorCode; ret
 export type DayScheduleValue = { version: number; receivedAtMs: number; parts: Record<Phase, { effectiveSlotIndex: number; effectiveAtMs: number } | null> };
 /** The answer to a `change-appearance` command: the look the gladiator now has and the server time the change was received. */
 export type ChangeAppearanceValue = { appearance: Appearance; receivedAtMs: number };
+/** The answer to a `wear-title` command: the title the gladiator now wears (`null` = none) and the server time the change was received. */
+export type WearTitleValue = { titleId: string | null; receivedAtMs: number };
 /** The message a `read-message` command marked read. */
 export type ReadMessageValue = { messageId: number };
 /**
@@ -67,6 +69,8 @@ export type GameCommand = Operation & (
   | { kind: 'set-tournament-opt-in'; enabled: boolean }
   // Change look: free and unlimited for now. The look replaces the caller's own gladiator's (the command names no gladiator).
   | { kind: 'change-appearance'; appearance: Appearance }
+  // Wear an earned title, or none (`titleId: null`), on the caller's own gladiator (the command names no gladiator).
+  | { kind: 'wear-title'; titleId: string | null }
   // Mark a message read for the caller's own account (the command names no account); no receipt, a repeat is a no-op.
   | { kind: 'read-message'; messageId: number }
   // Mark the account's own settled results seen up to a time (`upToMs`, server time in ms); no receipt, it never moves the mark back.

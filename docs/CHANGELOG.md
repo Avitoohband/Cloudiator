@@ -24,11 +24,11 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; 1.7 (released 2026-11-06) is new since.
+**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; 1.7 and 1.7.1 (released 2026-11-06) are new since.
 
-## 1.7.1 — Hand-given titles (in progress, not yet released)
+## 1.7.1 — Hand-given titles (2026-11-06)
 
-### Built
+Released 2026-11-06: M29 and the client; the Game Master gave Game Master to Indigo and High Ground to Tommy. No patch note.
 
 - The Game Master can now give special titles; a given title arrives in Notifications with Wear.
 

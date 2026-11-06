@@ -197,3 +197,8 @@ More from Avi, 2026-11-06 (a design pass started; not designed yet):
     ("what do you picture seeing when you open your inventory, and is there a game whose inventory/equipment screen it
     should feel like?") — no answer yet. Next: his answer, then a clickable mockup over real Inventory screenshots (his
     rule), then a written spec and plan.
+
+57. **High Ground, earnable by others (Avi, 2026-11-06).** "For Tommy give 'HighGround' title. In the future add the way
+    so other players could received it." 1.7.1 adds High Ground as a hand-given title (given to the gladiator Tommy) and
+    Game Master (given to Avi's gladiator Indigo), shown only to holders. Later: a play rule so others can earn High
+    Ground — Avi chose "Decide later" on 2026-11-06; ask him what Tommy did or what the rule should be.

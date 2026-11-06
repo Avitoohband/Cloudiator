@@ -185,3 +185,15 @@ UI ideas from Avi, 2026-11-05 (for a later UI patch; mockup over real screenshot
 55. **A sticky menu, placed where I want.** "sticky option for the menu so it won't disapear, also option to choose where it
     would be, bottom, top, left, or right": a setting keeps the menu always shown (it does not hide), and a second setting
     puts it at the bottom, top, left or right of the screen. Per device, like the 12/24-hour clock (idea 7).
+
+More from Avi, 2026-11-06 (a design pass started; not designed yet):
+
+56. **Items you can see: pixel icons, an inventory grid, worn gear as items.** "plan a new looking items plan, items have
+    visual, inventory is like matrix of square. wearing items showen as items. I want more pixel visuatlity to those items
+    and not just names." Every item gets a pixel-art icon (code-generated like the camp art, the approved route); the
+    Inventory becomes a grid of square slots instead of a list of names; the worn gear shows as item icons in equipment
+    slots (not only as text). Builds on idea 37 (item pictures in Inventory and the shops) and fits the gear wave (ideas
+    19-21, 46, 49). Status 2026-11-06: brainstorming started (superpowers:brainstorming); Claude asked Avi one open question
+    ("what do you picture seeing when you open your inventory, and is there a game whose inventory/equipment screen it
+    should feel like?") — no answer yet. Next: his answer, then a clickable mockup over real Inventory screenshots (his
+    rule), then a written spec and plan.

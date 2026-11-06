@@ -26,11 +26,9 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; nothing released since.
 
-## 1.7 — Wearable titles: show what your gladiator has done (in progress, not yet released)
+## 1.7 — Wearable titles: show what your gladiator has done (2026-11-06)
 
-Patch 1.7 (wearable titles). The title is the draft patch note's; Avi approves the wording at release.
-
-### Built
+Released 2026-11-06: M28 with the one-time history back-fill (every gladiator got the titles its history earned, and Founder), the game-command function and the client.
 
 - Titles: your gladiator earns titles for expeditions, Training, the Arena, tournaments, seasons, gear owned and gold earned, and wears one beside its name.
 - Everything you did before 1.7 counts: a notice in Notifications lists the titles your history earned.

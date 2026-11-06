@@ -1,5 +1,13 @@
 # Deployment checklist
 
+## Patch 1.7 LIVE — 2026-11-06
+
+Client e27b73f / Pages 51187ca7-da58-4f48-96d2-475a70785c93; Supabase M01–M28 (M28 `20261106064426_patch_1_7`, with its one-time
+history back-fill: 21 gladiators, 21 Founders, 119 titles); `game-command` from `ca79f26` (`game-worker` unchanged since 1.6).
+Note 10 at 18:16:59 UTC; patch 1.7 recorded at 18:17:17 UTC with 7 features, `latest_patch` 1.7. Gate 12/12 (native32), nine
+deployed checks (26 anonymous denials). Rules v2 stay active; never roll `game-command` back past 1.7 now that clients send
+`wear-title`. [Evidence](release-evidence.md#patch-17-released--2026-11-06).
+
 ## Patch 1.6 LIVE — 2026-11-05
 
 Client 94abb63845a8d7d4acef915633f6ae40330d492c / Pages 7e26de8e-ddf8-4d77-baa7-3dcb9e0d1546; Supabase M01–M27; functions

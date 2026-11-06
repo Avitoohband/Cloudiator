@@ -1538,3 +1538,23 @@ repository); the step-by-step ledger: `.superpowers/sdd/2026-10-30-economy-1-6/p
 | First v2 settlements | 17:33 UTC (read-only): slots 373727 and 373728 ran wholly on v2 and settled, 20 settlement jobs each, every job completed; boundaries 373728 and 373729 published (20 members, 64.3 s and 62.6 s), boundaries open 0, coordinator without error, every job kind failed 0, expired 0, unfinished 0, HTTP errors 0, `duplicateGrants` 0. |
 
 Open: Avi's signed-in check of the live game.
+
+## Patch 1.7 released — 2026-11-06
+
+Wearable titles: M28 with its one-time history back-fill, the `game-command` function and the client, then the patch note
+and record. Avi's go 2026-11-06 ("Go now"; the note "OK as written"; Champion/Medalist "Keep for now"). Raw outputs:
+`logs/p17-release-20261106/` (outside the repository); the ledger: `.superpowers/sdd/2026-10-30-titles-1-7/progress.md`;
+the controller's 37 rulings: [PATCH-1.7-RULINGS-2026-11-06](../implementation/PATCH-1.7-RULINGS-2026-11-06.md).
+
+| Step | Evidence |
+| --- | --- |
+| Gate of record | 12/12 on `084e20a` (2026-11-06 ~14:25–15:20 UTC) with Avi's native32 choice: `--browser-shards 32` and the TcpPortRandomizationWin Chrome flag (private overlay `node_modules/.cache/pw-design-tcp.config.mjs`); browser and production 1,372/1,372 case identities; db 544 with the Edge container unchanged. Two earlier runs: 11/12 (read-render C6, a real Task 12 regression, fixed in `084e20a`) and 11/12 (a Windows ERR_NO_BUFFER_SPACE host fault). Only docs changed after `084e20a`. |
+| Reviews | 12 tasks each with a spec + quality review (fix rounds where needed); a final whole-branch review: ready to release, 0 Critical/Important; its fix wave `5e677c1`; a test hardened against this PC's antivirus (`271c1a6`). |
+| M28 | `20261106064426_patch_1_7.sql` pushed 18:11:33 UTC (`db push --skip-vault --yes`, ~7 s, no retry) from `claude/` detached at `ca79f26`, inside the 17:40–18:20 UTC window. Before: list ended at M27; dry run listed only M28; boundaries open 0; Season 0 `ends_at_ms` 1795339200000; no other transaction in `pg_stat_activity`. |
+| Back-fill | `{ok, replayed:false, gladiators 21, founders 21, titles 119, worn 21}`; live counts equal: 21 gladiators, 21 made before the Season 0 end, 21 wearing a title, 119 titles held; 0 profiles whose `titles_earned` differs from their held titles; 7 title triggers enabled. |
+| Fingerprint and access | Fingerprint hosted 1,353 / local M01–M28 replay 1,356: only the accepted kinds — realtime default-ACL pair, three local-only `supabase_functions` defaults, `seed-rules` v1\|f v2\|t (after 1.6's switch) vs v1\|t v2\|f, `seed-retention`, `seed-retention-jobs`, `seed-owner-signals` 21/0; 0 game-schema lines. Access audit hosted 635 / local 671: the 36 local-only rows are all `platform-default` `supabase_functions`; 0 hosted-only; 0 findings. |
+| Edge | `game-command` deployed 18:12 UTC (814 kB; 0 CRLF; `game-worker` unchanged since 1.6). Probes: site preflight 204 with the exact origin and Max-Age 7200; another origin 403; worker without its secret 401 `unauthenticated`. |
+| Client | `release` 94abb63 → `e27b73f` at 18:13:21 UTC; Pages deployment 51187ca7-da58-4f48-96d2-475a70785c93 (success); the canonical page's 17 asset paths equal the deployment's, 6 new; the bundle carries `1.7`. Deployed checks 9 passed (desktop and phone routes 5/5, headers, connect-src, compression 33/33, CORS, anonymous denials 26/26 incl. the four title probes, Google-only auth, 47 assets clean). CI: the release-push run failed on the runner (`toomanyrequests: Rate exceeded` pulling Docker images) and was re-run; the branch run is separate. |
+| Note and record | Message 10 (patch-notes, "Wearable titles: show what your gladiator has done", 8 blocks, 827 characters, the Founder line for a release before 22 Nov) at 18:16:59 UTC; `record_patch('1.7', …, 10)` at 18:17:17 UTC with the 7 CHANGELOG features in the spec's order. Read-back: message 10 visible; patch 1.7, 7 features, message 10; `latest_patch` 1.7; rules v2. |
+
+Open: the first boundary with the triggers live (18:40 UTC) — see below once checked; Avi's signed-in look at the live game; the 1.7 clip and its feature posts (on Avi's go).

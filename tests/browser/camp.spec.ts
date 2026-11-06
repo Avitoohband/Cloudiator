@@ -640,27 +640,33 @@ test.describe('worn titles in the camp', () => {
   });
 
   test('never moves the name', async ({ page }) => {
+    // Reduced motion: nobody walks, so the actor's feet and its name stay put between the two reads.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await openCamp(page);
-    const nameBoxes = async (stripTitles: boolean) => {
+    // Where the name's box sits relative to the actor's feet: bottom edge and centre, in world px.
+    const nameOffsets = async (stripTitles: boolean) => {
       await page.evaluate(strip => {
         const hook = window.__cloudiatorCamp!;
         const world = hook.world()!;
         hook.setWorld({ ...world, revision: `titles-${strip}`, actors: world.actors.map(a => { const { title: _title, ...rest } = a; return strip ? rest : { ...a }; }) as typeof world.actors });
       }, stripTitles);
-      const out: Record<string, Box> = {};
-      for (const name of Object.keys(TITLES)) out[name] = (await closeUpOn(page, name, 2.4)).plates[0];
+      const out: Record<string, { bottom: number; centre: number; height: number }> = {};
+      for (const name of Object.keys(TITLES)) {
+        const actor = await closeUpOn(page, name, 2.4);
+        const feet = worldToScreen(actor.x, actor.y);
+        const box = actor.plates[0];
+        out[name] = { bottom: box.y + box.height - feet.y, centre: box.x + box.width / 2 - feet.x, height: box.height };
+        expect(actor.title === null, `${name} title ${stripTitles ? 'stripped' : 'kept'}`).toBe(stripTitles);
+      }
       return out;
     };
-    const withTitles = await nameBoxes(false);
-    const without = await nameBoxes(true);
+    const withTitles = await nameOffsets(false);
+    const without = await nameOffsets(true);
     for (const name of Object.keys(TITLES)) {
-      // The same view of the same camp (the actor only walks a little between frames).
-      expect(without[name].width, name).toBeCloseTo(withTitles[name].width, 0);
-      expect(without[name].height, name).toBeCloseTo(withTitles[name].height, 0);
+      expect(without[name].bottom, `${name}'s name bottom`).toBeCloseTo(withTitles[name].bottom, 1);
+      expect(without[name].centre, `${name}'s name centre`).toBeCloseTo(withTitles[name].centre, 1);
+      expect(without[name].height, `${name}'s name height`).toBeCloseTo(withTitles[name].height, 1);
     }
-    const actor = await closeUpOn(page, 'Atticus', 2.4);
-    expect(actor.title).toBeNull();
-    expect(actor.plates[0].height).toBeCloseTo(withTitles.Atticus.height, 0);
   });
 
   test("shows only the followed gladiator's title at medium zoom", async ({ page }) => {

@@ -149,9 +149,11 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
     // A replay's fighters' looks, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
-    looks: async ids => new Map(world.actors.filter(a => ids.includes(a.gladiatorId)).map(a => [a.gladiatorId, validAppearance(a.appearance) ? a.appearance : null] as const)),
-    // The titles worn now, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
-    readWornTitles: async ids => Object.fromEntries(world.actors.filter(a => ids.includes(a.gladiatorId)).map(a => [a.gladiatorId, a.title ?? null])),
+    looks: async (ids, onTitles) => {
+      const known = world.actors.filter(a => ids.includes(a.gladiatorId));
+      onTitles?.(Object.fromEntries(known.map(a => [a.gladiatorId, a.title ?? null])));
+      return new Map(known.map(a => [a.gladiatorId, validAppearance(a.appearance) ? a.appearance : null] as const));
+    },
     // Whether a trip's next slot was a Rest (no network): true only for the Woodland sample, and a malformed argument is `unavailable`,
     // as the live read refuses it.
     restAfter: async (gladiatorId, tripEndMs) => {

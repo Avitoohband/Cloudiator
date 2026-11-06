@@ -486,7 +486,7 @@ test.describe('battle-log replay', () => {
       return routeLiveReads(context, { world: { ...worldFixture, revision: 'looks-1', actors }, timelines: { [activityId]: timeline } });
     }
     /** The batched look reads (an `in` filter on the actor projection); the camp's own world reads have none. */
-    const lookReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('gladiator_id')?.startsWith('in.') && !r.query.get('select')?.includes('title'));
+    const lookReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('gladiator_id')?.startsWith('in.'));
     const fighters = async (page: Page) => (await page.evaluate(() => window.__cloudiatorBattle!.debug()))!.fighters;
     const layersOf = async (page: Page) => (await fighters(page)).map(f => f.layers);
     const tintOf = (layers: DebugFighter['layers'], id: string) => layers.find(l => l.id === id)?.tint;
@@ -528,7 +528,7 @@ test.describe('battle-log replay', () => {
       await expect(page.getByText('Setting the stage…')).toBeVisible();
       const query = lookReads(live)[0].query;
       expect(query.get('gladiator_id')).toBe(`in.(${aster.gladiatorId},${cassia.gladiatorId})`);
-      expect(query.get('select')).toBe('gladiator_id,appearance:actor->appearance');
+      expect(query.get('select')).toBe('gladiator_id,appearance:actor->appearance,title:actor->>title');
       release();
       await sceneReady(page);
       const [left, right] = await fighters(page);
@@ -638,6 +638,7 @@ test.describe("fighters' titles in the replay header", () => {
     ] };
     return routeLiveReads(context, { world: { ...worldFixture, revision: 'titles-1', actors }, timelines: { [activityId]: timeline } });
   }
+  // The titles come back in the one look read (select carries both columns); no request of their own.
   const titleReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('select')?.includes('title'));
   const headerTitles = (page: Page) => page.locator('[data-fighter-title]');
 

@@ -6,7 +6,7 @@
 // as React text. The header says the kind and when the bout was fought, never the server's stage label, which names the outcome
 // (plan Review Focus 4): the result shows only at the end, or on ⚑ Result.
 import {
-  useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore, type HTMLAttributes, type KeyboardEvent, type ReactNode,
+  useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type HTMLAttributes, type KeyboardEvent, type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { LeagueId } from '@contracts/commands';
@@ -222,7 +222,7 @@ const opponentIn = (log: BattleLog, side: string | null) => (log.participants.fi
  */
 export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, titles, takeFocus = false, back = null, queue = null, onChapter, counterHost = null, endActions = 'navigation' }: {
   /** `looks` (when the gateway has it) reads the fighters' looks the caller does not already hold. */
-  reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks' | 'readWornTitles'>>) | null;
+  reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks'>>) | null;
   activityId: string;
   stageId?: string | null;
   clock: DisplayClock | null;
@@ -246,28 +246,22 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   const [loaded, setLoaded] = useState<{ reads: object; attempt: number; view: ReplayView } | null>(null);
   /** Each Try again reads the replay once more (Task 23.4). */
   const [attempt, setAttempt] = useState(0);
-  // The fighters' worn titles, read once with the replay when the caller holds none; only this replay's own answer lands.
-  const [worn, setWorn] = useState<{ reads: object; activityId: string; attempt: number; lookup: TitleLookup } | null>(null);
-  // Kept in a ref: the caller's titles arriving later (its world loading) never reads the replay again.
-  const held = useRef(titles);
-  useLayoutEffect(() => { held.current = titles; });
+  // The worn titles of the fighters the caller does not hold come back with their looks, in that same one request (no read of their own);
+  // only this replay's own answer lands, and a failed read shows no titles.
+  const [worn, setWorn] = useState<{ reads: object; activityId: string; lookup: TitleLookup } | null>(null);
   useEffect(() => {
     if (!reads) return;
     let active = true;
-    loadReplayView(reads, activityId).then(async view => {
-      if (!active) return;
-      setLoaded({ reads, attempt, view });
-      if (held.current || !reads.readWornTitles || view.kind !== 'replay') return;
-      const ids = [...new Set(view.battles.flatMap(b => b.log.participants.map(p => p.gladiatorId)).filter((id): id is string => id !== null))];
-      if (ids.length === 0) return;
-      const answer = await reads.readWornTitles(ids).catch(() => ({}));
-      if (active) setWorn({ reads, activityId, attempt, lookup: titleLookupOf(answer) });
-    });
+    loadReplayView(reads, activityId).then(view => { if (active) setLoaded({ reads, attempt, view }); });
     return () => { active = false; };
   }, [activityId, reads, attempt]);
   const view = loaded && loaded.reads === reads && loaded.attempt === attempt ? loaded.view : null;
-  const shownTitles = titles ?? (worn && worn.reads === reads && worn.activityId === activityId && worn.attempt === attempt ? worn.lookup : undefined);
-  return view && clock ? <ActivityChapters view={view} headingLevel={headingLevel} titles={shownTitles} clock={clock} viewerId={viewerId} looks={{ known, read: reads?.looks?.bind(reads) ?? null }}
+  const readLooks = useMemo(() => reads?.looks ? (ids: readonly string[]) => reads.looks!(ids, answer => setWorn({ reads, activityId, lookup: titleLookupOf(answer) })) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reads, activityId]);
+  const fromRead = worn && worn.reads === reads && worn.activityId === activityId ? worn.lookup : null;
+  const shownTitles: TitleLookup | undefined = titles && fromRead ? id => titles(id) ?? fromRead(id) : titles ?? fromRead ?? undefined;
+  return view && clock ? <ActivityChapters view={view} headingLevel={headingLevel} titles={shownTitles} clock={clock} viewerId={viewerId} looks={{ known, read: readLooks }}
     onRetry={() => setAttempt(n => n + 1)} takeFocus={takeFocus} back={back} queue={queue} activityId={activityId} stageId={stageId} onChapter={onChapter} counterHost={counterHost} endActions={endActions} />
     : <p role="status">Loading the replay…</p>;
 }

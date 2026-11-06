@@ -36,7 +36,7 @@ test('reads the looks of several gladiators in one public read of the actor proj
   expect(requests).toHaveLength(1);
   expect(requests[0].table).toBe('world_actor_reads');
   // Only the id and the look cross, never the whole actor.
-  expect(requests[0].query.get('select')).toBe('gladiator_id,appearance:actor->appearance');
+  expect(requests[0].query.get('select')).toBe('gladiator_id,appearance:actor->appearance,title:actor->>title');
   expect(requests[0].query.get('gladiator_id')).toBe(`in.(${ASTER},${VARRO},${CASSIA})`);
   expect(looks).toBeInstanceOf(Map);
   expect(looks.get(ASTER)).toEqual(FEMALE);

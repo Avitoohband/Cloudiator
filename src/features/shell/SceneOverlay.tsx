@@ -95,7 +95,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
     if (player) return gateway;
     // The fighters' looks are public, so a visitor's replay reads them too, and whether a trip's next slot was a Rest (the whole-trip
     // replay's last chapter, Patch A Task 9).
-    return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; }, looks: ids => gateway.looks(ids),
+    return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; }, looks: (ids, onTitles) => gateway.looks(ids, onTitles),
       restAfter: (gladiatorId, tripEndMs) => gateway.restAfter(gladiatorId, tripEndMs) };
   }, [gateway, player]);
   // The camp's own world actors already hold their looks: a replay of those fighters reads nothing (the replay takes them once,

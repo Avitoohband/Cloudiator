@@ -247,32 +247,22 @@ export const MAX_LOOK_READ = 16;
  * of the actor projection (`world_actor_reads`, readable as `anon`); only the id and the `appearance` cross, never the whole
  * actor. Ids are lowercased, deduped and checked before any query is built (the column is a uuid: a text value would fail the
  * whole read), and a gladiator the projection does not know is absent from the map. A stored value that is not a valid look
- * reads as the legacy look. The replay waits for this read (`loadLooks`) and treats a failure as the legacy look.
+ * reads as the legacy look. `onTitles` is given the worn title of each (a known id, else null) from the same request. The replay waits for this read (`loadLooks`) and treats a failure as the legacy look.
  */
-export async function readLooks(client: SupabaseClient, ids: readonly string[]): Promise<Map<string, Appearance | null>> {
+export async function readLooks(client: SupabaseClient, ids: readonly string[], onTitles?: (titles: Record<string, string | null>) => void): Promise<Map<string, Appearance | null>> {
   const wanted = [...new Set(ids.filter((id): id is string => typeof id === 'string' && GLADIATOR_ID.test(id)).map(id => id.toLowerCase()))].slice(0, MAX_LOOK_READ);
   const looks = new Map<string, Appearance | null>();
   if (wanted.length === 0) return looks;
-  const rows = checked(await client.from('world_actor_reads').select('gladiator_id,appearance:actor->appearance').in('gladiator_id', wanted)
-    .limit(wanted.length)) as unknown as { gladiator_id: string; appearance: unknown }[];
-  for (const row of rows) looks.set(row.gladiator_id, validAppearance(row.appearance) ? row.appearance : null);
+  const rows = checked(await client.from('world_actor_reads').select('gladiator_id,appearance:actor->appearance,title:actor->>title').in('gladiator_id', wanted)
+    .limit(wanted.length)) as unknown as { gladiator_id: string; appearance: unknown; title?: unknown }[];
+  const titles: Record<string, string | null> = {};
+  for (const row of rows) {
+    looks.set(row.gladiator_id, validAppearance(row.appearance) ? row.appearance : null);
+    titles[row.gladiator_id] = knownTitleId(row.title);
+  }
+  // The same request carries the worn titles (Patch 1.7), so a replay page makes one read for both; an unknown id is no title.
+  try { onTitles?.(titles); } catch { /* a consumer's failure never fails the looks */ }
   return looks;
-}
-/**
- * The worn titles of up to `MAX_LOOK_READ` gladiators, in one public read of the actor projection (`world_actor_reads`, readable as `anon`):
- * only the id and the worn `title` cross. Ids are checked as the looks read checks them; an id the projection does not know is absent, one
- * it knows without a title (or with one this client does not know) is null. A failed read answers `{}`: a header then shows no title.
- */
-export async function readWornTitles(client: SupabaseClient, ids: readonly string[]): Promise<Record<string, string | null>> {
-  const wanted = [...new Set(ids.filter((id): id is string => typeof id === 'string' && GLADIATOR_ID.test(id)).map(id => id.toLowerCase()))].slice(0, MAX_LOOK_READ);
-  if (wanted.length === 0) return {};
-  try {
-    const result = await client.from('world_actor_reads').select('gladiator_id,title:actor->>title').in('gladiator_id', wanted).limit(wanted.length);
-    if (result.error || !Array.isArray(result.data)) return {};
-    const titles: Record<string, string | null> = {};
-    for (const row of result.data as unknown as { gladiator_id: string; title: unknown }[]) titles[row.gladiator_id] = knownTitleId(row.title);
-    return titles;
-  } catch { return {}; }
 }
 /**
  * The options of the next-slot Rest read, checked before any query is built (the fixture gateway applies the same rule): a

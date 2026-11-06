@@ -12,19 +12,22 @@ import { loadLooks, lookIdsFor, type LookMap } from '../../game/replay-looks';
 import { processingRetryDelay, renderTournament, tournamentRevealMarks, withTournamentLogs, withoutTournamentLogs } from '../../game/tournament-stage';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
+import type { TitleLookup } from '../titles/title-text';
 import { bracketChapter, upNextText } from '../bouts/bout-text';
 import { useClockMode } from '../../lib/clock-setting';
 
 type Reads = Pick<GameGateway, 'tournament' | 'tournamentLog'> & Partial<Pick<GameGateway, 'looks'>>;
 type Props = {
   reads: Reads; tournamentId: string; boutId: string; clock: DisplayClock | null; viewerId: string | null; known: LookMap | null;
+  /** The fighters' worn titles (the camp's world actors); none shown without it. */
+  titles?: TitleLookup;
   back: { label: string; go(): void } | null; takeFocus?: boolean; heldAtMs?: number | null; onChapter(boutId: string): void;
 };
 type Source = { reads: Reads; tournamentId: string };
 type Loaded = { source: Source; view: TournamentView | null; failed: boolean };
 type Selected = { source: Source; boutId: string; attempt: number; log: BattleLog | null; looks: LookMap | null; failed: boolean };
 
-export function BracketReplay({ reads, tournamentId, boutId, clock, viewerId, known, back, takeFocus, heldAtMs = null, onChapter }: Props) {
+export function BracketReplay({ reads, tournamentId, boutId, clock, viewerId, known, titles, back, takeFocus, heldAtMs = null, onChapter }: Props) {
   const [, setTick] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -121,7 +124,7 @@ export function BracketReplay({ reads, tournamentId, boutId, clock, viewerId, kn
   const select = (index: number) => { const next = chapters[index]; if (next) onChapter(next.bout.id); };
   const next = chapters[current + 1];
   const pair = next?.bout.sides;
-  return <BattleReplay key={boutId} headingLevel={2} viewerId={viewerId} league={state.league} takeFocus={takeFocus} back={back}
+  return <BattleReplay key={boutId} headingLevel={2} viewerId={viewerId} titles={titles} league={state.league} takeFocus={takeFocus} back={back}
     nav={{ previous: current > 0 ? () => select(current - 1) : null, counter: null,
       next: next ? { opponent: null, upNext: pair?.[0] && pair[1] ? upNextText({ a: pair[0].name, b: pair[1].name, chapter: next.roundLabel }, clockMode) : null,
         go: () => select(current + 1) } : null }}

@@ -52,6 +52,7 @@ import { useClockMode } from '../../lib/clock-setting';
 import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
+import type { TitleLookup } from '../titles/title-text';
 import {
   countdownText, creditedText, cutoffUtc, entryRules, entryStamina, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
   roundStatus, shapeText, statusDetail, statusText, timeWithUtc, victoryText, viewerText,
@@ -160,19 +161,38 @@ export type BracketModel = {
   /** The viewer's own credited summary for its placement, from its own timeline (null until read). */
   credited?: ActivitySummary | null;
   timeZone?: string;
+  /** Each entrant's worn title (the camp's world actors); none shows without it, and an unknown id shows nothing. */
+  titles?: TitleLookup;
 };
 
 /** Seven days after a tournament ends its bout replays are no longer kept; its results stay (Task 22.5). */
 const REPLAYS_GONE = 'These bout replays are no longer kept. Detailed replays are kept for seven days; the results stay.';
 
-function BoutCard({ bout, kept, onWatch }: { bout: TournamentBoutState; kept: boolean; onWatch(boutId: string): void }) {
+/** One fighter of a bout: the name, and the title it wears on a second line (gold italic); accessible text "{name}, {title}". */
+function Entrant({ side, titles, right = false }: { side: TournamentBoutState['sides'][number]; titles?: TitleLookup; right?: boolean }) {
+  const name = side?.name ?? 'To be decided';
+  let title: string | null = null;
+  if (side && titles) { try { title = titles(side.gladiatorId); } catch { title = null; } }
+  return (
+    <span className={`${styles.entrant} ${right ? styles.entrantRight : ''}`} {...(title ? { role: 'group', 'aria-label': `${name}, ${title}` } : {})}>
+      <span className={styles.entrantName}>{name}</span>
+      {title && <span className={styles.entrantTitle} title={title}>{title}</span>}
+    </span>
+  );
+}
+
+function BoutCard({ bout, kept, onWatch, titles }: { bout: TournamentBoutState; kept: boolean; onWatch(boutId: string): void; titles?: TitleLookup }) {
   const names = bout.sides.map(s => s?.name ?? 'To be decided');
   const winner = bout.sides.find(s => s?.gladiatorId === bout.winnerId) ?? null;
   const how = victoryText(bout);
   return (
     <li className={styles.bout} data-status={bout.status}>
       <p className={styles.boutTitle}>Bout {bout.position + 1}</p>
-      <p className={styles.sides}>{bout.sides.length === 0 ? 'To be revealed' : bout.status === 'bye' ? names[0] : names.join(' vs ')}</p>
+      {bout.sides.length === 0 ? <p className={styles.sides}>To be revealed</p>
+        : bout.status === 'bye' ? <p className={styles.sides}><Entrant side={bout.sides[0]} titles={titles} /></p>
+          : <p className={`${styles.sides} ${styles.pair}`}>
+            <Entrant side={bout.sides[0]} titles={titles} /><span className={styles.vs}>{' vs '}</span><Entrant side={bout.sides[1]} titles={titles} right />
+          </p>}
       {bout.status === 'fighting' && <p className={styles.live}>Bout in progress</p>}
       {bout.status === 'delayed' && <p className="muted">Not published yet</p>}
       {bout.status === 'bye' && winner && <p className={styles.winner} data-winner-id={winner.gladiatorId}>{winner.name} advances on a bye</p>}
@@ -249,7 +269,7 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
             <p className={styles.roundStatus}>{roundStatus(round)}</p>
             {roundNote(round, clockMode, timeZone) && <p className="muted">{roundNote(round, clockMode, timeZone)}</p>}
             {!kept && <p className="muted">{REPLAYS_GONE}</p>}
-            <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} />)}</ul>
+            <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} titles={model.titles} />)}</ul>
           </div>
         </section>
       )}
@@ -329,8 +349,8 @@ export function TournamentCardNotice({ id, failure, now, processedSlotIndex, pub
  * prepared without a published slot on the revision, a re-read first awaits the owner refresh (R2); with one, a card read
  * before the publication reads again once the revision shows it (C5).
  */
-function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onWatchBout, hook }: {
-  id: string; reads: TournamentReads; clock: DisplayClock; now: number; viewerId: string | null;
+function TournamentCard({ id, reads, clock, now, viewerId, titles, processedSlotIndex, publishedSlotIndex, refreshOwner, onRead, onWatchBout, hook }: {
+  id: string; reads: TournamentReads; clock: DisplayClock; now: number; viewerId: string | null; titles?: TitleLookup;
   /** The viewer's own processed slot (owner state; null without an owner), published with the slot's tournaments. */
   processedSlotIndex: number | null;
   /** The revision's published slot (Task 23.2; null before the first coordination), from the shared sync. */
@@ -467,7 +487,7 @@ function TournamentCard({ id, reads, clock, now, viewerId, processedSlotIndex, p
 
   if (failure && !view) return <TournamentCardNotice id={id} failure={failure} now={now} processedSlotIndex={processedSlotIndex} publishedSlotIndex={failedPublished} />;
   if (!state) return <p role="status" className={styles.detail}>Loading the tournament…</p>;
-  return <TournamentBracketView model={{ state, round: shownRound, viewerId,
+  return <TournamentBracketView model={{ state, round: shownRound, viewerId, titles,
     credited: credited && credited.activityId === placed ? credited.summary : null }}
     onRound={setRound} onWatch={boutId => onWatchBout?.(id, boutId)} />;
 }
@@ -485,8 +505,10 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
  * else sees the countdown and the brackets (spec "Menus", the Visitor column).
  */
-export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, onWatchBout, rules = RULES_V1 }: {
+export function TournamentPanel({ reads, owner, clock, fixture, samples = [], refresh, syncError, viewer, publishedSlotIndex = null, onWatchBout, rules = RULES_V1, titles }: {
   reads: TournamentReads | null;
+  /** Each entrant's worn title, from the camp's world actors (none shown without it). */
+  titles?: TitleLookup;
   onWatchBout?(tournamentId: string, boutId: string): void;
   owner: OwnerState | null;
   clock: DisplayClock;
@@ -617,7 +639,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
               // No server time yet: a failed revision read is said at once, never an endless "Loading" (review M1).
               : syncError ? <TournamentNotice failure="unavailable" preparing={false} />
                 : <p role="status" className={styles.detail}>Loading the tournament…</p>)
-              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null}
+              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null} titles={titles}
                 processedSlotIndex={owner?.processedSlotIndex ?? null} publishedSlotIndex={fixture ? null : publishedSlotIndex}
                 refreshOwner={refresh} onRead={onRead} onWatchBout={onWatchBout} hook={cardState} />}
       </section>

@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { expect, test, type Page } from './fixtures';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
-import { ownerFixture } from '../fixtures/domain';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { recordMeasurement } from '../fixtures/measurements';
 import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
 import { largeTournament, tournamentCampActors } from '../fixtures/tournament-build';
@@ -22,6 +22,7 @@ const revealOf = (key: TournamentKey, round: number) => {
   return startOf(key) + Math.ceil(80 * MIN * round / (rounds + 1));
 };
 const ASTER = ARENA_GLADIATORS.aster.id;
+const worldFixtureActor = worldFixture.actors[0];
 // Patch 1.6 (spec "Tournament entry stamina" and "Tournament prizes"), word for word: the fixture preview's rules are v2; the live transport's v1 unless a test sets v2.
 const V1_PRIZES = 'Gold prizes for 1st · 2nd · semifinal: 100 · 60 · 30 in every league. Renown: 50, 30, 15, and 5 for the others, plus 10 a won bout and 2 a lost one.';
 const V2_PRIZES = 'Gold prizes by league, for 1st · 2nd · semifinal: Bronze 40 · 24 · 12, Silver 60 · 36 · 18, Gold 80 · 48 · 24, Champion 100 · 60 · 30. '
@@ -912,6 +913,50 @@ test.describe('the live Tournaments panel', () => {
     expect(new Set(ids)).toEqual(new Set(['silver', 'bronze', 'gold'].map(league => `eq.tournament:${OPENING_SLOT}:${league}`)));
     expect(live.requests.every(r => r.reader === null)).toBe(true);
     expect(live.requests.some(r => r.table === 'owner_state' || r.table === 'activities')).toBe(false);
+  });
+
+  // Patch 1.7 Task 12 (the approved bracket-cell mockup): a bout's two fighters are two columns, each name with the title it wears
+  // on a second line (gold italic 11 px); the accessible text is "{name}, {title}", and a fighter with no title shows the name only.
+  test("shows each entrant's worn title under its name in the bout cells, cut with … only when narrow, with no sideways scroll", async ({ page, context }, testInfo) => {
+    const at = startOf('opening') + 30 * MIN;
+    const [nerva, aster] = ['Nerva', 'Aster'].map(name => VIEWS.opening.entrants.find(e => e.name === name)!);
+    const actor = (e: { gladiatorId: string; name: string }, title: string | null): PublicActor => ({ ...worldFixtureActor, gladiatorId: e.gladiatorId, name: e.name, title });
+    await routeLiveReads(context, { world: { ...emptyWorld(at), actors: [actor(nerva, 'lion'), actor(aster, 'founder')] }, tournaments: [VIEWS.opening], serverNowMs: () => at });
+    await page.goto('/game/');
+    const panel = await tournamentsPanel(page);
+    // Bout 2: Nerva (wears Lion of the Arena) on the left, Aster (Founder) on the right.
+    const bout = panel.locator('li[data-status]').filter({ hasText: 'Bout 2' });
+    await expect(bout.getByRole('group', { name: 'Nerva, Lion of the Arena' })).toBeVisible();
+    await expect(bout.getByRole('group', { name: 'Aster, Founder' })).toBeVisible();
+    // The cell's text is still "A vs B"; the title is its own gold italic 11 px line under the name; the right name aligns right.
+    await expect(bout.locator('p').nth(1)).toHaveText(/^Nerva\s*Lion of the Arena\s*vs\s*Aster\s*Founder$/);
+    const cells = await bout.getByRole('group').evaluateAll(groups => groups.map(g => {
+      const [name, title] = [...g.children] as HTMLElement[], t = getComputedStyle(title), n = getComputedStyle(name);
+      return { color: t.color, style: t.fontStyle, weight: t.fontWeight, size: t.fontSize, family: t.fontFamily, nowrap: t.whiteSpace, overflow: t.overflow, ellipsis: t.textOverflow,
+        nameSize: n.fontSize, nameWeight: n.fontWeight, align: getComputedStyle(g).textAlign, below: title.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 1,
+        whole: title.scrollWidth <= title.clientWidth };
+    }));
+    for (const cell of cells) expect(cell).toMatchObject({ color: 'rgb(230, 180, 80)', style: 'italic', weight: '600', size: '11px', nowrap: 'nowrap', overflow: 'hidden', ellipsis: 'ellipsis', below: true });
+    expect(cells[0].family).toMatch(/Georgia/);
+    expect(cells.map(c => c.align)).toEqual(['start', 'right']);
+    expect(cells.map(c => c.nameSize)).toEqual(['13.12px', '13.12px']);
+    // A fighter with no title shows its name only, as before.
+    const third = panel.locator('li[data-status]').filter({ hasText: 'Bout 3' });
+    await expect(third.getByRole('group')).toHaveCount(0);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    // Narrow: the same title is cut with … (the full title stays in the cell's accessible text and its tooltip).
+    const title = bout.getByRole('group', { name: 'Nerva, Lion of the Arena' }).locator('span').nth(1);
+    await title.evaluate(el => { el.parentElement!.style.width = '70px'; el.parentElement!.style.display = 'inline-block'; });
+    expect(await title.evaluate(el => ({ cut: el.scrollWidth > el.clientWidth, text: el.textContent, tip: el.getAttribute('title') }))).toEqual({ cut: true, text: 'Lion of the Arena', tip: 'Lion of the Arena' });
+    await title.evaluate(el => { el.parentElement!.style.width = ''; el.parentElement!.style.display = ''; });
+    mkdirSync('.superpowers/design/2026-10-30-titles/shots', { recursive: true });
+    const shot = testInfo.project.name.includes('mobile') ? '360' : 'desktop';
+    await page.setViewportSize(shot === '360' ? { width: 360, height: 740 } : { width: 1280, height: 800 });
+    expect(await noHorizontalScroll(page)).toBe(true);
+    // At 360 px a half-cell (124 px) holds the longest title whole.
+    if (shot === '360') expect(await bout.getByRole('group').evaluateAll(groups => groups.map(g => (g.children[1] as HTMLElement).scrollWidth <= (g.children[1] as HTMLElement).clientWidth))).toEqual([true, true]);
+    await bout.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `.superpowers/design/2026-10-30-titles/shots/task12-bracket-${shot}.png` });
   });
 
   test('follows the owner’s league after a promotion, from the owner read on a new revision', async ({ page, context }) => {

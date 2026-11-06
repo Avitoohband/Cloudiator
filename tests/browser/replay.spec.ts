@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { expect, test, type Page } from './fixtures';
 import type { BattleAction, BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor } from '../../supabase/functions/_shared/contracts/reads';
@@ -486,7 +486,7 @@ test.describe('battle-log replay', () => {
       return routeLiveReads(context, { world: { ...worldFixture, revision: 'looks-1', actors }, timelines: { [activityId]: timeline } });
     }
     /** The batched look reads (an `in` filter on the actor projection); the camp's own world reads have none. */
-    const lookReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('gladiator_id')?.startsWith('in.'));
+    const lookReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('gladiator_id')?.startsWith('in.') && !r.query.get('select')?.includes('title'));
     const fighters = async (page: Page) => (await page.evaluate(() => window.__cloudiatorBattle!.debug()))!.fighters;
     const layersOf = async (page: Page) => (await fighters(page)).map(f => f.layers);
     const tintOf = (layers: DebugFighter['layers'], id: string) => layers.find(l => l.id === id)?.tint;
@@ -619,5 +619,82 @@ test.describe('battle-log replay', () => {
       expectLegacy(right.layers, cassia.gladiatorId!);
       expect(backend).toEqual([]);
     });
+  });
+});
+
+// Patch 1.7 Task 12: the replay header shows each fighter's worn title under its name, read once from the public actor projection
+// (the camp scene uses the titles its world actors already hold). An NPC has none; a failed read shows the replay without titles.
+test.describe("fighters' titles in the replay header", () => {
+  test.skip(production, 'Replays need the fixture timelines or the routed transport, which production exports never include.');
+  const log = LOGS.tie;
+  const [aster, cassia] = log.participants;
+  const activityId = REPLAY_FIXTURES.tie.activityId;
+  const actor = (p: BattleLog['participants'][number], title: string | null): PublicActor =>
+    ({ ...worldFixture.actors[0], gladiatorId: p.gladiatorId!, name: p.name, title });
+  async function liveReplay(context: Parameters<typeof routeLiveReads>[0], actors: PublicActor[]) {
+    const at = worldFixture.serverNowMs, fought = at - 30 * 60_000;
+    const timeline: RevealedTimeline = { activityId, serverNowMs: at, visibleThroughMs: at, stages: [
+      { id: `${activityId}:1`, kind: 'bout', revealedAtMs: fought, startedAtMs: fought, endsAtMs: fought + log.durationMs, label: 'Bout: tie', battleLog: log },
+    ] };
+    return routeLiveReads(context, { world: { ...worldFixture, revision: 'titles-1', actors }, timelines: { [activityId]: timeline } });
+  }
+  const titleReads = (live: LiveTransport) => live.requests.filter(r => r.table === 'world_actor_reads' && r.query.get('select')?.includes('title'));
+  const headerTitles = (page: Page) => page.locator('[data-fighter-title]');
+
+  test("the replay page reads the two fighters' titles once, as a visitor, and shows them under the names", async ({ page, context }, testInfo) => {
+    const live = await liveReplay(context, [actor(aster, 'founder'), actor(cassia, 'lion')]);
+    await page.goto(`/replay/?activity=${activityId}`);
+    await sceneReady(page);
+    await expect(headerTitles(page)).toHaveText(['Founder', 'Lion of the Arena']);
+    // Under each name, in the fighter's own column, in gold italic.
+    const [left, right] = await page.locator('[data-fighter-title]').evaluateAll(nodes => nodes.map(n => ({ name: n.previousElementSibling?.textContent ?? '', style: getComputedStyle(n),
+      text: n.textContent, align: getComputedStyle(n.parentElement!).textAlign, y: n.getBoundingClientRect().top, nameBottom: n.previousElementSibling!.getBoundingClientRect().bottom })).map(o =>
+      ({ name: o.name, text: o.text, color: o.style.color, font: o.style.fontStyle, align: o.align, below: o.y >= o.nameBottom - 1 })));
+    expect(left).toMatchObject({ text: 'Founder', color: 'rgb(230, 180, 80)', font: 'italic', below: true });
+    expect(left.name).toContain('Aster');
+    expect(right).toMatchObject({ text: 'Lion of the Arena', align: 'right', below: true });
+    expect(right.name).toContain('Cassia');
+    expect(titleReads(live), 'one read for both fighters').toHaveLength(1);
+    expect(titleReads(live)[0].query.get('gladiator_id')).toContain(aster.gladiatorId!);
+    expect(titleReads(live)[0].query.get('gladiator_id')).toContain(cassia.gladiatorId!);
+    await page.waitForTimeout(500);
+    expect(titleReads(live)).toHaveLength(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    mkdirSync('.superpowers/design/2026-10-30-titles/shots', { recursive: true });
+    await page.screenshot({ path: `.superpowers/design/2026-10-30-titles/shots/task12-replay-header-${testInfo.project.name.includes('mobile') ? '360' : 'desktop'}.png` });
+  });
+
+  test('a failed read shows the replay without titles, and a fighter without one shows none', async ({ page, context }) => {
+    const live = await liveReplay(context, [actor(aster, 'founder'), actor(cassia, 'lion')]);
+    live.fail('world_actor_reads');
+    await page.goto(`/replay/?activity=${activityId}`);
+    await sceneReady(page);
+    await expect(page.getByRole('heading', { name: /Aster vs Cassia/ })).toBeVisible();
+    expect(titleReads(live).length).toBeGreaterThan(0);
+    await expect(headerTitles(page)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Skip to the result' }).click();
+    expect(await replayState(page)).toMatchObject({ finished: true, winnerId: log.winnerId });
+  });
+
+  test("an id this client does not know (a newer server's title) shows nothing", async ({ page, context }) => {
+    await liveReplay(context, [actor(aster, 'a-title-from-a-newer-server'), actor(cassia, 'lion')]);
+    await page.goto(`/replay/?activity=${activityId}`);
+    await sceneReady(page);
+    await expect(headerTitles(page)).toHaveText(['Lion of the Arena']);
+  });
+
+  test('the replay over the camp shows the titles its world actors hold, with no extra read', async ({ page, context }) => {
+    const live = await liveReplay(context, [actor(aster, 'founder'), actor(cassia, 'lion')]);
+    await page.goto(`/game/?view=replay&activity=${activityId}`);
+    await sceneReady(page);
+    await expect(headerTitles(page)).toHaveText(['Founder', 'Lion of the Arena']);
+    expect(titleReads(live)).toHaveLength(0);
+  });
+
+  test("the fixture preview shows Aster's title and an NPC fighter has none", async ({ page }) => {
+    await openReplay(page, REPLAY_FIXTURES.npc.activityId);
+    await sceneReady(page);
+    await expect(headerTitles(page)).toHaveText(['Founder']);
+    await expect(page.locator('[data-fighter-title]').first().locator('xpath=ancestor::div[1]')).toContainText('Aster');
   });
 });

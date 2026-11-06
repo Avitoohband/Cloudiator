@@ -15,6 +15,17 @@ export function titleName(id: unknown): string | null {
   return titleById(id)?.name ?? null;
 }
 
+/** A fighter's shown title (its name, as the lists show it) by gladiator id; null for none or one this client does not know. */
+export type TitleLookup = (gladiatorId: string) => string | null;
+
+/** A lookup over actors that carry a worn title id (the camp's world actors, or a read's answer by id): unknown ids and junk show nothing. */
+export function titleLookupOf(source: readonly { gladiatorId: string; title?: unknown }[] | Readonly<Record<string, unknown>> | null | undefined): TitleLookup {
+  const byId = new Map<string, string | null>();
+  if (Array.isArray(source)) for (const actor of source) byId.set(actor.gladiatorId, titleName(actor.title));
+  else if (source) for (const [id, title] of Object.entries(source)) byId.set(id, titleName(title));
+  return id => byId.get(id) ?? null;
+}
+
 /**
  * The worn title as the profile card words it: null for none or an id this client does not know; Champion names the latest first place of
  * the profile's prestige ("Champion · Season 2 Gold") when it has one, else the plain name. The lists and the camp carry no prestige and

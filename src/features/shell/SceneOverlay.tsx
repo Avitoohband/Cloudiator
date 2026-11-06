@@ -20,6 +20,7 @@ import type { GameUiState } from '../character/useGameState';
 import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
 import { ExpeditionUnavailable, ExpeditionView, type ExpeditionReads } from '../character/ExpeditionView';
 import { appearancesOf } from '../../game/replay-looks';
+import { titleLookupOf } from '../titles/title-text';
 import { markWatched } from '../bouts/watched';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import type { ReplayQueue } from '../bouts/bout-queue';
@@ -100,6 +101,8 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   // The camp's own world actors already hold their looks: a replay of those fighters reads nothing (the replay takes them once,
   // when it mounts, so a world refresh never changes a replay in play).
   const known = useMemo(() => appearancesOf(state.world?.actors), [state.world]);
+  // The same actors hold the titles they wear now: the headers show those (not the title worn when the bout was fought).
+  const titles = useMemo(() => state.world ? titleLookupOf(state.world.actors) : undefined, [state.world]);
 
   // The display clock has a server time once the shared sync has read the world (or it never will).
   const clock = state.world || state.syncError ? state.clock : null;
@@ -149,7 +152,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
           // A bracket's chapters retain the tournament and fixture projection across replacements and reloads.
           : named.kind === 'bout' ? loading ? <p role="status">Loading the replay…</p>
             : <BracketReplay key={viewKey} reads={gateway!} tournamentId={named.tournamentId} boutId={named.boutId} clock={clock}
-                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} takeFocus back={{ label, go: onClose }}
+                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} titles={titles} takeFocus back={{ label, go: onClose }}
                 heldAtMs={fixture ? tournamentSamples.find(sample => sample.id === named.tournamentId)?.asOfMs ?? null : null}
                 onChapter={boutId => {
                   const source: SceneView = { kind: 'bout', tournamentId: named.tournamentId, boutId: named.boutId, ...origin };
@@ -165,7 +168,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
                   back.current?.focus({ preventScroll: true });
                   onReplace({ kind: 'replay', activityId: named.activityId, stageId, ...origin });
                 }}
-                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} takeFocus back={{ label, go: onClose }} />
+                viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} titles={titles} takeFocus back={{ label, go: onClose }} />
             : loading ? <p role="status">Loading the expedition…</p>
               : <ExpeditionView key={viewKey} reads={reads} activityId={named.activityId} fixture={fixture} play={named.play ?? null}
                 onPlay={play => onWatch?.(play ? { kind: 'expedition', activityId: named.activityId, play, ...origin } : { kind: 'expedition', activityId: named.activityId, ...origin })}

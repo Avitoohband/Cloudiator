@@ -408,3 +408,44 @@
     padding: 0 0.55rem;
   }
 }
+
+/* A bout's two fighters as two columns, each name with its title on a second line (the approved bracket-cell mockup). */
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+  overflow-wrap: normal;
+}
+
+.vs {
+  padding-top: 1px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.entrant {
+  display: block;
+  min-width: 0;
+}
+
+.entrantRight {
+  text-align: right;
+}
+
+.entrantName {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entrantTitle {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e6b450;
+  font: italic 600 11px/14px Georgia, 'Palatino Linotype', serif;
+}

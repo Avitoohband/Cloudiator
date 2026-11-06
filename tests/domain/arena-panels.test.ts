@@ -36,6 +36,23 @@ function card(key: ArenaActivityKey, minute: number, overrides: Partial<ArenaCar
 const watch = (html: string) => /<button[^>]*>Watch replay<\/button>/.exec(html)?.[0] ?? '';
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
+describe('Arena card header titles (patch 1.7)', () => {
+  const titleOf = (html: string) => [...html.matchAll(/<(?:p|span) class="[^"]*" data-worn-title="">([^<]*)<\/(?:p|span)>/g)].map(m => m[1]);
+  it('shows the entrant and the opponent titles under their names', () => {
+    const html = card('ownerHumanLoss', 85, { entrantTitle: 'Founder' });
+    expect(titleOf(html)).toEqual(['Founder']);
+    const base = card('ownerHumanLoss', 85);
+    const opponent = { name: 'Cassia', className: 'Berserker', rating: 1027, title: 'Lion of the Arena' };
+    expect(titleOf(card('ownerHumanLoss', 85, { entrantTitle: 'Founder', opponent }))).toEqual(['Founder', 'Lion of the Arena']);
+    expect(titleOf(base)).toEqual([]);
+  });
+  // R4 regression guard (passes before the code): no title, null or empty shows no title line.
+  it('shows no title line without one', () => {
+    expect(titleOf(card('ownerHumanLoss', 85, { entrantTitle: null }))).toEqual([]);
+    expect(titleOf(card('ownerHumanLoss', 85, { entrantTitle: '' }))).toEqual([]);
+  });
+});
+
 describe('Arena card', () => {
   it('shows only the warm-up at minute 59, with the replay button disabled', () => {
     const html = card('ownerNpcWin', 59);

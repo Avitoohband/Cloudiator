@@ -66,6 +66,7 @@ import { MarketPanel } from '../market/MarketPanel';
 import { ArenaMenu } from '../arena/ArenaMenu';
 import type { ArenaSample } from '../arena/ArenaPanel';
 import { TournamentPanel, type TournamentSample } from '../tournaments/TournamentPanel';
+import { titleLookupOf } from '../titles/title-text';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { FIRST_RESULTS, choiceFor, choiceOwner, choose, type ResultsChoice } from '../results/results-choice';
 import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
@@ -247,6 +248,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const { owner, world, clock, viewer } = game;
   // The looks of the gladiators the camp holds as world actors: a tournament replay watched from here reads only the others.
   const knownLooks = useMemo(() => appearancesOf(world?.actors), [world]);
+  // The titles those actors wear now: the brackets show them under the entrants' names.
+  const worldTitles = useMemo(() => titleLookupOf(world?.actors), [world]);
   // The display time the owner's resting line shows its return against (Task 23.10): it follows the shared clock by the minute.
   const nowMs = useMinuteNow(clock);
   const clockMode = useClockMode();
@@ -533,7 +536,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         onAllBouts={() => { chooseResults({ view: 'mine', filter: 'all' }); show('results'); }} open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}
         samples={samples.arena} fights={fights} sceneUnavailable={sceneUnavailable} revision={game.revision}
         onProfile={(row, season) => openRow(row.gladiatorId, { wins: row.humanWins, losses: row.humanLosses, season }, row.name)} />;
-      case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
+      case 'tournaments': return <TournamentPanel key={owner?.gladiatorId ?? 'none'} titles={worldTitles} reads={reads} owner={owner} clock={clock} fixture={fixture} samples={samples.tournaments}
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex} rules={game.rules}
         onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}

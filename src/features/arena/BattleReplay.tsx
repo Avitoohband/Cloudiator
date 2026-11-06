@@ -23,6 +23,7 @@ import { useClockMode } from '../../lib/clock-setting';
 import { replayKept } from '../../lib/replay-retention';
 import { readReplaySpeed, saveReplaySpeed } from '../../lib/replay-speed';
 import { tournamentRound } from '../../lib/tournament-id';
+import { titleLookupOf, type TitleLookup } from '../titles/title-text';
 import { creatureFor, type Creature } from '../../game/battle-stage';
 import { createSceneBridge, type SceneBridge } from '../../game/bridge';
 import { BattleViewport, BattleViewportWaiting } from '../../game/BattleViewport';
@@ -156,7 +157,7 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView,
  * is no next bout; `takeFocus` moves the focus to ⏸ once the replay has loaded, when it is still on the scene's back button or
  * nowhere; `league` is a tournament bracket's (its eyebrow names it, and a bracket's bouts show no rewards).
  */
-export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null, endActions = 'navigation' }: {
+export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, titles, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null, endActions = 'navigation' }: {
   view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
   /**
    * Where the fighters' looks come from: the looks the caller already holds (its world actors) and a reader for the rest. The
@@ -164,6 +165,8 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
    * fighter the caller does not know. They are settled once per replay, so a look never changes while it plays.
    */
   looks?: LookSource;
+  /** The fighters' worn titles, shown under their names in the header; without it no title shows (an NPC or creature has none). */
+  titles?: TitleLookup;
   /** Reads the replay again: a replay that could not be loaded offers Try again (Task 23.4). */
   onRetry?: () => void;
   chapters?: ReplayChapters | null;
@@ -189,7 +192,7 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   const selected = Math.max(0, Math.min(chapters ? chapters.current : view.selected, battles.length - 1));
   // The whole view's fighters (every encounter of an expedition), whichever battles are shown yet: read once for the replay.
   return <ReplayBattles battle={battles[selected]} summary={summary} keptUntil={keptUntil} bridge={bridge} level={headingLevel} viewerId={viewerId}
-    looks={looks} lookIds={lookIdsFor(...view.battles.map(b => b.log))} chapters={chapters} nav={nav ?? (chapters ? chaptersNav(chapters) : null)}
+    looks={looks} titles={titles} lookIds={lookIdsFor(...view.battles.map(b => b.log))} chapters={chapters} nav={nav ?? (chapters ? chaptersNav(chapters) : null)}
     back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} endActions={endActions} />;
 }
 
@@ -217,9 +220,9 @@ const opponentIn = (log: BattleLog, side: string | null) => (log.participants.fi
  * server time, so nothing is filtered by the device's own clock). An activity with several bouts shows them as chapters, and
  * ⏮ ⏭ step through them (Arena replays Task 5); a step never adds a history entry.
  */
-export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, takeFocus = false, back = null, queue = null, onChapter, counterHost = null, endActions = 'navigation' }: {
+export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, titles, takeFocus = false, back = null, queue = null, onChapter, counterHost = null, endActions = 'navigation' }: {
   /** `looks` (when the gateway has it) reads the fighters' looks the caller does not already hold. */
-  reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks'>>) | null;
+  reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks' | 'readWornTitles'>>) | null;
   activityId: string;
   stageId?: string | null;
   clock: DisplayClock | null;
@@ -228,6 +231,8 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   viewerId?: string | null;
   /** The looks of the fighters the caller already holds as world actors (`appearancesOf`): they are not read. */
   known?: LookMap | null;
+  /** The worn titles the caller already holds (its world actors). Without them the replay reads the fighters' titles once, when it has a reader. */
+  titles?: TitleLookup;
   /** The scene over the camp: ⏸ takes the focus from its back button once the replay has loaded. */
   takeFocus?: boolean;
   /** The scene's way back, which the end card offers at the end (the replay page has none). */
@@ -241,21 +246,35 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   const [loaded, setLoaded] = useState<{ reads: object; attempt: number; view: ReplayView } | null>(null);
   /** Each Try again reads the replay once more (Task 23.4). */
   const [attempt, setAttempt] = useState(0);
+  // The fighters' worn titles, read once with the replay when the caller holds none; only this replay's own answer lands.
+  const [worn, setWorn] = useState<{ reads: object; activityId: string; attempt: number; lookup: TitleLookup } | null>(null);
+  // Kept in a ref: the caller's titles arriving later (its world loading) never reads the replay again.
+  const held = useRef(titles);
+  useLayoutEffect(() => { held.current = titles; });
   useEffect(() => {
     if (!reads) return;
     let active = true;
-    loadReplayView(reads, activityId).then(view => { if (active) setLoaded({ reads, attempt, view }); });
+    loadReplayView(reads, activityId).then(async view => {
+      if (!active) return;
+      setLoaded({ reads, attempt, view });
+      if (held.current || !reads.readWornTitles || view.kind !== 'replay') return;
+      const ids = [...new Set(view.battles.flatMap(b => b.log.participants.map(p => p.gladiatorId)).filter((id): id is string => id !== null))];
+      if (ids.length === 0) return;
+      const answer = await reads.readWornTitles(ids).catch(() => ({}));
+      if (active) setWorn({ reads, activityId, attempt, lookup: titleLookupOf(answer) });
+    });
     return () => { active = false; };
   }, [activityId, reads, attempt]);
   const view = loaded && loaded.reads === reads && loaded.attempt === attempt ? loaded.view : null;
-  return view && clock ? <ActivityChapters view={view} headingLevel={headingLevel} clock={clock} viewerId={viewerId} looks={{ known, read: reads?.looks?.bind(reads) ?? null }}
+  const shownTitles = titles ?? (worn && worn.reads === reads && worn.activityId === activityId && worn.attempt === attempt ? worn.lookup : undefined);
+  return view && clock ? <ActivityChapters view={view} headingLevel={headingLevel} titles={shownTitles} clock={clock} viewerId={viewerId} looks={{ known, read: reads?.looks?.bind(reads) ?? null }}
     onRetry={() => setAttempt(n => n + 1)} takeFocus={takeFocus} back={back} queue={queue} activityId={activityId} stageId={stageId} onChapter={onChapter} counterHost={counterHost} endActions={endActions} />
     : <p role="status">Loading the replay…</p>;
 }
 
 /** A loaded activity's replay with its bouts as chapters (those ended by the display time), the chosen one shown. */
 function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, counterHost, ...rest }: {
-  view: ReplayView; clock: DisplayClock; headingLevel: HeadingLevel; viewerId?: string | null; looks: LookSource; onRetry(): void;
+  view: ReplayView; clock: DisplayClock; headingLevel: HeadingLevel; viewerId?: string | null; looks: LookSource; titles?: TitleLookup; onRetry(): void;
   takeFocus: boolean; back: ReplayBack | null;
   queue: ReplayQueue | null; activityId: string; stageId: string | null; onChapter?: (stageId: string) => void;
   counterHost: HTMLElement | null;
@@ -328,7 +347,7 @@ function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, 
 
 function ReplayBattles({ battle, looks, lookIds, ...rest }: {
   battle: ReplayBattle; summary: ActivitySummary | null; keptUntil: number | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
-  looks?: LookSource; lookIds: readonly string[]; chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean;
+  looks?: LookSource; titles?: TitleLookup; lookIds: readonly string[]; chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean;
   league: LeagueId | null; last: boolean; endActions: 'again' | 'navigation';
 }) {
   // One look read for the whole replay: choosing another chapter of the same view reuses it and never waits again.
@@ -362,13 +381,15 @@ function useSettledLooks(ids: readonly string[], source: LookSource | undefined)
 /** Whether a key press came from a control that the key operates itself (Space presses a button, a summary toggles). */
 const operates = (target: HTMLElement) => target.closest('button, a, summary, input, select, textarea, [contenteditable="true"]') !== null;
 
-function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, looks: settledLooks, chapters, nav, back, takeFocus, league, last, endActions }: {
+function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, titles, looks: settledLooks, chapters, nav, back, takeFocus, league, last, endActions }: {
   battle: ReplayBattle; summary: ActivitySummary | null;
   /** When the replay stops being kept, while it still is at the display time (else null: no note). */
   keptUntil: number | null;
   bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
   /** The fighters' looks once settled (`useSettledLooks`); the scene is not mounted before. */
   looks: LookMap | null;
+  /** Each fighter's worn title, shown under its name in the header. */
+  titles?: TitleLookup;
   chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean; league: LeagueId | null;
   /** The activity's last chapter (a tournament run's rewards show there only). */
   last: boolean;
@@ -526,6 +547,11 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
     event.preventDefault();
   };
 
+  // An NPC or creature (no gladiator id) and an id the lookup does not know show nothing; a lookup that throws shows nothing too.
+  const title = (p: { gladiatorId: string | null }): string | null => {
+    if (p.gladiatorId === null || !titles) return null;
+    try { return titles(p.gladiatorId); } catch { return null; }
+  };
   const closeUp = `Close-up of ${a.name} (left) fighting ${b.name} (right). The combat log below describes every action.`;
   const winner = frame.result ? log.participants.find(p => p.id === frame.result!.winnerId) : undefined;
   const loser = frame.result ? log.participants.find(p => p.id === frame.result!.loserId) : undefined;
@@ -576,6 +602,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
           const hp = frame.hp[i];
           return <div key={p.id} className={i === 0 ? styles.left : styles.right}>
             <div className={styles.name}><strong>{p.name}</strong> <span className={styles.kind}>{kindOf(p)}</span></div>
+            {title(p) && <div className={styles.title} data-fighter-title="">{title(p)}</div>}
             <div className={styles.meter} role="meter" aria-label={`${p.name} health`} aria-valuemin={0} aria-valuemax={p.maxHealth} aria-valuenow={hp} aria-valuetext={`${hp} of ${p.maxHealth} health`}>
               <span className={styles.fill} style={{ width: `${(100 * hp) / p.maxHealth}%` }} />
               <span className={styles.hpText}>{hp} / {p.maxHealth}</span>

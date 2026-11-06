@@ -18,6 +18,7 @@ import { RULES_V2 } from '@domain/rules-v2';
 import { buildBracket, readyBouts, recordBout, runBout, tournamentOutcomes } from '@domain/tournament';
 import type { BuildSnapshot } from '@domain/types';
 import { BattleReplay } from '@/features/arena/BattleReplay';
+import { titleLookupOf, type TitleLookup } from '@/features/titles/title-text';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { pinDeviceClock } from '../fixtures/clock';
 import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
@@ -60,6 +61,36 @@ it('Watch replay asks for the full-screen bout, never an inline replay', () => {
   const html = bracket('completed', 85, { round: 1 });
   expect(count(html, '>Watch replay<')).toBe(4);
   for (const old of ['Close replay', 'Replay · ', 'Combat log']) expect(text(html)).not.toContain(old);
+});
+
+describe('titles in the bracket cells (patch 1.7, the approved mockup)', () => {
+  const CASSIA = ARENA_GLADIATORS.cassia.id;
+
+  it('shows a title under the name with the accessible text "{name}, {title}"', () => {
+    const html = bracket('completed', 85, { round: 1, titles: titleLookupOf({ [CASSIA]: 'lion' }) });
+    expect(html).toContain('role="group" aria-label="Cassia, Lion of the Arena"');
+    expect(html).toMatch(/<span class="[^"]*">Cassia<\/span><span class="[^"]*" title="Lion of the Arena">Lion of the Arena<\/span>/);
+    expect(count(html, 'Lion of the Arena</span>')).toBe(1);
+  });
+
+  it('keeps the bout card as it is: "A vs B" for the text, the winner line, the defeated line and the replay button', () => {
+    const plain = bracket('completed', 85, { round: 1 });
+    const titled = bracket('completed', 85, { round: 1, titles: titleLookupOf({ [CASSIA]: 'lion' }) });
+    expect(text(titled)).toBe(text(plain).replace('Aurelia vs Cassia', 'Aurelia vs Cassia Lion of the Arena'));
+    expect(count(titled, '>Watch replay<')).toBe(4);
+  });
+
+  // R4 regression guards (they pass before the code: no title was ever rendered).
+  it('shows the name only for no prop, no title, an unknown id, junk or a lookup that throws, and never throws', () => {
+    const base = text(bracket('completed', 85, { round: 1 }));
+    const throwing: TitleLookup = () => { throw new Error('bad'); };
+    for (const titles of [undefined, titleLookupOf({}), titleLookupOf({ [CASSIA]: null }), titleLookupOf({ [CASSIA]: 'newer-server-title' }),
+      titleLookupOf({ [CASSIA]: 7 }), throwing]) {
+      const html = bracket('completed', 85, { round: 1, titles });
+      expect(html).not.toContain('role="group"');
+      expect(text(html)).toBe(base);
+    }
+  });
 });
 
 describe('tournament registration', () => {

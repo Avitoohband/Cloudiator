@@ -29,6 +29,7 @@ import { BoutRow } from '../bouts/BoutRow';
 import { recentRow } from '../bouts/bout-text';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import { useWatched } from '../bouts/watched';
+import { titleName } from '../titles/title-text';
 import styles from './ArenaPanel.module.css';
 
 /** Reads the card makes: the activity's timeline and, once revealed, the opponent's public profile. */
@@ -59,7 +60,9 @@ export type ArenaCardModel = {
   state: ArenaStageState;
   owner: boolean;
   entrantName: string;
-  opponent: { name: string; className: string; rating: number | null } | null;
+  /** The title the entrant wears now (its name), shown under the name in the header; none for an unknown or missing one. */
+  entrantTitle?: string | null;
+  opponent: { name: string; className: string; rating: number | null; title?: string | null } | null;
   fixture: boolean;
 };
 
@@ -82,6 +85,7 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
         <div>
           <p className="eyebrow">{owner ? 'YOUR ARENA BOUT' : 'ARENA BOUT'}{minute !== null ? ` · MINUTE ${minute} OF ${SLOT_MINUTES}` : ''}</p>
           <h3 id={titleId} ref={headingRef} tabIndex={-1}>{entrantName}</h3>
+          {model.entrantTitle && <p className={styles.wornTitle} data-worn-title="">{model.entrantTitle}</p>}
         </div>
         {onClose && <button type="button" className={styles.close} onClick={onClose} aria-label="Close the Arena card">Close</button>}
       </header>
@@ -90,7 +94,7 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
 
       {opponent && (
         <dl className={styles.opponent} aria-label="Opponent">
-          <div><dt>Opponent</dt><dd>{opponent.name}</dd></div>
+          <div><dt>Opponent</dt><dd>{opponent.name}{opponent.title && <span className={styles.wornTitle} data-worn-title="">{opponent.title}</span>}</dd></div>
           <div><dt>Class</dt><dd>{opponent.className}</dd></div>
           {!state.npcOpponent && <div><dt>Current rating</dt><dd>{opponent.rating ?? 'not available'}</dd></div>}
         </dl>
@@ -197,12 +201,15 @@ function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock
   }, [opponentId, profile?.id, reads]);
 
   const actorName = (id: string | null) => (id ? world?.actors.find(a => a.gladiatorId === id)?.name ?? null : null);
+  // The title each wears now (the public world actor); an unknown id shows nothing.
+  const actorTitle = (id: string | null) => (id ? titleName(world?.actors.find(a => a.gladiatorId === id)?.title) : null);
   const entrantName = actorName(selection.gladiatorId) ?? (isOwner ? owner!.name : null) ?? state?.entrant?.name ?? 'Gladiator';
   const known = profile && profile.id === opponentId ? profile.value : null;
   const opponent = state?.opponent ? {
     name: state.opponent.npc ? state.opponent.name : actorName(state.opponent.gladiatorId) ?? known?.actor.name ?? state.opponent.name,
     className: state.opponent.npc ? 'NPC fallback' : className(state.opponent.classId ?? known?.actor.classId ?? null),
     rating: state.opponent.npc ? null : known?.rating ?? null,
+    title: state.opponent.npc ? null : actorTitle(state.opponent.gladiatorId) ?? titleName(known?.actor.title),
   } : null;
 
   // Opened from the camp (a fighter or a bout button), the card may sit far below the view: once its heading has
@@ -231,7 +238,7 @@ function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock
     </article>;
   }
   if (!state) return <p role="status" className={styles.detail}>Loading the Arena bout…</p>;
-  return <ArenaCardView model={{ state, owner: isOwner, entrantName, opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId, from: 'arena' }); }}
+  return <ArenaCardView model={{ state, owner: isOwner, entrantName, entrantTitle: actorTitle(selection.gladiatorId) ?? (isOwner ? titleName(owner!.wornTitle) : null), opponent, fixture }} onWatch={() => { if (state.replay) bridge.emit('view-replay', { activityId: state.replay.activityId, stageId: state.replay.stageId, from: 'arena' }); }}
     onClose={onClose} headingRef={heading} />;
 }
 

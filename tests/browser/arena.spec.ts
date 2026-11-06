@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { expect, test, type Page } from './fixtures';
 import type { BattleAction, BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, StandingRow, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
@@ -571,6 +571,31 @@ test.describe('the Arena card and league standings', () => {
     await expect(card(page).getByRole('region', { name: 'Credited' })).toContainText('Rating +13');
     await card(page).screenshot({ path: testInfo.outputPath('arena-card-human-credited.png') });
     expect(remote).toEqual([]);
+  });
+
+  // Patch 1.7 Task 12: the card's header shows the title the entrant wears now (and its opponent's, in the Opponent row), in gold italic.
+  test("shows the fighters' titles in the Arena card header, and none for an NPC opponent or a fighter wearing none", async ({ page }, testInfo) => {
+    const worn = card(page).locator('[data-worn-title]');
+    await arenaFlow.openAtMinute(page, 60.1, 'ownerHumanWin');
+    // Aster, the owner, wears Founder; Varro wears nothing in the fixture world.
+    await expect(worn).toHaveText(['Founder']);
+    await expect(card(page).getByRole('heading', { level: 3 })).toHaveText('Aster');
+    const header = await card(page).locator('header').evaluate(h => {
+      const title = h.querySelector('[data-worn-title]')!, name = h.querySelector('h3')!;
+      const cs = getComputedStyle(title);
+      return { color: cs.color, fontStyle: cs.fontStyle, below: title.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 1 };
+    });
+    expect(header).toEqual({ color: 'rgb(230, 180, 80)', fontStyle: 'italic', below: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    // An opponent wearing a title (Severus, from the world's actors) shows it under its name in the Opponent row; an NPC has none.
+    await arenaFlow.openAtMinute(page, 60.1, 'ownerTieBreak');
+    await expect(worn).toHaveText(['Founder', 'Moneyed']);
+    await expect(card(page).getByRole('definition').first()).toHaveText('SeverusMoneyed');
+    mkdirSync('.superpowers/design/2026-10-30-titles/shots', { recursive: true });
+    await card(page).screenshot({ path: `.superpowers/design/2026-10-30-titles/shots/task12-arena-header-${testInfo.project.name.includes('mobile') ? '360' : 'desktop'}.png` });
+    // An NPC opponent has none.
+    await arenaFlow.openAtMinute(page, 60.1, 'ownerNpcWin');
+    await expect(worn).toHaveText(['Founder']);
   });
 
   // Task 24.0b: the warm-up's reveal time is a short local time, as every slot time is (Task 23.10), never the fixed

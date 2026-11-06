@@ -230,3 +230,12 @@
 .wide { display: inline; }
 .narrow { display: none; }
 @media (hover: none), (max-width: 480px) { .wide { display: none; } .narrow { display: inline; } }
+
+/* The title a fighter wears, under its name (gold italic, as in the replay header). */
+.header .wornTitle,
+.wornTitle {
+  display: block;
+  margin: 0.1rem 0 0.25rem;
+  color: #e6b450;
+  font: italic 600 0.8rem/1.25 Georgia, 'Palatino Linotype', serif;
+}

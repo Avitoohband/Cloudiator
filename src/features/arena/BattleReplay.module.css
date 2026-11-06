@@ -88,6 +88,13 @@
   overflow-wrap: anywhere;
 }
 
+.title {
+  margin-top: 0.1rem;
+  color: #e6b450;
+  font: italic 600 0.75rem/1.2 Georgia, 'Palatino Linotype', serif;
+  overflow-wrap: anywhere;
+}
+
 .kind {
   display: inline-block;
   margin-left: 0.3rem;

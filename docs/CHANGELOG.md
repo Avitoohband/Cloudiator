@@ -37,9 +37,6 @@ Patch 1.7 (wearable titles). The title is the draft patch note's; Avi approves t
 - Your title shows with your name in the camp, the Gladiators list, the profile card, Arena bouts, replays and tournament brackets.
 - Titles: your gladiator earns titles for expeditions, Training, the Arena, tournaments, seasons, gear owned and gold earned, and wears one beside its name.
 - Choose your title, or none, on My gladiator: free, any time. Locked titles show how close you are.
-
-### Planned
-
 - Everything you did before 1.7 counts: a notice in Notifications lists the titles your history earned.
 - New titles arrive in Notifications; one earned by a result shows in that result, with Wear.
 

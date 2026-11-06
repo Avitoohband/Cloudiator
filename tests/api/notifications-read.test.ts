@@ -8,6 +8,7 @@ vi.mock('../../src/lib/api/client', () => ({ getBrowserClient: () => holder.clie
 import { createLiveGateway } from '../../src/lib/api/gateway';
 import { createFixtureGateway } from '../../src/lib/api/fixture-gateway';
 import { readNotifications } from '../../src/lib/api/reads';
+import { titleNotices } from '../../src/features/titles/title-notices';
 afterEach(() => { holder.client = null; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 // Notifications (2026-10-28): the owner's own settled results, newest 20, read from the owner-only `activities` table in one request
@@ -241,10 +242,13 @@ test('the fixture preview lists sample notifications, newest first, and agrees w
     expect(n.summary.activityId).toBe(n.activityId);
     expect(n.settledAtMs).toBe(n.summary.settledAtMs);
   }
-  // The owner's inbox is what these results make of it: new = settled after the mark.
+  // The owner's inbox is what these results and (patch 1.7) the owner's title notices make of it: new = after the mark. Aster's 8 titles
+  // from history are one notice, newer than the mark.
   const { inbox } = owner;
-  expect(inbox.newNotifications).toBe(list.filter(n => n.settledAtMs > inbox.notificationsSeenMs).length);
-  expect(inbox.newNotifications).toBeGreaterThan(0);
+  const notices = titleNotices(owner.titles);
+  expect(notices.map(n => n.kind)).toEqual(['history']);
+  expect(inbox.newNotifications).toBe(list.filter(n => n.settledAtMs > inbox.notificationsSeenMs).length + notices.filter(n => n.atMs > inbox.notificationsSeenMs).length);
+  expect(inbox.newNotifications).toBe(3);
   // A copy each time: a caller that edits it changes nothing for the next.
   list[0].destination = 'Edited';
   expect((await gateway.notifications()).items[0].destination).not.toBe('Edited');

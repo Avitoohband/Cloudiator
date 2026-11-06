@@ -94,14 +94,18 @@ export function ChangeLookDialog({ owner, gateway, refresh, onClose, preview = f
     sending.current = true; setBusy(true); setError(null);
     try {
       const result = await gateway.command<ChangeAppearanceValue>(next.command);
-      if (!mounted.current) return;
       if (result.ok) {
         attempt.current = null;
-        // The look is stored: a read that fails does not say otherwise (the next revision poll reads the owner and the camp again).
-        try { await refresh(); } catch { /* kept: saved */ }
+        // The look is stored: the owner and the camp are read again at once, also when the dialog has gone during the send (Chrome closes a
+        // modal dialog on a repeated Escape, with a cancel event it cannot cancel; `refresh` is the shell's, safe after this dialog has
+        // unmounted). A read that fails does not say otherwise (the next revision poll reads the owner and the camp again).
+        const read = (async () => { try { await refresh(); } catch { /* kept: saved */ } })();
+        if (!mounted.current) return;
+        await read;
         if (mounted.current) finish(true);
         return;
       }
+      if (!mounted.current) return;
       if (!keepsAttempt(result.code)) attempt.current = null;
       setError(preview && result.code === 'unavailable' ? LOOK_PREVIEW : LOOK_REFUSED);
     } catch {

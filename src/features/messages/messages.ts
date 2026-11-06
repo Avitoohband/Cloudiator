@@ -87,10 +87,28 @@ export function messagesStale(held: readonly GameMessage[], inbox: Inbox): boole
 /** Whether a result settled after the time the account last saw them (`notificationsSeenMs`): the server's rule for a new notification. */
 export const isNewNotification = (notification: GameNotification, seenMs: number): boolean => notification.settledAtMs > seenMs;
 
+/** A title notice as the counts see it (patch 1.7, `TitleNotice`): its time. */
+type Timed = { atMs: number };
+
 /**
- * Whether the notification list the panel holds lacks results the inbox counts as new: it holds fewer new results than
- * `inbox.newNotifications` says (the count is uncapped, the list shows at most 20, so a longer backlog stays stale until it is seen).
+ * Whether the notification list the panel holds lacks results the inbox counts as new: it holds fewer new results and new title notices
+ * (the owner's, patch 1.7: the server counts them in `newNotifications`) than `inbox.newNotifications` says (the count is uncapped, the
+ * list shows at most 20, so a longer backlog stays stale until it is seen).
  */
-export function notificationsStale(held: readonly GameNotification[], inbox: Inbox): boolean {
-  return held.filter(notification => isNewNotification(notification, inbox.notificationsSeenMs)).length < inbox.newNotifications;
+export function notificationsStale(held: readonly GameNotification[], inbox: Inbox, notices: readonly Timed[] = []): boolean {
+  return freshNotifications(held, notices, inbox.notificationsSeenMs) < inbox.newNotifications;
+}
+
+/** How many of these results and title notices are new after `seenMs` (the server's rule for both). */
+export function freshNotifications(results: readonly GameNotification[], notices: readonly Timed[], seenMs: number): number {
+  return results.filter(result => isNewNotification(result, seenMs)).length + notices.filter(notice => notice.atMs > seenMs).length;
+}
+
+/**
+ * The time the Notifications tab is marked seen up to: the newest of the results read (`newestSettledMs`, every row fetched, shown or
+ * not) and the title notices listed; null when there is neither.
+ */
+export function notificationsMark(newestSettledMs: number | null, notices: readonly Timed[]): number | null {
+  const times = [...(newestSettledMs === null ? [] : [newestSettledMs]), ...notices.map(notice => notice.atMs)];
+  return times.length ? Math.max(...times) : null;
 }

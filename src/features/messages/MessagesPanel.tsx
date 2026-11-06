@@ -12,13 +12,22 @@
 // - Patch numbers (Patch A, "Patch numbers and the changelog"): a patch note shows "Patch 1.3" after its tag, in the list and opened. The
 //   number is a button that opens Patch history (`PatchHistory`) here, at that patch; the account menu opens it too (`history`). In the list
 //   the row is a button already, so the number is a button beside it, drawn over the room the row keeps for it after the tag.
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+// - Titles (patch 1.7, spec "Notices (Notifications tab)"): a title a result earned is a gold line with Wear inside that result's card; the
+//   other titles are notices of their own, merged with the results by time (`TitleNotices`, `title-notices.ts`). They count in the summary
+//   line and in the badge (the server's `newNotifications`), and the tab is marked seen up to the newest of its results and notices.
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { Inbox, MessageBlock } from '@contracts/reads';
 import { PATCH } from '../../lib/patch';
-import { isNewNotification, isUnread, messageDate, messagesStale, notificationsStale, tagName, badgeText, type MessagingActions, type ShownMessage } from './messages';
+import { NOTIFICATIONS_PAGE } from '../../lib/api/reads';
+import { notificationEntries, notificationsSummary, resultTitleRows, titleNotices, type TitleNotice } from '../titles/title-notices';
+import {
+  freshNotifications, isNewNotification, isUnread, messageDate, messagesStale, notificationsMark, notificationsStale, tagName, badgeText, type MessagingActions,
+  type ShownMessage,
+} from './messages';
 import { PatchHistory } from './PatchHistory';
 import { LookDisclaimer } from './LookDisclaimer';
 import { levelUpLine, notificationLines, watchLabel } from './notifications';
+import { NoticeCard, TitleLines, useNoticeWear, type NoticeTitles } from './TitleNotices';
 import { useLoaded, useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
 
@@ -54,9 +63,14 @@ function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
   return <button type="button" className={styles.patchNumber} data-patch-number={patch} onClick={onOpen}>Patch {patch}</button>;
 }
 
-export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null }: MessagingActions & {
+const NO_NOTICES: readonly TitleNotice[] = [];
+
+export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null,
+  titles }: MessagingActions & {
   id: string;
   inbox: Inbox;
+  /** The owner's titles, the title worn now and the Wear and "Choose a title" actions (patch 1.7); absent shows no title. */
+  titles?: NoticeTitles;
   /** Explicit origin return overrides the ordinary unread-count choice. */
   initialTab?: Tab;
   /** Opens the panel on Patch history, with that patch open (null: the newest). */
@@ -91,6 +105,12 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const messages = useLoadedList<ShownMessage>(load, true);
   const notes = useLoaded(loadNotifications, visitedNotifications);
   const noteItems = notes.value?.items ?? null;
+  // Patch 1.7: the owner's title notices, merged with the results read (a notice older than a full page of results is left out).
+  const held = titles?.held;
+  const notices = useMemo(() => (held ? titleNotices(held) : NO_NOTICES), [held]);
+  const entries = useMemo(() => (noteItems ? notificationEntries(noteItems, notices, NOTIFICATIONS_PAGE) : []), [noteItems, notices]);
+  const listedNotices = useMemo(() => entries.flatMap(entry => (entry.kind === 'notice' ? [entry.notice] : [])), [entries]);
+  const wear = useNoticeWear(titles);
 
   // Read a list again when the inbox says it is stale, once per change of what the inbox says about it (a list that stays stale, such as
   // 25 new results behind a 20-row list, is not read in a loop).
@@ -104,7 +124,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const notesKey = `${inbox.newNotifications}|${inbox.notificationsSeenMs}`;
   const notesAsked = useRef(notesKey);
   useEffect(() => {
-    if (noteItems === null || notesAsked.current === notesKey || !notificationsStale(noteItems, inbox)) return;
+    if (noteItems === null || notesAsked.current === notesKey || !notificationsStale(noteItems, inbox, notices)) return;
     notesAsked.current = notesKey;
     notes.reload();
   }, [noteItems, notesKey]);
@@ -153,15 +173,16 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
 
   // The results are marked seen up to the newest row the read fetched, once for each newest time (a later result sends its own). That is
   // the newest row, not the newest one shown: the badge counts every result of the four kinds, and the list leaves out a row it cannot
-  // read, so a mark that stopped at the newest shown row could leave the badge on for good.
+  // read, so a mark that stopped at the newest shown row could leave the badge on for good. Patch 1.7: or up to the newest title notice
+  // listed, when it is newer (a notice left out is older than every listed result, so the mark covers it). It waits for the results' read.
   const seenUpTo = useRef(0);
+  const mark = notes.value ? notificationsMark(notes.value.newestSettledMs, listedNotices) : null;
   useEffect(() => {
-    const newest = notes.value?.newestSettledMs ?? null;
-    if (tab !== 'notifications' || newest === null || newest <= inbox.notificationsSeenMs || newest <= seenUpTo.current) return;
+    if (tab !== 'notifications' || mark === null || mark <= inbox.notificationsSeenMs || mark <= seenUpTo.current) return;
     const before = seenUpTo.current;
-    seenUpTo.current = newest;
-    seeNotifications(newest).catch(() => { if (seenUpTo.current === newest) seenUpTo.current = before; });
-  }, [tab, notes.value]);
+    seenUpTo.current = mark;
+    seeNotifications(mark).catch(() => { if (seenUpTo.current === mark) seenUpTo.current = before; });
+  }, [tab, notes.value, mark]);
 
   const select = (next: Tab) => {
     setTab(next);
@@ -182,7 +203,9 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
 
   const tabId = (t: Tab) => `${ids}-tab-${t}`;
   const messageCount = messages.items?.length ?? 0;
-  const freshNotes = (noteItems ?? []).filter(n => isNewNotification(n, seenAtOpen)).length;
+  const freshNotes = freshNotifications(noteItems ?? [], listedNotices, seenAtOpen);
+  // "Choose a title": the panel closes (the focus back on the Messages button) and the picker opens on My gladiator, with the focus in it.
+  const chooseTitle = () => { onClose(); titles?.choose(); };
 
   return (
     <section ref={root} id={id} className={styles.panel} aria-label="Messages" data-testid="messages-panel">
@@ -257,13 +280,19 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
             {noteItems === null ? (notes.failed ? <Failed what="Notifications" retry={notes.reload} /> : <p role="status" className={styles.state}>Loading notifications…</p>)
               : <>
                 {notes.failed && <Failed what="Notifications" retry={notes.reload} />}
-                {noteItems.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
-                  <p className={styles.summary}>Latest {noteItems.length} result{noteItems.length === 1 ? '' : 's'} · {freshNotes > 0 ? `${freshNotes} new` : 'nothing new'}</p>
+                {entries.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
+                  <p className={styles.summary}>{notificationsSummary(noteItems.length, listedNotices.length, freshNotes)}</p>
                   <ul className={styles.list}>
-                    {noteItems.map(note => {
+                    {entries.map(entry => {
+                      if (entry.kind === 'notice') {
+                        return titles && <NoticeCard key={`notice:${entry.notice.key}`} notice={entry.notice} fresh={entry.notice.atMs > seenAtOpen} titles={titles} wear={wear}
+                          onChoose={chooseTitle} />;
+                      }
+                      const note = entry.result;
                       const { title, lines, levelUp } = notificationLines(note);
                       const fresh = isNewNotification(note, seenAtOpen);
                       const label = watch && watch.kept(note) ? watchLabel(note) : null;
+                      const earned = titles ? resultTitleRows(titles.held, note.activityId) : [];
                       return <li key={note.activityId} className={styles.card} data-notification data-unread={fresh ? '' : undefined}>
                         <span className={styles.rowTop}>
                           <span className={styles.rowTitle}>
@@ -279,6 +308,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                         <ul className={styles.lines}>
                           {lines.map((line, n) => <li key={n} className={levelUp !== null && line === levelUpLine(levelUp) ? styles.level : undefined}>{line}</li>)}
                         </ul>
+                        {titles && earned.length > 0 && <TitleLines rows={earned} worn={titles.worn} wear={wear} />}
                       </li>;
                     })}
                   </ul>

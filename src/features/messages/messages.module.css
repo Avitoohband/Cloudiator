@@ -675,3 +675,151 @@
 .wide { display: inline; }
 .narrow { display: none; }
 @media (hover: none), (max-width: 480px) { .wide { display: none; } .narrow { display: inline; } }
+
+/* ---- Titles (patch 1.7, spec "Notices (Notifications tab)"; the approved mockup, section 5): a gold line per title inside a result's card
+ * or a notice's, with Wear (Worn ✓ when worn); the history notice's line, its chips (the worn one filled) and Choose a title. Every text
+ * colour is at least 4.5:1 on what it sits on; on touch every button is 44 px tall. */
+.tline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  margin: 2px 0 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(230, 180, 80, 0.4);
+  border-radius: 9px;
+  background: #2a2420;
+}
+
+.card:has(.noteWatch) > .tline {
+  grid-column: 1 / -1;
+}
+
+.tlineText {
+  min-width: 0;
+  color: #f0e3c2;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.tlineText i {
+  color: #f2c66b;
+  font: italic 600 14px Georgia, 'Palatino Linotype', serif;
+}
+
+.tlineText small {
+  display: block;
+  color: #cfc6b0;
+  font-size: 12px;
+}
+
+.wear {
+  min-width: 44px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #f2c66b;
+  border-radius: 8px;
+  background: #f2c66b;
+  color: #2a1d05;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wear[aria-pressed='true'] {
+  border-color: #5d8f5a;
+  background: transparent;
+  color: #b8e6b2;
+  font-weight: 600;
+  cursor: default;
+}
+
+.tlineError {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #ffb4a8;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.intro {
+  margin: 0;
+  color: #dfe3ec;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.tchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tchip,
+.tchipWorn {
+  padding: 1px 9px;
+  border: 1px solid rgba(230, 180, 80, 0.45);
+  border-radius: 999px;
+  font: italic 600 12.5px/1.5 Georgia, 'Palatino Linotype', serif;
+  overflow-wrap: anywhere;
+}
+
+.tchip {
+  background: #2d2722;
+  color: #f2c66b;
+}
+
+.tchipWorn {
+  border-color: #f2c66b;
+  background: #f2c66b;
+  color: #2a1d05;
+}
+
+.act {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 3px 0 0;
+}
+
+.act span {
+  color: #c8d0e0;
+  font-size: 12.5px;
+}
+
+.choose {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #39455c;
+  border-radius: 8px;
+  background: #26242e;
+  color: #f3f0e5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.choose:hover {
+  background: #302d3a;
+}
+
+.wear:focus-visible,
+.choose:focus-visible {
+  outline: 2px solid var(--accent, #e6b450);
+  outline-offset: 2px;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .wear,
+  .choose {
+    min-height: 44px;
+  }
+}

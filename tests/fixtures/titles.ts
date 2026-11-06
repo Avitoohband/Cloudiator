@@ -16,3 +16,10 @@ export const ASTER_TITLE_PROGRESS: Readonly<Record<string, number>> = { 'expedit
 /** `owner` with Aster's titles and progress, wearing Founder (a copy: the owner's own arrays are never shared). */
 export const withAsterTitles = (owner: OwnerState, wornTitle: string | null = 'founder'): OwnerState =>
   ({ ...owner, wornTitle, titles: structuredClone([...ASTER_TITLES]), titleProgress: { ...ASTER_TITLE_PROGRESS } });
+
+/**
+ * The title notices the server counts in `inbox.newNotifications` (Task 4): the distinct source and time among the titles with no
+ * activity and a source other than `joined`, after the "seen up to" mark. The fixture preview's inbox adds them (Task 11).
+ */
+export const titleNoticeCount = (titles: readonly EarnedTitle[], seenMs: number): number =>
+  new Set(titles.filter(t => t.activityId === null && t.source !== 'joined' && t.earnedAtMs > seenMs).map(t => `${t.source}:${t.earnedAtMs}`)).size;

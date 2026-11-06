@@ -19,6 +19,7 @@ import { PATCH, isBehind } from '../../lib/patch';
 import type { Viewer } from '../character/useGameState';
 import { MessagesButton } from '../messages/MessagesButton';
 import type { MessagingActions } from '../messages/messages';
+import type { NoticeTitles } from '../messages/TitleNotices';
 import { ClockSwitch } from './ClockSwitch';
 import { reloadPage } from './PatchNotice';
 import type { MenuId } from './menus';
@@ -53,7 +54,7 @@ function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; te
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -70,6 +71,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   onOpenMenu(id: MenuId): void;
   /** Opens the "Create your gladiator" dialog (signed in without a gladiator). */
   onCreate(): void;
+  /** The owner's titles and the Wear and "Choose a title" actions for the Notifications tab (patch 1.7; the shell's). */
+  titles?: NoticeTitles;
 }) {
   // One popover at a time: the account menu or the messages panel.
   const [popover, setPopover] = useState<'account' | 'messages' | null>(null);
@@ -146,7 +149,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
         {messaging && inbox && <MessagesButton key={requestedTab?.n ?? 'ordinary'} initialTab={requestedTab?.tab} inbox={inbox} {...messaging}
           watch={messaging.watch ? { kept: messaging.watch.kept, open: note => { setPopover(null); messaging.watch!.open(note); } } : undefined} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
           onToggle={() => { setRequestedTab(null); setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); }} onClose={closeMessages} buttonRef={messagesButton}
-          history={history} latestPatch={latestPatch} />}
+          history={history} latestPatch={latestPatch} titles={titles} />}
         <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId}
           onClick={() => { setHistory(undefined); setPopover(value => (value === 'account' ? null : 'account')); }}>
           {owner ? <>

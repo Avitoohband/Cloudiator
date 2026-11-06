@@ -20,7 +20,7 @@ import { FIXTURE_INBOX, FIXTURE_MESSAGES, FIXTURE_NOTIFICATIONS } from '../../..
 import { myBoutTimelines } from '../../../tests/fixtures/my-bouts';
 import { PATCH_1_4, SEED_PATCHES, linkNotes } from '../../../tests/fixtures/patches';
 import { profileCards } from '../../../tests/fixtures/profile-cards';
-import { withAsterTitles } from '../../../tests/fixtures/titles';
+import { ASTER_TITLES, titleNoticeCount, withAsterTitles } from '../../../tests/fixtures/titles';
 import { PATCH } from '../patch';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 import { FIXTURE_TITLES } from '../../game/demo-world';
@@ -118,9 +118,10 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     sendPresence: async () => { signalled = true; return { ok: true }; },
     // The owner fixture with the rating and renown of its credited Arena samples (resting, in the resting preview), and the inbox
     // the sample messages make (tests/fixtures/messages.ts). Patch 1.7: Aster's 8 titles and the mockup's progress, wearing Founder
-    // (tests/fixtures/titles.ts).
+    // (tests/fixtures/titles.ts); her history notice counts as new in the inbox, as the server counts it (Task 11).
     owner: async () => withAsterTitles({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
-      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX), ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
+      : structuredClone(ARENA_OWNER)), inbox: { ...structuredClone(FIXTURE_INBOX),
+      newNotifications: FIXTURE_INBOX.newNotifications + titleNoticeCount(ASTER_TITLES, FIXTURE_INBOX.notificationsSeenMs) }, ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
     // The sample messages, newest first (a copy each time), each patch note with the number of the patch that links it; no network.
     messages: async () => FIXTURE_MESSAGES.map(m => ({ ...structuredClone(m),
       patch: m.kind === 'patch-notes' ? FIXTURE_PATCHES.find(p => p.messageId === m.id)?.number ?? null : null })),

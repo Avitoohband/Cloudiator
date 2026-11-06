@@ -8,13 +8,14 @@ import { expect, test, type Locator, type Page } from './fixtures';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { BattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { ActivitySummary } from '../../supabase/functions/_shared/contracts/events';
-import type { GameMessage, Inbox, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
+import type { EarnedTitle, GameMessage, Inbox, OwnerState } from '../../supabase/functions/_shared/contracts/reads';
 import { CLOTH_COLOURS, HAIR_COLOURS, SKIN_TONES, type Appearance } from '../../supabase/functions/_shared/domain/appearance';
 import { legacyAppearance, tintFor } from '../../src/game/actors';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { ASTER_TITLES } from '../fixtures/titles';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, testUser, type LiveNotification } from './live-routes';
-import { chipToggle, cornerChip, expectOwnerShown } from './shell-helpers';
+import { chipToggle, cornerChip, expectOwnerShown, openMenu } from './shell-helpers';
 import { watchSyncPoll } from './sync-poll';
 
 // Task 6: the messages button and panel (spec "Game messages and a free look change", Layout and Accessibility; Avi approved the
@@ -61,17 +62,34 @@ const RESULTS = [
   settled(1, 'training', 'completed', 150, { attributePoints: 1 }),
 ];
 const newest = (list: readonly LiveNotification[]) => Math.max(...list.map(n => n.summary.settledAtMs));
+/**
+ * Patch 1.7 Task 11: an expedition won on the Ruined Outpost, Aster's 10th won expedition, which found her first Rare item: it earned
+ * Wanderer and Rare Find (the mockup's example). Founder at creation (`joined`) has no notice.
+ */
+const OUTPOST = settled(4, 'expedition', 'victory', 5, { money: 90, xp: 120, items: [{ catalogId: 'sword:5:rare', catalogVersion: 'v1', tier: 5, rarity: 'rare', quantity: 1 }] }, {}, 'outpost');
+const earned = (id: string, earnedAtMs: number, source: EarnedTitle['source'], activityId: string | null = null): EarnedTitle => ({ id, earnedAtMs, activityId, source, detail: null });
+const FOUNDER_AT_CREATION = earned('founder', SINCE, 'joined');
+const OUTPOST_TITLES = [earned('rare-find', OUTPOST.summary.settledAtMs, 'result', OUTPOST.summary.activityId),
+  earned('wanderer', OUTPOST.summary.settledAtMs, 'result', OUTPOST.summary.activityId)];
 
 type Server = { messages: GameMessage[]; notifications: LiveNotification[]; readIds: number[]; seenMs: number; sinceMs: number; level: { level: number; xp: number };
   /** The look the database holds for the owner's gladiator: null is the legacy look. */
-  appearance: Appearance | null };
-/** The inbox as the database computes it for this account: what `owner_state.inbox` carries. */
+  appearance: Appearance | null;
+  /** Patch 1.7: the titles the gladiator holds and the one it wears. */
+  titles: EarnedTitle[]; worn: string | null };
+/**
+ * The inbox as the database computes it for this account: what `owner_state.inbox` carries. Patch 1.7: `newNotifications` also counts the
+ * title notices, the distinct source and time among the titles with no activity and a source other than `joined`, after the mark.
+ */
 const inboxOf = (s: Server): Inbox => ({
   unread: s.messages.filter(m => m.publishedAtMs > s.sinceMs && !s.readIds.includes(m.id)).length,
   readIds: s.messages.map(m => m.id).filter(id => s.readIds.includes(id)).sort((a, b) => a - b), sinceMs: s.sinceMs,
-  newNotifications: s.notifications.filter(n => n.summary.settledAtMs > s.seenMs).length, notificationsSeenMs: s.seenMs,
+  newNotifications: s.notifications.filter(n => n.summary.settledAtMs > s.seenMs).length
+    + new Set(s.titles.filter(t => t.activityId === null && t.source !== 'joined' && t.earnedAtMs > s.seenMs).map(t => `${t.source}:${t.earnedAtMs}`)).size,
+  notificationsSeenMs: s.seenMs,
 });
-const ownerOf = (s: Server): OwnerState => ({ ...structuredClone(ownerFixture), progression: { ...ownerFixture.progression, ...s.level }, appearance: s.appearance, inbox: inboxOf(s) });
+const ownerOf = (s: Server): OwnerState => ({ ...structuredClone(ownerFixture), progression: { ...ownerFixture.progression, ...s.level }, appearance: s.appearance, inbox: inboxOf(s),
+  wornTitle: s.worn, titles: structuredClone(s.titles) });
 
 type Setup = { messages?: GameMessage[]; notifications?: LiveNotification[]; readIds?: number[]; seenMs?: number; sinceMs?: number; level?: Server['level'];
   /** Answers a read mark with this refusal instead of marking it (the message text must still show). */
@@ -84,13 +102,16 @@ type Setup = { messages?: GameMessage[]; notifications?: LiveNotification[]; rea
    */
   changeReplies?: ('ok' | 'invalid' | 'unavailable' | 'rate-limited' | 'drop' | 'applied-drop')[];
   /** Holds the first `change-appearance`'s answer (after it was applied) until this resolves (the command is being sent). */
-  holdChange?: Promise<void> };
+  holdChange?: Promise<void>;
+  /** Patch 1.7: the titles the gladiator holds (none by default) and the one it wears (none). A `wear-title` stores the title it names. */
+  titles?: EarnedTitle[]; worn?: string | null };
 /** A signed-in player in live mode whose server (the transport and the command handler) keeps messages, read marks and the notifications mark. */
 async function player(page: Page, setup: Setup = {}) {
   const context = page.context();
   await seedSession(context);
   const server: Server = { messages: [...(setup.messages ?? MESSAGES)], notifications: [...(setup.notifications ?? [])], readIds: [...(setup.readIds ?? [EVENING.id])],
-    seenMs: setup.seenMs ?? 0, sinceMs: setup.sinceMs ?? SINCE, level: setup.level ?? { level: 2, xp: 150 }, appearance: setup.appearance ?? null };
+    seenMs: setup.seenMs ?? 0, sinceMs: setup.sinceMs ?? SINCE, level: setup.level ?? { level: 2, xp: 150 }, appearance: setup.appearance ?? null,
+    titles: structuredClone(setup.titles ?? []), worn: setup.worn ?? null };
   const world = { ...worldFixture, revision: 'live-1', actors: worldFixture.actors.map(actor => ({ ...actor, appearance: server.appearance })) };
   const live = await routeLiveReads(context, { world, owner: ownerOf(server), messages: server.messages, notifications: server.notifications });
   const commands: GameCommand[] = [];
@@ -128,6 +149,12 @@ async function player(page: Page, setup: Setup = {}) {
       if (reply === 'drop' || reply === 'applied-drop') return route.abort('failed');
       if (reply !== 'ok') return answer(reply === 'unavailable' ? 503 : reply === 'rate-limited' ? 429 : 400, { ok: false, code: reply });
       return answer(200, { ok: true, receiptId: randomUUID(), value: { appearance: command.appearance, receivedAtMs: live.serverNowMs() } });
+    }
+    if (command.kind === 'wear-title') {
+      if (command.titleId !== null && !server.titles.some(t => t.id === command.titleId)) return answer(400, { ok: false, code: 'invalid' });
+      server.worn = command.titleId;
+      sync();
+      return answer(200, { ok: true, receiptId: randomUUID(), value: { titleId: command.titleId, receivedAtMs: live.serverNowMs() } });
     }
     return answer(409, { ok: false, code: 'invalid' });
   });
@@ -898,6 +925,161 @@ test.describe('Watch from Notifications', () => {
     expect(await focusDrops(page)).toEqual([]);
   });
 
+  // Patch 1.7 Task 11 (spec "Notices (Notifications tab)"; the approved mockup, section 5): a title earned by a result is a gold line inside
+  // that result, with Wear; the titles the release counted from history are one notice, "Titles from your history"; Founder at creation has
+  // none. The notices count on the badge (the server's `newNotifications`) and in the summary line, and the tab is marked seen up to the
+  // newest of its results and notices.
+  test.describe('title notices', () => {
+    const titlesTab = async (page: Page) => {
+      const panel = await openPanel(page);
+      await expect(tab(panel, /^Notifications/)).toHaveAttribute('aria-selected', 'true');
+      return panel;
+    };
+    const ALL_READ = [EVENING.id, LOOK.id, RELEASE.id];
+
+    test('shows a title inside its result, with Wear', async ({ page }, testInfo) => {
+      await watchFocus(page);
+      const { commands, server } = await player(page, { notifications: [OUTPOST, ...RESULTS], titles: [FOUNDER_AT_CREATION, ...OUTPOST_TITLES], worn: 'founder', readIds: ALL_READ });
+      await openLive(page);
+      const panel = await titlesTab(page);
+      const card = panel.locator('[data-notification]').filter({ hasText: 'Expedition victory: Ruined Outpost' });
+      // After the result's own lines, one gold line per title, in catalog order: "New title: {name}" (the name in italics), its rule, Wear.
+      await expect(card.locator('[data-title-line]')).toHaveText([/^New title: Wanderer\s*10 expeditions won\s*Wear$/, /^New title: Rare Find\s*A first Rare item\s*Wear$/]);
+      await expect(card.locator('[data-title-line="wanderer"] i')).toHaveText('Wanderer');
+      const wear = card.getByRole('button', { name: 'Wear Wanderer', exact: true });
+      await expect(wear).toHaveText('Wear');
+      await expect(wear).toHaveAttribute('aria-pressed', 'false');
+      await expect(card.getByRole('button', { name: 'Wear Rare Find', exact: true })).toHaveAttribute('aria-pressed', 'false');
+      // Founder at creation has no notice, and no other result earned a title.
+      await expect(panel.locator('[data-title-notice]')).toHaveCount(0);
+      await expect(panel.locator('[data-title-line]')).toHaveCount(2);
+      await expect(panel.getByText('Latest 4 results · 4 new', { exact: true })).toBeVisible();
+      await expectNamedControls(panel, 'the notifications with titles');
+      expect(await contrastIssues(panel), 'the notifications with titles').toEqual([]);
+      await a11yShot(page, testInfo, 'title-notice-wear');
+      // Wear sends one `wear-title`, as the picker does; the button then reads Worn ✓ and is pressed.
+      await wear.click();
+      await expect(wear).toHaveText('Worn ✓');
+      await expect(wear).toHaveAttribute('aria-pressed', 'true');
+      await expect(wear).toHaveAccessibleName('Wear Wanderer');
+      expect(sent(commands, 'wear-title')).toEqual([{ kind: 'wear-title', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/), titleId: 'wanderer' }]);
+      expect(server.worn).toBe('wanderer');
+      await expect(card.getByRole('button', { name: 'Wear Rare Find', exact: true })).toHaveText('Wear');
+      expect(await contrastIssues(panel), 'the notifications with a title worn').toEqual([]);
+      await a11yShot(page, testInfo, 'title-notice-worn');
+      // Pressing Worn ✓ sends nothing more.
+      await wear.click();
+      await page.waitForTimeout(300);
+      expect(sent(commands, 'wear-title')).toHaveLength(1);
+      expect(await focusDrops(page)).toEqual([]);
+      // My gladiator's Title button agrees.
+      await panel.getByRole('button', { name: 'Close messages' }).click();
+      await openMenu(page, 'My gladiator');
+      await expect(page.locator('[data-title-button]')).toHaveAttribute('aria-label', 'Title: Wanderer. Choose your title');
+    });
+
+    test('shows the history notice', async ({ page }, testInfo) => {
+      await watchFocus(page);
+      const { commands } = await player(page, { notifications: RESULTS, titles: structuredClone([...ASTER_TITLES]), worn: 'founder', readIds: ALL_READ });
+      await openLive(page);
+      const panel = await titlesTab(page);
+      // The newest entry: the release counted Aster's history after her last result.
+      const entries = panel.locator('[data-notification], [data-title-notice]');
+      await expect(entries).toHaveCount(4);
+      await expect(entries.first()).toHaveAttribute('data-title-notice', 'history');
+      const card = panel.locator('[data-title-notice="history"]');
+      await expect(card.locator('[data-notice-title]')).toHaveText('Titles from your history');
+      await expect(card.locator('[data-unread-dot]')).toHaveCount(1);
+      await expect(card).toContainText('Patch 1.7 counted everything you have done since you joined.');
+      // The earned titles as chips, the worn one first and marked.
+      await expect(card.locator('[data-title-chip]')).toHaveText(['Founder', 'Wanderer', 'Tiro', 'Bloodied', 'Finalist', 'Collector', 'Rare Find', 'Moneyed']);
+      await expect(card.locator('[data-title-chip][data-worn]')).toHaveText(['Founder']);
+      await expect(card.getByText('You now wear Founder.', { exact: true })).toBeVisible();
+      await expect(panel.getByText('Latest 3 results and 1 title notice · 4 new', { exact: true })).toBeVisible();
+      await expectNamedControls(panel, 'the history notice');
+      expect(await contrastIssues(panel), 'the history notice').toEqual([]);
+      await a11yShot(page, testInfo, 'history-notice');
+      // Choose a title opens the picker on My gladiator, with the focus in it; nothing is sent.
+      await card.getByRole('button', { name: 'Choose a title', exact: true }).click();
+      await expect(panel).toBeHidden();
+      const picker = page.getByRole('dialog', { name: 'Choose your title', exact: true });
+      await expect(picker).toBeVisible();
+      await expect(picker.getByRole('heading', { name: 'Choose your title', exact: true })).toBeFocused();
+      expect(sent(commands, 'wear-title')).toEqual([]);
+      await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(picker).toBeHidden();
+      await expect(page.locator('[data-title-button]')).toBeFocused();
+      expect(await focusDrops(page)).toEqual([]);
+    });
+
+    test('counts notices on the badge', async ({ page }) => {
+      const { commands } = await player(page, { notifications: RESULTS, titles: structuredClone([...ASTER_TITLES]), worn: 'founder', readIds: ALL_READ });
+      await openLive(page);
+      // Three new results and the history notice.
+      await expect(messagesButton(page)).toHaveAccessibleName('Messages, 4 new');
+      await expect(badge(page)).toHaveText('4');
+      const panel = await titlesTab(page);
+      // The notice is the newest entry: the tab is seen up to its time, and the badge clears.
+      expect(ASTER_TITLES[0].earnedAtMs).toBeGreaterThan(newest(RESULTS));
+      await expect.poll(() => sent(commands, 'see-notifications')).toEqual([{ kind: 'see-notifications', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/), upToMs: ASTER_TITLES[0].earnedAtMs }]);
+      await expect(messagesButton(page)).toHaveAccessibleName('Messages');
+      await expect(badge(page)).toHaveCount(0);
+      // The entries that were new when the panel opened keep their dot while it is open.
+      await expect(panel.locator('[data-unread-dot]')).toHaveCount(4);
+    });
+
+    test('marks the tab seen up to the newest result when the notice is older', async ({ page }) => {
+      const older = ASTER_TITLES.map(t => ({ ...t, earnedAtMs: newest(RESULTS) - 30 * MIN }));
+      const { commands } = await player(page, { notifications: RESULTS, titles: older, worn: 'founder', readIds: ALL_READ });
+      await openLive(page);
+      await expect(messagesButton(page)).toHaveAccessibleName('Messages, 4 new');
+      const panel = await titlesTab(page);
+      // Merged by time: the notice sits between the Arena victory and the expedition.
+      await expect(panel.locator('[data-notification-title], [data-notice-title]')).toHaveText(['Arena victory', 'Titles from your history', 'Expedition victory: Woodland Path', 'Training finished']);
+      await expect.poll(() => sent(commands, 'see-notifications').map(c => (c as { upToMs: number }).upToMs)).toEqual([newest(RESULTS)]);
+      await expect(badge(page)).toHaveCount(0);
+    });
+
+    test('fits title notices on a 360 × 740 phone, with 44 px buttons', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 360, height: 740 });
+      await player(page, { notifications: [OUTPOST, ...RESULTS], titles: [...structuredClone([...ASTER_TITLES]).filter(t => t.id !== 'wanderer' && t.id !== 'rare-find'), ...OUTPOST_TITLES],
+        worn: 'founder', readIds: ALL_READ });
+      await openLive(page);
+      const panel = await titlesTab(page);
+      const fits = async () => {
+        const box = (await panel.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(360);
+        expect(box.y + box.height).toBeLessThanOrEqual(740);
+        const burger = page.getByRole('button', { name: 'Menus', exact: true });
+        if (await burger.isVisible()) expect(box.y + box.height).toBeLessThanOrEqual((await burger.boundingBox())!.y);
+        expect(await noHorizontalScroll(page)).toBe(true);
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        // Each card lies inside the panel's width.
+        for (const card of await panel.locator('[data-notification], [data-title-notice]').all()) {
+          const c = (await card.boundingBox())!;
+          expect(c.x).toBeGreaterThanOrEqual(box.x);
+          expect(c.x + c.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+        }
+      };
+      await fits();
+      const small = await panel.evaluate(root => [...root.querySelectorAll('[data-title-notice] button, [data-title-line] button')].map(b => {
+        const r = b.getBoundingClientRect();
+        return { name: b.getAttribute('aria-label') || b.textContent?.trim(), w: Math.round(r.width), h: Math.round(r.height) };
+      }).filter(b => b.w < 44 || b.h < 44));
+      expect(small).toEqual([]);
+      await a11yShot(page, testInfo, 'history-notice-360');
+      const wear = panel.getByRole('button', { name: 'Wear Wanderer', exact: true });
+      await wear.scrollIntoViewIfNeeded();
+      await a11yShot(page, testInfo, 'title-notice-wear-360');
+      await wear.click();
+      await expect(wear).toHaveText('Worn ✓');
+      await fits();
+      await a11yShot(page, testInfo, 'title-notice-worn-360');
+      await expect(panel.locator('[data-title-notice="history"]').getByText('You now wear Wanderer.', { exact: true })).toBeVisible();
+    });
+  });
+
   // Task 7: the change-look dialog (spec Goal 4 and Decisions). Change look is free and unlimited, for the caller's own gladiator, and the picker
   // is the creation dialog's, opened on the current look: a legacy gladiator (no stored look) opens on male, short hair and the colours it shows.
   test.describe('the change-look dialog', () => {
@@ -1187,6 +1369,33 @@ test.describe('Watch from Notifications', () => {
       }
     });
 
+    // Patch 1.7 Task 11 (fold-in from Task 10's review): Chrome closes a modal dialog on a repeated Escape with no user activation in between
+    // (a cancel event that cannot be cancelled), so the dialog can be gone while the look is sent. A look the server stored is still read at once (the owner and the camp), not at the
+    // next poll 30 s later.
+    test('a look saved after the dialog was closed during the send shows in the camp at once', async ({ page }) => {
+      let release = () => {};
+      const held = new Promise<void>(resolve => { release = resolve; });
+      const { commands, server } = await player(page, { holdChange: held });
+      try {
+        await openLive(page);
+        const dialog = await openLookDialog(page);
+        await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
+        await saveButton(dialog).click();
+        await expect.poll(() => changes(commands).length).toBe(1);
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeVisible();
+        for (let press = 0; press < 5 && await dialog.isVisible(); press++) await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        expect((await campLook(page))?.layers).toContain('body');
+        release();
+        await expect.poll(async () => (await campLook(page))?.layers ?? [], { timeout: 4_000 }).toContain('body-female');
+        expect(server.appearance?.body).toBe('female');
+        expect(changes(commands)).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
+
     test('is a modal dialog: the page behind it takes no input', async ({ page }) => {
       await player(page);
       await openLive(page);
@@ -1304,13 +1513,17 @@ test.describe('in the fixture preview', () => {
   test('the sample messages and notifications open from the button, and the preview player\'s level agrees with them', async ({ page }) => {
     await page.goto('/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
-    // Two unread sample messages and two new sample results.
-    await expect(messagesButton(page)).toHaveAccessibleName('Messages, 4 new');
+    // Two unread sample messages, two new sample results and (patch 1.7) Aster's history notice.
+    await expect(messagesButton(page)).toHaveAccessibleName('Messages, 5 new');
     const panel = await openPanel(page);
     await expect(rows(panel)).toHaveCount(3);
     await expect(row(panel, 'A note from the game master')).toHaveAccessibleName(/Unread/);
     await tab(panel, /^Notifications/).click();
     await expect(panel.locator('[data-notification]')).toHaveCount(4);
+    // The mockup's release view: the history notice first, then the four samples.
+    await expect(panel.getByText('Latest 4 results and 1 title notice · 3 new', { exact: true })).toBeVisible();
+    await expect(panel.locator('[data-notification], [data-title-notice]').first()).toHaveAttribute('data-title-notice', 'history');
+    await expect(panel.locator('[data-title-notice] [data-title-chip]')).toHaveCount(8);
     // The preview's gladiator is level 1: no sample result may claim a level it has not reached.
     await expect(panel.getByText(/Level up!/)).toHaveCount(0);
     await expect(panel.getByText('Rare Sword (tier 5)')).toBeVisible();

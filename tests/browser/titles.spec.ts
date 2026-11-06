@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from './fixtures';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
+import type { ActivitySummary } from '../../supabase/functions/_shared/contracts/events';
 import type { OwnerState, PrestigeAward, PublicProfile } from '../../supabase/functions/_shared/contracts/reads';
 import { titleText } from '../../src/features/seasons/season-text';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { withAsterTitles } from '../fixtures/titles';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, noHorizontalScroll, watchFocus } from './a11y-helpers';
-import { SUPABASE_URL, isPresence, routeLiveReads, seedSession } from './live-routes';
-import { expectOwnerShown, menuDialog, openMenu, quietArrivals } from './shell-helpers';
+import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveNotification } from './live-routes';
+import { cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals } from './shell-helpers';
 
 // Patch 1.7 Task 10 (spec "My gladiator: the Title button", "The picker"; the approved mockup, section 4): a Title button beside the name on
 // My gladiator opens "Choose your title", a modal dialog like Change look: a preview of how others see the choice, Earned or All by family,
@@ -26,6 +27,8 @@ type Setup = {
   extra?: OwnerState['titles'];
   /** Public profiles (the picker reads the owner's prestige when it holds Champion). */
   profiles?: Record<string, PublicProfile>;
+  /** The owner's settled results, for the Notifications tab (Task 11). */
+  notifications?: LiveNotification[];
 };
 
 /** A signed-in Aster in live mode, with 8 titles earned, wearing Founder; the server keeps the title a wear stores. */
@@ -38,7 +41,7 @@ async function player(page: Page, setup: Setup = {}) {
     const owner = withAsterTitles(structuredClone(ownerFixture), server.worn);
     return { ...owner, titles: [...owner.titles, ...structuredClone(setup.extra ?? [])] };
   };
-  const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'live-1' }, owner: ownerOf(), profiles: setup.profiles });
+  const live = await routeLiveReads(context, { world: { ...worldFixture, revision: 'live-1' }, owner: ownerOf(), profiles: setup.profiles, notifications: setup.notifications });
   const commands: GameCommand[] = [];
   let wears = 0;
   /** While set, a `wear-title` waits for it before the server stores the title and answers (the answer is on its way). */
@@ -121,6 +124,8 @@ async function openPicker(page: Page) {
 }
 const wearButton = (dialog: Locator) => dialog.getByRole('button', { name: 'Wear title', exact: true });
 const status = (page: Page) => page.getByTestId('title-status');
+/** The Messages button in the corner chip (Task 11). */
+const cornerChipMessages = (page: Page) => cornerChip(page).getByRole('button', { name: /^Messages(, \d+ new)?$/ });
 
 test.describe('the Title button and "Choose your title" in live mode', () => {
   test.skip(production, 'Live mode uses the development-only intercepted Supabase transport.');
@@ -326,6 +331,116 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
       release();
       reads?.stop();
     }
+  });
+
+  // Task 11 (fold-in from Task 10's review): Chrome closes a modal dialog on a repeated Escape with no user activation in between (a cancel
+  // event that cannot be cancelled), so the picker can be gone while the wear is sent. The shell still hears the answer: the Title button shows the title at once.
+  test('a wear accepted after the dialog was closed during the send still shows', async ({ page }) => {
+    const { commands, server, holdWears } = await player(page);
+    await openLive(page);
+    const { button, dialog } = await openPicker(page);
+    await dialog.getByRole('radio', { name: 'Wanderer', exact: true }).check();
+    const release = holdWears();
+    try {
+      await wearButton(dialog).click();
+      await expect.poll(() => wears(commands).length).toBe(1);
+      // The dialog's own Escape does nothing while the wear is sent; after a cancelled one or two (Chrome's anti-abuse rule, with no user
+      // activation in between) Chrome closes the modal dialog with a cancel event that cannot be cancelled.
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeVisible();
+      for (let press = 0; press < 5 && await dialog.isVisible(); press++) await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(button).toHaveAccessibleName('Title: Founder. Choose your title');
+      release();
+      await expect.poll(() => server.worn).toBe('wanderer');
+      await expect(button).toHaveAccessibleName('Title: Wanderer. Choose your title', { timeout: 3_000 });
+      expect(wears(commands)).toHaveLength(1);
+    } finally {
+      release();
+    }
+  });
+
+  // Task 11 (ruling SI2, Review Focus 5): a notice's Wear button follows the same answered wear as the Title button, so an owner read that
+  // started before the answer never puts Founder back on it.
+  test.describe('a notice\'s Wear button', () => {
+    const OUTPOST_ID = '00000000-0000-4000-8000-000000000044';
+    const outpost: LiveNotification = { expeditionId: 'outpost', summary: { activityId: OUTPOST_ID, resolvedKind: 'expedition', result: 'victory', success: true,
+      rewards: { money: 90, xp: 120, renown: 0, attributePoints: 0, items: [], overflowMoney: 0 }, receiptId: '00000000-0000-4000-9000-000000000044',
+      settledAtMs: worldFixture.serverNowMs - 5 * 60_000, replayExpiry: { state: 'expired' } } satisfies ActivitySummary };
+    /** Aster's 8 history titles and Pathfinder, which the Outpost expedition earned. */
+    const setup = { notifications: [outpost], extra: [{ id: 'pathfinder', earnedAtMs: outpost.summary.settledAtMs, activityId: OUTPOST_ID, source: 'result' as const, detail: null }] };
+    async function openNotices(page: Page) {
+      await cornerChipMessages(page).click();
+      const panel = page.getByRole('region', { name: 'Messages', exact: true });
+      await panel.getByRole('tab', { name: /^Notifications/ }).click();
+      const wear = panel.getByRole('button', { name: 'Wear Pathfinder', exact: true });
+      await expect(wear).toHaveAttribute('aria-pressed', 'false');
+      return { panel, wear, history: panel.locator('[data-title-notice="history"]') };
+    }
+
+    test('keeps the answer over an older owner read', async ({ page }) => {
+      const { commands, ownerOf } = await player(page, setup);
+      await openLive(page);
+      const { wear, history } = await openNotices(page);
+      const reads = await holdOwnerReads(page, ownerOf);
+      try {
+        // An owner read starts before the wear is answered (the server still says Founder), and is held.
+        await backgroundRead(page);
+        await expect.poll(() => reads.held.length).toBe(1);
+        expect(reads.held[0].worn).toBe('founder');
+        await wear.click();
+        // The answer shows at once, before any read after it has landed.
+        await expect(wear).toHaveText('Worn ✓');
+        await expect(wear).toHaveAttribute('aria-pressed', 'true');
+        await expect(history.getByText('You now wear Pathfinder.', { exact: true })).toBeVisible();
+        await expect.poll(() => reads.held.length).toBe(2);
+        expect(reads.held[1].worn).toBe('pathfinder');
+        // The older read lands after the answer: the notice keeps Worn ✓.
+        await land(page, reads, 0);
+        await expect(wear).toHaveText('Worn ✓');
+        await expect(wear).toHaveAttribute('aria-pressed', 'true');
+        await expect(history.getByText('You now wear Pathfinder.', { exact: true })).toBeVisible();
+        await land(page, reads, 1);
+        await expect(wear).toHaveAttribute('aria-pressed', 'true');
+        expect(wears(commands)).toHaveLength(1);
+      } finally {
+        reads.stop();
+      }
+    });
+
+    // AGENTS.md (React async state): a background update that arrives before the answer never decides what the answer shows.
+    test('keeps the answer when a background read lands before it', async ({ page }) => {
+      const { commands, ownerOf, holdWears, live } = await player(page, setup);
+      await openLive(page);
+      const { wear } = await openNotices(page);
+      const release = holdWears();
+      let reads: Awaited<ReturnType<typeof holdOwnerReads>> | null = null;
+      try {
+        await wear.click();
+        await expect.poll(() => wears(commands).length).toBe(1);
+        await expect(wear).toHaveAttribute('aria-disabled', 'true');
+        // While the wear is on its way, a background read lands with Founder (the title is not stored yet).
+        const owners = live.count('owner_state');
+        const landed = page.waitForResponse(response => response.url().startsWith(`${SUPABASE_URL}/rest/v1/owner_state`));
+        await backgroundRead(page);
+        await landed;
+        expect(live.count('owner_state')).toBeGreaterThan(owners);
+        await expect(wear).toHaveText('Wear');
+        // Then the answer: Worn ✓ at once, while the read it starts is held.
+        reads = await holdOwnerReads(page, ownerOf);
+        release();
+        await expect(wear).toHaveText('Worn ✓');
+        await expect.poll(() => reads!.held.length).toBe(1);
+        await page.waitForTimeout(400);
+        await expect(wear).toHaveAttribute('aria-pressed', 'true');
+        await land(page, reads, 0);
+        await expect(wear).toHaveAttribute('aria-pressed', 'true');
+        expect(wears(commands)).toHaveLength(1);
+      } finally {
+        release();
+        reads?.stop();
+      }
+    });
   });
 
   test('says when a wear is refused', async ({ page }) => {

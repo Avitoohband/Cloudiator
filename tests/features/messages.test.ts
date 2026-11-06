@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
 import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
 import {
-  badgeText, buttonName, messagesRequestFor, isNewNotification, isUnread, messageDate, messagesStale, newCount, notificationsStale, tagName,
+  badgeText, buttonName, freshNotifications, messagesRequestFor, isNewNotification, isUnread, messageDate, messagesStale, newCount, notificationsMark,
+  notificationsStale, tagName,
 } from '../../src/features/messages/messages';
 
 // The pure rules behind the messages button and panel (spec "Decisions": badge, unread, tags, dates), and when a list the panel holds no
@@ -89,6 +90,34 @@ it('says a held notification list is stale when the inbox counts more new result
   expect(notificationsStale(held, inbox({ notificationsSeenMs: 5_000, newNotifications: 1 }))).toBe(true);
   expect(notificationsStale([], inbox({ newNotifications: 1 }))).toBe(true);
   expect(notificationsStale([], inbox())).toBe(false);
+});
+
+// Patch 1.7 Task 11: the server's `newNotifications` counts the title notices too (distinct source and time, after the mark), so a held
+// list agrees with it only when its new results and the owner's new notices add up; the summary's "new" counts both, and the mark goes up
+// to the newest of the results read and the notices listed.
+it('counts the title notices with the results when it decides that a held list is stale', () => {
+  const held = [result(2, 5_000), result(1, 4_000)];
+  const notices = [{ atMs: 6_000 }, { atMs: 3_000 }];
+  expect(notificationsStale(held, inbox({ notificationsSeenMs: 0, newNotifications: 4 }), notices)).toBe(false);
+  expect(notificationsStale(held, inbox({ notificationsSeenMs: 4_500, newNotifications: 2 }), notices)).toBe(false);
+  // A notice that the owner read does not carry yet (or a result the list lacks): stale.
+  expect(notificationsStale(held, inbox({ notificationsSeenMs: 4_500, newNotifications: 3 }), notices)).toBe(true);
+  // Without the notices, the inbox's notice is a result the list lacks.
+  expect(notificationsStale(held, inbox({ notificationsSeenMs: 4_500, newNotifications: 2 }))).toBe(true);
+});
+
+it('counts the new results and title notices together', () => {
+  expect(freshNotifications([result(2, 5_000), result(1, 4_000)], [{ atMs: 6_000 }, { atMs: 3_000 }], 3_500)).toBe(3);
+  expect(freshNotifications([result(2, 5_000)], [{ atMs: 5_000 }], 5_000)).toBe(0);
+  expect(freshNotifications([], [], 0)).toBe(0);
+});
+
+it('marks the tab seen up to the newest of the results read and the notices listed', () => {
+  expect(notificationsMark(5_000, [{ atMs: 6_000 }, { atMs: 3_000 }])).toBe(6_000);
+  expect(notificationsMark(7_000, [{ atMs: 6_000 }])).toBe(7_000);
+  expect(notificationsMark(null, [{ atMs: 6_000 }])).toBe(6_000);
+  expect(notificationsMark(5_000, [])).toBe(5_000);
+  expect(notificationsMark(null, [])).toBeNull();
 });
 
 it('marks a result new when it settled after the time the account last saw them', () => {

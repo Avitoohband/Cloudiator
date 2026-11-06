@@ -65,14 +65,19 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
   gateway: Pick<GameGateway, 'command' | 'profile'>;
   /** Reads the owner (and the camp's world) again after a wear; it settles on its own. */
   refresh(): void;
-  /** A wear was accepted: the title the answer says is worn now (null: none), told the moment it arrives. */
-  onWorn(titleId: string | null): void;
+  /**
+   * A wear was accepted: the gladiator the picker belongs to and the title the answer says it wears now (null: none), told the moment it
+   * arrives, also after the dialog has closed.
+   */
+  onWorn(gladiatorId: string, titleId: string | null): void;
   /** The dialog has closed: the status line after a wear ("You now wear Wanderer."), or null for Cancel, ×, Escape or the browser closing it. */
   onClose(status: string | null): void;
   /** The fixture preview takes no commands: a refusal says so, instead of inviting another try. */
   preview?: boolean;
 }) {
   const worn = titleById(owner.wornTitle) ? owner.wornTitle : null;
+  // The picker is keyed by its gladiator: a wear's answer is told for this one.
+  const gladiatorId = owner.gladiatorId;
   const [choice, setChoice] = useState<string | null>(worn);
   const [view, setView] = useState<'earned' | 'all'>('earned');
   const [busy, setBusy] = useState(false);
@@ -135,15 +140,17 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
     sending.current = true; setBusy(true); setError(null);
     try {
       const result = await gateway.command<WearTitleValue>(next.command);
-      if (!mounted.current) return;
       if (result.ok) {
         attempt.current = null;
         const titleId = answeredTitle(result.value, next.titleId);
-        onWorn(titleId);
+        // The shell hears an accepted wear even when the dialog has gone during the send (Chrome closes a modal dialog on a repeated
+        // Escape, with a cancel event it cannot cancel): both are the shell's, safe after this dialog has unmounted.
+        onWorn(gladiatorId, titleId);
         refresh();
-        finish(wornStatus(titleId));
+        if (mounted.current) finish(wornStatus(titleId));
         return;
       }
+      if (!mounted.current) return;
       if (!keepsWearAttempt(result.code)) attempt.current = null;
       setError(preview && result.code === 'unavailable' ? WEAR_PREVIEW : WEAR_REFUSED);
     } catch {

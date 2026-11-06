@@ -41,7 +41,7 @@
 // `useAwayTrip`, `away-trip.ts`). Like the arrival banner it is not mounted while a scene covers the camp; unlike it, it is the player's own
 // (nothing is read for a visitor). The scene it opens gives the focus back to it when the camp returns.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import type { Phase } from '@contracts/commands';
+import type { Phase, WearTitleValue } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
@@ -72,6 +72,7 @@ import { createBoutsStore, type BoutsStore } from '../bouts/bouts-store';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import { replayKept } from '../../lib/replay-retention';
 import { messagesRequestFor, type MessagesRequest, type MessagingActions } from '../messages/messages';
+import type { NoticeTitles } from '../messages/TitleNotices';
 import { GameViewport } from '../../game/GameViewport';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
@@ -462,9 +463,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   const wornTitle = owner ? shownWornTitle(owner, ownerReadStart, wornAnswer) : null;
   const pickerOwner = useMemo(() => (owner ? { ...owner, wornTitle } : null), [owner, wornTitle]);
   const openTitlePicker = useCallback(() => { setTitleStatus(null); show('gladiator'); setTitleOpen(true); }, [show]);
-  const titleAnswered = useCallback((titleId: string | null) => {
-    const current = ownerRef.current;
-    if (current) setWornAnswer({ gladiatorId: current.gladiatorId, titleId, afterRead: ownerReadsStarted() });
+  // An accepted wear, from the picker or a notice's Wear (each names the gladiator it wore for), told the moment it arrives, also after
+  // the picker or the messages panel has closed.
+  const titleAnswered = useCallback((gladiatorId: string, titleId: string | null) => {
+    setWornAnswer({ gladiatorId, titleId, afterRead: ownerReadsStarted() });
   }, [ownerReadsStarted]);
   const refreshTitle = useCallback(() => {
     void refreshWorld();
@@ -478,6 +480,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   }, []);
   useEffect(() => { setTitleOpen(false); }, [lookOwner]);
   const shownTitleStatus = titleStatus && titleStatus.gladiatorId === lookOwner ? titleStatus.text : null;
+  // The Notifications tab's titles (Task 11): the owner's, the title shown as worn (the same answered-wear rule as the Title button), Wear
+  // (the picker's command, through the gateway the shell reads with: the fixture preview refuses it) and "Choose a title".
+  const noticeTitles = useMemo<NoticeTitles | undefined>(() => (owner && reads ? {
+    gladiatorId: owner.gladiatorId, held: owner.titles, worn: wornTitle, preview: fixture,
+    send: command => reads.command<WearTitleValue>(command), onWorn: titleAnswered, refresh: refreshTitle, choose: openTitlePicker,
+  } : undefined), [owner, reads, wornTitle, fixture, titleAnswered, refreshTitle, openTitlePicker]);
 
   // "A new patch is out — reload" (Patch A, "Patch numbers and the changelog"): when the server's newest patch is ahead of this build. It
   // waits while a scene or a modal dialog is open (the creation and change-look dialogs are named too, so it never shows for the moment
@@ -543,7 +551,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging} messagesRequest={currentMessagesRequest}
-        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} />
+        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>

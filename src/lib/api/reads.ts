@@ -411,7 +411,8 @@ export async function readPatchNumbers(client: SupabaseClient, messageIds: reado
   }
   return numbers;
 }
-const NOTIFICATIONS_PAGE = 20;
+/** How many results one notifications read lists (the Notifications tab's page; patch 1.7's notices use it to know a full page). */
+export const NOTIFICATIONS_PAGE = 20;
 /** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */
 export type NotificationsRead = { items: GameNotification[]; newestSettledMs: number | null };
 type NotificationRow = { id: unknown; settled_at_ms: unknown; summary: unknown; destination: unknown; gladiators?: unknown };

@@ -48,7 +48,14 @@ export type OwnerState = {
    * already read by, and how many of the gladiator's own results are new since the account last saw them.
    */
   inbox: Inbox;
+  /** Patch 1.7 (M28): the title worn now (an id of TITLES_V1) or null; every title held, by `earnedAtMs` then id; the counters the titles measure. */
+  wornTitle: string | null; titles: EarnedTitle[]; titleProgress: Record<string, number>;
 };
+/** Where an earned title came from: the release back-fill, a result, a season award, a shop, a market buy, an NPC sale or creation. */
+export type TitleSource = 'history' | 'result' | 'season' | 'shop' | 'market' | 'sale' | 'joined';
+/** One title a gladiator holds; `detail` names the season place of a season title, null otherwise. */
+export type EarnedTitle = { id: string; earnedAtMs: number; activityId: string | null; source: TitleSource;
+  detail: { seasonIndex: number; league: LeagueId; place: 1 | 2 | 3 } | null };
 /**
  * The owner read's inbox. `unread`: the visible messages published after the gladiator was created (`sinceMs`) that the account
  * has not read (a new player starts at no badge). `readIds`: the ids of the visible messages the account has read, ascending,
@@ -82,6 +89,8 @@ export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena
 export type EquipmentSilhouette = 'weapon-sword' | 'weapon-axe' | 'weapon-spear' | 'weapon-bow' | 'offhand-shield' | 'armor-light' | 'armor-heavy' | 'head-hood' | 'head-helmet' | 'feet-light' | 'feet-heavy';
 export type PublicActor = {
   gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: EquipmentSilhouette[];
+  /** Patch 1.7 (M28): the title worn now, an id of TITLES_V1, or null; absent from an older server's row. A client shows nothing for an id it does not know. */
+  title?: string | null;
   /** The look chosen at creation (M24), as OwnerState.appearance; null is the legacy look. Cosmetic only, public like the gear. */
   appearance: Appearance | null;
   league: LeagueId; level: number; phase: Phase; location: CampLocation;

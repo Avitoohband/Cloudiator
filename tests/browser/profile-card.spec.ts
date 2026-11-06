@@ -60,6 +60,9 @@ test.describe('the richer profile card', () => {
     await expect(section(page, 'Lucilla', 'Gear')).toContainText('Two-handed weapon');
     const record = section(page, 'Lucilla', 'Record');
     await expect(record).toContainText(/Arena record\s*7–4 · all seasons/);
+    // Patch 1.7: she wears Champion (her Season 1 Silver first place) and has earned 9 titles.
+    await expect(lucilla.getByText('Champion · Season 1 Silver', { exact: true })).toBeVisible();
+    await expect(record).toContainText(/Titles\s*9 earned/);
     // Made 6 days (her level) before the fixture's clock: the card's minute clock follows the synced display clock.
     await expect(record).toContainText(/In camp since\s*\d+ \w+ · 6 days/);
     await expect(lucilla).not.toContainText(PRIVATE);

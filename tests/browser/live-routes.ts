@@ -436,8 +436,8 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
     patches: { rows: (data.patches ?? []).map(p => ({ number: p.number, sort_key: p.sortKey, title: p.title, released_at_ms: p.releasedAtMs, message_id: p.messageId,
       patch_features: p.features.map((text, i) => ({ position: i + 1, text })).reverse() })) },
     patch_features: { rows: (data.patches ?? []).flatMap(p => p.features.map((text, i) => ({ patch: p.number, position: i + 1, text }))) },
-    // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all.
-    owner_state: { private: true, rows: reader !== null && owner ? [{ state: owner }] : [] },
+    // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all. A 1.7 server's three title keys default to none (a spec's owner state may name its own).
+    owner_state: { private: true, rows: reader !== null && owner ? [{ state: { wornTitle: null, titles: [], titleProgress: {}, ...owner } }] : [] },
     // The timelines' owner summaries, the owner's settled results as `readNotifications` selects them (the kind, the slot, the expedition
     // asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the server's now:
     // none here, every result a spec lists has been revealed) and the owner's bouts as `readBouts` selects them.

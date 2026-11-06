@@ -20,6 +20,8 @@ export const ownerFixture: OwnerState = {
   restingUntilSlot: null,
   // No messages in the shared fixture world: no badge. The fixture preview's own inbox is tests/fixtures/messages.ts.
   inbox: { unread: 0, readIds: [], sinceMs: 0, newNotifications: 0, notificationsSeenMs: 0 },
+  // Patch 1.7: no titles in the shared fixture world; the fixture preview's own are in src/lib/api/fixture-gateway.ts.
+  wornTitle: null, titles: [], titleProgress: {},
 };
 
 export const worldFixture: WorldSnapshot = {

@@ -1,5 +1,5 @@
 import type { RevealedTimeline } from '@contracts/events';
-import type { OwnerState, SeasonView } from '@contracts/reads';
+import type { EarnedTitle, OwnerState, PublicActor, SeasonView } from '@contracts/reads';
 import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
@@ -22,6 +22,7 @@ import { PATCH_1_4, SEED_PATCHES, linkNotes } from '../../../tests/fixtures/patc
 import { profileCards } from '../../../tests/fixtures/profile-cards';
 import { PATCH } from '../patch';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
+import { FIXTURE_TITLES } from '../../game/demo-world';
 
 /** Sample replays the fixture game page links to. */
 export const FIXTURE_REPLAYS: readonly { activityId: string; label: string }[] = REPLAY_SAMPLES;
@@ -40,14 +41,32 @@ const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARE
  * The owner plus the current slot's Arena entrants, warming up at the fixture time (minute 40), and Otho, resting at home
  * (Task 23.9: listed, not drawn in the camp).
  */
-const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS, RESTING_ACTOR] };
+/** A fixture actor wearing the title the preview gives its name (`FIXTURE_TITLES`: the owner, the Arena gladiators and the crowd), or none. */
+const titled = (actor: PublicActor): PublicActor => (FIXTURE_TITLES[actor.name] ? { ...actor, title: FIXTURE_TITLES[actor.name] } : actor);
+const FIXTURE_WORLD = { ...worldFixture, actors: [...worldFixture.actors, ...ARENA_WORLD_ACTORS, RESTING_ACTOR].map(titled) };
 const OWNER_ID = RESTING_OWNER.gladiatorId;
 /**
  * The public profiles with their card data (Task 11c): sample builds, creation times and each standings row's record. Aster, the preview's
  * own gladiator, owns the Arena banner (Patch 1.6: her card shows its pill, and her shop says Owned).
  */
-const FIXTURE_PROFILES = profileCards({ ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE }, Object.values(ARENA_STANDINGS).flat(), ARENA_OWNER,
+const BASE_PROFILES = profileCards({ ...ARENA_PROFILES, [RESTING_ACTOR.gladiatorId]: RESTING_PROFILE }, Object.values(ARENA_STANDINGS).flat(), ARENA_OWNER,
   worldFixture.serverNowMs, new Set([OWNER_ID]));
+/**
+ * Patch 1.7: each profile's actor wears its preview title; the card counts the titles earned: Aster's 8, Lucilla's 9 (the mockup's), and one
+ * for anyone else who wears a title.
+ */
+const FIXTURE_PROFILES: typeof BASE_PROFILES = Object.fromEntries(Object.entries(BASE_PROFILES).map(([id, profile]) => {
+  const actor = titled(profile.actor);
+  return [id, { ...profile, actor, titlesEarned: id === OWNER_ID ? 8 : actor.name === 'Lucilla' ? 9 : actor.title ? 1 : 0 }];
+}));
+/**
+ * Aster's 8 earned titles, all counted from her history at one time (the release's back-fill), and the mockup's progress toward the rest
+ * (Patch 1.7 spec "Client", "Progress"). She wears Founder.
+ */
+const OWNER_TITLES: EarnedTitle[] = ['founder', 'wanderer', 'tiro', 'bloodied', 'finalist', 'collector', 'rare-find', 'moneyed']
+  .map(id => ({ id, earnedAtMs: worldFixture.serverNowMs, activityId: null, source: 'history', detail: null }));
+const OWNER_TITLE_PROGRESS: Record<string, number> = { 'expeditions-won': 34, 'outpost-won': 13, 'woodland-won': 21, trainings: 46, 'arena-wins': 18, 'arena-best-streak': 3,
+  'tournament-finals': 1, 'items-owned': 14, 'tiers-of-one': 2, 'rarities-of-one': 2, 'gold-earned': 1240, 'days-in-camp': 21 };
 /** The owner's cosmetics: the Arena banner, bound to her account as a bought one is. */
 const OWNER_COSMETICS: OwnerState['ownedCosmetics'] = [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }];
 /**
@@ -107,7 +126,8 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     // The owner fixture with the rating and renown of its credited Arena samples (resting, in the resting preview), and the inbox
     // the sample messages make (tests/fixtures/messages.ts).
     owner: async () => ({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
-      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX), ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
+      : structuredClone(ARENA_OWNER)), inbox: structuredClone(FIXTURE_INBOX), ownedCosmetics: structuredClone(OWNER_COSMETICS),
+      wornTitle: 'founder', titles: structuredClone(OWNER_TITLES), titleProgress: { ...OWNER_TITLE_PROGRESS } }),
     // The sample messages, newest first (a copy each time), each patch note with the number of the patch that links it; no network.
     messages: async () => FIXTURE_MESSAGES.map(m => ({ ...structuredClone(m),
       patch: m.kind === 'patch-notes' ? FIXTURE_PATCHES.find(p => p.messageId === m.id)?.number ?? null : null })),
@@ -136,6 +156,8 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
     // A replay's fighters' looks, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
     looks: async ids => new Map(world.actors.filter(a => ids.includes(a.gladiatorId)).map(a => [a.gladiatorId, validAppearance(a.appearance) ? a.appearance : null] as const)),
+    // The titles worn now, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
+    readWornTitles: async ids => Object.fromEntries(world.actors.filter(a => ids.includes(a.gladiatorId)).map(a => [a.gladiatorId, a.title ?? null])),
     // Whether a trip's next slot was a Rest (no network): true only for the Woodland sample, and a malformed argument is `unavailable`,
     // as the live read refuses it.
     restAfter: async (gladiatorId, tripEndMs) => {

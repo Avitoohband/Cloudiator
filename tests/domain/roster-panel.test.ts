@@ -173,4 +173,26 @@ describe('newcomers in the list', () => {
     expect(html).toContain('Ursa</button> (you)');
     expect(button(html, 'Find Ursa')).not.toContain('disabled');
   });
+
+  // Patch 1.7 (spec "Where a title shows"; ruling D2): the title after the name (and "(you)" or NEW), in its own italic element; the list
+  // shows the plain title name ("Champion"), never the profile card's season words; an id this client does not know shows nothing.
+  it('shows the worn title after the name and "(you)", in its own element', () => {
+    const wearing = (a: PublicActor, title: unknown) => ({ ...a, title }) as PublicActor;
+    const html = panel({ world: { ...WORLD, actors: [wearing(actor('Aster', 'training'), 'founder'), wearing(actor('Brutus', 'tournament'), 'champion'), wearing(actor('Corvina', 'camp'), 'lion')] }, ownerId: 'id-Aster' });
+    expect(html).toContain('Aster</button> (you) <em');
+    expect(/<em[^>]*>Founder<\/em>/.test(html)).toBe(true);
+    expect(/<em[^>]*>Champion<\/em>/.test(html)).toBe(true);
+    expect(/<em[^>]*>Lion of the Arena<\/em>/.test(html)).toBe(true);
+    expect(html).not.toContain('Champion ·');
+    // The title follows a NEW pill too.
+    const fresh = panel({ world: world(wearing({ ...ursa }, 'tiro')) });
+    expect(fresh).toMatch(/>NEW<\/span> <em[^>]*>Tiro<\/em>/);
+  });
+  it('shows no title for none, for an id this client does not know, or for junk, and never throws', () => {
+    for (const title of [undefined, null, 'den-breaker', '', 42, {}]) {
+      const html = panel({ world: { ...WORLD, actors: [{ ...actor('Aster', 'training'), title } as unknown as PublicActor] } });
+      expect(html, String(title)).not.toContain('<em');
+      expect(html, String(title)).toContain('Profile: Aster');
+    }
+  });
 });

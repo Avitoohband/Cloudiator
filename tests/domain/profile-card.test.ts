@@ -17,7 +17,7 @@ const ACTOR: PublicActor = {
   ...worldFixture.actors[0], name: 'Aster', classId: 'duelist', league: 'bronze', level: 4, location: 'training',
   equipmentSilhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet'],
 };
-const PROFILE: ProfileRead = { actor: ACTOR, combatStrength: 41, rating: 1042, prestige: [], build: null, joinedAtMs: null, arenaRecord: null, banner: false };
+const PROFILE: ProfileRead = { actor: ACTOR, combatStrength: 41, rating: 1042, prestige: [], build: null, joinedAtMs: null, arenaRecord: null, banner: false, titlesEarned: 0 };
 /** The card's clock: 10 Oct 2026, noon UTC. */
 const NOW = Date.UTC(2026, 9, 10, 12);
 type Props = Parameters<typeof ProfileCard>[0];
@@ -34,7 +34,7 @@ const LUCILLA_BUILD: PublicBuild = { stance: 'defensive', allocations: { strengt
 const LUCILLA: PublicActor = { ...worldFixture.actors[0], name: 'Lucilla', classId: 'guardian', league: 'silver', level: 6, location: 'arena', activityId: 'arena-activity',
   equipmentSilhouettes: ['weapon-spear', 'head-helmet', 'armor-heavy'] };
 const LUCILLA_PROFILE: ProfileRead = { actor: LUCILLA, combatStrength: null, rating: 1040, prestige: [], build: LUCILLA_BUILD,
-  joinedAtMs: Date.UTC(2026, 9, 2, 12), arenaRecord: { wins: 9, losses: 5 }, banner: false };
+  joinedAtMs: Date.UTC(2026, 9, 2, 12), arenaRecord: { wins: 9, losses: 5 }, banner: false, titlesEarned: 9 };
 /** The card's text items in document order: each eyebrow, chip, row (term and value) and line. */
 const items = (html: string) => [...html.matchAll(/<(p|li|div|dt)\b[^>]*>((?:(?!<\/?(?:p|li|div|ul|dl|section)\b)[\s\S])*?)<\/\1>/g)]
   .map(m => text(m[2]).trim()).filter(Boolean);
@@ -86,11 +86,12 @@ describe('profile card', () => {
   });
 
   // Task 21.4: season prestige (plan Decision 8, the approved mockup).
-  it('shows the latest champion title under the name and a badge chip per season award, newest first', () => {
-    const champion = card({ profile: { ...PROFILE, prestige: [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] } });
+  it('shows the worn champion title under the name and a badge chip per season award, newest first', () => {
+    const wearing = { ...ACTOR, title: 'champion' };
+    const champion = card({ actor: wearing, profile: { ...PROFILE, prestige: [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] } });
     expect(champion).toMatch(/<h2[^>]*>Aster<\/h2><p[^>]*>Champion · Season 1 Silver<\/p>/);
     expect(champion).toMatch(/<ul[^>]*aria-label="Season badges"[^>]*><li[^>]*>🥇 Season 1 · Silver<\/li><\/ul>/);
-    const career = card({ profile: { ...PROFILE, prestige: [
+    const career = card({ actor: wearing, profile: { ...PROFILE, prestige: [
       { seasonId: '0', league: 'bronze', place: 1, badge: 'gold', title: 'champion' },
       { seasonId: '2', league: 'silver', place: 1, badge: 'gold', title: 'champion' },
       { seasonId: '3', league: 'gold', place: 3, badge: 'bronze', title: null }] } });
@@ -100,9 +101,38 @@ describe('profile card', () => {
     const badges = /<ul[^>]*aria-label="Season badges"[^>]*>(.*?)<\/ul>/.exec(career)![1];
     expect([...badges.matchAll(/<li[^>]*>([^<]*)<\/li>/g)].map(m => m[1])).toEqual(['🥉 Season 4 · Gold', '🥇 Season 3 · Silver', '🥇 Season 1 · Bronze']);
     // A third place only: its badge and no title.
-    const third = card({ profile: { ...PROFILE, prestige: [{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }] } });
+    const third = card({ actor: wearing, profile: { ...PROFILE, prestige: [{ seasonId: '0', league: 'bronze', place: 3, badge: 'bronze', title: null }] } });
     expect(text(third)).toContain('🥉 Season 1 · Bronze');
     expect(text(third)).not.toContain('Champion ·');
+  });
+
+  // Patch 1.7 (spec "The Gladiators list, the card, the headers, the brackets"; ruling D2): the card shows the title the gladiator wears now,
+  // not a champion line from its prestige alone, and RECORD counts the titles earned.
+  it('shows the worn title under the name, Champion with its latest first place, and no other title line', () => {
+    const prestige: ProfileRead['prestige'] = [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }];
+    const html = card({ actor: { ...LUCILLA, title: 'champion' }, profile: { ...LUCILLA_PROFILE, prestige } });
+    expect(html).toMatch(/<h2[^>]*>Lucilla<\/h2><p[^>]*>Champion · Season 1 Silver<\/p>/);
+    expect(html.match(/Champion ·/g)).toHaveLength(1);
+    // Another title shows its name, never the prestige's words.
+    const pathfinder = card({ actor: { ...LUCILLA, title: 'pathfinder' }, profile: { ...LUCILLA_PROFILE, prestige } });
+    expect(pathfinder).toMatch(/<h2[^>]*>Lucilla<\/h2><p[^>]*>Pathfinder<\/p>/);
+    expect(text(pathfinder)).not.toContain('Champion ·');
+    // Wearing nothing shows no title line, whatever the prestige says.
+    for (const actor of [LUCILLA, { ...LUCILLA, title: null }]) expect(text(card({ actor, profile: { ...LUCILLA_PROFILE, prestige } }))).not.toContain('Champion ·');
+    // An id this client does not know (a newer server, junk) shows no title and never throws (Review Focus 1).
+    for (const title of ['den-breaker', 'x', 42, {}]) {
+      const unknown = { ...LUCILLA, title } as unknown as PublicActor;
+      expect(() => card({ actor: unknown, profile: { ...LUCILLA_PROFILE, prestige } }), String(title)).not.toThrow();
+      expect(text(card({ actor: unknown, profile: LUCILLA_PROFILE })), String(title)).not.toMatch(/Champion|den-breaker/);
+    }
+  });
+
+  it('counts the earned titles in RECORD: "9 earned", "None yet" at 0, nothing before the profile loads', () => {
+    expect(text(card({ actor: LUCILLA, profile: LUCILLA_PROFILE }))).toMatch(/Titles\s+9 earned/);
+    expect(text(card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, titlesEarned: 0 } }))).toMatch(/Titles\s+None yet/);
+    expect(text(card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, titlesEarned: 1 } }))).toMatch(/Titles\s+1 earned/);
+    expect(text(card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, titlesEarned: 1240 } }))).toMatch(/Titles\s+1,240 earned/);
+    for (const html of [card({ actor: LUCILLA }), card({ actor: LUCILLA, profileFailed: true })]) expect(text(html)).not.toContain('Titles');
   });
 
   it('shows nothing about seasons for a gladiator without prestige, or before the profile loads', () => {
@@ -197,7 +227,7 @@ describe('profile card', () => {
     const html = card({ actor: LUCILLA, profile: LUCILLA_PROFILE });
     const order = ['ATTRIBUTES · 22 POINTS', 'Vitality +5% 9', 'STATS · DEFENSIVE STANCE', 'Health 197', 'Damage 15', 'Speed every 1.13 s',
       'Armor 12.3 · blocks 25%', 'Critical 7% of hits', 'GEAR', 'Weapon Spear · Level 5 · uncommon', 'Off-hand Two-handed weapon', 'RECORD', 'Rating 1040',
-      'Arena record 9–5 · all seasons', 'In camp since 2 Oct · 8 days'];
+      'Titles 9 earned', 'Arena record 9–5 · all seasons', 'In camp since 2 Oct · 8 days'];
     const shown = items(html);
     let from = -1;
     for (const line of order) {
@@ -250,7 +280,7 @@ describe('profile card', () => {
 
   it('shows the Arena banner pill after the name line only when the profile says the gladiator owns it, its flag decorative', () => {
     const pill = /<p[^>]*>(<span aria-hidden="true">🚩<\/span>) Arena banner<\/p>/;
-    const owned = card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, banner: true, prestige: [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] } });
+    const owned = card({ actor: { ...LUCILLA, title: 'champion' }, profile: { ...LUCILLA_PROFILE, banner: true, prestige: [{ seasonId: '0', league: 'silver', place: 1, badge: 'gold', title: 'champion' }] } });
     expect(owned).toMatch(pill);
     expect(text(owned)).toContain('🚩 Arena banner');
     // After the name, before the title and the class line.

@@ -33,8 +33,8 @@ const profile = (over: Record<string, unknown> = {}) => ({ profile: { actor: ACT
 
 test('maps the build, the creation time and the Arena record', async () => {
   const { client, requests } = api(profile());
-  expect(await readProfile(client, ACTOR.gladiatorId)).toEqual({ actor: ACTOR, combatStrength: null, rating: 1040, prestige: [], build: BUILD,
-    joinedAtMs: 1_791_000_000_000, arenaRecord: { wins: 9, losses: 5 }, banner: false });
+  expect(await readProfile(client, ACTOR.gladiatorId)).toEqual({ actor: { ...ACTOR, title: null }, combatStrength: null, rating: 1040, prestige: [], build: BUILD,
+    joinedAtMs: 1_791_000_000_000, arenaRecord: { wins: 9, losses: 5 }, banner: false, titlesEarned: 0 });
   expect(requests[0].get('select')).toBe('profile');
   // The live gateway's profile is the same read, for a visitor.
   expect((await createLiveGateway().profile(ACTOR.gladiatorId)).build).toEqual(BUILD);
@@ -58,8 +58,8 @@ test('reads a malformed build as null, whatever part of it is wrong', async () =
 
 test('reads a profile from before M26 (without the three keys) with all three null', async () => {
   const { build: _b, joinedAtMs: _j, arenaRecord: _a, ...older } = profile().profile;
-  expect(await readProfile(api({ profile: older }).client, ACTOR.gladiatorId)).toEqual({ actor: ACTOR, combatStrength: null, rating: 1040, prestige: [],
-    build: null, joinedAtMs: null, arenaRecord: null, banner: false });
+  expect(await readProfile(api({ profile: older }).client, ACTOR.gladiatorId)).toEqual({ actor: { ...ACTOR, title: null }, combatStrength: null, rating: 1040, prestige: [],
+    build: null, joinedAtMs: null, arenaRecord: null, banner: false, titlesEarned: 0 });
 });
 
 // Patch 1.6 (spec "The Arena banner", M27): the profile read publishes whether the gladiator owns the Arena banner. Only `true` is a banner; a
@@ -73,4 +73,18 @@ test('reads the Arena banner: true only for true', async () => {
   expect((await createLiveGateway().profile(ACTOR.gladiatorId)).banner).toBe(false);
   api(profile({ banner: true }));
   expect((await createLiveGateway().profile(ACTOR.gladiatorId)).banner).toBe(true);
+});
+
+// Patch 1.7 (spec "Client"; ruling S5: on the client's ProfileRead): the count of titles earned is a whole number from 0, else 0, and the
+// profile's actor keeps the worn title this client knows (null for an unknown id, junk or no key: Review Focus 1).
+test('reads the titles earned as a whole number from 0, else 0, and the actor\u2019s worn title defensively', async () => {
+  expect((await readProfile(api(profile({ titlesEarned: 9 })).client, ACTOR.gladiatorId)).titlesEarned).toBe(9);
+  expect((await readProfile(api(profile({ titlesEarned: 0 })).client, ACTOR.gladiatorId)).titlesEarned).toBe(0);
+  for (const titlesEarned of [-1, 2.5, '9', null, true]) {
+    expect((await readProfile(api(profile({ titlesEarned })).client, ACTOR.gladiatorId)).titlesEarned, String(titlesEarned)).toBe(0);
+  }
+  expect((await readProfile(api(profile()).client, ACTOR.gladiatorId)).titlesEarned).toBe(0);
+  for (const [title, shown] of [['lion', 'lion'], ['den-breaker', null], [42, null], [undefined, null]] as const) {
+    expect((await readProfile(api(profile({ actor: { ...ACTOR, title } })).client, ACTOR.gladiatorId)).actor.title, String(title)).toBe(shown);
+  }
 });

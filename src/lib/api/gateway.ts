@@ -5,7 +5,7 @@ import type { MarketPage, OwnerState, ResultsPage, SeasonView, StandingRow, Stan
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readBouts, readLooks, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  GatewayReadError, readBouts, readLooks, readWornTitles, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
   readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
 export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
@@ -70,6 +70,12 @@ export interface GameGateway {
    * treats a failure as the legacy look; the fixture preview answers from its own world, with no network.
    */
   looks(ids: readonly GladiatorId[]): Promise<Map<string, Appearance | null>>;
+  /**
+   * The titles worn now (an id, or null for none or one this client does not know) of up to 16 gladiators, in one public read of the
+   * actor projection; a gladiator it does not know is absent, and a failed read answers `{}` (no title shown). The `/replay/` page, which
+   * holds a gateway and no database client, asks it for its headers (Patch 1.7).
+   */
+  readWornTitles(ids: readonly GladiatorId[]): Promise<Record<string, string | null>>;
   /**
    * Whether the gladiator's next slot after a trip that ended at `tripEndMs` was a Rest, from the public results (`recent_results`,
    * revealed in `[tripEndMs + slot, tripEndMs + 2 slots)`, a row whose `resolvedKind` is `rest`). The whole-trip replay has a
@@ -252,6 +258,7 @@ export function createLiveGateway(): GameGateway {
     profile: id => publicRead(client => readProfile(client, id)),
     recent: cursor => publicRead(client => readRecent(client, cursor)),
     looks: ids => publicRead(client => readLooks(client, ids)),
+    readWornTitles: ids => publicRead(client => readWornTitles(client, ids)).catch(() => ({})),
     restAfter: (gladiatorId, tripEndMs) => publicRead(client => readRestAfter(client, gladiatorId, tripEndMs)),
     messages: () => publicRead(async client => {
       const list = await readMessages(client);

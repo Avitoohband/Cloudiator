@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { titleById } from '@domain/titles';
-import { NO_TITLE, placeInSeasonText, progressShare, progressText, titleName } from '../../src/features/titles/title-text';
+import type { PrestigeAward } from '@contracts/reads';
+import { NO_TITLE, placeInSeasonText, progressShare, progressText, titleName, wornTitleText } from '../../src/features/titles/title-text';
 
 const p = { 'expeditions-won': 34, 'arena-best-streak': 3, 'tiers-of-one': 2, 'rarities-of-one': 2, 'gold-earned': 1240, 'days-in-camp': 21, 'outpost-won': 0 };
 
@@ -29,5 +30,17 @@ describe('title words', () => {
     expect(placeInSeasonText({ seasonIndex: 1, league: 'champion', place: 1 })).toBe('1st in Season 2 · Champion');
     expect([titleName('lion'), titleName('den-breaker'), titleName(undefined)]).toEqual(['Lion of the Arena', null, null]);
     expect(NO_TITLE).toBe('No title');
+  });
+  it('words the worn title: Champion names its latest first place, anything unknown is null', () => {
+    const award = (seasonId: string, league: PrestigeAward['league'], badge: PrestigeAward['badge']): PrestigeAward => ({ seasonId, league, place: 1, badge, title: 'champion' });
+    const second: PrestigeAward = { seasonId: '2', league: 'gold', place: 2, badge: 'silver', title: null };
+    expect(wornTitleText('champion', [award('0', 'silver', 'gold'), award('1', 'gold', 'gold')])).toBe('Champion · Season 2 Gold');
+    // Newest first whatever the order given, and a second place does not count.
+    expect(wornTitleText('champion', [award('1', 'gold', 'gold'), award('0', 'silver', 'gold'), second])).toBe('Champion · Season 2 Gold');
+    expect(wornTitleText('champion', [])).toBe('Champion');
+    expect(wornTitleText('pathfinder', [])).toBe('Pathfinder');
+    // Another title never takes the prestige's words.
+    expect(wornTitleText('pathfinder', [award('0', 'silver', 'gold')])).toBe('Pathfinder');
+    expect([wornTitleText('x', []), wornTitleText('den-breaker', []), wornTitleText(42, []), wornTitleText(null, []), wornTitleText(undefined, [])]).toEqual([null, null, null, null, null]);
   });
 });

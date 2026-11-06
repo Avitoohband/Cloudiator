@@ -58,6 +58,7 @@ export function profileCards(profiles: Readonly<Record<string, PublicProfile>>, 
       stance: 'balanced', allocations: suggestedSplit({ strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 }, points, actor.classId),
       equipment: silhouetteGear(actor.equipmentSilhouettes),
     };
-    return [id, { ...profile, build, joinedAtMs: nowMs - actor.level * DAY_MS, arenaRecord: records.get(id) ?? { wins: 0, losses: 0 }, banner: banners.has(id) }];
+    return [id, { ...profile, build, joinedAtMs: nowMs - actor.level * DAY_MS, arenaRecord: records.get(id) ?? { wins: 0, losses: 0 }, banner: banners.has(id),
+      titlesEarned: 0 }];
   }));
 }

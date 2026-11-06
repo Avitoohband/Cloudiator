@@ -17,6 +17,7 @@ import type { SceneBridge } from '../../game/bridge';
 import { newcomers } from '../arrivals/arrivals';
 import { campViewReason, classLine, countLine, isAway, matchLine, placeOf, playerCounts, restingText } from './actor-text';
 import { ownRestingText } from './activity-status';
+import { titleName } from '../titles/title-text';
 import styles from './CharacterPanel.module.css';
 
 /** The scene's last `roster` event: who is drawn in the camp, and who is away. */
@@ -69,6 +70,8 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
     const away = isAway(actor);
     const resting = actor.resting && !away;
     const absent = !reason && !away && (resting || !inCamp.has(actor.gladiatorId));
+    // Patch 1.7: the title worn now, by name only (the list carries no prestige, so Champion is just "Champion"); an id this client does not know shows nothing.
+    const worn = titleName(actor.title);
     const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
     return (
       <li key={actor.gladiatorId} className={styles.row}>
@@ -76,6 +79,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
           <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
           {actor.gladiatorId === ownerId ? ' (you)' : ''}
           {isNew && <span className={styles.newPill}>NEW</span>}
+          {worn && <>{' '}<em className={styles.wornTitle}>{worn}</em></>}
           <span>{resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`}</span>
           {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>
             {!resting ? 'Not in the camp right now.' : actor.gladiatorId === ownerId ? ownLine : restingText(actor.name)}

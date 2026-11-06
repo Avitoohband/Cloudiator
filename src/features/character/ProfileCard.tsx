@@ -30,7 +30,8 @@ import { COMPACT_QUERY } from '../shell/rail-reveal';
 import type { Roster } from './RosterPanel';
 import { classLine, gearText, isAway, placeOf } from './actor-text';
 import { ownRestingText } from './activity-status';
-import { badgeText, seasonName, titleText } from '../seasons/season-text';
+import { badgeText, seasonName } from '../seasons/season-text';
+import { wornTitleText } from '../titles/title-text';
 import { ActorPortrait } from './ActorPortrait';
 import { ClassChips } from './ClassCard';
 import { attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statRows } from './profile-card';
@@ -85,9 +86,10 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   const reasonId = useId();
   const rating = profile ? String(profile.rating) : profileFailed ? 'Not available' : 'Loading…';
   const bout = actor.location === 'arena' ? actor.activityId : null;
-  // Season prestige (Task 21.4): the badges newest season first, and the title of the latest champion award.
+  // Season prestige (Task 21.4): the badges newest season first. Patch 1.7: the title line is the title the gladiator wears now (Champion
+  // reads its latest first place from the prestige); an id this client does not know shows none.
   const awards = [...(profile?.prestige ?? [])].sort((p, q) => Number(q.seasonId) - Number(p.seasonId));
-  const title = awards.map(titleText).find(text => text !== null) ?? null;
+  const title = wornTitleText(actor.title, awards);
   // The build's sections: from the profile's build once it is read; "Loading…" before, "Not available" without a usable build.
   const build = profile?.build ?? null;
   const stats = build ? cardStats(actor.classId, build) : null;
@@ -141,6 +143,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
           <dl className={styles.facts}>
             <div><dt>Now</dt><dd>{own && actor.resting ? ownPlace ?? ownRestingText(null) : placeOf(actor)}</dd></div>
             <div><dt>Rating</dt><dd>{rating}</dd></div>
+            {profile && <div><dt>Titles</dt><dd>{profile.titlesEarned > 0 ? `${profile.titlesEarned.toLocaleString('en-US')} earned` : 'None yet'}</dd></div>}
             {profile?.arenaRecord && <div><dt>Arena record</dt><dd>{recordText(profile.arenaRecord)}
               {profile.arenaRecord.wins + profile.arenaRecord.losses > 0 && <small> · all seasons</small>}</dd></div>}
             {record && <div><dt>{record.season ? seasonName(record.season) : 'This season'}</dt><dd>{record.wins}–{record.losses}</dd></div>}

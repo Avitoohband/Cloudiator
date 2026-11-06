@@ -9,6 +9,15 @@ import { hashString } from './actors';
 const NAMES = ['Aster', 'Brennus', 'Cassia', 'Drusus', 'Eira', 'Flavia', 'Gaius', 'Hesper', 'Ilaria', 'Jovan', 'Kael', 'Livius', 'Mira', 'Nero', 'Octavia', 'Pax',
   'Quintus', 'Rhea', 'Severus', 'Talia', 'Ursa', 'Varro', 'Wren', 'Xanthe', 'Yara', 'Zeno', 'Atticus', 'Bryn', 'Corvin', 'Dara', 'Elio', 'Fenna', 'Galen', 'Hale',
   'Isolde', 'Juno', 'Kestrel', 'Lucan', 'Maren', 'Niko', 'Orla', 'Petra', 'Remus', 'Sabine', 'Tiber', 'Una', 'Vesta', 'Wulf', 'Xeno', 'Yorick'];
+/**
+ * The titles the fixture world wears (Patch 1.7 spec "Client", the approved mockup), by name: Aster (the owner) Founder, then the crowd's. Ilaria
+ * and everyone not named here wear none. Octavia's long "Lion of the Arena" is there to wrap in the Gladiators list. The fixture gateway gives
+ * the owner and the Arena gladiators (Lucilla, Severus) theirs by this table; the crowd takes theirs below.
+ */
+export const FIXTURE_TITLES: Readonly<Record<string, string>> = {
+  Aster: 'founder', Atticus: 'pathfinder', Brennus: 'tiro', Eira: 'invictus', Jovan: 'crowd-pleaser', Lucilla: 'champion', Mira: 'collector', Pax: 'bloodied',
+  Quintus: 'trailblazer', Severus: 'moneyed', Wren: 'rare-find', Xanthe: 'victor', Octavia: 'lion',
+};
 const CAMP_LOCATIONS: CampLocation[] = [...Array(14).fill('training'), ...Array(12).fill('rest'), ...Array(14).fill('arena'), ...Array(4).fill('orientation'), ...Array(6).fill('camp')];
 const AWAY_LOCATIONS: CampLocation[] = ['expedition:woodland', 'expedition:outpost', 'expedition:mountain'];
 const LOADOUTS: EquipmentSilhouette[][] = [
@@ -67,6 +76,8 @@ export function createDemoWorld(serverNowMs: number, inCamp = 50, away = 6): Wor
       endsAtMs: startsAtMs + SLOT_MS,
       visibleStage: null,
       resting: false,
+      // The crowd's own names only (a second lap of the names is a different gladiator), and not Aster, who is the owner in a fixture preview.
+      title: i < NAMES.length && NAMES[i] !== 'Aster' ? FIXTURE_TITLES[NAMES[i]] ?? null : null,
     };
   });
   return { revision: `demo-${slotIndex}`, serverNowMs, slotIndex, actors };

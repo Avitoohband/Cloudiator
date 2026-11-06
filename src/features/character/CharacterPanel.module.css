@@ -354,6 +354,14 @@ p.partTitle {
   font-size: 0.74rem;
 }
 
+.who .wornTitle {
+  display: inline-block;
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 /* A name in the list opens that gladiator's profile card (Task 13.7): it reads as the name, underlined on hover. */
 .row .nameButton {
   min-height: 0;

@@ -33,6 +33,7 @@ Patch 1.7 (wearable titles). The title is the draft patch note's; Avi approves t
 ### Built
 
 - Founder: every gladiator made in Season 1 has it, and it is never given again.
+- The profile card counts the titles a gladiator has earned.
 
 ### Planned
 
@@ -41,7 +42,6 @@ Patch 1.7 (wearable titles). The title is the draft patch note's; Avi approves t
 - Choose your title, or none, on My gladiator: free, any time. Locked titles show how close you are.
 - Your title shows with your name in the camp, the Gladiators list, the profile card, Arena bouts, replays and tournament brackets.
 - New titles arrive in Notifications; one earned by a result shows in that result, with Wear.
-- The profile card counts the titles a gladiator has earned.
 
 ## 1.6 — A new economy: slower levels and prizes by league (2026-11-05)
 

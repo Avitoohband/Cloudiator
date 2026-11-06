@@ -82,7 +82,7 @@ My bouts, the shared replay bar/result card, Next bout, named Back, Notification
 
 ## Features by area
 
-**Status:** Live (in the game now) · Planned 1.7 / 1.8 (designed, not built: don't film
+**Status:** Live (in the game now) · In 1.7 (built, not out yet) · Planned 1.7 / 1.8 (designed, not built: don't film
 them, don't promise them on an end card, and expect details to change). Avi's videos end with no "Coming soon" line.
 
 **Shown in video:** Concept trailer = `concept-video` (2026-10-23) · Looks update = `appearance-and-ui-update`
@@ -230,11 +230,11 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | --- | --- | --- | --- | --- | --- |
 | Titles to earn | 31 titles for expeditions won, Trainings, Arena wins, tournaments, season places, gear ever owned, gold earned and a few special ones; a gladiator wears one beside its name. | 1.7 | Planned 1.7 | Not built | — |
 | Your history counts | Everything done before 1.7 counts: a notice in Notifications lists the titles a gladiator's history earned. | 1.7 | Planned 1.7 | Not built | — |
-| Founder | Every gladiator made in Season 1 (it ends on 22 Nov 2026) is a Founder; nobody gets it again. | 1.7 | Built | Not on screen yet: the server grants it (at creation, and to Season 1's gladiators by the release back-fill); it shows once the title shows with the name | — |
+| Founder | Every gladiator made in Season 1 (it ends on 22 Nov 2026) is a Founder; nobody gets it again. | 1.7 | In 1.7 | The server grants it (at creation, and to Season 1's gladiators by the release back-fill); it shows with the name in the Gladiators list and on the profile card (not yet in the camp) | — |
 | Choose your title | A Title button on My gladiator opens "Choose your title": one title or none, free, any time; locked titles show how close you are. | 1.7 | Planned 1.7 | Not built | — |
 | Your title with your name | A gold line over the name in the camp, and the title in the Gladiators list, on the profile card, in Arena bouts and replays, and in tournament brackets. | 1.7 | Planned 1.7 | Not built | — |
 | New-title notices | New titles arrive in Notifications; one earned by a result shows inside that result, with Wear. | 1.7 | Planned 1.7 | Not built | — |
-| Titles on the card | The profile card counts the titles a gladiator has earned. | 1.7 | Planned 1.7 | Not built | — |
+| Titles on the card | The profile card counts the titles a gladiator has earned. | 1.7 | In 1.7 | A gladiator's profile card: RECORD → Titles, "{n} earned" or "None yet"; the worn title also shows under the name there and in the Gladiators list | — |
 
 ### Settings and accessibility
 

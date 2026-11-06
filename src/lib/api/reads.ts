@@ -2,13 +2,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, Attributes, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
 import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
 import type {
-  GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  EarnedTitle, GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { applyXp } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
+import { titleById } from '@domain/titles';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID, tournamentRound } from '../tournament-id';
 import { replayKept, tournamentEndsAtMs, tournamentReplayKept } from '../replay-retention';
 import { patchSortKey, type PatchEntry } from '../patch';
@@ -24,7 +25,37 @@ function checked<T>(result: { data: T | null; error: { code?: string } | null; s
 export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   const row = checked<{ state: OwnerState }>(await client.from('owner_state').select('state').maybeSingle());
   if (!row.state || typeof row.state !== 'object') throw new GatewayReadError('unavailable');
-  return row.state;
+  return withTitles(row.state);
+}
+const TITLE_SOURCES: readonly string[] = ['history', 'result', 'season', 'shop', 'market', 'sale', 'joined'];
+/** The shown title of a published id: the id when this client's catalog knows it, else null (a newer server's id, junk, an older server's missing key). */
+export function knownTitleId(value: unknown): string | null {
+  return typeof value === 'string' && titleById(value) ? value : null;
+}
+/** One held title, or null for a malformed row or an id this client does not know. A malformed `detail` reads as none. */
+function earnedTitleOf(value: unknown): EarnedTitle | null {
+  if (!record(value) || knownTitleId(value.id) === null || !count(value.earnedAtMs) || (value.activityId !== null && typeof value.activityId !== 'string')
+    || typeof value.source !== 'string' || !TITLE_SOURCES.includes(value.source)) return null;
+  const d = value.detail;
+  const detail = record(d) && count(d.seasonIndex) && typeof d.league === 'string' && LEAGUES.includes(d.league) && (d.place === 1 || d.place === 2 || d.place === 3)
+    ? { seasonIndex: d.seasonIndex, league: d.league as LeagueId, place: d.place as 1 | 2 | 3 } : null;
+  return { id: value.id as string, earnedAtMs: value.earnedAtMs, activityId: value.activityId, source: value.source as EarnedTitle['source'], detail };
+}
+/**
+ * The owner state with Patch 1.7's three keys read defensively (spec "Client"): a missing or malformed `titles` is `[]` (a malformed row
+ * dropped), `wornTitle` is null unless it is a title the gladiator holds, and `titleProgress` keeps only its whole numbers from 0.
+ */
+function withTitles(state: OwnerState): OwnerState {
+  const raw = state as unknown as { titles?: unknown; wornTitle?: unknown; titleProgress?: unknown };
+  const titles = Array.isArray(raw.titles) ? raw.titles.map(earnedTitleOf).filter((t): t is EarnedTitle => t !== null) : [];
+  const worn = knownTitleId(raw.wornTitle);
+  const titleProgress: Record<string, number> = {};
+  if (record(raw.titleProgress)) for (const [key, value] of Object.entries(raw.titleProgress)) if (count(value)) titleProgress[key] = value;
+  return { ...state, titles, wornTitle: worn !== null && titles.some(t => t.id === worn) ? worn : null, titleProgress };
+}
+/** A public actor with its worn title read defensively: the id when this client knows it, else null. */
+function withTitle(actor: PublicActor): PublicActor {
+  return { ...actor, title: knownTitleId((actor as { title?: unknown }).title) };
 }
 /**
  * The revision read as this client reads it: the shared contract's `RevisionState` and the server's newest patch (`latest_patch`, M26;
@@ -54,7 +85,7 @@ export async function readWorld(client: SupabaseClient): Promise<WorldSnapshot> 
     for (;;) {
       let query = client.from('world_actor_reads').select('gladiator_id,actor').order('gladiator_id').limit(50);
       if (cursor) query = query.gt('gladiator_id', cursor);
-      const rows = checked(await query); actors.push(...rows.map(row => row.actor as PublicActor));
+      const rows = checked(await query); actors.push(...rows.map(row => withTitle(row.actor as PublicActor)));
       if (rows.length < 50) break;
       cursor = rows.at(-1)!.gladiator_id;
     }
@@ -86,9 +117,10 @@ export type ArenaRecord = { wins: number; losses: number };
  * The profile read as this client reads it (Task 11c, M26): the shared contract's `PublicProfile` and the current build, the creation
  * time and the Arena record over all seasons. A client-side type, as `RevisionRead`: the shared contracts do not change. Each is null
  * when it is missing (a database before M26) or malformed. `banner` (Patch 1.6, M27) is whether the gladiator owns the Arena banner:
- * true only for a published `true`, so a missing (before M27) or malformed value is false.
+ * true only for a published `true`, so a missing (before M27) or malformed value is false. `titlesEarned` (Patch 1.7, M28) is how many titles the
+ * gladiator has earned: a whole number from 0, else 0 (Patch 1.7 spec, "Client"; ruling S5: on this client type, not on the shared `PublicProfile`).
  */
-export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null; banner: boolean };
+export type ProfileRead = PublicProfile & { build: PublicBuild | null; joinedAtMs: number | null; arenaRecord: ArenaRecord | null; banner: boolean; titlesEarned: number };
 const STANCES: readonly string[] = ['offensive', 'balanced', 'defensive'];
 const SLOTS: readonly EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
 const ATTRIBUTE_NAMES = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
@@ -141,11 +173,11 @@ export function publicBuildOf(value: unknown): PublicBuild | null {
   return { stance: value.stance as Stance, allocations, equipment };
 }
 export async function readProfile(client: SupabaseClient, id: GladiatorId): Promise<ProfileRead> {
-  const { prestige, build, joinedAtMs, arenaRecord, banner, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
-    joinedAtMs?: unknown; arenaRecord?: unknown; banner?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
+  const { prestige, build, joinedAtMs, arenaRecord, banner, titlesEarned, ...profile } = checked<{ profile: Omit<PublicProfile, 'prestige'> & { prestige: unknown; build?: unknown;
+    joinedAtMs?: unknown; arenaRecord?: unknown; banner?: unknown; titlesEarned?: unknown } }>(await client.from('public_profile_reads').select('profile').eq('gladiator_id', id).maybeSingle()).profile;
   if (!Array.isArray(prestige)) throw new GatewayReadError('unavailable');
   const wins = record(arenaRecord) ? arenaRecord.wins : undefined, losses = record(arenaRecord) ? arenaRecord.losses : undefined;
-  return { ...profile, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
+  return { ...profile, actor: withTitle(profile.actor), titlesEarned: count(titlesEarned) ? titlesEarned : 0, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
     arenaRecord: count(wins) && count(losses) ? { wins, losses } : null, banner: banner === true };
 }
 /**
@@ -225,6 +257,22 @@ export async function readLooks(client: SupabaseClient, ids: readonly string[]):
     .limit(wanted.length)) as unknown as { gladiator_id: string; appearance: unknown }[];
   for (const row of rows) looks.set(row.gladiator_id, validAppearance(row.appearance) ? row.appearance : null);
   return looks;
+}
+/**
+ * The worn titles of up to `MAX_LOOK_READ` gladiators, in one public read of the actor projection (`world_actor_reads`, readable as `anon`):
+ * only the id and the worn `title` cross. Ids are checked as the looks read checks them; an id the projection does not know is absent, one
+ * it knows without a title (or with one this client does not know) is null. A failed read answers `{}`: a header then shows no title.
+ */
+export async function readWornTitles(client: SupabaseClient, ids: readonly string[]): Promise<Record<string, string | null>> {
+  const wanted = [...new Set(ids.filter((id): id is string => typeof id === 'string' && GLADIATOR_ID.test(id)).map(id => id.toLowerCase()))].slice(0, MAX_LOOK_READ);
+  if (wanted.length === 0) return {};
+  try {
+    const result = await client.from('world_actor_reads').select('gladiator_id,title:actor->>title').in('gladiator_id', wanted).limit(wanted.length);
+    if (result.error || !Array.isArray(result.data)) return {};
+    const titles: Record<string, string | null> = {};
+    for (const row of result.data as unknown as { gladiator_id: string; title: unknown }[]) titles[row.gladiator_id] = knownTitleId(row.title);
+    return titles;
+  } catch { return {}; }
 }
 /**
  * The options of the next-slot Rest read, checked before any query is built (the fixture gateway applies the same rule): a

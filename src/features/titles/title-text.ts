@@ -1,8 +1,10 @@
 // Words for the titles: names, a locked title's progress, and a season place. The rules and thresholds are the shared catalog's
 // (@domain/titles); the counts come from the owner's reads (OwnerState.titleProgress). Nothing here decides who has earned what.
 import type { LeagueId } from '@contracts/commands';
+import type { PrestigeAward } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { titleById, type TitleDefinition } from '@domain/titles';
+import { titleText } from '../seasons/season-text';
 
 export type TitleProgress = Readonly<Record<string, number>>;
 
@@ -11,6 +13,21 @@ export const NO_TITLE = 'No title';
 
 export function titleName(id: unknown): string | null {
   return titleById(id)?.name ?? null;
+}
+
+/**
+ * The worn title as the profile card words it: null for none or an id this client does not know; Champion names the latest first place of
+ * the profile's prestige ("Champion · Season 2 Gold") when it has one, else the plain name. The lists and the camp carry no prestige and
+ * show `titleName`.
+ */
+export function wornTitleText(id: unknown, prestige: readonly PrestigeAward[]): string | null {
+  const name = titleName(id);
+  if (name === null) return null;
+  if (id === 'champion') {
+    const latest = [...prestige].filter(award => award.title === 'champion').sort((p, q) => Number(q.seasonId) - Number(p.seasonId))[0];
+    if (latest) return titleText(latest);
+  }
+  return name;
 }
 
 const count = (n: number) => n.toLocaleString('en-US');

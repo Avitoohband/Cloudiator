@@ -991,8 +991,8 @@ it('ships M27 completed from 21-economy.sql: the v2 row inactive, the mirror tri
   const files = all.filter(name => name.endsWith('_patch_1_6.sql'));
   expect(files).toHaveLength(1);
   expect(files[0]).toMatch(/^\d{14}_patch_1_6\.sql$/);
-  // The 27th migration, after M26 (Patch 1.4, the patch list and the profile card); Patch 1.5 has none.
-  expect(all).toHaveLength(27);
+  // The 27th migration, after M26 (Patch 1.4, the patch list and the profile card); Patch 1.5 has none. It was the last until
+  // M28 (patch 1.7, titles) followed it.
   expect(all[25]).toBe('20261030055918_patch_1_4.sql');
   expect(all[26]).toBe(files[0]);
   const m27 = readFileSync(new URL(files[0], dir), 'utf8').replace(/\r\n/g, '\n');

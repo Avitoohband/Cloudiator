@@ -1,5 +1,228 @@
 # Local identity backend and migrations
 
+## Patch 1.7 (M28): wearable titles
+
+M28 is `supabase/migrations/20261106064426_patch_1_7.sql`, Patch 1.7's one database change (Avi: one database change per
+patch). Its source is `supabase/sql/22-titles.sql` (SHA-256 `ffbb3ab6…c7b2a7`), where the design notes are; the spec is
+`docs/superpowers/specs/2026-10-30-titles-1-7-design.md` ("Server: M28 from `supabase/sql/22-titles.sql`") and the plan
+`docs/superpowers/plans/2026-10-30-titles-1-7.md` (Tasks 2–7). The worker is unchanged; the release deploys `game-command`
+only (Task 6's `wear-title` command).
+
+**What it changes.**
+- **Three owner-only tables:** `public.gladiator_titles` (one row per earned title, never changed or deleted),
+  `public.title_counters` (the stored measures, by name) and `public.item_firsts` (the ownership history: each catalog id a
+  gladiator has ever owned). Row security with an `owner_read` policy (`authenticated` reads its own gladiator's rows through
+  `auth.uid()`); `service_role` SELECT and INSERT, and UPDATE on `title_counters` only; no DELETE for anyone. `guard_frozen`
+  refuses update and delete on `gladiator_titles` and `item_firsts`; the deferred constraint trigger
+  `project_changed_character` on `gladiator_titles` republishes the gladiator at commit.
+- **`public.gladiators.worn_title`** (null, or an earned title) with the deferred foreign key `gladiators_worn_title_fkey`
+  (`(id, worn_title)` → `gladiator_titles(gladiator_id, title_id)`, checked at commit), and
+  **`public.public_profiles.titles_earned`** (`integer not null default 0`).
+- **`private.title_backfills`**, the back-fill's one record: RLS on, every privilege revoked from `public`, `anon`,
+  `authenticated` and `service_role` (the owner's only, like `private.economy_switches`).
+- **15 new functions:** the rules, measures and awarding (`title_rules`, `founder_cutoff_ms`, `title_measures`,
+  `add_title_count`, `set_title_count`, `award_titles`, `refresh_item_counters`; EXECUTE for `service_role`); six trigger
+  functions (`titles_on_gladiator`, `titles_on_activity`, `titles_on_ledger`, `titles_on_item`, `titles_on_season_award`,
+  `titles_on_banner`; executable by nobody); **`public.wear_title`** (the backend's `wear-title` command; EXECUTE for
+  `service_role`); and **`private.backfill_titles`** (the owner's only).
+- **Seven counting triggers** (ruling D1: six functions, `titles_on_item` serving two): `titles_on_gladiator` (Founder at
+  creation), `titles_on_activity` (a result), `titles_on_ledger` (gold from play), `titles_on_item` and `titles_on_item_move`
+  (the ownership history), `titles_on_season_award` and `titles_on_banner`. Each counts in its writer's own transaction. No
+  settlement, executor or worker function is restated.
+- **Restated:** `private.project_character` from M26 (`20-profile-card.sql`), with only the actor's `title` and the profile's
+  `titles_earned`; **`public.public_profile_reads`** from M27 (`21-economy.sql`) with `titlesEarned`; **`public.owner_state`**
+  from M25 (`18-messages.sql`) with `wornTitle`, `titles`, `titleProgress` and the title notices in `inbox.newNotifications`.
+- **Data:** `select public.refresh_projections()` (every actor carries its `title`, every profile its count), then the
+  release back-fill `select private.backfill_titles()`, once, last before the reload.
+
+**Provenance of the 16 function statements** (programmatic comparison, saved with the evidence): 15 new.
+`project_character` starts from M26's body (`20261030055918_patch_1_4.sql`) and changes only in the actor's
+`'title',g.worn_title`, the `public_profiles` upsert's `titles_earned` (insert, update and is-distinct check) and two
+comments. The two views differ from their latest sources (21-economy.sql's `public_profile_reads`, 18-messages.sql's
+`owner_state`) only in the keys named above. No later source restates any of the three.
+
+**Generation.** CLI 2.120.0,
+`npx --offline --no-install supabase db pull patch_1_7 --local --schema public,private --diff-engine pg-delta --yes`
+(Avi's choice of 2026-11-04; the Migra image is not on this machine and was not pulled). Its input was a clean M01–M27 reset
+(`db reset --local --no-seed --yes`; fingerprint 1,273 lines and access audit 650 rows, each byte-equal to M27's final replay)
+with `22-titles.sql` applied once through the psql fallback, after the container label check.
+- The shadow database was built from the local Postgres image already present. `docker events --filter type=image` recorded
+  no event during the pull, and the image list was the same before and after: nothing was downloaded.
+- With `--yes` the CLI also recorded `20261106064426` in the local migration history. The next clean reset replaced that
+  database.
+- The as-generated draft (887 lines) is kept with the evidence. Its 16 function bodies were already byte-identical to the
+  source's.
+
+**Completion.** The as-generated draft failed the file test (`tests/db/titles.test.ts`, "ships M28…"). Unlike M27's, this
+pg-delta draft emitted privilege statements for the new public tables, but as each role's grants rewritten (a revoke and a
+grant per role, and a `REVOKE … FROM anon`). It also:
+- dropped and re-created both views (`DROP VIEW`, then `CREATE VIEW … WITH (security_invoker=true)` as deparsed text), with
+  15 owner and API-role revokes and grants;
+- wrote the four tables with deparsed CHECKs (`title_counters`' `between 0 and 9007199254740991` as an AND of two
+  comparisons, the M25 case) and their foreign keys to `public.gladiators` as three separate `ADD CONSTRAINT` statements;
+- wrote the three tables' policies as deparsed `CREATE POLICY` text, and 53 function ACL statements (for each new function a
+  revoke from PUBLIC and from the owner, a grant back to the owner, and the backend's grants);
+- added `worn_title` after the four tables, and ordered the functions by name;
+- emitted no data and no reload, began with `SET local check_function_bodies = off;` and wrote no
+  `-- pg-delta: transaction=false` marker: the whole file is one transaction.
+
+It was completed from the source by a saved script (`complete-m28.mjs`) that accounts for every generated statement: kept, or
+named as replaced (2 view drops, 4 tables, 3 foreign keys, 3 RLS enables, 3 policies, 2 views and 89 ACL statements). M01–M27
+are unchanged. The completions, with their lines in `22-titles.sql`:
+1. A provenance header.
+2. The `worn_title` column first (as generated, moved; source :77). M28's first lock on `public.gladiators` is then its
+   ACCESS EXCLUSIVE, taken before the three tables' foreign keys take SHARE ROW EXCLUSIVE on it, so no lock is upgraded.
+3. The four tables, the source's `create table if not exists` statements with its CHECK text and inline foreign keys
+   (:52–74, :84–88), in place of the generated `CREATE TABLE` statements and their three `ADD CONSTRAINT … FOREIGN KEY`.
+4. Row security and privileges: `private.title_backfills`' revoke after its row security (:90; none was generated); the
+   source's block for the three public tables (:94–103: RLS, `revoke all` from the four roles, then the owner's SELECT and the
+   backend's SELECT and INSERT, then the `owner_read` policy) and `title_counters`' UPDATE grant (:104), in place of the
+   generated RLS enables, policies and 21 table revokes and grants.
+5. The 16 functions as generated, in the source's order (:118–772): nothing before what it calls.
+6. Every function ACL, the source's 11 statements (:240–246, :411–414, :465–466, :551–552, :775), after the functions, in
+   place of the generated 53.
+7. The two views last: the source's `create or replace` statements with `security_invoker` (:557–564 with
+   `public_profile_reads`' revoke and grant, and :579–624), in place of the generated `DROP VIEW` / `CREATE VIEW` pairs and their
+   15 grants. CREATE OR REPLACE keeps `owner_state`'s grants, as the source says.
+8. `select public.refresh_projections();` (:627), after the views and the new projector.
+9. The back-fill call `select private.backfill_titles();` (:778), after every trigger and its own revoke.
+10. `notify pgrst, 'reload schema';` (:780), last.
+
+Everything else is as generated: `SET local check_function_bodies = off`, `title_backfills`' row security, the
+`titles_earned` column, the deferred `gladiators_worn_title_fkey` (after `public.gladiator_titles`), the 16 function
+statements (each body byte-identical to the source's) and the ten triggers (the seven counting triggers, `guard_frozen` on the
+two frozen tables and the deferred `project_changed_character`), each after its function and its table. No CHECK calls a
+function. M28 re-emits no unchanged function.
+
+**Tests.**
+- `tests/db/titles.test.ts`, "ships M28 completed from 22-titles.sql…" (the shape of M27's test, ruling S2):
+  - exactly one `_patch_1_7.sql`, the 28th migration after M27, LF only; the header names the engine and command; no
+    non-transactional marker, no top-level BEGIN or COMMIT, no `drop`, and no data statement besides the two selects;
+  - the 16 source functions in the source's order, each once with the source's body (`project_character` with the worn
+    title), and no other;
+  - the four tables with the source's text and no other CHECK; the `worn_title` column before the tables and the deferred
+    foreign key after `gladiator_titles`;
+  - the source's block after its tables (its revoke before its grants) and no generated policy; `title_backfills`' revoke
+    after its row security; the source's 15 ACL statements and no other, each grant after its revoke, each function's after
+    the function, every function covered, and no grant on a trigger function or the back-fill;
+  - ruling PC1: exactly the source's ten triggers by table and name, each on the source's function, after it and after its
+    table, `project_changed_character` deferred;
+  - the two views the source's, with `security_invoker`, after every function, trigger, column, foreign key and function ACL;
+    the refresh after the views; the back-fill after every trigger; then only the reload.
+  - RED first: it failed on the absent file, then on the as-generated draft (no provenance header).
+  - Checked by mutation: it failed on each of 21 mutants, with the file then restored byte for byte (SHA-256
+    `3187ddd6…845859c`). The 21: no back-fill record revoke; `owner_state` without `security_invoker`; the back-fill before a
+    counting trigger; a trigger before its function; the foreign key before its table; the `worn_title` column after the
+    tables; the generated CHECK text; a trigger missing; a trigger on another table; no `wear_title` grant; a grant on a trigger
+    function; a grant before its revoke; M26's `project_character`; a re-emitted unchanged function; the functions in name
+    order; a view before a trigger; a generated `DROP VIEW`; the refresh before the views; no back-fill call; no reload; a
+    generated policy beside the block.
+- The pins: `tests/db/economy.test.ts` (M27 is the 27th migration) and `tests/db/restore-hosted.test.ts` (28 migrations).
+  `tests/rule-retention.test.ts` holds over M28 unchanged: its two data statements are selects, and no top-level statement
+  rewrites in-progress state.
+- The deployed checks' anonymous probes are 26, with `rpc wear_title` (null arguments; Task 4's ruling A carry) in
+  `tests/browser/deployed-checks.ts` and in `tests/deployed.test.ts`'s pinned rpc list. RED first: the probe's signature check
+  failed until M28 defined `public.wear_title`.
+
+**Replay evidence** (2026-11-06):
+- **Evidence**: parent `logs/p17-m28-task7-20261106/`: the as-generated draft, the completion, provenance, inspection, probe and
+  mutation scripts (hashed in `reader-hashes.txt`), each fingerprint and audit, and the runners' reports.
+- **Source applied once** to the clean M01–M27 reset: fingerprint 1,356 lines. That is M27's 1,273 with 83 added and 3
+  changed:
+  - added: 15 functions; the four tables (4 relations, 15 columns, 19 constraints with the deferred trigger's, 4 key indexes);
+    the two columns; the deferred foreign key; 3 policies; 10 triggers, each with its enabled line;
+  - changed: `project_character`'s body hash and the two views' hashes (their ACLs and options unchanged).
+- **Access audit** on the source-applied database: 671 rows, 0 finding rows. That is M27's 650 plus `service_role` EXECUTE on
+  the seven helpers and `wear_title`, the three `owner_read` policies, and the three tables' privileges (`authenticated`
+  SELECT; `service_role` SELECT and INSERT, and UPDATE on `title_counters`). The trigger functions, the back-fill and its table
+  have no API-role row.
+- **Clean resets** (`db reset --local --no-seed --yes`) replayed M01–M28 with nothing applied afterwards: two before the full
+  run, and a final one after the lock probe. Each replay's fingerprint and access audit were byte-equal to the source-applied
+  ones (`cmp`), and 28 migrations were recorded.
+- **Inspection of the replay** (read-only):
+  - `title_backfills` one row, `{ok, gladiators 0, titles 0, founders 0, worn 0, replayed false}` (a `--no-seed` replay has no
+    gladiator), `{postgres=arwdDxtm/postgres}`, RLS on; `rules_versions` v1 true, v2 false (unchanged);
+  - the 16 functions invoker, `search_path=""`, with no carriage return in any body:
+    - the six trigger functions and `backfill_titles`: `{postgres=X/postgres}`;
+    - the nine others: `{postgres=X/postgres,service_role=X/postgres}`;
+  - no function in `public` or `private` executable by `anon` or `authenticated`, none security definer;
+  - `gladiator_titles` and `item_firsts` `{postgres=arwdDxtm/postgres,authenticated=r/postgres,service_role=ar/postgres}`,
+    `title_counters` the same with `service_role=arw`, each RLS on with its `owner_read` policy;
+  - `public_profile_reads` and `owner_state` keep `{security_invoker=true}` and their M27 and M25 grants;
+  - `project_changed_character` and `gladiators_worn_title_fkey` deferrable, initially deferred; 57/57 triggers enabled; both
+    cron jobs active; every constraint validated.
+- **Lint and advisors** on the second replay: lint is empty. The advisors (`--type all --level info --fail-on warn`) gave 40
+  INFO notices and no warnings or errors: M27's 38, and two new ones, both intended:
+  - `rls_enabled_no_policy` for `private.title_backfills`: no API role has any privilege on it, and RLS with no policy denies
+    every row to anyone but its owner (as `economy_switches`);
+  - `unindexed_foreign_keys` for `gladiators_worn_title_fkey`: `gladiators`' primary key on `id` serves the lookup, and the
+    referenced title rows are never updated or deleted (`guard_frozen`), so no referencing scan runs.
+- **`npm run test:db`**: 544/544 in 32 files on the second M01–M28 replay (06:50–06:58 UTC), no skips: Task 6's 543 and the
+  file test. Before it the Edge source's access times were refreshed and the runtime settled (the Edge function is served
+  from this worktree). The Edge container's start time was the same before and after the run, and the fingerprint and audit
+  were still byte-equal after it. The unit suite (2,311) and `npm run typecheck` passed on the same tree.
+- **The back-fill on existing rows.** The replays run `--no-seed`, so M28's back-fill finds no gladiator. M28's call is the
+  source's statement, character for character, and the function body is the source's (the file test). `tests/db/titles.test.ts`,
+  "the history back-fill" (8 cases), runs it on real history: every measure, the five ownership sources, the founders, a second
+  run, a write waiting on M28's trigger statements, and the equivalence with the live triggers (ruling R2).
+- **Locks** (probed 2026-11-06: M28 in one rolled-back transaction on a clean M01–M27 reset
+  (`db reset --local --version 20261104081033 --no-seed --yes`), then its own backend's granted relation locks from `pg_locks`;
+  all are held to the commit). Evidence: `probe-output.txt` (79 rows) and `probe-summary.txt`. The rollback left the M27
+  fingerprint and audit unchanged (`cmp`).
+  - ACCESS EXCLUSIVE on `gladiators` (the `worn_title` column, M28's first statement) and `public_profiles` (`titles_earned`),
+    on the views `owner_state` and `public_profile_reads`, and on M28's own new tables, their keys and toast tables.
+  - SHARE ROW EXCLUSIVE on `activities`, `wallet_ledger`, `item_instances`, `owned_cosmetics` and `season_awards` (the seven
+    triggers; a purchase, a sale, a settlement or a season close waits) and on `gladiators` (the foreign keys).
+  - EXCLUSIVE on `gladiators` and `title_backfills`: the back-fill's own `lock table` statements, no-ops inside M28.
+  - ACCESS SHARE on the tables the two views read (`builds`, `schedules`, `wallets`, `reservations`, `character_rests`,
+    `notification_marks`, `message_reads`, `game_messages`, `arena_standings`, `world_actor_reads` and others) and on
+    `economy_switches` (the back-fill's switch time).
+  - With players (production), by reading the code: `refresh_projections` takes ROW EXCLUSIVE on `world_actors`,
+    `public_profiles`, `recent_results` and `arena_standings` (changed rows only); the back-fill reads `operation_receipts`,
+    `tournament_placements` and `private.market_listings` and writes the title tables, its record and the gladiators it
+    auto-wears.
+
+**Release (Task 13).** The spec's "Release" governs; every production write needs Avi's go. Every npx command here is
+`npx --offline --no-install`. Nothing hosted was run for this record.
+- **Deadline:** M28 must reach production **before 23 Jan 2027 09:20 UTC** (launch 2026-10-25 09:20 + 90 days). From then the
+  launch week's activities, placements, ledger rows and market listings leave the 90-day window, and the back-fill would miss
+  them; only Trainings fall back to earned points.
+- **Order:** M28, then `game-command` (the `wear-title` command), then the client, then the patch note and the patch row.
+- **Before the push** (reads, with the linked CLI; check the installed CLI version and help first):
+  1. Production's migration list ends at M27, `20261104081033_patch_1_6.sql`.
+  2. `db push --dry-run --skip-vault` lists exactly one migration, `20261106064426_patch_1_7.sql`. Use `--skip-vault` on the
+     push too: this release changes migrations only.
+  3. The window: outside Wednesday and Saturday 17:20–20:00 UTC, 20–60 minutes after a slot cutoff (…, 09:20, 10:40, 12:00 …
+     UTC), with no open boundary; `select ends_at_ms from public.seasons where season_index = 0` is 1795339200000.
+  4. Right before the push, long transactions, as the owner (it prints no query text):
+
+     ```sql
+     select pid,usename,application_name,state,wait_event_type,now()-xact_start as xact_age
+       from pg_stat_activity where xact_start is not null and pid<>pg_backend_pid() order by xact_start;
+     ```
+
+     Push only when no transaction is older than a few seconds, or with a `lock_timeout` on the push's session.
+- **Deadlock risk.** M28 takes its DDL locks (above) before `refresh_projections` and the back-fill run; the back-fill's own
+  table locks then change nothing. That is not the commands' shared order (account lock, gladiator row, wallet, items). A
+  command that holds a gladiator row and then needs a table M28 has locked, or a read of `owner_state` or
+  `public_profile_reads` that holds the view and waits for `gladiators` or `public_profiles` while M28 waits for the view,
+  deadlocks with M28, and Postgres aborts one side. Hence the quiet window, the long-transaction read and no open boundary.
+  - If the push fails as a deadlock's victim (SQLSTATE `40P01`), M28 rolled back whole (one transaction, the back-fill
+    included). Read the migration list again: it must still end at M27. Then push once more. If that fails too, stop and
+    diagnose.
+- **Read-back after the push** (aggregates only): `select result from private.title_backfills` (`gladiators` equal to the
+  gladiator count, `founders` equal to `select count(*) from public.gladiators where created_at_ms < 1795339200000`, `worn`
+  equal to the gladiators wearing a title); `select count(*) from public.public_profiles where titles_earned <> (select
+  count(*) from public.gladiator_titles t where t.gladiator_id = public_profiles.gladiator_id)` is 0; the hosted fingerprint
+  and access audit against this replay (1,356 lines and 671 rows). Expected differences besides the usual platform and
+  live-state lines: after the 1.6 switch the hosted fingerprint has `seed-rules|v1|f` and `seed-rules|v2|t`, where a local
+  replay has `seed-rules|v1|t` and `seed-rules|v2|f` (M27's record, "After the switch").
+- **On M28 alone**, the 1.6 functions and client keep working: the old client ignores the actor's `title`, the profile's
+  `titlesEarned` and the owner read's new keys; the old `game-command` has no `wear-title` and never calls `wear_title`; the
+  worker is unchanged, and the triggers count every write it settles.
+- **Rollback:** there is no down migration. Before the client nothing shows. Title rows are permanent; a wrong grant is
+  corrected by an owner statement after Avi's go (the guard dropped and restored inside that one transaction).
+
 ## Patch 1.6 (M27): the economy rebalance
 
 M27 is `supabase/migrations/20261104081033_patch_1_6.sql`, Patch 1.6's one database change (Avi: one database change per patch).

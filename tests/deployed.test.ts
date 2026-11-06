@@ -235,17 +235,18 @@ describe('anonDenied', () => {
     const rpcs = ANON_PROBES.filter(p => p.path.startsWith('/rest/v1/rpc/') && !p.profile).map(p => p.path.slice('/rest/v1/rpc/'.length));
     expect(rpcs).toEqual(['create_gladiator', 'edit_schedule', 'buy_listing', 'claim_jobs', 'complete_job', 'renew_job', 'settle_activity',
       // M25: the free look change, a message's read mark and the notifications' "seen up to" mark.
-      'change_appearance', 'read_message', 'see_notifications']);
+      'change_appearance', 'read_message', 'see_notifications',
+      // M28: the wear-title command.
+      'wear_title']);
     expect(ANON_PROBES.filter(p => p.method === 'POST' && !p.path.includes('/rpc/')).map(p => p.label))
       .toEqual(['insert wallets', 'insert item_instances', 'insert world_actors', 'insert game_messages', 'insert patches', 'insert patch_features']);
     expect(ANON_PROBES.filter(p => p.profile === 'private').map(p => [p.label, p.expected]))
       .toEqual([['read private.jobs', ['PGRST106']], ['rpc private.schedule_effective_slot', ['PGRST106']], ['rpc private.post_message', ['PGRST106']],
         ['rpc private.record_patch', ['PGRST106']]]);
-    // M28 (titles): a visitor reads none of the three owner-only title tables, refused for want of the privilege. The wear_title rpc
-    // probe comes with M28 itself (Task 7), since the next case checks each rpc probe against the migrations.
+    // M28 (titles): a visitor reads none of the three owner-only title tables, refused for want of the privilege.
     expect(ANON_PROBES.filter(p => p.method === 'GET' && !p.profile).map(p => [p.label, p.path, p.expected])).toEqual(
       ['gladiator_titles', 'title_counters', 'item_firsts'].map(table => [`read ${table}`, `/rest/v1/${table}?select=gladiator_id&limit=1`, ['42501']]));
-    expect(ANON_PROBES).toHaveLength(25);
+    expect(ANON_PROBES).toHaveLength(26);
   });
 
   it('calls only functions that take arguments, each argument null, by the names the migrations define', () => {

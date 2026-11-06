@@ -24,7 +24,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; nothing released since.
+**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; 1.7 (released 2026-11-06) is new since.
 
 ## 1.7 — Wearable titles: show what your gladiator has done (2026-11-06)
 

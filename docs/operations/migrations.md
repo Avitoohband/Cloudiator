@@ -1,5 +1,141 @@
 # Local identity backend and migrations
 
+## Patch 1.7.1 (M29): hand-given titles
+
+M29 is `supabase/migrations/20261106200416_patch_1_7_1.sql`, Patch 1.7.1's one database change (Avi: one database change per
+patch). Its source is `supabase/sql/23-awards.sql` (SHA-256 `80a74367…c5b15e`), where the design notes are; the plan is
+`docs/superpowers/plans/2026-11-06-hand-given-titles-1-7-1.md` (Task 1), and the 1.7 spec
+`docs/superpowers/specs/2026-10-30-titles-1-7-design.md` governs everything the plan does not name. The worker is unchanged. The
+shared catalog (`supabase/functions/_shared/domain/titles.ts`) gained the two rows, and `game-command` validates a `wear-title`
+id against it, so the release deploys `game-command` too (the worker does not import the catalog).
+
+**What it changes.**
+- **`private.title_rules()`** restated from M28 (`22-titles.sql`) with TITLES_V1's two hand-given rows after Bannerman:
+  `game-master` and `high-ground`, measure `award`, threshold 1, untiered (33 rules). No counter, trigger, settlement or
+  back-fill produces `award` (`private.title_measures` holds no such key), and `private.award_titles` compares a missing measure
+  as null, so nothing awards them; the release back-fill already ran (its record replays). Its ACL restated (EXECUTE for
+  `service_role`).
+- **`public.gladiator_titles.source`**: `gladiator_titles_source_check` dropped and added with `'award'`, in one
+  `ALTER TABLE`.
+- **`private.give_title(gladiator_id uuid, title_id text)`**, the owner's only (invoker, `search_path=''`, every privilege
+  revoked from `public`, `anon`, `authenticated` and `service_role`): accepts only a catalog id whose measure is `award`
+  (else 23514; an unknown gladiator 23503; nothing written); takes the account lock, then the gladiator row; at the database
+  time sampled after both inserts the title row once (source `award`, no activity or detail) and puts the title on. A second
+  call for the same pair changes nothing (not even an unchanged update). Result `{ok, given, worn}` (`worn`: the title worn
+  after the call). The deferred `project_changed_character` triggers republish the gladiator at commit (the actor's `title`,
+  the profile's `titles_earned`); `owner_state` counts the title as a notice (no activity, source not `joined`).
+
+**Generation.** CLI 2.120.0,
+`npx --offline --no-install supabase db pull patch_1_7_1 --local --schema public,private --diff-engine pg-delta --yes`
+(2026-11-06 20:04:14–20:04:23 UTC). Its input was a clean M01–M28 reset (`db reset --local --no-seed --yes`; fingerprint
+1,356 lines and access audit 671 rows, each byte-equal to M28's final replay) with `23-awards.sql` applied once through the
+psql fallback, after the container label check.
+- The shadow database was built from the local Postgres image already present. `docker events --filter type=image` recorded
+  no event during the pull, and the image list was the same before and after: nothing was downloaded.
+- With `--yes` the CLI also recorded `20261106200416` in the local migration history. The next clean reset replaced that
+  database.
+- The as-generated draft (88 lines, SHA-256 `d8bdeacc…99471b`) is kept with the evidence. Its two function bodies were already
+  byte-identical to the source's; it re-emitted no unchanged function.
+
+**Completion.** The as-generated draft failed the file test (`tests/db/awards.test.ts`, "ships M29…": no provenance header).
+pg-delta wrote the CHECK change as a `DROP CONSTRAINT` first and a deparsed `ADD CONSTRAINT … CHECK ((source = ANY (ARRAY[…])))`
+last, with the two functions between them in name order (`give_title` before `title_rules`), and three ACL statements on
+`give_title` (a revoke from PUBLIC and from the owner, and a grant back to the owner); none for `title_rules` (CREATE OR
+REPLACE keeps its grants); no reload. It began with `SET local check_function_bodies = off;` and wrote no
+`-- pg-delta: transaction=false` marker: the whole file is one transaction.
+
+It was completed from the source by a saved script (`complete-m29.mjs`) that accounts for every generated statement: kept, or
+named as replaced (the drop, the add and 3 ACL statements). M01–M28 are unchanged. The completions, with their lines in
+`23-awards.sql`:
+1. A provenance header.
+2. The two functions as generated, in the source's order (:34–70, :88–110): `title_rules` before `give_title`, which reads it.
+3. `title_rules`' ACL, the source's revoke and grant (:73–74), after it.
+4. The source's one `ALTER TABLE` (:77–78, its CHECK text: the M25 lesson), in place of the generated drop and add.
+5. `give_title`'s revoke from the four roles (:114), in place of the generated three.
+6. `notify pgrst, 'reload schema';` (:116), last.
+
+Everything else is as generated: `SET local check_function_bodies = off` and the two function statements. No CHECK calls a
+function.
+
+**Tests.**
+- `tests/db/awards.test.ts` (new), the database rules of hand-given titles: given once (worn at once, source `award` at the
+  database time, the world actor, the profile's count and the owner's notice); a second call changes nothing and says so; each
+  title, also to a gladiator with none or with No title; refused for a title earned by play, an unknown id or gladiator, writing
+  nothing; the lock order (it waits for a held account lock without holding the gladiator row, waits for a held row while
+  holding the account lock, and stamps the time after the wait); owner-only (no API role, the Data API does not serve
+  `private`); the widened CHECK; never awarded by any measure, by a real settlement, or by the back-fill, and a back-fill replay
+  keeps a given title.
+  - RED first: every case failed against M01–M28 (no `give_title`, 31 rules, the old CHECK), except the three "never earned by
+    play" cases, which hold vacuously there. Those three were checked by mutation: with `title_rules` giving `game-master` the
+    measure `trainings`, all three failed; the function was then restored from its captured `pg_get_functiondef` text, byte for
+    byte, and the fingerprint matched the source-applied one.
+- `tests/db/awards.test.ts`, "ships M29 completed from 23-awards.sql…" (the shape of M28's test): exactly one
+  `_patch_1_7_1.sql`, the 29th migration after M28, LF only; the header names the engine, command, source and M01-M28; no
+  non-transactional marker, no top-level BEGIN or COMMIT, no data statement, and no `drop` outside the source's CHECK
+  statement; the two source functions in the source's order with the source's bodies, and no other; the source's CHECK
+  statement once and no other table change or CHECK; the source's three ACL statements and no other, each after its function,
+  `title_rules`' grant after its revoke, no grant on `give_title`; the reload last.
+  - RED first: it failed on the absent file, then on the as-generated draft (no provenance header).
+  - Checked by mutation: it failed on each of 18 mutants, with the file then restored byte for byte (SHA-256
+    `bec1b530…14f576`). The 18: no header; the functions in name order; the generated CHECK; the CHECK without `award`; the CHECK
+    after `give_title`; a generated grant to the owner; a `service_role` grant on `give_title`; its revoke without
+    `service_role`; `title_rules`' grant missing; its grant before its revoke; its ACL before the function; a changed rule; a
+    re-emitted unchanged function; a top-level BEGIN and COMMIT; no reload; a statement after the reload; a data statement; CRLF
+    line endings.
+- `tests/db/titles.test.ts`: the catalog test pins 33 rules (the two `award` rows after Bannerman); M28's file test keeps M28 as
+  the 28th migration (no longer the last). `tests/db/restore-hosted.test.ts` pins 29 migrations. `tests/db/access-matrix.test.ts`
+  keeps `give_title` owner-only (no audit row; an accidental grant would show); the `service_role` snapshot is unchanged.
+  `tests/rule-retention.test.ts` holds over M29 unchanged (its one `drop` is a constraint's, and it writes no data).
+
+**Replay evidence** (2026-11-06):
+- **Evidence**: parent `logs/p171-m29-task1-20261106/`: the as-generated draft, the completion, mutation, probe and inspection
+  scripts (hashed in `reader-hashes.txt` before use), each fingerprint and audit, and the runners' reports.
+- **Source applied once** to the clean M01–M28 reset: fingerprint 1,357 lines. That is M28's 1,356 with 1 added (`give_title`)
+  and 2 changed (`title_rules`' body hash, `gladiator_titles_source_check` with `'award'`).
+- **Access audit** on the source-applied database: 671 rows, byte-equal to M28's: `give_title` has no API-role row, and
+  `title_rules`' `service_role` EXECUTE is unchanged.
+- **Clean resets** (`db reset --local --no-seed --yes`) replayed M01–M29 with nothing applied afterwards: one before the full run, and a final one after it. The lock probe ran before them on
+  its own M01–M28 reset. Each
+  replay's fingerprint and access audit were byte-equal to the source-applied ones (`cmp`), and 29 migrations were recorded.
+- **Inspection of the replay** (read-only): `give_title` invoker, `search_path=""`, `{postgres=X/postgres}`, volatile, no carriage
+  return in its body; `title_rules` immutable, `{postgres=X/postgres,service_role=X/postgres}`; no function in `public` or
+  `private` executable by `anon` or `authenticated`, none security definer; the CHECK validated; 57/57 triggers enabled; both
+  cron jobs active; the back-fill record unchanged (`{ok, gladiators 0, …, replayed false}`).
+- **Lint and advisors** on the first replay: lint is empty. The advisors (`--type all --level info --fail-on warn`) gave 40 INFO
+  notices and no warnings or errors, the same 40 as M28's.
+- **`npm run test:db`**: 556/556 in 33 files on the first M01–M29 replay (20:11–20:18 UTC), no skips: M28's 544 and 12 new (the
+  ten cases and the file test of `tests/db/awards.test.ts`, and the access-matrix case). Before it the Edge source's access times
+  were refreshed and the runtime settled (the Edge function is served from this worktree). The Edge container's start time was
+  the same before and after the run (20:10:35.79 UTC), and the fingerprint and audit were still byte-equal after it. The unit
+  suite (2,364) and `npm run typecheck` passed on the same tree.
+- **Locks** (probed 2026-11-06: M29 in one rolled-back transaction on a clean M01–M28 reset
+  (`db reset --local --version 20261106064426 --no-seed --yes`), then its own backend's granted relation locks from `pg_locks`).
+  Evidence: `probe-output.txt` and `probe-summary.txt`. The rollback left the M28 fingerprint and audit unchanged (`cmp`).
+  - ACCESS EXCLUSIVE on `public.gladiator_titles` (the CHECK), held to the commit: M29's only lock on a game table. While it
+    waits for or holds it, the owner read and every title write wait behind it (settlements, purchases, sales, `wear_title`).
+  - Nothing else: replacing `title_rules`, creating `give_title` and the ACL statements lock no table. M29 holds nothing anyone
+    else waits for, so it cannot join a deadlock; a long transaction on `gladiator_titles` only delays it.
+
+**Release (plan Task 3).** Every production write needs Avi's go. Every npx command here is `npx --offline --no-install`.
+Nothing hosted was run for this record.
+- **Order:** M29, then `game-command` (the shared catalog changed: a holder can put a given title back on only through the new
+  command's id check), then the client, then the 1.7.1 record without a note, then the two grants.
+- **Before the push**: production's migration list ends at M28, `20261106064426_patch_1_7.sql`; `db push --dry-run
+  --skip-vault` lists exactly `20261106200416_patch_1_7_1.sql` (use `--skip-vault` on the push too); push 20–60 minutes after a
+  slot cutoff, outside Wednesday and Saturday 17:20–20:00 UTC, with no open boundary; right before it, M28's `pg_stat_activity`
+  query (no transaction older than a few seconds, or a `lock_timeout` on the push's session).
+- **Read-back after the push** (no player data): `select pg_get_constraintdef(oid) from pg_constraint where
+  conname='gladiator_titles_source_check'` names `'award'`; `select jsonb_array_length(private.title_rules())` is 33; `select
+  proacl from pg_proc where oid='private.give_title(uuid,text)'::regprocedure` is `{postgres=X/postgres}`; the hosted
+  fingerprint and access audit against this replay (1,357 lines and 671 rows), with M28's expected differences.
+- **The grants** (plan Task 3; ids read by exact gladiator name, as Avi approved): `select private.give_title(<id>,
+  'game-master')` and `select private.give_title(<id>, 'high-ground')`, each answering `{"ok": true, "given": true, "worn": …}`;
+  a repeat answers `given: false` and changes nothing.
+- **On M29 alone**, 1.7's functions and client keep working: nothing awards an `award` title; the old client ignores a held
+  id it does not know (1.7 Review Focus 1) and the old `game-command` refuses it as a `wear-title` id.
+- **Rollback:** there is no down migration. A given title is permanent (guard_frozen); a wrong grant is corrected by an owner
+  statement after Avi's go (the guard dropped and restored inside that one transaction).
+
 ## Patch 1.7 (M28): wearable titles
 
 M28 is `supabase/migrations/20261106064426_patch_1_7.sql`, Patch 1.7's one database change (Avi: one database change per

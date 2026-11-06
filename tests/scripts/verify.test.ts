@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CI_ENV, HOST_FAULT_MARKER as GATE_MARKER, KNOWN_BLOCKERS, NOT_RUN_ON_CI, childEnv, classifyBrowser, classifyDb, gateReport, gateSteps, onCi, parseOptions,
@@ -518,6 +518,51 @@ describe('the Edge access-time refresh (C22)', { timeout: 30_000 }, () => {
     return { base, root, outside, inside };
   }
 
+  // Observed 2026-11-06 (after the PC's reboot at 12:12 UTC): on this host an external on-write reader (most likely Windows
+  // Defender real-time scanning, with NTFS last-access updates on) reads a newly written file about a second after the test
+  // set its baseline access time, so the junction tests saw a changed access time that no code of ours caused (lstat and
+  // readdir still report the junction as a link; an older checkout fails the same way). So the tests settle the files first,
+  // pin the baseline, check it holds, and compare the target with a control that the refresh never sees: only a target that
+  // changed while its control did not fails the test (the refresh walked through the junction).
+  const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const atime = (entry: string) => statSync(entry, { bigint: true }).atimeNs;
+  const OLD = new Date('2026-01-01T00:00:00Z');
+  /** Waits until every entry's access time has stopped changing (500 ms stable, at most 5 s), then pins it to OLD and re-checks. */
+  function settleAndPin(entries: string[]) {
+    for (const entry of entries) {
+      let last = atime(entry), stableSince = Date.now();
+      const deadline = Date.now() + 5_000;
+      while (Date.now() - stableSince < 500 && Date.now() < deadline) {
+        sleep(100);
+        const now = atime(entry);
+        if (now !== last) { last = now; stableSince = Date.now(); }
+      }
+    }
+    for (let attempt = 0; attempt < 5; attempt++) {
+      for (const entry of entries) utimesSync(entry, OLD, OLD);
+      sleep(500);
+      if (entries.every(entry => atime(entry) === atime(entries[0]))) return;
+    }
+  }
+  /** The scratch tree plus `control/control.ts`, which no refresh walks, settled and pinned like the target. */
+  function pinnedScratch() {
+    const tree = scratch();
+    const control = join(tree.base, 'control');
+    mkdirSync(control);
+    writeFileSync(join(control, 'control.ts'), 'export {};');
+    const pairs = [[join(tree.outside, 'target.ts'), join(control, 'control.ts')], [tree.outside, control]] as const;
+    settleAndPin(pairs.flat());
+    return { ...tree, pairs, baseline: pairs.map(([target, ctl]) => [atime(target), atime(ctl)] as const) };
+  }
+  /** A target may change only together with its control (an external reader); alone, the refresh followed the junction. */
+  function expectTargetsUntouched(t: ReturnType<typeof pinnedScratch>) {
+    for (const [i, [target, ctl]] of t.pairs.entries()) {
+      const [targetBefore, controlBefore] = t.baseline[i];
+      const targetChanged = atime(target) !== targetBefore, controlChanged = atime(ctl) !== controlBefore;
+      expect(targetChanged && !controlChanged, `${target} changed while its control did not`).toBe(false);
+    }
+  }
+
   it.skipIf(!windows)('sets every folder and file access time to now and leaves the modification times', () => {
     const { base, inside } = scratch();
     try {
@@ -533,14 +578,13 @@ describe('the Edge access-time refresh (C22)', { timeout: 30_000 }, () => {
   });
 
   it.skipIf(!windows)('skips a junction and never touches what it points to', () => {
-    const { base, root, outside, inside } = scratch();
+    const tree = pinnedScratch();
+    const { base, root, outside, inside } = tree;
     try {
       symlinkSync(outside, join(root, 'linked'), 'junction');
-      const target = statSync(join(outside, 'target.ts'), { bigint: true });
-      const folder = statSync(outside, { bigint: true });
+      expect(lstatSync(join(root, 'linked')).isSymbolicLink()).toBe(true);
       expect(refreshAccessTimes(root)).toEqual({ ok: true, count: inside.length, skipped: 1 });
-      expect(statSync(join(outside, 'target.ts'), { bigint: true }).atimeNs).toBe(target.atimeNs);
-      expect(statSync(outside, { bigint: true }).atimeNs).toBe(folder.atimeNs);
+      expectTargetsUntouched(tree);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 
@@ -628,18 +672,19 @@ describe('the Edge access-time refresh (C22)', { timeout: 30_000 }, () => {
   // name points to. A junction named node_modules directly under the root is skipped like any link, and its target is
   // untouched, also when the test seam would change it.
   it.skipIf(!windows)('still skips a junction named node_modules under the root, tolerating nothing and leaving its target untouched', () => {
-    const { base, root, outside, inside } = scratch();
+    const tree = pinnedScratch();
+    const { base, root, outside, inside } = tree;
     try {
       symlinkSync(outside, join(root, 'node_modules'), 'junction');
+      expect(lstatSync(join(root, 'node_modules')).isSymbolicLink()).toBe(true);
       const target = statSync(join(outside, 'target.ts'), { bigint: true });
       const folder = statSync(outside, { bigint: true });
       for (const options of [{}, { concurrentWrite: 'node_modules' }, { concurrentWrite: 'node_modules/target.ts' }, { concurrentRemove: 'node_modules' }]) {
         expect(refreshAccessTimes(root, options), JSON.stringify(options)).toEqual({ ok: true, count: inside.length, skipped: 1 });
       }
+      expectTargetsUntouched(tree);
       for (const [entry, before] of [[join(outside, 'target.ts'), target], [outside, folder]] as const) {
-        const after = statSync(entry, { bigint: true });
-        expect(after.atimeNs, entry).toBe(before.atimeNs);
-        expect(after.mtimeNs, entry).toBe(before.mtimeNs);
+        expect(statSync(entry, { bigint: true }).mtimeNs, entry).toBe(before.mtimeNs);
       }
       expect(prepareEdge(root)).toMatchObject({ ok: true, files: 2, refreshed: inside.length, skipped: 1 });
     } finally { rmSync(base, { recursive: true, force: true }); }

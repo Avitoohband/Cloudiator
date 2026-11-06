@@ -65,3 +65,7 @@ a task changed `supabase/functions`), the 1.7.1 record without a note (`node scr
 two grants (`select private.give_title(<Indigo's id>,'game-master')`, `select private.give_title(<Tommy's id>,
 'high-ground')` — ids read by exact gladiator name, which Avi approved for these two rows), each read back. Record the
 evidence and update HANDOFF.md.
+
+## Status
+
+**2026-11-06: released.** M29 live 21:59 UTC, game-command, client 8828d0a, record 1.7.1 (no note), Game Master → Indigo, High Ground → Tommy. High Ground's play rule waits for Avi (idea 57).

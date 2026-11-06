@@ -1560,3 +1560,17 @@ the controller's 37 rulings: [PATCH-1.7-RULINGS-2026-11-06](../implementation/PA
 | First boundary with the triggers | 18:43 UTC (read-only): slot 373748 published (21 members, 63.8 s); boundaries open 0; coordinator without error; prepare/simulation/reveal/settlement failed 0, expired 0, unfinished 0 (settlements ran through the title triggers); HTTP errors 0; `duplicateGrants` 0; back-fill counts unchanged and consistent (119 titles, 0 profile mismatches, 7 triggers enabled). |
 
 Open: Avi's signed-in look at the live game; the 1.7 clip and its feature posts (on Avi's go).
+
+## Patch 1.7.1 released — 2026-11-06
+
+Hand-given titles. Avi's go 2026-11-06 21:58 UTC ("Go now"; Patch history "Show it"). Plan: [2026-11-06-hand-given-titles-1-7-1](../superpowers/plans/2026-11-06-hand-given-titles-1-7-1.md); ledger `.superpowers/sdd/2026-11-06-hand-given-titles-1-7-1/progress.md`; raw outputs `logs/p171-release-20261106/`.
+
+| Step | Evidence |
+| --- | --- |
+| Gate of record | 12/12 on `f9916cc` (native32: db 556, browser and production 1,378/1,378); two task reviews and a final whole-branch review (ready to release). |
+| M29 | `20261106200416_patch_1_7_1.sql` (SHA-256 `bec1b530…`, LF) pushed 21:59:26 UTC (`--skip-vault`, ~4 s, no retry) after: list ended at M28; dry run only M29; boundaries open 0; no other transaction. Read-back: one source CHECK naming `award`; `title_rules()` 33; `give_title` ACL `{postgres=X/postgres}`; 0 profile mismatches. Fingerprint hosted 1,354 / local 1,357 and audit 635 / 671: only the accepted platform/live/`seed-rules` lines and 36 platform-default rows; 0 game-schema lines; 0 findings. |
+| Edge | `game-command` deployed 22:00 UTC (815 kB; only `_shared/domain/titles.ts` and type-only `_shared/contracts/reads.ts` changed since 1.7; `game-worker` untouched). Probes 204/403/401. |
+| Client | `release` e27b73f → `8828d0a` at 22:00:48 UTC; Pages 38a60f91-38e8-4fef-9eb5-a2ce252f4a77; canonical == deployment (17 paths, 3 new); bundle carries `1.7.1`. Deployed checks 9 passed (26 anonymous denials; 48 assets clean). |
+| Record | `record_patch('1.7.1', 'Hand-given titles', …, null)` at ~22:03:30 UTC (no note); `latest_patch` 1.7.1. |
+| Grants | `give_title` Indigo → `game-master` and Tommy → `high-ground` (22:04 UTC; ids read by exact name, Avi's go): both `{ok, given:true, worn}`. Read-back: exactly two `award` rows (null activity), both worn; the camp actors show the titles; profiles 11 and 9 titles; 0 mismatches. |
+

@@ -1,5 +1,11 @@
 # Deployment checklist
 
+## Patch 1.7.1 LIVE — 2026-11-06
+
+Client 8828d0a / Pages 38a60f91-38e8-4fef-9eb5-a2ce252f4a77; Supabase M01–M29 (M29 `20261106200416_patch_1_7_1`); `game-command`
+from 1.7.1 (`2603ab0`); record 1.7.1 without a note; Game Master given to Indigo and High Ground to Tommy
+(`private.give_title`, owner only). [Evidence](release-evidence.md#patch-171-released--2026-11-06).
+
 ## Patch 1.7 LIVE — 2026-11-06
 
 Client e27b73f / Pages 51187ca7-da58-4f48-96d2-475a70785c93; Supabase M01–M28 (M28 `20261106064426_patch_1_7`, with its one-time

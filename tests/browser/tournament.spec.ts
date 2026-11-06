@@ -959,6 +959,30 @@ test.describe('the live Tournaments panel', () => {
     await page.screenshot({ path: `.superpowers/design/2026-10-30-titles/shots/task12-bracket-${shot}.png` });
   });
 
+  // Patch 1.7 final fix: names may be 20 characters; the name wraps in its half-cell (never cut with an ellipsis); only the title is cut.
+  test('wraps a 20-character entrant name whole in its half-cell at 360 px, with no sideways scroll', async ({ page, context }) => {
+    const at = startOf('opening') + 30 * MIN;
+    const LONG = ['W'.repeat(20), 'M'.repeat(20)];
+    const view = JSON.parse(JSON.stringify(VIEWS.opening).replaceAll('Nerva', LONG[0]).replaceAll('Aster', LONG[1])) as TournamentView;
+    const [a, b] = LONG.map(name => view.entrants.find(e => e.name === name)!);
+    const actor = (e: { gladiatorId: string; name: string }, title: string): PublicActor => ({ ...worldFixtureActor, gladiatorId: e.gladiatorId, name: e.name, title });
+    await routeLiveReads(context, { world: { ...emptyWorld(at), actors: [actor(a, 'lion'), actor(b, 'founder')] }, tournaments: [view], serverNowMs: () => at });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto('/game/');
+    const panel = await tournamentsPanel(page);
+    const bout = panel.locator('li[data-status]').filter({ hasText: 'Bout 2' });
+    await bout.scrollIntoViewIfNeeded();
+    const cells = await bout.getByRole('group').evaluateAll(groups => groups.map(g => {
+      const name = g.children[0] as HTMLElement, box = name.getBoundingClientRect(), cell = g.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(name).lineHeight) || parseFloat(getComputedStyle(name).fontSize) * 1.2;
+      return { text: name.textContent, whole: name.scrollWidth <= name.clientWidth, inside: box.left >= cell.left - 1 && box.right <= cell.right + 1,
+        onScreen: box.left >= 0 && box.right <= window.innerWidth, wrapped: box.height > line * 1.5, ellipsis: getComputedStyle(name).textOverflow };
+    }));
+    expect(cells.map(c => c.text)).toEqual(LONG);
+    for (const cell of cells) expect(cell).toMatchObject({ whole: true, inside: true, onScreen: true, wrapped: true, ellipsis: 'clip' });
+    expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
   test('follows the owner’s league after a promotion, from the owner read on a new revision', async ({ page, context }) => {
     // The lookup league is the owner's, re-read by the shared game state when the revision changes (Task 19 gate).
     const at = startOf('opening') + 30 * MIN;

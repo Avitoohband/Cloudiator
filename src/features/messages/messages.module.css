@@ -729,6 +729,12 @@
   cursor: pointer;
 }
 
+/* Wear is aria-disabled while the title is sent: it keeps the focus, and looks busy (the Clearer busy buttons rule). */
+.wear[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .wear[aria-pressed='true'] {
   border-color: #5d8f5a;
   background: transparent;

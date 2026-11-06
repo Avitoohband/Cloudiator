@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import type { TransactionSql } from 'postgres';
@@ -26,6 +26,15 @@ import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/
 const commands = createDatabase(admin);
 beforeEach(async () => { await resetIdentity(); await sql`update private.scheduler set enabled=false where singleton`; });
 afterAll(() => sql.end());
+// A killed earlier run can leave the seven counting triggers disabled DB-wide (history() disables them) and the pause and
+// lock-probe test objects installed, which silently stops title counting for every other file: restore both first.
+beforeAll(async () => {
+  await titleTriggers('enable');
+  await sql`drop trigger if exists test_titles_lock_probe on public.gladiator_titles`;
+  await sql`drop trigger if exists test_titles_pause on public.title_counters`;
+  await sql`drop function if exists private.test_titles_lock_probe()`;
+  await sql`drop function if exists private.test_titles_pause()`;
+});
 
 const DAY = 86_400_000;
 const SEASON_MS = 2_419_200_000;
@@ -1415,7 +1424,7 @@ describe('the history back-fill', () => {
     expect(await buyListing(f, offer.value!.listingId as string)).toMatchObject({ ok: true });
     expect(await sell(f, bowId)).toMatchObject({ ok: true });
     // The switch to v2, recorded as 1.6 records it, then v2 gold: a result, salvage sold, a season first place (a real close).
-    const switchedAt = await dbNow();
+    const switchedAt = (await dbNow()) + 1; // strictly after the last v1 sell's created_at
     await sql`insert into private.economy_switches(version,switched_at_ms,wallets_scanned,wallets_cut,money_before,money_after,result)
       values('v2',${switchedAt},2,0,0,0,'{}')`;
     await activate('v2');

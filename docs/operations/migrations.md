@@ -203,11 +203,15 @@ function. M28 re-emits no unchanged function.
 
      Push only when no transaction is older than a few seconds, or with a `lock_timeout` on the push's session.
 - **Deadlock risk.** M28 takes its DDL locks (above) before `refresh_projections` and the back-fill run; the back-fill's own
-  table locks then change nothing. That is not the commands' shared order (account lock, gladiator row, wallet, items). A
-  command that holds a gladiator row and then needs a table M28 has locked, or a read of `owner_state` or
-  `public_profile_reads` that holds the view and waits for `gladiators` or `public_profiles` while M28 waits for the view,
-  deadlocks with M28, and Postgres aborts one side. Hence the quiet window, the long-transaction read and no open boundary.
-  - If the push fails as a deadlock's victim (SQLSTATE `40P01`), M28 rolled back whole (one transaction, the back-fill
+  table locks then change nothing. A command that holds a gladiator row only delays M28's first ALTER (`worn_title` on
+  `gladiators` comes first), and cannot form a cycle. The real cycles are two: (a) an `owner_state` or `public_profile_reads`
+  read that starts after the ALTER, holds the view and waits on `gladiators` or `public_profiles` while M28 waits for the
+  view; (b) a transaction that already wrote to `activities`, `wallet_ledger`, `item_instances`, `owned_cosmetics`,
+  `season_awards` or `public_profiles` and then touches `gladiators` (for example the deferred projector at its commit;
+  cleanup's 500 ms `lock_timeout` saves it). Postgres aborts one side. `pg_stat_activity` cannot see short view polls, so for
+  (a) the mitigation is the retry rule below, plus pushing in a quiet window 20-60 minutes after a slot cutoff, with no open
+  boundary.
+  - Retry rule: if the push fails as a deadlock's victim (SQLSTATE `40P01`), M28 rolled back whole (one transaction, the back-fill
     included). Read the migration list again: it must still end at M27. Then push once more. If that fails too, stop and
     diagnose.
 - **Read-back after the push** (aggregates only): `select result from private.title_backfills` (`gladiators` equal to the

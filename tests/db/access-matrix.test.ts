@@ -31,6 +31,33 @@ const line = (r: Row) => [r.section, r.object, r.grantee, r.privilege, r.detail]
 const lines = (rows: Row[]) => rows.map(line).sort();
 const toRows = (result: unknown) => [...(result as Row[])];
 const audit = async () => toRows(await sql.unsafe(AUDIT));
+it('keeps bot registration, bench, catalog and routine inaccessible to API roles', async () => {
+  const functions = ['private.create_bot(text,uuid)', 'private.bench_bot(text)', 'private.bot_catalog()'];
+  const roles = ['anon', 'authenticated', 'service_role'];
+  for (const signature of functions) {
+    expect(await sql`select p.prosecdef as definer,p.proconfig as config,
+      has_function_privilege('anon',p.oid,'EXECUTE') as anon,
+      has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated,
+      has_function_privilege('service_role',p.oid,'EXECUTE') as service
+      from pg_proc p where p.oid=to_regprocedure(${signature})`, signature)
+      .toEqual([{ definer: false, config: ['search_path=""'], anon: false, authenticated: false, service: false }]);
+  }
+  for (const role of roles) {
+    for (const statement of [
+      "select private.create_bot('pip',gen_random_uuid())", "select private.bench_bot('pip')",
+      'select * from private.bot_routines', 'select * from private.bots', 'update private.bots set active=true',
+    ]) {
+      await expect(sql.begin(async tx => {
+        await tx.unsafe(`set local role ${role}`);
+        await tx.unsafe(statement);
+      }), `${role}: ${statement}`).rejects.toMatchObject({ code: '42501' });
+    }
+  }
+  for (const client of [anonymous, (await account()).client, admin]) {
+    expect((await client.schema('private').from('bot_routines').select('*')).error?.code).toBe('PGRST106');
+    expect((await client.schema('private').rpc('bench_bot', { member_key: 'pip' })).error?.code).toBe('PGRST106');
+  }
+});
 class RolledBack extends Error {}
 /**
  * What `read` sees inside a transaction that first runs `statements`. The transaction always rolls back. It runs on a
@@ -105,6 +132,7 @@ const relationOf = (object: string) => object.split('.').slice(0, 2).join('.');
  * public sequences and MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on new public tables.
  */
 const SERVICE_ROLE = [
+  'column private.bots.gladiator_id: SELECT',
   // Task 5's economy switch/table deliberately add no service_role privilege; pinned separately below.
   'default postgres:public:sequences: UPDATE',
   'default postgres:public:tables: MAINTAIN,REFERENCES,TRIGGER,TRUNCATE',

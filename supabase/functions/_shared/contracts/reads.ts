@@ -90,6 +90,8 @@ export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena
 export type EquipmentSilhouette = 'weapon-sword' | 'weapon-axe' | 'weapon-spear' | 'weapon-bow' | 'offhand-shield' | 'armor-light' | 'armor-heavy' | 'head-hood' | 'head-helmet' | 'feet-light' | 'feet-heavy';
 export type PublicActor = {
   gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: EquipmentSilhouette[];
+  /** The public team marker is present only for a registered Ludus Nimbus actor. */
+  botTeam?: 'ludus-nimbus';
   /** Patch 1.7 (M28): the title worn now, an id of TITLES_V1, or null; absent from an older server's row. A client shows nothing for an id it does not know. */
   title?: string | null;
   /** The look chosen at creation (M24), as OwnerState.appearance; null is the legacy look. Cosmetic only, public like the gear. */

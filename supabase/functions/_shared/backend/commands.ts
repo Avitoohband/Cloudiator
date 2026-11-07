@@ -95,6 +95,7 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
   // All authenticated attempts count, including malformed bodies. Creation's separate budget is charged after parsing its kind.
   try {
     const retry = await deps.database.consumeRateLimit(actor, false);
+    if (retry === -1) return jsonResponse({ ok: false, code: 'unauthenticated' }, 401, origin);
     if (retry !== null) return jsonResponse({ ok: false, code: 'rate-limited', retryAfterMs: retry }, 429, origin);
     if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') return jsonResponse({ ok: false, code: 'invalid' }, 415, origin);
     let body: unknown;
@@ -102,6 +103,7 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     catch (error) { return jsonResponse({ ok: false, code: 'invalid' }, error instanceof RangeError ? 413 : 400, origin); }
     if (record(body) && body.kind === 'create-character') {
       const retryCreation = await deps.database.consumeRateLimit(actor, true);
+      if (retryCreation === -1) return jsonResponse({ ok: false, code: 'unauthenticated' }, 401, origin);
       if (retryCreation !== null) return jsonResponse({ ok: false, code: 'rate-limited', retryAfterMs: retryCreation }, 429, origin);
     }
     const command = parseCommand(body);

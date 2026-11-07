@@ -9,6 +9,66 @@
 -- afternoon and levels 3/7/12.
 begin;
 
+-- 6B schema. Define the registry before the title and projection functions that read it.
+-- The private catalog repeats the fixed v2 kits from domain/bots.ts. The routine seed is shared by every registration.
+create or replace function private.bot_catalog() returns jsonb
+language sql immutable security invoker set search_path='' as $$
+  select jsonb_object_agg(member_key,jsonb_build_object(
+    'key',member_key,'name',name,'level',level,'classId',class_id,'stance',stance,'role',role,
+    'allocation',jsonb_build_object('strength',str,'agility',agi,'vitality',vit,'endurance',endurance,'precision',prec),
+    'equipment',jsonb_build_object('weapon',weapon,'offHand',off_hand,'head',head,'body',body,'feet',feet),
+    'earnedPoints',earned,'peakStrength',gear,'leagueIndex',league_index,'staminaMaximum',stamina,'league',league))
+  from (values
+    ('tullia','Tullia',12,'guardian','defensive','guard',10,0,18,7,3,
+      'sword:10:common','round-shield:10:common','iron-helmet:10:common','light-armor:10:common','light-boots:10:common',38,84,39,115,'silver'),
+    ('grit','Grit',7,'berserker','offensive','striker',13,2,7,0,3,
+      'axe:5:common',null,'leather-hood:5:common','light-armor:5:common','light-boots:5:common',25,46.28,23,100,'bronze'),
+    ('ash','Ash',7,'duelist','balanced','skirmisher',5,9,2,0,9,
+      'sword:5:common',null,'leather-hood:5:common','light-armor:5:common','light-boots:5:common',25,48,23,100,'bronze'),
+    ('rufus','Rufus',4,'guardian','defensive','guard',4,0,7,2,1,
+      'sword:1:common','round-shield:1:common','iron-helmet:1:common','light-armor:1:common','light-boots:1:common',14,42,14,104,'bronze'),
+    ('pip','Pip',3,'duelist','balanced','skirmisher',3,5,1,0,5,
+      'sword:1:common',null,'leather-hood:1:common','light-armor:1:common','light-boots:1:common',14,32,11,100,'bronze')
+  ) as kit(member_key,name,level,class_id,stance,role,str,agi,vit,endurance,prec,weapon,off_hand,head,body,feet,earned,gear,league_index,stamina,league)
+$$;
+revoke all on function private.bot_catalog() from public,anon,authenticated,service_role;
+
+create table if not exists private.bots (
+  member_key text primary key check (private.bot_catalog() ? member_key),
+  team text not null check (team='ludus-nimbus'),
+  -- The trusted registry entry must exist before the gladiator's immediate Founder trigger runs.
+  gladiator_id uuid not null unique references public.gladiators(id) deferrable initially deferred,
+  role text not null check (role=private.bot_catalog()->member_key->>'role'),
+  active boolean not null default false
+);
+create table if not exists private.bot_routines (
+  member_key text not null check (private.bot_catalog() ? member_key),
+  week_index smallint not null check (week_index between 0 and 125),
+  directive text not null check (directive in ('off-duty','rest','on-call','arena','training')),
+  primary key(member_key,week_index)
+);
+alter table private.bots enable row level security;
+alter table private.bot_routines enable row level security;
+revoke all on private.bots,private.bot_routines from public,anon,authenticated,service_role;
+-- The existing invoker command, title and projection paths can ask only whether a gladiator is registered.
+grant select(gladiator_id) on private.bots to service_role;
+
+with weekly_slots as (
+  select j as week_index,j%18 as day_slot,(j/18+(j%18-8)/3)%4 as pair_start
+  from generate_series(0,125) slots(j)
+), roster as (
+  select member_key,array['grit','rufus','ash','pip'] as bronze from jsonb_object_keys(private.bot_catalog()) members(member_key)
+)
+insert into private.bot_routines as r(member_key,week_index,directive)
+select member_key,week_index,case
+  when day_slot<6 then 'off-duty'
+  when day_slot%3=0 then 'rest'
+  when day_slot%3=1 then 'on-call'
+  when member_key in ('tullia',bronze[1+pair_start],bronze[1+(pair_start+1)%4]) then 'arena'
+  else 'training' end
+from weekly_slots cross join roster
+on conflict(member_key,week_index) do update set directive=excluded.directive where r.directive<>excluded.directive;
+
 -- 1. Planning and affordability. Old workers can still send the five-key preparation under either retained version.
 alter table public.activities drop constraint if exists activities_resolved_kind_check,
   add constraint activities_resolved_kind_check check (resolved_kind in ('training','rest','expedition','arena','tournament','dungeon'));
@@ -1246,7 +1306,8 @@ language sql stable security invoker set search_path='' as $$
       'gold-earned',coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v2'),0)
         +coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v1'),0)/4,
       'days-in-camp',floor((title_measures.at_ms-g.created_at_ms)::numeric/86400000)::bigint,
-      'founder',case when g.created_at_ms<private.founder_cutoff_ms() then 1 else 0 end,
+      'founder',case when g.created_at_ms<private.founder_cutoff_ms()
+        and not exists(select 1 from private.bots r where r.gladiator_id=g.id) then 1 else 0 end,
       'banner',case when exists(select 1 from public.owned_cosmetics o where o.gladiator_id=g.id and o.catalog_id='banner') then 1 else 0 end)
   from public.gladiators g where g.id=title_measures.gid
 $$;
@@ -1325,6 +1386,9 @@ begin
     'activityId',case when not resting then a.id end,'activityStatus',case when resting then 'idle' when a.id is null then 'active' else a.status end,
     'startsAtMs',case when not resting then coalesce(a.starts_at_ms,g.created_at_ms) end,
     'endsAtMs',case when not resting then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
+  if exists(select 1 from private.bots r where r.gladiator_id=gid) then
+    actor:=actor||jsonb_build_object('botTeam','ludus-nimbus');
+  end if;
   insert into public.world_actors(gladiator_id,actor,processed_slot_index) values(gid,actor,g.processed_slot_index)
     on conflict(gladiator_id) do update set actor=excluded.actor,processed_slot_index=excluded.processed_slot_index
     where (world_actors.actor,world_actors.processed_slot_index) is distinct from (excluded.actor,excluded.processed_slot_index);
@@ -1707,6 +1771,230 @@ grant execute on function public.claim_jobs(uuid,text,integer),public.expedition
   private.title_rules(),private.title_measures(uuid,bigint) to service_role;
 revoke all on function private.titles_on_activity(),private.titles_on_ledger(),private.cleanup_history(bigint)
   from public,anon,authenticated,service_role;
+
+-- 6B operator registration. A registration is benched initially. Only a complete, trusted system identity may be used.
+-- Keep the economy switch and account lock order from SQL 21, then serialize contenders for the same catalog member.
+create or replace function private.create_bot(member_key text, actor_id uuid) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare kit jsonb:=private.bot_catalog()->member_key; gid uuid:=gen_random_uuid(); owner uuid; active boolean;
+  now_ms bigint; slot bigint; item record; item_id uuid; stamina bigint;
+  equipped jsonb:='{"weapon":null,"offHand":null,"head":null,"body":null,"feet":null}';
+begin
+  if kit is null or actor_id is null then
+    raise exception 'Unknown bot member or missing identity' using errcode='23514';
+  end if;
+  perform pg_advisory_xact_lock_shared(1600001,1);
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));
+  perform pg_advisory_xact_lock(1800602,hashtext(member_key));
+  select g.owner_id,b.active into owner,active from private.bots b join public.gladiators g on g.id=b.gladiator_id
+    where b.member_key=create_bot.member_key;
+  if owner is not null and owner<>actor_id then
+    raise exception 'Bot member is already registered to a different identity' using errcode='23505';
+  end if;
+
+  -- App metadata is controlled by the operator. Check the current account, after taking its row lock, even on retry.
+  perform 1 from auth.users u where u.id=actor_id for update;
+  if not exists(select 1 from auth.users u where u.id=actor_id and u.email=member_key||'@ludus-nimbus.invalid'
+    and u.raw_app_meta_data=jsonb_build_object('provider','cloudiator-bot','providers','[]'::jsonb,'bot_key',member_key)
+    and u.banned_until>clock_timestamp() and coalesce(u.encrypted_password,'')='' and coalesce(u.phone,'')=''
+    and u.email_confirmed_at is null and u.deleted_at is null and not u.is_anonymous and not u.is_sso_user
+    and not exists(select 1 from auth.identities i where i.user_id=u.id)
+    and not exists(select 1 from auth.sessions s where s.user_id=u.id)) then
+    raise exception 'Bot requires a banned system identity with no sign-in method' using errcode='23514';
+  end if;
+  if owner is not null then return jsonb_build_object('created',false,'active',active); end if;
+
+  now_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  slot:=now_ms/4800000;
+  stamina:=(kit->>'staminaMaximum')::bigint;
+  insert into private.bots(member_key,team,gladiator_id,role)
+    values(member_key,'ludus-nimbus',gid,kit->>'role');
+  insert into public.gladiators(id,owner_id,name,level,earned_points,league,peak_strength,stamina_current,stamina_maximum,
+      processed_slot_index,created_at_ms,orientation_end_ms)
+    values(gid,actor_id,kit->>'name',(kit->>'level')::bigint,(kit->>'earnedPoints')::bigint,kit->>'league',
+      (kit->>'peakStrength')::numeric,stamina,stamina,slot,now_ms,(slot+1)*4800000);
+
+  -- Fixed common variants from CATALOG_V1. SQL owns registration input and never accepts a supplied kit.
+  for item in select e.key as slot,e.value as catalog_id,v.damage,v.armor,v.weight,v.interval_ms
+    from jsonb_each_text(kit->'equipment') e
+    left join (values
+      ('sword:10:common',12,0,4,1000), ('round-shield:10:common',0,6,5,0),
+      ('iron-helmet:10:common',0,6,4,0), ('light-armor:10:common',0,4,3,0), ('light-boots:10:common',0,2,1,0),
+      ('axe:5:common',12,0,6,1400), ('sword:5:common',9,0,4,1000), ('leather-hood:5:common',0,1.5,1,0),
+      ('light-armor:5:common',0,3,3,0), ('light-boots:5:common',0,1.5,1,0),
+      ('sword:1:common',6,0,4,1000), ('round-shield:1:common',0,3,5,0), ('iron-helmet:1:common',0,3,4,0),
+      ('light-armor:1:common',0,2,3,0), ('light-boots:1:common',0,1,1,0), ('leather-hood:1:common',0,1,1,0)
+    ) as v(catalog_id,damage,armor,weight,interval_ms) on v.catalog_id=e.value
+    where e.value is not null
+  loop
+    if item.damage is null then raise exception 'Missing fixed bot item' using errcode='23514'; end if;
+    item_id:=gen_random_uuid();
+    equipped:=jsonb_set(equipped,array[item.slot],to_jsonb(item_id));
+    insert into public.item_instances(id,gladiator_id,item) values(item_id,gid,jsonb_build_object(
+      'id',item_id,'ownerId',gid,'catalogId',item.catalog_id,'catalogVersion','v1','tier',split_part(item.catalog_id,':',2)::integer,
+      'rarity','common','stats',jsonb_build_object('damage',item.damage,'armor',item.armor,'weight',item.weight,'intervalMs',item.interval_ms,
+        'attributes','{"strength":0,"agility":0,"vitality":0,"endurance":0,"precision":0}'::jsonb),
+      'quantity',1,'origin','starter','binding','bound','reservation',jsonb_build_object('kind','equipment','referenceId',gid)));
+  end loop;
+  insert into public.builds(gladiator_id,current_build) values(gid,jsonb_build_object('version',1,
+    'classId',kit->'classId','stance',kit->'stance','allocations',kit->'allocation','equipment',equipped));
+  insert into public.schedules(gladiator_id,schedule) values(gid,
+    '{"morning":{"kind":"rest"},"afternoon":{"kind":"rest"},"evening":{"kind":"rest"}}');
+  insert into public.wallets(gladiator_id,money,renown) values(gid,0,0);
+  return jsonb_build_object('created',true,'active',false);
+end $$;
+
+create or replace function private.bench_bot(member_key text) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare owner uuid; changed boolean;
+begin
+  select g.owner_id into owner from private.bots b join public.gladiators g on g.id=b.gladiator_id
+    where b.member_key=bench_bot.member_key;
+  if not found then raise exception 'Unknown registered bot' using errcode='23503'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(owner::text,0));
+  perform pg_advisory_xact_lock(1800602,hashtext(member_key));
+  update private.bots b set active=false where b.member_key=bench_bot.member_key and b.active;
+  changed:=found;
+  return jsonb_build_object('changed',changed,'active',false);
+end $$;
+revoke all on function private.create_bot(text,uuid),private.bench_bot(text) from public,anon,authenticated,service_role;
+
+-- The command rate gate precedes every player command, including presence. Keep the SQL 15 budgets and rest signals.
+create or replace function public.consume_command_rate(actor_id uuid, is_creation boolean) returns integer
+language plpgsql security invoker set search_path = '' as $$
+declare now_at timestamptz; oldest timestamptz; attempts integer; maximum integer; signal_ms bigint; recorded integer;
+begin
+  if actor_id is null or is_creation is null then raise exception 'invalid actor'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,1));
+  -- The command handler maps -1 to unauthenticated. System attempts never touch presence or rate state.
+  if exists(select 1 from public.gladiators g join private.bots b on b.gladiator_id=g.id
+    where g.owner_id=actor_id) then return -1; end if;
+  now_at := clock_timestamp();
+  -- Task 23.8: the owner's activity signal at database time sampled after the rate lock, at most once an hour. A refused or
+  -- rate-limited attempt is the owner's activity too, so it is recorded before the rate decision.
+  signal_ms := private.planning_now_ms();
+  insert into private.owner_signals as s(owner_id,last_signal_ms) values(consume_command_rate.actor_id,signal_ms)
+    on conflict (owner_id) do update set last_signal_ms=excluded.last_signal_ms where s.last_signal_ms<=excluded.last_signal_ms-3600000;
+  get diagnostics recorded = row_count;
+  if recorded>0 then
+    -- The first signal since a rest began (a rest not yet ended: through_slot at or after the processed slot) marks it; the
+    -- next boundary that freezes its cohort returns the character.
+    update public.character_rests r set signalled_at_ms=signal_ms from public.gladiators g
+      where g.owner_id=consume_command_rate.actor_id and r.gladiator_id=g.id and r.signalled_at_ms is null
+        and r.through_slot>=g.processed_slot_index;
+  end if;
+  delete from private.command_attempts a where a.actor_id=consume_command_rate.actor_id and a.attempted_at <= now_at-interval '1 minute';
+  select count(*), min(attempted_at) into attempts, oldest from private.command_attempts a
+    where a.actor_id=consume_command_rate.actor_id and a.is_creation=consume_command_rate.is_creation;
+  maximum := case when is_creation then 5 else 60 end;
+  if attempts >= maximum then return greatest(1,ceil(extract(epoch from (oldest+interval '1 minute'-now_at))*1000)::integer); end if;
+  insert into private.command_attempts(actor_id,is_creation,attempted_at) values(actor_id,is_creation,now_at);
+  return null;
+end $$;
+
+-- SQL 21 player creation, with the same account guard before its receipt check.
+create or replace function public.create_gladiator(actor_id uuid, operation_id uuid, input jsonb) returns jsonb
+language plpgsql security invoker set search_path = '' as $$
+declare command jsonb := input->'command'; allocation jsonb; total numeric; value jsonb; stat jsonb;
+  existing public.operation_receipts%rowtype; result jsonb; gid uuid := gen_random_uuid(); receipt uuid := gen_random_uuid();
+  weapon_id uuid := gen_random_uuid(); body_id uuid := gen_random_uuid(); now_ms bigint; slot bigint; item jsonb; item_id uuid; n integer := 0;
+begin
+  if actor_id is null then return jsonb_build_object('ok',false,'code','unauthenticated'); end if;
+  if operation_id is null or jsonb_typeof(input) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (select count(*) from jsonb_object_keys(input)) <> 4 or not (input ?& array['command','starterItems','staminaMaximum','peakStrength'])
+    or jsonb_typeof(command) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  -- One account lock covers all its operation IDs. Name's unique index also serializes different accounts.
+  perform pg_advisory_xact_lock_shared(1600001,1);
+  perform pg_advisory_xact_lock(hashtextextended(actor_id::text,0));
+  if exists(select 1 from public.gladiators g join private.bots b on b.gladiator_id=g.id where g.owner_id=actor_id) then
+    return jsonb_build_object('ok',false,'code','unauthenticated');
+  end if;
+  select * into existing from public.operation_receipts r where r.owner_id=actor_id and r.operation_id=create_gladiator.operation_id;
+  if found then
+    if existing.request <> command then return jsonb_build_object('ok',false,'code','conflict'); end if;
+    return existing.result;
+  end if;
+  -- Gladiator appearance (M24): an optional sixth key, exactly a valid look.
+  if (select count(*) from jsonb_object_keys(command)) <> (case when command ? 'appearance' then 6 else 5 end)
+    or not (command ?& array['kind','operationId','name','classId','allocation'])
+    or (command ? 'appearance' and private.valid_appearance(command->'appearance') is not true)
+    or command->>'kind' is distinct from 'create-character' or command->>'operationId' is distinct from operation_id::text
+    or jsonb_typeof(command->'name') is distinct from 'string' or command->>'name' <> btrim(command->>'name')
+    or not (command->>'name' ~ '^[A-Za-z0-9 _-]{3,20}$')
+    or jsonb_typeof(command->'classId') is distinct from 'string' or command->>'classId' not in ('berserker','guardian','duelist') then
+    return jsonb_build_object('ok',false,'code','invalid');
+  end if;
+  allocation := command->'allocation';
+  if jsonb_typeof(allocation) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (select count(*) from jsonb_object_keys(allocation)) <> 5
+    or not (allocation ?& array['strength','agility','vitality','endurance','precision']) then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  total := 0;
+  for value in select v from jsonb_each(allocation) e(k,v) loop
+    if jsonb_typeof(value) <> 'number' or value::text::numeric < 0 or value::text::numeric > 10 or trunc(value::text::numeric) <> value::text::numeric then
+      return jsonb_build_object('ok',false,'code','invalid');
+    end if;
+    total := total + value::text::numeric;
+  end loop;
+  if total <> 10 or jsonb_typeof(input->'staminaMaximum') is distinct from 'number'
+    or jsonb_typeof(input->'starterItems') is distinct from 'array' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  if (input->>'staminaMaximum')::numeric not between 90 and 122
+    or trunc((input->>'staminaMaximum')::numeric) <> (input->>'staminaMaximum')::numeric
+    or jsonb_array_length(input->'starterItems') <> 2 then
+    return jsonb_build_object('ok',false,'code','invalid');
+  end if;
+  -- Catalog rolls come only from the backend's canonical v1 domain catalog, never from the player's command.
+  for item in select * from jsonb_array_elements(input->'starterItems') loop
+    if jsonb_typeof(item) is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    if (select count(*) from jsonb_object_keys(item)) <> 6 or not (item ?& array['catalogId','catalogVersion','tier','rarity','stats','binding'])
+      or item->>'catalogId' is distinct from (case when n=0 then 'sword:1:common' else 'light-armor:1:common' end)
+      or item->>'catalogVersion' is distinct from 'v1' or item->'tier' is distinct from '1'::jsonb
+      or item->>'rarity' is distinct from 'common' or item->>'binding' is distinct from 'tradable'
+      or jsonb_typeof(item->'stats') is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    stat := item->'stats';
+    if (select count(*) from jsonb_object_keys(stat)) <> 5 or not (stat ?& array['damage','armor','weight','intervalMs','attributes'])
+      or jsonb_typeof(stat->'attributes') is distinct from 'object' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    if (select count(*) from jsonb_object_keys(stat->'attributes')) <> 5
+      or not ((stat->'attributes') ?& array['strength','agility','vitality','endurance','precision']) then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    for value in select v from jsonb_each(stat-'attributes') e(k,v) union all select v from jsonb_each(stat->'attributes') e(k,v) loop
+      if jsonb_typeof(value) is distinct from 'number' then return jsonb_build_object('ok',false,'code','invalid'); end if;
+      if value::text::numeric not between 0 and 1000000000 or trunc(value::text::numeric*100) <> value::text::numeric*100 then
+        return jsonb_build_object('ok',false,'code','invalid'); end if;
+    end loop;
+    if trunc((stat->>'intervalMs')::numeric) <> (stat->>'intervalMs')::numeric then return jsonb_build_object('ok',false,'code','invalid'); end if;
+    n := n+1;
+  end loop;
+  if input->'peakStrength' is distinct from '28'::jsonb then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  now_ms := floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  slot := now_ms / 4800000;
+  begin
+    -- The look as sent, or null (the legacy look) when the command has none.
+    insert into public.gladiators(id,owner_id,name,stamina_current,stamina_maximum,processed_slot_index,created_at_ms,orientation_end_ms,peak_strength,appearance)
+      values(gid,actor_id,command->>'name',(input->>'staminaMaximum')::bigint,(input->>'staminaMaximum')::bigint,slot,now_ms,(slot+1)*4800000,(input->>'peakStrength')::numeric,
+        command->'appearance');
+    insert into public.builds(gladiator_id,current_build) values(gid,jsonb_build_object('version',1,'classId',command->>'classId','stance','balanced','allocations',allocation,
+      'equipment',jsonb_build_object('weapon',weapon_id,'body',body_id,'offHand',null,'head',null,'feet',null)));
+    insert into public.schedules(gladiator_id,schedule) values(gid,'{"morning":{"kind":"training"},"afternoon":{"kind":"expedition","expeditionId":"woodland"},"evening":{"kind":"rest"}}');
+    insert into public.wallets(gladiator_id) values(gid);
+    n := 0;
+    for item in select * from jsonb_array_elements(input->'starterItems') loop
+      item_id := case when n=0 then weapon_id else body_id end;
+      insert into public.item_instances(id,gladiator_id,item) values(item_id,gid,item || jsonb_build_object('id',item_id,'ownerId',gid,'quantity',1,'origin','starter',
+        'reservation',jsonb_build_object('kind','equipment','referenceId',gid)));
+      n := n+1;
+    end loop;
+    result := jsonb_build_object('ok',true,'receiptId',receipt,'value',jsonb_build_object('gladiatorId',gid));
+  exception when unique_violation then
+    gid := null;
+    result := jsonb_build_object('ok',false,'code','conflict');
+  end;
+  insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+    values(actor_id,operation_id,receipt,gid,command,sha256(convert_to(command::text,'UTF8')),result);
+  if gid is not null then insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason) values(gid,receipt,100,0,'creation'); end if;
+  return result;
+end $$;
+revoke all on function public.consume_command_rate(uuid,boolean),public.create_gladiator(uuid,uuid,jsonb)
+  from public,anon,authenticated,service_role;
+grant execute on function public.consume_command_rate(uuid,boolean),public.create_gladiator(uuid,uuid,jsonb) to service_role;
 
 notify pgrst,'reload schema';
 commit;

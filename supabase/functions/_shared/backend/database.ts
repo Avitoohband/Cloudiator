@@ -140,6 +140,7 @@ export function prepareCreation(command: Creation) {
 }
 export function createDatabase(client: SupabaseClient) {
   return {
+    /** Null admits, -1 refuses system identities, and a positive result is the retry delay in milliseconds. */
     async consumeRateLimit(actor: Actor, isCreation: boolean): Promise<number | null> {
       const { data, error } = await client.rpc('consume_command_rate', { actor_id: actor.userId, is_creation: isCreation });
       if (error) throw new Error('rate-limit-unavailable');

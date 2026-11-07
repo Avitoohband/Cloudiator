@@ -1,11 +1,12 @@
--- Reapplicable local source for Patch 1.8 (M30). Sections 1–2 admit and group v2 dungeon activities.
+-- Reapplicable local source for Patch 1.8 (M30). Sections 1–3 admit, group, run and reveal v2 dungeon activities.
 -- Planning keeps the account/receipt/character order and samples database time after the character lock.
 -- Pair completion locks the job first and samples database time before checking the lease. Grouping's member
 -- FKs then take KEY SHARE on preparing activities while phase 7 waits, as with Arena assignments.
--- Run seeds derive from the grouping job seed and run id. Phase 8 will anchor the simulation to seat 0.
--- The shared reveal will take member activity KEY SHARE locks after its reveal-job lock. A member's
+-- Run seeds derive from the grouping job seed and run id. Phase 8 anchors the simulation to seat 0.
+-- The shared reveal takes member activity KEY SHARE locks after its reveal-job lock. A member's
 -- settlement uses only its own account, character, wallet, sorted items, activity and job locks, then samples time.
--- The later run phases restate 960000 ms and 604800000 ms. This section restates the v2 afternoon and levels 3/7/12.
+-- The run uses v2's 960000 ms fight interval, 120000 ms combat cap and 250 ms attack floor. Planning uses the v2
+-- afternoon and levels 3/7/12.
 begin;
 
 -- 1. Planning and affordability. Old workers can still send the five-key preparation under either retained version.
@@ -407,6 +408,434 @@ begin
   return true;
 end $$;
 
+-- 3. Run jobs and shared reveals. The plan is frozen; each due reveal publishes only a single stage and its fight.
+create table if not exists private.dungeon_results (
+  run_id text primary key references private.dungeon_runs(run_id),
+  simulation_job_id uuid not null references private.jobs(id),
+  plan jsonb not null check (jsonb_typeof(plan)='object'),
+  created_at_ms bigint not null
+);
+create index if not exists dungeon_results_simulation_job_idx on private.dungeon_results(simulation_job_id);
+
+create table if not exists public.dungeon_fights (
+  run_id text not null references private.dungeon_runs(run_id),
+  ordinal smallint not null check (ordinal between 1 and 4),
+  reveal_at_ms bigint not null,
+  log jsonb not null check (jsonb_typeof(log)='object'),
+  primary key(run_id,ordinal)
+);
+create index if not exists dungeon_fights_reveal_idx on public.dungeon_fights(reveal_at_ms);
+
+alter table private.dungeon_results enable row level security;
+alter table public.dungeon_fights enable row level security;
+revoke all on private.dungeon_results,public.dungeon_fights from public,anon,authenticated,service_role;
+grant select,insert,delete on private.dungeon_results,public.dungeon_fights to service_role;
+grant select on public.dungeon_fights to anon,authenticated;
+drop policy if exists backend_only on private.dungeon_results;
+create policy backend_only on private.dungeon_results to service_role using(true) with check(true);
+drop trigger if exists guard_frozen on private.dungeon_results;
+create trigger guard_frozen before update on private.dungeon_results for each row execute function private.guard_frozen();
+drop policy if exists due_read on public.dungeon_fights;
+create policy due_read on public.dungeon_fights for select to anon,authenticated
+  using(reveal_at_ms<=floor(extract(epoch from clock_timestamp())*1000)::bigint);
+
+
+create or replace function private.activity_executor_ready(kind text) returns boolean language sql immutable security invoker set search_path='' as $$
+  select coalesce(kind in ('training','rest','expedition','arena','tournament','dungeon'),false)
+$$;
+
+create or replace function private.prepare_activity_jobs(activity uuid) returns void language plpgsql security invoker set search_path='' as $$
+declare a public.activities%rowtype; s private.activity_snapshots%rowtype; simulation uuid; terminal uuid; reveal uuid;
+  seat private.arena_assignment_sides%rowtype; x private.arena_assignments%rowtype; entry private.tournament_entries%rowtype;
+  t private.tournaments%rowtype; bout private.tournament_bouts%rowtype; first_reveal integer;
+  run private.dungeon_runs%rowtype; anchor record;
+begin
+  select * into a from public.activities where id=activity;
+  select * into s from private.activity_snapshots where activity_id=activity;
+  if a.resolved_kind not in ('training','rest','expedition','arena','tournament','dungeon') then raise exception 'unsupported activity executor'; end if;
+  insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+    values('settlement','settlement:'||a.id,a.slot_index,a.gladiator_id,a.id,
+      jsonb_build_object('activityId',a.id,'gladiatorId',a.gladiator_id,'slotIndex',a.slot_index,'resolvedKind',a.resolved_kind,'endsAtMs',a.ends_at_ms),
+      s.seed,s.rules_version,a.ends_at_ms) on conflict(dedupe_key) do nothing;
+  select id into terminal from private.jobs where dedupe_key='settlement:'||a.id;
+  if a.resolved_kind='expedition' then
+    insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+      values('simulation','expedition:'||a.id,a.slot_index,a.gladiator_id,a.id,s.snapshot,s.seed,s.rules_version,a.starts_at_ms)
+      on conflict(dedupe_key) do nothing;
+    select id into simulation from private.jobs where dedupe_key='expedition:'||a.id;
+    insert into private.job_dependencies values(terminal,simulation) on conflict do nothing;
+  elsif a.resolved_kind='dungeon' then
+    select r.* into run from private.dungeon_run_members m join private.dungeon_runs r using(run_id)
+      where m.activity_id=a.id and r.slot_index=a.slot_index;
+    if not found then raise exception 'ungrouped dungeon entrant'; end if;
+    select anchor_activity.id,anchor_activity.gladiator_id,anchor_activity.starts_at_ms,f.rules_version into anchor
+      from private.dungeon_run_members m join public.activities anchor_activity on anchor_activity.id=m.activity_id
+      join private.activity_snapshots f on f.activity_id=anchor_activity.id
+      where m.run_id=run.run_id and m.seat=0 and anchor_activity.slot_index=run.slot_index and anchor_activity.resolved_kind='dungeon';
+    if not found then raise exception 'missing dungeon run anchor'; end if;
+    -- Any member may be visited first. Phase 8 already holds every member's account lock before this shared FK insert.
+    insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+      values('simulation','dungeon:'||run.run_id,run.slot_index,anchor.gladiator_id,anchor.id,
+        jsonb_build_object('kind','dungeon','runId',run.run_id,'slotIndex',run.slot_index,'rulesVersion',anchor.rules_version,
+          'dungeonId',run.dungeon_id,'startsAtMs',anchor.starts_at_ms,'seats',run.assignment->'seats'),
+        run.seed,anchor.rules_version,anchor.starts_at_ms) on conflict(dedupe_key) do nothing;
+    select id into simulation from private.jobs where dedupe_key='dungeon:'||run.run_id;
+    insert into private.job_dependencies values(terminal,simulation) on conflict do nothing;
+  elsif a.resolved_kind='arena' then
+    select * into seat from private.arena_assignment_sides where activity_id=a.id;
+    if not found then raise exception 'unpaired arena entrant'; end if;
+    select * into x from private.arena_assignments where battle_id=seat.battle_id;
+    insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+      values('simulation','arena:'||x.battle_id,x.slot_index,(x.assignment->'sides'->0->>'gladiatorId')::uuid,
+        (x.assignment->'sides'->0->>'activityId')::uuid,
+        jsonb_build_object('kind','arena','battleId',x.battle_id,'slotIndex',x.slot_index,'rulesVersion',s.rules_version,
+          'startsAtMs',a.starts_at_ms,'revealAtMs',a.starts_at_ms+3600000,'assignment',x.assignment,
+          'names',(select jsonb_agg(g.name order by e.ordinality) from jsonb_array_elements(x.assignment->'sides') with ordinality e(value,ordinality)
+            join public.gladiators g on g.id=(e.value->>'gladiatorId')::uuid)),
+        x.seed,s.rules_version,a.starts_at_ms)
+      on conflict(dedupe_key) do nothing;
+    select id into simulation from private.jobs where dedupe_key='arena:'||x.battle_id;
+    insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+      values('reveal','arena-reveal:'||a.id,a.slot_index,a.gladiator_id,a.id,jsonb_build_object('activityId',a.id,'ordinal',1),
+        s.seed,s.rules_version,a.starts_at_ms+3600000) on conflict(dedupe_key) do nothing;
+    select id into reveal from private.jobs where dedupe_key='arena-reveal:'||a.id;
+    insert into private.job_dependencies values(reveal,simulation),(terminal,simulation),(terminal,reveal) on conflict do nothing;
+    insert into public.activity_stages(activity_id,ordinal,reveal_at_ms,stage) values(a.id,0,a.starts_at_ms,jsonb_build_object(
+      'id',a.id::text||':0','kind','staging','revealedAtMs',a.starts_at_ms,'startedAtMs',a.starts_at_ms,'endsAtMs',a.starts_at_ms+3600000,
+      'label','Warming up')) on conflict(activity_id,ordinal) do nothing;
+  elsif a.resolved_kind='tournament' then
+    select * into entry from private.tournament_entries where activity_id=a.id;
+    if not found then raise exception 'unbracketed tournament entrant'; end if;
+    select * into t from private.tournaments where id=entry.tournament_id;
+    if entry.rank=1 then
+      for bout in select * from private.tournament_bouts where tournament_id=t.id and not bye order by round,position loop
+        insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+          values('simulation','tournament-bout:'||bout.id,t.slot_index,a.gladiator_id,a.id,
+            jsonb_build_object('kind','tournament-bout','tournamentId',t.id,'boutId',bout.id),bout.seed,t.rules_version,t.starts_at_ms)
+          on conflict(dedupe_key) do nothing;
+        insert into private.job_dependencies(job_id,prerequisite_id)
+          select child.id,parent.id from private.jobs child
+          join jsonb_array_elements_text(bout.parent_bout_ids) pid(value) on true
+          join private.jobs parent on parent.dedupe_key='tournament-bout:'||pid.value
+          where child.dedupe_key='tournament-bout:'||bout.id
+          on conflict do nothing;
+        -- Exception 4: the bout's one reveal, due at its stored reveal time, after its bout and its fought parents' reveals.
+        insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+          values('reveal','tournament-reveal:'||bout.id,t.slot_index,a.gladiator_id,a.id,
+            jsonb_build_object('kind','tournament-reveal','tournamentId',t.id,'boutId',bout.id),s.seed,t.rules_version,bout.reveal_at_ms)
+          on conflict(dedupe_key) do nothing;
+        insert into private.job_dependencies(job_id,prerequisite_id)
+          select r.id,p.id from private.jobs r join private.jobs p on p.dedupe_key='tournament-bout:'||bout.id
+          where r.dedupe_key='tournament-reveal:'||bout.id
+          union all
+          select r.id,p.id from private.jobs r
+          join jsonb_array_elements_text(bout.parent_bout_ids) pid(value) on true
+          join private.jobs p on p.dedupe_key='tournament-reveal:'||pid.value
+          where r.dedupe_key='tournament-reveal:'||bout.id
+          on conflict do nothing;
+      end loop;
+    end if;
+    -- Exception 5: this entrant's settlement (and, from rank 1, every entrant's settlement created so far) waits for the
+    -- final's bout and its reveal.
+    insert into private.job_dependencies(job_id,prerequisite_id)
+      select st.id,f.id from private.tournament_entries te join private.jobs st on st.dedupe_key='settlement:'||te.activity_id
+      join private.jobs f on f.dedupe_key in ('tournament-bout:'||t.id||':'||t.rounds||':0','tournament-reveal:'||t.id||':'||t.rounds||':0')
+      where te.tournament_id=t.id and (entry.rank=1 or te.activity_id=a.id)
+      on conflict do nothing;
+    -- Staging from the start until the reveal of the entrant's first fought bout: round one, or round two after a bye.
+    first_reveal:=case when exists(select 1 from private.tournament_bouts o where o.tournament_id=t.id and o.round=1 and o.bye
+      and o.result->>'winnerId'=a.gladiator_id::text) then 1 else 0 end;
+    insert into public.activity_stages(activity_id,ordinal,reveal_at_ms,stage) values(a.id,0,a.starts_at_ms,jsonb_build_object(
+      'id',a.id::text||':0','kind','staging','revealedAtMs',a.starts_at_ms,'startedAtMs',a.starts_at_ms,
+      'endsAtMs',(t.reveal_at_ms->>first_reveal)::bigint,'label','Tournament staging')) on conflict(activity_id,ordinal) do nothing;
+  end if;
+end $$;
+
+-- Under the v2 120 s cap, 250 ms floor and one sweep every four attacks, the maximum generic 6v6 log is
+-- 12 * 480 ordinary events + 6 * 120 * 5 additional sweep events + victory. The separate raw serialized cap
+-- also bounds unknown keys and string sizes. It is deliberately larger than the released 3v3 and major logs.
+create or replace function private.safe_party_log(value jsonb) returns jsonb
+language plpgsql immutable security invoker set search_path='' as $$
+declare
+  participants jsonb:='[]'::jsonb; events jsonb; p jsonb; e jsonb; k text; projected jsonb;
+  ids text[]:='{}'; sides integer[]:='{}'; roles text[]:='{}';
+  duration bigint; elapsed bigint; previous_ms bigint:=0; event_count integer; seq integer:=0;
+  attacker integer; defender integer; side integer; party_count integer:=0; hp_index integer:=0;
+  participant_keys constant text[]:=array['id','gladiatorId','name','classId','stance','maxHealth','initialHealth',
+    'armor','weaponDamage','attackIntervalMs','efficiencyBasisPoints','equipmentSilhouettes','side','role','seat'];
+  attribute_keys constant text[]:=array['strength','agility','vitality','endurance','precision'];
+  attack_keys constant text[]:=array['kind','sequence','elapsedMs','attackerId','defenderId','hit','critical','defend','evade',
+    'damage','healthBefore','healthAfter','sweep'];
+  victory_keys constant text[]:=array['kind','sequence','elapsedMs','winnerSide','reason'];
+begin
+  if jsonb_typeof(value) is distinct from 'object'
+    or jsonb_typeof(value->'participants') is distinct from 'array'
+    or jsonb_typeof(value->'events') is distinct from 'array'
+    or jsonb_typeof(value->'finalHp') is distinct from 'array'
+    or octet_length(value::text)>4000000 then
+    raise exception 'invalid party log' using errcode='22023';
+  end if;
+  event_count:=jsonb_array_length(value->'events');
+  if jsonb_array_length(value->'participants') not between 2 and 12
+    or jsonb_array_length(value->'finalHp')<>jsonb_array_length(value->'participants')
+    or event_count not between 1 and 9361
+    or not private.safe_integer(value->'durationMs')
+    or jsonb_typeof(value->'battleId') is distinct from 'string' or value->>'battleId'=''
+    or jsonb_typeof(value->'rulesVersion') is distinct from 'string' or value->>'rulesVersion'=''
+    or not coalesce(value->'winnerSide' in ('0'::jsonb,'1'::jsonb),false)
+    or coalesce(value->>'victoryReason','') not in ('defeat','health-fraction','tie-break')
+    or not coalesce(value->'tieBreakReason' in ('null'::jsonb,'"simultaneous-defeat"'::jsonb,'"equal-health-fraction"'::jsonb),false)
+    or ((value->>'victoryReason'='tie-break') is distinct from (value->'tieBreakReason'<>'null'::jsonb)) then
+    raise exception 'invalid party log' using errcode='22023';
+  end if;
+  duration:=(value->>'durationMs')::numeric;
+  if duration>120000 then raise exception 'invalid party log' using errcode='22023'; end if;
+
+  for p in select * from jsonb_array_elements(value->'participants') loop
+    foreach k in array array['id','name','stance','role'] loop
+      if jsonb_typeof(p->k) is distinct from 'string' or p->>k='' then
+        raise exception 'invalid party log' using errcode='22023';
+      end if;
+    end loop;
+    if p->>'id'=any(ids)
+      or p->>'stance' not in ('balanced','offensive','defensive')
+      or not coalesce(p->'classId' in ('null'::jsonb,'"berserker"'::jsonb,'"guardian"'::jsonb,'"duelist"'::jsonb),false)
+      or coalesce(jsonb_typeof(p->'gladiatorId'),'') not in ('null','string')
+      or not coalesce(p->'side' in ('0'::jsonb,'1'::jsonb),false)
+      or not coalesce(p->'seat' in ('null'::jsonb,'0'::jsonb,'1'::jsonb,'2'::jsonb),false)
+      or (p->'side'='0'::jsonb and p->>'role' not in ('gladiator','hireling'))
+      or (p->'side'='1'::jsonb and (p->>'role' not in ('monster','major') or p->'seat'<>'null'::jsonb))
+      or jsonb_typeof(p->'attributes') is distinct from 'object'
+      or jsonb_typeof(p->'equipmentSilhouettes') is distinct from 'array' then
+      raise exception 'invalid party log' using errcode='22023';
+    end if;
+    foreach k in array array['maxHealth','initialHealth','efficiencyBasisPoints'] loop
+      if not private.safe_integer(p->k,1) then raise exception 'invalid party log' using errcode='22023'; end if;
+    end loop;
+    if not private.safe_integer(p->'attackIntervalMs',250)
+      or not private.safe_integer(value->'finalHp'->hp_index) then
+      raise exception 'invalid party log' using errcode='22023';
+    end if;
+    if (p->>'initialHealth')::numeric>(p->>'maxHealth')::numeric
+      or (value->'finalHp'->>hp_index)::numeric>(p->>'initialHealth')::numeric then
+      raise exception 'invalid party log' using errcode='22023';
+    end if;
+    foreach k in array array['armor','weaponDamage'] loop
+      if jsonb_typeof(p->k) is distinct from 'number' then raise exception 'invalid party log' using errcode='22023'; end if;
+    end loop;
+    foreach k in array attribute_keys loop
+      if jsonb_typeof(p->'attributes'->k) is distinct from 'number' then raise exception 'invalid party log' using errcode='22023'; end if;
+    end loop;
+    if exists(select 1 from jsonb_array_elements(p->'equipmentSilhouettes') s where jsonb_typeof(s)<>'string') then
+      raise exception 'invalid party log' using errcode='22023';
+    end if;
+    side:=(p->>'side')::numeric;
+    if side=0 then party_count:=party_count+1; end if;
+    ids:=array_append(ids,p->>'id'); sides:=array_append(sides,side); roles:=array_append(roles,p->>'role');
+    hp_index:=hp_index+1;
+    projected:=private.json_project(p,participant_keys)||jsonb_build_object('attributes',private.json_project(p->'attributes',attribute_keys));
+    participants:=participants||jsonb_build_array(projected);
+  end loop;
+  if party_count not between 1 and 6 or cardinality(ids)-party_count not between 1 and 6 then
+    raise exception 'invalid party log' using errcode='22023';
+  end if;
+
+  for e in select * from jsonb_array_elements(value->'events') loop
+    if e->'sequence' is distinct from to_jsonb(seq) or not private.safe_integer(e->'elapsedMs') then
+      raise exception 'invalid party log' using errcode='22023';
+    end if;
+    elapsed:=(e->>'elapsedMs')::numeric;
+    if elapsed<previous_ms or elapsed>duration then raise exception 'invalid party log' using errcode='22023'; end if;
+    if seq=event_count-1 then
+      if e->>'kind' is distinct from 'victory' or e->'winnerSide' is distinct from value->'winnerSide'
+        or e->'reason' is distinct from value->'victoryReason' or elapsed<>duration then
+        raise exception 'invalid party log' using errcode='22023';
+      end if;
+    else
+      if e->>'kind' is distinct from 'attack'
+        or jsonb_typeof(e->'attackerId') is distinct from 'string'
+        or jsonb_typeof(e->'defenderId') is distinct from 'string' then
+        raise exception 'invalid party log' using errcode='22023';
+      end if;
+      attacker:=array_position(ids,e->>'attackerId'); defender:=array_position(ids,e->>'defenderId');
+      if attacker is null or defender is null or sides[attacker]=sides[defender]
+        or (e->'sweep'='true'::jsonb and roles[attacker]<>'major') then
+        raise exception 'invalid party log' using errcode='22023';
+      end if;
+      foreach k in array array['hit','critical','defend','evade','sweep'] loop
+        if jsonb_typeof(e->k) is distinct from 'boolean' then raise exception 'invalid party log' using errcode='22023'; end if;
+      end loop;
+      foreach k in array array['damage','healthBefore','healthAfter'] loop
+        if not private.safe_integer(e->k) then raise exception 'invalid party log' using errcode='22023'; end if;
+      end loop;
+    end if;
+    previous_ms:=elapsed; seq:=seq+1;
+  end loop;
+  -- Aggregate in log order without copying a growing JSONB array for every event.
+  select jsonb_agg(private.json_project(entry.val,case when entry.n=event_count then victory_keys else attack_keys end) order by entry.n)
+    into events from jsonb_array_elements(value->'events') with ordinality entry(val,n);
+  return private.json_project(value,array['battleId','rulesVersion','durationMs','winnerSide','victoryReason','finalHp','tieBreakReason'])
+    ||jsonb_build_object('participants',participants,'events',events);
+end $$;
+
+create or replace function private.accept_dungeon_result(job uuid,result jsonb) returns boolean
+language plpgsql security invoker set search_path='' as $$
+declare
+  j private.jobs%rowtype; run private.dungeon_runs%rowtype; anchor record; frozen_plan jsonb;
+  f jsonb; stage jsonb; outcome jsonb; reward jsonb; loot jsonb; log jsonb; ref jsonb;
+  next_stage integer:=0; fight_count integer; stage_count integer; fight_ordinal integer:=0; member_count integer;
+  stage_ms bigint; start_ms bigint; end_ms bigint; previous_end bigint;
+  members_seen text[]:='{}'; terminals uuid[]; entered jsonb; wins jsonb; prior_job uuid; reveal_job uuid;
+begin
+  select * into j from private.jobs where id=job;
+  if not found then return false; end if;
+  select * into run from private.dungeon_runs r where r.run_id=j.input->>'runId' and r.slot_index=j.slot_index;
+  if not found then return false; end if;
+  select a.id,a.gladiator_id,a.starts_at_ms,a.ends_at_ms,s.rules_version,s.seed into anchor
+    from private.dungeon_run_members m join public.activities a on a.id=m.activity_id
+    join private.activity_snapshots s on s.activity_id=a.id
+    where m.run_id=run.run_id and m.seat=0 and a.slot_index=run.slot_index and a.resolved_kind='dungeon';
+  if not found or j.activity_id is distinct from anchor.id or j.gladiator_id is distinct from anchor.gladiator_id
+    or j.rules_version is distinct from anchor.rules_version then return false; end if;
+
+  if j.kind='simulation' and j.input->>'kind'='dungeon' then
+    if j.dedupe_key<>'dungeon:'||run.run_id or j.seed<>run.seed or j.due_at_ms<>anchor.starts_at_ms
+      or j.input is distinct from jsonb_build_object('kind','dungeon','runId',run.run_id,'slotIndex',run.slot_index,
+        'rulesVersion',anchor.rules_version,'dungeonId',run.dungeon_id,'startsAtMs',anchor.starts_at_ms,'seats',run.assignment->'seats')
+      or jsonb_typeof(result) is distinct from 'object' or result->'runId' is distinct from to_jsonb(run.run_id)
+      or result->'rulesVersion' is distinct from to_jsonb(anchor.rules_version)
+      or result->'dungeonId' is distinct from to_jsonb(run.dungeon_id) or result->>'catalogVersion' is distinct from 'v1'
+      or jsonb_typeof(result->'fights') is distinct from 'array' or jsonb_typeof(result->'stages') is distinct from 'array'
+      or jsonb_typeof(result->'outcomes') is distinct from 'array' then return false; end if;
+    fight_count:=jsonb_array_length(result->'fights'); stage_count:=jsonb_array_length(result->'stages');
+    if fight_count not between 1 and 4 or stage_count not between 4 and 10 then return false; end if;
+    for f in select * from jsonb_array_elements(result->'fights') loop
+      fight_ordinal:=fight_ordinal+1;
+      if f->'ordinal' is distinct from to_jsonb(fight_ordinal)
+        or f->>'kind' is distinct from (case when fight_ordinal=4 then 'major' else 'room' end)
+        or f->'offsetMs' is distinct from to_jsonb(fight_ordinal*960000)
+        or jsonb_typeof(f->'won') is distinct from 'boolean' then return false; end if;
+      begin
+        log:=private.safe_party_log(f->'log');
+      exception when invalid_parameter_value then return false;
+      end;
+      if log->>'battleId'<>run.run_id||':fight:'||fight_ordinal or log->>'rulesVersion'<>anchor.rules_version
+        or f->'won' is distinct from to_jsonb(log->'winnerSide'='0'::jsonb) then return false; end if;
+    end loop;
+
+    fight_ordinal:=0; previous_end:=anchor.starts_at_ms;
+    for stage in select * from jsonb_array_elements(result->'stages') loop
+      if stage->>'id' is distinct from run.run_id||':'||next_stage
+        or coalesce(stage->>'kind','') not in ('depart','room','major','exploration','travel','return')
+        or jsonb_typeof(stage->'label') is distinct from 'string' or stage->>'label'=''
+        or not private.safe_integer(stage->'revealedAtMs') or not private.safe_integer(stage->'startedAtMs')
+        or not private.safe_integer(stage->'endsAtMs') then return false; end if;
+      stage_ms:=(stage->>'revealedAtMs')::numeric; start_ms:=(stage->>'startedAtMs')::numeric; end_ms:=(stage->>'endsAtMs')::numeric;
+      if stage_ms<previous_end or stage_ms>start_ms or start_ms>end_ms or end_ms>anchor.ends_at_ms then return false; end if;
+      if next_stage=0 then
+        if stage->>'kind'<>'depart' or stage_ms<>anchor.starts_at_ms or start_ms<>anchor.starts_at_ms then return false; end if;
+      elsif next_stage=stage_count-1 then
+        if stage->>'kind'<>'return' or stage_ms<>anchor.ends_at_ms or start_ms<>anchor.ends_at_ms then return false; end if;
+      elsif stage->>'kind'='depart' then return false;
+      end if;
+      if stage->>'kind' in ('room','major') then
+        f:=result->'fights'->fight_ordinal;
+        fight_ordinal:=fight_ordinal+1;
+        ref:=stage->'fight';
+        if f is null or stage->'kind' is distinct from f->'kind'
+          or ref->'runId' is distinct from to_jsonb(run.run_id) or ref->'ordinal' is distinct from to_jsonb(fight_ordinal)
+          or stage_ms<>anchor.starts_at_ms+fight_ordinal*960000 or start_ms<>stage_ms
+          or end_ms<>start_ms+(f->'log'->>'durationMs')::numeric then return false; end if;
+      elsif stage ? 'fight' then return false;
+      end if;
+      previous_end:=end_ms; next_stage:=next_stage+1;
+    end loop;
+    if fight_ordinal<>fight_count then return false; end if;
+
+    select count(*)::integer,array_agg(st.id order by m.seat) into member_count,terminals
+      from private.dungeon_run_members m join public.activities a on a.id=m.activity_id
+      left join private.jobs st on st.dedupe_key='settlement:'||a.id and st.kind='settlement'
+        and st.activity_id=a.id and st.gladiator_id=a.gladiator_id and st.slot_index=run.slot_index
+      where m.run_id=run.run_id and a.slot_index=run.slot_index and a.resolved_kind='dungeon';
+    if member_count not between 1 and 3 or jsonb_array_length(result->'outcomes')<>member_count
+      or array_position(terminals,null) is not null then return false; end if;
+    for outcome in select * from jsonb_array_elements(result->'outcomes') loop
+      reward:=outcome->'rewards';
+      if jsonb_typeof(outcome->'activityId') is distinct from 'string' or jsonb_typeof(outcome->'gladiatorId') is distinct from 'string'
+        or outcome->>'activityId'=any(members_seen)
+        or not exists(select 1 from private.dungeon_run_members m join public.activities a on a.id=m.activity_id
+          where m.run_id=run.run_id and m.activity_id::text=outcome->>'activityId' and a.gladiator_id::text=outcome->>'gladiatorId')
+        or coalesce(outcome->>'result','') not in ('victory','defeat') or jsonb_typeof(outcome->'success') is distinct from 'boolean'
+        or jsonb_typeof(outcome->'overLevel') is distinct from 'boolean'
+        or outcome->'success' is distinct from to_jsonb(outcome->>'result'='victory')
+        or not private.safe_integer(reward->'xp') or not private.safe_integer(reward->'money')
+        or jsonb_typeof(reward->'loot') is distinct from 'array' then return false; end if;
+      -- Check ordinals against the accepted fight log identities and winners; the executor still owns all reward amounts.
+      select coalesce(jsonb_agg(fight.val->'ordinal' order by fight.n),'[]'::jsonb),
+        coalesce(jsonb_agg(fight.val->'ordinal' order by fight.n) filter(where fight.val->'won'='true'::jsonb),'[]'::jsonb)
+        into entered,wins from jsonb_array_elements(result->'fights') with ordinality fight(val,n)
+        where exists(select 1 from jsonb_array_elements(fight.val->'log'->'participants') p
+          where p->>'role'='gladiator' and p->'gladiatorId'=outcome->'gladiatorId');
+      if outcome->'entered' is distinct from entered or outcome->'won' is distinct from wins
+        or outcome->'success' is distinct from to_jsonb(wins @> '[4]'::jsonb) then return false; end if;
+      for loot in select * from jsonb_array_elements(reward->'loot') loop
+        if jsonb_typeof(loot->'catalogId') is distinct from 'string' or loot->>'catalogId'=''
+          or loot->'catalogVersion' is distinct from result->'catalogVersion'
+          or loot->>'origin' is distinct from 'expedition' or not private.safe_integer(loot->'quantity',1) then return false; end if;
+      end loop;
+      members_seen:=array_append(members_seen,outcome->>'activityId');
+    end loop;
+
+    insert into private.dungeon_results(run_id,simulation_job_id,plan,created_at_ms)
+      values(run.run_id,j.id,result,private.planning_now_ms()) on conflict(run_id) do nothing;
+    if not found then return false; end if;
+    prior_job:=j.id; next_stage:=0;
+    for stage in select * from jsonb_array_elements(result->'stages') loop
+      insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
+        values('reveal','dungeon-reveal:'||run.run_id||':'||next_stage,run.slot_index,anchor.gladiator_id,anchor.id,
+          jsonb_build_object('kind','dungeon-reveal','runId',run.run_id,'ordinal',next_stage),anchor.seed,j.rules_version,
+          (stage->>'revealedAtMs')::numeric::bigint) on conflict(dedupe_key) do nothing;
+      select id into reveal_job from private.jobs where dedupe_key='dungeon-reveal:'||run.run_id||':'||next_stage;
+      insert into private.job_dependencies values(reveal_job,prior_job) on conflict do nothing;
+      prior_job:=reveal_job; next_stage:=next_stage+1;
+    end loop;
+    insert into private.job_dependencies(job_id,prerequisite_id)
+      select id,prior_job from unnest(terminals) t(id) on conflict do nothing;
+    return true;
+
+  elsif j.kind='reveal' and j.input->>'kind'='dungeon-reveal' then
+    if j.seed<>anchor.seed or not private.safe_integer(j.input->'ordinal')
+      or j.due_at_ms>private.planning_now_ms() or not private.dependencies_ready(j.id) then return false; end if;
+    if (j.input->>'ordinal')::numeric>9 then return false; end if;
+    next_stage:=(j.input->>'ordinal')::numeric;
+    if j.dedupe_key<>'dungeon-reveal:'||run.run_id||':'||next_stage then return false; end if;
+    select d.plan into frozen_plan from private.dungeon_results d where d.run_id=run.run_id;
+    stage:=frozen_plan->'stages'->next_stage;
+    if stage is null or j.due_at_ms<>(stage->>'revealedAtMs')::numeric then return false; end if;
+    ref:=stage->'fight';
+    stage:=private.json_project(stage,array['kind','label','revealedAtMs','startedAtMs','endsAtMs']);
+    if ref is not null then
+      fight_ordinal:=(ref->>'ordinal')::numeric;
+      f:=frozen_plan->'fights'->(fight_ordinal-1);
+      begin
+        log:=private.safe_party_log(f->'log');
+      exception when invalid_parameter_value then return false;
+      end;
+      insert into public.dungeon_fights(run_id,ordinal,reveal_at_ms,log)
+        values(run.run_id,fight_ordinal,j.due_at_ms,log) on conflict(run_id,ordinal) do nothing;
+      stage:=stage||jsonb_build_object('fight',jsonb_build_object('runId',run.run_id,'ordinal',fight_ordinal));
+    end if;
+    -- Shared reveal: only KEY SHARE on the activity FKs after the reveal job row. Member settlements wait on it.
+    insert into public.activity_stages(activity_id,ordinal,reveal_at_ms,stage)
+      select m.activity_id,next_stage,j.due_at_ms,stage||jsonb_build_object('id',m.activity_id::text||':'||next_stage)
+      from private.dungeon_run_members m where m.run_id=run.run_id order by m.seat
+      on conflict(activity_id,ordinal) do nothing;
+    return true;
+  end if;
+  return false;
+end $$;
+
+
 create or replace function public.complete_job(job_id uuid,lease_token uuid,result jsonb) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare j private.jobs%rowtype; now_ms bigint;
@@ -430,6 +859,9 @@ begin
       if not private.accept_grouping(j.id,result) then return jsonb_build_object('ok',false,'code','invalid'); end if;
     elsif not private.accept_pairing(j.id,result) then return jsonb_build_object('ok',false,'code','invalid');
     end if;
+  elsif (j.kind='simulation' and j.input->>'kind'='dungeon')
+    or (j.kind='reveal' and j.input->>'kind'='dungeon-reveal') then
+    if not private.accept_dungeon_result(j.id,result) then return jsonb_build_object('ok',false,'code','invalid'); end if;
   elsif not private.accept_job_result(j.id,result) then return jsonb_build_object('ok',false,'code','invalid');
   end if;
   update private.jobs set status='completed',result=complete_job.result,completed_at_ms=now_ms where id=j.id;
@@ -443,5 +875,8 @@ revoke all on function private.planning_command(uuid,uuid,jsonb,text),private.va
 grant execute on function private.planning_command(uuid,uuid,jsonb,text),private.valid_preparation(uuid,jsonb),
   private.boundary_check_stamina(bigint),private.grouping_input(bigint,text,text),private.boundary_pair(bigint),
   private.accept_grouping(uuid,jsonb),public.complete_job(uuid,uuid,jsonb) to service_role;
+revoke all on function private.safe_party_log(jsonb),private.accept_dungeon_result(uuid,jsonb)
+  from public,anon,authenticated,service_role;
+grant execute on function private.safe_party_log(jsonb),private.accept_dungeon_result(uuid,jsonb) to service_role;
 notify pgrst,'reload schema';
 commit;

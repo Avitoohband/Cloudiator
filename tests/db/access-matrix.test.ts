@@ -109,6 +109,7 @@ const SERVICE_ROLE = [
   'default postgres:public:sequences: UPDATE',
   'default postgres:public:tables: MAINTAIN,REFERENCES,TRIGGER,TRUNCATE',
   'function private.accept_arena_result(uuid, jsonb): EXECUTE',
+  'function private.accept_dungeon_result(uuid, jsonb): EXECUTE',
   'function private.accept_grouping(uuid, jsonb): EXECUTE',
   'function private.accept_job_result(uuid, jsonb): EXECUTE',
   'function private.accept_pairing(uuid, jsonb): EXECUTE',
@@ -177,6 +178,7 @@ const SERVICE_ROLE = [
   'function private.resume_operator_job(uuid): EXECUTE',
   'function private.safe_battle_log(jsonb): EXECUTE',
   'function private.safe_integer(jsonb, numeric): EXECUTE',
+  'function private.safe_party_log(jsonb): EXECUTE',
   'function private.safe_settlement(jsonb): EXECUTE',
   'function private.schedule_effective_slot(text, bigint): EXECUTE',
   'function private.season_bounds(bigint): EXECUTE',
@@ -245,6 +247,7 @@ const SERVICE_ROLE = [
   'relation private.command_attempts: DELETE,INSERT,SELECT',
   'relation private.coordinator: DELETE,INSERT,SELECT,UPDATE',
   'relation private.dispatch_log: SELECT',
+  'relation private.dungeon_results: DELETE,INSERT,SELECT',
   'relation private.dungeon_run_members: DELETE,INSERT,SELECT',
   'relation private.dungeon_runs: DELETE,INSERT,SELECT',
   'relation private.expedition_plans: DELETE,INSERT,SELECT',
@@ -274,6 +277,7 @@ const SERVICE_ROLE = [
   'relation public.builds: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   // Task 23.8 (M22): a character's rest at home, written by boundary phase 3 and consume_command_rate.
   'relation public.character_rests: INSERT,SELECT,UPDATE',
+  'relation public.dungeon_fights: DELETE,INSERT,SELECT',
   // Game messages (M25): the backend only reads them (the owner read's inbox, read_message); the operator writes as postgres.
   'relation public.game_messages: SELECT',
   // Titles (M28): earned titles and the ownership history are only ever inserted (guard_frozen refuses update and delete);

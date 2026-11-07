@@ -440,7 +440,9 @@ Precision order. Earned points equal the allocation total. Equipped items use th
   triples follow. The exact five kits and all 630 routine cells are checked against SQL.
 - **Dungeons.** Group eligible humans first using the regular strength bands. Add eligible on-call bots after humans
   and before hired fighters, within the original cap of `3 * ceil(humans / 3) - humans` bots per dungeon, with a bot in
-  at most one run. Bots must meet the unlock level and never start a bot-only run. Unassigned bots train where their
+  at most one run. The local implementation uses Troll Hall, Raider Stronghold, then Wolf Den as the working priority
+  pending Avi's choice. That reserves Tullia, the only level-12 bot, for an eligible Troll Hall cohort. Bots must meet
+  the unlock level and never start a bot-only run. Unassigned bots train where their
   routine and v2 limit allow. A bot uses its role's hired build at that dungeon's level for combat. Its actual name,
   actor and BOT tag appear in the run and log. It earns no dungeon payout and the humans' per-member payouts stay fixed.
 - **Arena.** Preserve real-player pairing first. A same-league bot within 25% of a player's frozen strength can replace

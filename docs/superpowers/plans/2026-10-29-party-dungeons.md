@@ -494,12 +494,12 @@ parity test. Pin every listed kit, allocation and stance, and all 630 routine ce
 system Auth identities and registers them idempotently. Record only safe status/counts. No bot identities are seeded
 by M30. The public projection exposes only a whitelisted bot team identifier, never Auth or schedule details.
 
-- [ ] Write and run RED: catalog/member parity, fixed cap/kit, exact slots and off-duty window, concurrent/repeated
+- [x] Write and run RED: catalog/member parity, fixed cap/kit, exact slots and off-duty window, concurrent/repeated
   create, refusal of bot sign-in/player commands and any public operator access, no economic grant or Founder, and
   no lost 1.7.1 title/profile fields. Include wrong identity and stale retry.
-- [ ] Implement on current SQL21 creation and SQL22 title/projection foundations. Preserve account/advisory lock order.
+- [x] Implement on current SQL21 creation and SQL22 title/projection foundations. Preserve account/advisory lock order.
   Register the trusted bot identity before any automatic title eligibility check. Test both non-bot and bot paths.
-- [ ] Run owning unit/DB/auth/ACL tests and offline typecheck. Independent review, commit and update handoff.
+- [x] Run owning unit/DB/auth/ACL tests and offline typecheck. Independent review, commit and update handoff.
 
 ### Task 6C: Schedule bots and fill dungeon seats after humans
 
@@ -510,7 +510,7 @@ by M30. The public projection exposes only a whitelisted bot team identifier, ne
 the cutoff without changing any human schedule. The human groups and seat order are canonical. In phase 7 use the
 affordable frozen human cohort, the approved global per-dungeon seat cap, each bot's eligibility and at most one run
 per bot. Derive disjoint per-dungeon bot pools once under the boundary coordinator before dispatching any grouping job.
-Order the dungeon IDs and eligible bot IDs deterministically. Acceptance only uses that frozen pool so parallel or
+Use the spec's working hardest-first priority and stable eligible bot IDs. Acceptance only uses that frozen pool so parallel or
 retried grouping jobs cannot reuse a bot. Expose derived duty status and scheduled return time with the public team
 identifier. Keep the full routines private. An unplaced bot follows the approved Training fallback with ordinary v2 checks. Preserve the ungrouped
 human guard and do not manufacture a bot-only run. Keep member settlement and shared reveals fenced.

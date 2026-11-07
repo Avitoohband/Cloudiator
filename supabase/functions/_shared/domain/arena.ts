@@ -185,9 +185,13 @@ type AssignmentScope = { battleId: string; seasonId: string; league: LeagueId; s
  * Both sides of a human bout share its `battleId`. An NPC bout's opponent is the entrant's fallback template, generated
  * once here; its battle participant id is `opponent.id` (`npc:<entrant gladiatorId>`) with a null `gladiatorId`.
  */
-export type ArenaAssignment = DeepReadonly<
+export type ArenaPairingAssignment = DeepReadonly<
   | (AssignmentScope & { kind: 'human'; sides: [ArenaSide, ArenaSide] })
   | (AssignmentScope & { kind: 'npc'; sides: [ArenaSide]; opponent: { id: string; snapshot: FighterSnapshot } })>;
+/** Only SQL can substitute a frozen bot for a validated NPC fallback. The bot is never a settlement side. */
+export type ArenaAssignment = ArenaPairingAssignment | DeepReadonly<AssignmentScope & {
+  kind: 'bot'; sides: [ArenaSide]; opponent: { id: string; name: string; snapshot: FighterSnapshot };
+}>;
 
 /** A non-empty string identifier. */
 export const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
@@ -210,7 +214,7 @@ export function copyFighter(f: FighterSnapshot): FighterSnapshot {
  * estimate exceeds twice the smaller (exactly twice is allowed). Any entrant left without an opponent gets an NPC bout.
  * All entrants share one season and slot. Deterministic for the same inputs and seed, independent of input order.
  */
-export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly PairingHistory[], seed: Seed): ArenaAssignment[] {
+export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly PairingHistory[], seed: Seed): ArenaPairingAssignment[] {
   if (!Array.isArray(entrants) || !Array.isArray(recent) || !nonEmpty(seed)) throw new RangeError('Invalid arena pairing input');
   // One retained rules version for the whole pairing: window, cap, ratings and strengths all come from it (with no
   // entrants nothing is paired and the window is never read).
@@ -253,7 +257,7 @@ export function matchArena(entrants: readonly ArenaEntrant[], recent: readonly P
     Math.max(a.cents, b.cents) <= rules.matchmaking.maximumStrengthRatio * Math.min(a.cents, b.cents);
   const side = (c: Candidate): ArenaSide => ({ gladiatorId: c.entrant.gladiatorId, activityId: c.entrant.activityId,
     rating: c.entrant.rating, strength: c.strength, fighter: copyFighter(c.entrant.fighter) });
-  const assignments: ArenaAssignment[] = [];
+  const assignments: ArenaPairingAssignment[] = [];
   for (const league of LEAGUES) {
     const open = pool.filter(c => c.entrant.league === league).sort(order);
     const scope = { seasonId: season!, league, slotIndex: slot! };
@@ -285,34 +289,39 @@ export type ArenaOutcome = DeepReadonly<{
  * Pure regular-Arena rewards for an assignment's revealed bout, one outcome per side in assignment order. The winner is
  * the log's `winnerId`, including a seeded simultaneous-defeat winner at zero health. Human bouts credit 10 renown for a
  * win and 2 for a loss and apply clamped Elo from the frozen side ratings; NPC bouts credit 3 or 0 renown and never
- * change rating. No XP or money is ever granted. Rejects a log that is not this assignment's bout: every fighter of the
- * bout (both sides, or the side and the NPC template) must be valid under one retained rules version, and the log's
- * participants must be exactly the bout's, a human logged with its own `gladiatorId` and the NPC with a null one.
+ * change rating. A v2 bot bout credits one human side with a fifth of the usual human renown, rounded down, and zero
+ * rating change. All these bouts award zero XP and money. Both frozen fighters and their logged identities must match
+ * the assignment's rules and participants.
  */
 export function arenaOutcomes(assignment: ArenaAssignment, log: BattleLog): ArenaOutcome[] {
   const sides = assignment?.sides;
   const npc = assignment?.kind === 'npc' && sides?.length === 1 ? assignment.opponent : null;
+  const bot = assignment?.kind === 'bot' && sides?.length === 1 ? assignment.opponent : null;
   // Each participant's battle-log identity, as `[participant id, logged gladiatorId]`.
   const expected: readonly (readonly [string, string | null])[] | null = assignment?.kind === 'human' && sides?.length === 2
     ? [[sides[0].gladiatorId, sides[0].gladiatorId], [sides[1].gladiatorId, sides[1].gladiatorId]]
+    : bot ? [[sides[0].gladiatorId, sides[0].gladiatorId], [bot.id, bot.id]]
     : npc ? [[sides[0].gladiatorId, sides[0].gladiatorId], [npc.id, null]] : null;
   const ids = expected?.map(([id]) => id) ?? [];
   const logged = Array.isArray(log?.participants) ? log.participants : [];
   if (!expected || !ids.every(nonEmpty) || ids[0] === ids[1] || !nonEmpty(assignment.battleId)
     || log.battleId !== assignment.battleId || logged.length !== 2
     || !expected.every(([id, gladiatorId]) => logged.some(p => p?.id === id && p.gladiatorId === gladiatorId))
+    || (bot && (!nonEmpty(bot.name) || !logged.some(p => p.id === bot.id && p.name === bot.name)))
     || !ids.includes(log.winnerId)) throw new RangeError('Battle log does not belong to the arena assignment');
-  const rules = sharedRules([...sides.map(side => side.fighter), ...(npc ? [npc.snapshot] : [])]);
-  if (log.rulesVersion !== rules.version) throw new RangeError('Battle log does not belong to the arena assignment');
+  const opponent = bot ?? npc;
+  const rules = sharedRules([...sides.map(side => side.fighter), ...(opponent ? [opponent.snapshot] : [])]);
+  if (log.rulesVersion !== rules.version || (bot && rules.version !== 'v2')) throw new RangeError('Battle log does not belong to the arena assignment');
   sides.forEach(side => validRating(side.rating, rules));
   const { humanWinRenown, humanLossRenown, npcWinRenown, npcLossRenown } = rules.arena;
   const outcome = (side: ArenaSide, won: boolean, renown: number, ratingAfter: number): ArenaOutcome => freezeDomain({
     gladiatorId: side.gladiatorId, activityId: side.activityId, result: won ? 'victory' as const : 'defeat' as const, success: won,
     rewards: { money: 0, renown, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 },
     ratingBefore: side.rating, ratingAfter, ratingDelta: ratingAfter - side.rating });
-  if (assignment.kind === 'npc') {
+  if (assignment.kind !== 'human') {
     const won = log.winnerId === sides[0].gladiatorId;
-    return [outcome(sides[0], won, won ? npcWinRenown : npcLossRenown, sides[0].rating)];
+    const renown = assignment.kind === 'bot' ? Math.floor((won ? humanWinRenown : humanLossRenown) / 5) : won ? npcWinRenown : npcLossRenown;
+    return [outcome(sides[0], won, renown, sides[0].rating)];
   }
   const [first, second] = assignment.sides;
   const [winner, loser] = log.winnerId === first.gladiatorId ? [first, second] : [second, first];

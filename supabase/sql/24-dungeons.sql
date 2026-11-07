@@ -254,9 +254,10 @@ begin
       select r.version,r.choice into schedule_version,choice from public.schedule_revisions r where r.gladiator_id=m.gladiator_id
         and r.phase=private.slot_phase(target) and r.effective_slot_index<=target order by r.effective_slot_index desc,r.version desc limit 1;
     else
-      -- Preserve the private Arena intent for 6D. Until that route is installed it never enters human pairing.
+      -- Bot Arena intent resolves with the same affordability check, outside the human pairing pool.
       schedule_version:=1;
-      choice:=jsonb_build_object('kind',case when bot_directive in ('on-call','training') then 'training' else 'rest' end);
+      choice:=jsonb_build_object('kind',case when bot_directive in ('on-call','training') then 'training'
+        when bot_directive='arena' then 'arena' else 'rest' end);
     end if;
     if schedule_version is null or prep is null then raise exception 'missing boundary input'; end if;
     insert into public.activities(gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,schedule_version,status)
@@ -269,7 +270,9 @@ begin
         'earnedPoints',g.earned_points,'unspentPoints',g.unspent_points,'league',g.league,'rating',g.rating,
         'peakStrength',g.peak_strength,'tournamentOptIn',g.tournament_opt_in))
       ||case when b.rules_version='v2' then jsonb_build_object('trainingAllowed',prep->'trainingAllowed') else '{}'::jsonb end
-      ||case when bot_directive is not null then jsonb_build_object('botDirective',bot_directive) else '{}'::jsonb end,
+      ||case when bot_directive is not null then jsonb_build_object('botDirective',bot_directive) else '{}'::jsonb end
+      ||case when bot_directive='arena' then jsonb_build_object('botArena',jsonb_build_object('name',g.name,
+        'snapshot',prep->'arenaFighter','strengthCents',(prep->>'arenaStrength')::numeric*100)) else '{}'::jsonb end,
       encode(extensions.gen_random_bytes(32),'hex'),b.rules_version);
   end loop;
   return null;
@@ -543,12 +546,244 @@ language sql stable security invoker set search_path='' as $$
     and a.requested->>'kind'='dungeon' and a.requested->>'dungeonId'=dungeon and s.rules_version=rules
 $$;
 
+-- 6D. The unique slot reservation is attached to the accepted assignment. Last meetings outlive replay cleanup.
+alter table private.arena_assignments drop constraint if exists arena_assignments_kind_check,
+  add constraint arena_assignments_kind_check check (kind in ('human','npc','bot')
+    and (kind<>'bot' or jsonb_typeof(assignment->'opponent'->'id') is not distinct from 'string'));
+create unique index if not exists arena_one_bot_per_slot on private.arena_assignments(slot_index,((assignment->'opponent'->>'id')::uuid))
+  where kind='bot';
+
+create table if not exists private.bot_arena_history (
+  human_id uuid not null references public.gladiators(id) on delete cascade,
+  bot_id uuid not null references private.bots(gladiator_id) on delete cascade,
+  last_slot bigint not null check (last_slot>=0),
+  primary key(human_id,bot_id),
+  check (human_id<>bot_id)
+);
+alter table private.bot_arena_history enable row level security;
+revoke all on private.bot_arena_history from public,anon,authenticated,service_role;
+grant select,insert,update on private.bot_arena_history to service_role;
+drop policy if exists backend_only on private.bot_arena_history;
+create policy backend_only on private.bot_arena_history to service_role using (true) with check (true);
+
+-- SQL09 pairing input retains the old worker wire. Bot duties have no tournament candidacy or history here.
+create or replace function private.pairing_input(target bigint,league_id text,season bigint,rules text) returns jsonb
+language sql stable security invoker set search_path='' as $$
+  with requested as (
+    select a.id as activity_id,a.gladiator_id,a.resolved_kind,s.snapshot,jsonb_build_object('gladiatorId',a.gladiator_id,'activityId',a.id,
+      'seasonId',season::text,'league',league_id,'slotIndex',target,'rating',s.snapshot->'starting'->'rating','fighter',p.result->'arenaFighter') as entrant
+    from public.activities a join private.activity_snapshots s on s.activity_id=a.id
+    join private.jobs p on p.dedupe_key='prepare:'||target||':'||a.gladiator_id and p.status='completed'
+    where a.slot_index=target and a.status='preparing' and a.requested->>'kind'='arena' and a.resolved_kind in ('arena','rest')
+      and not (s.snapshot ? 'botDirective') and s.snapshot->'starting'->>'league'=league_id),
+  entrants as (select * from requested where resolved_kind='arena'),
+  history as (
+    select x.slot_index,x.battle_id as id,x.assignment->'sides'->0->>'gladiatorId' as a,x.assignment->'sides'->1->>'gladiatorId' as b
+    from private.jobs pj join private.arena_assignments x on x.pairing_job_id=pj.id
+    where pj.kind='pair' and pj.slot_index between target-18 and target-1 and x.kind='human'
+    union all
+    select t.slot_index,o.id,case when o.round=1 then o.placed->>0 else o.result->>'winnerId' end,
+      case when o.round=1 then o.placed->>1 else o.result->>'loserId' end
+    from private.tournaments t join private.tournament_bouts o on o.tournament_id=t.id
+    where t.slot_index between target-18 and target-1 and not o.bye)
+  select jsonb_build_object('slotIndex',target,'league',league_id,'seasonId',season::text,'rulesVersion',rules,'historyFromSlot',target-18,
+    'entrants',coalesce((select jsonb_agg(e.entrant order by e.gladiator_id) from entrants e),'[]'::jsonb),
+    'recent',coalesce((select jsonb_agg(jsonb_build_object('slotIndex',h.slot_index,'gladiatorIds',jsonb_build_array(h.a,h.b)) order by h.slot_index,h.id)
+      from history h where h.a in (select e.gladiator_id::text from entrants e) and h.b in (select e.gladiator_id::text from entrants e)),'[]'::jsonb),
+    'tournament',jsonb_build_object(
+      'rested',coalesce((select jsonb_agg(r.entrant order by r.gladiator_id) from requested r where r.resolved_kind='rest'),'[]'::jsonb),
+      'candidates',coalesce((select jsonb_agg(jsonb_build_object('gladiatorId',r.gladiator_id,'choice',r.snapshot->'choice',
+        'stamina',r.snapshot->'starting'->'stamina'->'current',
+        'costs',jsonb_build_object('arena',r.snapshot->'costs'->'arena','tournament',r.snapshot->'costs'->'tournament'),
+        'optIn',jsonb_build_array(jsonb_build_object('enabled',r.snapshot->'starting'->'tournamentOptIn','receivedAtMs',target*4800000-1)))
+        order by r.gladiator_id) from requested r),'[]'::jsonb)))
+$$;
+
+-- SQL21 validation is retained in full before an NPC fallback can be substituted.
+create or replace function private.accept_pairing(job uuid,result jsonb) returns boolean language plpgsql security invoker set search_path='' as $$
+declare j private.jobs%rowtype; frozen jsonb; expected jsonb; bracketed jsonb:='{}'::jsonb; routed jsonb:='{}'::jsonb; seen jsonb:='{}'::jsonb;
+  e jsonb; s jsonb; x jsonb; r jsonb; gid text; human boolean; keys text[]; sides integer; league_id text; season bigint;
+  now_ms bigint:=private.planning_now_ms(); partitioned boolean; bracket jsonb; tid text;
+  opponent jsonb; human_strength_cents numeric;
+  eligible jsonb:='{}'::jsonb; has_bracket boolean:=false; calendar boolean; required_route text; required_reason text;
+begin
+  select * into j from private.jobs where id=job;
+  partitioned:=j.input ? 'tournament';
+  keys:=case when partitioned then array['assignments','tournament'] else array['assignments'] end;
+  if j.kind is distinct from 'pair' or jsonb_typeof(result) is distinct from 'object' or jsonb_typeof(result->'assignments') is distinct from 'array'
+    or (select array_agg(k order by k collate "C") from jsonb_object_keys(result) k) is distinct from keys then return false; end if;
+  league_id:=j.input->>'league';
+  season:=private.season_index(j.slot_index);
+  if season is null or j.input->>'seasonId' is distinct from season::text then return false; end if;
+  -- The frozen values of every Arena request of this slot and league: resolved Arena, or Rest by step 6.
+  select coalesce(jsonb_object_agg(a.gladiator_id::text,jsonb_build_object('activityId',a.id,'kind',a.resolved_kind,
+      'rating',sn.snapshot->'starting'->'rating','strength',p.result->'arenaStrength','fighter',p.result->'arenaFighter','npc',p.result->'npcTemplate',
+      'costs',sn.snapshot->'costs','snapshot',sn.snapshot,'requested',a.requested,'snapshotVersion',sn.rules_version,
+      'preparationVersion',p.rules_version,'preparationResultVersion',p.result->'rulesVersion',
+      'preparationSlot',p.slot_index,'preparationInputSlot',p.input->'slotIndex')),'{}'::jsonb) into frozen
+    from public.activities a join private.activity_snapshots sn on sn.activity_id=a.id
+    join private.jobs p on p.dedupe_key='prepare:'||a.slot_index||':'||a.gladiator_id and p.status='completed'
+    where a.slot_index=j.slot_index and a.status='preparing' and a.requested->>'kind'='arena' and a.resolved_kind in ('arena','rest')
+      and not (sn.snapshot ? 'botDirective') and sn.snapshot->'starting'->>'league'=league_id;
+  select coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) into expected from jsonb_each(frozen) f where f.value->>'kind'='arena';
+  if j.rules_version='v2' then
+    if not partitioned or not private.safe_integer(to_jsonb(j.slot_index)) then return false; end if;
+    -- The frozen pool and cutoff opt-in must agree with the job that the worker actually received. This reconstructs
+    -- only private frozen activity/preparation data, never the character's current opt-in or latest schedule.
+    if j.input is distinct from jsonb_set(private.pairing_input(j.slot_index,league_id,season,j.rules_version),
+      '{tournament,bracketSeed}',to_jsonb(encode(extensions.digest(j.seed||':bracket','sha256'),'hex'))) then return false; end if;
+    calendar:=private.economy_tournament_slot(j.slot_index);
+    for gid,x in select key,value from jsonb_each(frozen) loop
+      if x->'snapshotVersion' is distinct from '"v2"'::jsonb or x->'preparationVersion' is distinct from '"v2"'::jsonb
+        or x->'preparationResultVersion' is distinct from '"v2"'::jsonb or x->'fighter'->'rulesVersion' is distinct from '"v2"'::jsonb
+        or x->'preparationSlot' is distinct from to_jsonb(j.slot_index) or x->'preparationInputSlot' is distinct from to_jsonb(j.slot_index)
+        or x->'snapshot'->'rulesVersion' is distinct from '"v2"'::jsonb
+        or x->'snapshot'->'slotIndex' is distinct from to_jsonb(j.slot_index)
+        or x->'snapshot'->'cutoffMs' is distinct from to_jsonb(j.slot_index*4800000)
+        or x->'snapshot'->'activityId' is distinct from x->'activityId'
+        or x->'snapshot'->'gladiatorId' is distinct from to_jsonb(gid)
+        or x->'snapshot'->'choice' is distinct from x->'requested'
+        or x->'snapshot'->'choice'->>'kind' is distinct from 'arena'
+        or x->'snapshot'->'starting'->'league' is distinct from to_jsonb(league_id)
+        or jsonb_typeof(x->'snapshot'->'starting'->'tournamentOptIn') is distinct from 'boolean'
+        or not private.safe_integer(x->'snapshot'->'starting'->'stamina'->'current')
+        or not private.safe_integer(x->'costs'->'arena') or x->'costs'->'tournament' is distinct from '0'::jsonb then return false; end if;
+      -- Validate numeric types above before casting. Whole-number JSON spellings such as 25.0 remain valid.
+      if (x->>'kind'='arena') is distinct from
+        ((x->'snapshot'->'starting'->'stamina'->>'current')::numeric >= (x->'costs'->>'arena')::numeric) then return false; end if;
+      if calendar and x->'snapshot'->'starting'->'tournamentOptIn'='true'::jsonb then
+        eligible:=eligible||jsonb_build_object(gid,true);
+      end if;
+    end loop;
+    has_bracket:=(select count(*) from jsonb_object_keys(eligible))>=2;
+  end if;
+  if partitioned then
+    if jsonb_typeof(result->'tournament') is distinct from 'object'
+      or (select array_agg(k order by k collate "C") from jsonb_object_keys(result->'tournament') k) is distinct from array['bracket','routes']
+      or jsonb_typeof(result->'tournament'->'routes') is distinct from 'array' then return false; end if;
+    for r in select value from jsonb_array_elements(result->'tournament'->'routes') loop
+      if jsonb_typeof(r) is distinct from 'object'
+        or (select array_agg(k order by k collate "C") from jsonb_object_keys(r) k)
+          is distinct from array['activityId','gladiatorId','league','reason','route','staminaDebit']
+        or jsonb_typeof(r->'gladiatorId') is distinct from 'string' then return false; end if;
+      gid:=r->>'gladiatorId'; x:=frozen->gid;
+      if x is null or routed ? gid or r->'activityId' is distinct from x->'activityId' or r->'league' is distinct from to_jsonb(league_id)
+        then return false; end if;
+      if j.rules_version='v2' then
+        -- Derive the required route from the complete eligible pool: a valid smaller bracket, or all-Rest suppression,
+        -- is still invalid. Non-bracket entrants retain the preliminary ordinary-Arena affordability decision.
+        required_route:=case when has_bracket and eligible ? gid then 'tournament' else x->>'kind' end;
+        required_reason:=case when required_route='tournament' then 'bracket' when required_route='rest' then 'insufficient-stamina'
+          when not calendar then 'not-tournament-slot' when x->'snapshot'->'starting'->'tournamentOptIn'='false'::jsonb then 'opted-out'
+          else 'too-few-entrants' end;
+        if r->>'route' is distinct from required_route or r->>'reason' is distinct from required_reason then return false; end if;
+      elsif (x->>'kind'='rest') is distinct from (r->>'route'='rest') then return false; end if;
+      -- Rest is exactly step 6's fallback at no cost; a bracket costs the frozen tournament price, regular Arena the Arena price.
+      if not coalesce((r->>'route'='rest' and r->'reason'='"insufficient-stamina"'::jsonb and r->'staminaDebit'='0'::jsonb)
+          or (r->>'route'='tournament' and r->'reason'='"bracket"'::jsonb and r->'staminaDebit'=x->'costs'->'tournament')
+          or (r->>'route'='arena' and r->>'reason' in ('not-tournament-slot','opted-out','insufficient-stamina','too-few-entrants')
+            and r->'staminaDebit'=x->'costs'->'arena'),false) then return false; end if;
+      routed:=routed||jsonb_build_object(gid,true);
+      if r->>'route'='tournament' then
+        bracketed:=bracketed||jsonb_build_object(gid,jsonb_build_object('activityId',x->'activityId','rating',x->'rating','fighter',x->'fighter'));
+        expected:=expected-gid;
+      end if;
+    end loop;
+    if (select count(*) from jsonb_object_keys(routed))<>(select count(*) from jsonb_object_keys(frozen)) then return false; end if;
+    bracket:=result->'tournament'->'bracket';
+    if not private.valid_bracket(j.id,bracket,bracketed) then return false; end if;
+  end if;
+  for e in select value from jsonb_array_elements(result->'assignments') loop
+    if jsonb_typeof(e) is distinct from 'object' or e->'kind' is null or e->'kind' not in ('"human"'::jsonb,'"npc"'::jsonb)
+      or jsonb_typeof(e->'sides') is distinct from 'array' then return false; end if;
+    human:=e->>'kind'='human';
+    -- PL/pgSQL ends an IF condition at its first THEN, so the kind-dependent shape is computed first.
+    keys:=case when human then array['battleId','kind','league','seasonId','sides','slotIndex']
+      else array['battleId','kind','league','opponent','seasonId','sides','slotIndex'] end;
+    sides:=case when human then 2 else 1 end;
+    if (select array_agg(k order by k collate "C") from jsonb_object_keys(e) k) is distinct from keys
+      or e->'slotIndex' is distinct from to_jsonb(j.slot_index) or e->'league' is distinct from to_jsonb(league_id)
+      or e->'seasonId' is distinct from to_jsonb(season::text) or jsonb_array_length(e->'sides')<>sides then return false; end if;
+    for s in select value from jsonb_array_elements(e->'sides') loop
+      if jsonb_typeof(s) is distinct from 'object' or jsonb_typeof(s->'gladiatorId') is distinct from 'string'
+        or (select array_agg(k order by k collate "C") from jsonb_object_keys(s) k) is distinct from array['activityId','fighter','gladiatorId','rating','strength']
+        then return false; end if;
+      gid:=s->>'gladiatorId';
+      x:=expected->gid;
+      if x is null or seen ? gid or s->'activityId' is distinct from x->'activityId' or s->'rating' is distinct from x->'rating'
+        or s->'strength' is distinct from x->'strength' or s->'fighter' is distinct from x->'fighter' then return false; end if;
+      seen:=seen||jsonb_build_object(gid,true);
+    end loop;
+    if human then
+      if e->'battleId' is distinct from to_jsonb('arena:'||j.slot_index||':'||(e->'sides'->0->>'gladiatorId')||':'||(e->'sides'->1->>'gladiatorId')) then
+        return false;
+      end if;
+    else
+      gid:=e->'sides'->0->>'gladiatorId';
+      if e->'battleId' is distinct from to_jsonb('arena:'||j.slot_index||':'||gid||':npc') or jsonb_typeof(e->'opponent') is distinct from 'object' then
+        return false;
+      end if;
+      if (select array_agg(k order by k collate "C") from jsonb_object_keys(e->'opponent') k) is distinct from array['id','snapshot']
+        or e->'opponent'->'id' is distinct from to_jsonb('npc:'||gid) or e->'opponent'->'snapshot' is distinct from expected->gid->'npc' then
+        return false;
+      end if;
+    end if;
+  end loop;
+  -- Complete: every regular-Arena entrant appeared, each exactly once (duplicates were refused above).
+  if (select count(*) from jsonb_object_keys(seen))<>(select count(*) from jsonb_object_keys(expected)) then return false; end if;
+  for e in select value from jsonb_array_elements(result->'assignments') with ordinality as proposed(value,position) order by position loop
+    if j.rules_version='v2' and e->>'kind'='npc' then
+      gid:=e->'sides'->0->>'gladiatorId';
+      human_strength_cents:=(expected->gid->>'strength')::numeric*100;
+      -- All prior boundaries have settled before this phase. This slot cannot reveal until all pairing jobs complete.
+      select jsonb_build_object('id',d.gladiator_id,'name',s.snapshot->'botArena'->'name','snapshot',s.snapshot->'botArena'->'snapshot') into opponent
+      from private.bot_slot_duty d
+      join public.activities a on a.slot_index=d.slot_index and a.gladiator_id=d.gladiator_id
+      join private.activity_snapshots s on s.activity_id=a.id
+      left join private.bot_arena_history h on h.bot_id=d.gladiator_id and h.human_id=gid::uuid and h.last_slot<j.slot_index
+      where d.slot_index=j.slot_index and d.directive='arena' and a.status='preparing' and a.resolved_kind='arena'
+        and s.rules_version=j.rules_version and s.snapshot->'starting'->>'league'=league_id
+        and 4*(s.snapshot->'botArena'->>'strengthCents')::numeric between 3*human_strength_cents and 5*human_strength_cents
+        and not exists(select 1 from private.arena_assignments used where used.slot_index=j.slot_index and used.kind='bot'
+          and (used.assignment->'opponent'->>'id')::uuid=d.gladiator_id)
+      order by h.last_slot nulls first,d.gladiator_id limit 1;
+      if found then
+        e:=e||jsonb_build_object('kind','bot','opponent',opponent,'battleId','arena:'||j.slot_index||':'||gid||':bot:'||(opponent->>'id'));
+      end if;
+    end if;
+    insert into private.arena_assignments(battle_id,pairing_job_id,slot_index,league,season_index,kind,seed,assignment,created_at_ms)
+      values(e->>'battleId',j.id,j.slot_index,league_id,season,e->>'kind',
+        encode(extensions.digest(j.seed||':'||(e->>'battleId'),'sha256'),'hex'),e,now_ms);
+    insert into private.arena_assignment_sides(activity_id,battle_id,side)
+      select (side.value->>'activityId')::uuid,e->>'battleId',(side.ordinality-1)::smallint
+      from jsonb_array_elements(e->'sides') with ordinality side(value,ordinality);
+  end loop;
+  if jsonb_typeof(bracket)='object' then
+    tid:=bracket->>'id';
+    insert into private.tournaments(id,pairing_job_id,slot_index,league,season_index,rules_version,starts_at_ms,settles_at_ms,size,rounds,reveal_at_ms,created_at_ms)
+      values(tid,j.id,j.slot_index,league_id,season,j.rules_version,(bracket->>'startsAtMs')::bigint,(bracket->>'settlesAtMs')::bigint,
+        (bracket->>'size')::integer,(bracket->>'rounds')::integer,bracket->'revealAtMs',now_ms);
+    -- The display name is frozen with the entry: every bout log of the tournament carries the same names (decision 7).
+    insert into private.tournament_entries(tournament_id,gladiator_id,activity_id,rank,rating,fighter,name)
+      select tid,(t.value->>'gladiatorId')::uuid,(t.value->>'activityId')::uuid,(t.value->>'rank')::integer,(t.value->>'rating')::bigint,t.value->'fighter',g.name
+      from jsonb_array_elements(bracket->'entries') t join public.gladiators g on g.id=(t.value->>'gladiatorId')::uuid;
+    insert into private.tournament_bouts(id,tournament_id,round,position,parent_bout_ids,placed,bye,reveal_at_ms,seed,result)
+      select o.value->>'id',tid,(o.value->>'round')::integer,(o.value->>'position')::integer,o.value->'parentBoutIds',nullif(o.value->'placed','null'::jsonb),
+        (o.value->>'bye')::boolean,(o.value->>'revealAtMs')::bigint,
+        case when (o.value->>'bye')::boolean then null else encode(extensions.digest(j.seed||':'||(o.value->>'id'),'sha256'),'hex') end,
+        nullif(o.value->'result','null'::jsonb)
+      from jsonb_array_elements(bracket->'bouts') o;
+  end if;
+  return true;
+end $$;
+
 create or replace function private.boundary_pair(target bigint) returns text language plpgsql security invoker set search_path='' as $$
 declare b private.boundaries%rowtype; season bigint; l text; now_ms bigint:=private.planning_now_ms(); seed text; input jsonb; dungeon text; has_arena boolean;
   required_level integer; humans integer; pool jsonb; chosen uuid[]; used uuid[]:='{}';
 begin
   select * into b from private.boundaries where slot_index=target;
-  select exists(select 1 from public.activities a where a.slot_index=target and a.status='preparing'
+  select exists(select 1 from public.activities a join private.activity_snapshots s on s.activity_id=a.id
+    where a.slot_index=target and a.status='preparing' and not (s.snapshot ? 'botDirective')
     and (a.resolved_kind='arena' or (b.rules_version='v2' and a.requested->>'kind'='arena' and a.resolved_kind='rest'))) into has_arena;
   if not has_arena and not exists(select 1 from public.activities a where a.slot_index=target and a.status='preparing'
     and a.resolved_kind='dungeon') then return null; end if;
@@ -556,7 +791,7 @@ begin
     season:=private.season_index(target);
     if season is null then return 'epoch'; end if;
     for l in select distinct s.snapshot->'starting'->>'league' from public.activities a join private.activity_snapshots s on s.activity_id=a.id
-      where a.slot_index=target and a.status='preparing'
+      where a.slot_index=target and a.status='preparing' and not (s.snapshot ? 'botDirective')
         and (a.resolved_kind='arena' or (b.rules_version='v2' and a.requested->>'kind'='arena' and a.resolved_kind='rest'))
         and not exists(select 1 from private.jobs j where j.dedupe_key='pair:'||target||':'||(s.snapshot->'starting'->>'league')) loop
       seed:=encode(extensions.gen_random_bytes(32),'hex');
@@ -605,6 +840,7 @@ begin
       where t.slot_index=target and a.id=e.activity_id and a.status='preparing'
         and (a.resolved_kind='arena' or (t.rules_version='v2' and s.rules_version='v2' and a.resolved_kind='rest'));
     if exists(select 1 from public.activities a where a.slot_index=target and a.status='preparing' and a.resolved_kind='arena'
+      and not exists(select 1 from private.activity_snapshots s where s.activity_id=a.id and s.snapshot->>'botDirective'='arena')
       and not exists(select 1 from private.arena_assignment_sides x where x.activity_id=a.id)) then
       raise exception 'unpaired arena entrant';
     end if;
@@ -785,6 +1021,8 @@ begin
     select id into simulation from private.jobs where dedupe_key='dungeon:'||run.run_id;
     insert into private.job_dependencies values(terminal,simulation) on conflict do nothing;
   elsif a.resolved_kind='arena' then
+    -- Bot Arena attendance has only its private terminal. Any opponent and reveal belong to the human's bout.
+    if s.snapshot->>'botDirective'='arena' then return; end if;
     select * into seat from private.arena_assignment_sides where activity_id=a.id;
     if not found then raise exception 'unpaired arena entrant'; end if;
     select * into x from private.arena_assignments where battle_id=seat.battle_id;
@@ -1157,6 +1395,121 @@ begin
 end $$;
 
 
+-- SQL08 simulation and due reveal. Both retained bout routes use the same fields and result path.
+create or replace function private.accept_arena_result(job uuid,result jsonb) returns boolean language plpgsql security invoker set search_path='' as $$
+declare j private.jobs%rowtype; a public.activities%rowtype; x private.arena_assignments%rowtype; seat private.arena_assignment_sides%rowtype;
+  log jsonb; now_ms bigint; human boolean; sides integer; side jsonb; fighter jsonb; p jsonb; o jsonb;
+  expected_id text; expected_gid jsonb; won boolean; delta numeric; bot boolean;
+begin
+  select * into j from private.jobs where id=job for update;
+  now_ms:=private.planning_now_ms();
+  if not found or j.status is distinct from 'leased' or j.lease_until_ms<=now_ms or j.due_at_ms>now_ms or not private.dependencies_ready(j.id) then
+    return false;
+  end if;
+  select * into a from public.activities where id=j.activity_id;
+  if a.resolved_kind is distinct from 'arena' then return false; end if;
+  if j.kind='simulation' then
+    select * into x from private.arena_assignments where battle_id=j.input->>'battleId';
+    if not found or j.dedupe_key is distinct from 'arena:'||x.battle_id or jsonb_typeof(result) is distinct from 'object'
+      or (select array_agg(k order by k collate "C") from jsonb_object_keys(result) k) is distinct from array['battleId','log','outcomes']
+      or result->>'battleId' is distinct from x.battle_id or jsonb_typeof(result->'outcomes') is distinct from 'array' then
+      return false;
+    end if;
+    begin
+      log:=private.safe_battle_log(result->'log');
+    exception when others then
+      return false;
+    end;
+    human:=x.kind='human';
+    bot:=x.kind='bot';
+    if bot and (j.rules_version<>'v2' or j.input->'assignment' is distinct from x.assignment) then return false; end if;
+    sides:=case when human then 2 else 1 end;
+    if log->>'battleId' is distinct from x.battle_id or log->>'rulesVersion' is distinct from j.rules_version
+      or jsonb_array_length(result->'outcomes')<>sides
+      or log->>'winnerId' not in (log->'participants'->0->>'id',log->'participants'->1->>'id')
+      or (log->'events'->-1)->>'kind' is distinct from 'victory' or (log->'events'->-1)->>'winnerId' is distinct from log->>'winnerId' then
+      return false;
+    end if;
+    -- Humans and bots use frozen public identities. The NPC uses npc:<entrant> with a null gladiatorId.
+    for i in 0..1 loop
+      p:=log->'participants'->i;
+      if i<sides then
+        side:=x.assignment->'sides'->i;
+        fighter:=side->'fighter';
+        expected_id:=side->>'gladiatorId';
+        expected_gid:=side->'gladiatorId';
+        if p->'name' is distinct from j.input->'names'->i then return false; end if;
+      else
+        fighter:=x.assignment->'opponent'->'snapshot';
+        expected_id:=x.assignment->'opponent'->>'id';
+        expected_gid:=case when bot then x.assignment->'opponent'->'id' else 'null'::jsonb end;
+        if (bot and p->'name' is distinct from x.assignment->'opponent'->'name')
+          or coalesce(p->>'name','')='' then return false; end if;
+      end if;
+      if p->>'id' is distinct from expected_id or p->'gladiatorId' is distinct from expected_gid
+        or p->'classId' is distinct from fighter->'classId' or p->'stance' is distinct from fighter->'stance'
+        or p->'attributes' is distinct from fighter->'attributes' or p->'maxHealth' is distinct from fighter->'maxHealth'
+        or p->'initialHealth' is distinct from fighter->'maxHealth' or p->'armor' is distinct from fighter->'armor'
+        or p->'weaponDamage' is distinct from fighter->'weaponDamage' or p->'attackIntervalMs' is distinct from fighter->'attackIntervalMs'
+        or p->'equipmentSilhouettes' is distinct from fighter->'equipmentSilhouettes'
+        or (bot and p->'efficiencyBasisPoints' is distinct from to_jsonb(floor((fighter->>'efficiency')::double precision*10000+0.5))) then
+        return false;
+      end if;
+    end loop;
+    -- One outcome per side, in assignment order, consistent with the logged winner and the frozen ratings.
+    for i in 0..sides-1 loop
+      o:=result->'outcomes'->i;
+      side:=x.assignment->'sides'->i;
+      if jsonb_typeof(o) is distinct from 'object' or jsonb_typeof(o->'rewards') is distinct from 'object'
+        or (select array_agg(k order by k collate "C") from jsonb_object_keys(o) k)
+          is distinct from array['activityId','gladiatorId','ratingAfter','ratingBefore','ratingDelta','result','rewards','success']
+        or (select array_agg(k order by k collate "C") from jsonb_object_keys(o->'rewards') k)
+          is distinct from array['attributePoints','items','money','overflowMoney','renown','xp']
+        or o->'gladiatorId' is distinct from side->'gladiatorId' or o->'activityId' is distinct from side->'activityId' then
+        return false;
+      end if;
+      won:=log->>'winnerId'=side->>'gladiatorId';
+      if o->'result' is distinct from to_jsonb(case when won then 'victory' else 'defeat' end) or o->'success' is distinct from to_jsonb(won)
+        or o->'rewards'->'money' is distinct from '0'::jsonb or o->'rewards'->'xp' is distinct from '0'::jsonb
+        or o->'rewards'->'attributePoints' is distinct from '0'::jsonb or o->'rewards'->'overflowMoney' is distinct from '0'::jsonb
+        or o->'rewards'->'items' is distinct from '[]'::jsonb or not private.safe_integer(o->'rewards'->'renown')
+        or o->'ratingBefore' is distinct from side->'rating' or not private.safe_integer(o->'ratingAfter')
+        or not private.safe_integer(o->'ratingDelta',-9007199254740991) then
+        return false;
+      end if;
+      -- V2 human-vs-human renown is 10/2. A fifth, floored, is 2/0. The other currencies are checked above.
+      if bot and o->'rewards'->'renown' is distinct from to_jsonb((case when won then 10 else 2 end)/5) then return false; end if;
+      delta:=(o->>'ratingAfter')::numeric-(o->>'ratingBefore')::numeric;
+      if (o->>'ratingDelta')::numeric<>delta or (not human and delta<>0) or (human and won and delta<0) or (human and not won and delta>0) then
+        return false;
+      end if;
+    end loop;
+    -- The base sanitizer drops every extra worker field. Only the validated opponent gets the public tag.
+    if bot then log:=jsonb_set(log,'{participants,1,botTeam}','"ludus-nimbus"'::jsonb); end if;
+    insert into private.arena_results(battle_id,simulation_job_id,log,outcomes,created_at_ms) values(x.battle_id,j.id,log,result->'outcomes',now_ms);
+    return true;
+  elsif j.kind='reveal' then
+    -- The side's bout stage at minute 60: the battle's one frozen log, labelled from this side's perspective (exception 8).
+    select * into seat from private.arena_assignment_sides where activity_id=a.id;
+    select * into x from private.arena_assignments where battle_id=seat.battle_id;
+    bot:=x.kind='bot';
+    select r.log into log from private.arena_results r where r.battle_id=seat.battle_id;
+    if log is null or (j.input->>'ordinal')::integer is distinct from 1 then return false; end if;
+    insert into public.activity_stages(activity_id,ordinal,reveal_at_ms,stage) values(a.id,1,j.due_at_ms,jsonb_build_object(
+      'id',a.id::text||':1','kind','bout','revealedAtMs',j.due_at_ms,'startedAtMs',j.due_at_ms,
+      'endsAtMs',j.due_at_ms+(log->>'durationMs')::bigint,
+      'label',case when log->>'winnerId'=a.gladiator_id::text then 'Bout: victory' else 'Bout: defeat' end,'battleLog',log)
+      ||case when bot then jsonb_build_object('arenaMode','unranked') else '{}'::jsonb end);
+    if bot then
+      insert into private.bot_arena_history as h(human_id,bot_id,last_slot)
+        values(a.gladiator_id,(x.assignment->'opponent'->>'id')::uuid,x.slot_index)
+        on conflict(human_id,bot_id) do update set last_slot=excluded.last_slot where h.last_slot<excluded.last_slot;
+    end if;
+    return true;
+  end if;
+  return false;
+end $$;
+
 create or replace function public.complete_job(job_id uuid,lease_token uuid,result jsonb) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare j private.jobs%rowtype; now_ms bigint;
@@ -1420,6 +1773,7 @@ begin
     if not private.safe_integer(value->'ratingDelta',-9007199254740991) then raise exception 'invalid settlement outcome'; end if;
     result:=result||jsonb_build_object('ratingDelta',value->'ratingDelta');
   end if;
+  if value->>'arenaMode'='unranked' then result:=result||jsonb_build_object('arenaMode','unranked'); end if;
   if value ? 'dungeon' then
     if jsonb_typeof(dungeon) is distinct from 'object'
       or coalesce(dungeon->>'id','') not in ('wolf-den','raider-stronghold','troll-hall')
@@ -1429,6 +1783,57 @@ begin
       'terminalFight',dungeon->'terminalFight','partyWon',dungeon->'partyWon'));
   end if;
   return result;
+end $$;
+
+-- SQL08 Arena hooks reached through the retained SQL10 settlement dispatcher.
+create or replace function private.arena_settlement_failure(activity uuid) returns text language plpgsql stable security invoker set search_path='' as $$
+declare a public.activities%rowtype; seat private.arena_assignment_sides%rowtype; x private.arena_assignments%rowtype; o jsonb; live bigint;
+begin
+  select * into a from public.activities where id=activity;
+  select * into seat from private.arena_assignment_sides where activity_id=activity;
+  if not found then return 'arena-unassigned'; end if;
+  select * into x from private.arena_assignments where battle_id=seat.battle_id;
+  select r.outcomes->(seat.side::integer) into o from private.arena_results r where r.battle_id=seat.battle_id;
+  if o is null or o->>'activityId' is distinct from a.id::text or o->>'gladiatorId' is distinct from a.gladiator_id::text then
+    return 'arena-unsimulated';
+  end if;
+  if x.kind='bot' then return null; end if;
+  select r.rating into live from private.arena_ratings r where r.gladiator_id=a.gladiator_id and r.league=x.league and r.season_index=x.season_index;
+  if live is null or live is distinct from (x.assignment->'sides'->(seat.side::integer)->>'rating')::bigint
+    or live is distinct from (o->>'ratingBefore')::bigint then
+    return 'rating-mismatch';
+  end if;
+  return null;
+end $$;
+
+create or replace function private.arena_rewards(activity uuid) returns jsonb language plpgsql security invoker set search_path='' as $$
+declare a public.activities%rowtype; seat private.arena_assignment_sides%rowtype; x private.arena_assignments%rowtype; o jsonb;
+  human boolean; won boolean; after bigint;
+begin
+  select * into a from public.activities where id=activity;
+  select * into seat from private.arena_assignment_sides where activity_id=activity;
+  select * into x from private.arena_assignments where battle_id=seat.battle_id;
+  select r.outcomes->(seat.side::integer) into o from private.arena_results r where r.battle_id=seat.battle_id;
+  if o is null or o->>'activityId' is distinct from a.id::text then raise exception 'missing arena outcome'; end if;
+  human:=x.kind='human';
+  won:=o->>'result'='victory';
+  after:=(o->>'ratingAfter')::bigint;
+  if x.kind<>'bot' then
+    update private.arena_ratings set rating=after,
+      human_wins=human_wins+case when human and won then 1 else 0 end,
+      human_losses=human_losses+case when human and not won then 1 else 0 end
+      where gladiator_id=a.gladiator_id and league=x.league and season_index=x.season_index;
+    if not found then raise exception 'missing arena rating'; end if;
+    update public.gladiators set rating=after where id=a.gladiator_id and league=x.league and rating is distinct from after;
+  end if;
+  update public.wallets set renown=renown+(o->'rewards'->>'renown')::bigint where gladiator_id=a.gladiator_id;
+  insert into public.activity_stages(activity_id,ordinal,reveal_at_ms,stage) values(a.id,2,a.ends_at_ms,jsonb_build_object(
+    'id',a.id::text||':2','kind','return','revealedAtMs',a.ends_at_ms,'startedAtMs',a.ends_at_ms,'endsAtMs',a.ends_at_ms,
+    'label','Results credited'));
+  return jsonb_build_object('rewards',o->'rewards','result',o->'result','success',o->'success','ratingDelta',o->'ratingDelta',
+    'replayExpiry',case when private.planning_now_ms()<a.ends_at_ms+604800000
+      then jsonb_build_object('state','available','expiresAtMs',a.ends_at_ms+604800000) else jsonb_build_object('state','expired') end)
+    ||case when x.kind='bot' then jsonb_build_object('arenaMode','unranked') else '{}'::jsonb end;
 end $$;
 
 create or replace function private.settle_activity_core(activity_id uuid,lease_token uuid,prepared jsonb) returns jsonb
@@ -1446,7 +1851,7 @@ begin
   perform 1 from public.item_instances i join public.activities x on x.gladiator_id=i.gladiator_id where x.id=settle_activity_core.activity_id order by i.id for update of i;
   perform 1 from private.arena_ratings r join private.arena_assignment_sides s on s.activity_id=settle_activity_core.activity_id
     join private.arena_assignments x on x.battle_id=s.battle_id join public.activities y on y.id=s.activity_id
-    where r.gladiator_id=y.gladiator_id and r.league=x.league and r.season_index=x.season_index for update of r;
+    where x.kind<>'bot' and r.gladiator_id=y.gladiator_id and r.league=x.league and r.season_index=x.season_index for update of r;
   perform 1 from private.arena_ratings r join private.tournament_entries e on e.activity_id=settle_activity_core.activity_id
     join private.tournaments t on t.id=e.tournament_id
     where r.gladiator_id=e.gladiator_id and r.league=t.league and r.season_index=t.season_index for update of r;
@@ -1467,7 +1872,8 @@ begin
     or exists(select 1 from public.activities earlier where earlier.slot_index<a.slot_index and earlier.status<>'completed') then
     return jsonb_build_object('ok',false,'code','processing'); end if;
   bot_activity:=exists(select 1 from private.activity_snapshots s where s.activity_id=a.id and s.snapshot ? 'botDirective');
-  if a.resolved_kind in ('arena','tournament') and not exists(select 1 from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index) then
+  if not bot_activity and a.resolved_kind in ('arena','tournament')
+    and not exists(select 1 from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index) then
     if a.resolved_kind='arena' then failure:=private.arena_settlement_failure(a.id); else failure:=private.tournament_settlement_failure(a.id); end if;
     if failure is not null then
       -- Fail closed before any grant or checkpoint: neither the frozen nor the live value is used.
@@ -1666,7 +2072,8 @@ begin
     'location',case when idle then 'camp' when a.id is null then 'orientation'
       when a.resolved_kind='expedition' then 'expedition:'||(a.requested->>'expeditionId')
       when a.resolved_kind='dungeon' then 'dungeon:'||coalesce(a.requested->>'dungeonId',bot_dungeon) else a.resolved_kind end,
-    'activityId',case when not idle then a.id end,'activityStatus',case when idle then 'idle' when a.id is null then 'active' else a.status end,
+    'activityId',case when not idle and not (registered_bot and a.resolved_kind='arena') then a.id end,
+    'activityStatus',case when idle then 'idle' when a.id is null then 'active' else a.status end,
     'startsAtMs',case when not idle then coalesce(a.starts_at_ms,g.created_at_ms) end,
     'endsAtMs',case when not idle then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
   if registered_bot then
@@ -1702,7 +2109,9 @@ begin
         'replayExpiry',case when x.summary->'replayExpiry'->>'state'='available' then jsonb_build_object('state','available','expiresAtMs',x.summary->'replayExpiry'->'expiresAtMs') else jsonb_build_object('state','expired') end)
         ||case when x.resolved_kind='dungeon' then jsonb_build_object('dungeon',jsonb_build_object(
           'id',x.summary->'dungeon'->'id','terminalFight',x.summary->'dungeon'->'terminalFight',
-          'partyWon',x.summary->'dungeon'->'partyWon')) else '{}'::jsonb end as summary
+          'partyWon',x.summary->'dungeon'->'partyWon')) else '{}'::jsonb end
+        ||case when x.resolved_kind='arena' and x.summary->>'arenaMode'='unranked'
+          then jsonb_build_object('arenaMode','unranked') else '{}'::jsonb end as summary
       from public.activities x where x.gladiator_id=gid and x.status='completed' and x.summary is not null and x.settled_at_ms is not null
     ) p
     where not exists(select 1 from public.recent_results r where r.activity_id=p.activity_id

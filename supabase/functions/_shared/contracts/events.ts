@@ -16,18 +16,20 @@ export type ActivitySummary = {
   settledAtMs: number;
   replayExpiry: { state: 'available'; expiresAtMs: number } | { state: 'expired' };
   ratingDelta?: number;
+  arenaMode?: 'unranked';
   /** The party's terminal fight, independent of this member's result. Retained after the replay expires. */
   dungeon?: { id: DungeonId; terminalFight: 1 | 2 | 3 | 4; partyWon: boolean };
 };
 
 /** Safe completed result for spectators. Reward and receipt details remain owner-only. */
-export type PublicActivitySummary = Pick<ActivitySummary, 'activityId' | 'resolvedKind' | 'result' | 'success' | 'settledAtMs' | 'replayExpiry' | 'dungeon'>;
+export type PublicActivitySummary = Pick<ActivitySummary, 'activityId' | 'resolvedKind' | 'result' | 'success' | 'settledAtMs' | 'replayExpiry' | 'dungeon' | 'arenaMode'>;
 
 /** These snapshots appear only inside an already-revealed battle log. */
 export type RevealedCombatant = {
   id: string;
   gladiatorId: GladiatorId | null;
   name: string;
+  botTeam?: 'ludus-nimbus';
   classId: ClassId | null;
   stance: Stance;
   attributes: Readonly<Attributes>;
@@ -75,6 +77,7 @@ export type RevealedStage = {
   id: string; kind: 'depart' | 'travel' | 'exploration' | 'encounter' | 'return' | 'settlement' | 'staging' | 'bout' | 'room' | 'major';
   revealedAtMs: number; startedAtMs: number; endsAtMs: number; label: string;
   battleLog?: BattleLog;
+  arenaMode?: 'unranked';
   fight?: { runId: string; ordinal: 1 | 2 | 3 | 4 };
 };
 export type RevealedTimeline = {

@@ -120,6 +120,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.gladiator_titles': { retention: 'player' }, 'public.title_counters': { retention: 'player' },
   'public.item_firsts': { retention: 'player' }, 'private.title_backfills': { retention: 'singleton' },
   'private.arena_ratings': { retention: 'season' }, 'public.arena_standings': { retention: 'season' }, 'public.season_standings': { retention: 'season' },
+  // One last Arena meeting per human and fixed bot, at most five rows per human.
+  'private.bot_arena_history': { retention: 'player' },
   'private.season_awards': { retention: 'season' }, 'public.seasons': { retention: 'season' },
   'private.command_attempts': { retention: 'operational', windowSlots: 1 }, 'private.dispatch_log': { retention: 'operational', windowSlots: RETENTION.dispatchLogSlots },
   'private.operations_events': { retention: 'operational', windowSlots: RETENTION.operationsEventSlots },

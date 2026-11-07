@@ -46,7 +46,7 @@ it('keeps bot operations owner-only and private scheduling scoped to the worker'
   for (const role of roles) {
     const scoped = role === 'service_role'
       ? ['select team from private.bots', 'update private.bot_slot_duty set directive=\'rest\'']
-      : ['select * from private.bot_routines', 'select * from private.bot_slot_duty', 'select private.freeze_bot_duty(1)'];
+      : ['select * from private.bot_routines', 'select * from private.bot_slot_duty', 'select * from private.bot_arena_history', 'select private.freeze_bot_duty(1)'];
     for (const statement of [
       "select private.create_bot('pip',gen_random_uuid())", "select private.bench_bot('pip')", "select private.activate_bot('pip')",
       'select * from private.bots', 'update private.bots set active=true', ...scoped,
@@ -60,6 +60,7 @@ it('keeps bot operations owner-only and private scheduling scoped to the worker'
   for (const client of [anonymous, (await account()).client, admin]) {
     expect((await client.schema('private').from('bot_routines').select('*')).error?.code).toBe('PGRST106');
     expect((await client.schema('private').from('bot_slot_duty').select('*')).error?.code).toBe('PGRST106');
+    expect((await client.schema('private').from('bot_arena_history').select('*')).error?.code).toBe('PGRST106');
     expect((await client.schema('private').rpc('bench_bot', { member_key: 'pip' })).error?.code).toBe('PGRST106');
   }
 });
@@ -282,6 +283,7 @@ const SERVICE_ROLE = [
   'relation private.arena_assignments: DELETE,INSERT,SELECT',
   'relation private.arena_ratings: INSERT,SELECT,UPDATE',
   'relation private.arena_results: DELETE,INSERT,SELECT',
+  'relation private.bot_arena_history: INSERT,SELECT,UPDATE',
   'relation private.bot_slot_duty: INSERT,SELECT',
   'relation private.boundaries: DELETE,INSERT,SELECT,UPDATE',
   'relation private.boundary_members: DELETE,INSERT,SELECT,UPDATE',

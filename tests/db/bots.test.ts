@@ -1,18 +1,21 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { account, admin, anonymous, creation, request, resetIdentity, sql, tokenFor } from '../fixtures/db.ts';
+import { account, admin, anonymous, clockedClient, creation, request, resetIdentity, sql, tokenFor } from '../fixtures/db.ts';
 import { BOT_CATALOG_ORACLE, BOT_ITEM_SLOTS, BOT_KEYS, BOT_KITS, BOT_ROUTINE_ORACLE } from '../fixtures/bots.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { createDatabase, createWorkerDatabase } from '../../supabase/functions/_shared/backend/database.ts';
 import { handleCommand } from '../../supabase/functions/_shared/backend/commands.ts';
 import { advance, claim, completePreparations, coordinatorLease, fighter, resetWorld, rpc, runBoundary, settleDue, SLOT } from '../fixtures/boundary.ts';
 import { DEFAULT_EXECUTORS, prepareActivity } from '../../supabase/functions/_shared/backend/jobs.ts';
+import type { ArenaSimulationResult, PairingInput, PairingResult } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { DungeonGroupingInput, DungeonGroupingResult } from '../../supabase/functions/_shared/domain/dungeon-grouping.ts';
 import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
-import type { JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
+import { estimateArenaStrengthCents, makeFallback } from '../../supabase/functions/_shared/domain/arena.ts';
+import type { FighterSnapshot, JobLease, PreparationInput } from '../../supabase/functions/_shared/domain/types.ts';
 import type { DungeonId } from '../../supabase/functions/_shared/contracts/commands.ts';
 import { planDungeonRun, type DungeonRunInput, type DungeonRunPlan } from '../../supabase/functions/_shared/domain/dungeon.ts';
 import type { TransactionSql } from 'postgres';
+import { readBouts, readNotifications } from '../../src/lib/api/reads.ts';
 
 const commands = createDatabase(admin);
 const systemIds = new Set<string>();
@@ -329,6 +332,276 @@ async function botProgression(ids: string[]) {
 
 const clockAt = (tx: TransactionSql, ms: number) => tx.unsafe(`create or replace function private.planning_now_ms() returns bigint
   language sql volatile security invoker set search_path='' as 'select ${ms}::bigint'`);
+
+describe('unranked Arena bot bouts', () => {
+  const evening = MONDAY + 8; // Monday's first on-duty evening schedules Rufus for Arena.
+  const arenaDay = { ...restDay, evening: { kind: 'arena' } };
+
+  afterAll(() => resetWorld(evening - 1));
+
+  function fighterAtStrength(fighter: FighterSnapshot, cents: number): FighterSnapshot {
+    // Keep a legal fighter and its actual preparation strength in agreement, as legacy pairing requires.
+    let low = 0, high = 100_000_000;
+    while (low <= high) {
+      const damage = Math.floor((low + high) / 2);
+      const tuned = { ...fighter, maxHealth: 100, attackIntervalMs: 1000, baseDamage: damage / 100_000 };
+      const strength = estimateArenaStrengthCents(tuned);
+      if (strength === cents) return tuned;
+      if (strength < cents) low = damage + 1;
+      else high = damage - 1;
+    }
+    throw new Error(`No test fighter with strength ${cents} cents`);
+  }
+
+  async function freezeArena(target: number, strengths: Record<string, number>) {
+    const token = await coordinatorLease();
+    expect(await advance(target, token)).toMatchObject({ phase: 4, wait: 'preparation' });
+    for (let jobs = await claim('prepare'); jobs.length; jobs = await claim('prepare')) for (const job of jobs) {
+      const prep = prepareActivity(job.snapshot as PreparationInput, RULES_V2);
+      const cents = strengths[job.gladiatorId!];
+      const arenaFighter = cents === undefined ? prep.arenaFighter : fighterAtStrength(prep.arenaFighter, cents);
+      expect(await complete(job, cents === undefined ? prep : { ...prep, arenaFighter, npcTemplate: makeFallback(arenaFighter),
+        arenaStrength: cents / 100 })).toMatchObject({ ok: true });
+    }
+    expect(await advance(target, token)).toMatchObject({ phase: 7, wait: 'pairing' });
+    return { token, jobs: await claim('pair') };
+  }
+
+  async function arenaPair(humanCents: number, botCents: number,
+    options: { active?: boolean; stamina?: number; league?: string; target?: number; botKey?: string } = {}) {
+    const target = options.target ?? evening;
+    await resetV2(target);
+    const bot = await oldBot(options.botKey ?? 'rufus', target, options.stamina ?? 100, options.active ?? true);
+    if (options.league) await sql`update public.gladiators set league=${options.league} where id=${bot}`;
+    const human = await fighter({ firstSlot: target, schedule: arenaDay });
+    const { jobs, token } = await freezeArena(target, { [bot]: botCents, [human.gid]: humanCents });
+    expect(jobs).toHaveLength(1);
+    const [job] = jobs;
+    const proposal = await DEFAULT_EXECUTORS.v2.pair!(job) as PairingResult;
+    expect(proposal.assignments).toMatchObject([{ kind: 'npc', sides: [{ gladiatorId: human.gid }] }]);
+    expect(JSON.stringify(job.snapshot)).not.toContain(bot);
+    return { bot, human, token, job, proposal };
+  }
+
+  it.each([
+    [10_000, 7_499, 'npc'], [10_000, 7_500, 'bot'], [10_000, 12_500, 'bot'], [10_000, 12_501, 'npc'], [10_004, 12_505, 'bot'],
+  ] as const)('accepts %i vs %i frozen strength cents as %s', async (humanCents, botCents, kind) => {
+    const { bot, job, proposal } = await arenaPair(humanCents, botCents);
+    expect(await complete(job, proposal)).toMatchObject({ ok: true });
+    expect(await complete(job, proposal)).toMatchObject({ ok: true });
+    const rows = await sql`select kind,assignment->'opponent'->>'id' as opponent from private.arena_assignments where slot_index=${evening}`;
+    expect(rows).toEqual([{ kind, opponent: kind === 'bot' ? bot : `npc:${proposal.assignments[0].sides[0].gladiatorId}` }]);
+  });
+
+  it.each([{ active: false }, { stamina: 0 }, { league: 'gold' }, { botKey: 'ash' }, { target: MONDAY + 5 }])('keeps the NPC when the bot is ineligible (%j)', async options => {
+    const { human, job, proposal, token } = await arenaPair(10_000, 10_000, options);
+    if (options.active === false) expect(await activate('rufus')).toEqual({ changed: true, active: true });
+    expect(await complete(job, proposal)).toMatchObject({ ok: true });
+    const target = options.target ?? evening;
+    expect(await sql`select kind from private.arena_assignments where slot_index=${target}`).toEqual([{ kind: 'npc' }]);
+    if (options.active === false) {
+      expect(await complete(job, proposal)).toMatchObject({ ok: true, replayed: true });
+      expect(await advance(target, token)).toMatchObject({ status: 'complete' });
+      const [{ name }] = await sql`select name from public.gladiators where id=${human.gid}`;
+      const [simulation] = await claim('simulation');
+      expect(simulation.snapshot).toEqual({ kind: 'arena', battleId: proposal.assignments[0].battleId, slotIndex: target, rulesVersion: 'v2',
+        startsAtMs: target * SLOT, revealAtMs: target * SLOT + RULES_V2.arena.revealAfterMs, assignment: proposal.assignments[0], names: [name] });
+      expect(await complete(simulation, await DEFAULT_EXECUTORS.v2.simulation!(simulation))).toMatchObject({ ok: true });
+    }
+  });
+
+  it.each([44, 45])('respects the Arena duty cutoff with %i eligible humans', async humans => {
+    await resetV2(evening);
+    const bot = await oldBot('rufus', evening);
+    const human = await fighter({ firstSlot: evening, schedule: arenaDay });
+    for (let i = 1; i < humans; i++) await fighter({ firstSlot: evening, schedule: restDay });
+    const { jobs: [job] } = await freezeArena(evening, { [bot]: 10_000, [human.gid]: 10_000 });
+    expect(await complete(job, await DEFAULT_EXECUTORS.v2.pair!(job))).toMatchObject({ ok: true });
+    expect(await sql`select kind from private.arena_assignments where slot_index=${evening}`).toEqual([{ kind: humans === 44 ? 'bot' : 'npc' }]);
+  }, 45_000);
+
+  it.each(['never met', 'oldest', 'stable ID'] as const)('prefers %s over nearest strength or fixture order', async preference => {
+    await resetV2(evening);
+    const close = await oldBot('rufus', evening);
+    const far = await oldBot('grit', evening);
+    const human = await fighter({ firstSlot: evening, schedule: arenaDay });
+    const other = await fighter({ firstSlot: evening, schedule: restDay });
+    await sql`insert into private.bot_arena_history(human_id,bot_id,last_slot)
+      values(${human.gid},${close},${evening - 2}),(${other.gid},${far},${evening - 1})`;
+    if (preference !== 'never met') await sql`insert into private.bot_arena_history(human_id,bot_id,last_slot)
+      values(${human.gid},${far},${evening - (preference === 'oldest' ? 12 : 2)})`;
+    const { jobs: [job] } = await freezeArena(evening, { [close]: 10_000, [far]: 12_000, [human.gid]: 10_000 });
+    expect(await complete(job, await DEFAULT_EXECUTORS.v2.pair!(job))).toMatchObject({ ok: true });
+    const bot = preference === 'stable ID' ? [far, close].sort()[0] : far;
+    expect(await sql`select kind,assignment->'opponent'->>'id' as opponent from private.arena_assignments where slot_index=${evening}`)
+      .toEqual([{ kind: 'bot', opponent: bot }]);
+  });
+
+  it.each([false, true])('preserves free brackets and the retained human pair when Gold completes first = %s', async goldFirst => {
+    const target = MONDAY + 5 * 18 + 14; // Saturday 18:40 UTC is a v2 tournament and schedules Pip for Arena.
+    await resetV2(target);
+    const bot = await oldBot('pip', target);
+    const entrant = async (stamina: number, optIn = false) => {
+      const owner = await fighter({ firstSlot: target, schedule: arenaDay, stamina });
+      await sql`update public.gladiators set tournament_opt_in=${optIn} where id=${owner.gid}`;
+      return owner.gid;
+    };
+    const [first, second] = [await entrant(0, true), await entrant(0, true)];
+    const [strong, peer, solo, poor, weaker, gold] = [await entrant(100), await entrant(100), await entrant(100),
+      await entrant(0), await entrant(100), await entrant(100)];
+    await sql`update public.gladiators set league='gold' where id=${gold}`;
+    const { token, jobs } = await freezeArena(target, { [bot]: 10_000, [strong]: 30_000, [peer]: 29_000,
+      [solo]: 10_000, [weaker]: 4_500, [gold]: 10_000 });
+    expect(jobs).toHaveLength(2);
+    const bronzeJob = jobs.find(job => (job.snapshot as PairingInput).league === 'bronze')!;
+    const goldJob = jobs.find(job => (job.snapshot as PairingInput).league === 'gold')!;
+    const bronze = await DEFAULT_EXECUTORS.v2.pair!(bronzeJob) as PairingResult;
+    const goldPair = await DEFAULT_EXECUTORS.v2.pair!(goldJob) as PairingResult;
+    expect(JSON.stringify(bronzeJob.snapshot)).not.toContain(bot);
+    expect(bronze.assignments.map(a => a.kind)).toEqual(['human', 'npc', 'npc']);
+    expect(bronze.tournament?.routes.find(route => route.gladiatorId === poor)).toMatchObject({ route: 'rest', staminaDebit: 0 });
+    const forged = { ...bronze, tournament: { ...bronze.tournament!, routes: bronze.tournament!.routes.slice(1) } };
+    expect(await complete(bronzeJob, forged)).toMatchObject({ ok: false, code: 'invalid' });
+    expect(await sql`select 1 from private.arena_assignments where slot_index=${target}`).toEqual([]);
+    expect(await sql`select 1 from private.tournaments where slot_index=${target}`).toEqual([]);
+    const ordered = goldFirst ? [[goldJob, goldPair], [bronzeJob, bronze]] as const : [[bronzeJob, bronze], [goldJob, goldPair]] as const;
+    for (const [job, result] of ordered) expect(await complete(job, result)).toMatchObject({ ok: true });
+    expect(await advance(target, token)).toMatchObject({ status: 'complete' });
+    expect(await sql`select kind,assignment from private.arena_assignments where slot_index=${target} and kind<>'bot' order by kind,league`)
+      .toEqual([{ kind: 'human', assignment: bronze.assignments[0] }, { kind: 'npc', assignment: bronze.assignments[2] },
+        { kind: 'npc', assignment: goldPair.assignments[0] }]);
+    expect(await sql`select assignment from private.arena_assignments where slot_index=${target} and kind='bot'`)
+      .toMatchObject([{ assignment: { opponent: { id: bot }, sides: [{ gladiatorId: solo }] } }]);
+    expect(await sql`select e.gladiator_id,a.stamina_debit::int as debit from private.tournament_entries e join public.activities a on a.id=e.activity_id
+      where a.slot_index=${target} order by e.gladiator_id`).toEqual([first, second].sort().map(gid => ({ gladiator_id: gid, debit: 0 })));
+
+    if (goldFirst) {
+      // Two independent transactions contend for the same later slot and bot, with distinct league job IDs.
+      const reserve = (job: JobLease, league: string) => sql.begin(tx => tx`insert into private.arena_assignments
+        (battle_id,pairing_job_id,slot_index,league,season_index,kind,seed,assignment,created_at_ms)
+        select ${`race-${league}`},${job.id},${target + 1},${league},season_index,kind,seed,assignment,created_at_ms
+        from private.arena_assignments where slot_index=${target} and kind='bot'`);
+      const outcomes = await Promise.allSettled([reserve(bronzeJob, 'bronze'), reserve(goldJob, 'gold')]);
+      expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      expect(outcomes.find(result => result.status === 'rejected')).toMatchObject({ reason: { code: '23505', constraint_name: 'arena_one_bot_per_slot' } });
+      expect(await sql`select slot_index::int as slot from private.arena_assignments where kind='bot' order by slot_index`)
+        .toEqual([{ slot: target }, { slot: target + 1 }]);
+    }
+  });
+
+  it('fences validated fallback acceptance, reveal and one human settlement with a benched frozen opponent', async () => {
+    const target = evening + Math.floor((Math.floor(Date.now() / SLOT) - 1 - evening) / 126) * 126;
+    const { bot, human, token, job, proposal } = await arenaPair(10_000, 10_000, { target });
+    expect(await bench('rufus')).toEqual({ changed: true, active: false });
+    const [fallback] = proposal.assignments;
+    for (const forged of [{ ...fallback, kind: 'bot' }, { ...fallback, opponent: { id: 'forged' } }]) {
+      expect(await complete(job, { ...proposal, assignments: [forged] })).toMatchObject({ ok: false });
+      expect(await sql`select 1 from private.arena_assignments where slot_index=${target}`).toEqual([]);
+    }
+    expect(await complete(job, proposal)).toMatchObject({ ok: true });
+    expect(await advance(target, token)).toMatchObject({ status: 'complete' });
+    const [simulation] = await claim('simulation');
+    expect(simulation.snapshot).toMatchObject({ assignment: { kind: 'bot', opponent: { id: bot, name: 'Rufus' } } });
+    const before = await botProgression([bot]);
+    const result = await DEFAULT_EXECUTORS.v2.simulation!(simulation) as ArenaSimulationResult;
+    const [humanLog, botLog] = result.log.participants;
+    for (const forged of [
+      { ...result, outcomes: result.outcomes.map(o => ({ ...o, ratingDelta: 1 })) },
+      { ...result, outcomes: result.outcomes.map(o => ({ ...o, rewards: { ...o.rewards, renown: 99 } })) },
+      ...[{ name: 'Forged' }, { id: human.gid }, { maxHealth: botLog.maxHealth + 1 }, { efficiencyBasisPoints: botLog.efficiencyBasisPoints + 1 }].map(p =>
+        ({ ...result, log: { ...result.log, participants: [humanLog, { ...botLog, ...p }] } })),
+    ]) expect(await complete(simulation, forged)).toMatchObject({ ok: false });
+    const enriched = { ...result, log: { ...result.log, seed: 'private-test', participants: [humanLog,
+      { ...botLog, ownerId: 'private-test', routine: 'private-test', botTeam: 'forged' }] } };
+    expect(await complete(simulation, enriched)).toMatchObject({ ok: true });
+    const [reveal] = await claim('reveal');
+    const humanActivity = (await activity(human.gid, target)).id;
+    const botActivity = (await activity(bot, target)).id;
+    expect(await sql`select 1 from public.visible_events where activity_id=${humanActivity} and ordinal=1`).toEqual([]);
+    expect(await sql`select 1 from private.bot_arena_history where human_id=${human.gid}`).toEqual([]);
+    const rollback = new Error('restore clock');
+    await sql.begin(async tx => {
+      await clockAt(tx, target * SLOT + RULES_V2.arena.revealAfterMs - 1);
+      const [{ result: early }] = await tx`select public.complete_job(${reveal.id},${reveal.token},'{}') as result`;
+      expect(early).toEqual({ ok: false, code: 'processing' });
+      await clockAt(tx, reveal.expiresAtMs);
+      const [{ result: expired }] = await tx`select public.complete_job(${reveal.id},${reveal.token},'{}') as result`;
+      expect(expired).toEqual({ ok: false, code: 'conflict' });
+      throw rollback;
+    }).catch(error => { if (error !== rollback) throw error; });
+    const [botJob, ...premature] = await claim('settlement');
+    expect(botJob.activityId).toBe(botActivity);
+    expect(premature).toEqual([]);
+    expect(await complete({ ...reveal, token: randomUUID() }, {})).toMatchObject({ ok: false });
+    expect(await complete(reveal, {})).toMatchObject({ ok: true });
+    expect(await sql`select bot_id,last_slot::int as last_slot from private.bot_arena_history where human_id=${human.gid}`)
+      .toEqual([{ bot_id: bot, last_slot: target }]);
+    const { data, error } = await anonymous.from('visible_events').select('stage').eq('activity_id', humanActivity).eq('ordinal', 1).single();
+    expect(error).toBeNull();
+    expect(data?.stage).toMatchObject({ arenaMode: 'unranked', battleLog: { participants: [expect.objectContaining({ id: human.gid }),
+      expect.objectContaining({ id: bot, gladiatorId: bot, name: 'Rufus', botTeam: 'ludus-nimbus' })] } });
+    expect(JSON.stringify(data)).not.toContain('private-test');
+    const [owner] = await claim('settlement');
+    const renown = result.log.winnerId === human.gid ? 2 : 0;
+    expect(await settle(owner.activityId!, owner.token)).toMatchObject({ ok: true, newGrants: 1,
+      summary: { arenaMode: 'unranked', ratingDelta: 0, rewards: { renown, money: 0, xp: 0 } } });
+    expect(await settle(owner.activityId!, owner.token)).toMatchObject({ ok: true, newGrants: 0, replayed: true });
+    expect(await settle(botJob.activityId!, botJob.token)).toMatchObject({ ok: true, newGrants: 0 });
+    expect(await botProgression([bot])).toEqual(before);
+    expect(await sql`select gladiator_id,rating::int,human_wins::int,human_losses::int from public.arena_standings order by gladiator_id`)
+      .toEqual([{ gladiator_id: human.gid, rating: 1000, human_wins: 0, human_losses: 0 }]);
+    expect(await sql`select count(*)::int as count from public.wallet_ledger where gladiator_id=${human.gid} and reason='arena'`).toEqual([{ count: 1 }]);
+    expect((await readBouts(human.client, 'all')).rows).toMatchObject([{ activityId: humanActivity, arenaMode: 'unranked', renown, ratingDelta: 0,
+      opponent: { name: 'Rufus', npc: false, botTeam: 'ludus-nimbus' } }]);
+    expect((await readNotifications(human.client)).items).toMatchObject([{ activityId: humanActivity,
+      summary: { arenaMode: 'unranked', ratingDelta: 0, rewards: { renown } } }]);
+    expect((await human.state()).inbox.newNotifications).toBe(1);
+    const publicResult = await anonymous.from('recent_results').select('summary').eq('activity_id', humanActivity).single();
+    expect(publicResult.error).toBeNull();
+    expect(publicResult.data?.summary).toMatchObject({ arenaMode: 'unranked' });
+    expect(publicResult.data?.summary).not.toHaveProperty('rewards');
+    const expiry = (target + 1) * SLOT + RULES_V2.retention.replayMs;
+    expect((await readBouts(clockedClient(human.token, expiry), 'all')).rows)
+      .toMatchObject([{ activityId: humanActivity, arenaMode: 'unranked', opponent: null }]);
+    await sql.begin(async tx => {
+      await clockAt(tx, expiry);
+      await tx`update private.coordinator set published_slot=${target + 19} where singleton`;
+      await tx`update public.gladiators set processed_slot_index=${target + 19}`;
+      const [{ result: cleanup }] = await tx`select private.cleanup_history(${expiry}) as result`;
+      expect(cleanup.detail.deleted.arenaResults).toBe(1);
+      expect(await tx`select bot_id,last_slot::int as last_slot from private.bot_arena_history where human_id=${human.gid}`)
+        .toEqual([{ bot_id: bot, last_slot: target }]);
+      throw rollback;
+    }).catch(error => { if (error !== rollback) throw error; });
+  });
+
+  it('keeps an unmatched bot at Arena practice with one internal completion and no competitive output', async () => {
+    await resetV2(evening);
+    const bot = await oldBot('rufus', evening);
+    expect(await runBoundary(evening)).toMatchObject({ status: 'complete' });
+    const botActivity = await activity(bot, evening);
+    expect(botActivity).toMatchObject({ kind: 'arena' });
+    expect(await sql`select status from public.activities where id=${botActivity.id}`).toEqual([{ status: 'active' }]);
+    expect(await actor(bot)).toMatchObject({ location: 'arena', activityStatus: 'processing', botTeam: 'ludus-nimbus', activityId: null, visibleStage: null });
+    expect(await sql`select kind from private.jobs where slot_index=${evening} and kind not in ('prepare','settlement')`).toEqual([]);
+    const before = await botProgression([bot]);
+    const [job] = await claim('settlement');
+    expect(await settle(job.activityId!, randomUUID())).toMatchObject({ ok: false, code: 'conflict' });
+    expect(await settle(job.activityId!, job.token)).toEqual({ ok: true, activityId: botActivity.id, newGrants: 0 });
+    expect(await settle(job.activityId!, job.token)).toEqual({ ok: true, activityId: botActivity.id, newGrants: 0, replayed: true });
+    expect(await botProgression([bot])).toEqual(before);
+    expect(await sql`select status,summary,receipt_id from public.activities where id=${botActivity.id}`)
+      .toEqual([{ status: 'completed', summary: null, receipt_id: null }]);
+    expect(await sql`select activity_id from private.settled_slots where gladiator_id=${bot} and slot_index=${evening}`)
+      .toEqual([{ activity_id: botActivity.id }]);
+    for (const table of ['arena_assignments', 'arena_results', 'tournament_entries']) {
+      expect(await sql`select 1 from private.${sql(table)}`).toEqual([]);
+    }
+    expect(await sql`select 1 from public.visible_events where activity_id=${botActivity.id}`).toEqual([]);
+    expect(await sql`select 1 from public.recent_results where gladiator_id=${bot}`).toEqual([]);
+    expect(await sql`select 1 from public.arena_standings where gladiator_id=${bot}`).toEqual([]);
+  });
+});
 
 describe('frozen bot duty and dungeon seats', () => {
   afterAll(async () => {

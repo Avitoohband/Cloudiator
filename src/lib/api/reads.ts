@@ -418,7 +418,8 @@ function notifiableSummary(value: unknown): ActivitySummary | null {
   const summary = value as Partial<ActivitySummary>, rewards = summary.rewards as Partial<CreditedRewards> | null | undefined;
   if (typeof summary.resolvedKind !== 'string' || !NOTIFICATION_KINDS.includes(summary.resolvedKind) || !['completed', 'victory', 'defeat'].includes(summary.result as string)
     || typeof rewards !== 'object' || rewards === null || !whole(rewards.money) || !whole(rewards.renown) || !whole(rewards.xp) || !whole(rewards.attributePoints)
-    || !whole(rewards.overflowMoney) || !Array.isArray(rewards.items) || (summary.ratingDelta !== undefined && !Number.isSafeInteger(summary.ratingDelta))) return null;
+    || !whole(rewards.overflowMoney) || !Array.isArray(rewards.items) || (summary.ratingDelta !== undefined && !Number.isSafeInteger(summary.ratingDelta))
+    || (summary.arenaMode !== undefined && (summary.resolvedKind !== 'arena' || summary.arenaMode !== 'unranked'))) return null;
   const itemsFit = rewards.items.every(item => typeof item === 'object' && item !== null && typeof item.catalogId === 'string' && typeof item.rarity === 'string'
     && Number.isSafeInteger(item.tier) && whole(item.quantity));
   return itemsFit ? summary as ActivitySummary : null;
@@ -504,16 +505,20 @@ export type MyBout = {
   result: 'victory' | 'defeat' | 'completed'; renown: number;
   /** The owner's rating change; null when the summary has none (an NPC bout). */
   ratingDelta: number | null;
+  arenaMode?: 'unranked';
   replayExpiry: ActivitySummary['replayExpiry'];
   /** The run's last bout's opponent, read only while the replay is kept at the read's server time. */
-  opponent: { name: string; npc: boolean } | null;
+  opponent: { name: string; npc: boolean; botTeam?: 'ludus-nimbus' } | null;
   tieBreak: boolean;
   /** A tournament's last bout's round ("Final", "Semifinal", "Quarterfinal", "Round 1"), else null. */
   round: string | null;
 };
 export type BoutsPage = { rows: MyBout[]; nextCursor: string | null };
 /** The last bout of a run, as far as My bouts needs it: the server's stage label, the log's tie-break reason and its two participants. */
-export type LastBout = { label: string; tieBreakReason: string | null; participants: { id: string; gladiatorId: string | null; name: string }[] };
+export type LastBout = {
+  label: string; tieBreakReason: string | null;
+  participants: { id: string; gladiatorId: string | null; name: string; botTeam?: 'ludus-nimbus' }[];
+};
 
 /** A whole, non-negative number from a bigint column: a JSON number, or the text a driver may send it as (anything else is null). */
 const wholeOf = (value: unknown): number | null => {
@@ -570,7 +575,8 @@ function boutParts(input: Omit<BoutInput, 'lastBout'>): BoutParts | null {
   if (summary.resolvedKind !== kind || (summary.result !== 'victory' && summary.result !== 'defeat' && summary.result !== 'completed') || typeof rewards !== 'object' || rewards === null
     || !whole(rewards.renown) || !whole(summary.settledAtMs) || (delta !== undefined && delta !== null && !Number.isSafeInteger(delta)) || replayExpiry === null) return null;
   return { activityId, gladiatorId, kind, slotIndex, foughtAtMs: kind === 'arena' ? startsAtMs + RULES_V1.arena.revealAfterMs : startsAtMs, settledAtMs: summary.settledAtMs,
-    result: summary.result, renown: rewards.renown, ratingDelta: typeof delta === 'number' ? delta : null, replayExpiry };
+    result: summary.result, renown: rewards.renown, ratingDelta: typeof delta === 'number' ? delta : null, replayExpiry,
+    ...(kind === 'arena' && summary.arenaMode === 'unranked' ? { arenaMode: 'unranked' as const } : {}) };
 }
 const TIE_BREAKS: readonly unknown[] = ['simultaneous-defeat', 'equal-health-fraction'];
 /**
@@ -585,7 +591,9 @@ function withLastBout(parts: BoutParts, lastBout: LastBout | null): MyBout {
   const mine = kept?.participants.filter(p => p.gladiatorId === gladiatorId) ?? [], other = kept?.participants.filter(p => p.gladiatorId !== gladiatorId) ?? [];
   const log = kept !== null && kept.participants.length === 2 && mine.length === 1 && other.length === 1 ? kept : null;
   return { ...bout, tieBreak: log !== null && TIE_BREAKS.includes(log.tieBreakReason), round: log !== null && bout.kind === 'tournament' ? tournamentRound(log.label) : null,
-    opponent: log !== null ? { name: other[0].name, npc: other[0].gladiatorId === null } : null };
+    opponent: log !== null ? { name: other[0].name, npc: other[0].gladiatorId === null,
+      ...(bout.arenaMode === 'unranked' && other[0].gladiatorId !== null && other[0].botTeam === 'ludus-nimbus'
+        ? { botTeam: other[0].botTeam } : {}) } : null };
 }
 /**
  * One of the owner's bouts as My bouts shows it, or null for a row it cannot show faithfully. `lastBout` is the run's last bout, read
@@ -597,16 +605,18 @@ export function boutOf(input: BoutInput): MyBout | null {
 }
 
 const NAMES_PAGE = 50;
-/** The stage fields the names read takes: its label, the log's tie-break reason and each participant's id, gladiator id and name; never the stage or the log as a whole. */
+/** The stage label, tie-break reason and each participant's public identity fields. */
 const NAMES_SELECT = 'activity_id,ordinal,label:stage->>label,tieBreakReason:stage->battleLog->>tieBreakReason,'
   + 'p0id:stage->battleLog->participants->0->>id,p0gladiator:stage->battleLog->participants->0->>gladiatorId,p0name:stage->battleLog->participants->0->>name,'
-  + 'p1id:stage->battleLog->participants->1->>id,p1gladiator:stage->battleLog->participants->1->>gladiatorId,p1name:stage->battleLog->participants->1->>name';
+  + 'p1id:stage->battleLog->participants->1->>id,p1gladiator:stage->battleLog->participants->1->>gladiatorId,p1name:stage->battleLog->participants->1->>name,'
+  + 'p0bot:stage->battleLog->participants->0->>botTeam,p1bot:stage->battleLog->participants->1->>botTeam';
 type NameRow = Record<string, unknown>;
 /** A names row as the last bout it is, or null when a field is missing or not what it should be (a participant needs an id and a name). */
 function lastBoutOf(row: NameRow): LastBout | null {
   const participant = (i: 0 | 1) => {
     const id = row[`p${i}id`], gladiatorId = row[`p${i}gladiator`], name = row[`p${i}name`];
-    return typeof id === 'string' && typeof name === 'string' && name !== '' && (gladiatorId === null || typeof gladiatorId === 'string') ? { id, gladiatorId, name } : null;
+    return typeof id === 'string' && typeof name === 'string' && name !== '' && (gladiatorId === null || typeof gladiatorId === 'string')
+      ? { id, gladiatorId, name, ...(row[`p${i}bot`] === 'ludus-nimbus' ? { botTeam: 'ludus-nimbus' as const } : {}) } : null;
   };
   const first = participant(0), second = participant(1), { label, tieBreakReason } = row;
   return typeof label === 'string' && (tieBreakReason === null || typeof tieBreakReason === 'string') && first && second ? { label, tieBreakReason, participants: [first, second] } : null;

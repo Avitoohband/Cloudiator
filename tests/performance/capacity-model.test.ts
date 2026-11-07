@@ -48,6 +48,7 @@ describe('Task 23.3: capacity projections', () => {
     expect(TABLE_CLASSES['private.bots']).toEqual({ retention: 'singleton' });
     expect(TABLE_CLASSES['private.bot_routines']).toEqual({ retention: 'singleton' });
     expect(TABLE_CLASSES['private.bot_slot_duty']).toEqual({ retention: 'detail' });
+    expect(TABLE_CLASSES['private.bot_arena_history']).toEqual({ retention: 'player' });
   });
 
   it('separates shared dungeon detail, the second simulation copy and per-member summaries', () => {

@@ -131,10 +131,29 @@ test('asks for names only of kept replays, and only the names cross', async () =
   expect(v.get('select')!.split(',').every(field => /->>/.test(field) || ['activity_id', 'ordinal'].includes(field))).toBe(true);
   expect(v.get('select')).toBe('activity_id,ordinal,label:stage->>label,tieBreakReason:stage->battleLog->>tieBreakReason,'
     + 'p0id:stage->battleLog->participants->0->>id,p0gladiator:stage->battleLog->participants->0->>gladiatorId,p0name:stage->battleLog->participants->0->>name,'
-    + 'p1id:stage->battleLog->participants->1->>id,p1gladiator:stage->battleLog->participants->1->>gladiatorId,p1name:stage->battleLog->participants->1->>name');
+    + 'p1id:stage->battleLog->participants->1->>id,p1gladiator:stage->battleLog->participants->1->>gladiatorId,p1name:stage->battleLog->participants->1->>name,'
+    + 'p0bot:stage->battleLog->participants->0->>botTeam,p1bot:stage->battleLog->participants->1->>botTeam');
   // Due stages only, in the keyset order the paging needs, at the Data API's page size.
   expect([v.get('reveal_at_ms'), v.get('order'), v.get('limit'), v.get('or')]).toEqual([`lte.${SERVER_NOW}`, 'activity_id.asc,ordinal.asc', '50', null]);
   expect((await readBouts(api(serveBouts([row(2, 'arena', {}, { expired: true })]), SESSION).client, 'all')).rows[0].opponent).toBeNull();
+});
+
+test('keeps the unranked designation and reveals only the allowlisted bot identity during replay retention', async () => {
+  const unranked = (n: number, over: Over = {}) => {
+    const record = row(n, 'arena', { ratingDelta: 0, renown: 2 }, over);
+    return { ...record, summary: { ...record.summary, arenaMode: 'unranked' } };
+  };
+  const page = await bouts([unranked(1), unranked(2, { expired: true }), unranked(3)], [
+    lastBout(1, 'Bout: victory', 'Rufus', { p1bot: 'ludus-nimbus', tieBreakReason: 'simultaneous-defeat' }),
+    lastBout(2, 'Bout: victory', 'Pip', { p1bot: 'ludus-nimbus' }),
+    lastBout(3, 'Bout: victory', 'Varro', { p1bot: 'private-test' }),
+  ]);
+  expect(page.rows).toMatchObject([
+    { arenaMode: 'unranked', opponent: { name: 'Rufus', npc: false, botTeam: 'ludus-nimbus' }, tieBreak: true },
+    { arenaMode: 'unranked', opponent: null, tieBreak: false },
+    { arenaMode: 'unranked', opponent: { name: 'Varro', npc: false }, tieBreak: false },
+  ]);
+  expect(page.rows[2].opponent).not.toHaveProperty('botTeam');
 });
 
 test('asks for no names when no replay is kept: expired, or lapsed by the server’s time while its summary still says available', async () => {

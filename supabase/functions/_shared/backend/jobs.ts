@@ -10,7 +10,7 @@ import { planDungeonRun, type DungeonRunInput, type DungeonRunPlan } from '../do
 import { groupDungeon, type DungeonGroupingInput, type DungeonGroupingResult } from '../domain/dungeon-grouping.ts';
 import { makeFighter, simulateBattle } from '../domain/combat.ts';
 import { arenaNpcName, arenaOutcomes, estimateArenaStrength, leagueFor, makeFallback, matchArena, nonEmpty } from '../domain/arena.ts';
-import type { ArenaAssignment, ArenaEntrant, ArenaOutcome, PairingHistory } from '../domain/arena.ts';
+import type { ArenaAssignment, ArenaEntrant, ArenaOutcome, ArenaPairingAssignment, PairingHistory } from '../domain/arena.ts';
 import { buildBracket, isTournamentSlot, partitionTournament, readyBouts, recordBout, runBout, tournamentOutcomes } from '../domain/tournament.ts';
 import type { OptInRevision, TournamentCandidate, TournamentGraph, TournamentOutcome, TournamentRoute } from '../domain/tournament.ts';
 import { slotAt } from '../domain/clock.ts';
@@ -108,7 +108,7 @@ export type PairingInput = DeepReadonly<{
   tournament?: { bracketSeed: Seed; rested: ArenaEntrant[]; candidates: PairingCandidate[] };
 }>;
 /** Task 19: one route per candidate, and the league's bracket when it has one (checked by `checkGraph` before completion). */
-export type PairingResult = { assignments: ArenaAssignment[]; tournament?: { routes: TournamentRoute[]; bracket: TournamentGraph | null } };
+export type PairingResult = { assignments: ArenaPairingAssignment[]; tournament?: { routes: TournamentRoute[]; bracket: TournamentGraph | null } };
 /**
  * Canonical pairing under `rules`: spec §8.1 `matchArena` on the frozen entrants and history, under the pairing job's private
  * seed. Since Task 19 the job first runs spec §8.2's `partitionTournament` over every Arena request of its league, then
@@ -174,7 +174,7 @@ export function pairArenaV1(input: PairingInput, seed: Seed): PairingResult {
 /**
  * The one regular-Arena simulation of a battle, written by `private.prepare_activity_jobs` at phase 8 (Task 16). Its job
  * carries the battle's private seed, not an activity seed. `assignment` is the immutable frozen assignment: the only
- * source of fighters and of the NPC template. `names` are the human sides' public names in side order. `revealAtMs`
+ * source of fighters and of the NPC or bot opponent. `names` are the human sides' public names in side order. `revealAtMs`
  * restates the minute-60 reveal that SQL schedules; the executor checks it against these rules.
  */
 export type ArenaSimulationInput = DeepReadonly<{
@@ -187,7 +187,7 @@ export type ArenaSimulationResult = { battleId: string; log: BattleLog; outcomes
  * Canonical regular bout under `rules`: one `simulateBattle` of the frozen assignment under the battle seed, then
  * `arenaOutcomes`. Fighters are never rebuilt from stored build snapshots (JSONB reorders equipment keys, which would change
  * the logged silhouette order); a fighter frozen under another version fails the battle's own check. A human participant's
- * id is its gladiatorId; the NPC is `opponent.id` with a null gladiatorId.
+ * id is its gladiatorId, the NPC is `opponent.id` with a null gladiatorId, and a v2 bot uses its own public id and name.
  */
 export function simulateArena(input: ArenaSimulationInput, seed: Seed, rules: Rules): ArenaSimulationResult {
   requireRetained(rules);
@@ -203,10 +203,15 @@ export function simulateArena(input: ArenaSimulationInput, seed: Seed, rules: Ru
     return { id: side.gladiatorId, gladiatorId: side.gladiatorId, name: names[index], snapshot: side.fighter };
   };
   try {
-    const fighters: [BattleParticipant, BattleParticipant] = assignment.kind === 'human' && assignment.sides.length === 2 ? [human(0), human(1)]
-      : assignment.kind === 'npc' && assignment.sides.length === 1
-        ? [human(0), { id: assignment.opponent.id, gladiatorId: null, name: arenaNpcName(assignment.league), snapshot: assignment.opponent.snapshot }]
-        : (() => { throw new RangeError('Unknown arena assignment'); })();
+    let fighters: [BattleParticipant, BattleParticipant];
+    if (assignment.kind === 'human' && assignment.sides.length === 2) fighters = [human(0), human(1)];
+    else if (assignment.kind === 'npc' && assignment.sides.length === 1) {
+      const { id, snapshot } = assignment.opponent;
+      fighters = [human(0), { id, gladiatorId: null, name: arenaNpcName(assignment.league), snapshot }];
+    } else if (assignment.kind === 'bot' && assignment.sides.length === 1 && rules.version === 'v2') {
+      const { id, name, snapshot } = assignment.opponent;
+      fighters = [human(0), { id, gladiatorId: id, name, snapshot }];
+    } else throw new RangeError('Unknown arena assignment');
     const log = simulateBattle({ battleId: assignment.battleId, rulesVersion: rules.version, rules, fighters }, seed);
     return { battleId: assignment.battleId, log, outcomes: arenaOutcomes(assignment, log) };
   } catch {

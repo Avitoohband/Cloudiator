@@ -181,6 +181,27 @@ describe('regular Arena simulation executor', () => {
       .toEqual((['bronze', 'silver', 'gold', 'champion'] as const).map(arenaNpcName));
   });
 
+  it('simulates a v2 unranked opponent with one human outcome for both possible winners', () => {
+    const snapshot = prepareActivity(preparation({ rulesVersion: 'v2', trainingActivitiesEarlierInDay: 0 }), RULES_V2).arenaFighter;
+    const [fallback] = matchArena([{ ...entrant('solo'), fighter: snapshot }], [], 'pair-seed');
+    const assignment = { ...fallback, kind: 'bot', battleId: 'arena:300:solo:bot:nimbus',
+      opponent: { id: 'nimbus', name: 'Rufus', snapshot } } as unknown as ArenaAssignment;
+    const frozen = input(assignment, { rulesVersion: 'v2' });
+    const seen = new Set<string>();
+    for (let n = 0; n < 50 && seen.size < 2; n++) {
+      const result = DEFAULT_EXECUTORS.v2.simulation!(lease('simulation', { snapshot: frozen, rulesVersion: 'v2', seed: `unranked-${n}` })) as ArenaSimulationResult;
+      const won = result.log.winnerId === 'solo';
+      seen.add(result.log.winnerId);
+      expect(result.log.participants.map(p => [p.id, p.gladiatorId, p.name])).toEqual([
+        ['solo', 'solo', 'Name solo'], ['nimbus', 'nimbus', 'Rufus'],
+      ]);
+      expect(result.outcomes).toEqual([{ gladiatorId: 'solo', activityId: 'activity-solo', result: won ? 'victory' : 'defeat',
+        success: won, ratingBefore: 1000, ratingAfter: 1000, ratingDelta: 0,
+        rewards: { renown: won ? 2 : 0, money: 0, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 } }]);
+    }
+    expect([...seen].sort()).toEqual(['nimbus', 'solo']);
+  });
+
   it('simulates the frozen fighter exactly as stored, never a recomputation from a build', () => {
     // A fighter read back from JSONB keeps its own silhouette order; the bout must carry that order unchanged.
     const frozen = structuredClone(human) as unknown as { sides: { fighter: { equipmentSilhouettes: string[] } }[] };

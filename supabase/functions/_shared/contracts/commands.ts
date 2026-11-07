@@ -9,7 +9,10 @@ export type ClassId = 'berserker' | 'guardian' | 'duelist';
 export type Stance = 'offensive' | 'balanced' | 'defensive';
 export type LeagueId = 'bronze' | 'silver' | 'gold' | 'champion';
 export type Attributes = { strength: number; agility: number; vitality: number; endurance: number; precision: number };
-export type ActivityChoice = { kind: 'training' | 'rest' | 'arena' } | { kind: 'expedition'; expeditionId: 'woodland' | 'outpost' | 'mountain' };
+export type DungeonId = 'wolf-den' | 'raider-stronghold' | 'troll-hall';
+export type ActivityChoice = { kind: 'training' | 'rest' | 'arena' }
+  | { kind: 'expedition'; expeditionId: 'woodland' | 'outpost' | 'mountain' }
+  | { kind: 'dungeon'; dungeonId: DungeonId };
 export type Schedule = Record<Phase, ActivityChoice>;
 export type EquipmentSlot = 'weapon' | 'offHand' | 'head' | 'body' | 'feet';
 export type Equipment = Record<EquipmentSlot, string | null>;

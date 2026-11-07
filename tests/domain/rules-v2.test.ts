@@ -7,8 +7,8 @@ import { RULES_V2 } from '@domain/rules-v2.ts';
 import { isRulesV2, RETAINED_RULES, retainedRules } from '@domain/rules.ts';
 
 // Patch 1.6 (spec 2026-10-30-economy-1-6-design.md, "RULES_V2 (exact)"; plan Task 1). RULES_V2 is a second immutable rules
-// version beside RULES_V1: every value the same except the economy keys. RULES_V1 and CATALOG_V1 keep every value (an activity
-// frozen under v1 settles under v1), pinned here by hash.
+// version beside RULES_V1: every value the same except the economy keys and Patch 1.8's dungeon capability.
+// RULES_V1 and the original CATALOG_V1 entries stay pinned to the pre-1.6 hashes.
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // Computed before any 1.6 change by a throwaway test that printed hash(RULES_V1) and hash(CATALOG_V1) (never committed).
 const V1_RULES_HASH = '22d6600e16dcb46ea7ea621eae9284759bfe5eed023fcf99d5a328b7ad93d2c0';
@@ -22,18 +22,23 @@ function deepFrozen(value: unknown): boolean {
 
 describe('RULES_V2', () => {
   it('keeps every v1 rule and catalog value', () => {
+    const { dungeons: _dungeons, ...catalog } = CATALOG_V1;
     expect(hash(RULES_V1)).toBe(V1_RULES_HASH);
-    expect(hash(CATALOG_V1)).toBe(V1_CATALOG_HASH);
+    expect(hash(catalog)).toBe(V1_CATALOG_HASH);
   });
 
   const ECONOMY = ['version', 'progression', 'activityStamina', 'inventory', 'expeditionRewards', 'tournament', 'seasons'] as const;
-  it('differs from v1 only in the economy keys', () => {
+  it('differs from v1 only in the economy and dungeon keys', () => {
+    const { dungeon: _dungeon, ...v2 } = RULES_V2;
+    const { dungeonPhases: _phases, ...schedule } = RULES_V2.schedule;
+    const { dungeon: _cost, ...activityStamina } = RULES_V2.activityStamina;
     const rest = (rules: object) => Object.fromEntries(Object.entries(rules).filter(([key]) => !ECONOMY.includes(key as never)));
-    expect(Object.keys(rest(RULES_V2)).sort()).toEqual(Object.keys(rest(RULES_V1)).sort());
-    expect(rest(RULES_V2)).toEqual(rest(RULES_V1));
+    const legacyV2 = rest({ ...v2, schedule, activityStamina });
+    expect(Object.keys(legacyV2).sort()).toEqual(Object.keys(rest(RULES_V1)).sort());
+    expect(legacyV2).toEqual(rest(RULES_V1));
     expect({ ...RULES_V2.progression, trainingCapBase: undefined, trainingCapPerLevel: undefined, maxTrainingActivitiesPerGameDay: undefined })
       .toEqual({ ...RULES_V1.progression, trainingCapBase: undefined, trainingCapPerLevel: undefined, maxTrainingActivitiesPerGameDay: undefined });
-    expect(RULES_V2.activityStamina).toEqual({ ...RULES_V1.activityStamina, tournament: 0 });
+    expect(activityStamina).toEqual({ ...RULES_V1.activityStamina, tournament: 0 });
     expect({ ...RULES_V2.tournament, placementsByLeague: undefined })
       .toEqual({ ...RULES_V1.tournament, placements: undefined, placementsByLeague: undefined });
     expect({ ...RULES_V2.seasons, placementsByLeague: undefined })

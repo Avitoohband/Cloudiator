@@ -1,4 +1,6 @@
-import { freezeDomain, type CatalogItem, type Expedition, type EquipmentSlot, type SalvageEntry } from './types.ts';
+import type { DungeonId } from '../contracts/commands.ts';
+import { freezeDomain, type Attributes, type CatalogItem, type Dungeon, type DungeonMonster, type Expedition,
+  type EquipmentSlot, type HiredBuild, type HiredRole, type SalvageEntry } from './types.ts';
 import { RULES_V1 } from './rules-v1.ts';
 
 const templates: { id: string; name: string; slot: EquipmentSlot; hands: 0 | 1 | 2;
@@ -49,10 +51,56 @@ const expeditions: Record<'woodland' | 'outpost' | 'mountain', Expedition> = {
     enemy: { name: 'Dangerous creature', maxHp: 140, damage: 18, intervalMs: 1000, armor: 0, stance: 'balanced',
       attributes: { strength: 20, agility: 16, vitality: 14, endurance: 16, precision: 16 } } },
 };
+
+type AttributeLine = [strength: number, agility: number, vitality: number, endurance: number, precision: number];
+const attributes = ([strength, agility, vitality, endurance, precision]: AttributeLine): Attributes =>
+  ({ strength, agility, vitality, endurance, precision });
+const monster = (name: string, creature: DungeonMonster['creature'], maxHp: number, damage: number, intervalMs: number,
+  armor: number, line: AttributeLine): DungeonMonster =>
+  ({ name, creature, maxHp, damage, intervalMs, armor, stance: 'balanced', attributes: attributes(line) });
+
+function hiredBuilds(tier: 1 | 5 | 10, guard: AttributeLine, striker: AttributeLine, skirmisher: AttributeLine): Record<HiredRole, HiredBuild> {
+  const gear = (template: string) => `${template}:${tier}:common`;
+  const clothing = { body: gear('light-armor'), feet: gear('light-boots') };
+  return {
+    guard: { classId: 'guardian', stance: 'defensive', allocations: attributes(guard), equipment: {
+      weapon: gear('sword'), offHand: gear('round-shield'), head: gear('iron-helmet'), ...clothing } },
+    striker: { classId: 'berserker', stance: 'offensive', allocations: attributes(striker), equipment: {
+      weapon: gear('axe'), offHand: null, head: gear('leather-hood'), ...clothing } },
+    skirmisher: { classId: 'duelist', stance: 'balanced', allocations: attributes(skirmisher), equipment: {
+      weapon: gear('sword'), offHand: null, head: gear('leather-hood'), ...clothing } },
+  };
+}
+
+const timberWolf = monster('Timber wolf', 'timber-wolf', 46, 7, 1000, 0, [5, 6, 4, 5, 5]);
+const direWolf = monster('Dire wolf', 'dire-wolf', 69, 9, 1200, 2, [6, 4, 6, 6, 6]);
+const raider = monster('Raider', 'raider', 80, 12, 1100, 2, [12, 10, 8, 10, 10]);
+const raiderBrute = monster('Raider brute', 'raider', 130, 15, 1400, 4, [14, 6, 12, 10, 10]);
+const raiderArcher = monster('Raider archer', 'raider-archer', 70, 13, 1100, 0, [10, 12, 6, 10, 14]);
+const rockTroll = monster('Rock troll', 'rock-troll', 129, 17, 1100, 3, [20, 14, 14, 16, 16]);
+const frostTroll = monster('Frost troll', 'frost-troll', 147, 18, 1300, 5, [22, 12, 16, 16, 16]);
+const dungeons: Record<DungeonId, Dungeon> = {
+  'wolf-den': { id: 'wolf-den', name: 'Wolf Den', requiredLevel: 3, fullRewardsMaxLevel: 8, map: 'woodland',
+    rooms: [[timberWolf, timberWolf, timberWolf], [direWolf, direWolf, direWolf],
+      [direWolf, direWolf, monster('Stalker', 'timber-wolf', 52, 12, 1100, 0, [6, 8, 4, 6, 10])]],
+    major: monster('Alpha of the Den', 'dire-wolf', 754, 16, 1300, 4, [12, 6, 10, 10, 10]),
+    hired: hiredBuilds(1, [4, 0, 7, 2, 1], [8, 1, 3, 0, 2], [3, 5, 1, 0, 5]) },
+  'raider-stronghold': { id: 'raider-stronghold', name: 'Raider Stronghold', requiredLevel: 7, fullRewardsMaxLevel: 12, map: 'outpost',
+    rooms: [[raider, raider, raider], [raider, raiderBrute, raiderArcher], [raiderBrute, raiderBrute, raiderArcher]],
+    major: monster('Raider Warlord', 'raider', 880, 20, 1300, 6, [20, 10, 16, 14, 16]),
+    hired: hiredBuilds(5, [6, 0, 12, 5, 2], [13, 2, 7, 0, 3], [5, 9, 2, 0, 9]) },
+  'troll-hall': { id: 'troll-hall', name: 'Troll Hall', requiredLevel: 12, fullRewardsMaxLevel: null, map: 'mountain',
+    rooms: [[rockTroll, rockTroll, rockTroll], [rockTroll, frostTroll, frostTroll],
+      [frostTroll, frostTroll, monster('Troll shaman', 'frost-troll', 101, 20, 1200, 2, [18, 16, 12, 16, 20])]],
+    major: monster('Troll King', 'rock-troll', 1230, 19, 1300, 8, [28, 14, 22, 20, 22]),
+    hired: hiredBuilds(10, [10, 0, 18, 7, 3], [20, 3, 10, 0, 5], [7, 14, 3, 0, 14]) },
+};
+
 /** The single stackable expedition material: no equipment slot, sold to NPCs per unit, stacked up to the rules limit. */
 const salvage: SalvageEntry = { id: 'salvage', name: 'Salvage', tier: 1, rarity: 'common', binding: 'tradable',
   stats: { damage: 0, armor: 0, weight: 0, intervalMs: 0, attributes: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 } },
   stackLimit: RULES_V1.inventory.salvageStack, npcSellValue: RULES_V1.inventory.salvageSellValue };
 /** Variant IDs: template:tier:rarity, or template:tier:renown. Salvage is separate from equipment items. */
 export const CATALOG_V1 = freezeDomain({ version: 'v1', items, expeditions, salvage,
-  cosmetics: { banner: { id: 'banner', name: 'Arena banner', binding: 'bound' as const, renownPrice: RULES_V1.shops.bannerRenownPrice } } });
+  cosmetics: { banner: { id: 'banner', name: 'Arena banner', binding: 'bound' as const, renownPrice: RULES_V1.shops.bannerRenownPrice } },
+  dungeons });

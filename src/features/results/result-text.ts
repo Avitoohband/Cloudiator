@@ -17,11 +17,13 @@ type Outcome = PublicActivitySummary['result'];
 const WHAT: Record<Kind, Record<Outcome, string>> = {
   arena: { victory: 'won an Arena bout', defeat: 'lost an Arena bout', completed: 'fought an Arena bout' },
   expedition: { victory: 'returned victorious from an expedition', defeat: 'was defeated on an expedition', completed: 'returned from an expedition' },
+  dungeon: { victory: 'Dungeon', defeat: 'Dungeon', completed: 'Dungeon' },
   tournament: { victory: 'won a tournament', defeat: 'was knocked out of a tournament', completed: 'fought in a tournament' },
   training: { victory: 'finished training', defeat: 'finished training', completed: 'finished training' },
   rest: { victory: 'finished resting', defeat: 'finished resting', completed: 'finished resting' },
 };
-const KIND: Record<Kind, string> = { arena: 'Arena', expedition: 'Expedition', tournament: 'Tournament', training: 'Training', rest: 'Rest' };
+const KIND: Record<Kind, string> = { arena: 'Arena', expedition: 'Expedition', dungeon: 'Dungeon',
+  tournament: 'Tournament', training: 'Training', rest: 'Rest' };
 
 /** Whether a kind of activity ever has a replay. */
 const replayable = (kind: Kind) => kind !== 'training' && kind !== 'rest';

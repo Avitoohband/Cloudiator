@@ -8,7 +8,7 @@ export type CreditedOverflow = { catalogId: string; catalogVersion: string; quan
 export type CreditedRewards = { money: number; renown: number; xp: number; attributePoints: number; items: ItemReward[]; overflowMoney: number; overflow?: CreditedOverflow[] };
 export type ActivitySummary = {
   activityId: ActivityId;
-  resolvedKind: 'training' | 'rest' | 'expedition' | 'arena' | 'tournament';
+  resolvedKind: 'training' | 'rest' | 'expedition' | 'arena' | 'tournament' | 'dungeon';
   result: 'completed' | 'victory' | 'defeat';
   success: boolean;
   rewards: CreditedRewards;
@@ -57,10 +57,23 @@ export type BattleLog = {
   finalHp: readonly [number, number];
   tieBreakReason: 'simultaneous-defeat' | 'equal-health-fraction' | null;
 };
+export type PartyRole = 'gladiator' | 'hireling' | 'monster' | 'major';
+export type PartyCombatant = RevealedCombatant & { side: 0 | 1; role: PartyRole; seat: number | null };
+export type PartyAttack = BattleAction & { sweep: boolean };
+export type PartyVictory = {
+  kind: 'victory'; sequence: number; elapsedMs: number; winnerSide: 0 | 1; reason: BattleVictory['reason'];
+};
+export type PartyBattleLog = {
+  battleId: string; rulesVersion: string; participants: readonly PartyCombatant[];
+  events: readonly (PartyAttack | PartyVictory)[]; durationMs: number;
+  winnerSide: 0 | 1; victoryReason: BattleVictory['reason']; finalHp: readonly number[];
+  tieBreakReason: BattleLog['tieBreakReason'];
+};
 export type RevealedStage = {
-  id: string; kind: 'depart' | 'travel' | 'exploration' | 'encounter' | 'return' | 'settlement' | 'staging' | 'bout';
+  id: string; kind: 'depart' | 'travel' | 'exploration' | 'encounter' | 'return' | 'settlement' | 'staging' | 'bout' | 'room' | 'major';
   revealedAtMs: number; startedAtMs: number; endsAtMs: number; label: string;
   battleLog?: BattleLog;
+  fight?: { runId: string; ordinal: 1 | 2 | 3 | 4 };
 };
 export type RevealedTimeline = {
   activityId: ActivityId; serverNowMs: number; visibleThroughMs: number;

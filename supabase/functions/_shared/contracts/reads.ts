@@ -1,4 +1,4 @@
-import type { ActivityId, Attributes, ClassId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
+import type { ActivityId, Attributes, ClassId, DungeonId, Equipment, GladiatorId, LeagueId, Phase, Schedule, Stance } from './commands.ts';
 import type { ActivitySummary, PublicActivitySummary, ItemRarity, ItemStats, RevealedStage, BattleLog } from './events.ts';
 import type { Appearance } from '../domain/appearance.ts';
 
@@ -12,7 +12,7 @@ export type ItemInstance = {
   reservation: { kind: 'equipment' | 'pending-build' | 'listing'; referenceId: string } | null;
 };
 export type CurrentActivity = {
-  id: ActivityId; kind: 'orientation' | 'training' | 'rest' | 'expedition' | 'arena' | 'tournament';
+  id: ActivityId; kind: 'orientation' | 'training' | 'rest' | 'expedition' | 'arena' | 'tournament' | 'dungeon';
   status: 'queued' | 'active' | 'processing' | 'completed';
   startsAtMs: number; endsAtMs: number; label: string;
 };
@@ -72,7 +72,7 @@ export type Inbox = { unread: number; readIds: number[]; sinceMs: number; newNot
  * proved from stored data (the XP credited by this and later results and the level now); otherwise null, never a guess.
  */
 export type GameNotification = {
-  activityId: string; kind: 'training' | 'expedition' | 'arena' | 'tournament'; settledAtMs: number; summary: ActivitySummary;
+  activityId: string; kind: 'training' | 'expedition' | 'arena' | 'tournament' | 'dungeon'; settledAtMs: number; summary: ActivitySummary;
   destination: string | null; levelAfter: number | null;
 };
 /** One block of a message body: a paragraph or a bullet item, plain text only (never markup). */
@@ -85,7 +85,8 @@ export type GameMessage = {
   id: number; kind: 'patch-notes' | 'admin'; title: string; preview: string; body: MessageBlock[]; action: 'change-look' | null; publishedAtMs: number;
 };
 /** Whitelisted public projection: never spread an OwnerState into this shape. */
-export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena' | 'tournament' | 'expedition:woodland' | 'expedition:outpost' | 'expedition:mountain';
+export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena' | 'tournament'
+  | 'expedition:woodland' | 'expedition:outpost' | 'expedition:mountain' | `dungeon:${DungeonId}`;
 export type EquipmentSilhouette = 'weapon-sword' | 'weapon-axe' | 'weapon-spear' | 'weapon-bow' | 'offhand-shield' | 'armor-light' | 'armor-heavy' | 'head-hood' | 'head-helmet' | 'feet-light' | 'feet-heavy';
 export type PublicActor = {
   gladiatorId: GladiatorId; name: string; classId: ClassId; equipmentSilhouettes: EquipmentSilhouette[];

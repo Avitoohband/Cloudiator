@@ -36,7 +36,7 @@ export const COORDINATION_RETRY = Object.freeze({ attempts: 3, delayMs: 250, jit
 export { WorkerFailure } from './failure.ts';
 export type { FailureCode } from './failure.ts';
 
-const ACTIVITY_KINDS: readonly ActivityKind[] = ['training', 'rest', 'expedition', 'arena', 'tournament'];
+const ACTIVITY_KINDS: readonly Exclude<ActivityKind, 'dungeon'>[] = ['training', 'rest', 'expedition', 'arena', 'tournament'];
 /*
  * Patch 1.6 (spec "Worker"): every executor is written once over `rules`, the retained constant of the job's own version
  * (`RULES_V1`, `RULES_V2`) passed by reference, never a copy (`requireRetained` refuses one with its own message). Each refuses

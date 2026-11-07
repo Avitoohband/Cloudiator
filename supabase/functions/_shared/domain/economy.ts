@@ -1,4 +1,5 @@
-import type { LeagueId } from '../contracts/commands.ts';
+import type { DungeonId, LeagueId } from '../contracts/commands.ts';
+import type { ItemRarity } from '../contracts/events.ts';
 import { CATALOG_V1 } from './catalog-v1.ts';
 import { RULES_V2 } from './rules-v2.ts';
 import { isRulesV2 } from './rules.ts';
@@ -12,6 +13,10 @@ import { freezeDomain } from './types.ts';
 
 export type ExpeditionId = 'woodland' | 'outpost' | 'mountain';
 export type ExpeditionReward = { xp: number; money: number; salvageQuantity: number; gearChance: number; gearTier: 1 | 5 | 10 };
+export type DungeonReward = {
+  room: { xp: number; money: number }; major: { xp: number; money: number };
+  chest: { salvageQuantity: number; gearChance: number; gearTier: 1 | 5 | 10; rarity: Record<ItemRarity, number> };
+};
 export type PrizeAmount = { money: number; renown: number };
 export type TournamentPrizes = { winner: PrizeAmount; runnerUp: PrizeAmount; semifinal: PrizeAmount; other: PrizeAmount };
 export type SeasonPrize = { money: number; renown: number; title: 'champion' | null; badge: 'gold' | 'silver' | 'bronze' };
@@ -35,6 +40,13 @@ export function expeditionReward(rules: Rules, id: ExpeditionId): ExpeditionRewa
   if (!isRulesV2(rules)) return base;
   const { xp, money, gearChance } = rules.expeditionRewards[id];
   return freezeDomain({ xp, money, salvageQuantity: base.salvageQuantity, gearChance, gearTier: base.gearTier });
+}
+
+/** Per-member v2 payouts for each won fight entered and its major chest. Dungeons never pay under v1. */
+export function dungeonReward(rules: Rules, id: DungeonId): DungeonReward {
+  if (!isRulesV2(rules) || !rules.dungeon) throw new RangeError('Dungeon rewards require v2');
+  if (typeof id !== 'string' || !Object.hasOwn(rules.dungeon.rewardsById, id)) throw new RangeError('Unknown dungeon');
+  return rules.dungeon.rewardsById[id];
 }
 
 /** Maximum actual Training activities per game day: unlimited in v1 (null), two in v2, independent of the point cap. */

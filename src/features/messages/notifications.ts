@@ -23,7 +23,7 @@ function itemLine(item: ItemReward): string {
   return `${capital(item.rarity)} ${name} (tier ${item.tier})${quantity}`;
 }
 
-const KIND_NAME = { expedition: 'Expedition', arena: 'Arena', tournament: 'Tournament' } as const;
+const KIND_NAME = { expedition: 'Expedition', arena: 'Arena', tournament: 'Tournament', dungeon: 'Dungeon' } as const;
 
 function titleOf(n: GameNotification): string {
   if (n.kind === 'training') return 'Training finished';

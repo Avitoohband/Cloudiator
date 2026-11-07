@@ -83,6 +83,7 @@ export function tournamentEntryText(rules: Rules): string | null {
  * line); under v2 Arena keeps its own cost and then says that tournament entry is free (`tournamentEntryText`).
  */
 export function choiceHint(choice: ActivityChoice, clock: ClockMode, rules: Rules = RULES_V1, room: TrainingRoom = null): string {
+  if (choice.kind === 'dungeon') return 'Dungeon';
   const cost = staminaText(rules.activityStamina[choice.kind]);
   switch (choice.kind) {
     case 'training': return trainingHint(room, rules.activityStamina.training);

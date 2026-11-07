@@ -13,7 +13,7 @@ import { trainingDailyLimit } from '@domain/economy';
 import { RULES_V1 } from '@domain/rules-v1';
 import { activityCost, deriveStats } from '@domain/stats';
 import { isTournamentSlot } from '@domain/tournament-slot';
-import type { ActivityCosts, ActivityKind, Rules } from '@domain/types';
+import type { ActivityCosts, Rules } from '@domain/types';
 
 /** The stamina each kind of activity costs a build, as the server's boundary freezes them (the five kinds the boundary prices: a tournament too). */
 export type { ActivityCosts };
@@ -27,7 +27,7 @@ export type RestGain = { before: number; maximum: number } | null;
 type Stamina = Pick<OwnerState, 'stamina'>;
 const SLOT_MS = RULES_V1.clock.slotMs;
 const PHASES = RULES_V1.clock.phases;
-const KINDS = Object.keys(RULES_V1.activityStamina) as ActivityKind[];
+const KINDS = Object.keys(RULES_V1.activityStamina) as (keyof typeof RULES_V1.activityStamina)[];
 const usable = (value: number) => Number.isFinite(value) && value >= 0;
 /** Whether the owner's stamina holds numbers a gain can be told from. */
 const known = ({ stamina }: Stamina) => usable(stamina.current) && usable(stamina.maximum);
@@ -85,6 +85,7 @@ function step(walk: Walk, choice: ActivityChoice, slot: number, input: { costs: 
     case 'rest': return [rest];
     case 'training': return [limit !== null && walk.trainings >= limit ? rest : paid(costs.training, true)];
     case 'expedition': return [paid(costs.expedition)];
+    case 'dungeon': return costs.dungeon === undefined ? [] : [paid(costs.dungeon)];
     case 'arena': {
       const regular = paid(costs.arena);
       if (optIn === false || !isTournamentSlot(slotAt(slot * SLOT_MS), rules)) return [regular];

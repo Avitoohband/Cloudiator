@@ -1,4 +1,4 @@
-import type { ActivityChoice, Attributes, ClassId, EquipmentSlot, GameCommand, LeagueId, Phase, Stance } from '../contracts/commands.ts';
+import type { ActivityChoice, Attributes, ClassId, DungeonId, EquipmentSlot, GameCommand, LeagueId, Phase, Stance } from '../contracts/commands.ts';
 import type { BuildView, ItemInstance } from '../contracts/reads.ts';
 import type { ItemRarity, ItemStats } from '../contracts/events.ts';
 import type { RULES_V1 } from './rules-v1.ts';
@@ -9,7 +9,7 @@ export type { Attributes, ClassId, EquipmentSlot, Phase, Stance, ItemInstance };
 export type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
 /** Every retained rules version (rules.ts). The versions' economies differ: read those keys through economy.ts. */
 export type Rules = typeof RULES_V1 | typeof RULES_V2;
-/** Typed versioned catalog: equipment variants, expeditions and the stackable salvage material. */
+/** Typed versioned catalog: equipment variants, expeditions, dungeons and the stackable salvage material. */
 export type Catalog = typeof CATALOG_V1;
 /** Private domain inputs reuse the canonical queue command's fields. */
 export type BuildInput = Pick<Extract<GameCommand, { kind: 'queue-build' }>, 'classId' | 'stance' | 'allocation' | 'equipment'>;
@@ -29,8 +29,9 @@ export type DerivedStats = {
 /** Private backend inputs. Neither seeds nor these authoritative snapshots are read DTOs. */
 export type Seed = string;
 /** Resolved activity kinds; tournament is assigned by the Task 19 pairing hook, never requested directly. */
-export type ActivityKind = 'training' | 'rest' | 'expedition' | 'arena' | 'tournament';
-export type ActivityCosts = Record<ActivityKind, number>;
+export type ActivityKind = 'training' | 'rest' | 'expedition' | 'arena' | 'tournament' | 'dungeon';
+/** Older preparations and activity snapshots freeze only the original five keys. */
+export type ActivityCosts = Record<Exclude<ActivityKind, 'dungeon'>, number> & { dungeon?: number };
 /** Durable job categories: boundary preparation, per-league Arena pairing, private simulation, timed reveal and terminal
  * settlement. A `pair` job belongs to one slot and league, not to one gladiator, and is claimed as simple work. */
 export type JobKind = 'prepare' | 'pair' | 'simulation' | 'reveal' | 'settlement';
@@ -127,6 +128,19 @@ export type Expedition = DeepReadonly<{
   id: string; name: string; requiredLevel: 1 | 5 | 10; encounters: number;
   rewards: { xp: number; money: number; salvageQuantity: number; gearChance: number; gearTier: 1 | 5 | 10 };
   enemy: { name: string; maxHp: number; damage: number; intervalMs: number; attributes: Attributes; stance: Stance; armor: number };
+}>;
+export type HiredRole = 'guard' | 'striker' | 'skirmisher';
+export type DungeonMonster = DeepReadonly<{
+  name: string; creature: 'dire-wolf' | 'timber-wolf' | 'raider' | 'raider-archer' | 'rock-troll' | 'frost-troll';
+  maxHp: number; damage: number; intervalMs: number; armor: number; stance: 'balanced'; attributes: Attributes;
+}>;
+export type HiredBuild = DeepReadonly<{
+  classId: ClassId; stance: Stance; allocations: Attributes; equipment: Record<EquipmentSlot, string | null>;
+}>;
+export type Dungeon = DeepReadonly<{
+  id: DungeonId; name: string; requiredLevel: 3 | 7 | 12; fullRewardsMaxLevel: 8 | 12 | null;
+  map: 'woodland' | 'outpost' | 'mountain'; rooms: [DungeonMonster[], DungeonMonster[], DungeonMonster[]];
+  major: DungeonMonster; hired: Record<HiredRole, HiredBuild>;
 }>;
 
 /** Freeze owned versioned data/snapshots, never the caller's live DTO. */

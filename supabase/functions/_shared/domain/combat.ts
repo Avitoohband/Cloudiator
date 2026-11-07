@@ -30,14 +30,15 @@ function baseDamage(weapon: number, strength: number, coefficient: number): numb
   const a = decimal(weapon), b = multiply(decimal(strength), decimal(coefficient));
   return Number(a.numerator * b.denominator + b.numerator * a.denominator) / Number(a.denominator * b.denominator);
 }
-function roundedDamage(attacker: FighterSnapshot, defender: FighterSnapshot, rules: Rules, critical: boolean): number {
+export function roundedDamage(attacker: FighterSnapshot, defender: FighterSnapshot, rules: Rules, critical: boolean, factor = 1): number {
   const armor = multiply(decimal(rules.combat.armorReductionPerPoint), decimal(defender.armor));
   const cap = decimal(rules.combat.maximumArmorReduction);
   const reduction = armor.numerator * cap.denominator < cap.numerator * armor.denominator ? armor : cap;
   const remaining = { numerator: reduction.denominator - reduction.numerator, denominator: reduction.denominator };
-  const total = [attacker.baseDamage, attacker.efficiency, critical ? rules.combat.criticalDamage : 1,
+  const product = [attacker.baseDamage, attacker.efficiency, critical ? rules.combat.criticalDamage : 1,
     rules.stances[attacker.stance].outgoing, rules.stances[defender.stance].incoming]
     .map(decimal).reduce(multiply, remaining);
+  const total = factor === 1 ? product : multiply(product, decimal(factor));
   // One final nonnegative integer half-up rounding, after all modifiers.
   return Math.max(rules.combat.minimumDamage,
     Number((2n * total.numerator + total.denominator) / (2n * total.denominator)));

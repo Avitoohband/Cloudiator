@@ -96,7 +96,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   player-facing implementation. Show the v2 reward choice, the named bot behavior and tag, and the four existing dungeon
   title designs in that review. Use real test-app captures and show the room-loss and member-knockout cases separately.
 - [x] Finish the named bot team's spec and ordered tasks after Avi's decisions. Keep the entire 1.8 database change in M30.
-- [ ] Add the 1.8 in-progress section in `docs/CHANGELOG.md`, run `npx --offline --no-install vitest run tests/domain/patch.test.ts`
+- [x] Add the 1.8 in-progress section in `docs/CHANGELOG.md`, run `npx --offline --no-install vitest run tests/domain/patch.test.ts`
   and observe the mismatched patch failure. Set `PATCH='1.8'` in `src/lib/patch.ts`, rerun, review and commit the identity.
 
 ### Task 1: Rules, catalog, contracts and the party combat engine
@@ -141,9 +141,9 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   startingHealth?: number }>` and `SkirmishInput = DeepReadonly<{ battleId: string; rulesVersion: string; rules: Rules;
   units: SkirmishUnit[] }>`; weights and the sweep come from `rules.dungeon`, a `major` unit sweeps.
 
-- [ ] **Step 1: Record the guard hashes on the unmodified tree:** hash `RULES_V1`, `RULES_V2` and `CATALOG_V1` via
+- [x] **Step 1: Record the guard hashes on the unmodified tree:** hash `RULES_V1`, `RULES_V2` and `CATALOG_V1` via
   `node --experimental-strip-types --no-warnings` or the existing retention-test helper. Pin the baseline before edits.
-- [ ] **Step 2: Write `tests/domain/dungeon-catalog.test.ts`:**
+- [x] **Step 2: Write `tests/domain/dungeon-catalog.test.ts`:**
   - `keeps every pre-existing rule and catalog value`: compare full `RULES_V1`, `RULES_V2` without its three new dungeon
     keys and `CATALOG_V1` without `dungeons` with the Step 1 hashes. Keep the v1 catalog/hash guard in its existing owner.
   - `adds the three dungeons with the spec's numbers`: `CATALOG_V1.dungeons['wolf-den']` `toEqual` the full §3.1 content
@@ -152,7 +152,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   - `draws every monster with a manifest creature`: each `creature` is a creature id in `public/assets/manifest.json`.
   - In `schedule-choice.test.ts`: `opens dungeons in the v2 afternoon only` (v2 afternoon true, v1 all false, morning and
     evening false in both; Arena unchanged).
-- [ ] **Step 3: Write `tests/domain/party-combat.test.ts`** (fighters from `makeFighter` or literal snapshots; expected
+- [x] **Step 3: Write `tests/domain/party-combat.test.ts`** (fighters from `makeFighter` or literal snapshots; expected
   draws replayed from `seededRandom(seed)` in the documented order):
   - `is deterministic per seed`: equal logs for one seed, different events for another.
   - `keeps the two-fighter damage exactly`: `roundedDamage(a, d, RULES_V1, c)` equals the 5-argument call with factor 1
@@ -178,15 +178,15 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
     maximum → `RangeError`.
   - `logs only whitelisted participant fields`: each participant's keys are exactly `RevealedCombatant`'s plus `side`,
     `role`, `seat`.
-- [ ] **Step 4: Run** `npx --offline --no-install vitest run tests/domain/dungeon-catalog.test.ts tests/domain/party-combat.test.ts tests/domain/schedule-choice.test.ts`;
+- [x] **Step 4: Run** `npx --offline --no-install vitest run tests/domain/dungeon-catalog.test.ts tests/domain/party-combat.test.ts tests/domain/schedule-choice.test.ts`;
   expect FAIL (missing exports).
-- [ ] **Step 5: Implement** the rules, catalog and contracts; then the engine exactly as spec §4 (units 1–6 per side,
+- [x] **Step 5: Implement** the rules, catalog and contracts; then the engine exactly as spec §4 (units 1–6 per side,
   group order side 0 then side 1 in unit order, damage applied event by event, `healthBefore` / `healthAfter` per event,
   first attacks at the interval, `next = elapsed + interval` or past the limit). Model dungeon cost as optional on older
   frozen snapshots. Do not require a retroactive sixth key or change legacy serialized payloads.
-- [ ] **Step 6: Run** step 4's command, `npx --offline --no-install vitest run tests/domain/combat.test.ts tests/domain/replay-fixtures.test.ts`
+- [x] **Step 6: Run** step 4's command, `npx --offline --no-install vitest run tests/domain/combat.test.ts tests/domain/replay-fixtures.test.ts`
   and `npm run typecheck`; expect PASS (the existing fixtures unchanged).
-- [ ] **Step 7: Commit** `feat: dungeon rules, catalog, contracts and the party combat engine`.
+- [x] **Step 7: Commit** `feat: dungeon rules, catalog, contracts and the party combat engine`.
 
 ### Task 2: The run planner and balance pinned to the prototype
 

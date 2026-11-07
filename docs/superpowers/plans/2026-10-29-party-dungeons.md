@@ -222,7 +222,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
     `partyInput(dungeonId: DungeonId, humans: { classId: ClassId; level: number }[], runId: string): DungeonRunInput`
     (hired roles from `hiredRolesFor`).
 
-- [ ] **Step 1: Write `tests/domain/dungeon.test.ts`:**
+- [x] **Step 1: Write `tests/domain/dungeon.test.ts`:**
   - `builds hired fighters from the catalog at 0.9 health and base damage`: `[maxHealth, baseDamage, attackIntervalMs,
     armor, stance]` for Wolf Den guard / striker / skirmisher `[158, 9.45, 952, 9, 'defensive']`, `[117, 13.635, 1321, 4,
     'offensive']`, `[99, 9, 905, 4, 'balanced']`; Raider Stronghold `[205, 13.05, 952, 13.5]`, `[153, 19.71, 1308, 6]`,
@@ -251,12 +251,12 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
     salvage only, `overLevel: true`; level 8 → full; Troll Hall at level 30 → full (Review Focus 1).
   - `refuses a bad run`: a level below the dungeon's, seats other than exactly 0–2, no human, a repeated gladiator, an
     unknown dungeon, another rules version → `RangeError`.
-- [ ] **Step 2: Run** `npx --offline --no-install vitest run tests/domain/dungeon.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement** `dungeon.ts` as spec §5 (hired fighter: `makeFighter` of the catalog build with item
+- [x] **Step 2: Run** `npx --offline --no-install vitest run tests/domain/dungeon.test.ts`; expect FAIL.
+- [x] **Step 3: Implement** `dungeon.ts` as spec §5 (hired fighter: `makeFighter` of the catalog build with item
   instances from `CATALOG_V1.items`, then `fallbackOf`'s exact arithmetic with `hiredMultiplier` and the role's stance;
   chest draws in `expeditionLoot`'s order with the chest's rarity odds; result `victory` only for an entered, won major).
-- [ ] **Step 4: Run** step 2's command; expect PASS.
-- [ ] **Step 5: Write `tests/domain/dungeon-balance.test.ts`** (`{ timeout: 180_000 }`, 300 seeds per shape named
+- [x] **Step 4: Run** step 2's command; expect PASS.
+- [x] **Step 5: Write `tests/domain/dungeon-balance.test.ts`** (`{ timeout: 180_000 }`, 300 seeds per shape named
   `balance:<dungeon>:<shape>:<i>`):
   - `matches the prototype's builds and the catalog's hired builds`: `representativeBuild` allocations and gear at 3 / 7 /
     12 equal the catalog's hired builds of the same class.
@@ -268,21 +268,22 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
     approved reward table. The relative bands preserve 1.00–1.25× solo and 1.35–1.65× full party.
   - `plans a run in under 100 ms on average`: 50 Troll Hall full-party runs; print fight p50 / p95 / max ms and the p95 JSON
     size of a run for the report.
-- [ ] **Step 6: Run** `npx --offline --no-install vitest run tests/domain/dungeon-balance.test.ts`. If a band fails, tune in the spec's order (the
+- [x] **Step 6: Run** `npx --offline --no-install vitest run tests/domain/dungeon-balance.test.ts`. If a band fails, tune in the spec's order (the
   major's health, then its damage, then `hiredMultiplier`), rerun, and write the final numbers into spec §3.1 and §10;
   never widen a band. Expect PASS.
-- [ ] **Step 7: Commit** `feat: plan dungeon runs, balanced to the prototype`.
+- [x] **Step 7: Commit** `feat: plan dungeon runs, balanced to the prototype`.
 
 ### Task 3: The grouper and the worker executors
 
 **Files:**
 - Create: `supabase/functions/_shared/domain/dungeon-grouping.ts`, `tests/domain/dungeon-grouping.test.ts`
 - Modify: `supabase/functions/_shared/backend/jobs.ts` (the retained `executorsFor(rules)` pair and simulation dispatch),
-  `tests/backend/worker.test.ts`
+  `tests/backend/worker.test.ts`, `domain/arena.ts` (shared exact strength cents and no change to legacy pairing),
+  and `domain/dungeon.ts` (reuse the planner's frozen human build validation in grouping).
 
 **Interfaces:**
 - Consumes: Task 2's `DungeonSeat`, `DungeonRunInput`, `DungeonRunPlan`, `planDungeonRun`, `hiredRolesFor`;
-  `estimateArenaStrength`, `makeFighter`.
+  the frozen human fighter validator, and an exact cents accessor alongside `estimateArenaStrength`.
 - Produces: `DungeonEntrant = DeepReadonly<{ gladiatorId: string; activityId: string; name: string; level: number; build:
   BuildSnapshot }>`; `DungeonGroupingInput = DeepReadonly<{ kind: 'dungeon-grouping'; slotIndex: number; dungeonId:
   DungeonId; rulesVersion: string; entrants: DungeonEntrant[] }>`; `DungeonRunAssignment = DeepReadonly<{ runId: string;

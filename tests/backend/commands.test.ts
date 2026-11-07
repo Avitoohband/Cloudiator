@@ -336,6 +336,30 @@ it('parses edit-day-schedule with exactly the three parts and refuses Arena outs
   expect(parseCommand(editDay({ day: { morning: arena, afternoon: arena, evening: arena } }))).toBeNull();
 });
 
+it.each(['wolf-den', 'raider-stronghold', 'troll-hall'])('accepts %s in the afternoon in both schedule forms', dungeonId => {
+  const choice = { kind: 'dungeon', dungeonId };
+  const part = editPart('afternoon', choice);
+  const day = editDay({ day: dayOf({ afternoon: choice }) });
+  expect(parseCommand(part)).toEqual(part);
+  expect(parseCommand(day)).toEqual(day);
+});
+
+it.each(['morning', 'evening'])('rejects a dungeon in the %s in both schedule forms', phase => {
+  const choice = { kind: 'dungeon', dungeonId: 'wolf-den' };
+  expect(parseCommand(editPart(phase, choice))).toBeNull();
+  expect(parseCommand(editDay({ day: dayOf({ [phase]: choice }) }))).toBeNull();
+});
+
+it.each([
+  { kind: 'dungeon', dungeonId: 'dragon-lair' },
+  { kind: 'dungeon', dungeonId: 'wolf-den', extra: true },
+  { kind: 'dungeon', dungeonId: null },
+  { kind: 'dungeon' },
+])('rejects an invalid afternoon dungeon choice %j in both schedule forms', choice => {
+  expect(parseCommand(editPart('afternoon', choice))).toBeNull();
+  expect(parseCommand(editDay({ day: dayOf({ afternoon: choice }) }))).toBeNull();
+});
+
 it('refuses a day missing a part, with an extra key, or with a malformed part', () => {
   expect(parseCommand(editDay())).not.toBeNull(); // the complete day is the control for every refusal below
   for (const part of ['morning', 'afternoon', 'evening']) {

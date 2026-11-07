@@ -672,7 +672,7 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
   const SLOT_MS = RULES_V1.clock.slotMs;
   const refused = expect.objectContaining({ code: 'unsupported-rules' });
   const COPY = 'Rules must be the retained constants, never a copy';
-  const unchanged = (result: PreparationResult) => ({ derived: result.derived, costs: { ...result.costs, tournament: undefined }, league: result.league,
+  const unchanged = (result: PreparationResult) => ({ derived: result.derived, costs: { ...result.costs, tournament: undefined, dungeon: undefined }, league: result.league,
     arenaStrength: result.arenaStrength });
 
   it('v2 daily allowance is independent of point cap', () => {
@@ -743,6 +743,18 @@ describe('v2 jobs beside v1 (patch 1.6)', () => {
     return prepareActivity({ ...input, items: [body, head, feet, offHand], build: { ...input.build,
       equipment: { weapon: null, body: body.id, head: head.id, feet: feet.id, offHand: offHand.id } } }, RULES_V2);
   }
+
+  it('emits exactly the six v2 costs and keeps the frozen Training allowance', () => {
+    const result = v2Preparation();
+    expect(result.costs).toEqual({ training: 20, rest: 0, expedition: 30, arena: 25, tournament: 0, dungeon: 40 });
+    expect(result.trainingAllowed).toBe(false);
+  });
+
+  it('prices a dungeon from the v2 overload of the frozen build', () => {
+    const result = v2Preparation(true);
+    expect(result.derived.overload).toBeCloseTo(0.15, 10);
+    expect(result.costs.dungeon).toBe(46); // Load 23 over capacity 20, so 40 × 1.15.
+  });
 
   it.each([false, true])('pairs free v2 brackets from the full candidate pool (overload %s)', overloaded => {
     const prepared = v2Preparation(overloaded);

@@ -1,6 +1,6 @@
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { RULES_V2 } from '../domain/rules-v2.ts';
-import { requireRetained } from '../domain/rules.ts';
+import { isRulesV2, requireRetained } from '../domain/rules.ts';
 import { trainingDailyLimit, trainingPoints } from '../domain/economy.ts';
 import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
@@ -69,6 +69,7 @@ export function prepareActivity(input: PreparationInput, rules: Rules): Preparat
   if (!validation.ok) throw new WorkerFailure('invalid-build');
   const derived = deriveStats(validation.snapshot, rules);
   const costs = Object.fromEntries(ACTIVITY_KINDS.map(kind => [kind, activityCost(rules.activityStamina[kind], derived.overload)])) as ActivityCosts;
+  if (isRulesV2(rules)) costs.dungeon = activityCost(rules.activityStamina.dungeon, derived.overload);
   const arenaFighter = makeFighter(validation.snapshot, 'arena', rules);
   return { rulesVersion: rules.version, snapshot: structuredClone(validation.snapshot) as PreparationResult['snapshot'], derived,
     // The level and earned points were validated above (safe integers, level ≥ 1, earned ≥ the creation points).

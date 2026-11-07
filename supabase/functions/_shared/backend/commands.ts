@@ -3,6 +3,7 @@ import type { Actor } from './auth.ts';
 import type { AppearanceCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand, SeeNotificationsCommand, WearTitleCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
+import { RULES_V2 } from '../domain/rules-v2.ts';
 import { validAppearance } from '../domain/appearance.ts';
 import { titleById } from '../domain/titles.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
@@ -14,10 +15,11 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const exact = (v: unknown, keys: string[]): v is Record<string, unknown> => record(v) && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const integer = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
 const oneOf = (v: unknown, values: readonly string[]) => typeof v === 'string' && values.includes(v);
-/** One scheduled choice: its exact wire shape and an expedition that exists. Whether the part may hold it is `choiceAllowedInPhase`. */
+/** Exact scheduled choice and a known destination. The active version and level are checked in SQL. */
 const choiceShape = (choice: unknown): choice is ActivityChoice => record(choice)
   && ((exact(choice, ['kind']) && oneOf(choice.kind, ['training', 'rest', 'arena']))
-    || (exact(choice, ['kind', 'expeditionId']) && choice.kind === 'expedition' && oneOf(choice.expeditionId, Object.keys(CATALOG_V1.expeditions))));
+    || (exact(choice, ['kind', 'expeditionId']) && choice.kind === 'expedition' && oneOf(choice.expeditionId, Object.keys(CATALOG_V1.expeditions)))
+    || (exact(choice, ['kind', 'dungeonId']) && choice.kind === 'dungeon' && oneOf(choice.dungeonId, Object.keys(CATALOG_V1.dungeons))));
 const attributeKeys = ['strength', 'agility', 'vitality', 'endurance', 'precision'];
 const allocation = (v: unknown) => exact(v, attributeKeys) && Object.values(v).every(n => integer(n, 0, RULES_V1.attributes.maximumPoints))
   && Object.values(v).reduce<number>((sum, n) => sum + (n as number), 0) <= RULES_V1.attributes.maximumPoints;
@@ -34,17 +36,17 @@ export function parseCommand(value: unknown): GameCommand | null {
         && typeof value.name === 'string' && value.name === value.name.trim()
         && /^[A-Za-z0-9 _-]{3,20}$/.test(value.name)
         && oneOf(value.classId, Object.keys(RULES_V1.classes)) && validateCreationAllocation(value.allocation as Attributes); break;
-    // Arena only in the evening (launch feedback): the part's choice must pass `choiceAllowedInPhase`, else the command is invalid.
+    // Parse v2 phase syntax. SQL checks whether this choice is enabled for the current rules and owner.
     case 'edit-schedule': {
       const choice = value.choice;
       valid = shape('expectedVersion', 'phase', 'choice') && integer(value.expectedVersion, 1) && oneOf(value.phase, RULES_V1.clock.phases)
-        && choiceShape(choice) && choiceAllowedInPhase(value.phase as Phase, choice); break;
+        && choiceShape(choice) && choiceAllowedInPhase(value.phase as Phase, choice, RULES_V2); break;
     }
     // The whole day in one save: exactly the three parts, each a valid choice its part allows.
     case 'edit-day-schedule': {
       const day = value.day;
       valid = shape('expectedVersion', 'day') && integer(value.expectedVersion, 1) && exact(day, [...RULES_V1.clock.phases])
-        && RULES_V1.clock.phases.every(phase => { const choice = day[phase]; return choiceShape(choice) && choiceAllowedInPhase(phase, choice); }); break;
+        && RULES_V1.clock.phases.every(phase => { const choice = day[phase]; return choiceShape(choice) && choiceAllowedInPhase(phase, choice, RULES_V2); }); break;
     }
     case 'queue-build':
       valid = shape('expectedVersion', 'classId', 'stance', 'allocation', 'equipment') && integer(value.expectedVersion, 1)

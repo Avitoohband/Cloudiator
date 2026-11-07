@@ -106,8 +106,16 @@ export function estimateArenaStrength(fighter: FighterSnapshot): number {
   return strengthOf(fighter, rulesFor(fighter));
 }
 
-/** `estimateArenaStrength` for a fighter already validated against `rules`. */
 function strengthOf(fighter: FighterSnapshot, rules: Rules): number {
+  return strengthCentsOf(fighter, rules) / 100;
+}
+
+/** Exact strength cents for a grouping boundary, before conversion to the display value. */
+export function estimateArenaStrengthCents(fighter: FighterSnapshot): number {
+  return strengthCentsOf(fighter, rulesFor(fighter));
+}
+
+function strengthCentsOf(fighter: FighterSnapshot, rules: Rules): number {
   const precision = fighter.attributes.precision;
   const criticalBonus = decimal(rules.combat.criticalDamage);
   const extra = multiply({ numerator: criticalBonus.numerator - criticalBonus.denominator, denominator: criticalBonus.denominator },
@@ -119,7 +127,7 @@ function strengthOf(fighter: FighterSnapshot, rules: Rules): number {
     .reduce(multiply, multiply(multiply(expectedCritical, perSecond), hit));
   const cents = (200n * total.numerator + total.denominator) / (2n * total.denominator);
   if (cents > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError('Arena strength exceeds the safe integer range');
-  return Number(cents) / 100;
+  return Number(cents);
 }
 
 /**

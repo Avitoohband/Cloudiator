@@ -6,6 +6,8 @@ import { validateBuild } from '../domain/build.ts';
 import { activityCost, deriveStats } from '../domain/stats.ts';
 import { freezeDomain } from '../domain/types.ts';
 import { planExpedition } from '../domain/expedition.ts';
+import { planDungeonRun, type DungeonRunInput, type DungeonRunPlan } from '../domain/dungeon.ts';
+import { groupDungeon, type DungeonGroupingInput, type DungeonGroupingResult } from '../domain/dungeon-grouping.ts';
 import { makeFighter, simulateBattle } from '../domain/combat.ts';
 import { arenaNpcName, arenaOutcomes, estimateArenaStrength, leagueFor, makeFallback, matchArena, nonEmpty } from '../domain/arena.ts';
 import type { ArenaAssignment, ArenaEntrant, ArenaOutcome, PairingHistory } from '../domain/arena.ts';
@@ -261,11 +263,44 @@ export function simulateTournamentBoutV1(input: TournamentBoutInput, read: Tourn
   return simulateTournamentBout(input, read, seed, RULES_V1);
 }
 
+function requireDungeonJobScope(input: { rulesVersion: string; slotIndex: number }, job: JobLease): void {
+  if (input.rulesVersion !== RULES_V2.version || job.rulesVersion !== RULES_V2.version) throw new WorkerFailure('unsupported-rules');
+  if (input.slotIndex !== job.slotIndex) throw new WorkerFailure('invalid-input');
+}
+
+function groupDungeonV2(input: DungeonGroupingInput, job: JobLease): DungeonGroupingResult {
+  requireDungeonJobScope(input, job);
+  try { return groupDungeon(input, job.seed, RULES_V2); } catch (error) {
+    if (error instanceof RangeError) throw new WorkerFailure('invalid-input');
+    throw error;
+  }
+}
+
+function simulateDungeonV2(input: DungeonRunInput, job: JobLease): DungeonRunPlan {
+  requireDungeonJobScope(input, job);
+  if (input.startsAtMs !== input.slotIndex * RULES_V2.clock.slotMs) throw new WorkerFailure('invalid-input');
+  try { return planDungeonRun(input, job.seed, RULES_V2); } catch (error) {
+    if (error instanceof RangeError) throw new WorkerFailure('invalid-input');
+    throw error;
+  }
+}
+
+function pair(rules: Rules): JobExecutor {
+  return job => {
+    const input: unknown = job.snapshot;
+    if (input && typeof input === 'object' && !Array.isArray(input) && Object.hasOwn(input, 'kind')
+      && (input as { kind?: unknown }).kind === 'dungeon-grouping') {
+      if (rules !== RULES_V2) throw new WorkerFailure('unsupported-rules');
+      return groupDungeonV2(input as DungeonGroupingInput, job);
+    }
+    return pairArena(job.snapshot as PairingInput, job.seed, rules);
+  };
+}
+
 /**
- * A version's `simulation` executor dispatches on an explicit discriminator, under that version's `rules`. An Arena input
- * carries `kind: 'arena'`, a tournament bout `kind: 'tournament-bout'`; an expedition job's input is its activity snapshot,
- * which has no `kind` and whose choice is an expedition: it is planned only when it was frozen under `rules`. Anything else
- * is unsupported.
+ * A version's `simulation` executor dispatches on an explicit discriminator for Arena, tournaments and dungeons.
+ * A retained expedition input is its activity snapshot with no `kind` and an expedition choice. Each route uses the
+ * rules that froze the job.
  */
 function simulate(rules: Rules): JobExecutor {
   return (job: JobLease, io?: ExecutorIo): unknown => {
@@ -274,6 +309,10 @@ function simulate(rules: Rules): JobExecutor {
       if (Object.hasOwn(input, 'kind')) {
         const kind = (input as { kind?: unknown }).kind;
         if (kind === 'arena') return simulateArena(input as ArenaSimulationInput, job.seed, rules);
+        if (kind === 'dungeon') {
+          if (rules !== RULES_V2) throw new WorkerFailure('unsupported-rules');
+          return simulateDungeonV2(input as DungeonRunInput, job);
+        }
         if (kind === 'tournament-bout') {
           if (!io) throw new WorkerFailure('invalid-input');
           // The parents' winners come from storage under this job's own lease, never from the job input.
@@ -298,7 +337,7 @@ function simulate(rules: Rules): JobExecutor {
 export function executorsFor(rules: Rules): Readonly<Partial<Record<Exclude<JobKind, 'settlement'>, JobExecutor>>> {
   requireRetained(rules);
   return Object.freeze({ prepare: (job: JobLease) => prepareActivity(job.snapshot as PreparationInput, rules),
-    pair: (job: JobLease) => pairArena(job.snapshot as PairingInput, job.seed, rules),
+    pair: pair(rules),
     simulation: simulate(rules),
     // SQL selects the immutable stage by ordinal; no worker-supplied stage payload is trusted here.
     reveal: () => ({}) });

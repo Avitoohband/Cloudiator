@@ -95,8 +95,7 @@ const nonnegativeInt = (value: number) => Number.isSafeInteger(value) && value >
 const ITEM_ORIGINS = ['starter', 'shop', 'expedition', 'renown'] as const;
 
 /** Validate frozen equipment and rolls through the normal build validator. Training caps limit new points, not existing builds. */
-function humanFighter(seat: HumanSeat, rules: Rules): FighterSnapshot {
-  const { build, level } = seat;
+export function frozenDungeonHumanFighter(build: BuildSnapshot, level: number, rules: Rules): FighterSnapshot {
   if (!build || build.rulesVersion !== rules.version || !build.equipment || typeof build.equipment !== 'object') {
     throw new RangeError('Invalid frozen dungeon build');
   }
@@ -146,7 +145,7 @@ export function planDungeonRun(input: DungeonRunInput, seed: Seed, rules: Rules)
       ids.add(seat.gladiatorId);
       activities.add(seat.activityId);
       party.push({ id: seat.gladiatorId, gladiatorId: seat.gladiatorId, name: seat.name, side: 0, role: 'gladiator',
-        seat: seat.seat, snapshot: humanFighter(seat, retained) });
+        seat: seat.seat, snapshot: frozenDungeonHumanFighter(seat.build, seat.level, retained) });
     } else if (seat.kind === 'hireling' && typeof seat.role === 'string' && Object.hasOwn(HIRED_NAME, seat.role)) {
       party.push({ id: `hired:${seat.seat}`, gladiatorId: null, name: `Hired ${HIRED_NAME[seat.role]}`, side: 0,
         role: 'hireling', seat: seat.seat, snapshot: hiredFighter(dungeon, seat.role, retained) });

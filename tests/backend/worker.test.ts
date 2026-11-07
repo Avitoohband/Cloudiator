@@ -18,6 +18,9 @@ import type { ExpeditionPlan } from '../../supabase/functions/_shared/domain/exp
 import { arenaNpcName, arenaOutcomes, estimateArenaStrength, makeFallback, matchArena } from '../../supabase/functions/_shared/domain/arena.ts';
 import type { ArenaAssignment } from '../../supabase/functions/_shared/domain/arena.ts';
 import { itemFixture, ownerFixture } from '../fixtures/domain.ts';
+import { planDungeonRun } from '../../supabase/functions/_shared/domain/dungeon.ts';
+import type { DungeonGroupingInput } from '../../supabase/functions/_shared/domain/dungeon-grouping.ts';
+import { partyInput } from '../fixtures/dungeon-builds.ts';
 
 const SECRET = 'unit-worker-secret-0123456789abcdef0123456789';
 const gid = '0d5f8471-d919-428f-9ab7-058c95821757';
@@ -962,5 +965,65 @@ describe('private worker HTTP boundary', () => {
     const response = await handleWorker(post(`Bearer ${SECRET}`), { secret: SECRET, run: async () => { throw new Error('service key abc'); } });
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain('service key');
+  });
+});
+
+describe('dungeon jobs beside retained Arena jobs', () => {
+  const run = partyInput('wolf-den', [{ classId: 'duelist', level: 3 }], 'dungeon:1:wolf-den:1');
+  const human = run.seats.find(seat => seat.kind === 'human')!;
+  const grouping: DungeonGroupingInput = {
+    kind: 'dungeon-grouping', slotIndex: run.slotIndex, dungeonId: run.dungeonId, rulesVersion: 'v2',
+    entrants: [{ gladiatorId: human.gladiatorId, activityId: human.activityId,
+      name: human.name, level: human.level, build: human.build }],
+  };
+  const claimed = (kind: 'pair' | 'simulation', snapshot: JobLease['snapshot'], rulesVersion = 'v2') =>
+    lease(kind, {
+      snapshot, rulesVersion, slotIndex: run.slotIndex,
+      seed: kind === 'pair' ? 'party-seed' : 'run-seed',
+      activityId: kind === 'pair' ? null : human.activityId,
+      gladiatorId: kind === 'pair' ? null : human.gladiatorId,
+    });
+  const workerId = 'worker-dungeon';
+
+  it('completes a v2 dungeon pair lease with the frozen run assignment', async () => {
+    const job = claimed('pair', grouping);
+    const { database, calls } = port({ pair: [job] });
+    expect(await runWorker({ database, workerId, cpuNow: () => 0 })).toMatchObject({ completed: 1, failed: 0 });
+    expect(calls.filter(c => c.name === 'complete').map(c => c.args)).toEqual([[job.id, job.token, {
+      runs: [{ runId: run.runId, seats: [
+        human,
+        { seat: 1, kind: 'hireling', role: 'guard' },
+        { seat: 2, kind: 'hireling', role: 'striker' },
+      ] }],
+    }]]);
+  });
+
+  it('completes a v2 dungeon simulation lease with the plan from its private run seed', async () => {
+    const job = claimed('simulation', run);
+    const { database, calls } = port({ simulation: [job] });
+    expect(await runWorker({ database, workerId, cpuNow: () => 0 })).toMatchObject({ completed: 1, failed: 0 });
+    expect(calls.filter(c => c.name === 'complete').map(c => c.args))
+      .toEqual([[job.id, job.token, planDungeonRun(run, 'run-seed', RULES_V2)]]);
+  });
+
+  it.each([
+    { reason: 'grouping on a v1 lease', kind: 'pair', version: 'v1', snapshot: grouping, code: 'unsupported-rules' },
+    { reason: 'simulation on a v1 lease', kind: 'simulation', version: 'v1', snapshot: run, code: 'unsupported-rules' },
+    { reason: 'a v1 grouping snapshot on a v2 lease', kind: 'pair', version: 'v2',
+      snapshot: { ...grouping, rulesVersion: 'v1' }, code: 'unsupported-rules' },
+    { reason: 'a v1 simulation snapshot on a v2 lease', kind: 'simulation', version: 'v2',
+      snapshot: { ...run, rulesVersion: 'v1' }, code: 'unsupported-rules' },
+    { reason: 'a malformed grouping snapshot', kind: 'pair', version: 'v2',
+      snapshot: { ...grouping, entrants: null }, code: 'invalid-input' },
+    { reason: 'a malformed simulation snapshot', kind: 'simulation', version: 'v2',
+      snapshot: { ...run, seats: [] }, code: 'invalid-input' },
+    { reason: 'a run with a start that disagrees with its slot', kind: 'simulation', version: 'v2',
+      snapshot: { ...run, startsAtMs: run.startsAtMs + 1 }, code: 'invalid-input' },
+  ] as const)('fails $reason before completion', async ({ kind, version, snapshot, code }) => {
+    const job = claimed(kind, snapshot, version);
+    const { database, calls } = port({ [kind]: [job] });
+    expect(await runWorker({ database, workerId, cpuNow: () => 0 })).toMatchObject({ failed: 1, completed: 0 });
+    expect(calls.filter(c => c.name === 'complete')).toEqual([]);
+    expect(calls.filter(c => c.name === 'fail').map(c => c.args)).toEqual([[job.id, job.token, code]]);
   });
 });

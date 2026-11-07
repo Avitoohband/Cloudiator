@@ -510,16 +510,16 @@ by M30. The public projection exposes only a whitelisted bot team identifier, ne
 the cutoff without changing any human schedule. The human groups and seat order are canonical. In phase 7 use the
 affordable frozen human cohort, the approved global per-dungeon seat cap, each bot's eligibility and at most one run
 per bot. Derive disjoint per-dungeon bot pools once under the boundary coordinator before dispatching any grouping job.
-Use the spec's working hardest-first priority and stable eligible bot IDs. Acceptance only uses that frozen pool so parallel or
+Use Avi's approved hardest-first priority and stable eligible bot IDs. Acceptance only uses that frozen pool so parallel or
 retried grouping jobs cannot reuse a bot. Expose derived duty status and scheduled return time with the public team
 identifier. Keep the full routines private. An unplaced bot follows the approved Training fallback with ordinary v2 checks. Preserve the ungrouped
 human guard and do not manufacture a bot-only run. Keep member settlement and shared reveals fenced.
 
-- [ ] Write and run RED: off-duty at 00:00/08:00 UTC, 44 humans can see bots and 45 benches them, no bot idle suppression
+- [x] Write and run RED: off-duty at 00:00/08:00 UTC, 44 humans can see bots and 45 benches them, no bot idle suppression
   while active, current v2 Training limit, no bot-only runs, no duplicate bot across two dungeons, insufficient-stamina
   human excluded, valid bot retained ahead of a hire, role combat matches its hire equivalent and no economic grant.
-- [ ] Implement the minimal SQL/worker extensions. Preserve real-human grouping, fallback, dependency and lease behavior.
-- [ ] Run owning unit and DB tests plus capacity fixtures, then independent review, commit and update handoff.
+- [x] Implement the minimal SQL/worker extensions. Preserve real-human grouping, fallback, dependency and lease behavior.
+- [x] Run owning unit and DB tests plus capacity fixtures, then independent review, commit and update handoff.
 
 ### Task 6D: Unranked Arena bot bouts
 
@@ -530,7 +530,8 @@ human guard and do not manufacture a bot-only run. Keep member settlement and sh
 latest SQL21 pairing acceptance preserves free v2 tournaments and validates the frozen same-league and 25% eligibility.
 Use the existing Arena simulation/reveal lanes with unranked result metadata. Settle only the human's approved 20%
 floor of normal player-bout currencies. Do not update either rating, standings or qualification, or create a bot
-reward receipt in the public history. Preserve internal idempotency and opponent identity for replay.
+reward receipt in the public history. When a scheduled bot has no player match, keep it at the Arena for private practice
+with no public bout or reward. Preserve internal idempotency and opponent identity for replay.
 
 - [ ] Write and run RED: human pairs and tournaments unchanged, bots never enter a tournament, only eligible NPC
   replacements, least-recent eligible bot first, no double-assignment, 20% floor and no rank/qualification changes,

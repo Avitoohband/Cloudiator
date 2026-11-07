@@ -440,15 +440,17 @@ Precision order. Earned points equal the allocation total. Equipped items use th
   triples follow. The exact five kits and all 630 routine cells are checked against SQL.
 - **Dungeons.** Group eligible humans first using the regular strength bands. Add eligible on-call bots after humans
   and before hired fighters, within the original cap of `3 * ceil(humans / 3) - humans` bots per dungeon, with a bot in
-  at most one run. The local implementation uses Troll Hall, Raider Stronghold, then Wolf Den as the working priority
-  pending Avi's choice. That reserves Tullia, the only level-12 bot, for an eligible Troll Hall cohort. Bots must meet
+  at most one run. Avi chose Troll Hall, Raider Stronghold, then Wolf Den on 2026-11-07. That reserves Tullia, the only
+  level-12 bot, for an eligible Troll Hall cohort. Bots must meet
   the unlock level and never start a bot-only run. Unassigned bots train where their
   routine and v2 limit allow. A bot uses its role's hired build at that dungeon's level for combat. Its actual name,
   actor and BOT tag appear in the run and log. It earns no dungeon payout and the humans' per-member payouts stay fixed.
 - **Arena.** Preserve real-player pairing first. A same-league bot within 25% of a player's frozen strength can replace
   only that player's NPC fallback. Prefer the bot met least recently. No bot occupies a tournament seat. A human's bot
   bout pays `floor(0.2 * amount)` for each normal player-bout currency under the retained rules. No rating, standings or
-  season qualification change for either side. A bot spar has no economic reward. Existing human/NPC paths stay intact.
+  season qualification change for either side. Avi chose private Arena practice for a scheduled bot with no player
+  match on 2026-11-07. Practice keeps the bot at the Arena and creates no public bout or reward. Existing human/NPC
+  paths stay intact.
 - **Identity and safety.** Bot identities are registered by an operator behind owner-only create/bench operations, with
   system Auth accounts that have no sign-in method and are banned. An active bot cannot submit player commands. It has
   a fixed level and build, no market/shop actions or economic grants. Preserve exactly-once internal processing. Bots

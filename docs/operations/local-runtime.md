@@ -49,6 +49,20 @@ That report is supporting evidence, not a guarantee for other failures.
    no credential copying from another agent. Resume required database/Auth/HTTP
    and migration-only replay checks. Daemon recovery alone proves none of them.
 
+## Managed Windows CLI and Edge launch
+
+For a managed version/help failure writing the CLI telemetry file, retry
+with process-scoped `SUPABASE_TELEMETRY_DISABLED=1`. When script policy blocks
+the PowerShell launcher, use the installed `npx.cmd --offline --no-install`
+command from the intended worktree. A hidden command-shell process can launch
+it without a PowerShell script file. Check the named local container, its
+worktree bind, and the worker's own unauthenticated response.
+
+On 2026-11-07, CLI 2.120.0 version and help passed after the process-scoped
+opt-out. The existing cached Edge image started from the Design bind and
+returned its own 401 after the script-policy failure. Evidence is in parent
+`logs/p18-task4-local-preflight-20261107/`.
+
 ## Observed evidence and limits
 
 On2026-10-14, Docker Desktop4.94.0 startup failed on the exact socket rename.

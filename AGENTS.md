@@ -112,6 +112,20 @@ time, no default Vault write or hosted release with this flag had been tested;
 the rule is adopted from the documented help, not a verified release fix.
 See the [M26 release steps](docs/operations/migrations.md).
 
+## Managed Windows Supabase CLI — approved local guidance
+
+Avi approved this supplement on 2026-11-07 for **Supabase CLI**. If managed
+version or help calls fail while writing the home-directory telemetry file,
+set `SUPABASE_TELEMETRY_DISABLED=1` for that process. If Windows script policy
+blocks the PowerShell launcher, start the installed `npx.cmd` command directly
+with the same `--offline --no-install` flags. Use a hidden launcher for Edge.
+
+Observed with CLI 2.120.0: the telemetry write returned `EPERM`, and the
+PowerShell Edge launcher was refused by script policy. Tested separately:
+the process-scoped opt-out let version and help succeed, and the direct
+offline launcher served the verified Design bind with the worker's own 401.
+See [local runtime recovery](docs/operations/local-runtime.md).
+
 ## Windows Docker startup — approved local guidance
 
 Avi approved this extension on 2026-10-14 for **Supabase CLI**. Before retrying
@@ -166,6 +180,20 @@ stand-in from the `pg_get_functiondef` text captured before it was installed,
 never by replaying a migration or source statement through a shell tool that
 may rewrite line endings, and verify byte equality afterwards; otherwise the
 next generated draft can re-emit an unchanged function.
+Avi approved the corresponding trigger rule on 2026-11-07. If a test commits
+historical trigger DDL, capture the installed `pg_get_triggerdef(oid, false)`
+before the fixture, restore it transactionally in `finally`, and compare the
+canonical definitions byte for byte.
+Observed in 1.8 Task 6A: an M28 fixture replaced the dungeon ledger predicate.
+Tested separately: the seven captured definitions were restored and matched
+after all 287 affected DB tests passed.
+See [schema fixture restoration](docs/operations/migrations.md#fixtures-that-temporarily-replace-schema).
+Avi approved the dollar-quote rule on 2026-11-07 for **Making and Committing
+Schema Changes**. When composing SQL in JavaScript, use a replacement callback
+or slice for a body containing dollar quotes. Assert that the delimiters are
+intact before applying the source. Observed in 1.8 Task 6C: replacement-string
+substitution collapsed `$$` to `$`. Tested separately: a callback preserved
+the delimiters and the corrected local psql transaction passed.
 Avi approved on 2026-10-27 (M24 lesson): check that every CHECK constraint
 comes after the functions it calls. Observed with CLI 2.120.0: the generated M24
 draft added `gladiators_appearance_check` before creating
@@ -312,6 +340,13 @@ both logs and base the verdict on the complete native result.
 Observed in Patch 1.8 Task 2: ten loopback and two junction tests failed under
 managed execution. Tested separately: all 2,409 passed in the native offline
 retry with matching source hashes. See the [gate guide](docs/operations/verification-gates.md).
+
+Avi approved the SSR-cache extension on 2026-11-07. If managed Vitest fails
+before test collection with `ENOENT` in its isolated SSR cache, preserve the
+log and rerun the same offline test command natively with `TEMP` and `TMP`
+inside the task's workspace evidence folder. Observed in 1.8 Task 6A: the
+managed cache open failed. Tested separately: the native rerun passed all 33
+focused tests with matching source inputs.
 
 # Asynchronous browser probes — persistent project override
 

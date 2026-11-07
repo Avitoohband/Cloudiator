@@ -2641,6 +2641,25 @@ npx supabase migration list --local
 
 Inspect the exact generated path, grants, function privileges, security-invoker view, RLS, constraints, and private schema before staging. Never invent timestamps. Do not use the source file as a second migration on deployment. `db pull` can label the local database as “remote” in its progress/history messages; `--local` selects the local stack. Replaying with `db reset --local --no-seed --yes`, rerunning the integration suite, and rerunning advisors is a separate required check from source iteration. The initial uncommitted drafts `20261012050407` and `20261012050628` were discarded using local `migration repair --status reverted` and exact-file removal before the final M01; they were never committed or deployed.
 
+When assembling dollar-quoted SQL in JavaScript, use a replacement callback
+or slice and assert the preserved delimiters before applying the source.
+Task 6C observed replacement-string substitution collapse `$$` to `$`.
+The local psql transaction rolled back. The callback-based composition
+preserved the delimiters and applied successfully. See parent
+`logs/p18-task6c-20261107-44493f5/`.
+
+## Fixtures that temporarily replace schema
+
+Before a fixture commits historical trigger DDL, capture the installed
+`pg_get_triggerdef(oid, false)` definitions. Restore the
+captured definitions transactionally in `finally` after the test sessions
+finish and compare the canonical definitions byte for byte.
+
+In 1.8 Task 6A, the historical M28 backfill fixture overwrote the live
+`titles_on_ledger` dungeon predicate. The corrected fixture restored all
+seven installed definitions. The before/after comparison passed after the
+287-case affected DB run. See parent `logs/p18-task6a-20261107-6128c0e/`.
+
 ## Protected owner query and command boundary
 
 Task 5 can call the authenticated publishable-key client:

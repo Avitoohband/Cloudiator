@@ -70,6 +70,12 @@ and two junction checks. A separate native retry with matching input hashes
 passed all 2,409 tests. See parent `logs/p18-task2-20261107-ac712d8/`
 for `full-units.log`, `full-units-native.log` and both source manifests.
 
+Use the same evidence rule if managed Vitest fails before test collection
+with `ENOENT` in its isolated SSR cache. Rerun the unchanged offline command
+natively with `TEMP` and `TMP` inside the task's workspace evidence folder.
+In 1.8 Task 6A, the managed SSR-cache open failed and the native rerun passed
+all 33 focused tests. See parent `logs/p18-task6a-20261107-6128c0e/`.
+
 ## Database tests and the local Edge runtime
 
 Approved by Avi on 2026-10-14 as part of this override.

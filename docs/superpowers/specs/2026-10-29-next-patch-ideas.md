@@ -1,5 +1,7 @@
 # Next-patch ideas (Avi, 2026-10-29) — collected, not yet designed
 
+See the [Cloudiator roadmap](../../ROADMAP.md) for the consolidated release history and future plans.
+
 Avi's list after the game-messages release, in his order, with Claude's reading. Nothing here is designed or planned yet;
 the UI items get a clickable mockup over a real screenshot before Avi approves them (his rule).
 

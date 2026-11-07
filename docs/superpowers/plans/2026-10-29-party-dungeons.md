@@ -293,7 +293,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   `groupDungeonV2` and `simulateDungeonV2` only from the retained v2 dispatcher. Both reject malformed inputs and frozen
   versions that do not match the executor. A human seat copies its entrant's fields exactly for SQL validation.
 
-- [ ] **Step 1: Write the tests:**
+- [x] **Step 1: Write the tests:**
   - `partitions strengths in bands of at most 2×, then evenly`: cents `[100, 40, 35]` → `[[0], [1, 2]]`; `[100, 50]` →
     `[[0, 1]]` (exactly 2×); seven equal → `[[0,1,2],[3,4],[5,6]]`; 1–6 equal → sizes 1, 2, 3, 2+2, 3+2, 3+3.
   - `groups by strength, strongest first, independent of input order`: shuffled entrants give the same runs; equal
@@ -306,18 +306,19 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   - `worker.test.ts`: `routes dungeon grouping and simulation through the retained v2 executor`, rejects dungeon inputs
     at v1 and mismatched frozen versions, keeps both existing Arena routes, rejects malformed snapshots, and refuses a
     run whose `startsAtMs` is not `slotIndex * rules.clock.slotMs`.
-- [ ] **Step 2: Run** `npx --offline --no-install vitest run tests/domain/dungeon-grouping.test.ts tests/backend/worker.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement** as spec §6 in `executorsFor(rules)`. Check the discriminator and the retained version before
+- [x] **Step 2: Run** `npx --offline --no-install vitest run tests/domain/dungeon-grouping.test.ts tests/backend/worker.test.ts`; expect FAIL.
+- [x] **Step 3: Implement** as spec §6 in `executorsFor(rules)`. Check the discriminator and the retained version before
   using dungeon capabilities. Preserve `simulateV1` and the existing two-fighter route.
-- [ ] **Step 4: Run** step 2's command and `npm run typecheck`; expect PASS.
-- [ ] **Step 5: Commit** `feat: group dungeon entrants and run dungeon jobs in the worker`.
+- [x] **Step 4: Run** step 2's command and `npm run typecheck`; expect PASS.
+- [x] **Step 5: Commit** `feat: group dungeon entrants and run dungeon jobs in the worker`.
 
 ### Task 4: Planning, preparation and phase-7 grouping (Edge, SQL sections 1–2)
 
 **Files:**
 - Modify: `supabase/functions/_shared/backend/commands.ts` (`choiceShape` accepts `{ kind: 'dungeon', dungeonId }` with a
   catalog id and validates known v2 afternoon syntax in both schedule paths), `backend/jobs.ts` (v2 preparations carry
-  6 costs, retained v1 still carries 5), `tests/fixtures/db.ts` (`resetIdentity` truncates the new tables)
+  6 costs, retained v1 still carries 5). Verify that the existing `tests/fixtures/db.ts` character truncate cascades
+  through activities/jobs to both new tables. Keep M29 RED independent of the absent tables.
 - Create: `supabase/sql/24-dungeons.sql` with a header (purpose, lock order, the accepted exceptions of spec §7) and:
   - **Section 1:** `activities_resolved_kind_check` re-added with `'dungeon'`; `private.planning_command` restated from
     `18-messages.sql` with, in both `edit-schedule` and `edit-day-schedule`, a dungeon outside the afternoon `invalid` and

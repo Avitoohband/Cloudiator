@@ -44,6 +44,12 @@ describe('Task 23.3: capacity projections', () => {
     expect([...classes].sort()).toEqual(['detail', 'operational', 'permanent', 'player', 'season', 'singleton', 'summary']);
   });
 
+  it('accounts for the bounded bot roster and routines and prunable duty history', () => {
+    expect(TABLE_CLASSES['private.bots']).toEqual({ retention: 'singleton' });
+    expect(TABLE_CLASSES['private.bot_routines']).toEqual({ retention: 'singleton' });
+    expect(TABLE_CLASSES['private.bot_slot_duty']).toEqual({ retention: 'detail' });
+  });
+
   it('separates shared dungeon detail, the second simulation copy and per-member summaries', () => {
     for (const name of ['private.dungeon_runs', 'private.dungeon_run_members', 'private.dungeon_results', 'public.dungeon_fights']) {
       expect(TABLE_CLASSES[name]).toEqual({ retention: 'detail' });

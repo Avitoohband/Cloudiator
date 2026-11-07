@@ -13,8 +13,10 @@ import { freezeDomain, type BuildSnapshot, type Catalog, type DeepReadonly, type
 
 type Seat = 0 | 1 | 2;
 type Ordinal = 1 | 2 | 3 | 4;
+export type DungeonBot = Readonly<{ gladiatorId: string; activityId: string; name: string; level: number; role: HiredRole }>;
 export type DungeonSeat = DeepReadonly<
   { seat: Seat; kind: 'human'; gladiatorId: string; activityId: string; name: string; level: number; build: BuildSnapshot }
+  | (DungeonBot & { seat: Seat; kind: 'bot' })
   | { seat: Seat; kind: 'hireling'; role: HiredRole }
 >;
 type HumanSeat = Extract<DungeonSeat, { kind: 'human' }>;
@@ -86,13 +88,20 @@ export function dungeonChestLoot(reward: DungeonReward, catalog: Catalog, random
 }
 
 export function dungeonPartyLabel(dungeon: Dungeon, seats: readonly DungeonSeat[]): string {
-  const names = seats.map(seat => seat.kind === 'human' ? seat.name : `a hired ${HIRED_NAME[seat.role]}`);
+  const names = seats.map(seat => seat.kind === 'hireling' ? `a hired ${HIRED_NAME[seat.role]}` : seat.name);
   return `Enter ${dungeon.name} with ${names.length < 2 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
 }
 
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const nonnegativeInt = (value: number) => Number.isSafeInteger(value) && value >= 0;
 const ITEM_ORIGINS = ['starter', 'shop', 'expedition', 'renown'] as const;
+
+export function validDungeonBot(bot: DungeonBot, requiredLevel: number, maximumLevel: number): boolean {
+  return !!bot && typeof bot === 'object' && !Array.isArray(bot)
+    && nonempty(bot.gladiatorId) && nonempty(bot.activityId) && nonempty(bot.name)
+    && Number.isSafeInteger(bot.level) && bot.level >= requiredLevel && bot.level <= maximumLevel
+    && typeof bot.role === 'string' && Object.hasOwn(HIRED_NAME, bot.role);
+}
 
 /** Validate frozen equipment and rolls through the normal build validator. Training caps limit new points, not existing builds. */
 export function frozenDungeonHumanFighter(build: BuildSnapshot, level: number, rules: Rules): FighterSnapshot {
@@ -146,6 +155,14 @@ export function planDungeonRun(input: DungeonRunInput, seed: Seed, rules: Rules)
       activities.add(seat.activityId);
       party.push({ id: seat.gladiatorId, gladiatorId: seat.gladiatorId, name: seat.name, side: 0, role: 'gladiator',
         seat: seat.seat, snapshot: frozenDungeonHumanFighter(seat.build, seat.level, retained) });
+    } else if (seat.kind === 'bot') {
+      if (humans.length === 0 || party.some(unit => unit.role === 'hireling')
+        || !validDungeonBot(seat, dungeon.requiredLevel, retained.attributes.maximumLevel)
+        || ids.has(seat.gladiatorId) || activities.has(seat.activityId)) throw new RangeError('Invalid dungeon bot');
+      ids.add(seat.gladiatorId);
+      activities.add(seat.activityId);
+      party.push({ id: seat.gladiatorId, gladiatorId: seat.gladiatorId, name: seat.name, side: 0, role: 'bot',
+        seat: seat.seat, snapshot: hiredFighter(dungeon, seat.role, retained) });
     } else if (seat.kind === 'hireling' && typeof seat.role === 'string' && Object.hasOwn(HIRED_NAME, seat.role)) {
       party.push({ id: `hired:${seat.seat}`, gladiatorId: null, name: `Hired ${HIRED_NAME[seat.role]}`, side: 0,
         role: 'hireling', seat: seat.seat, snapshot: hiredFighter(dungeon, seat.role, retained) });

@@ -1,7 +1,7 @@
 import type { DungeonId } from '../contracts/commands.ts';
 import { estimateArenaStrengthCents, nonEmpty } from './arena.ts';
 import { CATALOG_V1 } from './catalog-v1.ts';
-import { frozenDungeonHumanFighter, hiredRolesFor, type DungeonSeat } from './dungeon.ts';
+import { frozenDungeonHumanFighter, hiredRolesFor, validDungeonBot, type DungeonBot, type DungeonSeat } from './dungeon.ts';
 import { seededRandom } from './random.ts';
 import { isRulesV2, requireRetained } from './rules.ts';
 import { freezeDomain, type BuildSnapshot, type DeepReadonly, type Rules, type Seed } from './types.ts';
@@ -10,7 +10,7 @@ export type DungeonEntrant = DeepReadonly<{
   gladiatorId: string; activityId: string; name: string; level: number; build: BuildSnapshot;
 }>;
 export type DungeonGroupingInput = DeepReadonly<{
-  kind: 'dungeon-grouping'; slotIndex: number; dungeonId: DungeonId; rulesVersion: string; entrants: DungeonEntrant[];
+  kind: 'dungeon-grouping'; slotIndex: number; dungeonId: DungeonId; rulesVersion: string; entrants: DungeonEntrant[]; bots?: DungeonBot[];
 }>;
 export type DungeonRunAssignment = DeepReadonly<{ runId: string; seats: DungeonSeat[] }>;
 export type DungeonGroupingResult = { runs: DungeonRunAssignment[] };
@@ -65,14 +65,29 @@ export function groupDungeon(input: DungeonGroupingInput, seed: Seed, rules: Rul
     return { entrant, cents: estimateArenaStrengthCents(fighter), tie: seededRandom(`${seed}:dungeon:${entrant.gladiatorId}`)() };
   }).sort((a, b) => b.cents - a.cents || a.tie - b.tie || compareIds(a.entrant.gladiatorId, b.entrant.gladiatorId));
 
+  const bots = input.bots === undefined ? [] : input.bots;
+  const cap = SEATS.length * Math.ceil(ranked.length / SEATS.length) - ranked.length;
+  if (!Array.isArray(bots) || bots.length > cap) throw new RangeError('Invalid dungeon bot pool');
+  for (const bot of bots) {
+    if (!validDungeonBot(bot, requiredLevel, retained.attributes.maximumLevel)
+      || ids.has(bot.gladiatorId) || activities.has(bot.activityId)) throw new RangeError('Invalid dungeon bot pool');
+    ids.add(bot.gladiatorId);
+    activities.add(bot.activityId);
+  }
+
   const groups = partitionByStrength(ranked.map(candidate => candidate.cents), retained.matchmaking.maximumStrengthRatio);
+  let nextBot = 0;
   return { runs: groups.map((group, index) => {
     const humans = group.map(position => ranked[position].entrant);
     const seats: DungeonSeat[] = humans.map(({ gladiatorId, activityId, name, level, build }, seat) => ({
       seat: SEATS[seat], kind: 'human', gladiatorId, activityId, name, level, build: structuredClone(build),
     }));
     for (const role of hiredRolesFor(humans.map(human => human.build.stance))) {
-      seats.push({ seat: SEATS[seats.length], kind: 'hireling', role });
+      const seat = SEATS[seats.length];
+      if (nextBot < bots.length) {
+        const { gladiatorId, activityId, name, level, role: botRole } = bots[nextBot++];
+        seats.push({ seat, kind: 'bot', gladiatorId, activityId, name, level, role: botRole });
+      } else seats.push({ seat, kind: 'hireling', role });
     }
     return freezeDomain({ runId: `dungeon:${slotIndex}:${dungeonId}:${index + 1}`, seats });
   }) };

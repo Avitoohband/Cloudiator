@@ -31,8 +31,9 @@ const line = (r: Row) => [r.section, r.object, r.grantee, r.privilege, r.detail]
 const lines = (rows: Row[]) => rows.map(line).sort();
 const toRows = (result: unknown) => [...(result as Row[])];
 const audit = async () => toRows(await sql.unsafe(AUDIT));
-it('keeps bot registration, bench, catalog and routine inaccessible to API roles', async () => {
-  const functions = ['private.create_bot(text,uuid)', 'private.bench_bot(text)', 'private.bot_catalog()'];
+it('keeps bot operations owner-only and private scheduling scoped to the worker', async () => {
+  const functions = ['private.create_bot(text,uuid)', 'private.bench_bot(text)', 'private.activate_bot(text)',
+    'private.set_bot_active(text,boolean)', 'private.bot_catalog()'];
   const roles = ['anon', 'authenticated', 'service_role'];
   for (const signature of functions) {
     expect(await sql`select p.prosecdef as definer,p.proconfig as config,
@@ -43,9 +44,12 @@ it('keeps bot registration, bench, catalog and routine inaccessible to API roles
       .toEqual([{ definer: false, config: ['search_path=""'], anon: false, authenticated: false, service: false }]);
   }
   for (const role of roles) {
+    const scoped = role === 'service_role'
+      ? ['select team from private.bots', 'update private.bot_slot_duty set directive=\'rest\'']
+      : ['select * from private.bot_routines', 'select * from private.bot_slot_duty', 'select private.freeze_bot_duty(1)'];
     for (const statement of [
-      "select private.create_bot('pip',gen_random_uuid())", "select private.bench_bot('pip')",
-      'select * from private.bot_routines', 'select * from private.bots', 'update private.bots set active=true',
+      "select private.create_bot('pip',gen_random_uuid())", "select private.bench_bot('pip')", "select private.activate_bot('pip')",
+      'select * from private.bots', 'update private.bots set active=true', ...scoped,
     ]) {
       await expect(sql.begin(async tx => {
         await tx.unsafe(`set local role ${role}`);
@@ -55,6 +59,7 @@ it('keeps bot registration, bench, catalog and routine inaccessible to API roles
   }
   for (const client of [anonymous, (await account()).client, admin]) {
     expect((await client.schema('private').from('bot_routines').select('*')).error?.code).toBe('PGRST106');
+    expect((await client.schema('private').from('bot_slot_duty').select('*')).error?.code).toBe('PGRST106');
     expect((await client.schema('private').rpc('bench_bot', { member_key: 'pip' })).error?.code).toBe('PGRST106');
   }
 });
@@ -132,7 +137,13 @@ const relationOf = (object: string) => object.split('.').slice(0, 2).join('.');
  * public sequences and MAINTAIN, REFERENCES, TRIGGER and TRUNCATE on new public tables.
  */
 const SERVICE_ROLE = [
+  'column private.bot_routines.directive: SELECT',
+  'column private.bot_routines.member_key: SELECT',
+  'column private.bot_routines.week_index: SELECT',
+  'column private.bots.active: SELECT',
   'column private.bots.gladiator_id: SELECT',
+  'column private.bots.member_key: SELECT',
+  'column private.bots.role: SELECT',
   // Task 5's economy switch/table deliberately add no service_role privilege; pinned separately below.
   'default postgres:public:sequences: UPDATE',
   'default postgres:public:tables: MAINTAIN,REFERENCES,TRIGGER,TRUNCATE',
@@ -169,6 +180,7 @@ const SERVICE_ROLE = [
   'function private.expedition_rewards(uuid, jsonb): EXECUTE',
   'function private.expire_seller_listings(uuid, bigint): EXECUTE',
   'function private.founder_cutoff_ms(): EXECUTE',
+  'function private.freeze_bot_duty(bigint): EXECUTE',
   'function private.grouping_input(bigint, text, text): EXECUTE',
   'function private.guard_arena_rating(): EXECUTE',
   'function private.guard_cosmetic(): EXECUTE',
@@ -270,6 +282,7 @@ const SERVICE_ROLE = [
   'relation private.arena_assignments: DELETE,INSERT,SELECT',
   'relation private.arena_ratings: INSERT,SELECT,UPDATE',
   'relation private.arena_results: DELETE,INSERT,SELECT',
+  'relation private.bot_slot_duty: INSERT,SELECT',
   'relation private.boundaries: DELETE,INSERT,SELECT,UPDATE',
   'relation private.boundary_members: DELETE,INSERT,SELECT,UPDATE',
   'relation private.boundary_work: DELETE,INSERT,SELECT,UPDATE',

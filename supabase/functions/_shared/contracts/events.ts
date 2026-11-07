@@ -59,7 +59,7 @@ export type BattleLog = {
   finalHp: readonly [number, number];
   tieBreakReason: 'simultaneous-defeat' | 'equal-health-fraction' | null;
 };
-export type PartyRole = 'gladiator' | 'hireling' | 'monster' | 'major';
+export type PartyRole = 'gladiator' | 'bot' | 'hireling' | 'monster' | 'major';
 export type PartyCombatant = RevealedCombatant & { side: 0 | 1; role: PartyRole; seat: number | null };
 export type PartyAttack = BattleAction & { sweep: boolean };
 export type PartyVictory = {

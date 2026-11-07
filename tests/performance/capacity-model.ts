@@ -87,6 +87,7 @@ export type Retention = 'detail' | 'summary' | 'permanent' | 'player' | 'season'
 export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; windowSlots?: number; compactAfterSlots?: number }>> = Object.freeze({
   'private.activity_snapshots': { retention: 'detail' }, 'private.arena_assignment_sides': { retention: 'detail' },
   'private.arena_assignments': { retention: 'detail' }, 'private.arena_results': { retention: 'detail' },
+  'private.bot_slot_duty': { retention: 'detail' },
   'private.boundary_members': { retention: 'detail' }, 'private.expedition_plans': { retention: 'detail' },
   'private.dungeon_runs': { retention: 'detail' }, 'private.dungeon_run_members': { retention: 'detail' },
   'private.dungeon_results': { retention: 'detail' }, 'public.dungeon_fights': { retention: 'detail' },
@@ -122,6 +123,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'private.season_awards': { retention: 'season' }, 'public.seasons': { retention: 'season' },
   'private.command_attempts': { retention: 'operational', windowSlots: 1 }, 'private.dispatch_log': { retention: 'operational', windowSlots: RETENTION.dispatchLogSlots },
   'private.operations_events': { retention: 'operational', windowSlots: RETENTION.operationsEventSlots },
+  // The operator registers at most five fixed bots, and their 630 routine cells are seeded once.
+  'private.bots': { retention: 'singleton' }, 'private.bot_routines': { retention: 'singleton' },
   'private.coordinator': { retention: 'singleton' }, 'private.scheduler': { retention: 'singleton' }, 'private.retention_state': { retention: 'singleton' },
   'private.rules_versions': { retention: 'singleton' }, 'private.season_epoch': { retention: 'singleton' }, 'public.world_revision_state': { retention: 'singleton' },
   // One retained audit per economy activation, independent of player count and elapsed slots.

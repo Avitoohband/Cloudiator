@@ -50,8 +50,9 @@ create table if not exists private.bot_routines (
 alter table private.bots enable row level security;
 alter table private.bot_routines enable row level security;
 revoke all on private.bots,private.bot_routines from public,anon,authenticated,service_role;
--- The existing invoker command, title and projection paths can ask only whether a gladiator is registered.
-grant select(gladiator_id) on private.bots to service_role;
+-- Only the private invoker coordinator needs the routine join, role and active flag. No API reader gets raw bot data.
+grant select(gladiator_id,member_key,role,active) on private.bots to service_role;
+grant select(member_key,week_index,directive) on private.bot_routines to service_role;
 
 with weekly_slots as (
   select j as week_index,j%18 as day_slot,(j/18+(j%18-8)/3)%4 as pair_start
@@ -68,6 +69,211 @@ select member_key,week_index,case
   else 'training' end
 from weekly_slots cross join roster
 on conflict(member_key,week_index) do update set directive=excluded.directive where r.directive<>excluded.directive;
+
+-- 6C. Duty is frozen with the human cohort. Only the published processed slot feeds the actor projection.
+create table if not exists private.bot_slot_duty (
+  slot_index bigint not null check (slot_index>=0),
+  gladiator_id uuid not null references private.bots(gladiator_id),
+  directive text not null check (directive in ('off-duty','rest','on-call','arena','training')),
+  role text not null check (role in ('guard','striker','skirmisher')),
+  returns_at_ms bigint,
+  primary key(slot_index,gladiator_id)
+);
+alter table private.bot_slot_duty drop constraint if exists bot_slot_duty_check,
+  add constraint bot_slot_duty_check check (returns_at_ms is null or (directive='off-duty' and returns_at_ms>slot_index*4800000));
+alter table private.bot_slot_duty enable row level security;
+revoke all on private.bot_slot_duty from public,anon,authenticated,service_role;
+grant select,insert on private.bot_slot_duty to service_role;
+drop policy if exists backend_only on private.bot_slot_duty;
+create policy backend_only on private.bot_slot_duty to service_role using (true) with check (true);
+drop trigger if exists guard_frozen on private.bot_slot_duty;
+create trigger guard_frozen before update on private.bot_slot_duty for each row execute function private.guard_frozen();
+
+-- The coordinator holds the boundary lock. The duty table is append-only outside owner retention.
+create or replace function private.freeze_bot_duty(target bigint) returns void
+language sql security invoker set search_path='' as $$
+  insert into private.bot_slot_duty(slot_index,gladiator_id,directive,role,returns_at_ms)
+  select target,g.id,case when roster.on_duty then r.directive else 'off-duty' end,b.role,
+    case when roster.on_duty and r.directive='off-duty' then (target-target%18+6)*4800000 end
+  from private.boundaries boundary
+  cross join private.bots b
+  join public.gladiators g on g.id=b.gladiator_id
+  join private.bot_routines r on r.member_key=b.member_key and r.week_index=((target-72)%126+126)%126
+  cross join lateral (select b.active and boundary.rules_version='v2'
+    and (select count(*) from private.boundary_members bm where bm.slot_index=target)<45 as on_duty) roster
+  where boundary.slot_index=target and boundary.phase=3 and not boundary.members_frozen
+    and g.processed_slot_index=target-1
+  on conflict(slot_index,gladiator_id) do nothing
+$$;
+revoke all on function private.freeze_bot_duty(bigint) from public,anon,authenticated,service_role;
+grant execute on function private.freeze_bot_duty(bigint) to service_role;
+
+-- SQL15 phases 3 and 8 retain the human idle recheck, account order and publication checkpoint.
+create or replace function private.boundary_apply_changes(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare b private.boundaries%rowtype; m record; starts_at bigint:=target*4800000;
+  idle_ms bigint:=(private.idle_rules()->>'afterMs')::bigint;
+begin
+  select * into b from private.boundaries where slot_index=target for update;
+  if not b.members_frozen then
+    -- A never-started character whose creation committed after an earlier cohort froze joins this cohort; its
+    -- orientation simply extends to this cutoff. A participating straggler is an inconsistency for the operator.
+    for m in select g.id,g.owner_id from public.gladiators g where g.processed_slot_index<target-1
+      and not exists(select 1 from public.activities a where a.gladiator_id=g.id) order by g.id loop
+      perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+      update public.gladiators set processed_slot_index=target-1,orientation_end_ms=target*4800000
+        where id=m.id and processed_slot_index<target-1;
+    end loop;
+    if exists(select 1 from public.gladiators where processed_slot_index<target-1) then return 'straggler'; end if;
+    -- Task 23.8: a character whose owner's last signal (or its creation, when later) is RULES_V1.idle before this boundary's
+    -- scheduled start rests at home instead of joining the cohort. Each one the first read finds idle is read again under its
+    -- owner's rate lock (consume_command_rate's), so a signal committed while the boundary waited counts.
+    for m in select g.id,g.owner_id from public.gladiators g left join private.owner_signals s on s.owner_id=g.owner_id
+      where g.processed_slot_index=target-1 and not exists(select 1 from private.bots bot where bot.gladiator_id=g.id)
+        and starts_at-greatest(s.last_signal_ms,g.created_at_ms)>=idle_ms order by g.id loop
+      perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,1));
+      if (select starts_at-greatest(s.last_signal_ms,g.created_at_ms) from public.gladiators g
+        left join private.owner_signals s on s.owner_id=g.owner_id where g.id=m.id)>=idle_ms then
+        -- A rest that reached the previous slot continues; any other starts here, without a signal.
+        insert into public.character_rests as r(gladiator_id,since_slot,through_slot,signalled_at_ms) values(m.id,target,target,null)
+          on conflict (gladiator_id) do update set since_slot=case when r.through_slot=target-1 then r.since_slot else excluded.since_slot end,
+            signalled_at_ms=case when r.through_slot=target-1 then r.signalled_at_ms end,through_slot=excluded.through_slot;
+      end if;
+    end loop;
+    insert into private.boundary_members(slot_index,gladiator_id,owner_id)
+      select target,g.id,g.owner_id from public.gladiators g where g.processed_slot_index=target-1
+        and not exists(select 1 from private.bots bot where bot.gladiator_id=g.id)
+        and not exists(select 1 from public.character_rests r where r.gladiator_id=g.id and r.through_slot=target)
+      on conflict do nothing;
+    perform private.freeze_bot_duty(target);
+    insert into private.boundary_members(slot_index,gladiator_id,owner_id)
+      select target,g.id,g.owner_id from private.bot_slot_duty d join public.gladiators g on g.id=d.gladiator_id
+      where d.slot_index=target and d.directive<>'off-duty' on conflict do nothing;
+    update private.boundaries set members_frozen=true,member_count=(select count(*) from private.boundary_members where slot_index=target)
+      where slot_index=target;
+  end if;
+  for m in select bm.gladiator_id,bm.owner_id from private.boundary_members bm where bm.slot_index=target order by bm.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+    perform 1 from public.gladiators where id=m.gladiator_id for update;
+    -- Repeat-safe: an already-applied or later-effective pending build returns false.
+    perform private.apply_pending_build(m.gladiator_id,target);
+  end loop;
+  return null;
+end $$;
+
+create or replace function private.boundary_start(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare a record; now_ms bigint:=private.planning_now_ms();
+begin
+  -- Check every member before any debit so an unsupported executor never leaves a partially started slot.
+  if exists(select 1 from public.activities x where x.slot_index=target and x.status='preparing' and not private.activity_executor_ready(x.resolved_kind)) then
+    return 'integration';
+  end if;
+  -- Exception 1: a member's jobs can reference another member's rows (an Arena battle job is anchored to side 0, whichever
+  -- side comes first), so every account lock is held before the first such foreign key takes KEY SHARE on those rows.
+  -- Task 23.8: the characters resting at this boundary take their account locks in the same gladiator-ordered pass.
+  for a in select locked.owner_id from (
+      select bm.gladiator_id,bm.owner_id from public.activities x
+        join private.boundary_members bm on bm.slot_index=target and bm.gladiator_id=x.gladiator_id
+        where x.slot_index=target and x.status='preparing'
+      union all
+      select g.id,g.owner_id from public.character_rests r join public.gladiators g on g.id=r.gladiator_id
+        where r.through_slot=target and g.processed_slot_index=target-1
+          and not exists(select 1 from private.bots b where b.gladiator_id=g.id)
+      union all
+      select g.id,g.owner_id from private.bot_slot_duty d join public.gladiators g on g.id=d.gladiator_id
+        where d.slot_index=target and d.directive='off-duty' and g.processed_slot_index=target-1) locked
+    order by locked.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(a.owner_id::text,0));
+  end loop;
+  for a in select x.id,x.gladiator_id,x.stamina_debit,x.debited,bm.owner_id from public.activities x
+    join private.boundary_members bm on bm.slot_index=target and bm.gladiator_id=x.gladiator_id
+    where x.slot_index=target and x.status='preparing' order by x.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(a.owner_id::text,0));
+    perform 1 from public.gladiators where id=a.gladiator_id for update;
+    if not a.debited then update public.gladiators set stamina_current=stamina_current-a.stamina_debit where id=a.gladiator_id; end if;
+    perform private.prepare_activity_jobs(a.id);
+    update public.activities set debited=true,status='active',published_at_ms=now_ms where id=a.id;
+    update public.gladiators set processed_slot_index=target where id=a.gladiator_id and processed_slot_index=target-1;
+  end loop;
+  -- Task 23.8: a resting character's checkpoint advances with the cohort's.
+  update public.gladiators g set processed_slot_index=target from public.character_rests r
+    where r.gladiator_id=g.id and r.through_slot=target and g.processed_slot_index=target-1
+      and not exists(select 1 from private.bots b where b.gladiator_id=g.id);
+  update public.gladiators g set processed_slot_index=target from private.bot_slot_duty d
+    where d.gladiator_id=g.id and d.slot_index=target and d.directive='off-duty' and g.processed_slot_index=target-1;
+  return private.boundary_published(target);
+end $$;
+
+-- SQL21 phases 4 and 5. Only human members enter ranked season ratings or read schedule revisions.
+create or replace function private.boundary_recompute_leagues(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare season bigint:=private.season_index(target); m record; g public.gladiators%rowtype; placed text; current_rating bigint;
+begin
+  if not exists(select 1 from private.boundary_members bm where bm.slot_index=target) then return null; end if;
+  if season is null then return 'epoch'; end if;
+  insert into public.seasons(season_index,starts_at_ms,ends_at_ms,rules_version)
+    select season,b.starts_at_ms,b.ends_at_ms,(select frozen.rules_version from private.boundaries frozen where frozen.slot_index=target)
+    from private.season_bounds(season) b
+    on conflict do nothing;
+  for m in select bm.gladiator_id,bm.owner_id,j.result->>'league' as computed,(j.result->>'arenaStrength')::numeric as strength
+    from private.boundary_members bm join private.jobs j on j.dedupe_key='prepare:'||target||':'||bm.gladiator_id
+    where bm.slot_index=target and not exists(select 1 from private.bots b where b.gladiator_id=bm.gladiator_id)
+    order by bm.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+    select * into g from public.gladiators where id=m.gladiator_id for update;
+    placed:=case when private.league_rank(m.computed)>private.league_rank(g.league) then m.computed else g.league end;
+    insert into private.arena_ratings(gladiator_id,league,season_index) values(m.gladiator_id,placed,season) on conflict do nothing;
+    select r.rating into current_rating from private.arena_ratings r
+      where r.gladiator_id=m.gladiator_id and r.league=placed and r.season_index=season;
+    if g.league is distinct from placed or g.rating is distinct from current_rating then
+      update public.gladiators set league=placed,rating=current_rating where id=m.gladiator_id;
+    end if;
+    insert into public.public_profiles(gladiator_id,rating,combat_strength) values(m.gladiator_id,current_rating,m.strength)
+      on conflict (gladiator_id) do update set combat_strength=excluded.combat_strength
+      where public_profiles.combat_strength is distinct from excluded.combat_strength;
+  end loop;
+  return null;
+end $$;
+
+create or replace function private.boundary_snapshot(target bigint) returns text language plpgsql security invoker set search_path='' as $$
+declare b private.boundaries%rowtype; m record; g public.gladiators%rowtype; prep jsonb; preparation private.jobs%rowtype;
+  schedule_version bigint; choice jsonb; activity uuid; bot_directive text;
+begin
+  select * into b from private.boundaries where slot_index=target;
+  for m in select bm.gladiator_id,bm.owner_id from private.boundary_members bm where bm.slot_index=target
+    and not exists(select 1 from public.activities a where a.gladiator_id=bm.gladiator_id and a.slot_index=target) order by bm.gladiator_id loop
+    perform pg_advisory_xact_lock(hashtextextended(m.owner_id::text,0));
+    select * into g from public.gladiators where id=m.gladiator_id for update;
+    select j.* into preparation from private.jobs j where j.dedupe_key='prepare:'||target||':'||m.gladiator_id and j.status='completed';
+    prep:=preparation.result;
+    if b.rules_version='v2' and (preparation.rules_version is distinct from b.rules_version
+      or preparation.slot_index is distinct from target or not private.valid_preparation(preparation.id,prep)) then
+      raise exception 'invalid boundary preparation';
+    end if;
+    select d.directive into bot_directive from private.bot_slot_duty d where d.slot_index=target and d.gladiator_id=m.gladiator_id;
+    if bot_directive is null then
+      -- Historical authority: latest revision effective by this slot, never the mutable latest-plan row.
+      select r.version,r.choice into schedule_version,choice from public.schedule_revisions r where r.gladiator_id=m.gladiator_id
+        and r.phase=private.slot_phase(target) and r.effective_slot_index<=target order by r.effective_slot_index desc,r.version desc limit 1;
+    else
+      -- Preserve the private Arena intent for 6D. Until that route is installed it never enters human pairing.
+      schedule_version:=1;
+      choice:=jsonb_build_object('kind',case when bot_directive in ('on-call','training') then 'training' else 'rest' end);
+    end if;
+    if schedule_version is null or prep is null then raise exception 'missing boundary input'; end if;
+    insert into public.activities(gladiator_id,slot_index,starts_at_ms,ends_at_ms,requested,schedule_version,status)
+      values(m.gladiator_id,target,target*4800000,(target+1)*4800000,choice,schedule_version,'preparing') returning id into activity;
+    insert into private.activity_snapshots(activity_id,snapshot,seed,rules_version) values(activity,jsonb_build_object(
+      'activityId',activity,'gladiatorId',m.gladiator_id,'slotIndex',target,'rulesVersion',b.rules_version,'cutoffMs',b.cutoff_ms,
+      'choice',choice,'scheduleVersion',schedule_version,'build',prep->'snapshot','derived',prep->'derived','costs',prep->'costs',
+      'trainingPoints',prep->'trainingPoints','starting',jsonb_build_object(
+        'stamina',jsonb_build_object('current',g.stamina_current,'maximum',g.stamina_maximum),'level',g.level,'xp',g.xp,
+        'earnedPoints',g.earned_points,'unspentPoints',g.unspent_points,'league',g.league,'rating',g.rating,
+        'peakStrength',g.peak_strength,'tournamentOptIn',g.tournament_opt_in))
+      ||case when b.rules_version='v2' then jsonb_build_object('trainingAllowed',prep->'trainingAllowed') else '{}'::jsonb end
+      ||case when bot_directive is not null then jsonb_build_object('botDirective',bot_directive) else '{}'::jsonb end,
+      encode(extensions.gen_random_bytes(32),'hex'),b.rules_version);
+  end loop;
+  return null;
+end $$;
 
 -- 1. Planning and affordability. Old workers can still send the five-key preparation under either retained version.
 alter table public.activities drop constraint if exists activities_resolved_kind_check,
@@ -339,6 +545,7 @@ $$;
 
 create or replace function private.boundary_pair(target bigint) returns text language plpgsql security invoker set search_path='' as $$
 declare b private.boundaries%rowtype; season bigint; l text; now_ms bigint:=private.planning_now_ms(); seed text; input jsonb; dungeon text; has_arena boolean;
+  required_level integer; humans integer; pool jsonb; chosen uuid[]; used uuid[]:='{}';
 begin
   select * into b from private.boundaries where slot_index=target;
   select exists(select 1 from public.activities a where a.slot_index=target and a.status='preparing'
@@ -360,14 +567,28 @@ begin
         on conflict (dedupe_key) do nothing;
     end loop;
   end if;
-  if b.rules_version='v2' then
-    for dungeon in select distinct a.requested->>'dungeonId' from public.activities a
-      join private.activity_snapshots s on s.activity_id=a.id
-      where a.slot_index=target and a.status='preparing' and a.resolved_kind='dungeon' and s.rules_version=b.rules_version
-        and a.requested->>'kind'='dungeon' and a.requested->>'dungeonId' in ('wolf-den','raider-stronghold','troll-hall')
-        and not exists(select 1 from private.jobs j where j.dedupe_key='party:'||target||':'||(a.requested->>'dungeonId'))
-      order by 1 loop
+  if b.rules_version='v2' and not exists(select 1 from private.jobs j where j.slot_index=target and j.kind='pair'
+    and j.input->>'kind'='dungeon-grouping') then
+    -- The coordinator commits all grouping jobs together. Resume the same batch, even after one pool has been accepted.
+    -- Hardest first gives the only level-12 bot to Troll Hall when eligible. Each dungeon uses the global vacancy cap.
+    for dungeon,required_level in select d.id,d.required_level from (values
+      (1,'troll-hall',12),(2,'raider-stronghold',7),(3,'wolf-den',3)) d(priority,id,required_level) order by d.priority loop
       input:=private.grouping_input(target,dungeon,b.rules_version);
+      humans:=jsonb_array_length(input->'entrants');
+      continue when humans=0;
+      select coalesce(jsonb_agg(candidate.entry order by candidate.id),'[]'::jsonb),coalesce(array_agg(candidate.id),'{}') into pool,chosen
+      from (
+        select a.gladiator_id as id,jsonb_build_object('gladiatorId',a.gladiator_id,'activityId',a.id,'name',g.name,
+          'level',s.snapshot->'starting'->'level','role',d.role) as entry
+        from private.bot_slot_duty d join public.activities a on a.slot_index=d.slot_index and a.gladiator_id=d.gladiator_id
+        join private.activity_snapshots s on s.activity_id=a.id join public.gladiators g on g.id=a.gladiator_id
+        where d.slot_index=target and d.directive='on-call' and a.status='preparing' and s.rules_version=b.rules_version
+          and a.gladiator_id<>all(used) and (s.snapshot->'starting'->>'level')::int>=required_level
+          and (s.snapshot->'starting'->'stamina'->>'current')::bigint>=(s.snapshot->'costs'->>'dungeon')::numeric
+        order by a.gladiator_id limit (3*((humans+2)/3)-humans)
+      ) candidate;
+      used:=used||chosen;
+      if jsonb_array_length(pool)>0 then input:=input||jsonb_build_object('bots',pool); end if;
       insert into private.jobs(kind,dedupe_key,slot_index,gladiator_id,activity_id,input,seed,rules_version,due_at_ms)
         values('pair','party:'||target||':'||dungeon,target,null,null,input,encode(extensions.gen_random_bytes(32),'hex'),b.rules_version,now_ms)
         on conflict (dedupe_key) do nothing;
@@ -393,6 +614,7 @@ begin
     end if;
   end if;
   if exists(select 1 from public.activities a where a.slot_index=target and a.status='preparing' and a.resolved_kind='dungeon'
+    and not exists(select 1 from private.bot_slot_duty d where d.slot_index=target and d.gladiator_id=a.gladiator_id and d.directive='on-call')
     and not exists(select 1 from private.dungeon_run_members m where m.activity_id=a.id)) then
     raise exception 'ungrouped dungeon entrant';
   end if;
@@ -401,9 +623,9 @@ end $$;
 
 create or replace function private.accept_grouping(job uuid,result jsonb) returns boolean
 language plpgsql security invoker set search_path='' as $$
-declare j private.jobs%rowtype; dungeon text; expected jsonb; scoped jsonb; entrant jsonb;
+declare j private.jobs%rowtype; dungeon text; expected jsonb; scoped jsonb; entrant jsonb; pool jsonb; next_bot integer:=0;
   run jsonb; seat jsonb; run_number bigint; seat_number bigint; gid text;
-  seen text[]:='{}'; has_human boolean; has_hireling boolean; now_ms bigint;
+  seen text[]:='{}'; has_human boolean; has_filler boolean; now_ms bigint;
 begin
   select * into j from private.jobs where id=job;
   if not found or j.kind is distinct from 'pair' or j.rules_version is distinct from 'v2'
@@ -413,6 +635,8 @@ begin
     or jsonb_typeof(j.input->'entrants') is distinct from 'array'
     or jsonb_typeof(result) is distinct from 'object' or jsonb_typeof(result->'runs') is distinct from 'array' then return false; end if;
   dungeon:=j.input->>'dungeonId';
+  pool:=coalesce(j.input->'bots','[]'::jsonb);
+  if jsonb_typeof(pool) is distinct from 'array' then return false; end if;
   if dungeon is null or dungeon not in ('wolf-den','raider-stronghold','troll-hall')
     or j.dedupe_key is distinct from 'party:'||j.slot_index||':'||dungeon
     or result-'runs'<>'{}'::jsonb or jsonb_array_length(result->'runs') not between 1 and jsonb_array_length(j.input->'entrants')
@@ -435,27 +659,37 @@ begin
     if run-array['runId','seats']<>'{}'::jsonb or jsonb_array_length(run->'seats')<>3
       or run->'runId' is distinct from to_jsonb('dungeon:'||j.slot_index||':'||dungeon||':'||run_number) then return false; end if;
     has_human:=false;
-    has_hireling:=false;
+    has_filler:=false;
     for seat,seat_number in select value,ordinality from jsonb_array_elements(run->'seats') with ordinality loop
       if jsonb_typeof(seat) is distinct from 'object' or seat->'seat' is distinct from to_jsonb(seat_number-1) then return false; end if;
       if seat->>'kind'='human' then
-        if has_hireling or jsonb_typeof(seat->'gladiatorId') is distinct from 'string' then return false; end if;
+        if has_filler or jsonb_typeof(seat->'gladiatorId') is distinct from 'string' then return false; end if;
         gid:=seat->>'gladiatorId';
         entrant:=expected->gid;
         if entrant is null or gid=any(seen) or seat-array['kind','seat'] is distinct from entrant
           or entrant-array['gladiatorId','name'] is distinct from scoped->gid then return false; end if;
         seen:=array_append(seen,gid);
         has_human:=true;
+      elsif seat->>'kind'='bot' then
+        gid:=seat->>'gladiatorId';
+        if not has_human or gid=any(seen) or pool->next_bot is null or seat-array['kind','seat'] is distinct from pool->next_bot
+          or not exists(select 1 from public.activities a join private.activity_snapshots s on s.activity_id=a.id
+            where a.id::text=seat->>'activityId' and a.gladiator_id::text=gid and a.slot_index=j.slot_index and a.status='preparing'
+              and a.resolved_kind in ('rest','training') and s.snapshot->>'botDirective'='on-call' and s.rules_version=j.rules_version)
+          then return false; end if;
+        seen:=array_append(seen,gid);
+        next_bot:=next_bot+1;
+        has_filler:=true;
       elsif seat->>'kind'='hireling' then
-        if not has_human or seat-array['kind','seat','role']<>'{}'::jsonb or seat->>'role' is null
+        if not has_human or next_bot<jsonb_array_length(pool) or seat-array['kind','seat','role']<>'{}'::jsonb or seat->>'role' is null
           or seat->>'role' not in ('guard','striker','skirmisher') then return false; end if;
-        has_hireling:=true;
+        has_filler:=true;
       else return false;
       end if;
     end loop;
     if not has_human then return false; end if;
   end loop;
-  if cardinality(seen)<>jsonb_array_length(j.input->'entrants') then return false; end if;
+  if next_bot<>jsonb_array_length(pool) or cardinality(seen)-next_bot<>jsonb_array_length(j.input->'entrants') then return false; end if;
 
   now_ms:=private.planning_now_ms();
   for run in select value from jsonb_array_elements(result->'runs') loop
@@ -465,6 +699,10 @@ begin
       select (value->>'activityId')::uuid,run->>'runId',(ordinality-1)::smallint
       from jsonb_array_elements(run->'seats') with ordinality where value->>'kind'='human';
   end loop;
+  -- The accepted pool is immutable. Replace the preliminary Training/Rest price, retaining the original request and snapshot.
+  update public.activities a set resolved_kind='dungeon',stamina_debit=(s.snapshot->'costs'->>'dungeon')::numeric::bigint,fallback=false
+    from jsonb_array_elements(pool) bot join private.activity_snapshots s on s.activity_id=(bot->>'activityId')::uuid
+    where a.id=s.activity_id;
   return true;
 end $$;
 
@@ -525,8 +763,13 @@ begin
     select id into simulation from private.jobs where dedupe_key='expedition:'||a.id;
     insert into private.job_dependencies values(terminal,simulation) on conflict do nothing;
   elsif a.resolved_kind='dungeon' then
-    select r.* into run from private.dungeon_run_members m join private.dungeon_runs r using(run_id)
-      where m.activity_id=a.id and r.slot_index=a.slot_index;
+    if s.snapshot->>'botDirective'='on-call' then
+      select r.* into run from private.dungeon_runs r where r.slot_index=a.slot_index
+        and r.assignment->'seats' @> jsonb_build_array(jsonb_build_object('kind','bot','activityId',a.id));
+    else
+      select r.* into run from private.dungeon_run_members m join private.dungeon_runs r using(run_id)
+        where m.activity_id=a.id and r.slot_index=a.slot_index;
+    end if;
     if not found then raise exception 'ungrouped dungeon entrant'; end if;
     select anchor_activity.id,anchor_activity.gladiator_id,anchor_activity.starts_at_ms,f.rules_version into anchor
       from private.dungeon_run_members m join public.activities anchor_activity on anchor_activity.id=m.activity_id
@@ -663,8 +906,9 @@ begin
       or coalesce(jsonb_typeof(p->'gladiatorId'),'') not in ('null','string')
       or not coalesce(p->'side' in ('0'::jsonb,'1'::jsonb),false)
       or not coalesce(p->'seat' in ('null'::jsonb,'0'::jsonb,'1'::jsonb,'2'::jsonb),false)
-      or (p->'side'='0'::jsonb and p->>'role' not in ('gladiator','hireling'))
+      or (p->'side'='0'::jsonb and p->>'role' not in ('gladiator','bot','hireling'))
       or (p->'side'='1'::jsonb and (p->>'role' not in ('monster','major') or p->'seat'<>'null'::jsonb))
+      or (p->>'role'='bot' and (p->'seat'='null'::jsonb or p->>'gladiatorId' is distinct from p->>'id'))
       or jsonb_typeof(p->'attributes') is distinct from 'object'
       or jsonb_typeof(p->'equipmentSilhouettes') is distinct from 'array' then
       raise exception 'invalid party log' using errcode='22023';
@@ -745,7 +989,8 @@ declare
   f jsonb; stage jsonb; outcome jsonb; reward jsonb; loot jsonb; log jsonb; ref jsonb;
   next_stage integer:=0; fight_count integer; stage_count integer; fight_ordinal integer:=0; member_count integer;
   stage_ms bigint; start_ms bigint; end_ms bigint; previous_end bigint;
-  members_seen text[]:='{}'; terminals uuid[]; entered jsonb; wins jsonb; prior_job uuid; reveal_job uuid;
+  members_seen text[]:='{}'; terminals uuid[]; bot_terminals uuid[]; entered jsonb; wins jsonb; prior_job uuid; reveal_job uuid;
+  bot_seats jsonb;
 begin
   select * into j from private.jobs where id=job;
   if not found then return false; end if;
@@ -769,6 +1014,7 @@ begin
       or jsonb_typeof(result->'outcomes') is distinct from 'array' then return false; end if;
     fight_count:=jsonb_array_length(result->'fights'); stage_count:=jsonb_array_length(result->'stages');
     if fight_count not between 1 and 4 or stage_count not between 4 and 10 then return false; end if;
+    select coalesce(jsonb_agg(s),'[]'::jsonb) into bot_seats from jsonb_array_elements(run.assignment->'seats') s where s->>'kind'='bot';
     for f in select * from jsonb_array_elements(result->'fights') loop
       fight_ordinal:=fight_ordinal+1;
       if f->'ordinal' is distinct from to_jsonb(fight_ordinal)
@@ -781,6 +1027,15 @@ begin
       end;
       if log->>'battleId'<>run.run_id||':fight:'||fight_ordinal or log->>'rulesVersion'<>anchor.rules_version
         or f->'won' is distinct from to_jsonb(log->'winnerSide'='0'::jsonb) then return false; end if;
+      -- A bot starts the first fight and can fall thereafter. Its frozen identity cannot be presented as another role or seat.
+      if exists(select 1 from jsonb_array_elements(log->'participants') p
+        where p->>'role'='bot' and not exists(select 1 from jsonb_array_elements(bot_seats) s
+          where p->'seat'=s->'seat' and p->'gladiatorId'=s->'gladiatorId' and p->'name'=s->'name'))
+        or exists(select 1 from jsonb_array_elements(bot_seats) s where
+          exists(select 1 from jsonb_array_elements(log->'participants') p where p->>'role'<>'bot'
+            and ((p->'side'='0'::jsonb and p->'seat'=s->'seat') or p->'id'=s->'gladiatorId' or p->'gladiatorId'=s->'gladiatorId'))
+          or (fight_ordinal=1 and not exists(select 1 from jsonb_array_elements(log->'participants') p
+            where p->>'role'='bot' and p->'seat'=s->'seat'))) then return false; end if;
     end loop;
 
     fight_ordinal:=0; previous_end:=anchor.starts_at_ms;
@@ -819,6 +1074,12 @@ begin
       where m.run_id=run.run_id and a.slot_index=run.slot_index and a.resolved_kind='dungeon';
     if member_count not between 1 and 3 or jsonb_array_length(result->'outcomes')<>member_count
       or array_position(terminals,null) is not null then return false; end if;
+    -- Bots have internal terminals, but the member outcomes and reward checks below remain human-only.
+    select coalesce(array_agg(st.id),'{}') into bot_terminals from jsonb_array_elements(bot_seats) s
+      left join private.jobs st on st.dedupe_key='settlement:'||(s->>'activityId') and st.kind='settlement'
+        and st.activity_id=(s->>'activityId')::uuid and st.gladiator_id=(s->>'gladiatorId')::uuid
+        and st.slot_index=run.slot_index and st.due_at_ms=anchor.ends_at_ms;
+    if array_position(bot_terminals,null) is not null then return false; end if;
     for outcome in select * from jsonb_array_elements(result->'outcomes') loop
       reward:=outcome->'rewards';
       if jsonb_typeof(outcome->'activityId') is distinct from 'string' or jsonb_typeof(outcome->'gladiatorId') is distinct from 'string'
@@ -860,7 +1121,7 @@ begin
       prior_job:=reveal_job; next_stage:=next_stage+1;
     end loop;
     insert into private.job_dependencies(job_id,prerequisite_id)
-      select id,prior_job from unnest(terminals) t(id) on conflict do nothing;
+      select id,prior_job from unnest(terminals||bot_terminals) t(id) on conflict do nothing;
     return true;
 
   elsif j.kind='reveal' and j.input->>'kind'='dungeon-reveal' then
@@ -1174,6 +1435,7 @@ create or replace function private.settle_activity_core(activity_id uuid,lease_t
 language plpgsql security invoker set search_path='' as $$
 declare a public.activities%rowtype; j private.jobs%rowtype; owner uuid; now_ms bigint; receipt uuid:=gen_random_uuid();
   settlement jsonb; operation uuid:=gen_random_uuid(); result_summary jsonb; outcome jsonb; inserted integer; failure text; grant_id text;
+  bot_activity boolean;
 begin
   if settle_activity_core.activity_id is null or settle_activity_core.lease_token is null then return jsonb_build_object('ok',false,'code','invalid'); end if;
   select g.owner_id into owner from public.activities x join public.gladiators g on g.id=x.gladiator_id where x.id=settle_activity_core.activity_id;
@@ -1204,6 +1466,7 @@ begin
   if not private.dependencies_ready(j.id) or a.slot_index>coalesce((select published_slot from private.coordinator where singleton),-1)
     or exists(select 1 from public.activities earlier where earlier.slot_index<a.slot_index and earlier.status<>'completed') then
     return jsonb_build_object('ok',false,'code','processing'); end if;
+  bot_activity:=exists(select 1 from private.activity_snapshots s where s.activity_id=a.id and s.snapshot ? 'botDirective');
   if a.resolved_kind in ('arena','tournament') and not exists(select 1 from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index) then
     if a.resolved_kind='arena' then failure:=private.arena_settlement_failure(a.id); else failure:=private.tournament_settlement_failure(a.id); end if;
     if failure is not null then
@@ -1219,7 +1482,15 @@ begin
   if inserted=0 then
     -- The permanent checkpoint already exists: finish the job with that receipt and grant nothing.
     select s.receipt_id into receipt from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index;
-    outcome:=jsonb_build_object('ok',true,'activityId',a.id,'receiptId',receipt,'newGrants',0,'replayed',true);
+    outcome:=jsonb_build_object('ok',true,'activityId',a.id,'newGrants',0,'replayed',true)
+      ||case when bot_activity then '{}'::jsonb else jsonb_build_object('receiptId',receipt) end;
+  elsif bot_activity then
+    -- Keep the permanent activity history for Training caps and recover ordinary Rest. Publish no grant or result.
+    if a.resolved_kind='rest' then
+      update public.gladiators set stamina_current=stamina_maximum where id=a.gladiator_id;
+    end if;
+    update public.activities set status='completed',settled_at_ms=now_ms where id=a.id;
+    outcome:=jsonb_build_object('ok',true,'activityId',a.id,'newGrants',0);
   else
     if a.resolved_kind in ('expedition','dungeon') then
       if a.resolved_kind='dungeon' then settlement:=private.dungeon_rewards(a.id,prepared);
@@ -1315,6 +1586,7 @@ $$;
 create or replace function private.titles_on_activity() returns trigger language plpgsql security invoker set search_path='' as $$
 declare won boolean:=new.summary->>'success'='true'; placed integer; streak bigint;
 begin
+  if new.summary is null and exists(select 1 from private.bots b where b.gladiator_id=new.gladiator_id) then return null; end if;
   if new.resolved_kind='training' then
     perform private.add_title_count(new.gladiator_id,'trainings',1);
   elsif new.resolved_kind='expedition' and won then
@@ -1354,7 +1626,7 @@ create trigger titles_on_ledger after insert on public.wallet_ledger for each ro
 create or replace function private.project_character(gid uuid) returns void
 language plpgsql security invoker set search_path='' as $$
 declare g public.gladiators%rowtype; b jsonb; a public.activities%rowtype; actor jsonb; silhouettes jsonb; awarded_prestige jsonb;
-  resting boolean; card jsonb;
+  resting boolean; idle boolean; card jsonb; registered_bot boolean; off_duty boolean:=false; returns_at bigint; bot_dungeon text;
 begin
   select * into g from public.gladiators where id=gid;
   if not found then return; end if;
@@ -1367,6 +1639,17 @@ begin
   -- Task 23.8: resting in its processed slot, it shows no activity, whatever its latest one was.
   resting:=exists(select 1 from public.character_rests r where r.gladiator_id=gid and r.since_slot<=g.processed_slot_index
     and g.processed_slot_index<=r.through_slot);
+  registered_bot:=exists(select 1 from private.bots r where r.gladiator_id=gid);
+  if registered_bot then
+    select d.directive='off-duty',d.returns_at_ms into off_duty,returns_at from private.bot_slot_duty d
+      where d.gladiator_id=gid and d.slot_index=g.processed_slot_index;
+    off_duty:=coalesce(off_duty,true);
+    if not off_duty and a.resolved_kind='dungeon' then
+      select r.dungeon_id into bot_dungeon from private.dungeon_runs r where r.slot_index=a.slot_index
+        and r.assignment->'seats' @> jsonb_build_array(jsonb_build_object('kind','bot','activityId',a.id));
+    end if;
+  end if;
+  idle:=resting or off_duty;
   select coalesce(jsonb_agg(silhouette order by silhouette),'[]'::jsonb) into silhouettes from (
     select case split_part(i.item->>'catalogId',':',1)
       when 'sword' then 'weapon-sword' when 'axe' then 'weapon-axe' when 'spear' then 'weapon-spear' when 'bow' then 'weapon-bow'
@@ -1379,15 +1662,16 @@ begin
   -- M24: the chosen look, null for the legacy look. M28: the worn title, null for none.
   actor:=jsonb_build_object('gladiatorId',g.id,'name',g.name,'classId',b->'classId','equipmentSilhouettes',silhouettes,'appearance',g.appearance,
     'title',g.worn_title,'league',g.league,'level',g.level,
-    'phase',private.slot_phase(case when resting then g.processed_slot_index else coalesce(a.slot_index,g.processed_slot_index) end),
-    'location',case when resting then 'camp' when a.id is null then 'orientation'
+    'phase',private.slot_phase(case when idle then g.processed_slot_index else coalesce(a.slot_index,g.processed_slot_index) end),
+    'location',case when idle then 'camp' when a.id is null then 'orientation'
       when a.resolved_kind='expedition' then 'expedition:'||(a.requested->>'expeditionId')
-      when a.resolved_kind='dungeon' then 'dungeon:'||(a.requested->>'dungeonId') else a.resolved_kind end,
-    'activityId',case when not resting then a.id end,'activityStatus',case when resting then 'idle' when a.id is null then 'active' else a.status end,
-    'startsAtMs',case when not resting then coalesce(a.starts_at_ms,g.created_at_ms) end,
-    'endsAtMs',case when not resting then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
-  if exists(select 1 from private.bots r where r.gladiator_id=gid) then
-    actor:=actor||jsonb_build_object('botTeam','ludus-nimbus');
+      when a.resolved_kind='dungeon' then 'dungeon:'||coalesce(a.requested->>'dungeonId',bot_dungeon) else a.resolved_kind end,
+    'activityId',case when not idle then a.id end,'activityStatus',case when idle then 'idle' when a.id is null then 'active' else a.status end,
+    'startsAtMs',case when not idle then coalesce(a.starts_at_ms,g.created_at_ms) end,
+    'endsAtMs',case when not idle then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
+  if registered_bot then
+    actor:=actor||jsonb_build_object('botTeam','ludus-nimbus','botDuty',case when off_duty then 'off-duty' else 'on-duty' end,
+      'botReturnsAtMs',returns_at);
   end if;
   insert into public.world_actors(gladiator_id,actor,processed_slot_index) values(gid,actor,g.processed_slot_index)
     on conflict(gladiator_id) do update set actor=excluded.actor,processed_slot_index=excluded.processed_slot_index
@@ -1594,6 +1878,7 @@ begin
         get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activitySnapshots',n);
         delete from private.boundary_members where slot_index between lo and hi;
         get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaryMembers',n);
+        delete from private.bot_slot_duty where slot_index between lo and hi;
         -- (15)
         update private.retention_state set detail_through_slot=hi where singleton;
         st.detail_through_slot:=hi;
@@ -1844,20 +2129,32 @@ begin
   return jsonb_build_object('created',true,'active',false);
 end $$;
 
-create or replace function private.bench_bot(member_key text) returns jsonb
+create or replace function private.set_bot_active(member_key text,active boolean) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare owner uuid; changed boolean;
 begin
   select g.owner_id into owner from private.bots b join public.gladiators g on g.id=b.gladiator_id
-    where b.member_key=bench_bot.member_key;
+    where b.member_key=set_bot_active.member_key;
   if not found then raise exception 'Unknown registered bot' using errcode='23503'; end if;
   perform pg_advisory_xact_lock(hashtextextended(owner::text,0));
   perform pg_advisory_xact_lock(1800602,hashtext(member_key));
-  update private.bots b set active=false where b.member_key=bench_bot.member_key and b.active;
+  update private.bots b set active=set_bot_active.active
+    where b.member_key=set_bot_active.member_key and b.active is distinct from set_bot_active.active;
   changed:=found;
-  return jsonb_build_object('changed',changed,'active',false);
+  return jsonb_build_object('changed',changed,'active',active);
 end $$;
-revoke all on function private.create_bot(text,uuid),private.bench_bot(text) from public,anon,authenticated,service_role;
+
+create or replace function private.bench_bot(member_key text) returns jsonb
+language sql security invoker set search_path='' as $$
+  select private.set_bot_active(member_key,false)
+$$;
+
+create or replace function private.activate_bot(member_key text) returns jsonb
+language sql security invoker set search_path='' as $$
+  select private.set_bot_active(member_key,true)
+$$;
+revoke all on function private.create_bot(text,uuid),private.set_bot_active(text,boolean),private.bench_bot(text),private.activate_bot(text)
+  from public,anon,authenticated,service_role;
 
 -- The command rate gate precedes every player command, including presence. Keep the SQL 15 budgets and rest signals.
 create or replace function public.consume_command_rate(actor_id uuid, is_creation boolean) returns integer

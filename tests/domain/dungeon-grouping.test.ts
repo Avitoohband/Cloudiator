@@ -5,6 +5,8 @@ import type { FighterSnapshot } from '@domain/types.ts';
 import { seededRandom } from '@domain/random.ts';
 import { RULES_V1 } from '@domain/rules-v1.ts';
 import { RULES_V2 } from '@domain/rules-v2.ts';
+import { hiredFighter, planDungeonRun, type DungeonRunInput } from '@domain/dungeon.ts';
+import { CATALOG_V1 } from '@domain/catalog-v1.ts';
 import { representativeBuild } from '../fixtures/dungeon-builds.ts';
 
 function entrant(id: string, addedVitality = 0): DungeonEntrant {
@@ -48,6 +50,46 @@ describe('dungeon strength bands', () => {
 });
 
 describe('dungeon grouping', () => {
+  const tullia = { gladiatorId: 'tullia', activityId: 'bot-tullia', name: 'Tullia', level: 12, role: 'guard' } as const;
+  const pip = { gladiatorId: 'pip', activityId: 'bot-pip', name: 'Pip', level: 3, role: 'skirmisher' } as const;
+
+  it('preserves the human groups and seats and fills only the frozen pool in run order', () => {
+    const snapshot = input([entrant('a'), entrant('b'), entrant('c', 500), entrant('d', 1200)]);
+    const baseline = groupDungeon(snapshot, 'bot-cap', RULES_V2);
+    const withBots = { ...snapshot, bots: [tullia, pip] };
+    const placed = groupDungeon(withBots, 'bot-cap', RULES_V2);
+    const humans = (value: typeof baseline) => value.runs.map(run => ({ id: run.runId,
+      seats: run.seats.filter(seat => seat.kind === 'human') }));
+    expect(humans(placed)).toEqual(humans(baseline));
+    expect(baseline.runs.flatMap(run => run.seats.filter(seat => seat.kind === 'hireling')).length).toBeGreaterThan(2);
+    expect(placed.runs.flatMap(run => run.seats.filter(seat => seat.kind === 'bot')))
+      .toEqual([{ ...tullia, kind: 'bot', seat: 1 }, { ...pip, kind: 'bot', seat: 2 }]);
+    expect(groupDungeon(input([]), 'empty', RULES_V2).runs).toEqual([]);
+  });
+
+  it.each([[tullia, tullia], [tullia, { ...pip, role: 'leader' }], [tullia, { ...pip, level: 2 }]])(
+    'rejects invalid frozen bot entries %#', (...bots) => {
+      const snapshot = { ...input([entrant('a')]), bots } as unknown as DungeonGroupingInput;
+      expect(() => groupDungeon(snapshot, 'invalid-bots', RULES_V2)).toThrow(RangeError);
+    });
+
+  it('fights with the target dungeon hire kit while exposing the named identity and paying only the human', () => {
+    const human = entrant('a');
+    const snapshot: DungeonRunInput = { kind: 'dungeon', runId: 'dungeon:1:wolf-den:1', slotIndex: 1,
+      dungeonId: 'wolf-den', rulesVersion: 'v2', startsAtMs: RULES_V2.clock.slotMs,
+      seats: [{ ...human, kind: 'human', seat: 0 }, { kind: 'hireling', role: 'guard', seat: 1 },
+        { kind: 'hireling', role: 'striker', seat: 2 }] };
+    const botSeat = { ...tullia, kind: 'bot', seat: 1 } as const;
+    const named = { ...snapshot, seats: [snapshot.seats[0], botSeat, snapshot.seats[2]] };
+    const plan = planDungeonRun(named, 'bot-combat', RULES_V2);
+    const control = planDungeonRun(snapshot, 'bot-combat', RULES_V2);
+    const hire = control.fights[0].log.participants[1];
+    expect(plan.fights[0].log.participants[1]).toEqual({ ...hire, id: 'tullia', gladiatorId: 'tullia',
+      name: 'Tullia', role: 'bot' });
+    expect(hire.maxHealth).toBe(hiredFighter(CATALOG_V1.dungeons['wolf-den'], 'guard', RULES_V2).maxHealth);
+    expect(plan.outcomes.map(outcome => outcome.gladiatorId)).toEqual(['a']);
+  });
+
   it('puts the stronger frozen builds first regardless of input order', () => {
     // Same class, gear, stance and attack stats. More vitality means more HP and a greater strength estimate.
     const weak = entrant('a');

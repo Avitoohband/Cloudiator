@@ -17,7 +17,8 @@ function validUnit(unit: SkirmishUnit, rules: Rules): boolean {
     || (unit.gladiatorId !== null && typeof unit.gladiatorId !== 'string')) return false;
   const { side, role, seat, snapshot, startingHealth } = unit;
   if (side === 0) {
-    if (role !== 'gladiator' && role !== 'hireling') return false;
+    if (role !== 'gladiator' && role !== 'bot' && role !== 'hireling') return false;
+    if (role === 'bot' && (seat === null || unit.gladiatorId !== unit.id)) return false;
     if (seat !== null && (!Number.isSafeInteger(seat) || seat < 0)) return false;
   } else if (side !== 1 || (role !== 'monster' && role !== 'major') || seat !== null) return false;
   return !!snapshot?.attributes && validFighter(snapshot, rules)

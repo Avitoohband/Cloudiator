@@ -347,15 +347,15 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
 - Produces: rows `private.dungeon_runs` / `private.dungeon_run_members` for Task 5; `grouping_input` and
   `accept_grouping` with the acceptance checks of spec §7.
 
-- [ ] **Step 1: Failing tests (units):** `parseCommand` accepts an afternoon Wolf Den in `edit-schedule` and
+- [x] **Step 1: Failing tests (units):** `parseCommand` accepts an afternoon Wolf Den in `edit-schedule` and
   `edit-day-schedule`, refuses it in the morning and the evening, refuses `dragon-lair` and an extra key. Generic
   `prepareActivity(input, RULES_V2)` costs are `{ training: 20, expedition: 30, arena: 25, tournament: 0, rest: 0,
   dungeon: 40 }` for an unloaded build, with `ceil(40 × (1 + overload))` for an overloaded one. Pin the old v1 cost shape.
-- [ ] **Step 2: Failing tests (`describe('dungeon planning')`):** `accepts Wolf Den in the afternoon at level 3 and
+- [x] **Step 2: Failing tests (`describe('dungeon planning')`):** `accepts Wolf Den in the afternoon at level 3 and
   refuses it at level 2, in the morning and in the evening`; `refuses an unknown dungeon or an extra key in edit-schedule
   and edit-day-schedule`; `validates preparations with the old 5 cost keys and with 6 including dungeon, and refuses 7 keys
   or 6 without dungeon`; `turns a dungeon into Rest at stamina 39 and when the frozen costs lack the dungeon key`.
-- [ ] **Step 3: Failing tests (`describe('dungeon grouping')`):** `writes one grouping job per dungeon with entrants and
+- [x] **Step 3: Failing tests (`describe('dungeon grouping')`):** `writes one grouping job per dungeon with entrants and
   waits with pairing until it completes` (3 Wolf Den and 1 Troll Hall entrants: jobs `party:<S>:wolf-den` and
   `party:<S>:troll-hall` with a null gladiator, wait `pairing`, phase 7 passes once the worker completes them); `stores
   frozen runs, members and run seeds` (seed equals the digest rule; an update raises); `refuses a grouping that drops,
@@ -364,12 +364,12 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   Rest out of every party` (Review Focus 2: stamina 39 → 2 entrants, 1 run of 2 humans); `stops the boundary with ungrouped
   dungeon entrant` (a dungeon activity inserted after its grouping job completed); `denies clients the runs, members, seeds
   and grouping jobs`.
-- [ ] **Step 4: Run** `npx --offline --no-install vitest run tests/backend` and `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
-- [ ] **Step 5: Implement** the Edge and worker changes and sections 1–2; apply `24-dungeons.sql` locally with the psql
+- [x] **Step 4: Run** `npx --offline --no-install vitest run tests/backend` and `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
+- [x] **Step 5: Implement** the Edge and worker changes and sections 1–2; apply `24-dungeons.sql` locally with the psql
   fallback (container label check first).
-- [ ] **Step 6: Run** step 4's commands plus `npm run test:db -- tests/db/build-schedule.test.ts tests/db/launch-feedback-backfill.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts tests/db/economy.test.ts`;
+- [x] **Step 6: Run** step 4's commands plus `npm run test:db -- tests/db/build-schedule.test.ts tests/db/launch-feedback-backfill.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts tests/db/economy.test.ts`;
   expect PASS (Arena and tournaments unchanged).
-- [ ] **Step 7: Commit** `feat: schedule dungeons in the afternoon and group their entrants at the boundary`.
+- [x] **Step 7: Commit** `feat: schedule dungeons in the afternoon and group their entrants at the boundary`.
 
 ### Task 5: Run jobs and shared reveals (SQL section 3)
 

@@ -1,19 +1,20 @@
 # Patch 1.8 (Patch B): party dungeons (MVP) — design
 
-Date: 2026-10-29. Author: Claude. Status: **approved direction** — Avi's go on the proposal, 2026-10-29: "yes, and your
-recommendations, go", with decisions (4)–(8) in [the next-patch ideas](2026-10-29-next-patch-ideas.md). The UI parts still
-need Avi's approval of a clickable mockup before they are built (his rule; plan Task 12).
+Date: 2026-10-29. Author: Claude. Status: **approved for implementation**. Avi approved the proposal on 2026-10-29,
+with decisions (4)–(8) in [the next-patch ideas](2026-10-29-next-patch-ideas.md), and approved the desktop and phone
+mockup on 2026-11-07 (see §9). Release approval is separate.
 
 Sources: the approved [proposal](../../../.superpowers/design/2026-10-29-party-dungeons/design-proposal.md) and its balance
 prototype (`prototype/`, re-run on 2026-10-29 at this branch's head: Wolf Den 90 / 74 / 45 %, Raider Stronghold 88 / 80 /
 56 %, Troll Hall 87 / 68 / 51 % for full party / duo + 1 hired / solo + 2 hired); the game as built
-([HANDOFF](../../implementation/HANDOFF.md), the [first-release design](2026-10-11-gladiator-arena-design.md), M01–M25).
+([HANDOFF](../../implementation/HANDOFF.md), the [first-release design](2026-10-11-gladiator-arena-design.md), M01–M29).
 Plan: [2026-10-29-party-dungeons.md](../plans/2026-10-29-party-dungeons.md).
 
-**Patch A ships first.** Patch A (next-patch items 2–8 and the whole-trip expedition replay, no migration) is planned in
-parallel ([its plan](../plans/2026-10-29-patch-a.md)) and released before this patch. The dungeon run view reuses
-Patch A's whole-trip replay (its trip chapters and pacing: walking sped up, fights at real speed), its LIVE marks and its
-on-screen "watch while away" button (§9).
+**2026-11-07 takeover baseline.** Patch A's whole-trip replay, the v2 economy, wearable titles and hand-given awards
+are live. Start from the pushed 1.7.1 line at `5d12d50`. The dungeon view reuses the current replay, LIVE marks and Watch
+button (§9). M30 adds dungeons and the separately designed named bot team. On 2026-11-07 Avi chose labeled bots in
+camp, dungeon seats after humans and unranked Arena. The recovered approved Ludus Nimbus rules are in §15.
+Avi also approved the v2 reward table in §3.1. Hired fighters fill the seats left after humans and eligible bots.
 
 Decisions Claude made inside Avi's go are marked **(Claude)**; the reasons are in §13.
 
@@ -21,22 +22,21 @@ Decisions Claude made inside Avi's go are marked **(Claude)**; the reasons are i
 
 ## 1. Scope
 
-**In the MVP (M29):** a Dungeon choice in the afternoon part of the schedule; three dungeons (Wolf Den, level 3; Raider
+**In the MVP (M30):** a Dungeon choice in the afternoon part of the schedule; three dungeons (Wolf Den, level 3; Raider
 Stronghold, level 7; Troll Hall, level 12) built from the six existing creatures; automatic grouping at the boundary into
-parties of up to 3, with hired fighters in every empty seat; a run of 3 rooms then the major (the boss) inside the one
+parties of up to 3, with eligible bots after human players and hired fighters in the remaining seats; a run of 3 rooms then the major (the boss) inside the one
 80-minute afternoon slot; personal rewards where every won fight a member entered pays (a lost major still pays the rooms);
 timed reveals, a run view, a party close-up replay, results, notifications and the camp location; a patch note.
 
-**Not in the MVP:** friend parties and invites, and seeing a friend's planned dungeon (phase 2, M30; Avi's decisions 5
-and 8); run records and first-clear trophies (phase 3); bot gladiators (a separate future design, HANDOFF); summoners (a
-future class). Solo expeditions, Arena, tournaments, seasons, the market, the v1 combat formulas and every existing replay
-and battle log are unchanged.
+Friend parties and invites, and seeing a friend's planned dungeon, follow in phase 2 (M31; Avi's decisions 5 and 8).
+Run records and first-clear trophies follow in phase 3. The [title design](2026-10-30-titles-1-7-design.md) separately
+assigns four playable dungeon titles to 1.8. The named bot team is part of the 1.8 release per the later handoff, with
+its own play rules and approval. Preserve existing expedition, Arena, tournament, season, market and replay behavior
+outside that approved bot design. Summoners remain a future class.
 
 **Extension points kept open (not built):**
-- *Friend parties (M30):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
+- *Friend parties (M31):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
   strangers. The frozen assignment already records each seat's kind.
-- *Bots:* a seat's `kind` is `'human' | 'hireling'` in the MVP; a named bot later adds `'bot'` (an entrant after the humans
-  and before the hired fighters, with its own rewards).
 - *Summoners:* the party engine fights *units*, not one unit per member. A spirit is a later unit on the party side with an
   owning seat and no rewards; nothing in the engine, targeting, logs or reveals may assume one unit per seat.
 
@@ -44,10 +44,11 @@ and battle log are unchanged.
 
 1. **Schedule.** The afternoon select lists the dungeons after the expeditions: "Dungeon: Wolf Den · Level 3". Locked ones
    are listed disabled, as locked expeditions are. The morning and evening selects do not offer them and say "Dungeons run in
-   the afternoon only." The description line: "3 rooms, then the boss. You're grouped with others who chose it; hired
-   fighters fill empty seats. Costs 40 stamina." The choice repeats every game day until changed, like any other.
-2. **The boundary.** At the afternoon cutoff everyone who chose the same dungeon (and could afford 40 stamina) is put into a
-   party of up to 3; empty seats get hired fighters. A player alone in a dungeon always runs, with two hired fighters.
+   the afternoon only." The description line: "3 rooms, then the boss. Players group first. Eligible bots and hired
+   fighters fill open seats. Costs 40 base stamina." The choice repeats every game day until changed, like any other.
+2. **The boundary.** At the afternoon cutoff, eligible players who can afford their calculated stamina cost group first
+   into parties of up to 3. Eligible bots and then hired fighters fill the open seats. A solo entrant gets two teammates
+   even if no bot qualifies.
 3. **The run.** The party leaves camp together through the expedition gate, fights Room 1 at minute 16, Room 2 at 32,
    Room 3 at 48 and the major at 64, and comes home at minute 80. Health carries between fights; after a won room every
    standing member recovers 20 % of its maximum. A member knocked out sits out the rest of the run. The first lost fight ends
@@ -60,17 +61,19 @@ and battle log are unchanged.
    share is not handed to the humans. Overflowing chest items sell to the NPCs at their value, as for an expedition.
 6. **Camp.** While away, the roster says "In Wolf Den"; the actor is away like an expedition actor.
 
-## 3. Rules and catalog (v1, additive)
+## 3. Rules and catalog (v2 dungeon capability)
 
-Every new key is added to `RULES_V1` / `CATALOG_V1` without changing an existing value (the 2026-10-25 `arenaPhases`
-precedent). No rules version changes: no in-flight snapshot can hold a dungeon choice, and the SQL choice check refuses one
-until M29. A guard test pins every pre-existing v1 value (a hash of the rules and catalog without the new keys).
+Following the 1.6 design, dungeon capability belongs to `RULES_V2`. Retain `RULES_V1` unchanged. The catalog stays
+`CATALOG_V1` with the new dungeon entries. No existing snapshot can contain a dungeon choice and M30 and the new command
+parser enable it only on active v2. Verify frozen v2 for the dungeon worker and payout. Guard full v1 and all pre-existing
+v2 and catalog values with the baseline hashes.
 
 ```
-RULES_V1.schedule.dungeonPhases = ['afternoon']
-RULES_V1.activityStamina.dungeon = 40
-RULES_V1.dungeon = { seats: 3, fightIntervalMs: 960_000, recovery: 0.2, hiredMultiplier: 0.9,
-  targetWeights: { defensive: 3, balanced: 2, offensive: 1 }, sweepEvery: 4, sweepFactor: 0.6, overLevelFactor: 0.5 }
+RULES_V2.schedule.dungeonPhases = ['afternoon']
+RULES_V2.activityStamina.dungeon = 40
+RULES_V2.dungeon = { seats: 3, fightIntervalMs: 960_000, recovery: 0.2, hiredMultiplier: 0.9,
+  targetWeights: { defensive: 3, balanced: 2, offensive: 1 }, sweepEvery: 4, sweepFactor: 0.6, overLevelFactor: 0.5,
+  rewardsById }
 ```
 
 `fightIntervalMs` is 80 min / 5: fights at 16, 32, 48 and 64 minutes. Stamina overload applies as for every activity
@@ -89,13 +92,16 @@ enemy templates. `creature` is the existing manifest creature drawn for it **(Cl
 | Raider Stronghold | 7 | 7–12 | outpost | 3× Raider 80/12/1100/2/(12,10,8,10,10) `raider` | Raider + Raider brute 130/15/1400/4/(14,6,12,10,10) `raider` + Raider archer 70/13/1100/0/(10,12,6,10,14) `raider-archer` | 2× Raider brute + Raider archer | Raider Warlord 880/20/1300/6/(20,10,16,14,16) `raider` |
 | Troll Hall | 12 | 12 and above | mountain | 3× Rock troll 129/17/1100/3/(20,14,14,16,16) `rock-troll` | Rock troll + 2× Frost troll 147/18/1300/5/(22,12,16,16,16) `frost-troll` | 2× Frost troll + Troll shaman 101/20/1200/2/(18,16,12,16,20) `frost-troll` | Troll King 1230/19/1300/8/(28,14,22,20,22) `rock-troll` |
 
-Rewards (per member, per won fight it entered):
+V2 rewards approved by Avi on 2026-11-07, per member and per won fight entered. Scaling the prototype XP preserves its
+relationship to live v2 expeditions. Gold follows each comparison expedition's new rate, rounded to whole gold, and gear
+chance halves alongside expedition gear chance. Store these in `RULES_V2.dungeon.rewardsById` and read them by retained
+version through `dungeonReward`.
 
 | Dungeon | Each room | Major | Major chest |
 | --- | --- | --- | --- |
-| Wolf Den | 20 XP, 5 gold | 100 XP, 25 gold | 1 salvage; 60 % one tier-1 item (Common 40 / Uncommon 45 / Rare 15 %) |
-| Raider Stronghold | 50 XP, 12 gold | 250 XP, 60 gold | 2 salvage; 60 % one tier-5 item (40 / 45 / 15) |
-| Troll Hall | 100 XP, 25 gold | 500 XP, 120 gold | 3 salvage; 60 % one tier-10 item (40 / 45 / 15) |
+| Wolf Den | 6 XP, 1 gold | 30 XP, 5 gold | 1 salvage; 30 % one tier-1 item (Common 40 / Uncommon 45 / Rare 15 %) |
+| Raider Stronghold | 15 XP, 2 gold | 75 XP, 10 gold | 2 salvage; 30 % one tier-5 item (40 / 45 / 15) |
+| Troll Hall | 30 XP, 4 gold | 150 XP, 18 gold | 3 salvage; 30 % one tier-10 item (40 / 45 / 15) |
 
 Chest items: the tier's non-renown variants of the drawn rarity, sorted by id, picked with the member's loot stream (the
 `expeditionLoot` pattern with the chest's own rarity odds). Loot grants use origin `'expedition'` **(Claude)**, so the
@@ -164,7 +170,8 @@ with an optional factor (folded into the exact product only when it is not 1, so
 - **Fights:** fight n (1–4) at `n × 16 min`, battle id `<runId>:fight:<n>`, seed `<seed>:fight:<n>`. Party health carries;
   after a won fight 1–3 each standing unit recovers `floor(0.2 × maximum)` (capped at its maximum); a unit at 0 is left
   out of later fights. The run continues while any party unit stands (hired fighters may finish a run whose humans fell) and
-  ends at the first lost fight.
+  ends at the first lost fight. If a simultaneous defeat awards the party a room win with nobody standing, pay that
+  room and wait at the safe point. No unit can enter the next fight.
 - **Stages** (shared by every member; a member's stage id is `<activityId>:<ordinal>`):
   0 `depart` [0, 16 min) "Enter Wolf Den with Ari, Bo and a hired Guard" (every seat in seat order);
   fight n: `room` (n ≤ 3) or `major` (n = 4) [start, start + duration], "Room n: victory | defeat" or
@@ -196,7 +203,7 @@ with an optional factor (folded into the exact product only when it is not 1, so
 6. Each run's seed is `encode(digest(<grouping job seed> || ':' || runId, 'sha256'), 'hex')`, written by acceptance (the
    Arena battle-seed exception).
 
-## 7. Server integration (M29 from `supabase/sql/23-dungeons.sql`)
+## 7. Server integration (M30 from `supabase/sql/24-dungeons.sql`)
 
 **No new job kind.** Grouping is a `pair` job with input `kind: 'dungeon-grouping'`; a run is one `simulation` job with
 input `kind: 'dungeon'`; reveals are `reveal` jobs with input `kind: 'dungeon-reveal'`; members settle through their own
@@ -221,16 +228,25 @@ Private tables: RLS on, `service_role` only, frozen by `private.guard_frozen`. `
 
 **Changed SQL (restated from its latest source).** `activities.resolved_kind` check gains `dungeon`;
 `private.planning_command` (18) accepts `{ kind: 'dungeon', dungeonId }` in the afternoon only, for a known id at the
-member's level (3 / 7 / 12), in `edit-schedule` and `edit-day-schedule`; `private.valid_preparation` (07);
-`private.boundary_check_stamina` (03); `private.boundary_pair` (09); `public.complete_job` (07) dispatches dungeon grouping
+member's level (3 / 7 / 12) and active v2, in `edit-schedule` and `edit-day-schedule`. `private.valid_preparation`,
+`private.boundary_check_stamina` and `private.boundary_pair` all start from (21), keeping v2 Training and free tournament
+behavior. `public.complete_job` (07) dispatches dungeon grouping
 to `private.accept_grouping` and dungeon simulations and reveals to `private.accept_dungeon_result`;
 `private.activity_executor_ready` (09) and `private.prepare_activity_jobs` (10) add `dungeon`;
 `public.expedition_settlement_input` (05), `private.settle_activity_core` (10) and the new `private.dungeon_rewards`;
-`private.project_character` (17) gives the location `dungeon:<id>`; `public.owner_state` (18) labels the activity "Dungeon"
-and counts dungeon results as notifications; `private.cleanup_history` (15) prunes dungeon fights, results, members and runs
+`private.project_character` and `public.owner_state` (22) add the `dungeon:<id>` location, activity label and dungeon
+notifications while preserving full profiles, worn titles, owner progress and title notices. `private.cleanup_history`
+(15) prunes dungeon fights, results, members and runs
 in its 7-day pass (summaries keep 90 days). New: `private.grouping_input`, `private.accept_grouping`,
-`private.safe_party_log`, `private.accept_dungeon_result`, `private.dungeon_rewards`. Every new function is `security
-invoker`, `search_path=''`, EXECUTE for `service_role` only.
+`private.safe_party_log`, `private.accept_dungeon_result`, `private.dungeon_rewards`. Callable helpers use `security
+invoker`, `search_path=''` and API EXECUTE for `service_role` only. Trigger functions and cleanup remain inaccessible to
+API callers. Read active rules with `private.active_rules_version()`. `private.economy_switches` stays owner-only.
+
+**Dungeon titles.** The 1.7 design already assigns Den Breaker (Wolf Den clear), Warlord's End (Stronghold clear),
+Kingslayer (Troll Hall clear) and Dungeoneer (25 clears) to 1.8. Start `private.title_rules()` from `23-awards.sql`,
+retaining Game Master and High Ground. Increment the member's own clear count exactly once, on an entered and won major,
+before awarding. Count positive dungeon gold in gold earned from play and use the existing ownership trigger for gear.
+Preserve existing expedition win counts and the exclusion of named bots from Founder.
 
 **Acceptance trusts canonical TypeScript amounts** (as preparation, pairing and Arena acceptance do) and checks shape and
 identity: grouping — exact keys, run ids numbered `1..R` in order, exactly 3 seats numbered 0–2, humans first, at least one
@@ -252,13 +268,14 @@ exactly when `result` is `'victory'`.
 5. Restated constants: 960000 (`dungeon.fightIntervalMs`), 604800000 (`retention.replayMs`), the unlock levels 3 / 7 / 12
    and the afternoon (`schedule.dungeonPhases`). A rules version that changes them needs a new source.
 
-All time-limited mutations go through the existing fenced paths (`complete_job`, `settle_activity_core`), which lock the
-job first, then sample `clock_timestamp()` time and revalidate token, status and expiry (the Postgres concurrency override);
-the plan adds the override's regression for the dungeon reveal.
+All time-limited mutations go through the existing fenced paths. `complete_job` locks its job first. Settlement locks
+account, character, wallet, items, activity and job in the existing order. Both sample `clock_timestamp()` after acquiring
+the required locks and revalidate token, status and expiry. The reveal regression holds the lock until after expiry.
 
-**Deploy window.** M29 first: with the previous worker, preparations keep 5 cost keys (accepted), no dungeon choice can be
-saved (the previous Edge parser refuses it), and every existing path behaves as before. Then `game-command` and
-`game-worker` together. Then the client. The patch note is posted last, once the client that offers dungeons is live.
+**Deploy window.** M30 first: with the previous worker, preparations keep 5 cost keys (accepted), no dungeon choice can be
+saved (the previous Edge parser refuses it), and every existing path behaves as before. Deploy and verify `game-worker`
+before deploying `game-command`, which first permits clients to save dungeon choices. Then release the client, post the
+patch note and link it to the patch record. Each production write requires Avi's explicit go.
 
 ## 8. Contracts
 
@@ -275,8 +292,15 @@ saved (the previous Edge parser refuses it), and every existing path behaves as 
 
 ## 9. Client
 
-Every new screen gets a clickable mockup over a real screenshot (desktop and 360 px phone) and Avi's approval before it is
-built. Screens:
+**Mockup approval, 2026-11-07.** Avi answered “Approve the mockup (Recommended)” to `call_5cb7b19d35da43dcb461ee2230b7598a`.
+The approved `mockups.html` is in the parent `logs/p18-mockup-20261107/` folder at SHA-256
+`2f789653c8b9a3d633cd3c14861279dd6dcae25d1812ca729597af0a8a182576`. The final installed Chrome check covered 14 views
+and 216 assertions each at 1440 × 900 and 360 × 740. It uses synthetic data, 24 real 1.7.1 screenshots and map layers from
+the current assets. The visible reward amounts follow §3.1. The approval includes the bot tag and unranked Arena card,
+four dungeon titles, separate room loss, boss loss and knocked-out member states, and the short mobile Watch control.
+The prototype's fictional data, fight timing and sample playback are review aids. Product behavior follows §§4–8.
+
+Screens:
 
 1. **Schedule** (§2, item 1): dungeon options in the afternoon select, the afternoon-only note elsewhere, the description
    line.
@@ -296,9 +320,10 @@ built. Screens:
    a sweep effect, normal/fast, pause, restart, skip, health bars from the log. Its own reducer
    (`src/game/party-replay.ts`) and stage planner (`src/game/party-stage.ts`); the Arena `replay.ts` /
    `battle-stage.ts` stay two-fighter. Route `/replay/?run=<runId>&fight=<n>`.
-4. **Results and notifications:** a victory reads "Wolf Den cleared: the Alpha of the Den fell", a defeat "Wolf Den: the
-   party was beaten"; the owner also sees its XP, gold and items (a defeat's room pay included); visitors see the public
-   outcome only. (The summary holds no per-room facts; the run view tells the fight-by-fight story.)
+4. **Results and notifications:** a victory reads "Wolf Den cleared: the Alpha of the Den fell". Use the known terminal
+   outcome for a boss defeat, room defeat or member knocked out before a party clear. A member defeat alone must never
+   imply the whole party lost. The owner sees their XP, gold and items including room pay on a defeat. Visitors see
+   the public outcome only. The run view has the fight details.
 5. **Camp:** "In Wolf Den" on the roster; the actor leaves and returns through the expedition gate (`dungeon:` locations
    are away, like `expedition:`).
 
@@ -312,36 +337,37 @@ class splits and common gear of `prototype/builds.ts`), 300 seeds per shape, fix
 | Full party (Berserker + Guardian + Duelist) at the required level beats the major | Wolf Den 90 %, Stronghold 88 %, Troll Hall 87 % | each within ±8 points of its target |
 | Solo + 2 hired (mean of the three classes) | 45 %, 56 %, 51 % | each within ±8 points; no class below 35 % |
 | Rooms 1–3 cleared by every reference shape | 100 % | ≥ 97 % |
-| Full party 3–5 levels over (L5 / L10 / L15) | 100 / 100 / 99 % | ≥ 95 % |
-| Solo run's expected XP ÷ the comparison expedition's (Woodland 100, Outpost 250, Mountain 500) | 1.05 / 1.16 / 1.11 | 1.00–1.25 |
-| Full party's expected XP ÷ the same | 1.50 / 1.48 / 1.47 | 1.35–1.65 |
+| Full party at L5 / L10 / L15 | 100 / 100 / 99 % | ≥ 95 % |
+| Solo run's expected XP ÷ the v2 comparison expedition's (Woodland 30, Outpost 75, Mountain 150) | Re-measure for v2 | 1.00–1.25 |
+| Full party's expected XP ÷ the same | Re-measure for v2 | 1.35–1.65 |
 
 If a band fails, tune in this order and re-measure: the major's health, then its damage, then `hiredMultiplier`; record
 the final numbers here. A run plans in well under the worker's 2,000 ms invocation budget (measured, recorded).
 
 ## 11. Release
 
-The gate of record (`node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs`, 12/12, DB-test rule), a
+The gate of record (`node scripts/verify.mjs --config node_modules/.cache/pw-design-tcp.config.mjs --browser-shards 32 --results <fresh-dir> --json <file>`, 12/12, DB-test rule), a
 fresh whole-branch review, then hosted read-only pre-checks. **Production needs Avi's go in chat** (with the patch note's
-text), outside Wednesday and Saturday 17:20–20:00 UTC and with no open boundary: `db push --dry-run` (exactly M29),
-`db push`, the access audit and fingerprint; `functions deploy game-command` and `game-worker`; the `release`
-fast-forward; the deployed checks about 2 minutes after Pages is live; then the patch note.
+text) for each write, outside Wednesday and Saturday 17:20–20:00 UTC and with no open boundary. Follow the M28/M29
+migration process and `--skip-vault` for dry-run and push. Confirm metadata with aggregate reads. Deploy and verify
+`game-worker` before `game-command`, fast-forward `release` on Avi's go, verify live Pages, then post the approved note
+and record on their own go. Finish the grandiose trailer using the playable test build before shipping.
 
 ## 12. Patch note (draft, posted with `private.post_message('patch-notes', …)` after the client is live)
 
 - **Title:** Dungeons: team up in the afternoon
-- **Preview:** Choose a dungeon for your afternoon. You're grouped with others who chose it, and hired fighters fill any
-  empty seat.
+- **Preview:** Choose a dungeon for your afternoon. Players group first, then eligible bots and hired fighters fill open seats.
 - **Body:**
   - p: "Dungeons are here. In your schedule, choose one for the afternoon (dungeons run in the afternoon only)."
   - li: "Wolf Den opens at level 3, Raider Stronghold at level 7 and Troll Hall at level 12."
-  - li: "When the afternoon starts, everyone who chose the same dungeon is put in a party of up to 3. Hired fighters fill
-    the empty seats, so you can always go, even alone."
+  - li: "When the afternoon starts, players who chose the same dungeon form parties of up to three. Eligible bots and hired
+    fighters fill open seats, so you can go even if no other player joins."
   - li: "A run is 3 rooms, then the boss, all in one afternoon. Health carries from fight to fight."
-  - li: "Every fight your party wins pays you. The boss pays the most and opens a chest. Lose to the boss and you still
-    keep what the rooms paid."
-  - li: "Rewards are your own: nobody splits loot, and hired fighters take nothing."
-  - li: "A dungeon costs 40 stamina."
+  - li: "Every fight you enter and your party wins pays you. The boss pays the most and opens a chest. Lose to the boss
+    and you still keep what the rooms paid."
+  - li: "Rewards are personal. Bots and hired fighters take no share."
+  - li: "A dungeon costs 40 base stamina."
+  - li: "Meet Ludus Nimbus, five named gladiators marked BOT. They can fill dungeon seats and fight in unranked Arena."
   - p: "Watch your run like an expedition and replay every fight. Inviting friends to your party comes in a later patch."
 
 ## 13. Decisions Claude made (inside Avi's go)
@@ -369,3 +395,41 @@ fast-forward; the deployed checks about 2 minutes after Pages is live; then the 
 | Few players, so human parties are rare at first | Hired fighters make every run playable; afternoon only |
 | Storage of party logs | Stored once per run, loaded on demand, pruned after 7 days; measured in the capacity task |
 | Patch A's replay names differ from this spec's wording | The run-view task binds to Patch A's merged exports first and records them |
+
+## 15. Ludus Nimbus bot team
+
+The archived 2026-10-29 bot-team proposal records Avi's approval of the name, five members, fixed builds, off-duty
+hours, crowd cutoff, tournament exclusion and 20% unranked Arena reward. Avi reaffirmed dungeons and unranked Arena on
+2026-11-07. The production baseline is now v2 and all bot schema ships in M30.
+
+| Gladiator | Class and stance | Dungeon role | Fixed level |
+| --- | --- | --- | --- |
+| Tullia | Guardian, Defensive | Guard | 12 |
+| Grit | Berserker, Offensive | Striker | 7 |
+| Ash | Duelist, Balanced | Skirmisher | 7 |
+| Rufus | Guardian, Defensive | Guard | 4 |
+| Pip | Duelist, Balanced | Skirmisher | 3 |
+
+- **Camp and schedule.** Each bot uses a deterministic weekly routine (126 slots), with ordinary choices, off duty and
+  on-call afternoons. Off duty 00:00–08:00 UTC and when the boundary has at least 45 active human gladiators. Off duty
+  actors stay in camp without a scheduled activity. Show the scheduled return in the viewer's clock when applicable.
+  Active bots are exempt from the idle presence rule. The weekly patterns must fit stamina and obey current v2 rules.
+- **Dungeons.** Group eligible humans first using the regular strength bands. Add eligible on-call bots after humans
+  and before hired fighters, within the original cap of `3 * ceil(humans / 3) - humans` bots per dungeon, with a bot in
+  at most one run. Bots must meet the unlock level and never start a bot-only run. Unassigned bots train where their
+  routine and v2 limit allow. A bot uses its role's hired build at that dungeon's level for combat. Its actual name,
+  actor and BOT tag appear in the run and log. It earns no dungeon payout and the humans' per-member payouts stay fixed.
+- **Arena.** Preserve real-player pairing first. A same-league bot within 25% of a player's frozen strength can replace
+  only that player's NPC fallback. Prefer the bot met least recently. No bot occupies a tournament seat. A human's bot
+  bout pays `floor(0.2 * amount)` for each normal player-bout currency under the retained rules. No rating, standings or
+  season qualification change for either side. A bot spar has no economic reward. Existing human/NPC paths stay intact.
+- **Identity and safety.** Bot identities are registered by an operator behind owner-only create/bench operations, with
+  system Auth accounts that have no sign-in method and are banned. An active bot cannot submit player commands. It has
+  a fixed level and build, no market/shop actions or economic grants. Preserve exactly-once internal processing. Bots
+  never qualify for Founder. Other title measures use the same applicable activity rules without inventing rewards.
+- **Disclosure.** The sky-blue BOT tag accompanies the name in camp, roster, profile, Arena, dungeon and replays.
+  Group bots under Ludus Nimbus in the roster. Show their separate count, team, off-duty state and unranked status.
+  No NEW tag or arrival announcement. No bot-only result, reward notice or standing appears as a human entry.
+- **Rollout.** M30 installs the schema and routines with no active bot identities. Create and activate bots only after
+  the worker, command and client understand the tag and the unranked routes, on separate explicit production approval.
+  Keep operator actions and aggregates auditable. Test the 44-human plus five-bot case and the 45-human cutoff.

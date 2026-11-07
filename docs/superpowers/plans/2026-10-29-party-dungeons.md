@@ -8,7 +8,7 @@ each member personally for every won fight it entered.
 
 **Architecture:** Pure, seeded TypeScript decides everything (an N-versus-M party engine beside the untouched two-fighter
 engine, a run planner, a grouper), run by the existing worker through the existing job kinds with input discriminators.
-One migration (M29, from `supabase/sql/23-dungeons.sql`) adds the dungeon choice, phase-7 grouping, one simulation and one
+One migration (M30, from `supabase/sql/24-dungeons.sql`) adds the dungeon choice, phase-7 grouping, one simulation and one
 shared reveal chain per run, a public `dungeon_fights` log table and per-member settlement through the expedition
 settlement path. The client adds dungeon choices to the schedule, a run view built on Patch A's whole-trip replay, a party
 close-up replay, and dungeon results, notifications and camp locations.
@@ -20,18 +20,30 @@ close-up replay, and dungeon results, notifications and camp locations.
 `docs/operations/migrations.md`, `docs/operations/verification-gates.md` and `docs/operations/job-leases.md` before Tasks
 4–6.
 
+**2026-11-07 takeover.** `codex/p18-dungeons` starts in `design` at `5d12d50`, the pushed Patch 1.7.1 line. The live
+client is `8828d0a`, the database is M01–M29 with v2 active, `game-command` is from 1.7.1 and `game-worker` is from 1.6.
+The dungeon MVP, exact v2 reward table and Ludus Nimbus play rules are recorded in the spec. Schedule, Results,
+Notifications, camp, dungeon and party replay UI need the clickable approval in
+Task 7 before implementation. The named bot team is also in 1.8 per the 1.6 and 1.7 decisions. It needs its own approved
+design and tasks before the single M30 is sealed. Avi chose labeled named bots for dungeons after humans and unranked
+Arena on 2026-11-07. Temporary hired fighters remain the fallback after the named bots.
+
 ## Global Constraints
 
-- **Patch A ships first.** This patch starts from a branch that contains Patch A (next-patch items 2–8 and the whole-trip
-  expedition replay). Task 8 binds to Patch A's merged code; it never re-implements it.
-- **v1 stays v1:** add only `RULES_V1.schedule.dungeonPhases = ['afternoon']`, `RULES_V1.activityStamina.dungeon = 40`,
-  `RULES_V1.dungeon = { seats: 3, fightIntervalMs: 960_000, recovery: 0.2, hiredMultiplier: 0.9, targetWeights: {
-  defensive: 3, balanced: 2, offensive: 1 }, sweepEvery: 4, sweepFactor: 0.6, overLevelFactor: 0.5 }` and
-  `CATALOG_V1.dungeons`; no existing v1 value changes; no new rules version.
+- **Current release line.** Patch A's whole-trip replay and the later Arena replay, v2 economy and wearable titles are
+  already present. Reuse the current modules and preserve their public behavior and retained reads.
+- **Rules.** Keep `RULES_V1` byte-stable. The approved 1.6 carry puts new dungeon capability in `RULES_V2` only:
+  `schedule.dungeonPhases = ['afternoon']`, `activityStamina.dungeon = 40` and `dungeon = { seats: 3,
+  fightIntervalMs: 960_000, recovery: 0.2, hiredMultiplier: 0.9, targetWeights: { defensive: 3, balanced: 2, offensive: 1 },
+  sweepEvery: 4, sweepFactor: 0.6, overLevelFactor: 0.5, rewardsById }`. Store the approved v2 payout table in
+  `rewardsById`. `CATALOG_V1.dungeons` adds maps, monsters and hired builds with existing values intact.
+  Keep the retained rules dispatcher and v1 settlement replay. Gate dungeon choice by active v2 when saving and by
+  frozen v2 when preparing, grouping, simulating and paying. Use `private.active_rules_version()` for the active value.
+  `private.economy_switches` is owner-only audit storage and stays inaccessible to command and settlement roles.
 - **Dungeons** exactly as spec §3.1–3.2: `wolf-den` (level 3, full rewards 3–8, woodland), `raider-stronghold` (7, 7–12,
-  outpost), `troll-hall` (12, no upper band, mountain); the monster stat lines, the reward table (rooms 20 XP + 5 gold /
-  50 + 12 / 100 + 25; majors 100 + 25 / 250 + 60 / 500 + 120; chest 1 / 2 / 3 salvage and 60 % one tier-1 / 5 / 10 item at
-  Common 40 / Uncommon 45 / Rare 15 %) and the nine hired builds.
+  outpost), `troll-hall` (12, no upper band, mountain). Treat the original stat lines and hired builds as balance inputs.
+  Pin the approved v2 figures in §3.1. Measure against the live expedition accessor (30 / 75 / 150 XP) and v2 Training
+  limits before accepting product balance.
 - **Identifiers:** fights at 16, 32, 48, 64 minutes; fight seed `<seed>:fight:<n>`, battle id `<runId>:fight:<n>`, loot
   stream `<seed>:loot:<gladiatorId>`; run id `dungeon:<slot>:<dungeonId>:<k>`; grouping job `party:<slot>:<dungeonId>`;
   run job `dungeon:<runId>`; reveal job `dungeon-reveal:<runId>:<ordinal>`; run seed
@@ -43,7 +55,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - **Hired fighters** earn nothing and never become a gladiator row, world actor, result, standing or notification; their
   share is never handed to the humans.
 - **Words:** every player word says gold; plain text only; times use Patch A's 12/24-hour setting.
-- **Database:** committed migrations are never edited; new M29 generated from the reapplicable `23-dungeons.sql`,
+- **Database:** committed migrations are never edited. Generate M30 with bundled `pg-delta` from the reapplicable `24-dungeons.sql`,
   completed and replayed per `AGENTS.md` (ACLs, RLS and policies, the invoker view, every CHECK and trigger after the
   functions it calls, data and initialisation statements), the replayed fingerprint byte-equal to the source-applied one,
   the access audit after the migration; multi-statement source through the psql fallback after the container label check;
@@ -52,12 +64,15 @@ close-up replay, and dungeon results, notifications and camp locations.
   Edge start time compared before and after, access times refreshed); no build while a browser run is active; the Postgres
   concurrency override (lock first, then sample `clock_timestamp()`, revalidate token, status and expiry, with its
   regression); the React effects override (reload flags scoped to the record version that set them); no package
-  downloads; no hosted Supabase command before Task 9's go.
+  downloads (`npx --offline --no-install`); no hosted Supabase command before Task 9's checks. Run only approved release
+  commands in the linked `claude` worktree and never modify `codex`. Never read `supabase/.temp` except `*-version` files.
+  Never print secrets or change Windows or Defender settings.
 - **UI:** a clickable mockup over real screenshots, desktop and 360 px, approved by Avi in chat before any UI code.
-- **Gate of record:** `node scripts/verify.mjs --config node_modules/.cache/pw-claude.config.mjs` 12/12 with the local
+- **Gate of record:** `node scripts/verify.mjs --config node_modules/.cache/pw-design-tcp.config.mjs --browser-shards 32 --results <fresh-dir> --json <file>` 12/12 with the local
   Edge serve running.
-- **Release:** production writes need Avi's go in chat; outside Wednesday and Saturday 17:20–20:00 UTC with no open
-  boundary; order M29 → `game-command` + `game-worker` → client → patch note.
+- **Release:** aggregate production reads only. Each production write needs its own explicit Avi go in chat. Release
+  outside Wednesday and Saturday 17:20–20:00 UTC with no open boundary. Order M30 → verified `game-worker` → `game-command`
+  → client → patch note → patch record. The grandiose 1.8 trailer is a pre-release deliverable in Task 9.
 
 ## Review Focus
 
@@ -75,16 +90,28 @@ close-up replay, and dungeon results, notifications and camp locations.
 
 ---
 
+### Before Task 1: player review and patch identity
+
+- [x] Prepare Task 7 Steps 1–3 on the exact 1.7.1 test build. Record Avi's approval and any changes before starting
+  player-facing implementation. Show the v2 reward choice, the named bot behavior and tag, and the four existing dungeon
+  title designs in that review. Use real test-app captures and show the room-loss and member-knockout cases separately.
+- [x] Finish the named bot team's spec and ordered tasks after Avi's decisions. Keep the entire 1.8 database change in M30.
+- [ ] Add the 1.8 in-progress section in `docs/CHANGELOG.md`, run `npx --offline --no-install vitest run tests/domain/patch.test.ts`
+  and observe the mismatched patch failure. Set `PATCH='1.8'` in `src/lib/patch.ts`, rerun, review and commit the identity.
+
 ### Task 1: Rules, catalog, contracts and the party combat engine
 
 **Files:**
-- Modify: `supabase/functions/_shared/domain/rules-v1.ts`, `catalog-v1.ts` (`dungeons`), `types.ts` (`ActivityKind` adds
+- Modify: `supabase/functions/_shared/domain/rules-v2.ts`, `domain/economy.ts`, `catalog-v1.ts` (`dungeons`), `types.ts` (`ActivityKind` adds
   `'dungeon'`; `Dungeon`, `DungeonMonster`, `HiredRole`, `HiredBuild`), `schedule-choice.ts`, `combat.ts` (export
   `roundedDamage`), `contracts/commands.ts`, `contracts/events.ts`, `contracts/reads.ts`; any client `Record` or `switch`
   that `npm run typecheck` flags gets a plain "Dungeon" entry only (the real screens are Tasks 7–8)
+- Narrow the existing five cost keys in `backend/jobs.ts` and `src/features/schedule/rest-stamina.ts` for type compatibility.
+  Keep preparation payloads at five keys in this task and return no dungeon stamina estimate until a cost is available.
 - Create: `supabase/functions/_shared/domain/party-combat.ts`
 - Test: `tests/domain/dungeon-catalog.test.ts` (new), `tests/domain/party-combat.test.ts` (new),
-  `tests/domain/schedule-choice.test.ts`
+  `tests/domain/schedule-choice.test.ts`, `tests/domain/rules-v2.test.ts` (preserve the existing hashes and compare the old
+  contract after omitting only the named dungeon additions)
 
 **Interfaces:**
 - Produces (contracts): `DungeonId = 'wolf-den' | 'raider-stronghold' | 'troll-hall'`; `ActivityChoice` adds
@@ -102,9 +129,10 @@ close-up replay, and dungeon results, notifications and camp locations.
   'balanced'; attributes: Attributes }`; `HiredBuild = { classId; stance; allocations: Attributes; equipment:
   Record<EquipmentSlot, string | null> }` (catalog ids); `Dungeon = { id; name; requiredLevel: 3 | 7 | 12;
   fullRewardsMaxLevel: 8 | 12 | null; map: 'woodland' | 'outpost' | 'mountain'; rooms: [DungeonMonster[],
-  DungeonMonster[], DungeonMonster[]]; major: DungeonMonster; rewards: { room: { xp; money }; major: { xp; money }; chest:
-  { salvageQuantity: 1 | 2 | 3; gearChance: 0.6; gearTier: 1 | 5 | 10; rarity: Record<ItemRarity, number> } }; hired:
-  Record<HiredRole, HiredBuild> }` (all `DeepReadonly`).
+  DungeonMonster[], DungeonMonster[]]; major: DungeonMonster; hired: Record<HiredRole, HiredBuild> }` (all `DeepReadonly`).
+  Add `DungeonReward = { room: { xp: number; money: number }; major: { xp: number; money: number }; chest: {
+  salvageQuantity: number; gearChance: number; gearTier: 1 | 5 | 10; rarity: Record<ItemRarity, number> } }` and the
+  accessor `dungeonReward(rules: Rules, id: DungeonId): DungeonReward` in `domain/economy.ts`, failing closed without v2.
 - Produces: `choiceAllowedInPhase(phase, choice, rules = RULES_V1)`: Arena only in `arenaPhases`, a dungeon only in
   `dungeonPhases`, everything else everywhere. `roundedDamage(attacker: FighterSnapshot, defender: FighterSnapshot, rules:
   Rules, critical: boolean, factor = 1): number` (the factor joins the exact product only when it is not 1).
@@ -113,19 +141,17 @@ close-up replay, and dungeon results, notifications and camp locations.
   startingHealth?: number }>` and `SkirmishInput = DeepReadonly<{ battleId: string; rulesVersion: string; rules: Rules;
   units: SkirmishUnit[] }>`; weights and the sweep come from `rules.dungeon`, a `major` unit sweeps.
 
-- [ ] **Step 1: Record the guard hashes on the unmodified tree:** print `sha256(JSON.stringify(RULES_V1))` and
-  `sha256(JSON.stringify(CATALOG_V1))` with a scratch script run by `node --experimental-strip-types --no-warnings` (the
-  prototype's method; no package), and paste both into the test below.
+- [ ] **Step 1: Record the guard hashes on the unmodified tree:** hash `RULES_V1`, `RULES_V2` and `CATALOG_V1` via
+  `node --experimental-strip-types --no-warnings` or the existing retention-test helper. Pin the baseline before edits.
 - [ ] **Step 2: Write `tests/domain/dungeon-catalog.test.ts`:**
-  - `keeps every pre-existing v1 rule and catalog value`: the hash of `RULES_V1` with `schedule.dungeonPhases`,
-    `activityStamina.dungeon` and `dungeon` deleted from a deep copy, and of `CATALOG_V1` without `dungeons`, equal the
-    step 1 hashes.
-  - `adds the three dungeons with the spec's numbers`: `CATALOG_V1.dungeons['wolf-den']` `toEqual` the full §3.1 literal
-    (rooms, major, rewards, hired builds); for the other two, `requiredLevel`, `fullRewardsMaxLevel`, `map`, the major's
-    stat line and the reward table.
+  - `keeps every pre-existing rule and catalog value`: compare full `RULES_V1`, `RULES_V2` without its three new dungeon
+    keys and `CATALOG_V1` without `dungeons` with the Step 1 hashes. Keep the v1 catalog/hash guard in its existing owner.
+  - `adds the three dungeons with the spec's numbers`: `CATALOG_V1.dungeons['wolf-den']` `toEqual` the full §3.1 content
+    (rooms, major, hired builds); for the other two, `requiredLevel`, `fullRewardsMaxLevel`, `map` and the major's stat line.
+    Pin each approved table row through `dungeonReward(RULES_V2, id)` and reject v1.
   - `draws every monster with a manifest creature`: each `creature` is a creature id in `public/assets/manifest.json`.
-  - In `schedule-choice.test.ts`: `opens dungeons in the afternoon only` (afternoon true; morning and evening false; Arena
-    unchanged).
+  - In `schedule-choice.test.ts`: `opens dungeons in the v2 afternoon only` (v2 afternoon true, v1 all false, morning and
+    evening false in both; Arena unchanged).
 - [ ] **Step 3: Write `tests/domain/party-combat.test.ts`** (fighters from `makeFighter` or literal snapshots; expected
   draws replayed from `seededRandom(seed)` in the documented order):
   - `is deterministic per seed`: equal logs for one seed, different events for another.
@@ -152,22 +178,24 @@ close-up replay, and dungeon results, notifications and camp locations.
     maximum → `RangeError`.
   - `logs only whitelisted participant fields`: each participant's keys are exactly `RevealedCombatant`'s plus `side`,
     `role`, `seat`.
-- [ ] **Step 4: Run** `npx vitest run tests/domain/dungeon-catalog.test.ts tests/domain/party-combat.test.ts tests/domain/schedule-choice.test.ts`;
+- [ ] **Step 4: Run** `npx --offline --no-install vitest run tests/domain/dungeon-catalog.test.ts tests/domain/party-combat.test.ts tests/domain/schedule-choice.test.ts`;
   expect FAIL (missing exports).
 - [ ] **Step 5: Implement** the rules, catalog and contracts; then the engine exactly as spec §4 (units 1–6 per side,
   group order side 0 then side 1 in unit order, damage applied event by event, `healthBefore` / `healthAfter` per event,
-  first attacks at the interval, `next = elapsed + interval` or past the limit).
-- [ ] **Step 6: Run** step 4's command, `npx vitest run tests/domain/combat.test.ts tests/domain/replay-fixtures.test.ts`
+  first attacks at the interval, `next = elapsed + interval` or past the limit). Model dungeon cost as optional on older
+  frozen snapshots. Do not require a retroactive sixth key or change legacy serialized payloads.
+- [ ] **Step 6: Run** step 4's command, `npx --offline --no-install vitest run tests/domain/combat.test.ts tests/domain/replay-fixtures.test.ts`
   and `npm run typecheck`; expect PASS (the existing fixtures unchanged).
 - [ ] **Step 7: Commit** `feat: dungeon rules, catalog, contracts and the party combat engine`.
 
 ### Task 2: The run planner and balance pinned to the prototype
 
 **Files:**
-- Create: `supabase/functions/_shared/domain/dungeon.ts`, `tests/domain/dungeon.test.ts`, `tests/fixtures/dungeon-builds.ts`
-  (a port of `.superpowers/design/2026-10-29-party-dungeons/prototype/builds.ts`: points 10 / 14 / 20 / 25 / 33 / 38 / 45
-  at levels 1 / 3 / 5 / 7 / 10 / 12 / 15, its class splits and gear table), `tests/domain/dungeon-balance.test.ts`
-- Modify only if a band fails: `catalog-v1.ts` (dungeon numbers), `rules-v1.ts` (`dungeon.hiredMultiplier`), spec §3.1 and
+- Create: `supabase/functions/_shared/domain/dungeon.ts`, `tests/domain/dungeon.test.ts`, `tests/fixtures/dungeon-builds.ts`,
+  `tests/domain/dungeon-balance.test.ts`. Port the archived prototype build fixtures without their absolute imports.
+  Points are 10 / 14 / 20 / 25 / 33 / 38 / 45 at levels 1 / 3 / 5 / 7 / 10 / 12 / 15, all within `10 + 4 × level`.
+  Use the original class splits and common gear for the baseline and include v2 capped-build sensitivity runs.
+- Modify only if a band fails: `catalog-v1.ts` (monster numbers), `rules-v2.ts` (`dungeon.hiredMultiplier`), spec §3.1 and
   §10 tables
 
 **Interfaces:**
@@ -187,7 +215,7 @@ close-up replay, and dungeon results, notifications and camp locations.
     `<runId>:<ordinal>`; Task 5 rewrites them per member)
   - `hiredFighter(dungeon: Dungeon, role: HiredRole, rules: Rules): FighterSnapshot`; `hiredRolesFor(humanStances:
     readonly Stance[]): HiredRole[]` (length `3 − humans`); `monsterFighter(monster: DungeonMonster, rules: Rules):
-    FighterSnapshot`; `dungeonChestLoot(dungeon: Dungeon, catalog: Catalog, random: () => number, salvageOnly: boolean):
+    FighterSnapshot`; `dungeonChestLoot(reward: DungeonReward, catalog: Catalog, random: () => number, salvageOnly: boolean):
     LootGrant[]`; `dungeonPartyLabel(dungeon: Dungeon, seats: readonly DungeonSeat[]): string`;
     `planDungeonRun(input: DungeonRunInput, seed: Seed, rules: Rules): DungeonRunPlan`
   - Fixture: `representativeBuild(classId: ClassId, level: 1 | 3 | 5 | 7 | 10 | 12 | 15): BuildSnapshot`,
@@ -212,17 +240,18 @@ close-up replay, and dungeon results, notifications and camp locations.
     Guard"; solo Ari → "Enter Wolf Den with Ari, a hired Guard and a hired Striker"; fights "Room n: victory" /
     "Alpha of the Den: defeat"; 4–10 stages, kinds and times as spec §5, the last `return` at 4800000.
   - `pays the won fights each member entered; a lost major still pays the rooms`: a found seed where Wolf Den rooms 1–3
-    are won and the major lost → every outcome `{ xp: 60, money: 15, loot: [] }`, `result: 'defeat'`, `success: false`.
+  are won and the major lost → every outcome is 18 XP, 3 gold and no loot, `result: 'defeat'`,
+  `success: false`. Add an all-fallen simultaneous room win that pays that room and creates no next fight.
   - `pays a fallen member only up to its last fight` (seeds `fall:0`…`fall:199`, one weak human): `entered` is `[1..m]`,
     `won ⊆ entered`, rewards equal the sum of its won fights.
   - `rolls each member's chest from <seed>:loot:<gladiatorId>`: a won major's loot equals `dungeonChestLoot(…,
-    seededRandom('<seed>:loot:<id>'), false)`, origin `'expedition'`; there is one outcome per human seat and none for a
+    seededRandom('<seed>:loot:<id>'), false)` with the retained v2 reward, origin `'expedition'`; one outcome per human and none for a
     hired seat.
   - `halves XP and gold above the band with a salvage-only chest`: Wolf Den at level 9 → `floor(0.5 × total)` and loot of
     salvage only, `overLevel: true`; level 8 → full; Troll Hall at level 30 → full (Review Focus 1).
   - `refuses a bad run`: a level below the dungeon's, seats other than exactly 0–2, no human, a repeated gladiator, an
     unknown dungeon, another rules version → `RangeError`.
-- [ ] **Step 2: Run** `npx vitest run tests/domain/dungeon.test.ts`; expect FAIL.
+- [ ] **Step 2: Run** `npx --offline --no-install vitest run tests/domain/dungeon.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** `dungeon.ts` as spec §5 (hired fighter: `makeFighter` of the catalog build with item
   instances from `CATALOG_V1.items`, then `fallbackOf`'s exact arithmetic with `hiredMultiplier` and the role's stance;
   chest draws in `expeditionLoot`'s order with the chest's rarity odds; result `victory` only for an entered, won major).
@@ -235,11 +264,11 @@ close-up replay, and dungeon results, notifications and camp locations.
   - `solo with two hired fighters beats the major within 8 points of 45 / 56 / 51 %, no class below 35 %`.
   - `every reference shape clears rooms 1–3 at least 97 % of the time; a party 3–5 levels over wins at least 95 %`
     (levels 5, 10, 15).
-  - `a solo run is worth 1.00–1.25× the comparison expedition's XP, a full party 1.35–1.65×` (mean member XP ÷ 100 / 250 /
-    500).
+  - Re-measure solo and full party expected XP against `expeditionReward` under `RULES_V2` (30 / 75 / 150 XP) with the
+    approved reward table. The relative bands preserve 1.00–1.25× solo and 1.35–1.65× full party.
   - `plans a run in under 100 ms on average`: 50 Troll Hall full-party runs; print fight p50 / p95 / max ms and the p95 JSON
     size of a run for the report.
-- [ ] **Step 6: Run** `npx vitest run tests/domain/dungeon-balance.test.ts`. If a band fails, tune in the spec's order (the
+- [ ] **Step 6: Run** `npx --offline --no-install vitest run tests/domain/dungeon-balance.test.ts`. If a band fails, tune in the spec's order (the
   major's health, then its damage, then `hiredMultiplier`), rerun, and write the final numbers into spec §3.1 and §10;
   never widen a band. Expect PASS.
 - [ ] **Step 7: Commit** `feat: plan dungeon runs, balanced to the prototype`.
@@ -248,8 +277,8 @@ close-up replay, and dungeon results, notifications and camp locations.
 
 **Files:**
 - Create: `supabase/functions/_shared/domain/dungeon-grouping.ts`, `tests/domain/dungeon-grouping.test.ts`
-- Modify: `supabase/functions/_shared/backend/jobs.ts` (`groupDungeonV1`, `simulateDungeonV1`, the v1 `pair` executor and
-  `simulateV1` dispatch), `tests/backend/worker.test.ts`
+- Modify: `supabase/functions/_shared/backend/jobs.ts` (the retained `executorsFor(rules)` pair and simulation dispatch),
+  `tests/backend/worker.test.ts`
 
 **Interfaces:**
 - Consumes: Task 2's `DungeonSeat`, `DungeonRunInput`, `DungeonRunPlan`, `planDungeonRun`, `hiredRolesFor`;
@@ -259,26 +288,26 @@ close-up replay, and dungeon results, notifications and camp locations.
   DungeonId; rulesVersion: string; entrants: DungeonEntrant[] }>`; `DungeonRunAssignment = DeepReadonly<{ runId: string;
   seats: DungeonSeat[] }>`; `DungeonGroupingResult = { runs: DungeonRunAssignment[] }`;
   `partitionByStrength(cents: readonly number[], ratio: number): number[][]` (index groups of an already sorted list);
-  `groupDungeon(input: DungeonGroupingInput, seed: Seed): DungeonGroupingResult`; in `jobs.ts`
-  `groupDungeonV1(input: DungeonGroupingInput, seed: Seed): DungeonGroupingResult` and `simulateDungeonV1(input:
-  DungeonRunInput, seed: Seed): DungeonRunPlan`, both throwing `WorkerFailure('invalid-input' | 'unsupported-rules')`. A
-  human seat copies its entrant's fields exactly (SQL compares them with frozen values).
+  `groupDungeon(input: DungeonGroupingInput, seed: Seed, rules: Rules): DungeonGroupingResult`. In `jobs.ts` use
+  `groupDungeonV2` and `simulateDungeonV2` only from the retained v2 dispatcher. Both reject malformed inputs and frozen
+  versions that do not match the executor. A human seat copies its entrant's fields exactly for SQL validation.
 
 - [ ] **Step 1: Write the tests:**
   - `partitions strengths in bands of at most 2×, then evenly`: cents `[100, 40, 35]` → `[[0], [1, 2]]`; `[100, 50]` →
     `[[0, 1]]` (exactly 2×); seven equal → `[[0,1,2],[3,4],[5,6]]`; 1–6 equal → sizes 1, 2, 3, 2+2, 3+2, 3+3.
   - `groups by strength, strongest first, independent of input order`: shuffled entrants give the same runs; equal
-    strengths order by `seededRandom('<seed>:dungeon:<id>')()` then gladiator id.
+    strengths order by `seededRandom('<seed>:dungeon:<id>')()` then gladiator id. Reuse the exact integer cents computed
+    in `domain/arena.ts` for banding so round-tripping through display strength cannot change a boundary.
   - `numbers runs and seats`: ids `dungeon:<slot>:<dungeonId>:1..R` in group order; humans in seats 0.., then the
     `hiredRolesFor` roles.
   - `refuses a bad grouping input`: an entrant below the level, a repeated gladiator or activity, a wrong `kind` or rules
     version → `RangeError`.
-  - `worker.test.ts`: `sends dungeon-grouping inputs to the grouper and every other pair input to pairArenaV1`; `plans a
-    dungeon run for a kind dungeon simulation and fails closed on a malformed one (invalid-input)`; `refuses a run whose
-    startsAtMs is not slot × slotMs`.
-- [ ] **Step 2: Run** `npx vitest run tests/domain/dungeon-grouping.test.ts tests/backend/worker.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement** as spec §6; the `pair` executor checks `(job.snapshot as { kind?: unknown }).kind ===
-  'dungeon-grouping'`; `simulateV1` gains `kind === 'dungeon'`.
+  - `worker.test.ts`: `routes dungeon grouping and simulation through the retained v2 executor`, rejects dungeon inputs
+    at v1 and mismatched frozen versions, keeps both existing Arena routes, rejects malformed snapshots, and refuses a
+    run whose `startsAtMs` is not `slotIndex * rules.clock.slotMs`.
+- [ ] **Step 2: Run** `npx --offline --no-install vitest run tests/domain/dungeon-grouping.test.ts tests/backend/worker.test.ts`; expect FAIL.
+- [ ] **Step 3: Implement** as spec §6 in `executorsFor(rules)`. Check the discriminator and the retained version before
+  using dungeon capabilities. Preserve `simulateV1` and the existing two-fighter route.
 - [ ] **Step 4: Run** step 2's command and `npm run typecheck`; expect PASS.
 - [ ] **Step 5: Commit** `feat: group dungeon entrants and run dungeon jobs in the worker`.
 
@@ -286,22 +315,24 @@ close-up replay, and dungeon results, notifications and camp locations.
 
 **Files:**
 - Modify: `supabase/functions/_shared/backend/commands.ts` (`choiceShape` accepts `{ kind: 'dungeon', dungeonId }` with a
-  catalog id; `choiceAllowedInPhase` already refuses other parts), `backend/jobs.ts` (`ACTIVITY_KINDS` adds `'dungeon'`, so
-  preparations carry 6 costs), `tests/fixtures/db.ts` (`resetIdentity` truncates the new tables)
-- Create: `supabase/sql/23-dungeons.sql` with a header (purpose, lock order, the accepted exceptions of spec §7) and:
+  catalog id and validates known v2 afternoon syntax in both schedule paths), `backend/jobs.ts` (v2 preparations carry
+  6 costs, retained v1 still carries 5), `tests/fixtures/db.ts` (`resetIdentity` truncates the new tables)
+- Create: `supabase/sql/24-dungeons.sql` with a header (purpose, lock order, the accepted exceptions of spec §7) and:
   - **Section 1:** `activities_resolved_kind_check` re-added with `'dungeon'`; `private.planning_command` restated from
     `18-messages.sql` with, in both `edit-schedule` and `edit-day-schedule`, a dungeon outside the afternoon `invalid` and
     `{ kind, dungeonId }` (exactly 2 keys) checked by `case dungeonId when 'wolf-den' then 3 when 'raider-stronghold' then 7
-    when 'troll-hall' then 12 end` against `g.level`; `private.valid_preparation` restated from `07-arena.sql` accepting
-    the five cost keys or those five plus `dungeon`, each a safe integer; `private.boundary_check_stamina` restated from
-    `03-activities-jobs.sql` with `p.cost is null or p.cost > p.stamina` → Rest.
+    when 'troll-hall' then 12 end` against `g.level` and active `v2` via `private.active_rules_version()`; restate
+    `private.valid_preparation` and `private.boundary_check_stamina` from `21-economy.sql`. Preserve slot-specific v2
+    `trainingAllowed` validation and the two-Training fallback. Accept legacy five-key v1/v2 preparations and the six-key
+    v2 preparation with safe integer `dungeon`. A frozen dungeon with a missing cost or insufficient stamina becomes Rest.
   - **Section 2:** `private.dungeon_runs` (`run_id text primary key` with a format check, `grouping_job_id uuid not null
     references private.jobs(id)`, `slot_index`, `dungeon_id` checked, `seed`, `assignment jsonb` object, `created_at_ms`)
     and `private.dungeon_run_members` (`activity_id uuid primary key references public.activities(id)`, `run_id references
     private.dungeon_runs`, `seat smallint` 0–2, `unique (run_id, seat)`): RLS on, `backend_only` policy, revoke all,
     `select, insert, delete` for `service_role`, `guard_frozen`; `private.grouping_input(target bigint, dungeon text, rules
-    text) returns jsonb`; `private.boundary_pair` restated from `09-tournaments.sql` (Arena body unchanged but entered only
-    when Arena entrants exist; then the dungeon jobs; the existing `pairing` / `operator` waits; then `raise exception
+    text) returns jsonb`; `private.boundary_pair` restated from `21-economy.sql` (preserve all Arena routing, including the
+    v2 cohort whose requested Arena resolved to Rest and can enter a free tournament; then the v2 dungeon jobs, the
+    existing `pairing` / `operator` waits and `raise exception
     'ungrouped dungeon entrant'`); `private.accept_grouping(job uuid, result jsonb) returns boolean`; `public.complete_job`
     restated from `07-arena.sql` sending `pair` jobs with `input->>'kind' = 'dungeon-grouping'` to `accept_grouping`; the
     revoke and grant lists; `notify pgrst, 'reload schema'`.
@@ -315,9 +346,9 @@ close-up replay, and dungeon results, notifications and camp locations.
   `accept_grouping` with the acceptance checks of spec §7.
 
 - [ ] **Step 1: Failing tests (units):** `parseCommand` accepts an afternoon Wolf Den in `edit-schedule` and
-  `edit-day-schedule`, refuses it in the morning and the evening, refuses `dragon-lair` and an extra key;
-  `prepareActivityV1` costs are `{ training: 20, expedition: 30, arena: 25, tournament: 25, rest: 0, dungeon: 40 }` for an
-  unloaded build and `ceil(40 × (1 + overload))` for an overloaded one.
+  `edit-day-schedule`, refuses it in the morning and the evening, refuses `dragon-lair` and an extra key. Generic
+  `prepareActivity(input, RULES_V2)` costs are `{ training: 20, expedition: 30, arena: 25, tournament: 0, rest: 0,
+  dungeon: 40 }` for an unloaded build, with `ceil(40 × (1 + overload))` for an overloaded one. Pin the old v1 cost shape.
 - [ ] **Step 2: Failing tests (`describe('dungeon planning')`):** `accepts Wolf Den in the afternoon at level 3 and
   refuses it at level 2, in the morning and in the evening`; `refuses an unknown dungeon or an extra key in edit-schedule
   and edit-day-schedule`; `validates preparations with the old 5 cost keys and with 6 including dungeon, and refuses 7 keys
@@ -331,17 +362,17 @@ close-up replay, and dungeon results, notifications and camp locations.
   Rest out of every party` (Review Focus 2: stamina 39 → 2 entrants, 1 run of 2 humans); `stops the boundary with ungrouped
   dungeon entrant` (a dungeon activity inserted after its grouping job completed); `denies clients the runs, members, seeds
   and grouping jobs`.
-- [ ] **Step 4: Run** `npx vitest run tests/backend` and `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
-- [ ] **Step 5: Implement** the Edge and worker changes and sections 1–2; apply `23-dungeons.sql` locally with the psql
+- [ ] **Step 4: Run** `npx --offline --no-install vitest run tests/backend` and `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
+- [ ] **Step 5: Implement** the Edge and worker changes and sections 1–2; apply `24-dungeons.sql` locally with the psql
   fallback (container label check first).
-- [ ] **Step 6: Run** step 4's commands plus `npm run test:db -- tests/db/build-schedule.test.ts tests/db/launch-feedback-backfill.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts`;
+- [ ] **Step 6: Run** step 4's commands plus `npm run test:db -- tests/db/build-schedule.test.ts tests/db/launch-feedback-backfill.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts tests/db/economy.test.ts`;
   expect PASS (Arena and tournaments unchanged).
 - [ ] **Step 7: Commit** `feat: schedule dungeons in the afternoon and group their entrants at the boundary`.
 
 ### Task 5: Run jobs and shared reveals (SQL section 3)
 
 **Files:**
-- Modify: `supabase/sql/23-dungeons.sql` section 3:
+- Modify: `supabase/sql/24-dungeons.sql` section 3:
   - `private.dungeon_results` (`run_id text primary key references private.dungeon_runs`, `simulation_job_id uuid
     references private.jobs(id)`, `plan jsonb` object, `created_at_ms`), backend only and frozen;
     `public.dungeon_fights` (`run_id text references private.dungeon_runs`, `ordinal smallint` 1–4, `reveal_at_ms bigint`,
@@ -367,7 +398,7 @@ close-up replay, and dungeon results, notifications and camp locations.
 - Test: `tests/db/dungeons.test.ts` (`describe('dungeon runs')`)
 
 **Interfaces:**
-- Consumes: Task 4's runs and members; Task 3's `simulateDungeonV1` (run by the real worker in the end-to-end test) and
+- Consumes: Task 4's runs and members; Task 3's `simulateDungeonV2` (run by the real worker in the end-to-end test) and
   Task 2's `planDungeonRun` (tests plan with the job's seed, as `tests/db/expeditions.test.ts` does).
 - Produces: `public.dungeon_fights` rows (Task 7 reads them); member stage rows with `fight` references; settlement jobs
   gated on the last reveal (Task 6).
@@ -379,7 +410,9 @@ close-up replay, and dungeon results, notifications and camp locations.
   unsafe reward, a stage outside the slot or out of order, or victory without success` (each → `invalid`, nothing
   written); `shows a dungeon fight to visitors and players only from its reveal time and hides plans, runs and seeds`;
   `passes the longest balance-sample fight through safe_party_log under 100 KB` (Review Focus 5: the longest of 300 Troll
-  Hall full-party plans); `takes every member's account lock before anchoring the run job to seat 0, so a member's command
+  Hall full-party plans); prove a separate validator ceiling admits the worst legal released 3v3 or major log under the
+  120 s cap, 250 ms minimum interval and sweep multiplicity, measured as serialized PostgreSQL bytes, and rejects
+  out-of-bound payloads. `takes every member's account lock before anchoring the run job to seat 0, so a member's command
   holding its lock cannot deadlock phase 8` (the pattern of `tests/db/arena.test.ts` "takes every member's account lock
   before phase 8 anchors a battle job to side 0"); `refuses a dungeon reveal whose lease expired while it waited on the job
   row lock` (the concurrency override's regression, as `docs/operations/job-leases.md` describes).
@@ -389,38 +422,43 @@ close-up replay, and dungeon results, notifications and camp locations.
   expect PASS.
 - [ ] **Step 5: Commit** `feat: run dungeon parties and reveal their fights on time`.
 
-### Task 6: Member settlement, projections, retention and access (SQL section 4), then M29 and capacity
+### Task 6A: Member settlement, projections, retention and access (SQL section 4)
 
 **Files:**
-- Modify: `supabase/sql/23-dungeons.sql` section 4: `public.expedition_settlement_input` restated from `05-expeditions.sql`
+- Modify: `supabase/sql/24-dungeons.sql` section 4: `public.expedition_settlement_input` restated from `05-expeditions.sql`
   (a dungeon member's `rewards` are its outcome's from `dungeon_results.plan->'outcomes'`, `rulesVersion` the plan's, the
   same lease fence); new `private.dungeon_rewards(activity uuid, prepared jsonb) returns jsonb` (`expedition_rewards`'
   body over the member's outcome, `result` and `success` from it, the 7-day `replayExpiry`); `private.settle_activity_core`
   restated from `10-tournament-results.sql` (dungeon → `dungeon_rewards`, a stale preparation `P0002`; receipt and ledger
-  for `'dungeon'`, reason `'dungeon'`); `private.project_character` restated from `17-appearance.sql` (location
-  `'dungeon:'||(a.requested->>'dungeonId')`); `public.owner_state` restated from `18-messages.sql` section 4 (label
-  "Dungeon"; `newNotifications` counts `'dungeon'`); `private.cleanup_history` restated from `15-release.sql` (in the
+  for `'dungeon'`, reason `'dungeon'`); `private.project_character` and `public.owner_state` restated from `22-titles.sql`.
+  Add location `'dungeon:'||(a.requested->>'dungeonId')`, label "Dungeon" and dungeon result notices. Preserve the full
+  public profile, worn title, counts, owner title progress/notices, idle Rest, ACLs and the invoker view.
+  `private.cleanup_history` restated from `15-release.sql` (in the
   7-day pass, before step 12, delete the `dungeon_fights`, `dungeon_results`, `dungeon_run_members` and `dungeon_runs` of
   runs in slots `lo..hi`, reported as `dungeonFights`, `dungeonResults`, `dungeonRunMembers`, `dungeonRuns`); the revoke
-  and grant lists
-- Create: `supabase/migrations/<generated>_dungeons.sql`
+  and grant lists. Preserve all unfinished-work and checkpoint fences and owner-only cleanup. Delete dependent dungeon
+  rows before jobs, permit owner cleanup of frozen rows and retain title history after dungeon details expire.
+- Add the four titles from the 1.7 spec to the shared catalog and `private.title_rules()` using `23-awards.sql` as the
+  baseline (both `award` rows retained). Count member dungeon clears before awarding, and count positive `dungeon` ledger
+  entries toward earned gold. Trigger functions stay non-executable by API roles. Keep expedition-win titles specific.
 - Modify: `tests/fixtures/access.ts` (`OPEN` adds `dungeon_fights`), `tests/db/access-matrix.test.ts` (the new relations'
   and functions' privilege lines), `tests/rule-retention.test.ts` (table list), `tests/performance/capacity-model.ts`
   (retention classes and per-run bytes from Task 2), `tests/browser/live-routes.ts` (`dungeon_fights` in `tables()`),
-  `tests/db/patches.test.ts` ("M26 is `<generated>_patches.sql`, the only `_patches.sql`, the 26th migration"),
-  every migration-count pin (`grep -rn "toHaveLength(28)\|M01–M28" tests`, e.g. `tests/db/restore-hosted.test.ts` → 29),
-  `tests/db/capacity.test.ts`, `docs/operations/migrations.md` (the M29 record and its release order)
+  every migration inventory pin (start with `tests/db/awards.test.ts` and `tests/db/restore-hosted.test.ts`: total 30,
+  preserve each previous migration's position and historical references),
+  `tests/db/capacity.test.ts`, `docs/operations/migrations.md` (the M30 record and its release order)
 - Test: `tests/db/dungeons.test.ts` (`describe('dungeon settlement')`), `tests/db/retention.test.ts`, the access matrix,
   `tests/db/capacity.test.ts`
 
 **Interfaces:**
-- Consumes: Task 5's plans and gated settlement jobs; the worker's unchanged `settle` path (`expedition_settlement_input`,
-  `prepareGrant`, `applyXp`, `settle_expedition`).
-- Produces: settled dungeon summaries (`resolvedKind: 'dungeon'`), `dungeon:<id>` world locations, M29.
+- Consumes: Task 5's plans and gated settlement jobs. Reuse `expedition_settlement_input`, `prepareGrant`, `applyXp` and
+  `settle_expedition` with the plan's retained `rulesVersion`. Inventory overflow uses v2 NPC values and keeps the old
+  v1 value in historical expedition settlement. No runtime role reads `private.economy_switches`.
+- Produces: settled dungeon summaries (`resolvedKind: 'dungeon'`) and `dungeon:<id>` world locations.
 
 - [ ] **Step 1: Failing tests:** `settles each member once at minute 80 from its own outcome; a retry replays the
   receipt`; `pays the won rooms when the major is lost` (Avi's decision 7: Wolf Den → `result: 'defeat'`, `success: false`,
-  XP 60, gold 15, no items, wallet +15); `pays an over-level member from its frozen level` (Review Focus 1: level 8 when
+  18 XP and 3 gold, no items, wallet +3); `pays an over-level member from its frozen level` (Review Focus 1: level 8 when
   saved, 9 at the snapshot → XP and gold halved, salvage only); `sells chest overflow at NPC value when the inventory is
   full`; `settles two members of one party at the same moment with one receipt each and no deadlock` (Review Focus 3:
   `Promise.all` of two `createWorkerDatabase(admin).settle` calls); `shows hired fighters nowhere a player appears` (Review
@@ -430,35 +468,109 @@ close-up replay, and dungeon results, notifications and camp locations.
   `public.dungeon_fights` (SELECT for `anon` and `authenticated` under `due_read`) and every new private table and
   function (`service_role` only); `runs a Wolf Den afternoon with four entrants end to end through the real worker HTTP
   endpoint` (as "runs planning, reveals and exactly-once rewards through the real private Edge worker HTTP endpoint").
+  Pin immediate first-clear and 25th-clear awards from member success, no clear from a fallen member in a winning party,
+  no double count on retry, dungeon gold and loot ownership counts, unchanged M29 award rows/ACLs and bot Founder exclusion.
 - [ ] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts tests/db/retention.test.ts tests/db/access-matrix.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** section 4; reapply the source; update the fixtures, lists and pins above.
-- [ ] **Step 4: Run** step 2's command and `npx vitest run tests/rule-retention.test.ts tests/performance`; expect PASS.
-- [ ] **Step 5: Write the M29 test** in `tests/db/dungeons.test.ts`: `ships M29 completed from 23-dungeons.sql: functions
+- [ ] **Step 4: Run** step 2's command and `npx --offline --no-install vitest run tests/rule-retention.test.ts tests/performance`; expect PASS.
+- [ ] **Step 5: Review and commit** `feat: settle dungeon members and count dungeon titles`.
+
+### Task 6B: Register Ludus Nimbus and protect bot identities
+
+**Files:** `domain/bots.ts` under the shared functions, `24-dungeons.sql` bot registry and routine section,
+`scripts/create-bots.mjs`, `tests/domain/bots.test.ts`, `tests/db/bots.test.ts` and existing title and access tests.
+
+**Interfaces:** Freeze the five catalog entries and their 126-slot UTC routines, with a catalog-to-SQL parity test.
+Before RED, pin every kit, allocation, stance and weekly choice against the approved fixed-build and duty rules in the
+task brief. The SQL parity test must cover the exact kit and routine values.
+`private.bots` stores team, gladiator, role and active status. `private.bot_routines` stores the fixed routine choices.
+`private.create_bot` and the bench operation are owner-only. The local/prod operator script makes banned, non-sign-in
+system Auth identities and registers them idempotently. Record only safe status/counts. No bot identities are seeded
+by M30. The public projection exposes only a whitelisted bot team identifier, never Auth or schedule details.
+
+- [ ] Write and run RED: catalog/member parity, fixed cap/kit, exact slots and off-duty window, concurrent/repeated
+  create, refusal of bot sign-in/player commands and any public operator access, no economic grant or Founder, and
+  no lost 1.7.1 title/profile fields. Include wrong identity and stale retry.
+- [ ] Implement on current SQL21 creation and SQL22 title/projection foundations. Preserve account/advisory lock order.
+  Register the trusted bot identity before any automatic title eligibility check. Test both non-bot and bot paths.
+- [ ] Run owning unit/DB/auth/ACL tests and offline typecheck. Independent review, commit and update handoff.
+
+### Task 6C: Schedule bots and fill dungeon seats after humans
+
+**Files:** `24-dungeons.sql` scheduling/grouping/settlement sections, `domain/bots.ts`, `domain/dungeon-grouping.ts`,
+`domain/dungeon.ts`, worker contracts, `tests/domain/dungeon-grouping.test.ts` and `tests/db/bots.test.ts`.
+
+**Interfaces:** Start `boundary_apply_changes` from SQL15's latest idle-aware version. Freeze bot eligibility after
+the cutoff without changing any human schedule. The human groups and seat order are canonical. In phase 7 use the
+affordable frozen human cohort, the approved global per-dungeon seat cap, each bot's eligibility and at most one run
+per bot. Derive disjoint per-dungeon bot pools once under the boundary coordinator before dispatching any grouping job.
+Order the dungeon IDs and eligible bot IDs deterministically. Acceptance only uses that frozen pool so parallel or
+retried grouping jobs cannot reuse a bot. Expose derived duty status and scheduled return time with the public team
+identifier. Keep the full routines private. An unplaced bot follows the approved Training fallback with ordinary v2 checks. Preserve the ungrouped
+human guard and do not manufacture a bot-only run. Keep member settlement and shared reveals fenced.
+
+- [ ] Write and run RED: off-duty at 00:00/08:00 UTC, 44 humans can see bots and 45 benches them, no bot idle suppression
+  while active, current v2 Training limit, no bot-only runs, no duplicate bot across two dungeons, insufficient-stamina
+  human excluded, valid bot retained ahead of a hire, role combat matches its hire equivalent and no economic grant.
+- [ ] Implement the minimal SQL/worker extensions. Preserve real-human grouping, fallback, dependency and lease behavior.
+- [ ] Run owning unit and DB tests plus capacity fixtures, then independent review, commit and update handoff.
+
+### Task 6D: Unranked Arena bot bouts
+
+**Files:** `domain/arena.ts`, shared Arena worker types/executors, `24-dungeons.sql` pairing/job/reward sections,
+`tests/domain/arena.test.ts`, `tests/backend/worker.test.ts`, `tests/db/arena.test.ts`, `tests/db/bots.test.ts`.
+
+**Interfaces:** Preserve `pairArena`'s retained player pairing. Add a distinct bot route only for an NPC fallback. The
+latest SQL21 pairing acceptance preserves free v2 tournaments and validates the frozen same-league and 25% eligibility.
+Use the existing Arena simulation/reveal lanes with unranked result metadata. Settle only the human's approved 20%
+floor of normal player-bout currencies. Do not update either rating, standings or qualification, or create a bot
+reward receipt in the public history. Preserve internal idempotency and opponent identity for replay.
+
+- [ ] Write and run RED: human pairs and tournaments unchanged, bots never enter a tournament, only eligible NPC
+  replacements, least-recent eligible bot first, no double-assignment, 20% floor and no rank/qualification changes,
+  bot spar with zero grants, release-window old worker unchanged while bots are inactive, fenced reveal and settlement.
+- [ ] Implement from the latest SQL21 pairing and SQL10 settlement bodies with the dungeon changes included. Keep
+  existing two-fighter human and NPC logs byte-stable. Verify replay only discloses the whitelisted bot identity/tag.
+- [ ] Run owning unit, worker, Arena/tournament/economy/title DB and offline typecheck. Independent review, commit and
+  update handoff.
+
+### Task 6E: Seal M30 and prove capacity
+
+**Files:** Create `supabase/migrations/<generated>_patch_1_8.sql`. Update the migration count pins, access and retention
+coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume all Task 4–6D source changes.
+
+- [ ] **Step 1: Write the M30 test** in `tests/db/dungeons.test.ts`: `ships M30 completed from 24-dungeons.sql: functions
   before the CHECKs and triggers that call them, revokes before grants, the source bodies, ACLs, RLS and policies, the
   invoker view and the reload last` (the shape of `tests/db/messages.test.ts`'s M25 test). Run it; expect FAIL (no file).
-- [ ] **Step 6: Generate and complete M29** per `docs/operations/migrations.md` (as M25): compare the draft with the source
+- [ ] **Step 2: Generate and complete M30** as in the M28/M29 records: clean M01–M29, apply the final LF source once and
+  capture fingerprint and audit, then `npx --offline --no-install supabase db pull patch_1_8 --local --schema public,private --diff-engine pg-delta --yes`.
+  Record the generator's image/cache evidence and compare the draft with the source
   for grants and revokes, RLS and policies, the invoker view, function / trigger / CHECK order, initialisation statements,
   and re-emitted unchanged functions byte-equal to their previous migration; complete every omission (a privilege-only
   omission through `supabase migration new`, the Task 23.1 rule).
-- [ ] **Step 7: Replay:** `npx supabase db reset --local --no-seed --yes`; inspect the replayed function bodies and
+- [ ] **Step 3: Replay:** `npx --offline --no-install supabase db reset --local --no-seed --yes`; inspect the replayed function bodies and
   `search_path`, role ACLs, policies, triggers and the invoker view; the `scripts/schema-fingerprint.sql` output equals the
   source-applied one byte for byte, and again after a second reset; record the line count.
-- [ ] **Step 8: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
-  `npm run test:db` under the DB-test rule, `npx supabase db lint --local` and the advisors `--local`; expect PASS and no
+- [ ] **Step 4: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
+  `npm run test:db` under the DB-test rule, `npx --offline --no-install supabase db lint --local` and the advisors `--local`; expect PASS and no
   new advisor finding.
-- [ ] **Step 9: Capacity:** add to `tests/db/capacity.test.ts` `publishes an afternoon with 25 of 50 characters in dungeons
-  within 120 s, by the tick after the cutoff` and the 90-day size check with dungeon rows; run with `CAPACITY_GATE=1`;
+- [ ] **Step 5: Capacity:** add to `tests/db/capacity.test.ts` `publishes an afternoon with 25 of 50 characters in dungeons
+  within 120 s, by the tick after the cutoff`, measure the following boundary's settlements and check the 90-day size
+  with dungeon rows. Model one afternoon per three slots, parties of up to three, per-run plans/logs/jobs, member stages,
+  permanent receipts, title counts and the approved bot population. Run with `CAPACITY_GATE=1`;
   expect PASS. If either fails, stop and report the numbers to the controller (no scope change).
-- [ ] **Step 10: Commit** `feat: settle dungeon members and ship M29`, with the M29 record in `migrations.md`.
+- [ ] **Step 6: Review and commit** `feat: seal party dungeons and Ludus Nimbus in M30`, with the M30 migration record.
 
 ### Task 7: Client: mockups for Avi, then reads, schedule, results, notifications and camp
 
 **Files:**
-- Create (untracked design folder): `.superpowers/design/2026-10-29-party-dungeons/mockups.html` and `shots/`
+- Review evidence (parent workspace): `logs/p18-mockup-20261107/mockups.html`, `shots/`, `art/` and `mockup-verification.json`
 - Modify: `src/lib/api/reads.ts` (`readDungeonFight`; timeline stages keep `fight` for `room` / `major`;
   `NOTIFICATION_KINDS` adds `'dungeon'`, a dungeon's `destination` is its name), `src/lib/api/gateway.ts` (`dungeonFight`,
   cached like `tournamentLog`), `src/lib/api/fixture-gateway.ts`, `src/features/schedule/schedule-text.ts`,
   `src/features/schedule/SchedulePanel.tsx` (`choiceKey` / `choiceOf` for `dungeon:<id>`),
+  `src/features/schedule/rest-stamina.ts` (dungeon cost and v2 projection), `src/features/titles/title-picker.ts`
+  (remove the four shipped titles from the later-titles line),
   `src/features/results/result-text.ts`, `src/features/results/ResultsPanel.tsx` (a dungeon row's Replay opens
   `/dungeon/?activity=`), `src/features/messages/notifications.ts`, `src/features/character/actor-text.ts`,
   `src/features/character/activity-status.ts`, `src/game/actors.ts` (`locationKind`: `dungeon` → `'away'`)
@@ -474,18 +586,21 @@ close-up replay, and dungeon results, notifications and camp locations.
   `readDungeonFight(client: SupabaseClient, runId: string, ordinal: number): Promise<PartyBattleLog>`; fixtures
   `DUNGEON_FIXTURES` keyed `full-victory` (Wolf Den, three humans), `solo-major-lost` (Raider Stronghold, one human and two
   hired), `room-lost` (Troll Hall, a member fallen in room 2, the run lost in room 3), each a timeline plus its fight logs;
-  `schedule-text`: `choicesFor(phase, level)` lists unlocked dungeons in the afternoon only, `lockedChoices(level, phase)`
-  the afternoon's locked ones, `dungeonNote(phase): string | null`, `choiceLabel` "Dungeon: Wolf Den", `optionLabel`
-  "Dungeon: Wolf Den · Level 3", and `choiceHint`'s dungeon case "3 rooms, then the boss. You're grouped with others who
-  chose it; hired fighters fill empty seats. Costs 40 stamina." (the cost from `rules.activityStamina.dungeon`).
+  `schedule-text`: `choicesFor(phase, level, rules)` lists unlocked dungeons in the v2 afternoon only. Pass phase and
+  active rules to `lockedChoices` and `dungeonNote` too, and keep Training cap/warning and v2 Rest projection.
+  `choiceLabel` "Dungeon: Wolf Den", `optionLabel`
+  "Dungeon: Wolf Den · Level 3", and `choiceHint`'s dungeon case "3 rooms, then the boss. Players group first. Eligible bots
+  and hired fighters fill open seats. Costs 40 base stamina." (the cost from `rules.activityStamina.dungeon`).
 
-- [ ] **Step 1: Capture real screens** in the fixture preview at 1440 × 900 and 360 × 740: the schedule's afternoon
-  select, an expedition scene at a fight, a close-up replay, Results, Notifications, the roster and Patch A's watch button.
-- [ ] **Step 2: Build the clickable mockup** over them: dungeon options and the afternoon-only note; the run view (party of
+- [x] **Step 1: Capture real screens** at 1440 × 900 and 360 × 740. Use the routed owner in `tests/browser/live-routes.ts`
+  and `planning.spec.ts` for the editable Schedule and `away-button.spec.ts` for Watch live. The fixture Schedule is
+  read-only. Use fixture preview for the existing run, replay, Results, Notifications and roster. Use test data only.
+- [x] **Step 2: Build the clickable mockup** over them: dungeon options and the afternoon-only note; the run view (party of
   three in formation, a room fight, the major one scale larger and tinted, the five-segment strip, LIVE and the whole-trip
   replay controls from Patch A); the 3-v-3 close-up with a sweep; the result card and notification lines (spec §9); the
-  roster's "In Wolf Den"; the watch button for a dungeon. Each at both sizes.
-- [ ] **Step 3: Show Avi and wait for his approval in chat.** Record his answer and any change in spec §9 (dated) and
+  roster's "In Wolf Den"; the watch button for a dungeon. Add the four dungeon titles and Ludus Nimbus disclosure in
+  camp, roster, profile, unranked Arena and replay, at both sizes.
+- [x] **Step 3: Show Avi and wait for his approval in chat.** Record his answer and any change in spec §9 (dated) and
   commit `docs: Avi's dungeon mockup decisions`. No step below and no Task 8 step starts before this approval.
 - [ ] **Step 4: Failing tests:** `dungeon-fixtures.test.ts` `regenerates the dungeon fixtures from planDungeonRun byte
   for byte`; `dungeon-read.test.ts` `reads a revealed fight once and serves it from the cache`, `refuses a malformed log
@@ -493,15 +608,17 @@ close-up replay, and dungeon results, notifications and camp locations.
   with its dungeon's name`; `schedule-text.test.ts` `offers Wolf Den and Raider Stronghold in the afternoon at level 7 and
   lists Troll Hall locked`, `offers no dungeon in the morning or evening and says "Dungeons run in the afternoon only."`,
   `describes a dungeon with its 40 stamina` (`choiceHint` equals the line above);
-  `results-panel` / `notifications` `reads "Wolf Den cleared: the Alpha of the Den fell" for a victory and "Wolf Den: the
-  party was beaten" with the room pay for a defeat`; `roster-panel` `says "In Wolf Den" while away`; `locationKind` of
+  `results-panel` / `notifications` verifies the approved victory and defeat text, including a member knocked out while
+  the party cleared. Room pay remains visible to that member. `roster-panel` `says "In Wolf Den" while away`; `locationKind` of
   `dungeon:wolf-den` is `'away'`.
-- [ ] **Step 5: Run** `npx vitest run tests/domain tests/api tests/features`; expect FAIL.
-- [ ] **Step 6: Implement** the reads, gateway, fixtures, schedule words and result, notification and camp lines.
+- [ ] **Step 5: Run** `npx --offline --no-install vitest run tests/domain tests/api tests/features`; expect FAIL.
+- [ ] **Step 6: Implement** the reads, gateway, fixtures, schedule words and result, notification and camp lines. Allowlist
+  a dungeon identifier in the public result, keep owner reward amounts private and preserve the combined look/title read.
 - [ ] **Step 7: Browser tests:** in `planning.spec.ts`, a level-3 player saves a day with Wolf Den in the afternoon and the
   command carries `{ kind: 'dungeon', dungeonId: 'wolf-den' }`, the morning select offers no dungeon and shows the note,
   and the panel fits 360 × 740; in `full-screen.spec.ts`, a dungeon member walks out through the gate and the roster line
-  reads "In Wolf Den". Run with the private Playwright config; expect PASS.
+  reads "In Wolf Den". Cover the BOT tag in every approved surface, including a bot in a mixed dungeon party and in an
+  unranked Arena replay. Run with the private Playwright config; expect PASS.
 - [ ] **Step 8: Commit** `feat: dungeon choices, results, notifications and camp lines`.
 
 ### Task 8: Run view and party close-up replay (reusing Patch A)
@@ -511,7 +628,8 @@ close-up replay, and dungeon results, notifications and camp locations.
   `DungeonView.module.css`, `src/app/dungeon/page.tsx`, `src/game/party-replay.ts`, `src/game/party-stage.ts`,
   `src/features/dungeon/PartyReplay.tsx` and `PartyReplay.module.css`
 - Modify: `src/game/expedition-creatures.ts` (waiting groups and the major), `src/app/replay/page.tsx`
-  (`?run=<runId>&fight=<n>`), `src/features/shell/scene-url.ts` (the dungeon scene), Patch A's
+  (`?run=<runId>&fight=<n>`), `src/features/shell/scene-url.ts`, `CampShell.tsx`, `SceneOverlay.tsx`, `useAwayTrip.ts`
+  and `AwayButton.tsx` (dungeon Watch, close and focus return), Patch A's
   `src/game/trip-replay.ts` (`TripChapterId` adds `'fight-4'`), `src/features/character/trip-text.ts` (`TripMark.fight`
   adds 4) and `src/features/shell/away-trip.ts` (`awayState` is running for a dungeon too, `nextFight` adds 16 | 32 | 48 |
   64, and its button opens `/dungeon/?activity=`), `scripts/release-scan.mjs` (`FIXED_ROUTES` adds `dungeon/index.html`),
@@ -553,7 +671,7 @@ close-up replay, and dungeon results, notifications and camp locations.
   logged healthAfter`, `applies a sweep group at once`, `ends with the logged winner side`; `party-stage`: `fits three
   against three on 360 × 740 at an integer scale of at least 2 with no overlap`, `draws the major one integer scale larger
   than the monsters`; `static.test.ts`: `scanner refuses an export without the fixed dungeon page`.
-- [ ] **Step 3: Run** `npx vitest run tests/domain/dungeon-stage.test.ts tests/domain/party-replay.test.ts tests/domain/party-stage.test.ts tests/domain/away-trip.test.ts tests/static.test.ts tests/deployed.test.ts`; expect FAIL.
+- [ ] **Step 3: Run** `npx --offline --no-install vitest run tests/domain/dungeon-stage.test.ts tests/domain/party-replay.test.ts tests/domain/party-stage.test.ts tests/domain/away-trip.test.ts tests/static.test.ts tests/deployed.test.ts`; expect FAIL.
 - [ ] **Step 4: Implement** the pure cores, then the scene, view, route and replay as approved in Task 7 step 3.
 - [ ] **Step 5: Browser tests** (`dungeon.spec.ts`, `replay.spec.ts`, fixtures): the watch button opens a running run;
   the party walks and fights at the fixture times; the whole-trip replay plays and its chapters work; a fight opens the
@@ -563,23 +681,33 @@ close-up replay, and dungeon results, notifications and camp locations.
   expect PASS.
 - [ ] **Step 6: Commit** `feat: watch dungeon runs and replay party fights`.
 
-### Task 9: Gate, review, release and the patch note
+### Task 9: Trailer, gate, review and release
 
-- [ ] **Step 1: Deployed probes:** add to `tests/browser/deployed-checks.ts` the anonymous M29 probes (`dungeon_fights`
+- [ ] **Step 1: Deployed probes:** add to `tests/browser/deployed-checks.ts` the anonymous M30 probes (`dungeon_fights`
   returns only revealed rows; the new private tables and functions are refused).
-- [ ] **Step 2: Gate:** start the local Edge serve and run the gate of record; expect 12/12 (DB-test rule, no build during
-  the browser run).
-- [ ] **Step 3: Review:** a fresh reviewer checks the whole branch against the spec; fix what it finds; rerun the affected
+- [ ] **Step 2: Trailer:** when the test build is playable, read
+  `C:/Users/Avi_OP_PC/Documents/Youtube Channel Videos/.agents/skills/cloudiator-patch-video/SKILL.md` and use
+  its grandiose trailer workflow with HyperFrames. Capture real test gameplay, with playable party combat, hires, the
+  boss and approved bot presentation. Show Avi the preview and use his approval for rendering. Finish the film,
+  thumbnail, story and feature-post kit before shipping. Ask separately before any upload or post.
+- [ ] **Step 3: Gate:** after any reboot start Docker Desktop, then serve Edge from Design with
+  `npx --offline --no-install supabase functions serve --env-file .env.edge.local`. Check both private browser-config
+  modes and helpers. Run the native32 gate of record on the exact candidate and retain complete reports for all 12 stages.
+- [ ] **Step 4: Review:** a fresh reviewer checks the whole branch against the spec; fix what it finds; rerun the affected
   tests and the gate.
-- [ ] **Step 4: Hosted pre-checks (read-only, `db query --linked --agent no`):** Patch A is live on `release`; no open
-  boundary; the time is outside Wednesday and Saturday 17:20–20:00 UTC; 0 failed jobs in the last hour.
-- [ ] **Step 5: Avi's go in chat**, showing him the spec §12 patch note. Then `npx supabase db push --dry-run` (exactly
-  M29), `db push`, the access audit and fingerprint against the local replay; `functions deploy game-command` and
-  `functions deploy game-worker` (`--project-ref djkblzbnritgbmctsvob`, Docker bundling); the `release` fast-forward; the
-  deployed checks about 2 minutes after Pages is live.
-- [ ] **Step 6: Post the patch note** with `private.post_message('patch-notes', …)` exactly as spec §12, only after the
-  client is live; read it back as visible.
-- [ ] **Step 7: Watch the first afternoon** after the release (read-only): publication time, the grouping jobs completed,
-  0 failed or operator jobs, the runs settled at minute 80.
-- [ ] **Step 8: Record** the evidence in `docs/operations/release-evidence.md` and `deployment.md`, update
-  `docs/implementation/HANDOFF.md`; commit `deploy: ship party dungeons (M29)`.
+- [ ] **Step 5: Hosted pre-checks (aggregate reads only):** confirm 1.7.1 on `release`, M01–M29 and active v2, no open
+  boundary, zero recent failed jobs, and a quiet window outside Wednesday and Saturday 17:20–20:00 UTC.
+- [ ] **Step 6: Release with separate explicit Avi go for each write.** Show the actual patch note and candidate proof.
+  Check `npx --offline --no-install supabase db push --dry-run --skip-vault` lists only M30, then on migration go use
+  `db push --skip-vault --yes`. Compare fingerprint and audit to the local replay via aggregate checks. On individual
+  go, deploy and verify `game-worker` first, then `game-command`. On client go, fast-forward `release` and verify the
+  exact Pages deployment and live probes. Each production command runs only in the approved linked release worktree.
+- [ ] **Step 7: Register bots, note and record.** After the client is verified, use the local-proven bot operator script
+  to create and activate the five identities only on Avi's exact go. Verify counts, labels and inactive competitors using
+  aggregate checks. Post the approved §12 note on its own go. On the next
+  explicit go run the linked patch record generated by `node scripts/patch-statement.mjs 1.8`. Verify visibility,
+  `latest_patch` and feature count through aggregate reads.
+- [ ] **Step 8: Watch the first afternoon and next boundary** with aggregate publication, grouping, settlement and job
+  health checks. Confirm no failed or operator jobs or duplicate grants and record actual settlement timing.
+- [ ] **Step 9: Record** the evidence in `docs/operations/release-evidence.md` and `deployment.md`, update
+  `docs/implementation/HANDOFF.md`; commit `deploy: ship party dungeons (M30)`.

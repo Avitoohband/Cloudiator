@@ -28,7 +28,7 @@ describe('title words', () => {
   it('words a season place and a title name', () => {
     expect(placeInSeasonText({ seasonIndex: 0, league: 'bronze', place: 3 })).toBe('3rd in Season 1 · Bronze');
     expect(placeInSeasonText({ seasonIndex: 1, league: 'champion', place: 1 })).toBe('1st in Season 2 · Champion');
-    expect([titleName('lion'), titleName('den-breaker'), titleName(undefined)]).toEqual(['Lion of the Arena', null, null]);
+    expect([titleName('lion'), titleName('den-breaker'), titleName('outfitter'), titleName(undefined)]).toEqual(['Lion of the Arena', 'Den Breaker', null, null]);
     expect(NO_TITLE).toBe('No title');
   });
   it('words the worn title: Champion names its latest first place, anything unknown is null', () => {
@@ -41,6 +41,6 @@ describe('title words', () => {
     expect(wornTitleText('pathfinder', [])).toBe('Pathfinder');
     // Another title never takes the prestige's words.
     expect(wornTitleText('pathfinder', [award('0', 'silver', 'gold')])).toBe('Pathfinder');
-    expect([wornTitleText('x', []), wornTitleText('den-breaker', []), wornTitleText(42, []), wornTitleText(null, []), wornTitleText(undefined, [])]).toEqual([null, null, null, null, null]);
+    expect([wornTitleText('x', []), wornTitleText('outfitter', []), wornTitleText(42, []), wornTitleText(null, []), wornTitleText(undefined, [])]).toEqual([null, null, null, null, null]);
   });
 });

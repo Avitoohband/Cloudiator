@@ -49,4 +49,15 @@ describe('retained rules in the migrated database', () => {
       expect(Object.keys(DEFAULT_EXECUTORS[version]).sort(), version).toEqual(kinds.filter(kind => kind !== 'settlement'));
     }
   });
+
+  it('keeps each frozen dungeon run and plan attached to its retained-rules job', async () => {
+    expect(await sql`select c.conrelid::regclass::text as relation,a.attname as column,c.convalidated as validated,
+      c.confupdtype as "onUpdate",c.confdeltype as "onDelete"
+      from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum=c.conkey[1]
+      where c.contype='f' and c.confrelid='private.jobs'::regclass and c.conrelid in
+        ('private.dungeon_runs'::regclass,'private.dungeon_results'::regclass) order by 1`).toEqual([
+      { relation: 'private.dungeon_results', column: 'simulation_job_id', validated: true, onUpdate: 'a', onDelete: 'a' },
+      { relation: 'private.dungeon_runs', column: 'grouping_job_id', validated: true, onUpdate: 'a', onDelete: 'a' },
+    ]);
+  });
 });

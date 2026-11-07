@@ -22,12 +22,12 @@ const aster = (level = 1): OwnerState => {
 const names = (rows: readonly { name: string }[]) => rows.map(row => row.name);
 
 describe('the picker', () => {
-  // Patch 1.7.1: a hand-given (`award`) title is shown only to its holder, and All counts what is shown: 31 for most players.
-  it('counts the earned titles and the titles shown: 31, or 32 for a holder of a hand-given one', () => {
-    expect(pickerCounts(aster())).toEqual({ earned: 8, all: 31 });
-    expect(pickerCounts({ titles: [] })).toEqual({ earned: 0, all: 31 });
-    expect(pickerCounts(withAsterAward(aster()))).toEqual({ earned: 9, all: 32 });
-    expect(TITLES_V1).toHaveLength(33);
+  // A hand-given title is shown only to its holder. All counts what is shown.
+  it('counts the earned titles and the titles shown: 35, or 36 for a holder of a hand-given one', () => {
+    expect(pickerCounts(aster())).toEqual({ earned: 8, all: 35 });
+    expect(pickerCounts({ titles: [] })).toEqual({ earned: 0, all: 35 });
+    expect(pickerCounts(withAsterAward(aster()))).toEqual({ earned: 9, all: 36 });
+    expect(TITLES_V1).toHaveLength(37);
   });
 
   it('shows a hand-given title only to its holder, in Earned and in All', () => {
@@ -41,7 +41,7 @@ describe('the picker', () => {
     expect(rowsOf(holder, 'all').filter(r => r.id === 'game-master' || r.id === 'high-ground').map(r => r.id)).toEqual(['game-master']);
     // The other hand-given title stays hidden, and Special keeps its catalog order (Game Master after Bannerman).
     expect(pickerGroups(holder, 'all')[0].rows.map(r => r.name)).toEqual(['Founder', 'Old Guard', 'Bannerman', 'Game Master']);
-    expect(rowsOf(holder, 'all')).toHaveLength(32);
+    expect(rowsOf(holder, 'all')).toHaveLength(36);
   });
 
   it('lists the earned titles by family, in the families\' order, leaving out empty families', () => {
@@ -60,14 +60,15 @@ describe('the picker', () => {
     expect(groups.flatMap(g => g.rows).every(row => row.earned && row.progress === null)).toBe(true);
   });
 
-  it('lists all 31 in All, a locked one with its progress', () => {
+  it('lists all 35 in All, a locked one with its progress', () => {
     const groups = pickerGroups(aster(6), 'all');
-    expect(groups.map(g => g.family)).toEqual(['Special', 'Expeditions', 'Training', 'Arena', 'Tournaments', 'Seasons', 'Gear collection', 'Wealth']);
+    expect(groups.map(g => g.family)).toEqual(['Special', 'Expeditions', 'Dungeons', 'Training', 'Arena', 'Tournaments', 'Seasons', 'Gear collection', 'Wealth']);
     const rows = groups.flatMap(g => g.rows);
     expect(rows.map(r => r.id)).toEqual(TITLES_V1.map(t => t.id).filter(id => id !== 'game-master' && id !== 'high-ground'));
     const row = (id: string) => rows.find(r => r.id === id)!;
     expect(row('pathfinder')).toEqual({ id: 'pathfinder', name: 'Pathfinder', rule: '50 expeditions won', earned: false, progress: '34 of 50', share: 0.68 });
     expect(row('troll-slayer').progress).toBe('Opens at level 10');
+    expect(row('kingslayer').progress).toBe('Opens at level 12');
     expect(row('raiders-bane').progress).toBe('13 of 25');
     expect(row('patrician')).toMatchObject({ earned: false, progress: '1,240 of 4,000', share: 0.31 });
     expect(row('old-guard').progress).toBe('21 of 100 days');
@@ -88,15 +89,15 @@ describe('the picker', () => {
   // Review Focus 1: an id this client does not know (a newer server's, or junk) is shown nowhere and never throws.
   it('ignores a held title this client does not know', () => {
     const owner = aster();
-    owner.titles = [...owner.titles, { id: 'dungeoneer', earnedAtMs: 1, activityId: null, source: 'history', detail: null },
+    owner.titles = [...owner.titles, { id: 'outfitter', earnedAtMs: 1, activityId: null, source: 'history', detail: null },
       { id: 'founder', earnedAtMs: 2, activityId: null, source: 'joined', detail: null }];
-    expect(pickerCounts(owner)).toEqual({ earned: 8, all: 31 });
+    expect(pickerCounts(owner)).toEqual({ earned: 8, all: 35 });
     expect(pickerGroups(owner, 'earned').flatMap(g => g.rows)).toHaveLength(8);
-    expect(pickerGroups(owner, 'all').flatMap(g => g.rows).some(r => r.id === 'dungeoneer')).toBe(false);
+    expect(pickerGroups(owner, 'all').flatMap(g => g.rows).some(r => r.id === 'outfitter')).toBe(false);
   });
 
-  it('says the eight titles that arrive later', () => {
-    expect(LATER_TITLES).toBe('8 more arrive later: 4 with party dungeons, 2 in the Deep, Outfitter with the new gear, and Legend-Bearer if a Legendary rarity ever comes.');
+  it('says the four titles that arrive later', () => {
+    expect(LATER_TITLES).toBe('4 more arrive later: 2 in the Deep, Outfitter with the new gear, and Legend-Bearer if a Legendary rarity ever comes.');
   });
 });
 
@@ -177,7 +178,7 @@ describe('the Title button', () => {
 
   // Review Focus 1, and D2: the button shows the plain name ("Champion"), never throws on an unknown id.
   it('shows No title for an id this client does not know, and the plain name for Champion', () => {
-    for (const junk of ['dungeoneer', '', 'FOUNDER']) expect(render(junk), junk).toContain('aria-label="Title: No title. Choose your title"');
+    for (const junk of ['outfitter', '', 'FOUNDER']) expect(render(junk), junk).toContain('aria-label="Title: No title. Choose your title"');
     expect(render('champion')).toContain('aria-label="Title: Champion. Choose your title"');
   });
 });

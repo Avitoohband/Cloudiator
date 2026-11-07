@@ -84,7 +84,7 @@ test('reads the titles earned as a whole number from 0, else 0, and the actor\u2
     expect((await readProfile(api(profile({ titlesEarned })).client, ACTOR.gladiatorId)).titlesEarned, String(titlesEarned)).toBe(0);
   }
   expect((await readProfile(api(profile()).client, ACTOR.gladiatorId)).titlesEarned).toBe(0);
-  for (const [title, shown] of [['lion', 'lion'], ['den-breaker', null], [42, null], [undefined, null]] as const) {
+  for (const [title, shown] of [['lion', 'lion'], ['den-breaker', 'den-breaker'], ['outfitter', null], [42, null], [undefined, null]] as const) {
     expect((await readProfile(api(profile({ actor: { ...ACTOR, title } })).client, ACTOR.gladiatorId)).actor.title, String(title)).toBe(shown);
   }
 });

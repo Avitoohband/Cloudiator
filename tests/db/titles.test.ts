@@ -80,8 +80,8 @@ describe('the titles catalog and awarding', () => {
     const [{ rules, volatility, definer, config }] = await sql`select private.title_rules() as rules, p.provolatile as volatility,
       p.prosecdef as definer, p.proconfig as config from pg_proc p where p.oid='private.title_rules()'::regprocedure`;
     expect(rules).toEqual(TITLES_V1.map(({ id, measure, threshold, tier }) => ({ id, measure, threshold, tier })));
-    // 1.7's 31, and patch 1.7.1's two hand-given rules after Bannerman (23-awards.sql restates the function; measure 'award').
-    expect(rules).toHaveLength(33);
+    // Includes the two hand-given rules after Bannerman and the four dungeon rules.
+    expect(rules).toHaveLength(37);
     expect(rules.slice(2, 5)).toEqual([{ id: 'bannerman', measure: 'banner', threshold: 1, tier: null },
       { id: 'game-master', measure: 'award', threshold: 1, tier: null }, { id: 'high-ground', measure: 'award', threshold: 1, tier: null }]);
     expect({ volatility, definer, config }).toEqual({ volatility: 'i', definer: false, config: ['search_path=""'] });
@@ -906,8 +906,8 @@ describe('wear-title', () => {
   it('refuses an unheld, unknown or malformed title and a wrong shape as invalid, with no receipt', async () => {
     const f = await holder(), operationId = randomUUID();
     const [version, before] = [await rowVersion(f.gid), await worldRevision()];
-    // Croesus is a catalog title it does not hold; den-breaker is no title at all; the rest are not ids.
-    for (const titleId of ['croesus', 'den-breaker', 'Founder', 7, '', 'a', 'tiro ', true, [], {}, ['tiro'], { id: 'tiro' }]) {
+    // Croesus and Den Breaker are unheld catalog titles. Outfitter is still unknown.
+    for (const titleId of ['croesus', 'den-breaker', 'outfitter', 'Founder', 7, '', 'a', 'tiro ', true, [], {}, ['tiro'], { id: 'tiro' }]) {
       expect(await wearRpc(f.id, operationId, wear(titleId, operationId)), JSON.stringify(titleId)).toEqual({ ok: false, code: 'invalid' });
     }
     const valid = wear('wanderer', operationId), { titleId: _titleId, ...withoutTitle } = valid;
@@ -1088,6 +1088,11 @@ async function history<T>(seed: () => Promise<T>): Promise<T> {
 /** The source's own statements for the seven counting triggers (titles_on_gladiator and section 3), as M28 runs them. */
 const TRIGGER_STATEMENTS = readFileSync(new URL('../../supabase/sql/22-titles.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   .match(/^(?:drop trigger if exists titles_on_\w+ on [\w.]+;|create trigger titles_on_\w+[^;]*;)$/gm) ?? [];
+const titleTriggerDefinitions = () => Promise.all(TITLE_TRIGGERS.map(async ([table, name]) => {
+  const [row] = await sql`select pg_get_triggerdef(oid,false) as definition from pg_trigger
+    where tgrelid=${table}::regclass and tgname=${name}`;
+  return row.definition as string;
+}));
 type Backfill = { ok: boolean; ranAtMs: number; gladiators: number; titles: number; founders: number; worn: number; replayed: boolean };
 const backfill = async () => (await sql`select private.backfill_titles() as result`)[0].result as Backfill;
 const HOUR = 3_600_000;
@@ -1341,6 +1346,7 @@ describe('the history back-fill', () => {
       expect(leases.map(l => l.activityId)).toEqual([training]);
       // The world as M28 finds it: no title, counter or ownership-history row.
       await wipeTitles();
+      const installedTriggers = paused ? null : await titleTriggerDefinitions();
       const { counted, inside } = await withPause(paused, gate => withSessions(async (a, b) => {
         // M28's transaction: the seven triggers, then the back-fill, not yet committed. In the second variant only the
         // back-fill, its own locks alone, held at its first counter (its history already read) while the write arrives.
@@ -1358,7 +1364,17 @@ describe('the history back-fill', () => {
         expect((await settling)[0].outcome).toMatchObject({ ok: true });
         await b.q`commit`;
         return { counted: ran as Backfill, inside: seen };
-      }));
+      })).finally(async () => {
+        if (!installedTriggers) return;
+        // The probe committed M28's definitions. Restore what this database had before it, including later predicates.
+        await sql.begin(async tx => {
+          for (const [index, [table, name]] of TITLE_TRIGGERS.entries()) {
+            await tx.unsafe(`drop trigger ${name} on ${table}`);
+            await tx.unsafe(installedTriggers[index]);
+          }
+        });
+        expect(await titleTriggerDefinitions()).toEqual(installedTriggers);
+      });
       // Placed in 1970 within season 0 (the boundary's): a Founder and an Old Guard from history, and nine Trainings.
       expect(counted).toEqual({ ok: true, ranAtMs: counted.ranAtMs, gladiators: 1, titles: 2, founders: 1, worn: 1, replayed: false });
       expect(inside).toEqual({ trainings: 9, 'items-owned': 2, 'rare-items': 0, 'tiers-of-one': 1, 'rarities-of-one': 1 });

@@ -59,7 +59,7 @@ Deno.test('Edge runtime routes wear-title to its own transaction and refuses an 
   const command = { kind: 'wear-title', operationId: id, titleId: 'pathfinder' };
   const worn = await send(command);
   if (worn.status !== 200 || (await worn.json()).value.titleId !== 'pathfinder') throw new Error('Wear-title routing failed');
-  const unknown = await send({ ...command, titleId: 'den-breaker' });
+  const unknown = await send({ ...command, titleId: 'outfitter' });
   if (unknown.status !== 400 || (await unknown.json()).code !== 'invalid') throw new Error('Unknown title id was not refused');
   const extra = await send({ ...command, gladiatorId: id });
   if (extra.status !== 400) throw new Error('Extra authority was not refused');

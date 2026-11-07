@@ -35,7 +35,7 @@ test('reads an owner state without the three title keys (an older server) as no 
 
 test('keeps the well-formed titles and drops a malformed row or an id this client does not know', async () => {
   const season = { id: 'champion', earnedAtMs: 9, activityId: null, source: 'season', detail: { seasonIndex: 0, league: 'silver', place: 1 } };
-  const { client } = api(() => ownerRow({ titles: [TIRO, { id: 7 }, 'tiro', null, { ...TIRO, id: 'den-breaker' }, { ...TIRO, source: 'gift' }, { ...TIRO, earnedAtMs: -1 }, season,
+  const { client } = api(() => ownerRow({ titles: [TIRO, { id: 7 }, 'tiro', null, { ...TIRO, id: 'outfitter' }, { ...TIRO, source: 'gift' }, { ...TIRO, earnedAtMs: -1 }, season,
     { ...TIRO, id: 'lion', detail: { seasonIndex: 'x' } }], wornTitle: 'tiro' }));
   const owner = await readOwner(client);
   expect(owner.titles.map(t => t.id)).toEqual(['tiro', 'champion', 'lion']);
@@ -55,32 +55,34 @@ test('keeps a hand-given title (source award)', async () => {
   expect(owner.wornTitle).toBe('game-master');
 });
 
-test('reads a worn title that is not a held 1.7 id as null', async () => {
-  for (const [wornTitle, titles] of [['den-breaker', [TIRO]], [42, [TIRO]], ['lion', [TIRO]], ['tiro', []], [undefined, [TIRO]]] as const) {
+test('reads an unheld or unknown worn title as null', async () => {
+  for (const [wornTitle, titles] of [['den-breaker', [TIRO]], ['outfitter', [TIRO]], [42, [TIRO]], ['lion', [TIRO]], ['tiro', []], [undefined, [TIRO]]] as const) {
     expect((await readOwner(api(() => ownerRow({ wornTitle, titles })).client)).wornTitle, String(wornTitle)).toBeNull();
   }
 });
 
 test('keeps only the whole-number progress from 0', async () => {
-  const { client } = api(() => ownerRow({ titleProgress: { 'arena-wins': 18, trainings: 46.5, 'gold-earned': -1, 'days-in-camp': '21', 'items-owned': 0, x: null } }));
-  expect((await readOwner(client)).titleProgress).toEqual({ 'arena-wins': 18, 'items-owned': 0 });
+  const { client } = api(() => ownerRow({ titleProgress: { 'arena-wins': 18, 'dungeon-clears': 1,
+    'wolf-den-clears': 1, trainings: 46.5, 'gold-earned': -1, 'days-in-camp': '21', 'items-owned': 0, x: null } }));
+  expect((await readOwner(client)).titleProgress).toEqual({ 'arena-wins': 18, 'dungeon-clears': 1, 'wolf-den-clears': 1, 'items-owned': 0 });
   expect((await readOwner(api(() => ownerRow({ titleProgress: [1, 2] })).client)).titleProgress).toEqual({});
 });
 
 test('a world actor keeps a title this client knows, and reads an unknown, junk or missing one as null', async () => {
   const actor = (id: string, extra: Record<string, unknown>) => ({ gladiator_id: id, actor: { ...worldFixture.actors[0], gladiatorId: id, ...extra } });
-  const rows = [actor('a1', { title: 'lion' }), actor('a2', { title: 'den-breaker' }), actor('a3', { title: 42 }), actor('a4', {}), actor('a5', { title: null })];
+  const rows = [actor('a1', { title: 'lion' }), actor('a2', { title: 'outfitter' }), actor('a3', { title: 42 }),
+    actor('a4', {}), actor('a5', { title: null }), actor('a6', { title: 'den-breaker' })];
   const { client } = api(table => (table === 'world_revision'
     ? json({ revision: 'r1', server_now_ms: 1, slot_index: 0, published_slot_index: null, latest_patch: null })
     : json(rows)));
   const world = await readWorld(client);
-  expect(world.actors.map(a => a.title)).toEqual(['lion', null, null, null, null]);
+  expect(world.actors.map(a => a.title)).toEqual(['lion', null, null, null, null, 'den-breaker']);
 });
 
 test('the looks read carries the worn titles in the same single request', async () => {
   const A = '0d5f8471-d919-428f-9ab7-058c95821757', B = '5b0c3f8e-2d4a-4e61-9a7b-6c5d4e3f2a10', C = '7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b', D = '1a2b3c4d-4c5d-4e6f-8a9b-0c1d2e3f4a5b';
   const { client, requests } = api(() => json([{ gladiator_id: A, appearance: null, title: 'lion' }, { gladiator_id: B, appearance: null, title: null },
-    { gladiator_id: D, appearance: null, title: 'den-breaker' }]));
+    { gladiator_id: D, appearance: null, title: 'outfitter' }]));
   let titles: Record<string, string | null> = {};
   const looks = await readLooks(client, [A.toUpperCase(), B, C, D, 'junk'], t => { titles = t; });
   expect(requests).toHaveLength(1);

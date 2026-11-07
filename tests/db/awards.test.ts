@@ -262,7 +262,7 @@ describe('never earned by play', () => {
     await award(f.gid, at);
     // Every title earned by play, and neither hand-given one.
     expect(await idsOf(f.gid)).toEqual([...BY_PLAY].sort());
-    expect(BY_PLAY).toHaveLength(31);
+    expect(BY_PLAY).toHaveLength(35);
     expect(GIVEN).toEqual(['game-master', 'high-ground']);
   });
 

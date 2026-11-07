@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STORED_COUNTERS, TITLES_V1, TITLE_FAMILIES, titleById } from '@domain/titles';
 
-// The spec's table "The titles", rows 1-31, and patch 1.7.1's two hand-given titles after Bannerman (plan
+// The spec's table "The titles", including Patch 1.8's four dungeon titles and patch 1.7.1's two hand-given titles (plan
 // docs/superpowers/plans/2026-11-06-hand-given-titles-1-7-1.md, "Global constraints"): [id, name, family id, rule, measure, threshold,
 // tier]. The measure `award` is produced by no counter, trigger or back-fill: only the owner's private.give_title grants them.
 const SPEC_ROWS = [
@@ -16,6 +16,10 @@ const SPEC_ROWS = [
   ['wolfbane', 'Wolfbane', 'expeditions', '25 wins on Woodland Path', 'woodland-won', 25, null],
   ['raiders-bane', "Raider's Bane", 'expeditions', '25 wins on Ruined Outpost', 'outpost-won', 25, null],
   ['troll-slayer', 'Troll-Slayer', 'expeditions', '25 wins on Mountain Pass', 'mountain-won', 25, null],
+  ['den-breaker', 'Den Breaker', 'dungeons', 'Beat Alpha of the Den (Wolf Den)', 'wolf-den-clears', 1, null],
+  ['warlords-end', "Warlord's End", 'dungeons', 'Beat the Raider Warlord (Raider Stronghold)', 'raider-stronghold-clears', 1, null],
+  ['kingslayer', 'Kingslayer', 'dungeons', 'Beat the Troll King (Troll Hall)', 'troll-hall-clears', 1, null],
+  ['dungeoneer', 'Dungeoneer', 'dungeons', '25 dungeon clears', 'dungeon-clears', 25, null],
   ['tiro', 'Tiro', 'training', '10 Trainings', 'trainings', 10, 1],
   ['disciplined', 'Disciplined', 'training', '100 Trainings', 'trainings', 100, 2],
   ['doctore', 'Doctore', 'training', '400 Trainings', 'trainings', 400, 3],
@@ -40,15 +44,16 @@ const SPEC_ROWS = [
   ['croesus', 'Croesus', 'wealth', '12,000 gold earned', 'gold-earned', 12000, 3],
 ];
 
-describe('the titles catalog of patch 1.7', () => {
-  it('lists the 33 titles (1.7\'s 31 and 1.7.1\'s two hand-given) in the picker order', () => {
+describe('the titles catalog', () => {
+  it('lists the 37 titles in the picker order', () => {
     expect(TITLES_V1.map(t => t.id)).toEqual(['founder', 'old-guard', 'bannerman', 'game-master', 'high-ground', 'wanderer', 'pathfinder', 'trailblazer',
-      'wolfbane', 'raiders-bane', 'troll-slayer', 'tiro', 'disciplined', 'doctore', 'bloodied', 'crowd-pleaser', 'lion',
+      'wolfbane', 'raiders-bane', 'troll-slayer', 'den-breaker', 'warlords-end', 'kingslayer', 'dungeoneer',
+      'tiro', 'disciplined', 'doctore', 'bloodied', 'crowd-pleaser', 'lion',
       'invictus', 'finalist', 'victor', 'triumphator', 'medalist', 'champion', 'thrice-crowned', 'collector', 'curator',
       'antiquarian', 'tempered', 'connoisseur', 'rare-find', 'moneyed', 'patrician', 'croesus']);
     expect(TITLES_V1.every(t => /^[a-z][a-z-]{1,30}$/.test(t.id) && t.name.length <= 18)).toBe(true);
     expect(Math.max(...TITLES_V1.map(t => t.name.length))).toBe(17);
-    expect(TITLE_FAMILIES.map(f => f.name)).toEqual(['Special', 'Expeditions', 'Training', 'Arena', 'Tournaments', 'Seasons', 'Gear collection', 'Wealth']);
+    expect(TITLE_FAMILIES.map(f => f.name)).toEqual(['Special', 'Expeditions', 'Dungeons', 'Training', 'Arena', 'Tournaments', 'Seasons', 'Gear collection', 'Wealth']);
     expect(Object.isFrozen(TITLES_V1[0])).toBe(true);
   });
   it('holds the spec rules, thresholds and tiers', () => {
@@ -60,16 +65,16 @@ describe('the titles catalog of patch 1.7', () => {
     expect(row('founder')).toEqual(['Founder', 'Made in Season 1', 'founder', 1, null]);
     expect(TITLES_V1.map(t => [t.id, t.name, t.family, t.rule, t.measure, t.threshold, t.tier])).toEqual(SPEC_ROWS);
   });
-  it('earns 31 by play and gives two by hand', () => {
+  it('earns 35 by play and gives two by hand', () => {
     expect(TITLES_V1.filter(t => t.measure === 'award').map(t => [t.id, t.name, t.rule])).toEqual([
       ['game-master', 'Game Master', "The game's Game Master"], ['high-ground', 'High Ground', 'Given by the Game Master']]);
-    expect(TITLES_V1.filter(t => t.measure !== 'award')).toHaveLength(31);
+    expect(TITLES_V1.filter(t => t.measure !== 'award')).toHaveLength(35);
     // No stored counter is named after the hand-given measure, so private.title_measures never yields it.
     expect(STORED_COUNTERS).not.toContain('award');
   });
-  it('names unknown ids as nothing', () => { for (const id of ['', 'den-breaker', 'Founder', null, 7]) expect(titleById(id)).toBeNull(); });
+  it('names unknown ids as nothing', () => { for (const id of ['', 'outfitter', 'Founder', null, 7]) expect(titleById(id)).toBeNull(); });
   it('stores exactly the spec counters', () => expect([...STORED_COUNTERS].sort()).toEqual(['arena-best-streak', 'arena-streak',
-    'arena-wins', 'expeditions-won', 'gold-v1', 'gold-v2', 'items-owned', 'mountain-won', 'outpost-won', 'rare-items',
+    'arena-wins', 'dungeon-clears', 'expeditions-won', 'gold-v1', 'gold-v2', 'items-owned', 'mountain-won', 'outpost-won', 'raider-stronghold-clears', 'rare-items',
     'rarities-of-one', 'season-firsts', 'season-top-three', 'tiers-of-one', 'tournament-finals', 'tournament-wins', 'trainings',
-    'woodland-won']));
+    'troll-hall-clears', 'wolf-den-clears', 'woodland-won']));
 });

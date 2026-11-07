@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { sql, resetIdentity } from '../fixtures/db.ts';
-import { CAPACITY, logSection, measureCadence, measureSeasonClose, measureStandings, measureWorld, writeSection } from '../fixtures/capacity.ts';
-import { BUDGETS, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocations, share } from '../performance/capacity-model.ts';
+import { CAPACITY, logSection, measureCadence, measureDungeonCapacity, measureSeasonClose, measureStandings, measureWorld, writeSection } from '../fixtures/capacity.ts';
+import { BUDGETS, RETENTION, TABLE_CLASSES, projectDatabase, projectDungeonPayload, projectEgress, projectInvocations, share } from '../performance/capacity-model.ts';
 
 // Task 23.3 (Review Focus 3): the target load against the free-tier budgets, measured on the local stack.
 // 1. A measurement world of CAPACITY.players characters runs CAPACITY.slots accelerated boundaries (after one warm-up slot)
@@ -138,5 +138,38 @@ describe('Task 23.3: capacity against the free-tier budgets', () => {
       // Published by the tick after the cutoff (Task 23.2: about 61.4 s), never in a third tick, and within spec §10.4's 120 s.
       expect(w.publishedMs, `slot ${w.slot}`).toBeLessThan(90_000);
     }
+  }, 600_000);
+
+  it('publishes an afternoon with 25 of 50 characters in dungeons within 120 s, by the tick after the cutoff', async () => {
+    const entrants = 25;
+    const { afternoon, following, flagged, runs, members, fights, bytes, settlements } = await measureDungeonCapacity(TARGET_CHARACTERS, entrants);
+    // Task 2's 50-run Troll Hall benchmark p95 in compact UTF-8. Include this case for each of the two raw plan copies.
+    const benchmarkPlanBytes = 85_292;
+    const measured = projectDungeonPayload(bytes, runs, members, RETENTION.summarySlots);
+    const benchmark = projectDungeonPayload({ ...bytes, frozenPlan: Math.max(bytes.frozenPlan, benchmarkPlanBytes),
+      simulationResult: Math.max(bytes.simulationResult, benchmarkPlanBytes) }, runs, members, RETENTION.summarySlots);
+    const reportWindow = (window: typeof following) => ({ firstTicks: window.firstTicks, previousSettlements: window.previousSettlements,
+      settledInCutoffTick: window.settledInCutoffTick, publishedMs: window.publishedMs, statuses: window.statuses });
+    const report = { players: TARGET_CHARACTERS, runs, members, fights, bytes, benchmarkPlanBytes, measured, benchmark, settlements,
+      afternoon: reportWindow(afternoon), following: reportWindow(following) };
+    logSection('dungeons', report);
+    writeSection('dungeons', report);
+    expect(flagged).toBe(0);
+    expect(afternoon.activities).toEqual({ dungeon: entrants, rest: TARGET_CHARACTERS - entrants });
+    expect(runs).toBe(Math.ceil(entrants / 3));
+    expect(members).toBe(entrants);
+    expect(fights).toBeGreaterThanOrEqual(runs);
+    expect(fights).toBeLessThanOrEqual(runs * 4);
+    expect(following.activities).toEqual({ rest: TARGET_CHARACTERS });
+    expect(following.previousSettlements).toBe(TARGET_CHARACTERS);
+    expect(following.firstTicks[0].claimableSimple).toBe(runs + TARGET_CHARACTERS);
+    expect(settlements).toMatchObject({ settledByPublication: TARGET_CHARACTERS, dungeonsByPublication: entrants });
+    for (const window of [afternoon, following]) {
+      expect(window.statuses.every(status => status === 200)).toBe(true);
+      expect(window.publishedMs).not.toBeNull();
+      expect(window.publishedMs).toBeLessThan(120_000);
+    }
+    for (const size of Object.values(bytes)) expect(size).toBeGreaterThan(0);
+    expect(bytes.simulationResult).toBe(bytes.frozenPlan);
   }, 600_000);
 });

@@ -43,11 +43,14 @@ export function wornTitleText(id: unknown, prestige: readonly PrestigeAward[]): 
 
 const count = (n: number) => n.toLocaleString('en-US');
 
-/** The expedition trips a title counts, with the level each opens at (the catalog's required levels). */
+/** The trips a title counts, with the level each opens at (the catalog's required levels). */
 const TRIP_LEVEL: Partial<Record<TitleDefinition['measure'], number>> = {
   'woodland-won': CATALOG_V1.expeditions.woodland.requiredLevel,
   'outpost-won': CATALOG_V1.expeditions.outpost.requiredLevel,
   'mountain-won': CATALOG_V1.expeditions.mountain.requiredLevel,
+  'wolf-den-clears': CATALOG_V1.dungeons['wolf-den'].requiredLevel,
+  'raider-stronghold-clears': CATALOG_V1.dungeons['raider-stronghold'].requiredLevel,
+  'troll-hall-clears': CATALOG_V1.dungeons['troll-hall'].requiredLevel,
 };
 
 /** A locked title's progress line in the picker: "34 of 50", "Best run 3 of 5", "Opens at level 5". */

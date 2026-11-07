@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { TransactionSql } from 'postgres';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { anonymous, resetIdentity, sql } from '../fixtures/db.ts';
-import { advance, claim, coordinatorLease, fighter, historicalPort, resetWorld, rpc, SLOT, TTR } from '../fixtures/boundary.ts';
+import { account, admin, anonymous, resetIdentity, sql } from '../fixtures/db.ts';
+import { advance, claim, coordinatorLease, fighter, historicalPort, resetWorld, rpc, SLOT, TTR, type Choices } from '../fixtures/boundary.ts';
 import { DEFAULT_EXECUTORS, prepareActivity, runWorker } from '../../supabase/functions/_shared/backend/jobs.ts';
 import type { DungeonId } from '../../supabase/functions/_shared/contracts/commands.ts';
 import type { DungeonGroupingInput, DungeonGroupingResult } from '../../supabase/functions/_shared/domain/dungeon-grouping.ts';
@@ -13,7 +14,10 @@ import type { JobLease, PreparationInput } from '../../supabase/functions/_share
 
 import { partyInput } from '../fixtures/dungeon-builds.ts';
 import { planDungeonRun, type DungeonRunInput, type DungeonRunPlan } from '../../supabase/functions/_shared/domain/dungeon.ts';
-import type { PartyBattleLog } from '../../supabase/functions/_shared/contracts/events.ts';
+import type { ActivitySummary, PartyBattleLog } from '../../supabase/functions/_shared/contracts/events.ts';
+import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
+import { createWorkerDatabase, prepareGrant } from '../../supabase/functions/_shared/backend/database.ts';
+import { applyXp } from '../../supabase/functions/_shared/domain/inventory.ts';
 
 const TARGET = 301;
 const wolfDen = { kind: 'dungeon', dungeonId: 'wolf-den' } as const;
@@ -26,7 +30,7 @@ async function selectRules(tx: TransactionSql, version: 'v1' | 'v2') {
 
 beforeEach(() => resetWorld(TARGET - 1));
 afterEach(() => sql.begin(tx => selectRules(tx, 'v1')));
-afterAll(() => sql.end());
+afterAll(async () => { await resetIdentity(); await sql.end(); });
 
 it.each(['edit_schedule', 'edit_day_schedule'] as const)('validates fresh dungeon %s after consulting its receipt', async wrapper => {
   const owner = await fighter({ firstSlot: TARGET });
@@ -96,8 +100,8 @@ it.each(['v1', 'v2'] as const)('validates the %s preparation cost shape at a rea
   }
 });
 
-async function dungeonFighter(dungeonId: DungeonId = 'wolf-den', stamina = 100) {
-  const owner = await fighter({ firstSlot: TARGET, stamina, schedule: { ...TTR, afternoon: { kind: 'dungeon', dungeonId } } });
+async function dungeonFighter(dungeonId: DungeonId = 'wolf-den', stamina = 100, firstSlot = TARGET, otherSlots: Choices = TTR) {
+  const owner = await fighter({ firstSlot, stamina, schedule: { ...otherSlots, afternoon: { kind: 'dungeon', dungeonId } } });
   await sql`update public.gladiators set level=${dungeonId === 'troll-hall' ? 12 : dungeonId === 'raider-stronghold' ? 7 : 3}
     where id=${owner.gid}`;
   return owner;
@@ -119,7 +123,7 @@ it('publishes Rest from a legacy five-cost v2 preparation that requested a dunge
   expect(await sql`select 1 from private.jobs where kind='pair' and slot_index=${TARGET}`).toHaveLength(0);
 });
 
-async function reachGrouping(legacyId?: string, decimalCostId?: string) {
+async function reachGrouping(legacyId?: string, decimalCostId?: string, beforeSnapshot?: () => Promise<unknown>) {
   await sql.begin(tx => selectRules(tx, 'v2'));
   const token = await coordinatorLease();
   expect(await advance(TARGET, token)).toMatchObject({ phase: 4, wait: 'preparation' });
@@ -135,6 +139,7 @@ async function reachGrouping(legacyId?: string, decimalCostId?: string) {
     const { dungeon: _newCost, ...legacy } = prep.costs;
     expect(await complete(job, job.gladiatorId === legacyId ? { ...prep, costs: legacy } : prep)).toMatchObject({ ok: true });
   }
+  await beforeSnapshot?.();
   expect(await advance(TARGET, token)).toMatchObject({ phase: 7, status: 'waiting', wait: 'pairing' });
   return { token, jobs: await claim('pair') };
 }
@@ -475,9 +480,9 @@ describe('dungeon runs', () => {
     expect(await claim('settlement', 1)).toEqual([]);
     await sql.begin(async tx => {
       const [{ leases }] = await tx`select public.claim_jobs(${randomUUID()},'settlement',2) as leases`;
-      expect(leases.map((job: JobLease) => [job.kind, job.id])).toEqual([
-        ['reveal', final.id], ['settlement', settlements.map(row => row.id).sort()[0]],
-      ]);
+      expect(leases.length).toBe(0);
+      const [{ reveals: fallback }] = await tx`select public.claim_jobs(${randomUUID()},'reveal',1) as reveals`;
+      expect(fallback.map((job: JobLease) => job.id)).toEqual([final.id]);
       throw rolledBack;
     }).catch(error => { if (error !== rolledBack) throw error; });
     const released = await claim('settlement', 3);
@@ -738,4 +743,588 @@ describe('dungeon runs', () => {
       contender.release();
     }
   });
+});
+
+const workerDatabase = createWorkerDatabase(admin);
+const slotEnd = (TARGET + 1) * SLOT;
+const clearTitles = ['den-breaker', 'warlords-end', 'kingslayer', 'dungeoneer'];
+
+async function strengthen(owner: Awaited<ReturnType<typeof dungeonFighter>>) {
+  const allocation = { strength: 200, vitality: 100, endurance: 10, agility: 15, precision: 25 };
+  await sql`update public.gladiators set earned_points=350 where id=${owner.gid}`;
+  await sql`update public.builds set current_build=jsonb_set(current_build,'{allocations}',${sql.json(allocation)})
+    where gladiator_id=${owner.gid}`;
+}
+
+async function settlementRun(dungeonId: DungeonId = 'wolf-den', overLevel = false) {
+  const owners = [await dungeonFighter(dungeonId), await dungeonFighter(dungeonId)];
+  for (const owner of owners) await strengthen(owner);
+  if (overLevel) await sql`update public.gladiators set level=8 where id=${owners[0].gid}`;
+  const { jobs, token } = await reachGrouping(undefined, undefined, overLevel
+    ? () => sql`update public.gladiators set level=9 where id=${owners[0].gid}` : undefined);
+  expect(await complete(jobs[0], await propose(jobs[0]))).toMatchObject({ ok: true });
+  expect(await advance(TARGET, token)).toMatchObject({ phase: 9, status: 'complete' });
+  const [sim] = await claim('simulation');
+  const input = sim.snapshot as DungeonRunInput;
+  const plan = planDungeonRun(input, 'settlement-strong-party', RULES_V2);
+  expect(plan.fights.map(fight => fight.won)).toEqual([true, true, true, true]);
+  return { owners, sim, input, plan };
+}
+
+// Use accepted fixture logs to separate a member's terminal pay from the party's result. The real Edge test below uses
+// the unmodified executor, and the over-level test uses the plan built from the actual frozen preparation.
+function wolfOutcome(plan: DungeonRunPlan, terminal: 1 | 3 | 4, partyWon: boolean, fallen?: string): DungeonRunPlan {
+  const allDown = terminal === 1 && partyWon;
+  const fights = plan.fights.slice(0, terminal).map((fight, i) => {
+    const keep = (id: string) => i === 0 || id !== fallen;
+    const won = i === terminal - 1 ? partyWon : true;
+    const winnerSide = won ? 0 as const : 1 as const;
+    const victoryReason = allDown ? 'tie-break' as const : 'defeat' as const;
+    const participants = fight.log.participants.filter(p => keep(p.id));
+    const finalHp = fight.log.participants.flatMap((p, index) => !keep(p.id) ? []
+      : [p.id === fallen || (allDown && p.side === 0) || p.side !== winnerSide ? 0 : fight.log.finalHp[index]]);
+    const events = fight.log.events.filter(e => e.kind === 'victory' || (keep(e.attackerId) && keep(e.defenderId)))
+      .map((e, sequence) => e.kind === 'victory' ? { ...e, sequence, winnerSide, reason: victoryReason } : { ...e, sequence });
+    return { ...fight, won, log: { ...fight.log, participants, events, finalHp, winnerSide, victoryReason,
+      tieBreakReason: allDown ? 'simultaneous-defeat' as const : null } };
+  });
+  const lastFightIndex = plan.stages.findIndex(stage => stage.fight?.ordinal === terminal);
+  const stages = [...plan.stages.slice(0, lastFightIndex + 1)];
+  const lastStage = stages.at(-1)!;
+  stages.push({ id: `${plan.runId}:${stages.length}`, kind: terminal === 4 && partyWon ? 'travel' : 'return',
+    revealedAtMs: lastStage.endsAtMs, startedAtMs: lastStage.endsAtMs, endsAtMs: slotEnd, label: 'Safe return to camp' });
+  stages.push({ ...plan.stages.at(-1)!, id: `${plan.runId}:${stages.length}` });
+  const outcomes = plan.outcomes.map((outcome): DungeonRunPlan['outcomes'][number] => {
+    const entered = outcome.gladiatorId === fallen ? [1] : fights.map(fight => fight.ordinal);
+    const won = entered.filter(ordinal => fights[ordinal - 1].won);
+    const success = won.includes(4);
+    const rooms = won.filter(ordinal => ordinal < 4).length;
+    return { ...outcome, entered, won, success, result: success ? 'victory' as const : 'defeat' as const,
+      rewards: success ? { xp: 48, money: 8, loot: [{ catalogId: 'sword:1:uncommon', catalogVersion: 'v1', quantity: 1, origin: 'expedition' }] }
+        : { xp: rooms * 6, money: rooms, loot: [] } };
+  });
+  return { ...plan, fights, stages, outcomes };
+}
+
+async function leaseFinal(sim: JobLease, plan: DungeonRunPlan) {
+  expect(await complete(sim, plan)).toMatchObject({ ok: true });
+  for (let n = 0; n < plan.stages.length - 1; n++) {
+    const [reveal] = await claim('reveal');
+    expect(await complete(reveal, {})).toMatchObject({ ok: true });
+  }
+}
+
+async function revealAndLease(sim: JobLease, plan: DungeonRunPlan) {
+  await leaseFinal(sim, plan);
+  const [last, ...settlements] = await claim('settlement');
+  expect(last.kind).toBe('reveal');
+  expect(settlements).toHaveLength(plan.outcomes.length);
+  expect(await complete(last, {})).toMatchObject({ ok: true });
+  return settlements;
+}
+
+function preparation(state: OwnerState, rewards: DungeonRunPlan['outcomes'][number]['rewards']) {
+  const { level, xp } = state.progression;
+  return { rewards, grant: prepareGrant(state, rewards.loot, RULES_V2), progressionBaseline: { level, xp },
+    progression: applyXp(level, xp, rewards.xp) };
+}
+
+const takeSettlement = (job: JobLease) => workerDatabase.settle(job.activityId!, job.token);
+const preparedSettle = (job: JobLease, prepared: ReturnType<typeof preparation>) =>
+  rpc('settle_expedition', { activity_id: job.activityId, lease_token: job.token, prepared });
+const nowIn = (tx: TransactionSql, ms: number) => tx.unsafe(`create or replace function private.planning_now_ms() returns bigint
+  language sql volatile security invoker set search_path='' as 'select ${ms}::bigint'`);
+async function rollbackOnly(run: (tx: TransactionSql) => Promise<void>) {
+  await sql.begin(async tx => { await run(tx); throw rolledBack; }).catch(error => { if (error !== rolledBack) throw error; });
+}
+
+async function creditedState(gids: string[]) {
+  const [row] = await sql`select
+    (select jsonb_agg(to_jsonb(w) order by w.gladiator_id) from public.wallets w where w.gladiator_id in ${sql(gids)}) wallets,
+    (select jsonb_agg(jsonb_build_array(g.level,g.xp) order by g.id) from public.gladiators g where g.id in ${sql(gids)}) progression,
+    (select jsonb_agg(to_jsonb(i) order by i.id) from public.item_instances i where i.gladiator_id in ${sql(gids)}) items,
+    (select jsonb_agg(to_jsonb(c) order by c.gladiator_id,c.counter) from public.title_counters c where c.gladiator_id in ${sql(gids)}) counters,
+    (select jsonb_agg(to_jsonb(t) order by t.gladiator_id,t.title_id) from public.gladiator_titles t where t.gladiator_id in ${sql(gids)}) titles,
+    (select jsonb_agg(to_jsonb(o) order by o.receipt_id) from public.operation_receipts o where o.gladiator_id in ${sql(gids)}) receipts,
+    (select jsonb_agg(to_jsonb(s) order by s.activity_id) from private.settled_slots s where s.gladiator_id in ${sql(gids)}) checkpoints,
+    (select jsonb_agg(to_jsonb(l) order by l.id) from public.wallet_ledger l where l.gladiator_id in ${sql(gids)}) ledger`;
+  return row;
+}
+
+describe('dungeon settlement', () => {
+  async function dueBundle() {
+    const { sim, plan } = await leasedDungeon();
+    await leaseFinal(sim, plan);
+    const [{ reveal }] = await sql`select id as reveal from private.jobs where kind='reveal' and status='pending'`;
+    const members = (await sql`select id from private.jobs where kind='settlement' order by id`).map(row => row.id as string);
+    expect(members).toHaveLength(2);
+    return { reveal: reveal as string, members };
+  }
+
+  async function claimIn(tx: TransactionSql, cap: number) {
+    const [{ jobs }] = await tx`select public.claim_jobs(${randomUUID()},'settlement',${cap}) as jobs`;
+    return jobs as JobLease[];
+  }
+
+  it('does not hold member locks when an empty claim skips a shared reveal', async () => {
+    const { reveal, members } = await dueBundle();
+    await rollbackOnly(async owner => {
+      await owner`select id from private.jobs where id=${reveal} for update`;
+      await rollbackOnly(async contender => {
+        expect((await claimIn(contender, 20)).length).toBe(0);
+        // The contender's transaction stays open after its empty claim.
+        const leases = await claimIn(owner, 3);
+        expect(leases.map(job => job.id)).toEqual([reveal, ...members]);
+        expect(leases.map(job => job.attempt)).toEqual([1, 1, 1]);
+      });
+    });
+  });
+
+  it('releases the reveal and tentative siblings when one member is locked', async () => {
+    const { reveal, members } = await dueBundle();
+    await rollbackOnly(async owner => {
+      await owner`select id from private.jobs where id=${members[1]} for update`;
+      await rollbackOnly(async contender => {
+        expect((await claimIn(contender, 20)).length).toBe(0);
+        // The contender got as far as the second member. Its rejected bundle must leave every row claimable here.
+        expect((await claimIn(owner, 3)).map(job => job.id)).toEqual([reveal, ...members]);
+      });
+    });
+  });
+
+  it('fits nine shared reveals and 50 settlements in three claims without completing any reveal', async () => {
+    const owner = await dungeonFighter();
+    const id = (ordinal: number) => `00000000-0000-4000-8000-${String(ordinal).padStart(12, '0')}`;
+    const groups = Array.from({ length: 9 }, (_, index) => {
+      const runId = `dungeon:${TARGET}:wolf-den:${index + 1}`;
+      const reveal = id(100 + index);
+      // One member per group sorts before Rest, with the other two sorting after it.
+      const members = index === 8 ? [id(index + 1)] : [id(index + 1), id(60 + index * 2), id(61 + index * 2)];
+      return { runId, reveal, members };
+    });
+    const rest = Array.from({ length: 25 }, (_, index) => id(20 + index));
+    await sql.begin(async tx => {
+      for (const { runId, reveal, members } of groups) {
+        await tx`insert into private.jobs(id,kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
+          values(${reveal},'reveal',${`dungeon-reveal:${runId}:3`},${TARGET},${owner.gid},
+            ${tx.json({ kind: 'dungeon-reveal', runId, ordinal: 3 })},'v2',${slotEnd})`;
+        for (const member of members) {
+          await tx`insert into private.jobs(id,kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
+            values(${member},'settlement',${`settlement:${member}`},${TARGET},${owner.gid},'{"resolvedKind":"dungeon"}','v2',${slotEnd})`;
+          await tx`insert into private.job_dependencies(job_id,prerequisite_id) values(${member},${reveal})`;
+        }
+      }
+      for (const [index, job] of rest.entries()) {
+        await tx`insert into private.jobs(id,kind,dedupe_key,slot_index,gladiator_id,input,rules_version,due_at_ms)
+          values(${job},'settlement',${`settlement:${job}`},${TARGET},${owner.gid},'{"resolvedKind":"rest"}','v2',${slotEnd - (index === 0 ? 1 : 0)})`;
+      }
+    });
+    const batches = [await claim('settlement', 20), await claim('settlement', 20), await claim('settlement', 20)];
+    const leases = batches.flat();
+    expect(batches[0][0].id).toBe(rest[0]);
+    expect(batches.map(batch => batch.length)).toEqual([20, 20, 19]);
+    expect(leases.map(job => job.id).sort()).toEqual([...groups.flatMap(g => [g.reveal, ...g.members]), ...rest].sort());
+    expect(leases.every(job => job.attempt === 1)).toBe(true);
+    for (const { reveal, members } of groups) {
+      const batch = batches.find(batch => batch.some(job => job.id === reveal))!;
+      const offset = batch.findIndex(job => job.id === reveal);
+      expect(batch.slice(offset, offset + members.length + 1).map(job => job.id)).toEqual([reveal, ...members]);
+    }
+  });
+
+  it('settles each member once at minute 80 from its own outcome; a retry replays the receipt', async () => {
+    const { owners, sim, plan: original } = await settlementRun();
+    const plan = wolfOutcome(original, 4, true, owners[0].gid);
+    expect(plan.fights[0].log.finalHp[plan.fights[0].log.participants.findIndex(p => p.id === owners[0].gid)]).toBe(0);
+    expect(plan.fights.slice(1).flatMap(fight => fight.log.participants).map(p => p.id)).not.toContain(owners[0].gid);
+    await leaseFinal(sim, plan);
+    expect((await owners[0].state()).currentActivity).toMatchObject({ kind: 'dungeon', label: 'Dungeon' });
+    expect((await sql`select actor from public.world_actors where gladiator_id=${owners[0].gid}`)[0].actor)
+      .toMatchObject({ location: 'dungeon:wolf-den', activityStatus: 'active' });
+    await rollbackOnly(async tx => {
+      await nowIn(tx, slotEnd - 1);
+      const leases = () => tx`select public.claim_jobs(${randomUUID()},'settlement',20) as jobs`;
+      expect((await leases())[0].jobs).toEqual([]);
+      await nowIn(tx, slotEnd);
+      const [{ jobs }] = await leases();
+      expect(jobs.map((job: JobLease) => job.kind)).toEqual(['reveal', 'settlement', 'settlement']);
+      const [last, member] = jobs as JobLease[];
+      const [{ ready }] = await tx`select private.dependencies_ready(${member.id}) as ready`;
+      expect(ready).toBe(false);
+      const [{ result }] = await tx`select public.settle_activity(${member.activityId},${member.token}) as result`;
+      expect(result).toEqual({ ok: false, code: 'processing' });
+      await tx`select public.complete_job(${last.id},${last.token},'{}')`;
+      expect((await tx`select private.dependencies_ready(${member.id}) as ready`)[0].ready).toBe(true);
+    });
+    const [last, ...jobs] = await claim('settlement');
+    expect(await complete(last, {})).toMatchObject({ ok: true });
+    const ordered = owners.map(owner => jobs.find(job => job.gladiatorId === owner.gid)!);
+    const before = await Promise.all(owners.map(owner => owner.state()));
+    const spectator = await account();
+    const results = await Promise.all(ordered.map(async job => {
+      const result = await takeSettlement(job);
+      if (!result.ok) throw new Error(`Dungeon settlement refused: ${result.code}`);
+      return result;
+    }));
+    const [fallen, cleared] = results;
+    expect(fallen).toMatchObject({ ok: true, activityId: ordered[0].activityId, newGrants: 1,
+      summary: { result: 'defeat', success: false, rewards: { xp: 6, money: 1, items: [], overflowMoney: 0 } } });
+    expect(cleared).toMatchObject({ ok: true, activityId: ordered[1].activityId, newGrants: 1,
+      summary: { result: 'victory', success: true, rewards: { xp: 48, money: 8, items: [{ catalogId: 'sword:1:uncommon' }] } } });
+    expect(fallen.receiptId).not.toBe(cleared.receiptId);
+    for (const [index, owner] of owners.entries()) {
+      const result = results[index], activityId = ordered[index].activityId!;
+      const credited = await owner.state();
+      expect(credited.wallets.money).toBe(before[index].wallets.money + (index ? 8 : 1));
+      expect(credited.progression).toMatchObject(applyXp(before[index].progression.level, before[index].progression.xp, index ? 48 : 6));
+      expect(credited.currentActivity).toMatchObject({ kind: 'dungeon', label: 'Dungeon' });
+      expect(credited.inbox?.newNotifications).toBe(1);
+      expect(credited.titleProgress?.['gold-v2']).toBe(index ? 8 : 1);
+      expect(credited.titleProgress?.['items-owned']).toBe((before[index].titleProgress?.['items-owned'] ?? 0) + index);
+      expect(credited.titleProgress?.['dungeon-clears'] ?? 0).toBe(index);
+      expect(credited.titleProgress?.['wolf-den-clears'] ?? 0).toBe(index);
+      expect(credited.titles?.map(t => t.id).filter(id => clearTitles.includes(id))).toEqual(index ? ['den-breaker'] : []);
+      const own = await owner.client.from('activities').select('summary').eq('id', activityId).single();
+      expect(own.error).toBeNull();
+      expect(own.data?.summary).toEqual(result.summary);
+      const { data: other, error: otherError } = await spectator.client.from('activities').select('summary').eq('id', activityId);
+      expect(otherError).toBeNull();
+      expect(other).toEqual([]);
+      expect((await anonymous.from('activities').select('summary').eq('id', activityId)).error).not.toBeNull();
+      for (const client of [anonymous, spectator.client, owner.client]) {
+        const forbidden = await client.rpc('expedition_settlement_input', { activity_id: activityId, lease_token: ordered[index].token });
+        expect(forbidden.error).not.toBeNull();
+        expect(forbidden.data).toBeNull();
+      }
+      const expected = { activityId, resolvedKind: 'dungeon', result: index ? 'victory' : 'defeat', success: Boolean(index),
+        settledAtMs: (result.summary as ActivitySummary).settledAtMs, replayExpiry: { state: 'expired' },
+        dungeon: { id: 'wolf-den', terminalFight: 4, partyWon: true } };
+      for (const client of [anonymous, spectator.client, owner.client]) {
+        const read = await client.from('recent_results').select('summary').eq('activity_id', activityId).single();
+        expect(read.error).toBeNull();
+        expect(read.data?.summary).toEqual(expected);
+      }
+      await rollbackOnly(async tx => {
+        const [{ sanitized }] = await tx`select private.safe_settlement(jsonb_set(${tx.json(result.summary as never)}::jsonb,
+          '{dungeon,private}', '"hidden"')) as sanitized`;
+        expect(sanitized.dungeon).toEqual(expected.dungeon);
+        await tx`update public.activities set summary=jsonb_set(summary||'{"secret":"hidden"}','{dungeon,private}', '"hidden"') where id=${activityId}`;
+        await tx`set constraints all immediate`;
+        expect((await tx`select summary from public.recent_results where activity_id=${activityId}`)[0].summary).toEqual(expected);
+      });
+      expect(await sql`select o.receipt_id,s.receipt_id as checkpoint,l.money_delta::int as money from public.operation_receipts o
+        join private.settled_slots s on s.receipt_id=o.receipt_id join public.wallet_ledger l on l.receipt_id=o.receipt_id
+        where o.owner_id=${owner.id} and o.request->>'activityId'=${activityId} and l.reason='dungeon'`)
+        .toEqual([{ receipt_id: result.receiptId, checkpoint: result.receiptId, money: index ? 8 : 1 }]);
+    }
+    const gids = owners.map(owner => owner.gid);
+    const settled = await creditedState(gids);
+    for (const [index, job] of ordered.entries()) {
+      expect(await takeSettlement(job)).toMatchObject({ ok: true, receiptId: results[index].receiptId, newGrants: 0, replayed: true });
+      expect(await workerDatabase.settle(job.activityId!, randomUUID())).toEqual({ ok: false, code: 'conflict' });
+    }
+    expect(await creditedState(gids)).toEqual(settled);
+    for (const table of ['world_actors', 'recent_results', 'arena_standings', 'operation_receipts', 'wallet_ledger']) {
+      const rows = await sql`select * from public.${sql(table)}`;
+      expect(rows.every(row => gids.includes(row.gladiator_id))).toBe(true);
+      expect(JSON.stringify(rows)).not.toContain('hired:');
+    }
+  });
+
+  it('admits dungeon fight reads exactly at the database-clock reveal cutoff', async () => {
+    const { runId } = await groupedDungeon();
+    await rollbackOnly(async tx => {
+      await tx`select set_config('cloudiator.test_run_id',${runId},true)`;
+      for (const role of ['anon', 'authenticated']) {
+        await tx`select set_config('cloudiator.test_reader_role',${role},true)`;
+        // Bracket the RLS SELECT within the exact same real millisecond. Retry only if scheduling crossed a millisecond.
+        await tx`do $probe$
+        declare
+          run text:=current_setting('cloudiator.test_run_id'); due bigint; at_read bigint; after_read bigint; seen smallint[];
+        begin
+          for attempt in 1..12 loop
+            due:=floor(extract(epoch from clock_timestamp())*1000)::bigint+10;
+            insert into public.dungeon_fights(run_id,ordinal,reveal_at_ms,log) values
+              (run,1,due-1,'{}'),(run,2,due,'{}'),(run,3,due+1,'{}')
+              on conflict(run_id,ordinal) do update set reveal_at_ms=excluded.reveal_at_ms;
+            perform set_config('role',current_setting('cloudiator.test_reader_role'),true);
+            loop
+              at_read:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+              exit when at_read>=due;
+            end loop;
+            select array_agg(f.ordinal order by f.ordinal) into seen from public.dungeon_fights f where f.run_id=run;
+            after_read:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+            perform set_config('role','none',true);
+            if at_read=due and after_read=due then
+              if seen is distinct from array[1,2]::smallint[] then raise exception 'unexpected due fight visibility: %',seen; end if;
+              return;
+            end if;
+          end loop;
+          raise exception 'could not bracket the fight visibility read within its exact reveal millisecond';
+        end
+        $probe$`;
+      }
+    });
+  });
+
+  it.each([
+    [3, false, 12, 2], [4, false, 18, 3], [1, true, 6, 1],
+  ] as const)('pays room wins at terminal fight %i with partyWon=%s', async (terminal, partyWon, xp, money) => {
+    const { owners, sim, plan: original } = await settlementRun();
+    const plan = wolfOutcome(original, terminal, partyWon);
+    const jobs = await revealAndLease(sim, plan);
+    if (partyWon) {
+      expect(plan.fights[0].log.participants.every((p, i) => p.side !== 0 || plan.fights[0].log.finalHp[i] === 0)).toBe(true);
+      expect(plan.stages.at(-2)).toMatchObject({ kind: 'return' });
+    }
+    expect(await sql`select ordinal from public.dungeon_fights where run_id=${plan.runId} order by ordinal`)
+      .toEqual(plan.fights.map(fight => ({ ordinal: fight.ordinal })));
+    for (const job of jobs) {
+      const owner = owners.find(owner => owner.gid === job.gladiatorId)!;
+      const before = await owner.state();
+      expect(await takeSettlement(job)).toMatchObject({ ok: true, summary: { result: 'defeat', success: false,
+        dungeon: { id: 'wolf-den', terminalFight: terminal, partyWon }, rewards: { xp, money, items: [], overflowMoney: 0 } } });
+      const state = await owner.state();
+      expect(state.wallets.money).toBe(before.wallets.money + money);
+      expect(state.titleProgress?.['dungeon-clears'] ?? 0).toBe(0);
+    }
+  });
+
+  it('pays an over-level member from its frozen level and sells full-inventory salvage at retained v2 value', async () => {
+    const { owners: [owner], sim, input, plan } = await settlementRun('wolf-den', true);
+    expect(input.seats.find(seat => seat.kind === 'human' && seat.gladiatorId === owner.gid)).toMatchObject({ level: 9 });
+    const outcome = plan.outcomes.find(row => row.gladiatorId === owner.gid)!;
+    expect(outcome).toMatchObject({ overLevel: true, rewards: { xp: 24, money: 4 } });
+    expect(outcome.rewards.loot.length).toBeGreaterThan(0);
+    expect(outcome.rewards.loot.every(loot => loot.catalogId === 'salvage')).toBe(true);
+    await sql`update public.gladiators set level=8 where id=${owner.gid}`;
+    const initial = await owner.state();
+    const sample = initial.inventory[0];
+    await sql`insert into public.item_instances(id,gladiator_id,item)
+      select i.id,${owner.gid},${sql.json(sample)}::jsonb||jsonb_build_object('id',i.id,'origin','shop','reservation',null)
+      from (select gen_random_uuid() id from generate_series(1,${60 - initial.inventory.length})) i`;
+    const jobs = await revealAndLease(sim, plan);
+    const job = jobs.find(job => job.gladiatorId === owner.gid)!;
+    const before = await owner.state();
+    const owned = before.titleProgress?.['items-owned'];
+    const overflowMoney = outcome.rewards.loot.reduce((sum, loot) => sum + loot.quantity * 4, 0);
+    await sql.begin(tx => selectRules(tx, 'v1')); // Retained plan v2 prices overflow even when the live rules differ.
+    expect(await takeSettlement(job)).toMatchObject({ ok: true, summary: { rewards: { xp: 24, money: 4, items: [], overflowMoney,
+      overflow: [expect.objectContaining({ catalogId: 'salvage', unitValue: 4 })] } } });
+    const after = await owner.state();
+    expect(after.inventory).toEqual(before.inventory);
+    expect(after.titleProgress?.['items-owned']).toBe(owned);
+    expect(after.titleProgress?.['gold-v1']).toBe(4 + overflowMoney);
+    expect(after.wallets.money).toBe(before.wallets.money + 4 + overflowMoney);
+  });
+
+  it.each([
+    ['wolf-den', 'den-breaker'], ['raider-stronghold', 'warlords-end'], ['troll-hall', 'kingslayer'],
+  ] as const)('awards the first %s clear and the 25th total clear inside settlement', async (id, firstClear) => {
+    const { owners, sim, plan } = await settlementRun(id);
+    const [, veteran] = owners;
+    await sql`select private.set_title_count(${veteran.gid},'dungeon-clears',24)`;
+    const jobs = await revealAndLease(sim, plan);
+    for (const [index, owner] of owners.entries()) {
+      const job = jobs.find(job => job.gladiatorId === owner.gid)!;
+      const outcome = plan.outcomes.find(outcome => outcome.activityId === job.activityId)!;
+      const prepared = preparation(await owner.state(), outcome.rewards);
+      await rollbackOnly(async tx => {
+        const [{ result }] = await tx`select public.settle_expedition(${job.activityId},${job.token},${tx.json(prepared as never)}) as result`;
+        expect(result).toMatchObject({ ok: true, summary: { success: true } });
+        const titles = await tx`select title_id,source,activity_id from public.gladiator_titles where gladiator_id=${owner.gid}
+          and title_id=any(${[...clearTitles, 'game-master', 'high-ground']}::text[]) order by title_id`;
+        expect(titles).toEqual((index ? [firstClear, 'dungeoneer'].sort() : [firstClear])
+          .map(title_id => ({ title_id, source: 'result', activity_id: job.activityId })));
+        expect((await tx`select private.title_measures(${owner.gid},${slotEnd}) as measures`)[0].measures)
+          .toMatchObject({ 'dungeon-clears': index ? 25 : 1, [`${id}-clears`]: 1, 'expeditions-won': 0 });
+      });
+    }
+  });
+
+  it('rolls back a stale preparation and rejects a matching lease that expires under the job lock', async () => {
+    const { owners, sim, plan } = await settlementRun();
+    const jobs = await revealAndLease(sim, plan);
+    const [owner] = owners;
+    const job = jobs.find(job => job.gladiatorId === owner.gid)!;
+    const read = await rpc<{ rewards: DungeonRunPlan['outcomes'][number]['rewards']; rulesVersion: string } | null>(
+      'expedition_settlement_input', { activity_id: job.activityId, lease_token: job.token });
+    expect(read).toMatchObject({ rewards: plan.outcomes.find(outcome => outcome.activityId === job.activityId)!.rewards, rulesVersion: 'v2' });
+    const prepared = preparation(await owner.state(), read!.rewards);
+    await sql`update public.gladiators set xp=xp+1 where id=${owner.gid}`;
+    const before = await creditedState([owner.gid]);
+    expect(await preparedSettle(job, prepared)).toEqual({ ok: false, code: 'stale-preparation' });
+    expect(await creditedState([owner.gid])).toEqual(before);
+    const fresh = preparation(await owner.state(), read!.rewards);
+    const [{ expiry }] = await sql`update private.jobs set lease_until_ms=private.planning_now_ms()+3000
+      where id=${job.id} returning lease_until_ms::float8 as expiry`;
+    const contender = await sql.reserve();
+    let locked!: () => void, release!: () => void;
+    const ready = new Promise<void>(resolve => { locked = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const blocker = sql.begin(async tx => {
+      await tx`select 1 from private.jobs where id=${job.id} for update`;
+      locked();
+      await hold;
+    });
+    let pending: PromiseLike<unknown> | undefined;
+    try {
+      await ready;
+      const [{ pid }] = await contender`select pg_backend_pid() as pid`;
+      pending = contender`select public.settle_expedition(${job.activityId},${job.token},${contender.json(fresh as never)}) as r`.execute();
+      void Promise.resolve(pending).catch(() => undefined);
+      let blocked = false, now = 0;
+      for (let poll = 0; poll < 100 && !blocked; poll++) {
+        [{ blocked, now }] = await sql`select cardinality(pg_blocking_pids(${pid}))>0 as blocked,private.planning_now_ms()::float8 as now`;
+        if (!blocked) await delay(10);
+      }
+      expect(blocked).toBe(true);
+      expect(now).toBeLessThan(expiry);
+      for (let poll = 0; poll < 125 && now <= expiry; poll++) {
+        await delay(40);
+        now = (await sql`select private.planning_now_ms()::float8 as now`)[0].now;
+      }
+      expect(now).toBeGreaterThan(expiry);
+      release();
+      await blocker;
+      expect(await pending).toEqual([{ r: { ok: false, code: 'conflict' } }]);
+      expect(await creditedState([owner.gid])).toEqual(before);
+      const retried = (await claim('settlement')).find(retry => retry.id === job.id)!;
+      expect(retried.attempt).toBe(2);
+      expect(await takeSettlement(retried)).toMatchObject({ ok: true, newGrants: 1 });
+    } finally {
+      release();
+      await Promise.allSettled([blocker, pending]);
+      contender.release();
+    }
+  });
+
+  it('prunes dungeon fights, results, members and runs after 7 days and keeps the summaries 90', async () => {
+    const { owners, sim, plan: original } = await settlementRun();
+    const plan = wolfOutcome(original, 4, true, owners[0].gid);
+    await leaseFinal(sim, plan);
+    const [last, ...jobs] = await claim('settlement');
+    const expiry = slotEnd + RULES_V2.retention.replayMs;
+    const summaryExpiry = slotEnd + RULES_V2.retention.summaryMs;
+    const gids = owners.map(owner => owner.gid);
+    const prepared = await Promise.all(jobs.map(async job => preparation(
+      await owners.find(owner => owner.gid === job.gladiatorId)!.state(),
+      plan.outcomes.find(outcome => outcome.activityId === job.activityId)!.rewards)));
+    await rollbackOnly(async tx => {
+      const cleanup = async (ms: number) => {
+        await nowIn(tx, ms);
+        return (await tx`select private.cleanup_history(${ms}) as result`)[0].result;
+      };
+      await tx`update private.coordinator set published_slot=${TARGET + 19} where singleton`;
+      await tx`update public.gladiators set processed_slot_index=${TARGET + 19}`;
+      const empty = { dungeonFights: 0, dungeonResults: 0, dungeonRunMembers: 0, dungeonRuns: 0 };
+      expect((await cleanup(expiry)).detail).toMatchObject({ blockedSlot: TARGET, deleted: empty });
+      await nowIn(tx, slotEnd);
+      const [{ result: reveal }] = await tx`select public.complete_job(${last.id},${last.token},'{}') as result`;
+      expect(reveal).toMatchObject({ ok: true });
+      for (const [index, job] of jobs.entries()) {
+        const [{ result }] = await tx`select public.settle_expedition(${job.activityId},${job.token},${tx.json(prepared[index] as never)}) as result`;
+        expect(result).toMatchObject({ ok: true, summary: { replayExpiry: { state: 'available', expiresAtMs: expiry } } });
+      }
+      await tx`set constraints all immediate`;
+      const summaries = () => tx`select a.id,a.summary as owner,r.summary as public
+        from public.activities a join public.recent_results r on r.activity_id=a.id where a.slot_index=${TARGET} order by a.id`;
+      const before = await summaries();
+      expect(before).toHaveLength(2);
+      const keys = () => tx`select o.owner_id,o.operation_id,o.receipt_id,o.request,o.request_digest from public.operation_receipts o
+        join private.settled_slots s on s.receipt_id=o.receipt_id where s.slot_index=${TARGET} order by o.receipt_id`;
+      const checkpoints = () => tx`select * from private.settled_slots where slot_index=${TARGET} order by gladiator_id`;
+      const titles = () => tx`select * from public.gladiator_titles where gladiator_id in ${tx(gids)} order by gladiator_id,title_id`;
+      const counters = () => tx`select * from public.title_counters where gladiator_id in ${tx(gids)} order by gladiator_id,counter`;
+      const preserved = await Promise.all([keys(), checkpoints(), titles(), counters()]);
+      expect((await cleanup(expiry - 1)).detail.deleted).toMatchObject(empty);
+      expect(await summaries()).toEqual(before);
+      expect((await cleanup(expiry)).detail.deleted).toMatchObject({
+        dungeonFights: 4, dungeonResults: 1, dungeonRunMembers: 2, dungeonRuns: 1,
+      });
+      expect(await tx`select id from private.jobs where slot_index=${TARGET}`).toEqual([]);
+      expect(await tx`select run_id from private.dungeon_runs union all select run_id from private.dungeon_results
+        union all select run_id from private.dungeon_run_members union all select run_id from public.dungeon_fights`).toEqual([]);
+      const expired = before.map(row => ({ ...row, owner: { ...row.owner, replayExpiry: { state: 'expired' } },
+        public: { ...row.public, replayExpiry: { state: 'expired' } } }));
+      expect(await summaries()).toEqual(expired);
+      // Rebuild both public rows from the retained activities after all detailed sources are gone.
+      await tx`delete from public.recent_results where activity_id in ${tx(before.map(row => row.id))}`;
+      await tx`update public.gladiators set rating=rating+1 where id in ${tx(gids)}`;
+      await tx`set constraints all immediate`;
+      expect(await summaries()).toEqual(expired);
+      expect((await cleanup(expiry)).detail.deleted).toMatchObject(empty);
+      expect((await cleanup(summaryExpiry - 1)).summary.deleted.activities).toBe(0);
+      expect(await summaries()).toEqual(expired);
+      const pruned = await cleanup(summaryExpiry);
+      expect(pruned.summary).toMatchObject({ deleted: { activities: 2 }, compacted: { receipts: 2 } });
+      expect(await tx`select id from public.activities where slot_index=${TARGET}`).toEqual([]);
+      expect(await tx`select activity_id from public.recent_results where activity_id in ${tx(before.map(row => row.id))}`).toEqual([]);
+      expect(await Promise.all([keys(), checkpoints(), titles(), counters()])).toEqual(preserved);
+      expect(await tx`select distinct o.result from public.operation_receipts o
+        join private.settled_slots s on s.receipt_id=o.receipt_id where s.slot_index=${TARGET}`)
+        .toEqual([{ result: { compactedAtMs: summaryExpiry } }]);
+      expect((await cleanup(summaryExpiry)).summary.deleted.activities).toBe(0);
+    });
+  });
+
+  it('runs a Wolf Den afternoon with four entrants end to end through the real worker HTTP endpoint', async () => {
+    const previous = Math.floor(Date.now() / SLOT) - 1;
+    const target = previous - (previous + 2) % 3;
+    await resetWorld(target - 1);
+    await sql.begin(tx => selectRules(tx, 'v2'));
+    const rest = { kind: 'rest' };
+    const owners = [];
+    for (let i = 0; i < 4; i++) {
+      const owner = await dungeonFighter('wolf-den', 100, target, { morning: rest, afternoon: rest, evening: rest });
+      await strengthen(owner);
+      owners.push(owner);
+    }
+    const before = await Promise.all(owners.map(owner => owner.state()));
+    const invoke = () => {
+      const secret = process.env.LOCAL_WORKER_SECRET;
+      if (!secret || secret.length <= 20) throw new Error('Local worker test authorization is unavailable');
+      const input = ['url = "http://supabase_edge_runtime_Cloudiator:8081/game-worker"', 'request = "POST"', 'silent',
+        'show-error', 'write-out = "\\n%{http_code}"', `header = ${JSON.stringify(`Authorization: Bearer ${secret}`)}`,
+        'header = "Content-Type: application/json"', 'data-binary = "{}"'].join('\n');
+      const output = execFileSync('docker', ['exec', '-i', 'supabase_db_Cloudiator', 'curl', '--config', '-'], { input, encoding: 'utf8' });
+      const split = output.lastIndexOf('\n');
+      expect(Number(output.slice(split + 1))).toBe(200);
+      return JSON.parse(output.slice(0, split));
+    };
+    for (let round = 0; round < 22; round++) {
+      expect(invoke().failed).toBe(0);
+      const [{ count }] = await sql`select count(*)::int from public.activities where slot_index=${target} and status='completed'`;
+      if (count === 4) break;
+    }
+    const results = await sql`select a.gladiator_id,a.id,a.summary,p.plan,r.run_id from public.activities a
+      join private.dungeon_run_members m on m.activity_id=a.id join private.dungeon_runs r using(run_id)
+      join private.dungeon_results p using(run_id) where a.slot_index=${target} and a.status='completed'`;
+    expect(results).toHaveLength(4);
+    expect(new Set(results.map(row => row.run_id)).size).toBe(2);
+    for (const [index, owner] of owners.entries()) {
+      const row = results.find(result => result.gladiator_id === owner.gid)!;
+      const outcome = (row.plan as DungeonRunPlan).outcomes.find(outcome => outcome.activityId === row.id)!;
+      expect(row.summary).toMatchObject({ success: outcome.success, rewards: { xp: outcome.rewards.xp, money: outcome.rewards.money },
+        replayExpiry: { state: 'available', expiresAtMs: (target + 1) * SLOT + RULES_V2.retention.replayMs } });
+      const state = await owner.state();
+      const credited = row.summary.rewards;
+      const expected = preparation(before[index], outcome.rewards);
+      expect(state.wallets.money).toBe(before[index].wallets.money + credited.money + credited.overflowMoney);
+      expect(state.progression).toMatchObject(expected.progression);
+      expect(credited.items).toEqual([
+        ...expected.grant.plan.retained.map(({ catalogId, catalogVersion, tier, rarity, quantity }) => ({ catalogId, catalogVersion, tier, rarity, quantity })),
+        ...expected.grant.plan.stacked.map(({ quantity }) => ({ catalogId: 'salvage', catalogVersion: 'v1', tier: 1, rarity: 'common', quantity })),
+      ]);
+      expect(await sql`select money_delta::int as money from public.wallet_ledger where receipt_id=${row.summary.receiptId} and reason='dungeon'`)
+        .toEqual([{ money: credited.money + credited.overflowMoney }]);
+      expect(await sql`select ordinal from public.dungeon_fights where run_id=${row.run_id} order by ordinal`)
+        .toEqual((row.plan as DungeonRunPlan).fights.map(fight => ({ ordinal: fight.ordinal })));
+    }
+    const { checkpoints: _beforeCheckpoints, ...credited } = await creditedState(owners.map(owner => owner.gid));
+    expect(invoke().failed).toBe(0);
+    expect(await sql`select activity_id from private.settled_slots where slot_index=${target}`).toHaveLength(4);
+    const { checkpoints: _afterCheckpoints, ...replayed } = await creditedState(owners.map(owner => owner.gid));
+    expect(replayed).toEqual(credited);
+  }, 120_000);
 });

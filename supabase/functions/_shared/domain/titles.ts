@@ -1,13 +1,14 @@
 import { freezeDomain } from './types.ts';
 
-// The wearable titles of patch 1.7 (spec docs/superpowers/specs/2026-10-30-titles-1-7-design.md, "The titles" and "What each
-// measure counts"). The SQL (supabase/sql/22-titles.sql; its rules restated with 1.7.1's two rows by 23-awards.sql) restates these
+// The wearable titles (spec docs/superpowers/specs/2026-10-30-titles-1-7-design.md, "The titles" and "What each
+// measure counts"). The SQL (22-titles.sql, 23-awards.sql and 24-dungeons.sql) restates these
 // rules and counts; this is the shared name, rule and order every client and Edge command binds to. A title is earned when its measure
 // reaches its threshold; a hand-given one (measure `award`) never is.
 
-export type TitleFamily = 'special' | 'expeditions' | 'training' | 'arena' | 'tournaments' | 'seasons' | 'gear' | 'wealth';
+export type TitleFamily = 'special' | 'expeditions' | 'dungeons' | 'training' | 'arena' | 'tournaments' | 'seasons' | 'gear' | 'wealth';
 export type TitleMeasure = 'founder' | 'days-in-camp' | 'banner' | 'expeditions-won' | 'woodland-won' | 'outpost-won'
-  | 'mountain-won' | 'trainings' | 'arena-wins' | 'arena-best-streak' | 'tournament-finals' | 'tournament-wins'
+  | 'mountain-won' | 'wolf-den-clears' | 'raider-stronghold-clears' | 'troll-hall-clears' | 'dungeon-clears'
+  | 'trainings' | 'arena-wins' | 'arena-best-streak' | 'tournament-finals' | 'tournament-wins'
   | 'season-top-three' | 'season-firsts' | 'items-owned' | 'tiers-of-one' | 'rarities-of-one' | 'rare-items' | 'gold-earned'
   // Patch 1.7.1: a hand-given title. No counter, trigger or back-fill produces it; only the owner's private.give_title grants one.
   | 'award';
@@ -18,8 +19,8 @@ const row = (id: string, name: string, family: TitleFamily, rule: string, measur
   tier: 1 | 2 | 3 | null = null): TitleDefinition => ({ id, name, family, rule, measure, threshold, tier });
 
 /**
- * The spec's rows 1-31, and patch 1.7.1's two hand-given titles after Bannerman (plan
- * docs/superpowers/plans/2026-11-06-hand-given-titles-1-7-1.md), in the picker's order (also the catalog order the awarding uses).
+ * The spec's released titles in picker order, including the two hand-given titles after Bannerman and four dungeon titles.
+ * The awarding logic uses the same order.
  */
 export const TITLES_V1: readonly TitleDefinition[] = freezeDomain([
   row('founder', 'Founder', 'special', 'Made in Season 1', 'founder', 1),
@@ -33,6 +34,10 @@ export const TITLES_V1: readonly TitleDefinition[] = freezeDomain([
   row('wolfbane', 'Wolfbane', 'expeditions', '25 wins on Woodland Path', 'woodland-won', 25),
   row('raiders-bane', "Raider's Bane", 'expeditions', '25 wins on Ruined Outpost', 'outpost-won', 25),
   row('troll-slayer', 'Troll-Slayer', 'expeditions', '25 wins on Mountain Pass', 'mountain-won', 25),
+  row('den-breaker', 'Den Breaker', 'dungeons', 'Beat Alpha of the Den (Wolf Den)', 'wolf-den-clears', 1),
+  row('warlords-end', "Warlord's End", 'dungeons', 'Beat the Raider Warlord (Raider Stronghold)', 'raider-stronghold-clears', 1),
+  row('kingslayer', 'Kingslayer', 'dungeons', 'Beat the Troll King (Troll Hall)', 'troll-hall-clears', 1),
+  row('dungeoneer', 'Dungeoneer', 'dungeons', '25 dungeon clears', 'dungeon-clears', 25),
   row('tiro', 'Tiro', 'training', '10 Trainings', 'trainings', 10, 1),
   row('disciplined', 'Disciplined', 'training', '100 Trainings', 'trainings', 100, 2),
   row('doctore', 'Doctore', 'training', '400 Trainings', 'trainings', 400, 3),
@@ -59,21 +64,22 @@ export const TITLES_V1: readonly TitleDefinition[] = freezeDomain([
 
 /** The family headings, in the picker's order. */
 export const TITLE_FAMILIES: readonly { id: TitleFamily; name: string }[] = freezeDomain([
-  { id: 'special', name: 'Special' }, { id: 'expeditions', name: 'Expeditions' }, { id: 'training', name: 'Training' },
+  { id: 'special', name: 'Special' }, { id: 'expeditions', name: 'Expeditions' }, { id: 'dungeons', name: 'Dungeons' }, { id: 'training', name: 'Training' },
   { id: 'arena', name: 'Arena' }, { id: 'tournaments', name: 'Tournaments' }, { id: 'seasons', name: 'Seasons' },
   { id: 'gear', name: 'Gear collection' }, { id: 'wealth', name: 'Wealth' },
 ]) as readonly { id: TitleFamily; name: string }[];
 
-/** The 18 stored counters of "What each measure counts" (every row "Stored as: counter"). The other measures are derived. */
+/** The stored counters of "What each measure counts". The other measures are derived. */
 export const STORED_COUNTERS: readonly string[] = Object.freeze([
   'expeditions-won', 'woodland-won', 'outpost-won', 'mountain-won', 'trainings', 'arena-wins', 'arena-streak',
   'arena-best-streak', 'tournament-finals', 'tournament-wins', 'season-top-three', 'season-firsts', 'gold-v1', 'gold-v2',
-  'items-owned', 'rare-items', 'tiers-of-one', 'rarities-of-one',
+  'items-owned', 'rare-items', 'tiers-of-one', 'rarities-of-one', 'dungeon-clears',
+  'wolf-den-clears', 'raider-stronghold-clears', 'troll-hall-clears',
 ]);
 
 const BY_ID: ReadonlyMap<string, TitleDefinition> = new Map(TITLES_V1.map(t => [t.id, t]));
 
-/** The 1.7 title with this id, or null for anything else (an unknown, mistyped or later-patch id). */
+/** The title with this id, or null for an unknown, mistyped or later-patch id. */
 export function titleById(id: unknown): TitleDefinition | null {
   return typeof id === 'string' ? BY_ID.get(id) ?? null : null;
 }

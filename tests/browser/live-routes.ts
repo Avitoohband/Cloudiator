@@ -6,7 +6,7 @@
 // Google), and its PKCE exchange signs in `LiveTransport.googleUser`.
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
-import type { ActivitySummary, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { ActivitySummary, PartyBattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { GameMessage, MarketListing, OwnerState, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 import type { PatchEntry } from '../../src/lib/patch';
@@ -67,6 +67,8 @@ export type LiveData = {
   tournaments?: readonly TournamentView[];
   /** Activity timelines by activity id: their stages, public completion and (for a signed-in reader) owner summary. */
   timelines?: Readonly<Record<string, RevealedTimeline>>;
+  /** Revealed dungeon fights as stored by the public read model. */
+  dungeonFights?: readonly { run_id: string; ordinal: 1 | 2 | 3 | 4; reveal_at_ms: number; log: PartyBattleLog }[];
   /** Recent public results, newest first. */
   recent?: readonly ResultRow[];
   /** Open marketplace offers (the public `market_offers` projection), in any order. */
@@ -412,6 +414,7 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
       profile: { ...profile, prestige: (profile.prestige ?? []).map(({ seasonId, ...award }) => ({ seasonIndex: Number(seasonId), ...award })) } })) },
     visible_events: { rows: due(timelines.flatMap(t => t.stages.map((stage, ordinal) => ({ id: stage.id, activity_id: t.activityId, ordinal, reveal_at_ms: stage.revealedAtMs, stage })))) },
     recent_results: { rows: due([...recent.values()]) },
+    dungeon_fights: { rows: due([...(data.dungeonFights ?? [])]) },
     // Each season's rules version (M27, Patch 1.6): the one that opened it, 'v1' unless a test names another.
     seasons: { rows: seasons.map(s => ({ season_index: Number(s.seasonId), starts_at_ms: s.startsAtMs, ends_at_ms: s.endsAtMs, closed_at_ms: s.closedAtMs,
       rules_version: s.rulesVersion ?? 'v1' })) },

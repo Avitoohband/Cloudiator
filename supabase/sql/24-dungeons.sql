@@ -878,5 +878,835 @@ grant execute on function private.planning_command(uuid,uuid,jsonb,text),private
 revoke all on function private.safe_party_log(jsonb),private.accept_dungeon_result(uuid,jsonb)
   from public,anon,authenticated,service_role;
 grant execute on function private.safe_party_log(jsonb),private.accept_dungeon_result(uuid,jsonb) to service_role;
+-- 4. Settle one member under its own locks, project its retained outcome, and prune shared replay detail.
+
+-- M20's claim, with one bounded exception for a dungeon's due final reveal and its due member settlements.
+-- Lease that complete bundle first at its due time. Keep the single-job and legacy reveal paths in their existing order.
+create or replace function public.claim_jobs(worker_id uuid,kind text,batch_limit integer) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare now_ms bigint:=private.planning_now_ms(); cap integer; leases jsonb; picked uuid[]:='{}'::uuid[]; candidate record; waits uuid[];
+  held uuid[]; settlement uuid;
+begin
+  if claim_jobs.worker_id is null or claim_jobs.kind is null or claim_jobs.kind not in ('prepare','pair','simulation','reveal','settlement')
+    or batch_limit is null or batch_limit<1 then
+    raise exception 'invalid claim' using errcode='22023';
+  end if;
+  cap:=least(batch_limit,case when claim_jobs.kind='simulation' then 5 else 20 end);
+  perform private.sweep_exhausted_leases(now_ms);
+  if claim_jobs.kind<>'settlement' then
+    select coalesce(array_agg(x.id order by x.due_at_ms,x.id),'{}'::uuid[]) into picked from (
+      select j.id,j.due_at_ms from private.jobs j
+      where j.kind=claim_jobs.kind and j.due_at_ms<=now_ms
+        and private.dependencies_ready(j.id)
+        and (j.status='pending' or (j.status='leased' and j.lease_until_ms<=now_ms and j.attempts<j.max_attempts))
+      order by j.due_at_ms,j.id limit cap for update skip locked) x;
+  else
+    for candidate in
+      select coalesce(dungeon.id,j.id) as id,dungeon.id is not null as dungeon_bundle,
+        bool_or(private.dependencies_ready(j.id)) as ready,min(j.due_at_ms) as due_at_ms,
+        array_agg(j.id order by j.id) as member_ids
+      from private.jobs j
+      left join lateral (
+        -- Only the final dungeon reveal is a direct prerequisite of its members' settlements and due with them.
+        select p.id from private.job_dependencies d join private.jobs p on p.id=d.prerequisite_id
+        where j.input->>'resolvedKind'='dungeon' and d.job_id=j.id and p.kind='reveal'
+          and p.input->>'kind'='dungeon-reveal' and p.status<>'completed'
+          and p.slot_index=j.slot_index and p.due_at_ms=j.due_at_ms
+        order by p.id limit 1
+      ) dungeon on true
+      where j.kind='settlement' and j.due_at_ms<=now_ms
+        and (j.status='pending' or (j.status='leased' and j.lease_until_ms<=now_ms and j.attempts<j.max_attempts))
+        and (private.dependencies_ready(j.id) or private.released_by_due_reveals(j.id,now_ms))
+      group by 1,2
+      order by due_at_ms,dungeon_bundle desc,id
+    loop
+      exit when cardinality(picked)>=cap;
+      if candidate.dungeon_bundle then
+        -- Fit the whole party before taking locks. Same-due independent jobs can fill the tail of a batch.
+        continue when cardinality(candidate.member_ids) not between 1 and 3
+          or cardinality(picked)+cardinality(candidate.member_ids)+1>cap;
+        begin
+          perform 1 from private.jobs p where p.id=candidate.id and p.kind='reveal'
+            and p.input->>'kind'='dungeon-reveal' and p.due_at_ms=candidate.due_at_ms
+            and (p.status='pending' or (p.status='leased' and p.lease_until_ms<=now_ms and p.attempts<p.max_attempts))
+            and private.dependencies_ready(p.id)
+            for update nowait;
+          continue when not found;
+          select coalesce(array_agg(x.id order by x.id),'{}'::uuid[]) into held from (
+            select m.id from private.jobs m join private.job_dependencies d on d.job_id=m.id
+            where m.id=any(candidate.member_ids) and d.prerequisite_id=candidate.id
+              and m.kind='settlement' and m.input->>'resolvedKind'='dungeon' and m.due_at_ms=candidate.due_at_ms
+              and (m.status='pending' or (m.status='leased' and m.lease_until_ms<=now_ms and m.attempts<m.max_attempts))
+              and not exists(select 1 from private.job_dependencies other join private.jobs p on p.id=other.prerequisite_id
+                where other.job_id=m.id and p.id<>candidate.id and p.status<>'completed')
+            order by m.id for update of m nowait
+          ) x;
+          if held is distinct from candidate.member_ids then
+            raise exception 'dungeon settlement bundle changed' using errcode='PZ001';
+          end if;
+          picked:=picked||candidate.id||held;
+        exception when lock_not_available or sqlstate 'PZ001' then
+          -- Roll back all tentative row locks for this bundle. Other claimants can still take the reveal and its members.
+          null;
+        end;
+        continue;
+      end if;
+      waits:='{}'::uuid[];
+      if not candidate.ready then
+        -- Only the reveals not already picked: one this claim took for an earlier settlement is locked by this transaction,
+        -- was checked then, and precedes this settlement in the list.
+        select coalesce(array_agg(p.id order by p.due_at_ms,p.id),'{}'::uuid[]) into waits from private.job_dependencies d
+          join private.jobs p on p.id=d.prerequisite_id where d.job_id=candidate.id and p.status<>'completed' and p.id<>all(picked);
+      end if;
+      continue when cardinality(picked)+cardinality(waits)+1>cap;
+      select j.id into settlement from private.jobs j where j.id=candidate.id and j.kind='settlement' and j.due_at_ms<=now_ms
+        and (j.status='pending' or (j.status='leased' and j.lease_until_ms<=now_ms and j.attempts<j.max_attempts))
+        for update skip locked;
+      continue when settlement is null;
+      if cardinality(waits)>0 then
+        select coalesce(array_agg(x.id order by x.due_at_ms,x.id),'{}'::uuid[]) into held from (
+          select p.id,p.due_at_ms from private.jobs p where p.id=any(waits) and p.kind='reveal' and p.due_at_ms<=now_ms
+            and (p.status='pending' or (p.status='leased' and p.lease_until_ms<=now_ms and p.attempts<p.max_attempts))
+            and private.dependencies_ready(p.id)
+          for update skip locked) x;
+        continue when cardinality(held)<>cardinality(waits);
+      end if;
+      picked:=picked||waits||settlement;
+    end loop;
+  end if;
+  with chosen as (
+    select x.id,x.ord from unnest(picked) with ordinality x(id,ord)
+  ), previous as (
+    select j.id,j.status as previous_status,j.attempts as previous_attempt from private.jobs j join chosen c on c.id=j.id
+  ), expired as (
+    update private.job_attempts a set finished_at_ms=now_ms,outcome='expired',failure_code='lease-expired'
+    from previous p where p.previous_status='leased' and a.job_id=p.id and a.attempt=p.previous_attempt and a.outcome is null
+  ), claimed as (
+    update private.jobs j set status='leased',lease_token=gen_random_uuid(),lease_owner=claim_jobs.worker_id,leased_at_ms=now_ms,
+      lease_until_ms=now_ms+120000,attempts=j.attempts+1
+    from chosen c where j.id=c.id
+    returning j.*,c.ord
+  ), logged as (
+    insert into private.job_attempts(job_id,attempt,worker_id,claimed_at_ms) select c.id,c.attempts,claim_jobs.worker_id,now_ms from claimed c
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'token',c.lease_token,'expiresAtMs',c.lease_until_ms,'kind',c.kind,
+    'activityId',c.activity_id,'gladiatorId',c.gladiator_id,'slotIndex',c.slot_index,'snapshot',c.input,'seed',c.seed,
+    'rulesVersion',c.rules_version,'attempt',c.attempts) order by c.ord),'[]'::jsonb) into leases from claimed c;
+  return leases;
+end $$;
+
+create or replace function public.expedition_settlement_input(activity_id uuid,lease_token uuid) returns jsonb language plpgsql security invoker set search_path='' as $$
+declare result jsonb;
+begin
+  select jsonb_build_object('jobId',j.id,'state',o.state,'rewards',p.rewards,'rulesVersion',p.rules_version) into result
+    from public.activities a join private.jobs j on j.dedupe_key='settlement:'||a.id
+    join lateral (
+      select e.plan->'rewards' as rewards,e.plan->'rulesVersion' as rules_version
+        from private.expedition_plans e where a.resolved_kind='expedition' and e.activity_id=a.id
+      union all
+      select member.outcome->'rewards',d.plan->'rulesVersion'
+        from private.dungeon_run_members m join private.dungeon_runs r using(run_id)
+        join private.dungeon_results d using(run_id)
+        cross join lateral jsonb_array_elements(d.plan->'outcomes') member(outcome)
+        where a.resolved_kind='dungeon' and m.activity_id=a.id and r.slot_index=a.slot_index
+          and r.dungeon_id=a.requested->>'dungeonId'
+          and member.outcome->>'activityId'=a.id::text and member.outcome->>'gladiatorId'=a.gladiator_id::text
+    ) p on true
+    join public.gladiators g on g.id=a.gladiator_id
+    join public.owner_state o on o.owner_id=g.owner_id
+    where a.id=expedition_settlement_input.activity_id and j.lease_token=expedition_settlement_input.lease_token and j.status='leased'
+      and j.lease_until_ms>private.planning_now_ms();
+  return result;
+end $$;
+
+create or replace function private.dungeon_rewards(activity uuid,prepared jsonb) returns jsonb language plpgsql security invoker set search_path='' as $$
+declare a public.activities%rowtype; g public.gladiators%rowtype; p jsonb; applied jsonb; items jsonb:='[]'::jsonb; e jsonb; overflow jsonb; dungeon jsonb; member_outcome jsonb;
+begin
+  select * into a from public.activities where id=activity;
+  select * into g from public.gladiators where id=a.gladiator_id;
+  -- Only read shared frozen rows. The core already holds this member's account and settlement locks.
+  select d.plan,member.outcome,jsonb_build_object('id',r.dungeon_id,'terminalFight',d.plan->'fights'->-1->'ordinal',
+      'partyWon',d.plan->'fights'->-1->'won')
+    into p,member_outcome,dungeon
+    from private.dungeon_run_members m join private.dungeon_runs r using(run_id)
+    join private.dungeon_results d using(run_id)
+    cross join lateral jsonb_array_elements(d.plan->'outcomes') member(outcome)
+    where m.activity_id=a.id and r.slot_index=a.slot_index and r.dungeon_id=a.requested->>'dungeonId'
+      and member.outcome->>'activityId'=a.id::text and member.outcome->>'gladiatorId'=a.gladiator_id::text;
+  if not found or a.resolved_kind is distinct from 'dungeon' or prepared->'rewards' is distinct from member_outcome->'rewards'
+    then raise exception 'invalid dungeon preparation'; end if;
+  if prepared->'progressionBaseline' is distinct from jsonb_build_object('level',g.level,'xp',g.xp) then return null; end if;
+  if not private.safe_integer(prepared->'progression'->'level',1) or not private.safe_integer(prepared->'progression'->'xp') then raise exception 'invalid progression'; end if;
+  applied:=private.apply_inventory_plan(g.id,prepared->'grant');
+  if applied is null then return null; end if;
+  update public.gladiators set level=(prepared->'progression'->>'level')::bigint,xp=(prepared->'progression'->>'xp')::bigint where id=g.id;
+  update public.wallets set money=money+(member_outcome->'rewards'->>'money')::bigint+(applied->>'overflowMoney')::bigint where gladiator_id=g.id;
+  for e in select * from jsonb_array_elements(prepared->'grant'->'plan'->'retained') loop
+    items:=items||jsonb_build_array(jsonb_build_object('catalogId',e->'catalogId','catalogVersion',e->'catalogVersion','tier',e->'tier','rarity',e->'rarity','quantity',e->'quantity'));
+  end loop;
+  for e in select * from jsonb_array_elements(prepared->'grant'->'plan'->'stacked') loop
+    items:=items||jsonb_build_array(jsonb_build_object('catalogId','salvage','catalogVersion',p->'catalogVersion','tier',1,'rarity','common','quantity',e->'quantity'));
+  end loop;
+  select coalesce(jsonb_agg(entry||jsonb_build_object('catalogVersion',p->'catalogVersion')),'[]'::jsonb) into overflow
+    from jsonb_array_elements(applied->'overflow') entry;
+  return jsonb_build_object('result',member_outcome->'result','success',member_outcome->'success','dungeon',dungeon,
+    'rewards',jsonb_build_object('money',member_outcome->'rewards'->'money','xp',member_outcome->'rewards'->'xp','renown',0,'attributePoints',0,'items',items,'overflowMoney',applied->'overflowMoney','overflow',overflow),
+    'replayExpiry',case when private.planning_now_ms()<a.ends_at_ms+604800000 then jsonb_build_object('state','available','expiresAtMs',a.ends_at_ms+604800000)
+      else jsonb_build_object('state','expired') end);
+end $$;
+
+create or replace function private.safe_settlement(value jsonb) returns jsonb language plpgsql stable security invoker set search_path='' as $$
+declare r jsonb:=value->'rewards'; e jsonb; items jsonb:='[]'::jsonb; expiry jsonb; k text; result jsonb;
+  overflow jsonb:='[]'::jsonb; total numeric:=0; dungeon jsonb:=value->'dungeon';
+begin
+  if jsonb_typeof(value) is distinct from 'object' or jsonb_typeof(r) is distinct from 'object'
+    or coalesce(value->>'result','') not in ('completed','victory','defeat') or jsonb_typeof(value->'success') is distinct from 'boolean'
+    or jsonb_typeof(r->'items') is distinct from 'array' then raise exception 'invalid settlement outcome'; end if;
+  foreach k in array array['money','renown','xp','attributePoints','overflowMoney'] loop
+    if not private.safe_integer(r->k) then raise exception 'invalid settlement outcome'; end if;
+  end loop;
+  for e in select * from jsonb_array_elements(r->'items') loop
+    if jsonb_typeof(e) is distinct from 'object' or jsonb_typeof(e->'catalogId') is distinct from 'string'
+      or jsonb_typeof(e->'catalogVersion') is distinct from 'string' or e->>'catalogId'='' or e->>'catalogVersion'=''
+      or e->'tier' not in ('1'::jsonb,'5'::jsonb,'10'::jsonb) or e->'tier' is null
+      or coalesce(e->>'rarity','') not in ('common','uncommon','rare') or not private.safe_integer(e->'quantity',1) then raise exception 'invalid settlement outcome'; end if;
+    items:=items||jsonb_build_array(jsonb_build_object('catalogId',e->'catalogId','catalogVersion',e->'catalogVersion','tier',e->'tier','rarity',e->'rarity','quantity',e->'quantity'));
+  end loop;
+  if jsonb_typeof(value->'replayExpiry') is distinct from 'object' then raise exception 'invalid settlement outcome'; end if;
+  if value->'replayExpiry'->>'state'='available' then
+    if not private.safe_integer(value->'replayExpiry'->'expiresAtMs') then raise exception 'invalid settlement outcome'; end if;
+    expiry:=jsonb_build_object('state','available','expiresAtMs',value->'replayExpiry'->'expiresAtMs');
+  elsif value->'replayExpiry'->>'state'='expired' then expiry:=jsonb_build_object('state','expired');
+  else raise exception 'invalid settlement outcome'; end if;
+  result:=jsonb_build_object('result',value->'result','success',value->'success','replayExpiry',expiry,
+    'rewards',jsonb_build_object('money',r->'money','renown',r->'renown','xp',r->'xp','attributePoints',r->'attributePoints','overflowMoney',r->'overflowMoney','items',items));
+  if r ? 'overflow' then
+    if jsonb_typeof(r->'overflow') is distinct from 'array' then raise exception 'invalid settlement outcome'; end if;
+    for e in select * from jsonb_array_elements(r->'overflow') loop
+      if jsonb_typeof(e) is distinct from 'object' or jsonb_typeof(e->'catalogId') is distinct from 'string'
+        or jsonb_typeof(e->'catalogVersion') is distinct from 'string' or e->>'catalogId'='' or e->>'catalogVersion'=''
+        or not private.safe_integer(e->'quantity',1) or not private.safe_integer(e->'unitValue') or not private.safe_integer(e->'money')
+        then raise exception 'invalid settlement outcome'; end if;
+      if (e->>'quantity')::numeric*(e->>'unitValue')::numeric<>(e->>'money')::numeric then raise exception 'invalid settlement outcome'; end if;
+      total:=total+(e->>'money')::numeric;
+      overflow:=overflow||jsonb_build_array(jsonb_build_object('catalogId',e->'catalogId','catalogVersion',e->'catalogVersion',
+        'quantity',e->'quantity','unitValue',e->'unitValue','money',e->'money'));
+    end loop;
+    if total<>(r->>'overflowMoney')::numeric then raise exception 'invalid settlement outcome'; end if;
+    result:=jsonb_set(result,'{rewards,overflow}',overflow);
+  end if;
+  if value ? 'ratingDelta' then
+    if not private.safe_integer(value->'ratingDelta',-9007199254740991) then raise exception 'invalid settlement outcome'; end if;
+    result:=result||jsonb_build_object('ratingDelta',value->'ratingDelta');
+  end if;
+  if value ? 'dungeon' then
+    if jsonb_typeof(dungeon) is distinct from 'object'
+      or coalesce(dungeon->>'id','') not in ('wolf-den','raider-stronghold','troll-hall')
+      or not coalesce(dungeon->'terminalFight' in ('1'::jsonb,'2'::jsonb,'3'::jsonb,'4'::jsonb),false)
+      or jsonb_typeof(dungeon->'partyWon') is distinct from 'boolean' then raise exception 'invalid dungeon outcome'; end if;
+    result:=result||jsonb_build_object('dungeon',jsonb_build_object('id',dungeon->'id',
+      'terminalFight',dungeon->'terminalFight','partyWon',dungeon->'partyWon'));
+  end if;
+  return result;
+end $$;
+
+create or replace function private.settle_activity_core(activity_id uuid,lease_token uuid,prepared jsonb) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare a public.activities%rowtype; j private.jobs%rowtype; owner uuid; now_ms bigint; receipt uuid:=gen_random_uuid();
+  settlement jsonb; operation uuid:=gen_random_uuid(); result_summary jsonb; outcome jsonb; inserted integer; failure text; grant_id text;
+begin
+  if settle_activity_core.activity_id is null or settle_activity_core.lease_token is null then return jsonb_build_object('ok',false,'code','invalid'); end if;
+  select g.owner_id into owner from public.activities x join public.gladiators g on g.id=x.gladiator_id where x.id=settle_activity_core.activity_id;
+  if not found then return jsonb_build_object('ok',false,'code','not-found'); end if;
+  perform pg_advisory_xact_lock(hashtextextended(owner::text,0));
+  perform 1 from public.gladiators g join public.activities x on x.gladiator_id=g.id where x.id=settle_activity_core.activity_id for update of g;
+  perform 1 from public.wallets w join public.activities x on x.gladiator_id=w.gladiator_id where x.id=settle_activity_core.activity_id for update of w;
+  perform 1 from public.item_instances i join public.activities x on x.gladiator_id=i.gladiator_id where x.id=settle_activity_core.activity_id order by i.id for update of i;
+  perform 1 from private.arena_ratings r join private.arena_assignment_sides s on s.activity_id=settle_activity_core.activity_id
+    join private.arena_assignments x on x.battle_id=s.battle_id join public.activities y on y.id=s.activity_id
+    where r.gladiator_id=y.gladiator_id and r.league=x.league and r.season_index=x.season_index for update of r;
+  perform 1 from private.arena_ratings r join private.tournament_entries e on e.activity_id=settle_activity_core.activity_id
+    join private.tournaments t on t.id=e.tournament_id
+    where r.gladiator_id=e.gladiator_id and r.league=t.league and r.season_index=t.season_index for update of r;
+  select * into a from public.activities where id=settle_activity_core.activity_id for update;
+  select * into j from private.jobs where dedupe_key='settlement:'||a.id for update;
+  if not found then return jsonb_build_object('ok',false,'code','not-found'); end if;
+  now_ms:=private.planning_now_ms();
+  if j.status='completed' then
+    -- A lost response retries with the same token and receives the committed receipt, never a second grant.
+    if j.lease_token=settle_activity_core.lease_token then return j.result||jsonb_build_object('newGrants',0,'replayed',true); end if;
+    return jsonb_build_object('ok',false,'code','conflict');
+  end if;
+  if j.status<>'leased' or j.lease_token is distinct from settle_activity_core.lease_token or j.lease_until_ms<=now_ms then
+    return jsonb_build_object('ok',false,'code','conflict');
+  end if;
+  if a.status<>'active' or now_ms<a.ends_at_ms then return jsonb_build_object('ok',false,'code','processing'); end if;
+  if not private.dependencies_ready(j.id) or a.slot_index>coalesce((select published_slot from private.coordinator where singleton),-1)
+    or exists(select 1 from public.activities earlier where earlier.slot_index<a.slot_index and earlier.status<>'completed') then
+    return jsonb_build_object('ok',false,'code','processing'); end if;
+  if a.resolved_kind in ('arena','tournament') and not exists(select 1 from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index) then
+    if a.resolved_kind='arena' then failure:=private.arena_settlement_failure(a.id); else failure:=private.tournament_settlement_failure(a.id); end if;
+    if failure is not null then
+      -- Fail closed before any grant or checkpoint: neither the frozen nor the live value is used.
+      update private.jobs set status='operator',lease_token=null,lease_owner=null,lease_until_ms=null,last_failure=failure where id=j.id;
+      update private.job_attempts set finished_at_ms=now_ms,outcome='failed',failure_code=failure where job_attempts.job_id=j.id and attempt=j.attempts;
+      return jsonb_build_object('ok',false,'code','operator');
+    end if;
+  end if;
+  insert into private.settled_slots(gladiator_id,slot_index,activity_id,receipt_id,resolved_kind,settled_at_ms)
+    values(a.gladiator_id,a.slot_index,a.id,receipt,a.resolved_kind,now_ms) on conflict do nothing;
+  get diagnostics inserted=row_count;
+  if inserted=0 then
+    -- The permanent checkpoint already exists: finish the job with that receipt and grant nothing.
+    select s.receipt_id into receipt from private.settled_slots s where s.gladiator_id=a.gladiator_id and s.slot_index=a.slot_index;
+    outcome:=jsonb_build_object('ok',true,'activityId',a.id,'receiptId',receipt,'newGrants',0,'replayed',true);
+  else
+    if a.resolved_kind in ('expedition','dungeon') then
+      if a.resolved_kind='dungeon' then settlement:=private.dungeon_rewards(a.id,prepared);
+      else settlement:=private.expedition_rewards(a.id,prepared); end if;
+      if settlement is null then
+        -- Raise in a subtransaction at the RPC wrapper: every tentative write/guard rolls back before stale return.
+        raise exception 'stale preparation' using errcode='P0002';
+      end if;
+    else settlement:=private.settle_rewards(a.id); end if;
+    if a.resolved_kind='tournament' then
+      -- Exception 7: the placement grant's one identity, kept with this activity's receipt; the summary whitelist drops it.
+      grant_id:=settlement->'placement'->>'id';
+      if grant_id is null then raise exception 'missing placement grant'; end if;
+    end if;
+    settlement:=private.safe_settlement(settlement);
+    result_summary:=settlement||jsonb_build_object('activityId',a.id,'resolvedKind',a.resolved_kind,'receiptId',receipt,'settledAtMs',now_ms);
+    if a.resolved_kind in ('expedition','arena','tournament','dungeon') then
+      insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+        values(owner,operation,receipt,a.gladiator_id,jsonb_build_object('kind','activity-settlement','activityId',a.id)
+          ||case when grant_id is null then '{}'::jsonb else jsonb_build_object('grantId',grant_id) end,
+          extensions.digest(a.id::text,'sha256'),result_summary);
+      insert into public.wallet_ledger(gladiator_id,receipt_id,money_delta,renown_delta,reason)
+        values(a.gladiator_id,receipt,(settlement->'rewards'->>'money')::bigint+(settlement->'rewards'->>'overflowMoney')::bigint,
+          (settlement->'rewards'->>'renown')::bigint,a.resolved_kind);
+    end if;
+    update public.activities set status='completed',receipt_id=receipt,summary=result_summary,settled_at_ms=now_ms where id=a.id;
+    outcome:=jsonb_build_object('ok',true,'activityId',a.id,'receiptId',receipt,'newGrants',1,'summary',result_summary);
+  end if;
+  update private.jobs set status='completed',result=outcome,completed_at_ms=now_ms where id=j.id;
+  update private.job_attempts set finished_at_ms=now_ms,outcome='completed' where job_attempts.job_id=j.id and attempt=j.attempts;
+  return outcome;
+end $$;
+
+create or replace function private.title_rules() returns jsonb language sql immutable security invoker set search_path='' as $$
+  select '[
+    {"id":"founder","measure":"founder","threshold":1,"tier":null},
+    {"id":"old-guard","measure":"days-in-camp","threshold":100,"tier":null},
+    {"id":"bannerman","measure":"banner","threshold":1,"tier":null},
+    {"id":"game-master","measure":"award","threshold":1,"tier":null},
+    {"id":"high-ground","measure":"award","threshold":1,"tier":null},
+    {"id":"wanderer","measure":"expeditions-won","threshold":10,"tier":1},
+    {"id":"pathfinder","measure":"expeditions-won","threshold":50,"tier":2},
+    {"id":"trailblazer","measure":"expeditions-won","threshold":200,"tier":3},
+    {"id":"wolfbane","measure":"woodland-won","threshold":25,"tier":null},
+    {"id":"raiders-bane","measure":"outpost-won","threshold":25,"tier":null},
+    {"id":"troll-slayer","measure":"mountain-won","threshold":25,"tier":null},
+    {"id":"den-breaker","measure":"wolf-den-clears","threshold":1,"tier":null},
+    {"id":"warlords-end","measure":"raider-stronghold-clears","threshold":1,"tier":null},
+    {"id":"kingslayer","measure":"troll-hall-clears","threshold":1,"tier":null},
+    {"id":"dungeoneer","measure":"dungeon-clears","threshold":25,"tier":null},
+    {"id":"tiro","measure":"trainings","threshold":10,"tier":1},
+    {"id":"disciplined","measure":"trainings","threshold":100,"tier":2},
+    {"id":"doctore","measure":"trainings","threshold":400,"tier":3},
+    {"id":"bloodied","measure":"arena-wins","threshold":1,"tier":1},
+    {"id":"crowd-pleaser","measure":"arena-wins","threshold":25,"tier":2},
+    {"id":"lion","measure":"arena-wins","threshold":100,"tier":3},
+    {"id":"invictus","measure":"arena-best-streak","threshold":5,"tier":null},
+    {"id":"finalist","measure":"tournament-finals","threshold":1,"tier":null},
+    {"id":"victor","measure":"tournament-wins","threshold":1,"tier":null},
+    {"id":"triumphator","measure":"tournament-wins","threshold":5,"tier":null},
+    {"id":"medalist","measure":"season-top-three","threshold":1,"tier":null},
+    {"id":"champion","measure":"season-firsts","threshold":1,"tier":null},
+    {"id":"thrice-crowned","measure":"season-firsts","threshold":3,"tier":null},
+    {"id":"collector","measure":"items-owned","threshold":10,"tier":1},
+    {"id":"curator","measure":"items-owned","threshold":40,"tier":2},
+    {"id":"antiquarian","measure":"items-owned","threshold":100,"tier":3},
+    {"id":"tempered","measure":"tiers-of-one","threshold":3,"tier":null},
+    {"id":"connoisseur","measure":"rarities-of-one","threshold":3,"tier":null},
+    {"id":"rare-find","measure":"rare-items","threshold":1,"tier":null},
+    {"id":"moneyed","measure":"gold-earned","threshold":1000,"tier":1},
+    {"id":"patrician","measure":"gold-earned","threshold":4000,"tier":2},
+    {"id":"croesus","measure":"gold-earned","threshold":12000,"tier":3}
+  ]'::jsonb
+$$;
+
+create or replace function private.title_measures(gid uuid, at_ms bigint) returns jsonb
+language sql stable security invoker set search_path='' as $$
+  select '{"expeditions-won":0,"woodland-won":0,"outpost-won":0,"mountain-won":0,"trainings":0,"arena-wins":0,"arena-streak":0,
+      "arena-best-streak":0,"tournament-finals":0,"tournament-wins":0,"season-top-three":0,"season-firsts":0,"gold-v1":0,"gold-v2":0,
+      "dungeon-clears":0,"wolf-den-clears":0,"raider-stronghold-clears":0,"troll-hall-clears":0,
+      "items-owned":0,"rare-items":0,"tiers-of-one":0,"rarities-of-one":0}'::jsonb
+    ||coalesce((select jsonb_object_agg(c.counter,c.value) from public.title_counters c where c.gladiator_id=g.id),'{}'::jsonb)
+    ||jsonb_build_object(
+      'gold-earned',coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v2'),0)
+        +coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v1'),0)/4,
+      'days-in-camp',floor((title_measures.at_ms-g.created_at_ms)::numeric/86400000)::bigint,
+      'founder',case when g.created_at_ms<private.founder_cutoff_ms() then 1 else 0 end,
+      'banner',case when exists(select 1 from public.owned_cosmetics o where o.gladiator_id=g.id and o.catalog_id='banner') then 1 else 0 end)
+  from public.gladiators g where g.id=title_measures.gid
+$$;
+
+create or replace function private.titles_on_activity() returns trigger language plpgsql security invoker set search_path='' as $$
+declare won boolean:=new.summary->>'success'='true'; placed integer; streak bigint;
+begin
+  if new.resolved_kind='training' then
+    perform private.add_title_count(new.gladiator_id,'trainings',1);
+  elsif new.resolved_kind='expedition' and won then
+    perform private.add_title_count(new.gladiator_id,'expeditions-won',1);
+    if new.requested->>'expeditionId' in ('woodland','outpost','mountain') then
+      perform private.add_title_count(new.gladiator_id,(new.requested->>'expeditionId')||'-won',1);
+    end if;
+  elsif new.resolved_kind='dungeon' and won then
+    perform private.add_title_count(new.gladiator_id,'dungeon-clears',1);
+    perform private.add_title_count(new.gladiator_id,(new.summary->'dungeon'->>'id')||'-clears',1);
+  elsif new.resolved_kind='arena' and won then
+    perform private.add_title_count(new.gladiator_id,'arena-wins',1);
+    streak:=private.add_title_count(new.gladiator_id,'arena-streak',1);
+    if streak>coalesce((select c.value from public.title_counters c
+        where c.gladiator_id=new.gladiator_id and c.counter='arena-best-streak'),0) then
+      perform private.set_title_count(new.gladiator_id,'arena-best-streak',streak);
+    end if;
+  elsif new.resolved_kind='arena' then
+    perform private.set_title_count(new.gladiator_id,'arena-streak',0);
+  elsif new.resolved_kind='tournament' then
+    select p.place into placed from public.tournament_placements p where p.activity_id=new.id;
+    if placed=1 then perform private.add_title_count(new.gladiator_id,'tournament-wins',1); end if;
+    if placed in (1,2) then perform private.add_title_count(new.gladiator_id,'tournament-finals',1); end if;
+  end if;
+  if new.resolved_kind is distinct from 'rest' then
+    perform private.award_titles(new.gladiator_id,
+      coalesce(new.settled_at_ms,floor(extract(epoch from clock_timestamp())*1000)::bigint),new.id,'result',null);
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists titles_on_ledger on public.wallet_ledger;
+create trigger titles_on_ledger after insert on public.wallet_ledger for each row
+  when (new.money_delta>0 and new.reason in ('expedition','arena','tournament','dungeon','season','npc-sale'))
+  execute function private.titles_on_ledger();
+
+create or replace function private.project_character(gid uuid) returns void
+language plpgsql security invoker set search_path='' as $$
+declare g public.gladiators%rowtype; b jsonb; a public.activities%rowtype; actor jsonb; silhouettes jsonb; awarded_prestige jsonb;
+  resting boolean; card jsonb;
+begin
+  select * into g from public.gladiators where id=gid;
+  if not found then return; end if;
+  select current_build into b from public.builds where gladiator_id=gid;
+  if b is null then return; end if;
+  -- Only an authoritative published activity is visible. Preparing snapshots remain private.
+  select * into a from public.activities where gladiator_id=gid and status<>'preparing'
+    and published_at_ms is not null and published_at_ms<=floor(extract(epoch from clock_timestamp())*1000)::bigint
+    order by slot_index desc limit 1;
+  -- Task 23.8: resting in its processed slot, it shows no activity, whatever its latest one was.
+  resting:=exists(select 1 from public.character_rests r where r.gladiator_id=gid and r.since_slot<=g.processed_slot_index
+    and g.processed_slot_index<=r.through_slot);
+  select coalesce(jsonb_agg(silhouette order by silhouette),'[]'::jsonb) into silhouettes from (
+    select case split_part(i.item->>'catalogId',':',1)
+      when 'sword' then 'weapon-sword' when 'axe' then 'weapon-axe' when 'spear' then 'weapon-spear' when 'bow' then 'weapon-bow'
+      when 'round-shield' then 'offhand-shield' when 'leather-hood' then 'head-hood' when 'iron-helmet' then 'head-helmet'
+      when 'light-armor' then 'armor-light' when 'heavy-armor' then 'armor-heavy' when 'light-boots' then 'feet-light'
+      when 'heavy-boots' then 'feet-heavy' end as silhouette
+    from public.item_instances i where i.gladiator_id=gid
+      and i.id in (select value::uuid from jsonb_each_text(b->'equipment') where value is not null)
+  ) equipment where silhouette is not null;
+  -- M24: the chosen look, null for the legacy look. M28: the worn title, null for none.
+  actor:=jsonb_build_object('gladiatorId',g.id,'name',g.name,'classId',b->'classId','equipmentSilhouettes',silhouettes,'appearance',g.appearance,
+    'title',g.worn_title,'league',g.league,'level',g.level,
+    'phase',private.slot_phase(case when resting then g.processed_slot_index else coalesce(a.slot_index,g.processed_slot_index) end),
+    'location',case when resting then 'camp' when a.id is null then 'orientation'
+      when a.resolved_kind='expedition' then 'expedition:'||(a.requested->>'expeditionId')
+      when a.resolved_kind='dungeon' then 'dungeon:'||(a.requested->>'dungeonId') else a.resolved_kind end,
+    'activityId',case when not resting then a.id end,'activityStatus',case when resting then 'idle' when a.id is null then 'active' else a.status end,
+    'startsAtMs',case when not resting then coalesce(a.starts_at_ms,g.created_at_ms) end,
+    'endsAtMs',case when not resting then coalesce(a.ends_at_ms,g.orientation_end_ms) end,'visibleStage',null,'resting',resting);
+  insert into public.world_actors(gladiator_id,actor,processed_slot_index) values(gid,actor,g.processed_slot_index)
+    on conflict(gladiator_id) do update set actor=excluded.actor,processed_slot_index=excluded.processed_slot_index
+    where (world_actors.actor,world_actors.processed_slot_index) is distinct from (excluded.actor,excluded.processed_slot_index);
+  -- Task 21: prestige, one entry per season award.
+  select coalesce(jsonb_agg(jsonb_build_object('seasonIndex',x.season_index,'league',x.league,'place',x.place,'badge',x.badge,'title',x.title)
+    order by x.season_index),'[]'::jsonb) into awarded_prestige from private.season_awards x where x.gladiator_id=gid;
+  -- Task 11c: the profile card's build, from the CURRENT build only (never pending_build): the stance, the points and each worn item's
+  -- public fields, never its id, owner, origin, binding or reservation; a slot with nothing worn is null.
+  card:=jsonb_build_object('stance',b->'stance','allocations',b->'allocations','equipment',
+    (select jsonb_object_agg(s.slot,(select jsonb_build_object('catalogId',i.item->'catalogId','catalogVersion',
+       i.item->'catalogVersion','tier',i.item->'tier','rarity',i.item->'rarity','stats',i.item->'stats')
+       from public.item_instances i where i.gladiator_id=gid and i.id=(b->'equipment'->>s.slot)::uuid))
+     from unnest(array['weapon','offHand','head','body','feet']) as s(slot)));
+  -- Combined combat strength/league score belongs to Task 16. Never label gear history as that score.
+  -- M28: titles_earned, the count of the gladiator's titles (never which, how or when).
+  insert into public.public_profiles(gladiator_id,rating,prestige,build,joined_at_ms,titles_earned)
+    values(gid,g.rating,awarded_prestige,card,g.created_at_ms,(select count(*) from public.gladiator_titles t where t.gladiator_id=gid))
+    on conflict(gladiator_id) do update
+    set rating=excluded.rating,prestige=excluded.prestige,build=excluded.build,joined_at_ms=excluded.joined_at_ms,titles_earned=excluded.titles_earned
+    where (public_profiles.rating,public_profiles.prestige,public_profiles.build,public_profiles.joined_at_ms,public_profiles.titles_earned)
+      is distinct from (excluded.rating,excluded.prestige,excluded.build,excluded.joined_at_ms,excluded.titles_earned);
+  -- Task 22 (exception 4b): only new or changed rows reach the upsert; an unchanged row is neither written nor locked.
+  insert into public.recent_results(activity_id,gladiator_id,name,reveal_at_ms,summary)
+    select p.activity_id,p.gladiator_id,p.name,p.reveal_at_ms,p.summary from (
+      select x.id as activity_id,gid as gladiator_id,g.name as name,x.settled_at_ms as reveal_at_ms,jsonb_build_object('activityId',x.id,'resolvedKind',x.resolved_kind,
+        'result',x.summary->'result','success',x.summary->'success','settledAtMs',x.settled_at_ms,
+        'replayExpiry',case when x.summary->'replayExpiry'->>'state'='available' then jsonb_build_object('state','available','expiresAtMs',x.summary->'replayExpiry'->'expiresAtMs') else jsonb_build_object('state','expired') end)
+        ||case when x.resolved_kind='dungeon' then jsonb_build_object('dungeon',jsonb_build_object(
+          'id',x.summary->'dungeon'->'id','terminalFight',x.summary->'dungeon'->'terminalFight',
+          'partyWon',x.summary->'dungeon'->'partyWon')) else '{}'::jsonb end as summary
+      from public.activities x where x.gladiator_id=gid and x.status='completed' and x.summary is not null and x.settled_at_ms is not null
+    ) p
+    where not exists(select 1 from public.recent_results r where r.activity_id=p.activity_id
+      and (r.name,r.summary,r.reveal_at_ms) is not distinct from (p.name,p.summary,p.reveal_at_ms))
+    on conflict(activity_id) do update set name=excluded.name,summary=excluded.summary,reveal_at_ms=excluded.reveal_at_ms
+    where (recent_results.name,recent_results.summary,recent_results.reveal_at_ms) is distinct from (excluded.name,excluded.summary,excluded.reveal_at_ms);
+  -- Task 16: every league-season rating record of the character, as public standings (rating and human counters only).
+  insert into public.arena_standings(gladiator_id,league,season_index,name,rating,human_wins,human_losses)
+    select r.gladiator_id,r.league,r.season_index,g.name,r.rating,r.human_wins,r.human_losses from private.arena_ratings r where r.gladiator_id=gid
+    on conflict(gladiator_id,league,season_index) do update set name=excluded.name,rating=excluded.rating,
+      human_wins=excluded.human_wins,human_losses=excluded.human_losses
+    where (arena_standings.name,arena_standings.rating,arena_standings.human_wins,arena_standings.human_losses)
+      is distinct from (excluded.name,excluded.rating,excluded.human_wins,excluded.human_losses);
+end $$;
+
+create or replace view public.owner_state with (security_invoker=true) as
+select g.owner_id,jsonb_build_object(
+  'gladiatorId',g.id,'name',g.name,'appearance',g.appearance,'currentBuild',b.current_build,'pendingBuild',b.pending_build,'buildVersion',b.version,
+  'schedule',s.schedule,'scheduleVersion',s.version,'wallets',jsonb_build_object('money',w.money,'renown',w.renown),
+  'reservedFees',jsonb_build_object('money',coalesce((select sum(r.money) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0),
+    'renown',coalesce((select sum(r.renown) from public.reservations r where r.gladiator_id=g.id and r.status='held'),0)),
+  'inventory',coalesce((select jsonb_agg(i.item order by i.id) from public.item_instances i where i.gladiator_id=g.id),'[]'::jsonb),'inventoryCapacity',60,
+  'ownedCosmetics',coalesce((select jsonb_agg(jsonb_build_object('catalogId',c.catalog_id,'catalogVersion',c.catalog_version,'binding',c.binding) order by c.catalog_id) from public.owned_cosmetics c where c.gladiator_id=g.id),'[]'::jsonb),
+  'progression',jsonb_build_object('level',g.level,'xp',g.xp,'earnedAttributePoints',g.earned_points,'unspentAttributePoints',g.unspent_points,'league',g.league,'peakStrength',g.peak_strength,'rating',g.rating),
+  'stamina',jsonb_build_object('current',g.stamina_current,'maximum',g.stamina_maximum),'tournamentOptIn',g.tournament_opt_in,'processedSlotIndex',g.processed_slot_index,
+  'currentActivity',case when rest.gladiator_id is null then coalesce((select jsonb_build_object('id',a.id,'kind',coalesce(a.resolved_kind,a.requested->>'kind'),
+      'status',case when a.status='completed' then 'completed' when a.status='preparing' then 'queued'
+        when extract(epoch from statement_timestamp())*1000<a.ends_at_ms then 'active' else 'processing' end,
+      'startsAtMs',a.starts_at_ms,'endsAtMs',a.ends_at_ms,
+      'label',case coalesce(a.resolved_kind,a.requested->>'kind') when 'training' then 'Training'
+        when 'rest' then case when a.fallback then 'Resting (not enough stamina)' else 'Resting' end
+        when 'expedition' then 'Expedition' when 'dungeon' then 'Dungeon' when 'arena' then 'Arena' else 'Tournament' end)
+    from public.activities a where a.gladiator_id=g.id order by a.slot_index desc limit 1),
+    jsonb_build_object('id',g.id,'kind','orientation','status',case when extract(epoch from statement_timestamp())*1000<g.orientation_end_ms then 'active' else 'processing' end,
+      'startsAtMs',g.created_at_ms,'endsAtMs',g.orientation_end_ms,'label','Orientation')) end,
+  'restingUntilSlot',case when rest.signalled_at_ms is not null then rest.through_slot+1 end,
+  'wornTitle',g.worn_title,
+  'titles',coalesce((select jsonb_agg(jsonb_build_object('id',t.title_id,'earnedAtMs',t.earned_at_ms,'activityId',t.activity_id,
+      'source',t.source,'detail',t.detail) order by t.earned_at_ms,t.title_id)
+    from public.gladiator_titles t where t.gladiator_id=g.id),'[]'::jsonb),
+  'titleProgress',coalesce((select jsonb_object_agg(c.counter,c.value) from public.title_counters c where c.gladiator_id=g.id),'{}'::jsonb)
+    ||jsonb_build_object('gold-earned',
+      coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v2'),0)
+      +coalesce((select c.value from public.title_counters c where c.gladiator_id=g.id and c.counter='gold-v1'),0)/4,
+      'days-in-camp',(floor(extract(epoch from statement_timestamp())*1000)::bigint-g.created_at_ms)/86400000),
+  'inbox',jsonb_build_object(
+    'unread',(select count(*) from public.game_messages m where not m.hidden and m.published_at_ms>g.created_at_ms
+      and not exists(select 1 from public.message_reads r where r.owner_id=g.owner_id and r.message_id=m.id)),
+    'readIds',coalesce((select jsonb_agg(r.message_id order by r.message_id) from public.message_reads r
+      join public.game_messages m on m.id=r.message_id and not m.hidden where r.owner_id=g.owner_id),'[]'::jsonb),
+    'sinceMs',g.created_at_ms,
+    'newNotifications',(select count(*) from public.activities a where a.gladiator_id=g.id and a.status='completed'
+      and a.resolved_kind in ('training','expedition','arena','tournament','dungeon') and a.summary is not null and a.settled_at_ms is not null
+      and a.settled_at_ms<=floor(extract(epoch from statement_timestamp())*1000)::bigint
+      and a.settled_at_ms>greatest(coalesce(nm.seen_ms,0),g.created_at_ms))
+      +(select count(*) from (select distinct t.source,t.earned_at_ms from public.gladiator_titles t where t.gladiator_id=g.id
+        and t.activity_id is null and t.source<>'joined' and t.earned_at_ms>greatest(coalesce(nm.seen_ms,0),g.created_at_ms)) n),
+    'notificationsSeenMs',greatest(coalesce(nm.seen_ms,0),g.created_at_ms))) as state
+from public.gladiators g join public.builds b on b.gladiator_id=g.id join public.schedules s on s.gladiator_id=g.id join public.wallets w on w.gladiator_id=g.id
+  left join public.character_rests rest on rest.gladiator_id=g.id and rest.since_slot<=g.processed_slot_index and g.processed_slot_index<=rest.through_slot
+  left join public.notification_marks nm on nm.owner_id=g.owner_id;
+
+create or replace function private.cleanup_history(now_ms bigint) returns jsonb
+language plpgsql security invoker set search_path='' as $$
+declare
+  started_ms bigint:=floor(extract(epoch from clock_timestamp())*1000)::bigint; step_ms bigint;
+  st private.retention_state%rowtype; published bigint; cp_slot bigint; horizon bigint; lo bigint; hi bigint;
+  data_slots integer; third bigint; blocked bigint; n bigint; flipped bigint:=0; compacted bigint:=0;
+  battles text[]; tids text[]; dungeon_run_ids text[]; job_ids uuid[]; listing_ids uuid[];
+  v_deleted jsonb; v_replay jsonb; v_detail jsonb; v_summary jsonb; v_ledger jsonb; v_market jsonb; v_operational jsonb; v_cron jsonb; v_result jsonb;
+  folded_rows bigint; folded_gladiators bigint; expired integer; reservations bigint; revisions bigint;
+  more boolean; trim_lo bigint; trim_hi bigint; trim_horizon bigint; trim_slots integer; trim_third bigint; trim_blocked bigint;
+  jobs_compacted bigint:=0;
+begin
+  if now_ms is null then raise exception 'invalid cleanup time' using errcode='22023'; end if;
+  -- Give up any contended lock after 500 ms, for the rest of this transaction (Decision 4).
+  perform set_config('lock_timeout','500ms',true);
+  select * into st from private.retention_state where singleton for update;
+  if not found then raise exception 'missing retention state'; end if;
+  -- Database time after the guard lock; never a time ahead of it (Decision 4).
+  if now_ms>private.planning_now_ms() then raise exception 'cleanup time is in the future' using errcode='22023'; end if;
+  select c.published_slot into published from private.coordinator c where c.singleton;
+  cp_slot:=case when published is null then null else least(published,(select min(g.processed_slot_index) from public.gladiators g)) end;
+
+  -- 0. Expired replays, independent of the checkpoint: whole slots that ended 7 days ago, lowest first, at most 300.
+  step_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  with picked as (
+    select a.id from public.activities a
+    where (a.summary->'replayExpiry'->>'state')='available' and a.status='completed' and a.slot_index<=(now_ms-604800000)/4800000-1
+      and (a.summary->'replayExpiry'->>'expiresAtMs')::numeric<=now_ms
+    order by a.slot_index,a.id limit 300)
+  update public.activities a set summary=jsonb_set(a.summary,'{replayExpiry}','{"state":"expired"}'::jsonb) from picked p where a.id=p.id;
+  get diagnostics n=row_count; flipped:=n;
+  v_replay:=jsonb_build_object('flipped',flipped,'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-step_ms);
+
+  -- Seven-day pass.
+  step_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  v_deleted:=jsonb_build_object('activityStages',0,'expeditionPlans',0,'arenaResults',0,'arenaAssignmentSides',0,'arenaAssignments',0,
+    'tournamentResults',0,'tournamentBouts',0,'tournamentEntries',0,'tournaments',0,'jobDependencies',0,'jobAttempts',0,'jobs',0,
+    'activitySnapshots',0,'boundaryMembers',0,
+    'dungeonFights',0,'dungeonResults',0,'dungeonRunMembers',0,'dungeonRuns',0);
+  lo:=null; hi:=null; blocked:=null; more:=false; compacted:=0;
+  if cp_slot is not null then
+    horizon:=least(cp_slot-19,(now_ms-604800000)/4800000-1);
+    lo:=st.detail_through_slot+1;
+    if horizon>=lo then
+      -- At most three data slots; empty slots between them are skipped.
+      select count(*),max(x.slot_index) into data_slots,third from (
+        select distinct a.slot_index from public.activities a where a.slot_index>=lo order by 1 limit 3) x;
+      hi:=case when data_slots<3 then horizon else least(third,horizon) end;
+      -- Stop below a slot that still has unfinished work.
+      select min(x.slot) into blocked from (
+        select min(a.slot_index) as slot from public.activities a where a.slot_index between lo and hi and a.status<>'completed'
+        union all
+        select min(j.slot_index) from private.jobs j where j.slot_index between lo and hi and j.status<>'completed') x;
+      if blocked is not null then hi:=blocked-1; end if;
+      if hi>=lo then
+        -- (1) No 'available' summary outlives its detail.
+        update public.activities a set summary=jsonb_set(a.summary,'{replayExpiry}','{"state":"expired"}'::jsonb)
+          where a.slot_index between lo and hi and a.status='completed' and (a.summary->'replayExpiry'->>'state')='available';
+        get diagnostics n=row_count; flipped:=flipped+n;
+        -- (2) Public bout logs become their fight summary (exception 3).
+        update public.tournament_bout_results b set result=(b.result-'battleLog')||jsonb_build_object('fight',jsonb_build_object(
+            'durationMs',b.result->'battleLog'->'durationMs','victoryReason',b.result->'battleLog'->'victoryReason',
+            'tieBreakReason',b.result->'battleLog'->'tieBreakReason'))
+          from public.tournament_views v where v.id=b.tournament_id and v.slot_index between lo and hi and b.result ? 'battleLog';
+        get diagnostics compacted=row_count;
+        -- (3)-(4) Stages and expedition plans of A.
+        delete from public.activity_stages s using public.activities a where a.id=s.activity_id and a.slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activityStages',n);
+        delete from private.expedition_plans p using public.activities a where a.id=p.activity_id and a.slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('expeditionPlans',n);
+        -- (5)-(7) Arena battles, through their pairing jobs' slot (the indexed path).
+        select coalesce(array_agg(x.battle_id),'{}') into battles from private.arena_assignments x join private.jobs p on p.id=x.pairing_job_id
+          where p.kind='pair' and p.slot_index between lo and hi;
+        delete from private.arena_results where battle_id=any(battles);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('arenaResults',n);
+        delete from private.arena_assignment_sides where battle_id=any(battles);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('arenaAssignmentSides',n);
+        delete from private.arena_assignments where battle_id=any(battles);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('arenaAssignments',n);
+        -- (8)-(11) Tournament frames.
+        select coalesce(array_agg(t.id),'{}') into tids from private.tournaments t where t.slot_index between lo and hi;
+        delete from private.tournament_results where tournament_id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentResults',n);
+        delete from private.tournament_bouts where tournament_id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentBouts',n);
+        delete from private.tournament_entries where tournament_id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentEntries',n);
+        delete from private.tournaments where id=any(tids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournaments',n);
+        -- Dungeon detail references the run, simulation and grouping jobs. Delete it before the jobs.
+        select coalesce(array_agg(r.run_id),'{}') into dungeon_run_ids from private.dungeon_runs r where r.slot_index between lo and hi;
+        delete from public.dungeon_fights where run_id=any(dungeon_run_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('dungeonFights',n);
+        delete from private.dungeon_results where run_id=any(dungeon_run_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('dungeonResults',n);
+        delete from private.dungeon_run_members where run_id=any(dungeon_run_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('dungeonRunMembers',n);
+        delete from private.dungeon_runs where run_id=any(dungeon_run_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('dungeonRuns',n);
+        -- (12) Completed jobs of R, except a pairing job a tournament view still references (the 90-day pass removes it).
+        select coalesce(array_agg(j.id),'{}') into job_ids from private.jobs j where j.slot_index between lo and hi and j.status='completed'
+          and not exists(select 1 from public.tournament_views v where v.pairing_job_id=j.id);
+        delete from private.job_dependencies where job_id=any(job_ids) or prerequisite_id=any(job_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobDependencies',n);
+        delete from private.job_attempts where job_id=any(job_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobAttempts',n);
+        delete from private.jobs where id=any(job_ids);
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobs',n);
+        -- (13)-(14) Frozen snapshots of A and the cohorts of R.
+        delete from private.activity_snapshots s using public.activities a where a.id=s.activity_id and a.slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activitySnapshots',n);
+        delete from private.boundary_members where slot_index between lo and hi;
+        get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaryMembers',n);
+        -- (15)
+        update private.retention_state set detail_through_slot=hi where singleton;
+        st.detail_through_slot:=hi;
+      end if;
+      more:=blocked is null and st.detail_through_slot<horizon;
+    end if;
+  end if;
+  -- Task 23.7: the completed jobs of settled slots keep their rows and lose their payloads. Settled: above the trim
+  -- watermark, at or below P - 19 (the seven-day pass's rule without its seven-day age) and below the first slot with an
+  -- unfinished activity or job; at most three slots that have jobs a call, empty slots skipped. The watermark moves first,
+  -- because the job guard allows the compaction only at or below it.
+  if cp_slot is not null then
+    trim_lo:=st.jobs_compacted_through_slot+1;
+    trim_horizon:=cp_slot-19;
+    if trim_horizon>=trim_lo then
+      select count(*),max(x.slot_index) into trim_slots,trim_third from (
+        select distinct j.slot_index from private.jobs j where j.slot_index between trim_lo and trim_horizon order by 1 limit 3) x;
+      trim_hi:=case when trim_slots<3 then trim_horizon else trim_third end;
+      select min(x.slot) into trim_blocked from (
+        select min(a.slot_index) as slot from public.activities a where a.slot_index between trim_lo and trim_hi and a.status<>'completed'
+        union all
+        select min(j.slot_index) from private.jobs j where j.slot_index between trim_lo and trim_hi and j.status<>'completed') x;
+      if trim_blocked is not null then trim_hi:=trim_blocked-1; end if;
+      if trim_hi>=trim_lo then
+        update private.retention_state set jobs_compacted_through_slot=trim_hi where singleton;
+        st.jobs_compacted_through_slot:=trim_hi;
+        update private.jobs j set input='{"compacted": true}'::jsonb,result='{"ok": true, "compacted": true}'::jsonb
+          where j.slot_index between trim_lo and trim_hi and j.status='completed' and j.input<>'{"compacted": true}'::jsonb;
+        get diagnostics jobs_compacted=row_count;
+      end if;
+    end if;
+  end if;
+  v_detail:=jsonb_build_object('fromSlot',case when hi>=lo then lo end,'throughSlot',case when hi>=lo then hi end,'more',more,
+    'blockedSlot',blocked,'deleted',v_deleted,'compacted',jsonb_build_object('tournamentBoutResults',compacted,'jobs',jobs_compacted),
+    'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-step_ms);
+  v_replay:=v_replay||jsonb_build_object('flipped',flipped);
+
+  -- Ninety-day pass.
+  step_ms:=floor(extract(epoch from clock_timestamp())*1000)::bigint;
+  v_deleted:=jsonb_build_object('tournamentBoutResults',0,'tournamentPlacements',0,'tournamentViews',0,'jobAttempts',0,'jobs',0,
+    'activities',0,'boundaryWork',0,'boundaries',0);
+  lo:=null; hi:=null; more:=false; compacted:=0;
+  if cp_slot is not null then
+    horizon:=least(cp_slot-19,(now_ms-7776000000)/4800000-1,st.detail_through_slot);
+    lo:=st.summary_through_slot+1;
+    if horizon>=lo then
+      select count(*),max(x.slot_index) into data_slots,third from (
+        select distinct a.slot_index from public.activities a where a.slot_index>=lo order by 1 limit 3) x;
+      hi:=case when data_slots<3 then horizon else least(third,horizon) end;
+      -- (1) Settlement receipts keep their key, request and digest (the replay guard); only their result is compacted.
+      update public.operation_receipts o set result=jsonb_build_object('compactedAtMs',now_ms)
+        from public.activities a where a.slot_index between lo and hi and o.receipt_id=a.receipt_id
+          and o.request->>'kind'='activity-settlement' and not (o.result ? 'compactedAtMs' and o.result-'compactedAtMs'='{}'::jsonb);
+      get diagnostics compacted=row_count;
+      -- (2)-(5) The public tournament rows of R', then the pairing jobs only they still referenced.
+      delete from public.tournament_bout_results b using public.tournament_views v where v.id=b.tournament_id and v.slot_index between lo and hi;
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentBoutResults',n);
+      delete from public.tournament_placements p using public.tournament_views v where v.id=p.tournament_id and v.slot_index between lo and hi;
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('tournamentPlacements',n);
+      with gone as (delete from public.tournament_views v where v.slot_index between lo and hi returning v.pairing_job_id)
+        select coalesce(array_agg(g.pairing_job_id),'{}'),count(*) into job_ids,n from gone g;
+      v_deleted:=v_deleted||jsonb_build_object('tournamentViews',n);
+      delete from private.job_attempts where job_id=any(job_ids);
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobAttempts',n);
+      delete from private.jobs where id=any(job_ids);
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('jobs',n);
+      -- (6) Completed activities (recent_results cascade). A forgotten referencing row fails the whole call closed.
+      delete from public.activities where slot_index between lo and hi and status='completed';
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('activities',n);
+      -- (7) Finished boundary bookkeeping.
+      delete from private.boundary_work where slot_index between lo and hi and status='done';
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaryWork',n);
+      delete from private.boundaries where slot_index between lo and hi and status='complete';
+      get diagnostics n=row_count; v_deleted:=v_deleted||jsonb_build_object('boundaries',n);
+      -- (8)
+      update private.retention_state set summary_through_slot=hi where singleton;
+      st.summary_through_slot:=hi;
+      more:=hi<horizon;
+    end if;
+  end if;
+  v_summary:=jsonb_build_object('fromSlot',case when hi>=lo then lo end,'throughSlot',case when hi>=lo then hi end,'more',more,
+    'deleted',v_deleted,'compacted',jsonb_build_object('receipts',compacted),
+    'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-step_ms);
+
+  -- Ledger fold (one statement): the oldest rows older than 90 days, at most 5000, summed into their checkpoints.
+  with picked as (
+    select l.id from public.wallet_ledger l where l.created_at<to_timestamp((now_ms-7776000000)/1000.0)
+    order by l.created_at,l.id limit 5000
+  ), folded as (
+    delete from public.wallet_ledger l using picked p where l.id=p.id
+    returning l.gladiator_id,l.money_delta,l.renown_delta,l.created_at
+  ), sums as (
+    select f.gladiator_id,sum(f.money_delta)::bigint as money,sum(f.renown_delta)::bigint as renown,count(*) as n_rows,max(f.created_at) as through
+    from folded f group by f.gladiator_id
+  ), saved as (
+    insert into private.wallet_checkpoints as c(gladiator_id,money,renown,ledger_rows,folded_through,updated_at_ms)
+      select s.gladiator_id,s.money,s.renown,s.n_rows,s.through,now_ms from sums s
+    on conflict (gladiator_id) do update set money=c.money+excluded.money,renown=c.renown+excluded.renown,
+      ledger_rows=c.ledger_rows+excluded.ledger_rows,folded_through=greatest(c.folded_through,excluded.folded_through),
+      updated_at_ms=excluded.updated_at_ms
+    returning c.gladiator_id
+  )
+  select coalesce((select sum(s.n_rows) from sums s),0)::bigint,(select count(*) from saved) into folded_rows,folded_gladiators;
+  v_ledger:=jsonb_build_object('rows',folded_rows,'gladiators',folded_gladiators,'more',folded_rows=5000);
+
+  -- Fee reservations already consumed or refunded whose queue-build receipt is 90 days old; held ones are never touched.
+  with doomed as (
+    select r.id from public.reservations r join public.gladiators g on g.id=r.gladiator_id
+      join public.operation_receipts o on o.owner_id=g.owner_id and o.operation_id=r.operation_id
+    where r.status in ('consumed','refunded') and o.request->>'kind'='queue-build'
+      and o.created_at<to_timestamp((now_ms-7776000000)/1000.0)
+    order by o.created_at,r.id limit 1000)
+  delete from public.reservations r using doomed d where r.id=d.id;
+  get diagnostics reservations=row_count;
+
+  -- Schedule revisions 90 days old that no future boundary can read: a newer revision of the same phase is effective by the
+  -- character's next boundary (processed slot + 1) and is not effective earlier than this one (phase 5 picks the latest
+  -- effective slot, then the latest version).
+  with doomed as (
+    select r.gladiator_id,r.phase,r.version from public.schedule_revisions r join public.gladiators g on g.id=r.gladiator_id
+    where r.received_at_ms<now_ms-7776000000 and exists(select 1 from public.schedule_revisions x where x.gladiator_id=r.gladiator_id
+      and x.phase=r.phase and x.version>r.version and x.effective_slot_index>=r.effective_slot_index
+      and x.effective_slot_index<=g.processed_slot_index+1)
+    order by r.received_at_ms,r.gladiator_id,r.phase,r.version limit 1000)
+  delete from public.schedule_revisions r using doomed d where r.gladiator_id=d.gladiator_id and r.phase=d.phase and r.version=d.version;
+  get diagnostics revisions=row_count;
+
+  -- Every deferred projection trigger of this call fires now, inside the lock budget, so a failure is this call's failure.
+  set constraints all immediate;
+
+  -- Market (exception 1): the expiry backstop, then terminal listings 90 days past expiry with any offer; never an open one.
+  expired:=private.expire_listings(now_ms);
+  select coalesce(array_agg(x.id),'{}') into listing_ids from (
+    select l.id from private.market_listings l where l.status<>'open' and l.expires_at_ms<=now_ms-7776000000
+    order by l.expires_at_ms,l.id limit 1000) x;
+  delete from public.market_offers where id=any(listing_ids);
+  get diagnostics n=row_count; v_market:=jsonb_build_object('expired',expired,'offers',n);
+  delete from private.market_listings where id=any(listing_ids);
+  get diagnostics n=row_count; v_market:=v_market||jsonb_build_object('listings',n);
+
+  -- Operational windows, 1000 rows each.
+  delete from private.command_attempts a where a.id in (select x.id from private.command_attempts x
+    where x.attempted_at<to_timestamp((now_ms-3600000)/1000.0) order by x.attempted_at limit 1000 for update skip locked);
+  get diagnostics n=row_count; v_operational:=jsonb_build_object('commandAttempts',n);
+  delete from private.dispatch_log d where d.id in (select x.id from private.dispatch_log x
+    where x.dispatched_at_ms<now_ms-172800000 order by x.dispatched_at_ms limit 1000);
+  get diagnostics n=row_count; v_operational:=v_operational||jsonb_build_object('dispatchLog',n);
+  delete from private.operations_events e where e.id in (select x.id from private.operations_events x
+    where x.at_ms<now_ms-2592000000 order by x.at_ms limit 1000);
+  get diagnostics n=row_count; v_operational:=v_operational||jsonb_build_object('operationsEvents',n);
+  -- pg_cron's run log in its own block: a failure here reports only its SQLSTATE and the rest of the call still commits.
+  begin
+    delete from cron.job_run_details d where d.runid in (select x.runid from cron.job_run_details x
+      where x.end_time<to_timestamp((now_ms-604800000)/1000.0) order by x.end_time limit 1000);
+    get diagnostics n=row_count; v_cron:=to_jsonb(n);
+  exception when others then
+    v_cron:=jsonb_build_object('ok',false,'sqlstate',sqlstate);
+  end;
+  v_operational:=v_operational||jsonb_build_object('cronRunDetails',v_cron);
+
+  v_result:=jsonb_build_object('ok',true,'nowMs',now_ms,'publishedSlot',published,'checkpointSlot',cp_slot,
+    'durationMs',floor(extract(epoch from clock_timestamp())*1000)::bigint-started_ms,'replay',v_replay,'detail',v_detail,'summary',v_summary,
+    'ledger',v_ledger,'market',v_market,'reservations',reservations,'scheduleRevisions',revisions,'operational',v_operational);
+  update private.retention_state set last_run_at_ms=now_ms,last_result=v_result where singleton;
+  return v_result;
+end $$;
+
+revoke all on function public.claim_jobs(uuid,text,integer),public.expedition_settlement_input(uuid,uuid),
+  private.dungeon_rewards(uuid,jsonb),
+  private.safe_settlement(jsonb),private.settle_activity_core(uuid,uuid,jsonb),private.project_character(uuid),
+  private.title_rules(),private.title_measures(uuid,bigint) from public,anon,authenticated,service_role;
+grant execute on function public.claim_jobs(uuid,text,integer),public.expedition_settlement_input(uuid,uuid),
+  private.dungeon_rewards(uuid,jsonb),
+  private.safe_settlement(jsonb),private.settle_activity_core(uuid,uuid,jsonb),private.project_character(uuid),
+  private.title_rules(),private.title_measures(uuid,bigint) to service_role;
+revoke all on function private.titles_on_activity(),private.titles_on_ledger(),private.cleanup_history(bigint)
+  from public,anon,authenticated,service_role;
+
 notify pgrst,'reload schema';
 commit;

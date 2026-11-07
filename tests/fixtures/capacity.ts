@@ -13,7 +13,7 @@ import type { WorkerReport } from '../../supabase/functions/_shared/domain/types
 import { readMarket, readOwner, readProfile, readRecent, readRevision, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
   readTournamentLog, readWorld } from '../../src/lib/api/reads.ts';
 import { DISPATCH_PER_MINUTE, TABLE_CLASSES, type DatabaseMeasure, type EgressMeasure, type Encoding, type ReadSize, type RoleSizes,
-  type TableMeasure } from '../performance/capacity-model.ts';
+  type DungeonPayloadBytes, type TableMeasure } from '../performance/capacity-model.ts';
 export { logSection, writeSection } from '../performance/harness.ts';
 
 // Task 23.3 measurement harness for tests/db/capacity.test.ts (run through `npm run test:db`, or scripts/resource-report.mjs).
@@ -71,7 +71,7 @@ async function resetWorld(published: number | null) {
   await sql`update private.scheduler set enabled=false where singleton`;
 }
 
-type Choice = { kind: 'arena' | 'training' | 'rest' } | { kind: 'expedition'; expeditionId: 'woodland' };
+type Choice = { kind: 'arena' | 'training' | 'rest' } | { kind: 'expedition'; expeditionId: 'woodland' } | { kind: 'dungeon'; dungeonId: 'troll-hall' };
 type Choices = { morning: Choice; afternoon: Choice; evening: Choice };
 const ARENA: Choice = { kind: 'arena' }, TRAINING: Choice = { kind: 'training' }, WOODLAND: Choice = { kind: 'expedition', expeditionId: 'woodland' };
 /**
@@ -711,6 +711,53 @@ export async function measureCadence(players: number) {
   const summary = (run: World) => run.windows.map(w => ({ slot: w.slot, activities: w.activities, publishedMs: w.publishedMs, firstTicks: w.firstTicks,
     previousSettlements: w.previousSettlements, settledInCutoffTick: w.settledInCutoffTick, statusesOk: w.statuses.every(s => s === 200) }));
   return { expeditions: summary(expeditions), arena: summary(arena), flagged: [...expeditions.flagged, ...arena.flagged].length };
+}
+
+/** One v2 dungeon afternoon plus the following boundary, which must finish the shared reveals and all member settlements. */
+export async function measureDungeonCapacity(players: number, entrants: number) {
+  const slot = 301;
+  await resetWorld(slot - 1);
+  const rest = { kind: 'rest' } as const;
+  const restSchedule: Choices = { morning: rest, afternoon: rest, evening: rest };
+  const dungeonSchedule: Choices = { ...restSchedule, afternoon: { kind: 'dungeon', dungeonId: 'troll-hall' } };
+  await many(players, i => player(i, slot, [i < entrants ? dungeonSchedule : restSchedule], false));
+  await sql.begin(async tx => {
+    await tx`update private.rules_versions set active=false where active`;
+    await tx`update private.rules_versions set active=true where version='v2'`;
+    await tx`update public.gladiators set level=12`;
+  });
+  const tables = await gameTables();
+  const seeded = await counts(tables);
+  const windows = await withWorker(async tick => {
+    const revision = { value: (await sql`select revision from public.world_revision`)[0].revision as string };
+    const afternoon = await runWindow(slot, tick, tables, seeded, revision);
+    const following = await runWindow(slot + 1, tick, tables, afternoon.after, revision);
+    return { afternoon: afternoon.window, following: following.window, flagged: afternoon.flagged.length + following.flagged.length };
+  }).finally(() => sql.begin(async tx => {
+    await tx`update private.rules_versions set active=false where active`;
+    await tx`update private.rules_versions set active=true where version='v1'`;
+  }));
+  const [{ runs, members, fights }] = await sql`select (select count(*)::int from private.dungeon_runs) as runs,
+    (select count(*)::int from private.dungeon_run_members) as members,(select count(*)::int from public.dungeon_fights) as fights`;
+  const [settlements] = await sql`select
+    count(*) filter(where a.status='completed' and a.settled_at_ms<=b.completed_at_ms)::int as "settledByPublication",
+    count(*) filter(where a.resolved_kind='dungeon' and a.status='completed' and a.settled_at_ms<=b.completed_at_ms)::int as "dungeonsByPublication",
+    (max(a.settled_at_ms)-${(slot + 1) * SLOT})::float8 as "lastSettlementMs"
+    from public.activities a cross join private.boundaries b where a.slot_index=${slot} and b.slot_index=${slot + 1}`;
+  const [bytes] = await sql<DungeonPayloadBytes[]>`select
+    (select avg(octet_length(to_jsonb(r)::text))::float8 from private.dungeon_runs r) as "frozenRun",
+    (select avg(octet_length(d.plan::text))::float8 from private.dungeon_results d) as "frozenPlan",
+    (select sum(octet_length(f.log::text))::float8/nullif(${runs}::integer,0) from public.dungeon_fights f) as "fightLogs",
+    (select avg(octet_length(to_jsonb(m)::text))::float8 from private.dungeon_run_members m) as "memberSeat",
+    (select avg(octet_length(j.result::text))::float8 from private.dungeon_results d
+      join private.jobs j on j.id=d.simulation_job_id) as "simulationResult",
+    (select avg(octet_length(a.summary::text))::float8 from public.activities a
+      where a.slot_index=${slot} and a.resolved_kind='dungeon') as "ownerSummary",
+    (select avg(octet_length(r.summary::text))::float8 from public.recent_results r
+      join public.activities a on a.id=r.activity_id where a.slot_index=${slot} and a.resolved_kind='dungeon') as "publicSummary",
+    (select avg(octet_length(o.result::text))::float8 from public.operation_receipts o
+      join private.settled_slots s using(receipt_id) where s.slot_index=${slot} and s.resolved_kind='dungeon') as "receiptSummary"`;
+  return { ...windows, runs, members, fights, bytes, settlements };
 }
 
 // ---- Season close and standings ----------------------------------------------------------------------------------------

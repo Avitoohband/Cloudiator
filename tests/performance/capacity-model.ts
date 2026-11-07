@@ -88,6 +88,8 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'private.activity_snapshots': { retention: 'detail' }, 'private.arena_assignment_sides': { retention: 'detail' },
   'private.arena_assignments': { retention: 'detail' }, 'private.arena_results': { retention: 'detail' },
   'private.boundary_members': { retention: 'detail' }, 'private.expedition_plans': { retention: 'detail' },
+  'private.dungeon_runs': { retention: 'detail' }, 'private.dungeon_run_members': { retention: 'detail' },
+  'private.dungeon_results': { retention: 'detail' }, 'public.dungeon_fights': { retention: 'detail' },
   'private.job_attempts': { retention: 'detail' }, 'private.job_dependencies': { retention: 'detail' },
   'private.jobs': { retention: 'detail', compactAfterSlots: JOB_PAYLOAD_SLOTS },
   'private.tournament_bouts': { retention: 'detail' }, 'private.tournament_entries': { retention: 'detail' },
@@ -112,7 +114,7 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.notification_marks': { retention: 'player' },
   // M26: the patch list and its features (a row per release, recorded by hand and kept; at most 20 features each): tiny, kept.
   'public.patches': { retention: 'singleton' }, 'public.patch_features': { retention: 'singleton' },
-  // M28: titles, kept forever with the player: at most 33 titles (31 earned by play, and M29's two hand-given ones), 18 counters
+  // Titles, kept forever with the player: at most 37 titles (35 earned by play and two hand-given ones), 22 counters
   // and one ownership-history row per catalog id (132 today) per character. The release back-fill's one record.
   'public.gladiator_titles': { retention: 'player' }, 'public.title_counters': { retention: 'player' },
   'public.item_firsts': { retention: 'player' }, 'private.title_backfills': { retention: 'singleton' },
@@ -125,6 +127,22 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   // One retained audit per economy activation, independent of player count and elapsed slots.
   'private.economy_switches': { retention: 'singleton' },
 });
+
+/** Average JSON payload bytes for one shared run and one member's retained rows. */
+export type DungeonPayloadBytes = {
+  frozenRun: number; frozenPlan: number; fightLogs: number; memberSeat: number; simulationResult: number;
+  ownerSummary: number; publicSummary: number; receiptSummary: number;
+};
+
+/** Peak retained payload bytes from repeated dungeon afternoons. Heap and index sizes are measured separately. */
+export function projectDungeonPayload(bytes: DungeonPayloadBytes, runsPerAfternoon: number, membersPerAfternoon: number, slots: number) {
+  const afternoons = (windowSlots: number) => Math.ceil(Math.min(slots, windowSlots) / 3);
+  const detail = afternoons(RETENTION.detailSlots) * (runsPerAfternoon * (bytes.frozenRun + bytes.frozenPlan + bytes.fightLogs)
+    + membersPerAfternoon * bytes.memberSeat);
+  const simulationJobs = afternoons(JOB_PAYLOAD_SLOTS) * runsPerAfternoon * bytes.simulationResult;
+  const summaries = afternoons(RETENTION.summarySlots) * membersPerAfternoon * (bytes.ownerSummary + bytes.publicSummary + bytes.receiptSummary);
+  return { detail, simulationJobs, summaries, total: detail + simulationJobs + summaries };
+}
 
 /**
  * One table as measured: rows added by a regular slot and by a tournament slot (its boundary, reveals and settlement),

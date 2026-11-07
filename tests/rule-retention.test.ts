@@ -40,6 +40,7 @@ function topLevelStatements(sql: string): string[] {
 const IN_PROGRESS = ['private.jobs', 'private.job_dependencies', 'private.activity_snapshots', 'private.boundaries', 'private.boundary_members',
   'private.boundary_work', 'private.rules_versions', 'private.expedition_plans', 'private.arena_assignments', 'private.arena_assignment_sides',
   'private.tournaments', 'private.tournament_entries', 'private.tournament_bouts', 'private.pending_build_preparations', 'private.settled_slots',
+  'private.dungeon_runs', 'private.dungeon_run_members', 'private.dungeon_results', 'public.dungeon_fights',
   'public.activities', 'public.activity_stages'];
 /** Reviewed top-level backfills: none touches in-progress state. */
 const REVIEWED_UPDATES = new Map<string, RegExp[]>([

@@ -135,7 +135,7 @@ it('accepts wear-title only with exactly a 1.7 title id or null', () => {
   expect(parseCommand({ ...wearCommand, titleId: null })).toEqual({ ...wearCommand, titleId: null });
   // Patch 1.7.1: the two hand-given titles are catalog ids too, so a holder can put one back on (the database refuses anyone else).
   for (const given of ['game-master', 'high-ground']) expect(parseCommand({ ...wearCommand, titleId: given })).toEqual({ ...wearCommand, titleId: given });
-  for (const bad of ['den-breaker', 'Pathfinder', '', 7, true, [], {}, ['pathfinder'], undefined])
+  for (const bad of ['outfitter', 'Pathfinder', '', 7, true, [], {}, ['pathfinder'], undefined])
     expect(parseCommand({ ...wearCommand, titleId: bad }), JSON.stringify(bad)).toBeNull();
   const { titleId: _titleId, ...missing } = wearCommand;
   expect(parseCommand(missing)).toBeNull();
@@ -159,7 +159,7 @@ it('routes wear-title to its own transaction with the verified actor and the par
   expect((await handleCommand(req({ ...wearCommand, titleId: null }), routed)).status).toBe(404);
   expect(calls).toEqual([wearCommand, wearCommand, { ...wearCommand, titleId: null }].map(command => ({ actor: { userId: operationId }, command })));
   // An unknown id or a command with extra authority is refused at the boundary and never reaches the transaction.
-  for (const bad of [{ ...wearCommand, titleId: 'den-breaker' }, { ...wearCommand, gladiatorId: operationId }, { kind: 'wear-title', operationId }]) {
+  for (const bad of [{ ...wearCommand, titleId: 'outfitter' }, { ...wearCommand, gladiatorId: operationId }, { kind: 'wear-title', operationId }]) {
     const refused = await handleCommand(req(bad), routed);
     expect(refused.status).toBe(400);
     expect(await refused.json()).toEqual({ ok: false, code: 'invalid' });

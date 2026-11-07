@@ -134,6 +134,7 @@ async function detailRows(q: Sql, lo: number, hi: number): Promise<Counts> {
       b as (select x.battle_id from private.arena_assignments x join private.jobs p on p.id=x.pairing_job_id
         where p.kind='pair' and p.slot_index between ${lo} and ${hi}),
       t as (select id from private.tournaments where slot_index between ${lo} and ${hi}),
+      d as (select run_id from private.dungeon_runs where slot_index between ${lo} and ${hi}),
       j as (select id from private.jobs where slot_index between ${lo} and ${hi}
         and not exists(select 1 from public.tournament_views v where v.pairing_job_id=jobs.id))
     select (select count(*)::int from public.activity_stages where activity_id in (select id from a)) as "activityStages",
@@ -145,6 +146,10 @@ async function detailRows(q: Sql, lo: number, hi: number): Promise<Counts> {
       (select count(*)::int from private.tournament_bouts where tournament_id in (select id from t)) as "tournamentBouts",
       (select count(*)::int from private.tournament_entries where tournament_id in (select id from t)) as "tournamentEntries",
       (select count(*)::int from t) as "tournaments",
+      (select count(*)::int from public.dungeon_fights where run_id in (select run_id from d)) as "dungeonFights",
+      (select count(*)::int from private.dungeon_results where run_id in (select run_id from d)) as "dungeonResults",
+      (select count(*)::int from private.dungeon_run_members where run_id in (select run_id from d)) as "dungeonRunMembers",
+      (select count(*)::int from d) as "dungeonRuns",
       (select count(*)::int from private.job_dependencies where job_id in (select id from j) or prerequisite_id in (select id from j)) as "jobDependencies",
       (select count(*)::int from private.job_attempts where job_id in (select id from j)) as "jobAttempts",
       (select count(*)::int from j) as "jobs",
@@ -376,7 +381,10 @@ describe('Task 22.1: retention in the database', () => {
   it('removes replay detail of slots older than seven days and keeps their summaries and settled slots', () => rollback(async tx => {
     await checkpoint(tx, LAST + 19);
     const before = await detailRows(tx, FIRST, LAST);
-    for (const [table, n] of Object.entries(before)) expect(n, table).toBeGreaterThan(0);
+    for (const [table, n] of Object.entries(before)) {
+      if (table.startsWith('dungeon')) expect(n, table).toBe(0);
+      else expect(n, table).toBeGreaterThan(0);
+    }
     const kept = await keptRows(tx), summaries = await summaryRows(tx, FIRST, LAST);
     const outcomes = (await tx`select id, summary-'replayExpiry' as summary from public.activities order by id`).map(row => ({ ...row }));
     const result = await cleanup(tx, SEVEN_DAYS_LATER);

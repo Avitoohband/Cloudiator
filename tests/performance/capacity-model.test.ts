@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
-import { BUDGETS, JOB_PAYLOAD_SLOTS, MONTHS, RETENTION, TABLE_CLASSES, projectDatabase, projectEgress, projectInvocations, share,
+import { BUDGETS, JOB_PAYLOAD_SLOTS, MONTHS, RETENTION, TABLE_CLASSES, projectDatabase, projectDungeonPayload, projectEgress, projectInvocations, share,
   tournamentsIn } from './capacity-model.ts';
 
 // Task 23.3: the arithmetic that turns the measured run into monthly figures, pinned on small synthetic inputs.
@@ -42,6 +42,23 @@ describe('Task 23.3: capacity projections', () => {
   it('classifies every retention class it projects', () => {
     const classes = new Set(Object.values(TABLE_CLASSES).map(c => c.retention));
     expect([...classes].sort()).toEqual(['detail', 'operational', 'permanent', 'player', 'season', 'singleton', 'summary']);
+  });
+
+  it('separates shared dungeon detail, the second simulation copy and per-member summaries', () => {
+    for (const name of ['private.dungeon_runs', 'private.dungeon_run_members', 'private.dungeon_results', 'public.dungeon_fights']) {
+      expect(TABLE_CLASSES[name]).toEqual({ retention: 'detail' });
+    }
+    const bytes = { frozenRun: 5, frozenPlan: 100, fightLogs: 90, memberSeat: 7, simulationResult: 100,
+      ownerSummary: 13, publicSummary: 11, receiptSummary: 13 };
+    const detailPerAfternoon = 2 * (5 + 100 + 90) + 5 * 7;
+    const summaryPerAfternoon = 5 * (13 + 11 + 13);
+    expect(projectDungeonPayload(bytes, 2, 5, 3)).toEqual({
+      detail: detailPerAfternoon, simulationJobs: 200, summaries: summaryPerAfternoon, total: detailPerAfternoon + 200 + summaryPerAfternoon,
+    });
+    expect(projectDungeonPayload(bytes, 2, 5, 2_000)).toEqual({
+      detail: 42 * detailPerAfternoon, simulationJobs: 7 * 200, summaries: 540 * summaryPerAfternoon,
+      total: 42 * detailPerAfternoon + 7 * 200 + 540 * summaryPerAfternoon,
+    });
   });
 
   it('projects detail, summary and permanent growth with compaction, a base and the operational windows', () => {

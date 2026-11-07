@@ -120,10 +120,10 @@ describe('profile card', () => {
     // Wearing nothing shows no title line, whatever the prestige says.
     for (const actor of [LUCILLA, { ...LUCILLA, title: null }]) expect(text(card({ actor, profile: { ...LUCILLA_PROFILE, prestige } }))).not.toContain('Champion ·');
     // An id this client does not know (a newer server, junk) shows no title and never throws (Review Focus 1).
-    for (const title of ['den-breaker', 'x', 42, {}]) {
+    for (const title of ['outfitter', 'x', 42, {}]) {
       const unknown = { ...LUCILLA, title } as unknown as PublicActor;
       expect(() => card({ actor: unknown, profile: { ...LUCILLA_PROFILE, prestige } }), String(title)).not.toThrow();
-      expect(text(card({ actor: unknown, profile: LUCILLA_PROFILE })), String(title)).not.toMatch(/Champion|den-breaker/);
+      expect(text(card({ actor: unknown, profile: LUCILLA_PROFILE })), String(title)).not.toMatch(/Champion|outfitter/);
     }
   });
 

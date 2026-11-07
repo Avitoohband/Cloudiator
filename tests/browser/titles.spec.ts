@@ -154,7 +154,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     // Earned or All, Earned pressed.
     const which = dialog.getByRole('group', { name: 'Which titles', exact: true });
     await expect(which.getByRole('button', { name: 'Earned · 8', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await expect(which.getByRole('button', { name: 'All · 31', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    await expect(which.getByRole('button', { name: 'All · 35', exact: true })).toHaveAttribute('aria-pressed', 'false');
     // First "Wear nothing", then each family with its earned titles, the worn one chosen.
     const nothing = dialog.getByRole('group', { name: 'Wear nothing', exact: true });
     await expect(nothing.getByRole('radio', { name: 'No title', exact: true })).not.toBeChecked();
@@ -233,7 +233,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     const { commands } = await player(page);
     await openLive(page);
     const { dialog } = await openPicker(page);
-    const all = dialog.getByRole('button', { name: 'All · 31', exact: true });
+    const all = dialog.getByRole('button', { name: 'All · 35', exact: true });
     await all.click();
     await expect(all).toHaveAttribute('aria-pressed', 'true');
     await expect(dialog.getByRole('button', { name: 'Earned · 8', exact: true })).toHaveAttribute('aria-pressed', 'false');
@@ -251,8 +251,9 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await expect(wearButton(dialog)).toBeDisabled();
     // Every family is listed, every title once, and the earned ones are still radios.
     await expect(dialog.getByRole('group', { name: 'Seasons', exact: true })).toContainText('A season first place');
+    await expect(dialog.getByRole('group', { name: 'Dungeons', exact: true })).toContainText('25 dungeon clears');
     await expect(dialog.getByRole('radio')).toHaveCount(9);
-    await expect(dialog.getByTestId('locked-title')).toHaveCount(23);
+    await expect(dialog.getByTestId('locked-title')).toHaveCount(27);
     // Patch 1.7.1: a title nobody can earn by play is shown only to its holder.
     await expect(dialog.getByText('Game Master', { exact: true })).toHaveCount(0);
     await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
@@ -260,7 +261,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await expect(dialog.getByRole('group', { name: 'Wealth', exact: true }).getByTestId('locked-title').filter({ hasText: 'Patrician' })).toContainText('1,240 of 4,000');
     // The list ends with the titles that arrive later.
     const body = dialog.getByTestId('title-picker-body');
-    await expect(body.locator(':scope > *').last()).toHaveText('8 more arrive later: 4 with party dungeons, 2 in the Deep, Outfitter with the new gear, and Legend-Bearer if a Legendary rarity ever comes.');
+    await expect(body.locator(':scope > *').last()).toHaveText('4 more arrive later: 2 in the Deep, Outfitter with the new gear, and Legend-Bearer if a Legendary rarity ever comes.');
     expect(await contrastIssues(dialog), 'the title picker, All').toEqual([]);
     await body.evaluate(el => { el.scrollTop = 520; });
     await a11yShot(page, testInfo, 'title-picker-all');
@@ -450,20 +451,20 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
   test.describe('a hand-given title', () => {
     const holder = { extra: [structuredClone(ASTER_AWARD)] };
 
-    test('is listed for its holder: All · 32, Earned · 9, a title to wear', async ({ page }, testInfo) => {
+    test('is listed for its holder with 36 visible titles and nine earned', async ({ page }, testInfo) => {
       const { commands } = await player(page, holder);
       await openLive(page);
       const { dialog } = await openPicker(page);
       const which = dialog.getByRole('group', { name: 'Which titles', exact: true });
       await expect(which.getByRole('button', { name: 'Earned · 9', exact: true })).toHaveAttribute('aria-pressed', 'true');
-      await expect(which.getByRole('button', { name: 'All · 32', exact: true })).toBeVisible();
+      await expect(which.getByRole('button', { name: 'All · 36', exact: true })).toBeVisible();
       const special = dialog.getByRole('group', { name: 'Special', exact: true });
       await expect(special.getByRole('radio', { name: 'Game Master', exact: true })).toBeVisible();
       await expect(special).toContainText("The game's Game Master");
       await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
-      await which.getByRole('button', { name: 'All · 32', exact: true }).click();
+      await which.getByRole('button', { name: 'All · 36', exact: true }).click();
       await expect(dialog.getByRole('radio')).toHaveCount(10);
-      await expect(dialog.getByTestId('locked-title')).toHaveCount(23);
+      await expect(dialog.getByTestId('locked-title')).toHaveCount(27);
       await expect(dialog.getByRole('group', { name: 'Special', exact: true }).getByRole('radio', { name: 'Game Master', exact: true })).toBeVisible();
       await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
       await a11yShot(page, testInfo, 'title-picker-holder-all');
@@ -499,7 +500,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
       await openLive(page);
       const { dialog } = await openPicker(page);
       await settled(dialog);
-      await dialog.getByRole('button', { name: 'All · 32', exact: true }).click();
+      await dialog.getByRole('button', { name: 'All · 36', exact: true }).click();
       await expect(dialog.getByRole('radio', { name: 'Game Master', exact: true })).toBeAttached();
       expect(await noHorizontalScroll(page)).toBe(true);
       expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -569,7 +570,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await a11yShot(page, testInfo, 'title-picker-360-earned');
     // In All the titles scroll inside the body; the preview stays at the top and the foot at the bottom.
-    await dialog.getByRole('button', { name: 'All · 31', exact: true }).click();
+    await dialog.getByRole('button', { name: 'All · 35', exact: true }).click();
     const body = dialog.getByTestId('title-picker-body');
     expect(await body.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
     const preview = dialog.getByTestId('title-preview');

@@ -189,7 +189,7 @@ describe('newcomers in the list', () => {
     expect(fresh).toMatch(/>NEW<\/span> <em[^>]*>Tiro<\/em>/);
   });
   it('shows no title for none, for an id this client does not know, or for junk, and never throws', () => {
-    for (const title of [undefined, null, 'den-breaker', '', 42, {}]) {
+    for (const title of [undefined, null, 'outfitter', '', 42, {}]) {
       const html = panel({ world: { ...WORLD, actors: [{ ...actor('Aster', 'training'), title } as unknown as PublicActor] } });
       expect(html, String(title)).not.toContain('<em');
       expect(html, String(title)).toContain('Profile: Aster');

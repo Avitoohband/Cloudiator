@@ -1,4 +1,4 @@
-import type { ActivityId, Attributes, ClassId, GladiatorId, Stance } from './commands.ts';
+import type { ActivityId, Attributes, ClassId, DungeonId, GladiatorId, Stance } from './commands.ts';
 
 export type ItemRarity = 'common' | 'uncommon' | 'rare';
 export type ItemStats = { damage: number; armor: number; weight: number; intervalMs: number; attributes: Attributes };
@@ -16,10 +16,12 @@ export type ActivitySummary = {
   settledAtMs: number;
   replayExpiry: { state: 'available'; expiresAtMs: number } | { state: 'expired' };
   ratingDelta?: number;
+  /** The party's terminal fight, independent of this member's result. Retained after the replay expires. */
+  dungeon?: { id: DungeonId; terminalFight: 1 | 2 | 3 | 4; partyWon: boolean };
 };
 
 /** Safe completed result for spectators. Reward and receipt details remain owner-only. */
-export type PublicActivitySummary = Pick<ActivitySummary, 'activityId' | 'resolvedKind' | 'result' | 'success' | 'settledAtMs' | 'replayExpiry'>;
+export type PublicActivitySummary = Pick<ActivitySummary, 'activityId' | 'resolvedKind' | 'result' | 'success' | 'settledAtMs' | 'replayExpiry' | 'dungeon'>;
 
 /** These snapshots appear only inside an already-revealed battle log. */
 export type RevealedCombatant = {

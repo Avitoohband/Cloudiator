@@ -136,6 +136,7 @@ const SERVICE_ROLE = [
   'function private.boundary_start(bigint): EXECUTE',
   'function private.close_season(bigint, bigint): EXECUTE',
   'function private.dependencies_ready(uuid): EXECUTE',
+  'function private.dungeon_rewards(uuid, jsonb): EXECUTE',
   'function private.economy_tournament_slot(bigint): EXECUTE',
   'function private.expedition_rewards(uuid, jsonb): EXECUTE',
   'function private.expire_seller_listings(uuid, bigint): EXECUTE',

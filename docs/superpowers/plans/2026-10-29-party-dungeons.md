@@ -405,7 +405,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
 - Produces: `public.dungeon_fights` rows (Task 7 reads them); member stage rows with `fight` references; settlement jobs
   gated on the last reveal (Task 6).
 
-- [ ] **Step 1: Failing tests:** `creates one run job per run, anchored to seat 0 with the run seed, and gates every
+- [x] **Step 1: Failing tests:** `creates one run job per run, anchored to seat 0 with the run seed, and gates every
   member's settlement on it`; `stores an accepted plan privately and chains one reveal per stage, the last gating every
   settlement`; `writes each member's stage under its own id and one whitelisted dungeon_fights row per fight` (an extra key
   in a participant and an event is absent after); `refuses a plan for another run, a missing, extra or hired outcome, an
@@ -418,11 +418,11 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   holding its lock cannot deadlock phase 8` (the pattern of `tests/db/arena.test.ts` "takes every member's account lock
   before phase 8 anchors a battle job to side 0"); `refuses a dungeon reveal whose lease expired while it waited on the job
   row lock` (the concurrency override's regression, as `docs/operations/job-leases.md` describes).
-- [ ] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement** section 3; reapply the source.
-- [ ] **Step 4: Run** step 2's command plus `npm run test:db -- tests/db/expeditions.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts`;
+- [x] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts`; expect FAIL.
+- [x] **Step 3: Implement** section 3; reapply the source.
+- [x] **Step 4: Run** step 2's command plus `npm run test:db -- tests/db/expeditions.test.ts tests/db/arena.test.ts tests/db/tournaments.test.ts`;
   expect PASS.
-- [ ] **Step 5: Commit** `feat: run dungeon parties and reveal their fights on time`.
+- [x] **Step 5: Commit** `feat: run dungeon parties and reveal their fights on time`.
 
 ### Task 6A: Member settlement, projections, retention and access (SQL section 4)
 
@@ -433,6 +433,9 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   body over the member's outcome, `result` and `success` from it, the 7-day `replayExpiry`); `private.settle_activity_core`
   restated from `10-tournament-results.sql` (dungeon → `dungeon_rewards`, a stale preparation `P0002`; receipt and ledger
   for `'dungeon'`, reason `'dungeon'`); `private.project_character` and `public.owner_state` restated from `22-titles.sql`.
+  Restate `private.safe_settlement` from `05-expeditions.sql`. Explicitly whitelist `dungeon: { id, terminalFight, partyWon }`
+  in the owner summary and the public projector. The existing member result and success stay separate from the party's
+  terminal outcome. Keep the three public fields after detailed replays expire, and keep receipts and payouts owner-only.
   Add location `'dungeon:'||(a.requested->>'dungeonId')`, label "Dungeon" and dungeon result notices. Preserve the full
   public profile, worn title, counts, owner title progress/notices, idle Rest, ACLs and the invoker view.
   `private.cleanup_history` restated from `15-release.sql` (in the
@@ -443,12 +446,11 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
 - Add the four titles from the 1.7 spec to the shared catalog and `private.title_rules()` using `23-awards.sql` as the
   baseline (both `award` rows retained). Count member dungeon clears before awarding, and count positive `dungeon` ledger
   entries toward earned gold. Trigger functions stay non-executable by API roles. Keep expedition-win titles specific.
-- Modify: `tests/fixtures/access.ts` (`OPEN` adds `dungeon_fights`), `tests/db/access-matrix.test.ts` (the new relations'
-  and functions' privilege lines), `tests/rule-retention.test.ts` (table list), `tests/performance/capacity-model.ts`
-  (retention classes and per-run bytes from Task 2), `tests/browser/live-routes.ts` (`dungeon_fights` in `tables()`),
-  every migration inventory pin (start with `tests/db/awards.test.ts` and `tests/db/restore-hosted.test.ts`: total 30,
-  preserve each previous migration's position and historical references),
-  `tests/db/capacity.test.ts`, `docs/operations/migrations.md` (the M30 record and its release order)
+- Modify: `contracts/events.ts` (`ActivitySummary` and `PublicActivitySummary` add the optional dungeon summary),
+  `tests/db/access-matrix.test.ts` (only this task's privilege lines, preserving Task 5's `dungeon_fights` fixture),
+  `tests/rule-retention.test.ts` (table list), `tests/performance/capacity-model.ts` (retention classes and per-run bytes
+  from Task 2), `tests/browser/live-routes.ts` (`dungeon_fights` in `tables()`) and `tests/db/capacity.test.ts`.
+  Keep migration inventory pins and the migration record for Task 6E, when the M30 file exists.
 - Test: `tests/db/dungeons.test.ts` (`describe('dungeon settlement')`), `tests/db/retention.test.ts`, the access matrix,
   `tests/db/capacity.test.ts`
 
@@ -472,6 +474,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   endpoint` (as "runs planning, reveals and exactly-once rewards through the real private Edge worker HTTP endpoint").
   Pin immediate first-clear and 25th-clear awards from member success, no clear from a fallen member in a winning party,
   no double count on retry, dungeon gold and loot ownership counts, unchanged M29 award rows/ACLs and bot Founder exclusion.
+  Verify the same whitelisted terminal outcome after replay expiry and reprojection, with rewards on the owner path only.
 - [ ] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts tests/db/retention.test.ts tests/db/access-matrix.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** section 4; reapply the source; update the fixtures, lists and pins above.
 - [ ] **Step 4: Run** step 2's command and `npx --offline --no-install vitest run tests/rule-retention.test.ts tests/performance`; expect PASS.

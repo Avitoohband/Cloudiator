@@ -242,6 +242,11 @@ in its 7-day pass (summaries keep 90 days). New: `private.grouping_input`, `priv
 invoker`, `search_path=''` and API EXECUTE for `service_role` only. Trigger functions and cleanup remain inaccessible to
 API callers. Read active rules with `private.active_rules_version()`. `private.economy_switches` stays owner-only.
 
+Persist `dungeon: { id, terminalFight, partyWon }` on both settled summary reads so the approved result copy survives
+replay expiry. `terminalFight` is 1–4 and `partyWon` is the result of that fight. A terminal room won with nobody left
+standing is a safe return. The existing member result stays separate, including when the party clears after that member
+falls. The public projection exposes these three fields and keeps reward amounts and receipts on the owner path.
+
 **Dungeon titles.** The 1.7 design already assigns Den Breaker (Wolf Den clear), Warlord's End (Stronghold clear),
 Kingslayer (Troll Hall clear) and Dungeoneer (25 clears) to 1.8. Start `private.title_rules()` from `23-awards.sql`,
 retaining Game Master and High Ground. Increment the member's own clear count exactly once, on an entered and won major,

@@ -299,6 +299,20 @@ See the [gate guide](docs/operations/verification-gates.md) and
 is a separate install stage, using the frozen config/lock and existing pinned
 entrypoints, requiring its own applicable authorization.
 
+# Managed Windows unit retries — persistent project override
+
+Avi approved this supplement on 2026-11-07 for `superpowers:verification-before-completion`,
+**The Gate Function**. Keep vendor skill caches unchanged.
+
+Preserve a managed run when unchanged loopback or junction fixtures fail with
+`EACCES` or `EPERM`. Check the failing fixtures and rerun the same complete
+offline suite in narrowly approved native execution with the same inputs. Keep
+both logs and base the verdict on the complete native result.
+
+Observed in Patch 1.8 Task 2: ten loopback and two junction tests failed under
+managed execution. Tested separately: all 2,409 passed in the native offline
+retry with matching source hashes. See the [gate guide](docs/operations/verification-gates.md).
+
 # Asynchronous browser probes — persistent project override
 
 Avi approved this supplement on 2026-11-01 for `superpowers:verification-before-completion`,

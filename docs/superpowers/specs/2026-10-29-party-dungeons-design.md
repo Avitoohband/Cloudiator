@@ -414,6 +414,11 @@ hours, crowd cutoff, tournament exclusion and 20% unranked Arena reward. Avi rea
   on-call afternoons. Off duty 00:00–08:00 UTC and when the boundary has at least 45 active human gladiators. Off duty
   actors stay in camp without a scheduled activity. Show the scheduled return in the viewer's clock when applicable.
   Active bots are exempt from the idle presence rule. The weekly patterns must fit stamina and obey current v2 rules.
+- **Evening rotation.** Avi chose three Arena candidates and two Training bots each on-duty evening on 2026-11-07.
+  Tullia is always a candidate. Rotate the adjacent pair in the circular order Grit, Rufus, Ash, Pip, starting at
+  `(UTC weekday from Monday + on-duty game day from 08:00) % 4`. The remaining two train. This keeps two Bronze
+  options at different levels alongside Tullia. All five use Rest in the on-duty mornings and are on call in the
+  afternoons, subject to ordinary eligibility. Pin and verify every slot before Task 6B implementation.
 - **Dungeons.** Group eligible humans first using the regular strength bands. Add eligible on-call bots after humans
   and before hired fighters, within the original cap of `3 * ceil(humans / 3) - humans` bots per dungeon, with a bot in
   at most one run. Bots must meet the unlock level and never start a bot-only run. Unassigned bots train where their

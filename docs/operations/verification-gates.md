@@ -58,6 +58,18 @@ after pinned `npm ci`, before starting Supabase or serving Edge. The later gate 
 cache-only. This workflow edit does not authorize remote installation or a push;
 Avi explicitly approved normal remote pinned CI/Pages installs and CI container pulls for the planned releases on2026-11-01. New local package downloads remain unapproved. The two28556a1CI runs executed this preparation successfully; their unrelated bed-pixel timeouts are preserved in the1.5gate handoff.
 
+## Managed Windows unit retries
+
+Preserve the original log when an unchanged loopback or junction fixture
+fails with `EACCES` or `EPERM` in managed execution. Verify the fixture and
+keep the suite, offline switches and inputs intact. With narrowly scoped
+native approval, rerun the entire suite and retain both results.
+
+On 2026-11-07, the Patch 1.8 planner's managed unit run failed ten loopback
+and two junction checks. A separate native retry with matching input hashes
+passed all 2,409 tests. See parent `logs/p18-task2-20261107-ac712d8/`
+for `full-units.log`, `full-units-native.log` and both source manifests.
+
 ## Database tests and the local Edge runtime
 
 Approved by Avi on 2026-10-14 as part of this override.

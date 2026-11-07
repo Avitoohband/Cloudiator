@@ -415,6 +415,18 @@ hours, crowd cutoff, tournament exclusion and 20% unranked Arena reward. Avi rea
 | Rufus | Guardian, Defensive | Guard | 4 |
 | Pip | Duelist, Balanced | Skirmisher | 3 |
 
+Camp and Arena loadouts reuse each role's hired build from the highest dungeon that bot can enter. This keeps the
+existing gear silhouettes and legal v2 point budgets. Allocations are listed in Strength, Agility, Vitality, Endurance,
+Precision order. Earned points equal the allocation total. Equipped items use the listed common catalog variants.
+
+| Gladiator | Allocations | Weapon | Off-hand | Head | Body | Feet |
+| --- | --- | --- | --- | --- | --- | --- |
+| Tullia | 10 / 0 / 18 / 7 / 3 | `sword:10:common` | `round-shield:10:common` | `iron-helmet:10:common` | `light-armor:10:common` | `light-boots:10:common` |
+| Grit | 13 / 2 / 7 / 0 / 3 | `axe:5:common` | — | `leather-hood:5:common` | `light-armor:5:common` | `light-boots:5:common` |
+| Ash | 5 / 9 / 2 / 0 / 9 | `sword:5:common` | — | `leather-hood:5:common` | `light-armor:5:common` | `light-boots:5:common` |
+| Rufus | 4 / 0 / 7 / 2 / 1 | `sword:1:common` | `round-shield:1:common` | `iron-helmet:1:common` | `light-armor:1:common` | `light-boots:1:common` |
+| Pip | 3 / 5 / 1 / 0 / 5 | `sword:1:common` | — | `leather-hood:1:common` | `light-armor:1:common` | `light-boots:1:common` |
+
 - **Camp and schedule.** Each bot uses a deterministic weekly routine (126 slots), with ordinary choices, off duty and
   on-call afternoons. Off duty 00:00–08:00 UTC and when the boundary has at least 45 active human gladiators. Off duty
   actors stay in camp without a scheduled activity. Show the scheduled return in the viewer's clock when applicable.
@@ -423,7 +435,9 @@ hours, crowd cutoff, tournament exclusion and 20% unranked Arena reward. Avi rea
   Tullia is always a candidate. Rotate the adjacent pair in the circular order Grit, Rufus, Ash, Pip, starting at
   `(UTC weekday from Monday + on-duty game day from 08:00) % 4`. The remaining two train. This keeps two Bronze
   options at different levels alongside Tullia. All five use Rest in the on-duty mornings and are on call in the
-  afternoons, subject to ordinary eligibility. Pin and verify every slot before Task 6B implementation.
+  afternoons, subject to ordinary eligibility. For absolute slot `s`, the UTC routine index is
+  `((s - 72) % 126 + 126) % 126`. In each 18-slot UTC day the first six slots are off duty, then four Rest/on-call/evening
+  triples follow. The exact five kits and all 630 routine cells are checked against SQL.
 - **Dungeons.** Group eligible humans first using the regular strength bands. Add eligible on-call bots after humans
   and before hired fighters, within the original cap of `3 * ceil(humans / 3) - humans` bots per dungeon, with a bot in
   at most one run. Bots must meet the unlock level and never start a bot-only run. Unassigned bots train where their

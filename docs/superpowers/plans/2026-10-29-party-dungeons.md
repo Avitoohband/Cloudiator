@@ -436,6 +436,8 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   Restate `private.safe_settlement` from `05-expeditions.sql`. Explicitly whitelist `dungeon: { id, terminalFight, partyWon }`
   in the owner summary and the public projector. The existing member result and success stay separate from the party's
   terminal outcome. Keep the three public fields after detailed replays expire, and keep receipts and payouts owner-only.
+  Restate the M20 `public.claim_jobs` with complete, bounded, reveal-first dungeon settlement bundles so siblings fit
+  together in one worker. Retain the existing worker caps, legacy claims, due-order priority and separate member settlement.
   Add location `'dungeon:'||(a.requested->>'dungeonId')`, label "Dungeon" and dungeon result notices. Preserve the full
   public profile, worn title, counts, owner title progress/notices, idle Rest, ACLs and the invoker view.
   `private.cleanup_history` restated from `15-release.sql` (in the
@@ -460,7 +462,7 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   v1 value in historical expedition settlement. No runtime role reads `private.economy_switches`.
 - Produces: settled dungeon summaries (`resolvedKind: 'dungeon'`) and `dungeon:<id>` world locations.
 
-- [ ] **Step 1: Failing tests:** `settles each member once at minute 80 from its own outcome; a retry replays the
+- [x] **Step 1: Failing tests:** `settles each member once at minute 80 from its own outcome; a retry replays the
   receipt`; `pays the won rooms when the major is lost` (Avi's decision 7: Wolf Den → `result: 'defeat'`, `success: false`,
   18 XP and 3 gold, no items, wallet +3); `pays an over-level member from its frozen level` (Review Focus 1: level 8 when
   saved, 9 at the snapshot → XP and gold halved, salvage only); `sells chest overflow at NPC value when the inventory is
@@ -475,19 +477,18 @@ Arena on 2026-11-07. Temporary hired fighters remain the fallback after the name
   Pin immediate first-clear and 25th-clear awards from member success, no clear from a fallen member in a winning party,
   no double count on retry, dungeon gold and loot ownership counts, unchanged M29 award rows/ACLs and bot Founder exclusion.
   Verify the same whitelisted terminal outcome after replay expiry and reprojection, with rewards on the owner path only.
-- [ ] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts tests/db/retention.test.ts tests/db/access-matrix.test.ts`; expect FAIL.
-- [ ] **Step 3: Implement** section 4; reapply the source; update the fixtures, lists and pins above.
-- [ ] **Step 4: Run** step 2's command and `npx --offline --no-install vitest run tests/rule-retention.test.ts tests/performance`; expect PASS.
-- [ ] **Step 5: Review and commit** `feat: settle dungeon members and count dungeon titles`.
+- [x] **Step 2: Run** `npm run test:db -- tests/db/dungeons.test.ts tests/db/retention.test.ts tests/db/access-matrix.test.ts`; expect FAIL.
+- [x] **Step 3: Implement** section 4; reapply the source; update the fixtures, lists and pins above.
+- [x] **Step 4: Run** step 2's command and `npx --offline --no-install vitest run tests/rule-retention.test.ts tests/performance`; expect PASS.
+- [x] **Step 5: Review and commit** `feat: settle dungeon members and count dungeon titles`.
 
 ### Task 6B: Register Ludus Nimbus and protect bot identities
 
 **Files:** `domain/bots.ts` under the shared functions, `24-dungeons.sql` bot registry and routine section,
 `scripts/create-bots.mjs`, `tests/domain/bots.test.ts`, `tests/db/bots.test.ts` and existing title and access tests.
 
-**Interfaces:** Freeze the five catalog entries and their 126-slot UTC routines, with a catalog-to-SQL parity test.
-Before RED, pin every kit, allocation, stance and weekly choice against the approved fixed-build and duty rules in the
-task brief. The SQL parity test must cover the exact kit and routine values.
+**Interfaces:** Freeze the five catalog entries and their 126-slot UTC routines from spec §15, with a catalog-to-SQL
+parity test. Pin every listed kit, allocation and stance, and all 630 routine cells before RED.
 `private.bots` stores team, gladiator, role and active status. `private.bot_routines` stores the fixed routine choices.
 `private.create_bot` and the bench operation are owner-only. The local/prod operator script makes banned, non-sign-in
 system Auth identities and registers them idempotently. Record only safe status/counts. No bot identities are seeded

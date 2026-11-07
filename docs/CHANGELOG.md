@@ -26,6 +26,20 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; 1.7 and 1.7.1 (released 2026-11-06) are new since.
 
+## 1.8 — Party dungeons and Ludus Nimbus (in progress, not yet released)
+
+### Built
+
+### Planned
+
+- Choose a dungeon for the afternoon: Wolf Den at level 3, Raider Stronghold at level 7, or Troll Hall at level 12.
+- Players group into parties of up to three. Eligible bots take open seats after players, and hired fighters fill the rest.
+- Fight three rooms and a boss in one afternoon. Health carries through the run, and a dungeon costs 40 base stamina.
+- Earn personal rewards for the fights you enter and your party wins. A boss win opens a chest, and a boss loss still pays for cleared rooms.
+- Watch your party leave camp and explore live, replay the full run, or watch a room or boss fight up close.
+- Dungeon Results and Notifications show the outcome and your rewards. Earn Den Breaker, Warlord’s End, Kingslayer, and Dungeoneer through dungeon clears.
+- Meet Ludus Nimbus, five gladiators marked BOT. Eligible bots can fill dungeon seats or replace an Arena NPC in an unranked bout.
+
 ## 1.7.1 — Hand-given titles (2026-11-06)
 
 Released 2026-11-06: M29 and the client; the Game Master gave Game Master to Indigo and High Ground to Tommy. No patch note.

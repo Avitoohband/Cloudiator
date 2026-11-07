@@ -6,7 +6,7 @@
  * The patch this build is. The first commit of a patch's work sets it and opens the patch's section in docs/CHANGELOG.md; a fix
  * release from `release` sets the next third number the same way. A unit test fails unless it names CHANGELOG.md's top section.
  */
-export const PATCH = '1.7.1';
+export const PATCH = '1.8';
 
 /** The server's pattern for a patch number (public.patches.number): "1.0" and "1.2.1", never "1.3.0" or "01.2". */
 const PATTERN = /^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})(?:\.([1-9][0-9]{0,2}))?$/;

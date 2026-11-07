@@ -533,12 +533,12 @@ floor of normal player-bout currencies. Do not update either rating, standings o
 reward receipt in the public history. When a scheduled bot has no player match, keep it at the Arena for private practice
 with no public bout or reward. Preserve internal idempotency and opponent identity for replay.
 
-- [ ] Write and run RED: human pairs and tournaments unchanged, bots never enter a tournament, only eligible NPC
+- [x] Write and run RED: human pairs and tournaments unchanged, bots never enter a tournament, only eligible NPC
   replacements, least-recent eligible bot first, no double-assignment, 20% floor and no rank/qualification changes,
   bot spar with zero grants, release-window old worker unchanged while bots are inactive, fenced reveal and settlement.
-- [ ] Implement from the latest SQL21 pairing and SQL10 settlement bodies with the dungeon changes included. Keep
+- [x] Implement from the latest SQL21 pairing and SQL10 settlement bodies with the dungeon changes included. Keep
   existing two-fighter human and NPC logs byte-stable. Verify replay only discloses the whitelisted bot identity/tag.
-- [ ] Run owning unit, worker, Arena/tournament/economy/title DB and offline typecheck. Independent review, commit and
+- [x] Run owning unit, worker, Arena/tournament/economy/title DB and offline typecheck. Independent review, commit and
   update handoff.
 
 ### Task 6E: Seal M30 and prove capacity
@@ -561,10 +561,12 @@ coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume a
 - [ ] **Step 4: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
   `npm run test:db` under the DB-test rule, `npx --offline --no-install supabase db lint --local` and the advisors `--local`; expect PASS and no
   new advisor finding.
-- [ ] **Step 5: Capacity:** add to `tests/db/capacity.test.ts` `publishes an afternoon with 25 of 50 characters in dungeons
-  within 120 s, by the tick after the cutoff`, measure the following boundary's settlements and check the 90-day size
-  with dungeon rows. Model one afternoon per three slots, parties of up to three, per-run plans/logs/jobs, member stages,
-  permanent receipts, title counts and the approved bot population. Run with `CAPACITY_GATE=1`;
+- [ ] **Step 5: Capacity:** rerun the existing 25-of-50 dungeon fixture on the clean M30 replay, with both publications
+  within 120 s by the tick after cutoff and all following settlements accounted for. Combine its physical relation sizes
+  with the retained 90-day model, including heap, indexes and TOAST. Model one afternoon per three slots, parties of up
+  to three, both temporary plan copies, shared logs and jobs, member stages and summaries, permanent receipts, title
+  counts and the approved bot population. Use the measured plan p95 sensitivity and compare the integrated total with
+  524,288,000 bytes. Keep all four legacy capacity checks. Run with `CAPACITY_GATE=1`;
   expect PASS. If either fails, stop and report the numbers to the controller (no scope change).
 - [ ] **Step 6: Review and commit** `feat: seal party dungeons and Ludus Nimbus in M30`, with the M30 migration record.
 

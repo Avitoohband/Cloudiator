@@ -28,15 +28,16 @@ parties of up to 3, with eligible bots after human players and hired fighters in
 80-minute afternoon slot; personal rewards where every won fight a member entered pays (a lost major still pays the rooms);
 timed reveals, a run view, a party close-up replay, results, notifications and the camp location; a patch note.
 
-Friend parties and invites, and seeing a friend's planned dungeon, follow in phase 2 (M32; Avi's decisions 5 and 8).
+Choosing dungeon teammates by invitation and seeing a friend's planned dungeon follow in phase 2 (M32; Avi's decisions 5 and 8).
 Run records and first-clear trophies follow in phase 3. The [title design](2026-10-30-titles-1-7-design.md) separately
 assigns four playable dungeon titles to 1.8. The named bot team is part of the 1.8 release per the later handoff, with
 its own play rules and approval. Preserve existing expedition, Arena, tournament, season, market and replay behavior
 outside that approved bot design. Summoners remain a future class.
 
 **Extension points kept open (not built):**
-- *Friend parties (M32):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
-  strangers. The frozen assignment already records each seat's kind.
+- *Friend parties (M32):* players invite chosen teammates for a specific dungeon run. Grouping keeps eligible teammates
+  who accepted together for that run before automatically grouping players without a party. Runs, rewards and reveals
+  work with either lineup. The frozen assignment already records each seat's kind. Saving a lineup for reuse is open.
 - *Summoners:* the party engine fights *units*, not one unit per member. A spirit is a later unit on the party side with an
   owning seat and no rewards; nothing in the engine, targeting, logs or reveals may assume one unit per seat.
 

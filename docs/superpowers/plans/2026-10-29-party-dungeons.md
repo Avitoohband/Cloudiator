@@ -24,6 +24,10 @@ close-up replay, and dungeon results, notifications and camp locations.
 separately approved M31 catalog migration before registering the five benched bots. Keep the `ash` member key,
 identity and build. M31 has a separate release gate and production approval. Friend parties move to M32.
 
+**M32 friend parties.** Players choose their teammates by inviting them to a specific dungeon run. At the cutoff,
+keep eligible players who accepted invitations to the same party together before automatically grouping players without
+a party. Whether players can save and reuse a lineup across runs is open.
+
 **2026-11-07 takeover.** `codex/p18-dungeons` starts in `design` at `5d12d50`, the pushed Patch 1.7.1 line. The live
 client is `8828d0a`, the database is M01–M29 with v2 active, `game-command` is from 1.7.1 and `game-worker` is from 1.6.
 The dungeon MVP, exact v2 reward table and Ludus Nimbus play rules are recorded in the spec. Schedule, Results,

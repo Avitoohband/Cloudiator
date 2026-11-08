@@ -7,11 +7,11 @@ import { headersFile } from '../scripts/build-headers.mjs';
 
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true }); });
-/** A complete export: the five fixed routes and the `_headers` scripts/build-headers.mjs writes (Task 23.6). */
+/** A complete export with the fixed routes and the generated headers. */
 function exportedSite(content = '<main>Cloudiator</main>', headers: string | null = headersFile(null)) {
   const directory = mkdtempSync(join(tmpdir(), 'cloudiator-static-'));
   directories.push(directory);
-  for (const route of ['', 'game', 'auth/callback', 'replay', 'expedition']) {
+  for (const route of ['', 'game', 'auth/callback', 'replay', 'expedition', 'dungeon']) {
     mkdirSync(join(directory, route), { recursive: true });
     writeFileSync(join(directory, route, 'index.html'), content);
   }
@@ -49,6 +49,13 @@ test('scanner refuses an export without the fixed expedition page', () => {
   const result = scan(directory);
   expect(result.status).toBe(1);
   expect(result.stderr).toContain('Missing fixed route: expedition/index.html');
+});
+test('scanner refuses an export without the fixed dungeon page', () => {
+  const directory = exportedSite();
+  rmSync(join(directory, 'dungeon/index.html'));
+  const result = scan(directory);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Missing fixed route: dungeon/index.html');
 });
 test('scanner accepts framework navigation seed references without private string inputs', () => {
   expect(scan(exportedSite('previousTree:i,url:t,nextUrl:r,seed:n; exitStatus:2,url:n,seed:null')).status).toBe(0);

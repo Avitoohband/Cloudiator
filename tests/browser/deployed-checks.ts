@@ -267,6 +267,43 @@ export function denialProblem(probe: AnonProbe, status: number, body: string): s
     : `${probe.label}: status ${status}, code ${code ?? 'none'}, expected ${probe.expected.join(' or ')}`;
 }
 
+/** M30 schema exposure checks. A private table cannot return a row even if exposed: its key cannot be null. */
+export const M30_PRIVATE_PROBES: AnonProbe[] = [
+  ...[
+    ['dungeon_runs', 'run_id'], ['dungeon_run_members', 'activity_id'], ['dungeon_results', 'run_id'],
+    ['bots', 'member_key'], ['bot_routines', 'member_key'], ['bot_slot_duty', 'gladiator_id'], ['bot_arena_history', 'human_id'],
+  ].map(([table, key]): AnonProbe => ({ label: `read private.${table}`, method: 'GET',
+    path: `/rest/v1/${table}?select=${key}&${key}=is.null`, profile: 'private', expected: ['PGRST106'] })),
+  // The STABLE validator is read only and null fails input validation before it can return a log.
+  { label: 'rpc private.safe_party_log', method: 'POST', path: '/rest/v1/rpc/safe_party_log',
+    body: { value: null }, profile: 'private', expected: ['PGRST106'] },
+];
+
+type DungeonFightProbe = { label: string; method: 'HEAD'; path: string; headers: Headers; requireZero: boolean };
+
+/** M30 public access and reveal check; a HEAD request returns counts without reading any fight payload. */
+export function dungeonFightProbes(nowMs: number): [DungeonFightProbe, DungeonFightProbe] {
+  const path = '/rest/v1/dungeon_fights?select=run_id&limit=1';
+  // Allow for the requests' latency and small clock differences with the database at a reveal boundary.
+  const future = nowMs + 30_000;
+  const request = { method: 'HEAD', headers: { Prefer: 'count=exact' } } as const;
+  return [
+    { ...request, label: 'visible dungeon fights', path, requireZero: false },
+    { ...request, label: 'future dungeon fights', path: `${path}&reveal_at_ms=gt.${future}`, requireZero: true },
+  ];
+}
+
+/** Reads the exact total from Content-Range; never echoes the header or any response body. */
+export function dungeonFightCount(probe: Pick<DungeonFightProbe, 'label' | 'requireZero'>, { status, headers }: Answer):
+  { count: number | null; problem: string | null } {
+  const { label, requireZero } = probe;
+  if (status !== 200 && status !== 206) return { count: null, problem: `${label}: status ${status}, expected 200 or 206` };
+  const total = /^(?:\*|\d+-\d+)\/(\d+)$/.exec(headers['content-range'] ?? '')?.[1];
+  const count = Number(total);
+  if (!Number.isSafeInteger(count)) return { count: null, problem: `${label}: exact count missing or invalid` };
+  return { count, problem: requireZero && count !== 0 ? `${label}: count ${count}, expected 0` : null };
+}
+
 /** authProvidersGoogleOnly: GoTrue's `/auth/v1/settings` has Google on, every other provider off, and sign-up open. */
 export function authSettingsProblems(settings: unknown): string[] {
   const external = settings && typeof settings === 'object' ? (settings as { external?: unknown }).external : undefined;

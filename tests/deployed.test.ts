@@ -5,10 +5,10 @@ import { join, resolve } from 'node:path';
 import { IMMUTABLE, PERMISSIONS_POLICY, contentSecurityPolicy } from '../scripts/build-headers.mjs';
 import { FIXED_ROUTES } from '../scripts/release-scan.mjs';
 import {
-  ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences,
+  ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, M30_PRIVATE_PROBES, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences,
   compressionProblem, connectSrcProblems, consoleError, denialProblem, deployedOrigin, evidenceLine, expectedHeaders, foreignPreflightProblems,
   headerMismatches, maskKeys, parseCsp, policyOrigin, preflightProblems, publishableKey, recordingFlags, shippedProblems, statusProblem,
-  supabaseOrigin, workerProblems,
+  dungeonFightCount, dungeonFightProbes, supabaseOrigin, workerProblems,
 } from './browser/deployed-checks.ts';
 
 // Task 24.2 (plan Decisions 1, 8 and 9): the pure pieces of the deployed acceptance checks (tests/browser/deployed.spec.ts),
@@ -52,9 +52,9 @@ describe('the environment', () => {
 });
 
 describe('the fixed routes', () => {
-  it('are the release scan\'s five routes, as URL paths', () => {
-    expect(FIXED_ROUTES).toEqual(['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html']);
-    expect(ROUTES).toEqual(['/', '/game/', '/auth/callback/', '/replay/', '/expedition/']);
+  it('are the release scan\'s six routes, as URL paths', () => {
+    expect(FIXED_ROUTES).toEqual(['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html', 'dungeon/index.html']);
+    expect(ROUTES).toEqual(['/', '/game/', '/auth/callback/', '/replay/', '/expedition/', '/dungeon/']);
   });
 
   it('name a status other than 200 as a problem, so a check goes on to its evidence line (fix round 1)', () => {
@@ -205,24 +205,28 @@ const MIGRATIONS = readdirSync('supabase/migrations').filter(name => name.endsWi
   .map(name => readFileSync(join('supabase/migrations', name), 'utf8')).join('\n');
 const quoted = (name: string) => `"?${name}"?`;
 /**
- * Whether the migrations define `public.<table>.<column>` NOT NULL and in the table's primary key, and never relax either: no
- * later DROP NOT NULL on it, and no dropped primary key or table. Both generated styles are read: pg_dump's quoted
- * `CREATE TABLE …` with `ALTER TABLE ONLY … ADD CONSTRAINT … PRIMARY KEY (…)`, and migra's `create table` whose unique index
- * becomes the key (`PRIMARY KEY using index`).
+ * Whether the migrations define `<schema>.<table>.<column>` NOT NULL and in the table's primary key, and never relax either.
+ * Covers inline keys, pg_dump's `ADD CONSTRAINT … PRIMARY KEY (…)`, and migra's `PRIMARY KEY using index`.
  */
-function notNullPrimaryKey(table: string, column: string): boolean {
-  const create = new RegExp(`create table (?:if not exists )?${quoted('public')}\\.${quoted(table)} \\(([\\s\\S]*?)\\n\\s*\\);`, 'i').exec(MIGRATIONS);
-  const definition = create && new RegExp(`^\\s*${quoted(column)}\\s+([^\\n]*)$`, 'im').exec(create[1]);
-  if (!definition || !/\bnot null\b/i.test(definition[1])) return false;
-  const target = `alter table (?:only )?${quoted('public')}\\.${quoted(table)}`;
+function notNullPrimaryKey(table: string, column: string, schema = 'public'): boolean {
+  const relation = `${quoted(schema)}\\.${quoted(table)}`;
+  const create = new RegExp(`create table (?:if not exists )?${relation} \\(([\\s\\S]*?)\\n\\s*\\);`, 'i').exec(MIGRATIONS)?.[1];
+  if (!create) return false;
+  const definition = new RegExp(`^\\s*${quoted(column)}\\s+([^\\n]*)$`, 'im').exec(create)?.[1];
+  if (!definition) return false;
+  const columnKey = /\bprimary key\b/i.test(definition);
+  if (!columnKey && !/\bnot null\b/i.test(definition)) return false;
+  const target = `alter table (?:only )?${relation}`;
   const pkey = quoted(`${table}_pkey`);
   if (new RegExp(`${target}\\s+alter column ${quoted(column)}\\s+drop not null`, 'i').test(MIGRATIONS)) return false;
-  if (new RegExp(`${target}\\s+drop constraint ${pkey}|drop table (?:if exists )?${quoted('public')}\\.${quoted(table)}\\b`, 'i').test(MIGRATIONS)) return false;
+  if (new RegExp(`${target}\\s+drop constraint ${pkey}|drop table (?:if exists )?${relation}\\b`, 'i').test(MIGRATIONS)) return false;
+  if (columnKey) return true;
+  const inline = /^\s*primary key\s*\(([^)]*)\)/im.exec(create)?.[1];
   const dumped = new RegExp(`${target}\\s+add constraint ${pkey} primary key \\(([^)]*)\\)`, 'i').exec(MIGRATIONS)?.[1];
   const promoted = new RegExp(`${target}\\s+add constraint ${pkey} primary key using index ${pkey}`, 'i').test(MIGRATIONS)
-    ? new RegExp(`create unique index ${pkey} on ${quoted('public')}\\.${quoted(table)} using btree \\(([^)]*)\\)`, 'i').exec(MIGRATIONS)?.[1]
+    ? new RegExp(`create unique index ${pkey} on ${relation} using btree \\(([^)]*)\\)`, 'i').exec(MIGRATIONS)?.[1]
     : undefined;
-  return !!(dumped ?? promoted)?.split(',').map(part => part.trim().replaceAll('"', '')).includes(column);
+  return !!(inline ?? dumped ?? promoted)?.split(',').map(part => part.trim().replaceAll('"', '')).includes(column);
 }
 /** The argument names of every definition of `<schema>.<name>` in the migrations. */
 function signatures(schema: string, name: string): string[][] {
@@ -290,6 +294,53 @@ describe('anonDenied', () => {
     expect(denialProblem(rpc, 404, '{"code":"PGRST202","message":"Could not find the function"}')).toBe('rpc claim_jobs: status 404, code PGRST202, expected 42501');
     expect(denialProblem(exposure, 200, '[]')).toBe(`${exposure.label}: status 200, code none, expected PGRST106`);
     expect(denialProblem(rpc, 400, '{"code":"22023","message":"invalid claim"}')).toBe('rpc claim_jobs: status 400, code 22023, expected 42501');
+  });
+});
+
+describe('M30 anonymous Data API probes', () => {
+  it('asks for exact aggregate counts without fetching fight rows, including a future-only check', () => {
+    expect(dungeonFightProbes?.(1_800_000_000_000)).toEqual([
+      { label: 'visible dungeon fights', method: 'HEAD', path: '/rest/v1/dungeon_fights?select=run_id&limit=1',
+        headers: { Prefer: 'count=exact' }, requireZero: false },
+      { label: 'future dungeon fights', method: 'HEAD', path: '/rest/v1/dungeon_fights?select=run_id&limit=1&reveal_at_ms=gt.1800000030000',
+        headers: { Prefer: 'count=exact' }, requireZero: true },
+    ]);
+  });
+
+  it('requires a successful exact count and fails if any future fight is visible', () => {
+    const visible = { label: 'visible dungeon fights', requireZero: false };
+    const future = { label: 'future dungeon fights', requireZero: true };
+    expect(dungeonFightCount?.(visible, { status: 206, headers: { 'content-range': '0-0/42' } })).toEqual({ count: 42, problem: null });
+    expect(dungeonFightCount(visible, { status: 200, headers: { 'content-range': '*/0' } })).toEqual({ count: 0, problem: null });
+    expect(dungeonFightCount(future, { status: 200, headers: { 'content-range': '*/0' } })).toEqual({ count: 0, problem: null });
+    expect(dungeonFightCount(future, { status: 200, headers: { 'content-range': '0-0/1' } }))
+      .toEqual({ count: 1, problem: 'future dungeon fights: count 1, expected 0' });
+    expect(dungeonFightCount(future, { status: 401, headers: { 'content-range': '*/0' } }))
+      .toEqual({ count: null, problem: 'future dungeon fights: status 401, expected 200 or 206' });
+    for (const range of [undefined, '*/*', '0-0/9007199254740992', 'unexpected header data']) {
+      expect(dungeonFightCount(future, { status: 200, headers: range === undefined ? {} : { 'content-range': range } }))
+        .toEqual({ count: null, problem: 'future dungeon fights: exact count missing or invalid' });
+    }
+  });
+
+  it('cannot read private rows or run a mutating M30 routine even if the private profile is exposed', () => {
+    const tables = [
+      ['dungeon_runs', 'run_id'], ['dungeon_run_members', 'activity_id'], ['dungeon_results', 'run_id'],
+      ['bots', 'member_key'], ['bot_routines', 'member_key'], ['bot_slot_duty', 'gladiator_id'], ['bot_arena_history', 'human_id'],
+    ];
+    expect(M30_PRIVATE_PROBES).toEqual([
+      ...tables.map(([table, key]) => ({ label: `read private.${table}`, method: 'GET',
+        path: `/rest/v1/${table}?select=${key}&${key}=is.null`, profile: 'private', expected: ['PGRST106'] })),
+      { label: 'rpc private.safe_party_log', method: 'POST', path: '/rest/v1/rpc/safe_party_log',
+        body: { value: null }, profile: 'private', expected: ['PGRST106'] },
+    ]);
+    for (const [table, key] of tables) expect(notNullPrimaryKey(table, key, 'private'), `private.${table}.${key}`).toBe(true);
+    expect(signatures('private', 'safe_party_log')).toEqual([['value']]);
+    for (const probe of M30_PRIVATE_PROBES) {
+      expect(denialProblem(probe, 406, '{"code":"PGRST106"}')).toBeNull();
+      // An exposed schema is a regression even if another layer refused this particular request.
+      expect(denialProblem(probe, 403, '{"code":"42501"}')).not.toBeNull();
+    }
   });
 });
 

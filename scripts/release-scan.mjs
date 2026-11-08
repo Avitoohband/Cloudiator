@@ -5,7 +5,7 @@
  */
 
 /** The five pages every export carries, as files of the export. */
-export const FIXED_ROUTES = ['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html'];
+export const FIXED_ROUTES = ['index.html', 'game/index.html', 'auth/callback/index.html', 'replay/index.html', 'expedition/index.html', 'dungeon/index.html'];
 
 /** Backend material that must never reach the browser. */
 export const FORBIDDEN = [

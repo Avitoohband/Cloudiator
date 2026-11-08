@@ -62,7 +62,7 @@ if (failures.length) {
   console.error(failures.join('\n'));
   process.exitCode = 1;
 } else {
-  console.log(`Static export verified: 5 fixed routes; _headers as generated (connect-src 'self'${connect === 'none' ? '' : ` ${connect}`}`
+  console.log(`Static export verified: ${FIXED_ROUTES.length} fixed routes; _headers as generated (connect-src 'self'${connect === 'none' ? '' : ` ${connect}`}`
     + `${required ? ', as required by --origin' : ''}); `
     + `no art gallery; ${scanned} assets scanned; no forbidden backend material; no fixture preview data.`);
 }

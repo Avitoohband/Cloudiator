@@ -1,8 +1,9 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from './fixtures';
 import {
-  ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences, compressionProblem,
-  connectSrcProblems, consoleError, denialProblem, deployedOrigin, expectedHeaders, foreignPreflightProblems, headerMismatches,
-  maskKeys, policyOrigin, preflightProblems, publishableKey, shippedProblems, statusProblem, supabaseOrigin, workerProblems, type AttestedCheck,
+  ANON_PROBES, ATTESTED, FOREIGN_ORIGIN, M30_PRIVATE_PROBES, ROUTES, attested, attestedProblems, authSettingsProblems, chunkReferences,
+  compressionProblem, connectSrcProblems, consoleError, denialProblem, deployedOrigin, dungeonFightCount, dungeonFightProbes,
+  expectedHeaders, foreignPreflightProblems, headerMismatches, maskKeys, policyOrigin, preflightProblems, publishableKey,
+  shippedProblems, statusProblem, supabaseOrigin, workerProblems, type AnonProbe, type AttestedCheck,
 } from './deployed-checks';
 
 // Task 24.2: the deployed acceptance checks (plan Decisions 1, 8 and 9; Tasks 24.5, 24.6 and 24.8). They run only with
@@ -11,8 +12,8 @@ import {
 // credential: the worker is asked without its secret, and the Data API and Auth are asked anonymously with the publishable
 // key the deployed bundle itself carries (public by design), kept in memory and never printed.
 // - Automatic (@automatic): fixedRoutesReload (also on the phone, @browser), securityHeaders, connectSrc, compression, cors,
-//   anonDenied, authProvidersGoogleOnly, shippedAssetsClean. CLOUDIATOR_SUPABASE_ORIGIN is required by connectSrc, cors,
-//   anonDenied and authProvidersGoogleOnly.
+//   anonDenied, dungeonAnonymousAccess (M30), authProvidersGoogleOnly, shippedAssetsClean. CLOUDIATOR_SUPABASE_ORIGIN is
+//   required by connectSrc, cors, anonDenied, dungeonAnonymousAccess and authProvidersGoogleOnly.
 // - Attested (@attested): values Avi reads from scripts/hosted-checks.sql after the real journey, set as CLOUDIATOR_ATTEST_*.
 //   Each fails, naming its variable and row, until it is set.
 // Every page runs under the CSP-violation listener (tests/browser/fixtures.ts; the config sets `listenForCsp`).
@@ -59,15 +60,25 @@ async function bundleKey(request: APIRequestContext) {
 
 /**
  * A request that carries the publishable key. Playwright's call log for a failed request lists its headers (observed: it
- * prints `apikey: …`), so a failure is rethrown with the first line of its message only, and the key masked as well. Each
- * request times out after 10 s, so the 14 probes fail inside the test's 180 s, never by the test timeout, whose report would
- * print the pending request's call log.
+ * prints `apikey: …`), so a failure is rethrown with the first line of its message only, and the key masked as well.
+ * Each keyed request times out after 10 s.
  */
 async function keyed(request: APIRequestContext, url: string, options: Parameters<APIRequestContext['fetch']>[1] & { method: string }, key: string): Promise<APIResponse> {
   try { return await request.fetch(url, { ...options, timeout: 10_000 }); } catch (error) {
     const first = maskKeys(String(error instanceof Error ? error.message : error).split('\n')[0].replaceAll(key, '<publishable key>'));
     throw new Error(`${options.method} ${new URL(url).pathname}: ${first}`);
   }
+}
+
+async function anonymousDenial(request: APIRequestContext, supabase: string, key: string, probe: AnonProbe) {
+  const headers: Record<string, string> = { apikey: key, Prefer: 'return=minimal' };
+  if (probe.body) headers['Content-Type'] = 'application/json';
+  if (probe.profile) headers[probe.method === 'GET' ? 'Accept-Profile' : 'Content-Profile'] = probe.profile;
+  const response = await keyed(request, `${supabase}${probe.path}`, { method: probe.method, headers, maxRedirects: 0,
+    data: probe.body ? JSON.stringify(probe.body) : undefined }, key);
+  const status = response.status();
+  // Only inspect a refusal's error code. An unexpectedly successful request's body is never read into evidence.
+  return denialProblem(probe, status, status >= 400 ? await response.text() : '');
 }
 
 /**
@@ -191,15 +202,32 @@ test.describe('deployedChecks (automatic)', () => {
     const key = await bundleKey(request);
     const problems: string[] = [];
     for (const probe of ANON_PROBES) {
-      const headers: Record<string, string> = { apikey: key, Prefer: 'return=minimal' };
-      if (probe.body) headers['Content-Type'] = 'application/json';
-      if (probe.profile) headers[probe.method === 'GET' ? 'Accept-Profile' : 'Content-Profile'] = probe.profile;
-      const response = await keyed(request, `${supabase}${probe.path}`, { method: probe.method, headers,
-        data: probe.body ? JSON.stringify(probe.body) : undefined }, key);
-      const problem = denialProblem(probe, response.status(), await response.text());
+      const problem = await anonymousDenial(request, supabase, key, probe);
       if (problem) problems.push(problem);
     }
     evidence(`${ANON_PROBES.length - problems.length} of ${ANON_PROBES.length} anonymous probes refused as expected`);
+    expect(problems).toEqual([]);
+  });
+
+  test('dungeonAnonymousAccess', AUTOMATIC, async ({ request }) => {
+    const supabase = supabaseOrigin(process.env);
+    const key = await bundleKey(request);
+    const problems: string[] = [];
+    const counts: string[] = [];
+    for (const probe of dungeonFightProbes(Date.now())) {
+      const response = await keyed(request, `${supabase}${probe.path}`, { method: probe.method,
+        headers: { ...probe.headers, apikey: key }, maxRedirects: 0 }, key);
+      const status = response.status();
+      const { count, problem } = dungeonFightCount(probe, { status, headers: response.headers() });
+      counts.push(`${probe.label}: status ${status}, count ${count ?? 'unavailable'}`);
+      if (problem) problems.push(problem);
+    }
+    let refused = 0;
+    for (const probe of M30_PRIVATE_PROBES) {
+      const problem = await anonymousDenial(request, supabase, key, probe);
+      if (problem) problems.push(problem); else refused += 1;
+    }
+    evidence(`${counts.join('; ')}; ${refused} of ${M30_PRIVATE_PROBES.length} M30 private probes refused as expected`);
     expect(problems).toEqual([]);
   });
 

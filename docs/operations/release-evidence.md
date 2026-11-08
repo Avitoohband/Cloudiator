@@ -1663,8 +1663,17 @@ five safe identities, 22 starter items, no ranked or tournament effects and a he
 camp actors and profiles retained their off-duty display for the already-published slot 373782.
 
 The first eligible dungeon boundary is slot 373783 at 17:20 UTC (19:20 Israel time). The 45-human cap,
-dungeon eligibility and demand determine assignments. The in-game patch record still shows 1.7.1. Review
-`PATCH-NOTE-REVIEW.md` and approve the note and linked record separately. The trailer still needs its
+dungeon eligibility and demand determine assignments. The in-game patch record showed 1.7.1 at this checkpoint.
+The trailer still needs its
 00:40.000–00:41.867 roster shot refreshed for Cinder. Readback and the exact draft are in parent
 `logs/p18-m31-20261108/`.
+
+## Patch 1.8 notification published — 2026-11-08
+
+Avi approved the exact “Dungeons: team up in the afternoon” notification. The guarded linked publication
+verified the live release ref, five active bots, the quiet window and absence of the note. The local
+rollback rehearsal verified exact content and duplicate prevention. Production readback verified one
+visible message with the exact title, preview, nine body blocks and null action. It is message 11,
+published at 16:29:29.644 UTC. Evidence and payload hashes are in parent `logs/p18-m31-20261108/`.
+The linked patch record requires separate approval.
 

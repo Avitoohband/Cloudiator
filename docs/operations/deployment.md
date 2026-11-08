@@ -2,7 +2,7 @@
 
 ## Patch 1.8 rollout — client deployed 2026-11-08
 
-Production serves the 1.8 client from `7804b1e` on Pages deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Supabase has M01–M31, active rules v2, worker v4 and command v8. All 10 anonymous deployed checks passed and GitHub release run `42486998287` passed. Tullia, Grit, Cinder, Rufus and Pip are active. The first eligible dungeon boundary is 19:20 Israel time. The patch record is 1.7.1. The patch note and linked record each require Avi's separate approval. [Evidence](release-evidence.md#patch-18-ludus-nimbus-activated--2026-11-08).
+Production serves the 1.8 client from `7804b1e` on Pages deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Supabase has M01–M31, active rules v2, worker v4 and command v8. All 10 anonymous deployed checks passed and GitHub release run `42486998287` passed. Tullia, Grit, Cinder, Rufus and Pip are active. The first eligible dungeon boundary is 19:20 Israel time. The approved notification is visible as message 11. The patch record is 1.7.1 and its linked 1.8 record requires Avi's separate approval. [Evidence](release-evidence.md#patch-18-notification-published--2026-11-08).
 
 ## Patch 1.7.1 LIVE — 2026-11-06
 

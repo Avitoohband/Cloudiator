@@ -37,11 +37,11 @@ export type SceneEvents = {
 };
 export type ArenaFightSummary = {
   battleId: string;
-  /** In participant order; an NPC side has no gladiator and opens its entrant's activity. */
+  /** In participant order. A bot or NPC fallback shares the human entrant's public activity. */
   sides: [ArenaFightSide, ArenaFightSide];
   status: 'entering' | 'fighting' | 'result';
 };
-export type ArenaFightSide = { gladiatorId: string | null; name: string; activityId: string; npc: boolean };
+export type ArenaFightSide = { gladiatorId: string | null; name: string; activityId: string; npc: boolean; bot: boolean };
 export type SceneEventName = keyof SceneEvents;
 export type Listener<E extends SceneEventName> = (payload: SceneEvents[E]) => void;
 

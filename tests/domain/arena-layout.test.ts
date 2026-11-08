@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RevealedTimeline } from '@contracts/events';
+import type { RevealedCombatant, RevealedTimeline } from '@contracts/events';
 import type { PublicActor } from '@contracts/reads';
 import { loadAssetManifest } from '@/game/assets';
 import { findPath, gridFromMap, pathLength } from '@/game/paths';
@@ -7,7 +7,7 @@ import { layoutCamp } from '@/game/actors';
 import { REPLAY_OUTRO_MS } from '@/game/replay';
 import { ARENA_REVEAL_MS, ARENA_SLOT_MS, renderArenaStage } from '@/game/arena-stage';
 import {
-  ARENA_ENTRY_MS, ARENA_GATE, ARENA_JOG_PACE, ARENA_RESULT_HOLD_MS, arenaFightButton, arenaRings, arenaReadsDue, campArenaFights, fightStatus, ringTiles, scheduleArenaRings,
+  ARENA_ENTRY_MS, ARENA_GATE, ARENA_JOG_PACE, ARENA_RESULT_HOLD_MS, arenaFightButton, arenaPartnersShown, arenaRings, arenaReadsDue, campArenaFights, fightStatus, ringTiles, scheduleArenaRings,
   updateRingSchedule, type CampFight, type RingSlot,
 } from '@/game/arena-layout';
 import type { ArenaFightSummary } from '@/game/bridge';
@@ -114,6 +114,71 @@ describe('camp arena fights', () => {
     expect(fightsAt(S + 61 * MIN, ARENA_WORLD_ACTORS.map(a => ({ ...a, location: 'rest' as const })))).toEqual([]);
   });
 
+  const human = ARENA_WORLD_ACTORS.find(a => a.name === 'Bellator')!;
+  const bot: PublicActor = {
+    ...ARENA_WORLD_ACTORS.find(a => a.name === 'Corvina')!, name: 'Grit', botTeam: 'ludus-nimbus',
+    botDuty: 'on-duty', activityId: null, visibleStage: null,
+  };
+  const due = S + ARENA_REVEAL_MS;
+  const mixedTimeline = () => {
+    const timeline = structuredClone(ARENA_TIMELINES[human.activityId!]);
+    const stage = timeline.stages.find(s => s.kind === 'bout')!;
+    stage.arenaMode = 'unranked';
+    const log = stage.battleLog!;
+    const participant: RevealedCombatant = { ...log.participants[1], name: bot.name, botTeam: 'ludus-nimbus' };
+    stage.battleLog = { ...log, participants: [log.participants[0], participant] };
+    return { timeline, stage, participant };
+  };
+
+  it('stages a due mixed bout from the human timeline and gives both sides the human activity', () => {
+    const { timeline } = mixedTimeline();
+    const known = new Map([[human.activityId!, timeline]]);
+    expect(fightsAt(due - 1, [human, bot], known)).toEqual([]);
+    expect(fightsAt(due, [human, bot], known)).toMatchObject([{
+      battleId: arenaBattleId('campOne'), fighters: [human.gladiatorId, bot.gladiatorId],
+      activities: [human.activityId, human.activityId],
+    }]);
+    expect(arenaReadsDue([human, bot], new Map(), due)).toEqual([human.activityId]);
+    expect(arenaPartnersShown(timeline, [human, bot], due)).toEqual([]);
+  });
+
+  it('requires a matching Arena bot from the same slot and the due stage’s own bot disclosure', () => {
+    const { timeline, stage, participant } = mixedTimeline();
+    const known = new Map([[human.activityId!, timeline]]);
+    for (const opponent of [
+      { ...bot, gladiatorId: arenaActor(42).gladiatorId },
+      { ...bot, location: 'camp' as const },
+      { ...bot, startsAtMs: S - ARENA_SLOT_MS },
+      { ...bot, botTeam: undefined },
+      { ...bot, activityId: 'private-bot-activity' },
+    ]) {
+      expect(fightsAt(due, [human, opponent], known)).toHaveLength(0);
+    }
+    expect(fightsAt(due, [human], known)).toEqual([]);
+    expect(fightsAt(due, [bot], known)).toEqual([]);
+    delete participant.botTeam;
+    expect(fightsAt(due, [human, bot], known)).toEqual([]);
+    participant.botTeam = 'ludus-nimbus';
+    delete stage.arenaMode;
+    expect(fightsAt(due, [human, bot], known)).toEqual([]);
+  });
+
+  it('does not read a private activity even if an Arena bot projection carries an ID', () => {
+    const { timeline } = mixedTimeline();
+    const actors = [human, { ...bot, activityId: 'private-bot-activity' }];
+    expect(arenaReadsDue(actors, new Map(), due)).toEqual([human.activityId]);
+    expect(arenaPartnersShown(timeline, actors, due)).toEqual([]);
+  });
+
+  it('labels the bot on either side and selects the human for the keyboard action', () => {
+    const activityId = human.activityId!;
+    const entrant = { gladiatorId: human.gladiatorId, name: human.name, activityId, npc: false, bot: false };
+    const opponent = { gladiatorId: bot.gladiatorId, name: bot.name, activityId, npc: false, bot: true };
+    const summary: ArenaFightSummary = { battleId: 'mixed', status: 'fighting', sides: [opponent, entrant] };
+    expect(arenaFightButton(summary)).toEqual({ label: 'Bellator vs Grit (BOT)', entrant });
+    expect(arenaFightButton({ ...summary, sides: [entrant, opponent] })).toEqual({ label: 'Bellator vs Grit (BOT)', entrant });
+  });
+
   it('keeps an NPC fallback logged as participant 0 on its own side, and opens its entrant from either side', () => {
     const valeria = ARENA_WORLD_ACTORS.find(a => a.name === 'Valeria')!;
     const flipped: RevealedTimeline = structuredClone(ARENA_TIMELINES[valeria.activityId!]);
@@ -124,7 +189,7 @@ describe('camp arena fights', () => {
     expect(fighters).toEqual([null, ARENA_GLADIATORS.valeria.id]);
     expect(fight.activities).toEqual([valeria.activityId, valeria.activityId]);
     // The keyboard button names the gladiator first and the NPC second, and opens the gladiator's card.
-    const side = (gladiatorId: string | null, name: string) => ({ gladiatorId, name, activityId: valeria.activityId!, npc: gladiatorId === null });
+    const side = (gladiatorId: string | null, name: string) => ({ gladiatorId, name, activityId: valeria.activityId!, npc: gladiatorId === null, bot: false });
     const npcFirst: ArenaFightSummary = { battleId: fight.battleId, status: 'fighting', sides: [side(null, 'Iron Warden'), side(ARENA_GLADIATORS.valeria.id, 'Valeria')] };
     expect(arenaFightButton(npcFirst)).toEqual({ label: 'Valeria vs Iron Warden (NPC)', entrant: npcFirst.sides[1] });
     const npcSecond: ArenaFightSummary = { ...npcFirst, sides: [npcFirst.sides[1], npcFirst.sides[0]] };

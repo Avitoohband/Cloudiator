@@ -59,36 +59,46 @@ export type CampFight = {
   readonly endsAtMs: number;
   /** Camp gladiator ids in participant order; null is an NPC fallback (on either side), which the scene draws itself. */
   readonly fighters: readonly [string | null, string | null];
-  /** The activity each side's Arena card opens; the NPC side opens its entrant's. */
+  /** The public activity each side can open. A bot or NPC fallback shares the human entrant's. */
   readonly activities: readonly [string, string];
 };
 
 /** An Arena bout: its log always comes with the entrant's timeline. */
 export type ArenaCampFight = CampFight & { readonly log: BattleLog };
 
-const isArena = (actor: PublicActor) => actor.location === 'arena' && !!actor.activityId;
+/** An Arena actor whose own public timeline the camp can open or read. */
+export const hasArenaTimeline = (actor: PublicActor): actor is PublicActor & { activityId: string } =>
+  actor.location === 'arena' && actor.botTeam !== 'ludus-nimbus' && !!actor.activityId;
 /** Start, then battle id: the one order in which the camp lists and schedules its fights. */
 export const byStart = (p: CampFight, q: CampFight) => p.startedAtMs - q.startedAtMs || (p.battleId < q.battleId ? -1 : p.battleId > q.battleId ? 1 : 0);
 
 /**
- * Revealed bouts of the camp's Arena entrants at the display time. A human pair needs both fighters in the arena;
- * either entrant's timeline is enough, since both carry the same battle. Ordered by start, then battle id.
+ * Revealed bouts of the camp's Arena entrants at the display time. A human pair shares its battle in both timelines.
+ * A mixed bout has only the human timeline and needs a matching bot actor in the same Arena slot. NPC fallbacks
+ * come from the log alone. Ordered by start, then battle id.
  */
 export function campArenaFights(actors: readonly PublicActor[], timelines: ReadonlyMap<string, RevealedTimeline>, displayNowMs: number): ArenaCampFight[] {
-  const entrants = new Map(actors.filter(isArena).map(a => [a.gladiatorId, a]));
+  const entrants = new Map(actors.filter(hasArenaTimeline).map(a => [a.gladiatorId, a]));
+  const bots = new Map(actors.filter(a => a.location === 'arena' && a.botTeam === 'ludus-nimbus' && a.activityId === null).map(a => [a.gladiatorId, a]));
   const fights = new Map<string, ArenaCampFight>();
   for (const actor of entrants.values()) {
-    const timeline = timelines.get(actor.activityId!);
+    const timeline = timelines.get(actor.activityId);
     if (!timeline) continue;
     const bout = renderArenaStage(timeline, displayNowMs, { entrantId: actor.gladiatorId }).bout;
     if (!bout?.log || !bout.battleId || fights.has(bout.battleId)) continue;
-    const ids: readonly [string | null, string | null] = [bout.log.participants[0].gladiatorId, bout.log.participants[1].gladiatorId];
-    if (!ids.includes(actor.gladiatorId)) continue;
-    if (!ids.every(id => id === null || entrants.has(id)) || ids.every(id => id === null)) continue;
-    const activityOf = (id: string | null) => (id ? entrants.get(id)!.activityId! : actor.activityId!);
+    const [first, second] = bout.log.participants;
+    const [human, opponent] = first.gladiatorId === actor.gladiatorId ? [first, second] : [second, first];
+    if (human.gladiatorId !== actor.gladiatorId || human.botTeam || opponent.gladiatorId === actor.gladiatorId) continue;
+    const unranked = timeline.stages.find(stage => stage.id === bout.stageId)?.arenaMode === 'unranked';
+    if (unranked) {
+      const bot = opponent.gladiatorId === null ? undefined : bots.get(opponent.gladiatorId);
+      if (opponent.botTeam !== 'ludus-nimbus' || !bot || actor.startsAtMs === null
+        || bot.startsAtMs !== actor.startsAtMs || bout.startedAtMs !== actor.startsAtMs + ARENA_REVEAL_MS) continue;
+    } else if (opponent.botTeam || (opponent.gladiatorId !== null && !entrants.has(opponent.gladiatorId))) continue;
+    const activityOf = (id: string | null) => (id === null ? undefined : entrants.get(id)?.activityId) ?? actor.activityId;
     fights.set(bout.battleId, {
       battleId: bout.battleId, log: bout.log, startedAtMs: bout.startedAtMs, endsAtMs: bout.endsAtMs,
-      fighters: ids, activities: [activityOf(ids[0]), activityOf(ids[1])],
+      fighters: [first.gladiatorId, second.gladiatorId], activities: [activityOf(first.gladiatorId), activityOf(second.gladiatorId)],
     });
   }
   return [...fights.values()].sort(byStart);
@@ -169,12 +179,13 @@ export function fightStatus(slot: RingSlot, durationMs: number, t: number, arriv
 }
 
 /**
- * The keyboard button for a ring fight: the gladiator first and an NPC fallback second (marked), whichever side of
- * the log the NPC is on; it opens the gladiator's Arena card (an NPC side opens its entrant's activity anyway).
+ * The keyboard button for a ring fight opens the human entrant's Arena card. A bot or NPC is named second and marked.
  */
 export function arenaFightButton(fight: ArenaFightSummary): { label: string; entrant: ArenaFightSide } {
-  const [first, second] = fight.sides[0].npc && !fight.sides[1].npc ? [fight.sides[1], fight.sides[0]] : fight.sides;
-  return { label: `${first.name} vs ${second.name}${second.npc ? ' (NPC)' : ''}`, entrant: first };
+  const [a, b] = fight.sides;
+  const [first, second] = a.npc || a.bot ? [b, a] : [a, b];
+  const mark = second.bot ? ' (BOT)' : second.npc ? ' (NPC)' : '';
+  return { label: `${first.name} vs ${second.name}${mark}`, entrant: first };
 }
 
 export type ArenaRead = { readAtMs: number; hasBout: boolean };
@@ -186,14 +197,14 @@ export type ArenaRead = { readAtMs: number; hasBout: boolean };
  * a bout not revealed yet, or a partner not in the arena.
  */
 export function arenaPartnersShown(timeline: RevealedTimeline, actors: readonly PublicActor[], displayNowMs: number): string[] {
-  const entrant = actors.find(a => isArena(a) && a.activityId === timeline.activityId);
+  const entrant = actors.find(a => hasArenaTimeline(a) && a.activityId === timeline.activityId);
   if (!entrant) return [];
   const log = renderArenaStage(timeline, displayNowMs, { entrantId: entrant.gladiatorId }).bout?.log;
   if (!log || !log.participants.some(p => p.gladiatorId === entrant.gladiatorId)) return [];
   const partners: string[] = [];
   for (const p of log.participants) {
     if (!p.gladiatorId || p.gladiatorId === entrant.gladiatorId) continue;
-    const partner = actors.find(a => isArena(a) && a.gladiatorId === p.gladiatorId && a.startsAtMs === entrant.startsAtMs);
+    const partner = actors.find(a => hasArenaTimeline(a) && a.gladiatorId === p.gladiatorId && a.startsAtMs === entrant.startsAtMs);
     if (partner?.activityId) partners.push(partner.activityId);
   }
   return partners;
@@ -207,14 +218,14 @@ export function arenaPartnersShown(timeline: RevealedTimeline, actors: readonly 
 export function arenaReadsDue(actors: readonly PublicActor[], known: ReadonlyMap<string, ArenaRead>, displayNowMs: number): string[] {
   const due: string[] = [];
   for (const actor of actors) {
-    if (!isArena(actor) || actor.startsAtMs === null) continue;
-    const read = known.get(actor.activityId!);
+    if (!hasArenaTimeline(actor) || actor.startsAtMs === null) continue;
+    const read = known.get(actor.activityId);
     if (read?.hasBout) continue;
     const shown = actor.visibleStage?.kind === 'bout' || actor.visibleStage?.kind === 'return';
     if (!shown && displayNowMs < actor.startsAtMs + ARENA_REVEAL_MS) continue;
     if (displayNowMs >= actor.startsAtMs + ARENA_SLOT_MS) continue;
     if (read && displayNowMs - read.readAtMs < ARENA_RETRY_MS) continue;
-    due.push(actor.activityId!);
+    due.push(actor.activityId);
   }
   return due;
 }

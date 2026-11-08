@@ -1,7 +1,7 @@
 import { test, expect, type BrowserContext } from './fixtures';
 import { randomUUID } from 'node:crypto';
 import type { BattleLog, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import type { PublicProfile, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
+import type { PublicActor, PublicProfile, StandingsPage } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture } from '../fixtures/domain';
 import { emptyWorld, routeLiveReads, seedSession, testUser } from './live-routes';
 import { openMenu } from './shell-helpers';
@@ -90,4 +90,52 @@ test('discloses an unranked Ludus Nimbus bout in Arena and its recorded replay',
   const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
   await expect(replay.getByText(/ARENA · UNRANKED/)).toBeVisible();
   await expect(replay.getByRole('heading', { name: /Aster vs Grit/ }).getByText('BOT', { exact: true })).toBeVisible();
+});
+
+test('stages the public human-versus-bot Arena bout with a keyboard action for the human', { tag: '@render' }, async ({ page, context }) => {
+  const activityId = 'd0700000-0000-4000-8000-000000000062';
+  const start = Math.floor(Date.now() / SLOT) * SLOT;
+  const foughtAt = start + 60 * MINUTE;
+  const now = foughtAt + 5_000;
+  const recorded = arenaWin as unknown as BattleLog;
+  const [human, bot] = [recorded.participants[0], { ...recorded.participants[1], name: 'Grit', botTeam: 'ludus-nimbus' as const }];
+  const battleLog: BattleLog = { ...recorded, participants: [human, bot] };
+  const timeline: RevealedTimeline = { activityId, serverNowMs: now, visibleThroughMs: now, stages: [
+    { id: `${activityId}:0`, kind: 'staging', revealedAtMs: start, startedAtMs: start, endsAtMs: foughtAt, label: 'Warming up' },
+    { id: `${activityId}:1`, kind: 'bout', revealedAtMs: foughtAt, startedAtMs: foughtAt, endsAtMs: foughtAt + battleLog.durationMs,
+      label: 'Bout: victory', battleLog, arenaMode: 'unranked' },
+  ] };
+  const entrant: PublicActor = {
+    gladiatorId: human.gladiatorId!, name: human.name, classId: 'guardian', equipmentSilhouettes: ['weapon-sword', 'offhand-shield'],
+    appearance: null, league: 'bronze', level: 1, phase: 'morning', location: 'arena', activityId, activityStatus: 'active',
+    startsAtMs: start, endsAtMs: start + SLOT, visibleStage: null, resting: false,
+  };
+  const opponent: PublicActor = {
+    ...entrant, gladiatorId: bot.gladiatorId!, name: bot.name, classId: 'berserker', equipmentSilhouettes: ['weapon-axe'],
+    activityId: null, botTeam: bot.botTeam, botDuty: 'on-duty', botReturnsAtMs: null,
+  };
+  const practice: PublicActor = { ...opponent, gladiatorId: 'd0700000-0000-4000-8000-000000000063', name: 'Mica' };
+  const world = { ...emptyWorld(now), actors: [entrant, opponent, practice] };
+  const live = await routeLiveReads(context, { world, serverNowMs: () => now, rulesVersion: 'v2', timelines: { [activityId]: timeline } });
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/game/');
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+  await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), now);
+  const menu = await openMenu(page, 'Arena');
+  const group = menu.getByRole('group', { name: 'Arena bouts in the rings' });
+  const button = group.getByRole('button', { name: 'Aster vs Grit (BOT)', exact: true });
+  await expect(button).toBeVisible({ timeout: 15_000 });
+  await expect(group.getByRole('button')).toHaveCount(1);
+  const scene = await page.evaluate(() => window.__cloudiatorCamp!.state()!);
+  expect(scene.arena.fights).toMatchObject([{ fighters: [entrant.gladiatorId, opponent.gladiatorId], npc: null, status: 'fighting' }]);
+  expect(scene.actors.find(actor => actor.id === opponent.gladiatorId)?.marker).toBe('BOT');
+
+  await button.focus();
+  await button.press('Enter');
+  const card = menu.getByRole('article', { name: 'Aster' });
+  await expect(card.getByRole('heading', { name: 'Aster' })).toBeFocused();
+  await expect(card.getByText('BOT', { exact: true })).toBeVisible();
+  const timelineReads = live.requests.filter(request => request.table === 'visible_events');
+  expect([...new Set(timelineReads.map(request => request.query.get('activity_id')))]).toEqual([`eq.${activityId}`]);
 });

@@ -14,7 +14,7 @@ import { titleById } from '@domain/titles';
 import { campActorTag, layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import {
-  ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, updateRingSchedule, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
+  ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, hasArenaTimeline, updateRingSchedule, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
 } from './arena-layout';
 import { assignSpectators, campTournamentFights, campTournamentRoles, mergeCampFights, spectatorSpots, type CampTournamentRole, type SpectatorSpot } from './tournament-camp';
 import { LABEL_BASE, NPC_CLOTH, fighterLook, planStage, stageAt, type LabelPose, type StageFrame, type StageLayout, type StagePlan } from './battle-stage';
@@ -523,7 +523,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         id: actor.gladiatorId, kind: 'player', name: actor.name, container, layers, look: lookKey(placement),
         label: this.makeLabel(actor.name), x: placement.x + 0.5, y: placement.y + 0.5, action: placement.action, facing: placement.facing,
         offsetMs: placement.routine.offsetMs, walk: null, placement, location: actor.location, frame: '', flip: null, depth: NaN,
-        activityId: actor.activityId, startsAtMs: actor.startsAtMs, arena: null, pose: null,
+        activityId: hasArenaTimeline(actor) ? actor.activityId : null, startsAtMs: actor.startsAtMs, arena: null, pose: null,
       };
       container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => {
         if (dragged(pointer)) return;
@@ -573,7 +573,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         existing.placement = placement;
         existing.location = actor.location;
         existing.offsetMs = placement.routine.offsetMs;
-        existing.activityId = actor.activityId;
+        existing.activityId = hasArenaTimeline(actor) ? actor.activityId : null;
         existing.startsAtMs = actor.startsAtMs;
         // A fighter in a ring stays there; it walks to its new staging spot when its bout is over. A spectator
         // stays at its spot while its tournament runs (updateArena moves it).
@@ -791,7 +791,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     /**
-     * Arena: each revealed bout of two entrants in camp (or an entrant and its NPC fallback) jogs into its ring,
+     * Arena: each revealed bout of two entrants in camp (or an entrant and its bot or NPC opponent) jogs into its ring,
      * plays the battle log at the bout's real time once both stand there (so it ends when the Arena card shows the
      * result), holds the result and walks back to staging. Everyone else in the arena warms up until minute 60,
      * then waits in staging.
@@ -958,8 +958,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           status: status as ArenaFightSummary['status'],
           sides: ([0, 1] as const).map(side => {
             const id = fight.fighters[side];
-            const logged = fight.log?.participants[side].name ?? '';
-            return { gladiatorId: id, name: id ? views.get(id)?.name ?? logged : logged, activityId: fight.activities[side], npc: !id };
+            const participant = fight.log?.participants[side];
+            const logged = participant?.name ?? '';
+            return { gladiatorId: id, name: id ? views.get(id)?.name ?? logged : logged, activityId: fight.activities[side],
+              npc: id === null, bot: participant?.botTeam === 'ludus-nimbus' };
           }) as ArenaFightSummary['sides'],
         })) });
       }

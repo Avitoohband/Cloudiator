@@ -15,7 +15,7 @@ import { activityCost, deriveStats } from '@domain/stats';
 import { isTournamentSlot } from '@domain/tournament-slot';
 import type { ActivityCosts, Rules } from '@domain/types';
 
-/** The stamina each kind of activity costs a build, as the server's boundary freezes them (the five kinds the boundary prices: a tournament too). */
+/** The stamina each activity supported by the active rules costs a build, as the server's boundary freezes it. */
 export type { ActivityCosts };
 
 /**
@@ -27,7 +27,6 @@ export type RestGain = { before: number; maximum: number } | null;
 type Stamina = Pick<OwnerState, 'stamina'>;
 const SLOT_MS = RULES_V1.clock.slotMs;
 const PHASES = RULES_V1.clock.phases;
-const KINDS = Object.keys(RULES_V1.activityStamina) as (keyof typeof RULES_V1.activityStamina)[];
 const usable = (value: number) => Number.isFinite(value) && value >= 0;
 /** Whether the owner's stamina holds numbers a gain can be told from. */
 const known = ({ stamina }: Stamina) => usable(stamina.current) && usable(stamina.maximum);
@@ -35,7 +34,7 @@ const known = ({ stamina }: Stamina) => usable(stamina.current) && usable(stamin
 /**
  * The stamina every kind of activity costs the owner's CURRENT build under `rules`: the build as the boundary validates it
  * (`validateBuild` against the owner's items, points and level), its overload from `deriveStats`, and `activityCost` of each base cost
- * and that overload (v2's tournament entry is 0, overloaded too). Null when the build does not validate (a piece that is gone, on sale
+ * and that overload (v2 prices dungeons and keeps tournament entry free, even overloaded). Null when the build does not validate (a piece that is gone, on sale
  * or too high a tier) or the rules cannot derive it: the boundary would then refuse to prepare it, so no cost, and no rest number built
  * on one, is made up. Never throws.
  */
@@ -46,7 +45,7 @@ export function activityCosts(owner: Pick<OwnerState, 'currentBuild' | 'inventor
       owner.inventory, owner.progression.earnedAttributePoints, owner.progression.level, rules);
     if (!valid.ok) return null;
     const { overload } = deriveStats(valid.snapshot, rules);
-    return Object.fromEntries(KINDS.map(kind => [kind, activityCost(rules.activityStamina[kind], overload)])) as ActivityCosts;
+    return Object.fromEntries(Object.entries(rules.activityStamina).map(([kind, cost]) => [kind, activityCost(cost, overload)])) as ActivityCosts;
   } catch { return null; }
 }
 

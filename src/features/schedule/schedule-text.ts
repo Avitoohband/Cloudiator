@@ -1,7 +1,7 @@
 // The words and choices of the Schedule panel (launch feedback, 2026-10-25): which choices a part of the day offers, what each
 // one costs and does, which part is running, and what a saved day says. Pure, so the panel only lays them out. The rules
 // come from the rules given (`RULES_V1` by default; the active rules' since Patch 1.6: stamina costs, the Arena bout's timing,
-// the tournament's days, hour and entry, the parts Arena may take), never from numbers written here.
+// the tournament's days, hour and entry, the parts Arena and dungeons may take), never from numbers written here.
 import type { ActivityChoice, DayScheduleValue, Phase, Schedule } from '@contracts/commands';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { slotAt } from '@domain/clock';
@@ -18,26 +18,46 @@ import { countWord, trainingHint, type TrainingRoom } from './training-cap';
 export const PHASES: readonly Phase[] = RULES_V1.clock.phases;
 const MINUTE_MS = 60_000;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-type ExpeditionId = Extract<ActivityChoice, { kind: 'expedition' }>['expeditionId'];
-/** The catalog's expeditions, in its order (the order the select lists them). */
-const EXPEDITIONS = Object.keys(CATALOG_V1.expeditions) as ExpeditionId[];
-const requiredLevel = (id: ExpeditionId) => CATALOG_V1.expeditions[id].requiredLevel;
-const expeditionChoice = (expeditionId: ExpeditionId): ActivityChoice => ({ kind: 'expedition', expeditionId });
+const EXPEDITIONS = (Object.keys(CATALOG_V1.expeditions) as (keyof typeof CATALOG_V1.expeditions)[])
+  .map((expeditionId): ActivityChoice => ({ kind: 'expedition', expeditionId }));
+const DUNGEONS = Object.values(CATALOG_V1.dungeons).map(({ id }): ActivityChoice => ({ kind: 'dungeon', dungeonId: id }));
+const CHOICES: ActivityChoice[] = [{ kind: 'training' }, { kind: 'rest' }, { kind: 'arena' }, ...EXPEDITIONS, ...DUNGEONS];
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/**
- * What a part's select offers a player of `level`: training, rest, Arena only where `rules` allow it (the evening in v1), then
- * the expeditions the level has opened. The expeditions it has not opened are `lockedChoices`: the select still lists them,
- * disabled, so a player sees what the next level brings (as the panel always has).
- */
-export function choicesFor(phase: Phase, level: number, rules: Rules = RULES_V1): ActivityChoice[] {
-  const always: ActivityChoice[] = [{ kind: 'training' }, { kind: 'rest' }, { kind: 'arena' }];
-  return [...always.filter(choice => choiceAllowedInPhase(phase, choice, rules)), ...EXPEDITIONS.filter(id => level >= requiredLevel(id)).map(expeditionChoice)];
+function destination(choice: ActivityChoice) {
+  if (choice.kind === 'expedition') return CATALOG_V1.expeditions[choice.expeditionId];
+  if (choice.kind === 'dungeon') return CATALOG_V1.dungeons[choice.dungeonId];
+  return null;
 }
 
-/** The expeditions a player of `level` has not unlocked yet, in the order the select lists them after the open choices. */
-export function lockedChoices(level: number): ActivityChoice[] {
-  return EXPEDITIONS.filter(id => level < requiredLevel(id)).map(expeditionChoice);
+/** The select value also distinguishes two saved choices of the same kind. */
+export function choiceKey(choice: ActivityChoice): string {
+  if (choice.kind === 'expedition') return `expedition:${choice.expeditionId}`;
+  if (choice.kind === 'dungeon') return `dungeon:${choice.dungeonId}`;
+  return choice.kind;
+}
+
+export function choiceOf(value: string): ActivityChoice | undefined {
+  return CHOICES.find(choice => choiceKey(choice) === value);
+}
+
+/**
+ * What a part's select offers a player of `level`: training, rest, Arena where allowed, then the expeditions and dungeons
+ * the level has opened and the phase permits.
+ */
+export function choicesFor(phase: Phase, level: number, rules: Rules = RULES_V1): ActivityChoice[] {
+  return CHOICES.filter(choice => {
+    const place = destination(choice);
+    return choiceAllowedInPhase(phase, choice, rules) && (place === null || level >= place.requiredLevel);
+  });
+}
+
+/** The destinations this phase permits that a player of `level` has yet to unlock. */
+export function lockedChoices(phase: Phase, level: number, rules: Rules = RULES_V1): ActivityChoice[] {
+  return CHOICES.filter(choice => {
+    const place = destination(choice);
+    return place !== null && level < place.requiredLevel && choiceAllowedInPhase(phase, choice, rules);
+  });
 }
 
 /**
@@ -49,15 +69,24 @@ export function arenaNote(phase: Phase, rules: Rules = RULES_V1): string | null 
   return `Arena runs in ${rules.schedule.arenaPhases.map(allowed => `the ${allowed}`).join(' and ')} only.`;
 }
 
-/** A choice's name: "Training", "Rest", "Arena", "Expedition: Woodland Path". */
-export function choiceLabel(choice: ActivityChoice): string {
-  if (choice.kind === 'expedition') return `Expedition: ${CATALOG_V1.expeditions[choice.expeditionId].name}`;
-  return capital(choice.kind);
+/** The note for phases outside the dungeon schedule, on worlds where dungeons are available. */
+export function dungeonNote(phase: Phase, rules: Rules = RULES_V1): string | null {
+  if (!isRulesV2(rules) || DUNGEONS.some(choice => choiceAllowedInPhase(phase, choice, rules))) return null;
+  return `Dungeons run in ${rules.schedule.dungeonPhases.map(allowed => `the ${allowed}`).join(' and ')} only.`;
 }
 
-/** A choice as its select option reads: an expedition also names the level that opens it ("Expedition: Woodland Path · Level 1"). */
+/** A choice's name: "Training", "Rest", "Arena", "Expedition: Woodland Path", "Dungeon: Wolf Den". */
+export function choiceLabel(choice: ActivityChoice): string {
+  const place = destination(choice);
+  const kind = capital(choice.kind);
+  return place === null ? kind : `${kind}: ${place.name}`;
+}
+
+/** A choice as its select option reads: a destination also names the level that opens it. */
 export function optionLabel(choice: ActivityChoice): string {
-  return choice.kind === 'expedition' ? `${choiceLabel(choice)} · Level ${requiredLevel(choice.expeditionId)}` : choiceLabel(choice);
+  const place = destination(choice);
+  const label = choiceLabel(choice);
+  return place === null ? label : `${label} · Level ${place.requiredLevel}`;
 }
 
 const staminaText = (cost: number) => cost === 0 ? 'Costs nothing.' : `Costs ${cost} stamina.`;
@@ -83,7 +112,10 @@ export function tournamentEntryText(rules: Rules): string | null {
  * line); under v2 Arena keeps its own cost and then says that tournament entry is free (`tournamentEntryText`).
  */
 export function choiceHint(choice: ActivityChoice, clock: ClockMode, rules: Rules = RULES_V1, room: TrainingRoom = null): string {
-  if (choice.kind === 'dungeon') return 'Dungeon';
+  if (choice.kind === 'dungeon') {
+    return isRulesV2(rules) ? '3 rooms, then the boss. Players group first. Eligible bots and hired fighters fill open seats. '
+      + `Costs ${rules.activityStamina.dungeon} base stamina.` : 'Dungeon';
+  }
   const cost = staminaText(rules.activityStamina[choice.kind]);
   switch (choice.kind) {
     case 'training': return trainingHint(room, rules.activityStamina.training);

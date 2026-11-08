@@ -12,14 +12,11 @@ import { useClockMode } from '../../lib/clock-setting';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { RestGainText } from './RestGainText';
 import { activityCosts, projectRest, restHint } from './rest-stamina';
-import { PHASES, arenaNote, choiceHint, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from './schedule-text';
+import { PHASES, arenaNote, choiceHint, choiceKey, choiceOf, choicesFor, dungeonNote, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from './schedule-text';
 import { slotTimeText } from './slot-time';
 import { trainingLimitWarning, trainingRoom } from './training-cap';
 import { useMinuteNow } from './use-minute-now';
 
-const choiceKey = (choice: ActivityChoice) => choice.kind === 'expedition' ? `expedition:${choice.expeditionId}` : choice.kind;
-const choiceOf = (value: string): ActivityChoice => value.startsWith('expedition:') ? { kind: 'expedition', expeditionId: value.split(':')[1] as 'woodland' | 'outpost' | 'mountain' }
-  : { kind: value as 'rest' | 'training' | 'arena' };
 const sameChoice = (a: ActivityChoice, b: ActivityChoice) => choiceKey(a) === choiceKey(b);
 type Edit = Extract<GameCommand, { kind: 'edit-day-schedule' }>;
 const SLOT_MS = RULES_V1.clock.slotMs;
@@ -30,8 +27,8 @@ const NOT_THE_CHOICE = ['processing', 'conflict', 'unavailable', 'rate-limited']
 
 /**
  * The repeating schedule: the whole day is one draft (a choice for each part), saved with one button as one command that the
- * server applies in full or not at all (launch feedback, 2026-10-25). Each part offers only the choices it may hold (Arena
- * only in the evening) and says what its choice costs; the part running now says so, when it ends and that a change to it
+ * server applies in full or not at all (launch feedback, 2026-10-25). Each part offers only the choices it may hold and
+ * says what its choice costs; the part running now says so, when it ends and that a change to it
  * starts with its next occurrence.
  *
  * The estimated next start of each part and the running part come from the shared display clock (estimated server time), and
@@ -136,7 +133,7 @@ export function SchedulePanel({ owner, gateway, refresh, clock, rules = RULES_V1
     const time = slot === null ? '' : slotTimeText(nextPhaseStart(phase, slotStart), nowMs, clockMode);
     return time ? <p>Estimated next start: {time}</p> : null;
   };
-  const level = owner.progression.level, locked = lockedChoices(level);
+  const level = owner.progression.level;
   /** What each kind of activity costs the current build under the active rules (null when it cannot be derived): a Rest's number is walked from them. */
   const costs = useMemo(() => activityCosts({ currentBuild: owner.currentBuild, inventory: owner.inventory, progression: owner.progression }, rules),
     [owner.currentBuild, owner.inventory, owner.progression, rules]);
@@ -157,19 +154,28 @@ export function SchedulePanel({ owner, gateway, refresh, clock, rules = RULES_V1
     {running && <p role="note" className="schedule-running">{runningNotice(running, nextPhaseStart(running.phase, slotStart), nowMs, clockMode)}</p>}
     <div className="schedule-grid">{PHASES.map((phase, index) => {
       const isRunning = running?.phase === phase;
-      const note = arenaNote(phase);
-      const noteLine = `${panelId}-${phase}-note`, hintLine = `${panelId}-${phase}-hint`;
+      const arena = arenaNote(phase, rules), dungeon = dungeonNote(phase, rules);
+      const arenaLine = `${panelId}-${phase}-note`, dungeonLine = `${panelId}-${phase}-dungeon`, hintLine = `${panelId}-${phase}-hint`;
       const marked = refused && changed.includes(phase);
-      const options = [...choicesFor(phase, level).map(choice => ({ choice, shut: false })), ...locked.map(choice => ({ choice, shut: true }))];
+      const options = [
+        ...choicesFor(phase, level, rules).map(choice => ({ choice, shut: false })),
+        ...lockedChoices(phase, level, rules).map(choice => ({ choice, shut: true })),
+      ];
+      // Keep all dungeons after the expeditions, including locked expeditions.
+      options.sort((a, b) => Number(a.choice.kind === 'dungeon') - Number(b.choice.kind === 'dungeon'));
       return <article className={`schedule-slot slot-${index}`} key={phase} data-running={isRunning ? '' : undefined}>
         <div className="slot-head"><h3>{phase}</h3>{isRunning && <span className="running-badge">Running now</span>}</div>
         <label htmlFor={`schedule-${phase}`}>{phase} activity</label>
-        <select id={`schedule-${phase}`} value={choiceKey(draft[phase])} disabled={busy} onChange={event => edit(phase, choiceOf(event.target.value))}
+        <select id={`schedule-${phase}`} value={choiceKey(draft[phase])} disabled={busy} onChange={event => {
+          const choice = choiceOf(event.target.value);
+          if (choice) edit(phase, choice);
+        }}
           aria-invalid={marked ? true : undefined}
-          aria-describedby={[note ? noteLine : '', hintLine, marked && outcomeShown ? outcomeShown : ''].filter(Boolean).join(' ')}>
+          aria-describedby={[arena ? arenaLine : '', dungeon ? dungeonLine : '', hintLine, marked && outcomeShown ? outcomeShown : ''].filter(Boolean).join(' ')}>
           {options.map(({ choice, shut }) => <option key={choiceKey(choice)} value={choiceKey(choice)} disabled={shut}>{optionLabel(choice)}</option>)}
         </select>
-        {note && <p id={noteLine} className="slot-note">{note}</p>}
+        {arena && <p id={arenaLine} className="slot-note">{arena}</p>}
+        {dungeon && <p id={dungeonLine} className="slot-note">{dungeon}</p>}
         <p id={hintLine} className="slot-hint">{hintFor(phase)}</p>
         {estimate(phase)}
       </article>;

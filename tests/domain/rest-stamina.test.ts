@@ -90,6 +90,16 @@ describe('projectRest', () => {
     expect(projectRest({ phase: 'evening', nowMs: morning, owner: owner(29, 'training'), day, costs: BASE })).toEqual({ before: 104, maximum: 104 });
   });
 
+  it('projects a v2 evening Rest after the draft dungeon and its overload-adjusted cost', () => {
+    const dungeonDay: Schedule = { ...day, afternoon: { kind: 'dungeon', dungeonId: 'wolf-den' } };
+    const projection = { phase: 'evening', nowMs: morning, day: dungeonDay, rules: RULES_V2 } as const;
+    expect(projectRest({ ...projection, owner: owner(46), costs: activityCosts(ownerFixture, RULES_V2) })).toEqual({ before: 6, maximum: 104 });
+    // Overload raises the cost to 47. Exact stamina pays it, one less yields a Rest instead.
+    const costs = activityCosts(overloaded, RULES_V2);
+    expect(projectRest({ ...projection, owner: owner(47), costs })).toEqual({ before: 0, maximum: 104 });
+    expect(projectRest({ ...projection, owner: owner(46), costs })).toEqual({ before: 104, maximum: 104 });
+  });
+
   it('turns a part it cannot afford into a Rest', () => {
     expect(projectRest({ phase: 'evening', nowMs: morning, owner: owner(20, 'training'), day, costs: BASE })).toEqual({ before: 104, maximum: 104 });
   });
@@ -281,9 +291,9 @@ describe('projectRest under the rules v2', () => {
 
 describe('activityCosts', () => {
   it('derives the costs under the rules it is given: a v2 tournament entry costs nothing, even overloaded', () => {
-    expect(activityCosts(ownerFixture, RULES_V2)).toEqual({ ...BASE, tournament: 0 });
+    expect(activityCosts(ownerFixture, RULES_V2)).toEqual({ ...BASE, tournament: 0, dungeon: 40 });
     expect(activityCosts(ownerFixture, RULES_V1)).toEqual(BASE);
-    expect(activityCosts(overloaded, RULES_V2)).toEqual({ training: 24, expedition: 36, arena: 30, tournament: 0, rest: 0 });
+    expect(activityCosts(overloaded, RULES_V2)).toEqual({ training: 24, expedition: 36, arena: 30, tournament: 0, rest: 0, dungeon: 47 });
   });
 
   it('uses the build overload in the costs, as the boundary does', () => {

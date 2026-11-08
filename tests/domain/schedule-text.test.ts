@@ -4,7 +4,7 @@ import { CATALOG_V1 } from '@domain/catalog-v1';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
 import type { Rules } from '@domain/types';
-import { arenaNote, choiceHint, choiceLabel, choicesFor, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary, tournamentEntryText } from '../../src/features/schedule/schedule-text';
+import { arenaNote, choiceHint, choiceKey, choiceLabel, choiceOf, choicesFor, dungeonNote, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary, tournamentEntryText } from '../../src/features/schedule/schedule-text';
 import { trainingRoom } from '../../src/features/schedule/training-cap';
 
 // Launch feedback (2026-10-25): the schedule screen's words. The zone is pinned to New York and the locale to en-US, as
@@ -49,15 +49,59 @@ describe('choicesFor', () => {
       const open = Object.values(CATALOG_V1.expeditions).filter(e => e.requiredLevel <= player).map(e => `expedition:${e.id}`);
       const shut = Object.values(CATALOG_V1.expeditions).filter(e => e.requiredLevel > player).map(e => `expedition:${e.id}`);
       expect(key(choicesFor('evening', player)).filter(k => k.startsWith('expedition:')), `level ${player}`).toEqual(open);
-      expect(key(lockedChoices(player)), `level ${player}`).toEqual(shut);
+      expect(key(lockedChoices('evening', player)), `level ${player}`).toEqual(shut);
     }
-    expect(lockedChoices(RULES_V1.attributes.maximumLevel)).toEqual([]);
+    expect(lockedChoices('afternoon', RULES_V1.attributes.maximumLevel)).toEqual([]);
   });
 
   it('reads the Arena parts from the rules it is given, defaulting to v1', () => {
     const wider = { ...RULES_V1, schedule: { arenaPhases: ['afternoon', 'evening'] } } as unknown as Rules;
     expect(key(choicesFor('afternoon', 1, wider))).toContain('arena');
     expect(key(choicesFor('morning', 1, wider))).not.toContain('arena');
+  });
+
+  it('opens Wolf Den and Raider Stronghold in the v2 afternoon at level 7', () => {
+    expect(choicesFor('afternoon', 7, RULES_V2).filter(choice => choice.kind === 'dungeon')).toEqual([
+      { kind: 'dungeon', dungeonId: 'wolf-den' },
+      { kind: 'dungeon', dungeonId: 'raider-stronghold' },
+    ]);
+  });
+
+  it('lists Troll Hall as locked in the v2 afternoon at level 7', () => {
+    expect(lockedChoices('afternoon', 7, RULES_V2).filter(choice => choice.kind === 'dungeon')).toEqual([
+      { kind: 'dungeon', dungeonId: 'troll-hall' },
+    ]);
+  });
+
+  it('keeps dungeons out of other v2 phases and all v1 phases, including locked options', () => {
+    for (const [rules, phases] of [[RULES_V1, PHASE_OF], [RULES_V2, ['morning', 'evening']]] as const) {
+      for (const phase of phases) {
+        expect(choicesFor(phase, 20, rules).map(choice => choice.kind)).not.toContain('dungeon');
+        expect(lockedChoices(phase, 1, rules).map(choice => choice.kind)).not.toContain('dungeon');
+      }
+    }
+  });
+});
+
+describe('schedule option values', () => {
+  it.each([
+    ['dungeon:wolf-den', { kind: 'dungeon', dungeonId: 'wolf-den' }],
+    ['dungeon:raider-stronghold', { kind: 'dungeon', dungeonId: 'raider-stronghold' }],
+    ['dungeon:troll-hall', { kind: 'dungeon', dungeonId: 'troll-hall' }],
+    ['expedition:woodland', WOODLAND],
+    ['training', TRAINING],
+  ] as const)('round-trips %s without losing the saved choice', (value, choice) => {
+    expect(choiceKey(choice)).toBe(value);
+    expect(choiceOf(value)).toEqual(choice);
+  });
+});
+
+describe('dungeonNote', () => {
+  it('says when dungeons run in the other v2 phases and omits the note under v1', () => {
+    expect(dungeonNote('morning', RULES_V2)).toBe('Dungeons run in the afternoon only.');
+    expect(dungeonNote('evening', RULES_V2)).toBe('Dungeons run in the afternoon only.');
+    expect(dungeonNote('afternoon', RULES_V2)).toBeNull();
+    for (const phase of PHASE_OF) expect(dungeonNote(phase, RULES_V1)).toBeNull();
   });
 });
 
@@ -90,9 +134,23 @@ describe('choiceLabel', () => {
     expect(optionLabel(WOODLAND)).toBe(`Expedition: ${CATALOG_V1.expeditions.woodland.name} · Level ${CATALOG_V1.expeditions.woodland.requiredLevel}`);
     expect(optionLabel({ kind: 'expedition', expeditionId: 'mountain' })).toBe(`Expedition: ${CATALOG_V1.expeditions.mountain.name} · Level ${CATALOG_V1.expeditions.mountain.requiredLevel}`);
   });
+
+  it('names each dungeon and its required level in the option', () => {
+    expect(optionLabel({ kind: 'dungeon', dungeonId: 'wolf-den' })).toBe('Dungeon: Wolf Den · Level 3');
+    expect(optionLabel({ kind: 'dungeon', dungeonId: 'raider-stronghold' })).toBe('Dungeon: Raider Stronghold · Level 7');
+    expect(optionLabel({ kind: 'dungeon', dungeonId: 'troll-hall' })).toBe('Dungeon: Troll Hall · Level 12');
+  });
 });
 
 describe('choiceHint', () => {
+  it('describes the v2 dungeon party and its base stamina cost', () => {
+    const wolf = { kind: 'dungeon', dungeonId: 'wolf-den' } as const;
+    const description = '3 rooms, then the boss. Players group first. Eligible bots and hired fighters fill open seats.';
+    expect(choiceHint(wolf, '12', RULES_V2)).toBe(`${description} Costs 40 base stamina.`);
+    const dearer = { ...RULES_V2, activityStamina: { ...RULES_V2.activityStamina, dungeon: 42 } };
+    expect(choiceHint(wolf, '12', dearer)).toBe(`${description} Costs 42 base stamina.`);
+  });
+
   it('carries each activity\'s stamina cost from the rules (training, expedition, Arena)', () => {
     expect(RULES_V1.activityStamina).toMatchObject({ training: 20, expedition: 30, arena: 25, rest: 0 });
     expect(choiceHint(TRAINING, '12')).toContain(`Costs ${RULES_V1.activityStamina.training} stamina.`);

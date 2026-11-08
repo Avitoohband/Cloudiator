@@ -4,6 +4,7 @@
 // and not watched on this device, the opponent and its tag, the sub-line (a phone's leaves out a leading "Arena" or "Tournament"), and
 // ▶ Watch, or Result for a bout whose replay is gone (the row then dimmed). Every word is `boutRow`'s, rendered as text.
 import { Fragment } from 'react';
+import { BotTag } from '../character/BotTag';
 import type { BoutRowText } from './bout-text';
 import styles from './bouts.module.css';
 
@@ -39,7 +40,7 @@ export function BoutRow({ text, watched, onOpen }: { text: BoutRowText; watched:
         <span className={styles.name}>
           {fresh && <><span className={styles.dot} data-unwatched-dot aria-hidden="true" /><span className={styles.sr}>Not watched yet: </span></>}
           <span data-bout-name>{text.name}</span>
-          {text.tag && <span className={styles.tag}>{text.tag}</span>}
+          {text.tag === 'BOT' ? <BotTag /> : text.tag && <span className={styles.tag}>{text.tag}</span>}
         </span>
         <Sub text={text.sub.wide} which="wide" />
         <Sub text={text.sub.narrow} which="narrow" />

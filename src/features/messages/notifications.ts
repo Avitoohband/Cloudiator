@@ -4,6 +4,7 @@
 import type { ItemReward } from '@contracts/events';
 import type { GameNotification } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
+import { dungeonOutcome } from '../dungeon/dungeon-text';
 
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
@@ -27,6 +28,7 @@ const KIND_NAME = { expedition: 'Expedition', arena: 'Arena', tournament: 'Tourn
 
 function titleOf(n: GameNotification): string {
   if (n.kind === 'training') return 'Training finished';
+  if (n.kind === 'dungeon') return dungeonOutcome(n.summary, 'you') ?? (n.destination ? `Dungeon finished: ${n.destination}` : 'Dungeon finished');
   const name = KIND_NAME[n.kind], result = n.summary.result;
   const title = `${name} ${result === 'victory' ? 'victory' : result === 'defeat' ? 'defeat' : 'finished'}`;
   return n.kind === 'expedition' && n.destination ? `${title}: ${n.destination}` : title;
@@ -35,7 +37,7 @@ function titleOf(n: GameNotification): string {
 /** The approved wide, phone and accessible Watch words; training has no replay. */
 export function watchLabel(note: GameNotification): { wide: string; narrow: string; name: string } | null {
   if (note.kind === 'training') return null;
-  const trip = note.kind === 'expedition';
+  const trip = note.kind === 'expedition' || note.kind === 'dungeon';
   return { wide: trip ? '▶ Watch the trip' : '▶ Watch', narrow: trip ? '▶ The trip' : '▶ Watch', name: `${trip ? 'Watch the trip' : 'Watch'}: ${titleOf(note)}` };
 }
 

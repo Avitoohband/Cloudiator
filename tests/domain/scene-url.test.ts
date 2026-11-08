@@ -13,6 +13,17 @@ const A1 = 'a1d0c2e4-5f60-4b7a-9c3d-1e2f3a4b5c61';
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, '\'').replace(/\s+/g, ' ').trim();
 
 describe('scenes over the camp in the address', () => {
+  it('round-trips the dungeon trip and rewards origin using the existing camp history', () => {
+    const view = { kind: 'dungeon', activityId: A1, play: 'trip', from: 'rewards' } as const;
+    const href = sceneHref('http://x/game/?mode=fixture&view=replay&stage=s2', view);
+    expect(href).toBe(`/game/?mode=fixture&view=dungeon&activity=${A1}&play=trip&from=rewards`);
+    expect(sceneOf(new URL(`http://x${href}`).searchParams)).toEqual(view);
+    expect(sceneOf(params('view=dungeon&activity=invalid&play=trip'))).toEqual({ kind: 'dungeon', activityId: null });
+    expect(sceneForResult(A1, 'dungeon')).toEqual({ kind: 'dungeon', activityId: A1, play: 'trip' });
+    expect(originMenu('rewards')).toBe('results');
+    expect(backLabel('rewards')).toBe('Your rewards');
+  });
+
   it('matches a pending step source by live activity, stage and origin, rather than scene identity alone', () => {
     const source = { kind: 'replay' as const, activityId: A1, stageId: 's2', from: 'bouts' as const };
     expect(sameSceneSource(sceneOf(params(`view=replay&activity=${A1}&stage=s2&from=bouts`)), source)).toBe(true);

@@ -368,6 +368,14 @@ describe('watched marks', () => {
 });
 
 describe('the My bouts view', () => {
+  it('labels a trusted unranked bot bout and shows only its recorded reward', () => {
+    const row = boutRow(bout({ arenaMode: 'unranked', ratingDelta: 0, renown: 2,
+      opponent: { name: 'Grit', npc: false, botTeam: 'ludus-nimbus' } }), NOW, '24', 'UTC');
+    expect(row).toMatchObject({ name: 'vs Grit', tag: 'BOT' });
+    expect(row.sub.narrow).toContain('Unranked');
+    expect(row.sub.narrow).toContain('+2 renown');
+    expect(row.sub.narrow).toContain('Rating unchanged');
+  });
   beforeEach(() => { pinDeviceClock('12'); });
   afterEach(() => { vi.restoreAllMocks(); });
   const noop = () => {};

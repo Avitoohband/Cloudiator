@@ -5,6 +5,7 @@ import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import { RosterPanel, type Roster } from '@/features/character/RosterPanel';
 import { countLine, matchLine, playerCounts } from '@/features/character/actor-text';
 import { createSceneBridge } from '@/game/bridge';
+import { campActorTag, locationKind } from '@/game/actors';
 import { worldFixture } from '../fixtures/domain';
 
 const noop = () => {};
@@ -18,6 +19,28 @@ const panel = (props: Partial<Parameters<typeof RosterPanel>[0]> = {}) => render
 const button = (html: string, label: string) => new RegExp(`<button([^>]*)aria-label="${label}"[^>]*>`).exec(html)?.[0] ?? '';
 
 describe('Gladiators', () => {
+  it('places a dungeon member away from camp and names the dungeon in their roster row', () => {
+    const away = { ...actor('Corvina', 'dungeon:wolf-den'), activityId: 'dungeon-1' };
+    const html = panel({ world: { ...WORLD, actors: [WORLD.actors[0], away] } });
+    expect(html).toContain('In Wolf Den');
+    expect(html).not.toContain('aria-label="Find Corvina"');
+    expect(button(html, 'Watch Corvina&#x27;s dungeon')).not.toBe('');
+    expect(locationKind('dungeon:wolf-den')).toBe('away');
+  });
+
+  it('groups trusted bots separately from the players and never marks a bot as a new arrival', () => {
+    const bot: PublicActor = { ...actor('Pip', 'orientation'), botTeam: 'ludus-nimbus', botDuty: 'off-duty', botReturnsAtMs: null };
+    const human = actor('Grit', 'orientation');
+    const html = panel({ world: { ...WORLD, actors: [human, bot] } });
+    expect(html).toContain('1 player');
+    expect(html).toContain('Ludus Nimbus · 1 bot · Unranked');
+    expect(html).toContain('aria-label="Ludus Nimbus"');
+    expect(html).toContain('Off duty');
+    expect(html.match(/>NEW<\/span>/g)).toHaveLength(1);
+    expect(campActorTag(bot)).toBe('BOT');
+    expect(campActorTag(human)).toBe('NEW');
+  });
+
   it('gives a gladiator who is neither drawn in the camp nor away a reason for its disabled Find and Follow', () => {
     const html = panel();
     for (const label of ['Find Brutus', 'Follow Brutus']) {

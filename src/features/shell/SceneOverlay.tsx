@@ -15,6 +15,7 @@
 // device whenever it shows one, so My bouts drops that bout's dot (Arena replays Task 4). A replay takes the focus from Back to ⏸ once
 // it has loaded, and its result card offers the same way back at the end (Arena replays Task 5).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import dynamic from 'next/dynamic';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { GameUiState } from '../character/useGameState';
 import { ActivityReplay, BattleReplay } from '../arena/BattleReplay';
@@ -28,6 +29,10 @@ import { backLabel, boutFilterOf, namedScene, sameSceneSource, sceneFromOf, scen
 import { BracketReplay } from '../tournaments/BracketReplay';
 import type { TournamentSample } from '../tournaments/TournamentPanel';
 import styles from './shell.module.css';
+
+const DungeonView = dynamic(() => import('../dungeon/DungeonView').then(module => module.DungeonView), {
+  ssr: false, loading: () => <p role="status">Loading the dungeon…</p>,
+});
 
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
@@ -76,7 +81,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   // a bracket's bouts are chapters of one scene (`sceneKeyOf`).
   const named = namedScene(view);
   // A replay's stage is a chapter of the loaded activity too: replace its address without rereading its timeline or looks.
-  const sceneKey = named?.kind === 'expedition' || named?.kind === 'replay' ? `${named.kind}|${named.activityId}` : sceneKeyOf(view);
+  const sceneKey = named?.kind === 'expedition' || named?.kind === 'replay' || named?.kind === 'dungeon' ? `${named.kind}|${named.activityId}` : sceneKeyOf(view);
   const shownKey = useRef(sceneKey);
   useLayoutEffect(() => {
     if (shownKey.current === sceneKey) return;
@@ -90,13 +95,14 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   const watching = player && named?.kind === 'replay' ? named.activityId : null;
   const displayClock = state.clock;
   useEffect(() => { if (watching) markWatched(watching, displayClock.now()); }, [watching, displayClock]);
-  const reads = useMemo<(ExpeditionReads & Partial<Pick<GameGateway, 'looks' | 'restAfter'>>) | null>(() => {
+  const reads = useMemo<(ExpeditionReads & Pick<GameGateway, 'dungeonFight'> & Partial<Pick<GameGateway, 'looks' | 'restAfter'>>) | null>(() => {
     if (!gateway) return null;
     if (player) return gateway;
     // The fighters' looks are public, so a visitor's replay reads them too, and whether a trip's next slot was a Rest (the whole-trip
     // replay's last chapter, Patch A Task 9).
     return { timeline: async id => { const { summary: _owner, ...shown } = await gateway.timeline(id); return shown; }, looks: (ids, onTitles) => gateway.looks(ids, onTitles),
-      restAfter: (gladiatorId, tripEndMs) => gateway.restAfter(gladiatorId, tripEndMs) };
+      restAfter: (gladiatorId, tripEndMs) => gateway.restAfter(gladiatorId, tripEndMs),
+      dungeonFight: (runId, ordinal) => gateway.dungeonFight(runId, ordinal) };
   }, [gateway, player]);
   // The camp's own world actors already hold their looks: a replay of those fighters reads nothing (the replay takes them once,
   // when it mounts, so a world refresh never changes a replay in play).
@@ -134,7 +140,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   // timeline twice and restarting the replay.
   const loading = !reads || state.session.status === 'loading' || state.viewer === 'loading';
   return (
-    <dialog ref={dialog} className={styles.scene} aria-label={view.kind === 'expedition' ? 'Expedition' : 'Replay'}
+    <dialog ref={dialog} className={styles.scene} aria-label={view.kind === 'expedition' ? 'Expedition' : view.kind === 'dungeon' ? 'Dungeon' : 'Replay'}
       // Escape asks the scene to close: the address goes back to the camp, and the dialog stays open (with the focus in
       // it) until the scene unmounts and gives the focus back to its opener (Task 23.5: a native close would drop the
       // focus to <body> until then). Should the browser close it anyway, follow that into the address. The close event
@@ -148,6 +154,7 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
       <div className={styles.sceneBody}>
         {named === null
           ? view.kind === 'expedition' ? <ExpeditionUnavailable fixture={fixture} reason="not-found" overCamp />
+            : view.kind === 'dungeon' ? <section><h2>Dungeon not available</h2><p>No revealed dungeon run matches this link.</p></section>
             : <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} headingLevel={2} />
           // A bracket's chapters retain the tournament and fixture projection across replacements and reloads.
           : named.kind === 'bout' ? loading ? <p role="status">Loading the replay…</p>
@@ -169,6 +176,10 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
                   onReplace({ kind: 'replay', activityId: named.activityId, stageId, ...origin });
                 }}
                 viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} titles={titles} takeFocus back={{ label, go: onClose }} />
+            : named.kind === 'dungeon' ? loading ? <p role="status">Loading the dungeon…</p>
+              : <DungeonView key={viewKey} reads={reads} activityId={named.activityId} fixture={fixture} play={named.play ?? null}
+                  onPlay={play => onReplace({ kind: 'dungeon', activityId: named.activityId, ...(play ? { play } : {}), ...origin })}
+                  revision={state.revision} world={state.world} owner={owner} overCamp />
             : loading ? <p role="status">Loading the expedition…</p>
               : <ExpeditionView key={viewKey} reads={reads} activityId={named.activityId} fixture={fixture} play={named.play ?? null}
                 onPlay={play => onWatch?.(play ? { kind: 'expedition', activityId: named.activityId, play, ...origin } : { kind: 'expedition', activityId: named.activityId, ...origin })}

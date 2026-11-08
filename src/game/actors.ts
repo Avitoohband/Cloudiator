@@ -41,7 +41,7 @@ export function hashString(text: string): number {
 /** Contract CampLocation ids ('camp' means idling about camp), with a keyword fallback for older display labels. */
 export function locationKind(location: string): RoutineKind {
   const l = location.toLowerCase();
-  if (l.startsWith('expedition')) return 'away';
+  if (l.startsWith('expedition') || l.startsWith('dungeon:')) return 'away';
   if (l === 'training' || /train|practice|yard/.test(l)) return 'training';
   if (l === 'rest' || /rest|sleep|quarters/.test(l)) return 'rest';
   if (l === 'tournament' || /tournament/.test(l)) return 'tournament';
@@ -54,7 +54,13 @@ export function locationKind(location: string): RoutineKind {
  * A gladiator who has just arrived (Patch A item 2): its public location is `orientation` (from its creation until its first
  * boundary, at most one slot) and it is not resting at home. The arrival banner, the Gladiators list and the camp's "NEW" tag all use it.
  */
-export const isNewcomer = (actor: Pick<PublicActor, 'location' | 'resting'>): boolean => actor.location === 'orientation' && !actor.resting;
+type CampActorTagFields = Pick<PublicActor, 'location' | 'resting' | 'botTeam'>;
+export const isNewcomer = (actor: CampActorTagFields): boolean =>
+  actor.botTeam !== 'ludus-nimbus' && actor.location === 'orientation' && !actor.resting;
+
+export function campActorTag(actor: CampActorTagFields): 'BOT' | 'NEW' | null {
+  return actor.botTeam === 'ludus-nimbus' ? 'BOT' : isNewcomer(actor) ? 'NEW' : null;
+}
 
 const ZONE_FOR: Record<RoutineKind, ZoneId | null> = {
   training: 'training', rest: 'rest', arena: 'arena', tournament: 'arena', away: null, orientation: 'expedition-gate', idle: 'merchants',

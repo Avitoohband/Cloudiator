@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PublicActivitySummary } from '@contracts/events';
-import type { ResultRow, ResultsPage } from '@contracts/reads';
+import type { ActivitySummary, PublicActivitySummary } from '@contracts/events';
+import type { GameNotification, ResultRow, ResultsPage } from '@contracts/reads';
 import { resultLine, resultTime } from '@/features/results/result-text';
 import { ResultsPanel, ResultsTabs, ResultsView, readResults, type ResultsModel } from '@/features/results/ResultsPanel';
+import { DungeonRewardsView } from '@/features/results/DungeonRewards';
 import { createBoutsStore } from '@/features/bouts/bouts-store';
 import { createDisplayClock } from '@/game/display-clock';
 import { RESULTS_FIXTURE } from '../fixtures/results';
@@ -27,6 +28,23 @@ function row(kind: PublicActivitySummary['resolvedKind'], result: PublicActivity
 }
 
 describe('result lines', () => {
+  it('keeps the dungeon outcome separate from the member result and the retained replay', () => {
+    const result = (id: NonNullable<PublicActivitySummary['dungeon']>['id'], terminalFight: 1 | 2 | 3 | 4,
+      partyWon: boolean, memberWon: boolean, replay: 'available' | 'expired' = 'available') => {
+      const base = row('dungeon', memberWon ? 'victory' : 'defeat', replay);
+      return resultLine({ ...base, summary: { ...base.summary, dungeon: { id, terminalFight, partyWon } } }, SETTLED);
+    };
+    expect(result('wolf-den', 4, true, true)).toEqual({ text: 'Wolf Den cleared: the Alpha of the Den fell', replay: true });
+    expect(result('wolf-den', 4, false, false)).toEqual({ text: 'Wolf Den: the party lost to the Alpha', replay: true });
+    expect(result('troll-hall', 3, false, false)).toEqual({ text: 'Troll Hall: the party lost in Room 3', replay: true });
+    expect(result('troll-hall', 2, true, false)).toEqual({
+      text: 'Troll Hall: the party won Room 2 with no fighters left to continue', replay: true,
+    });
+    expect(result('wolf-den', 4, true, false, 'expired')).toEqual({
+      text: 'Wolf Den: Aster fell before the party cleared the dungeon · replay no longer kept', replay: false,
+    });
+  });
+
   it('says what Training and Rest did, never offers a replay and never says one is no longer kept (Tasks 7, 9)', () => {
     const trainingRow = row('training', 'completed', 'expired');
     expect(resultLine(trainingRow, SETTLED)).toEqual({ text: 'Aster finished training', replay: false });
@@ -97,6 +115,29 @@ describe("a result's time", () => {
 });
 
 describe('Results', () => {
+  it('shows credited dungeon rewards only in the owner view and keeps them after replay expiry', () => {
+    const summary: ActivitySummary = {
+      ...row('dungeon', 'defeat', 'expired').summary, dungeon: { id: 'wolf-den', terminalFight: 3, partyWon: false },
+      receiptId: 'secret-receipt', rewards: { money: 2, xp: 12, renown: 0, attributePoints: 0, items: [], overflowMoney: 0 },
+    };
+    const notification: GameNotification = {
+      activityId: summary.activityId, kind: 'dungeon', settledAtMs: SETTLED, summary, destination: 'Wolf Den', levelAfter: null,
+    };
+    const owner = renderToStaticMarkup(createElement(DungeonRewardsView, { notes: [notification], serverNowMs: SETTLED, onWatch: noop }));
+    expect(text(owner)).toContain('Wolf Den: the party lost in Room 3');
+    expect(text(owner)).toContain('+2 gold');
+    expect(text(owner)).toContain('+12 XP');
+    expect(owner).not.toContain('secret-receipt');
+    expect(owner).not.toContain('>Replay<');
+
+    const everyone = renderToStaticMarkup(createElement(ResultsView, {
+      model: { rows: [{ gladiatorId: ASTER, name: 'Aster', summary }], nextCursor: null, status: 'ready' },
+      viewerId: ASTER, serverNowMs: SETTLED, onMore: noop, onRetry: noop, onWatch: noop,
+    }));
+    expect(text(everyone)).toContain('Wolf Den: the party lost in Room 3');
+    expect(everyone).not.toMatch(/gold|XP|secret-receipt/);
+  });
+
   const MINE = 'mine-0000';
   beforeEach(() => { pinDeviceClock('24'); });
   afterEach(() => { vi.restoreAllMocks(); });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivitySummary } from '@contracts/events';
 import type { GameNotification, OwnerState } from '@contracts/reads';
-import { awayProgress, awayScene, awayState, awayText, boutAway, type AwayState } from '@/features/shell/away-trip';
+import { awayProgress, awayScene, awayState, awayText, boutAway, dungeonSafeReturn, type AwayState } from '@/features/shell/away-trip';
 import { ARENA_GLADIATORS, ARENA_TIMELINES, arenaActivityId } from '../fixtures/arena';
 
 // Patch A Task 11 (spec "Item 3 + Task 10", "The button on the camp"; the approved mockup): the pure core of the away button. While
@@ -83,6 +83,18 @@ const lost = (): AwayState => awayState({ ...afterTrip, latestTrip: noteOf({ des
 const processing = (): AwayState => awayState({ ...base, nowMs: tripEnd + 30_000 })!;
 
 describe('the away button while the trip runs', () => {
+  it('names a running dungeon and its four fight times, and opens the dungeon scene', () => {
+    const dungeon = { ...base, owner: { ...expeditionOwner, currentActivity: { ...expeditionOwner.currentActivity!,
+      kind: 'dungeon' as const, label: 'Wolf Den' } }, destination: 'Wolf Den' };
+    const stateAt = (minute: number) => awayState({ ...dungeon, nowMs: start + minute * MIN });
+    expect([0, 16, 32, 48, 64].map(minute => {
+      const state = stateAt(minute);
+      return state?.kind === 'running' ? state.nextFight : undefined;
+    })).toEqual([16, 32, 48, 64, null]);
+    expect(awayText(stateAt(18)!, false)).toMatchObject({ title: ' is in Wolf Den', sub: 'Minute 18 of 80 · next fight at minute 32' });
+    expect(awayScene(stateAt(18)!)).toEqual({ kind: 'dungeon', activityId: tripId });
+  });
+
   it('says where the gladiator is while the trip runs', () => {
     const s = awayState({ ...base, nowMs: start + 30 * MIN })!;
     expect(awayText(s, false)).toEqual({ name: 'Aster', title: ' is on the Woodland Path', sub: 'Minute 30 of 80 · next fight at minute 40', action: '● Watch live' });
@@ -125,6 +137,33 @@ describe('the away button while the trip runs', () => {
 });
 
 describe('the away button once the trip is over', () => {
+  it('keeps a won terminal room distinct from a boss clear when every fighter fell', () => {
+    const summary = summaryOf({ resolvedKind: 'dungeon', result: 'defeat', success: false,
+      dungeon: { id: 'wolf-den', terminalFight: 2, partyWon: true },
+      rewards: { money: 2, xp: 12, renown: 0, attributePoints: 0, items: [], overflowMoney: 0 } });
+    const state = awayState({ ...afterTrip, latestTrip: noteOf({ kind: 'dungeon', destination: 'Wolf Den', summary }) })!;
+    expect(awayText(state, false).sub).toBe('Won Room 2 · No fighters left · +2 gold · +12 XP');
+  });
+
+  it('stops naming a next fight once a safe return is published after a room win', () => {
+    const at = start + 32 * MIN + 16_000;
+    const timeline = { activityId: tripId, serverNowMs: at, visibleThroughMs: at, stages: [
+      { id: 'room-2', kind: 'room' as const, label: 'Room 2: victory', revealedAtMs: start + 32 * MIN, startedAtMs: start + 32 * MIN, endsAtMs: at },
+      { id: 'safe', kind: 'return' as const, label: 'Rest at the safe return point', revealedAtMs: at, startedAtMs: at, endsAtMs: tripEnd },
+    ] };
+    expect(dungeonSafeReturn(timeline, at - 1)).toBe(false);
+    expect(dungeonSafeReturn(timeline, at)).toBe(true);
+  });
+  it('keeps dungeon room pay on a defeat and opens the whole dungeon trip', () => {
+    const note = noteOf({ kind: 'dungeon', destination: 'Wolf Den', summary: summaryOf({
+      resolvedKind: 'dungeon', result: 'defeat', success: false, dungeon: { id: 'wolf-den', terminalFight: 4, partyWon: true },
+      rewards: { money: 1, xp: 6, renown: 0, attributePoints: 0, items: [], overflowMoney: 0 },
+    }) });
+    const state = awayState({ ...afterTrip, latestTrip: note })!;
+    expect(awayText(state, false)).toMatchObject({ sub: 'Party cleared · +1 gold · +6 XP' });
+    expect(awayScene(state)).toEqual({ kind: 'dungeon', activityId: tripId, play: 'trip' });
+  });
+
   it('offers the whole trip once back, with the owner’s own result', () => {
     expect(awayText(back({ money: 20, xp: 100 }), false)).toEqual({ name: 'Aster', title: ' is back from the Woodland Path', sub: 'Success · +20 gold · +100 XP', action: '▶ Watch the whole trip' });
     expect(awayText(back({ money: 20, xp: 0 }), false).sub).toBe('Success · +20 gold');

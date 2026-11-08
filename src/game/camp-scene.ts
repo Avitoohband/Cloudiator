@@ -11,7 +11,7 @@ import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/read
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
 import { titleById } from '@domain/titles';
-import { isNewcomer, layersFor, layoutCamp, type Placement } from './actors';
+import { campActorTag, layersFor, layoutCamp, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import {
   ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, updateRingSchedule, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
@@ -562,12 +562,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (!existing) {
           const v = this.createPlayer(actor, placement);
           views.set(actor.gladiatorId, v);
-          this.tagNewcomer(v, isNewcomer(actor));
+          this.tagActor(v, campActorTag(actor));
           this.syncTitle(v, actor.title);
           if (!initial) this.walkTo(v, { x: placement.x, y: placement.y }, now, { action: placement.action, facing: placement.facing }, { from: GATE });
           continue;
         }
-        this.tagNewcomer(existing, isNewcomer(actor));
+        this.tagActor(existing, campActorTag(actor));
         this.syncTitle(existing, actor.title);
         if (lookKey(placement) !== existing.look) this.restyle(existing, placement);
         existing.placement = placement;
@@ -981,7 +981,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         v.spectator = null;
         if (!v.arena && v.placement) this.walkTo(v, { x: v.placement.x, y: v.placement.y }, now, { action: v.placement.action, facing: v.placement.facing });
       }
-      const champion = entrant && !inRing && tournamentRoles.get(v.id)?.role === 'champion';
+      const champion = v.marker?.text !== 'BOT' && entrant && !inRing && tournamentRoles.get(v.id)?.role === 'champion';
       const crowned = v.marker?.text === 'Champion';
       if (champion && !crowned) {
         v.marker?.destroy();
@@ -993,19 +993,18 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
     }
 
-    /**
-     * A newcomer (in orientation, not resting) carries an always-visible gold "NEW" tag over its nameplate, drawn like the "NPC" and
-     * "Champion" tags, for as long as it is new (Patch A item 2). Only the tag this puts up is taken down; another kind stays.
-     */
-    tagNewcomer(v: ActorView, isNew: boolean) {
-      const tagged = v.marker?.text === 'NEW';
-      if (isNew && !v.marker) {
-        v.marker = this.add.text(0, 0, 'NEW', { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color: '#2a1d05', backgroundColor: '#f2c66b', padding: { x: 3, y: 1 } })
-          .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2).setVisible(false);
-      } else if (!isNew && tagged) {
-        v.marker!.destroy();
+    /** The world supplies a registered bot's marker. Existing NPC and Champion tags have their own lifetime. */
+    tagActor(v: ActorView, tag: ReturnType<typeof campActorTag>) {
+      if (v.marker?.text === tag) return;
+      if (v.marker?.text === 'NEW' || v.marker?.text === 'BOT') {
+        v.marker.destroy();
         v.marker = undefined;
       }
+      if (!tag || v.marker) return;
+      const color = tag === 'BOT' ? '#142536' : '#2a1d05';
+      const backgroundColor = tag === 'BOT' ? '#a9ddfa' : '#f2c66b';
+      v.marker = this.add.text(0, 0, tag, { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'bold', color, backgroundColor, padding: { x: 3, y: 1 } })
+        .setOrigin(0.5, 1).setDepth(2_000_002).setResolution(2).setVisible(false);
     }
 
     standAt(v: ActorView, spot: TilePoint, action: ActionId, facing: Direction) {

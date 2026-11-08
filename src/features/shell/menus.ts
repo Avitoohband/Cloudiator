@@ -30,7 +30,7 @@ export function menusFor(viewer: Viewer): MenuDef[] {
  */
 export function originMenu(from: SceneFrom): MenuId | null {
   switch (from) {
-    case 'bouts': case 'bouts-won': case 'bouts-lost': case 'results': return 'results';
+    case 'bouts': case 'bouts-won': case 'bouts-lost': case 'results': case 'rewards': return 'results';
     case 'arena': return 'arena';
     case 'tournaments': return 'tournaments';
     case 'gladiators': return 'gladiators';

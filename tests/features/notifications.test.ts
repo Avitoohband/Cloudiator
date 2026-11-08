@@ -15,6 +15,19 @@ function note(kind: GameNotification['kind'], summary: Partial<ActivitySummary> 
 }
 const woodland = { destination: 'Woodland Path' };
 
+it('names a dungeon clear even after a member falls and lists only the credited room pay', () => {
+  const result = note('dungeon', {
+    result: 'defeat', success: false, dungeon: { id: 'wolf-den', terminalFight: 4, partyWon: true },
+    rewards: rewards({ xp: 6, money: 1 }),
+  }, { destination: 'Wolf Den' });
+  expect(notificationLines(result)).toEqual({
+    title: 'Wolf Den: you fell before the party cleared the dungeon', lines: ['+1 gold', '+6 XP'], levelUp: null,
+  });
+  expect(watchLabel(result)).toEqual({
+    wide: '▶ Watch the trip', narrow: '▶ The trip', name: 'Watch the trip: Wolf Den: you fell before the party cleared the dungeon',
+  });
+});
+
 it('lists what training earned: XP and attribute points, with the singular for one point', () => {
   expect(notificationLines(note('training', { rewards: rewards({ xp: 40, attributePoints: 1 }) }))).toEqual({
     title: 'Training finished', lines: ['+40 XP', '+1 attribute point'], levelUp: null });

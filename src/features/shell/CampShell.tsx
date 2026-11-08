@@ -107,8 +107,8 @@ const SIGN_IN_MESSAGES: Record<SignInResult, string> = {
 };
 
 type Sample = { activityId: string; label: string };
-type Samples = { replays: readonly Sample[]; expeditions: readonly Sample[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
-const NO_SAMPLES: Samples = { replays: [], expeditions: [], arena: [], tournaments: [] };
+type Samples = { replays: readonly Sample[]; expeditions: readonly Sample[]; dungeons: readonly Sample[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
+const NO_SAMPLES: Samples = { replays: [], expeditions: [], dungeons: [], arena: [], tournaments: [] };
 
 /**
  * Whether an element is rendered and not hidden (the touch row of icons hides while a sheet is open).
@@ -173,7 +173,8 @@ function SchedulePreview({ owner }: { owner: OwnerState | null }) {
  * scene in place; a modified click (a new tab or window) follows the link, which opens the same scene over a new camp.
  */
 function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 'bout' }>; label: string; onOpen(view: SceneView): void }) {
-  const href = `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}${view.from ? `&from=${view.from}` : ''}`;
+  const href = view.kind === 'dungeon' ? `/dungeon/?mode=fixture&activity=${encodeURIComponent(view.activityId)}`
+    : `?mode=fixture&view=${view.kind}&activity=${encodeURIComponent(view.activityId)}${view.from ? `&from=${view.from}` : ''}`;
   return <a href={href} onClick={event => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -184,7 +185,7 @@ function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 
 /** Results: the recent results (a player's My bouts first), and in fixture mode the sample replays and expeditions below them, opened as scenes. */
 function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen, bouts, choice, onChoose, onWatchBout }: {
   fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; clock: DisplayClock;
-  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
+  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind'], origin?: 'rewards'): void;
   onOpen(view: SceneView): void;
   bouts: BoutsStore | null; choice: ResultsChoice; onChoose(next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>): void;
   onWatchBout(bout: MyBout, filter: BoutFilter): void;
@@ -193,7 +194,7 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   const sample = (view: Exclude<SceneView, { kind: 'bout' }>): Exclude<SceneView, { kind: 'bout' }> => ({ ...view, from: 'results' });
   return <>
     {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts} view={choice.view} onView={view => onChoose({ view })}
-      filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} />
+      filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} loadRewards={reads.notifications} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
@@ -202,6 +203,10 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
     {fixture && samples.expeditions.length > 0 && <nav className="sample-replays" aria-label="Sample expeditions">
       <p className="eyebrow">SAMPLE EXPEDITIONS</p>
       <ul>{samples.expeditions.map(e => <li key={e.activityId}><SampleLink view={sample({ kind: 'expedition', activityId: e.activityId })} label={e.label} onOpen={onOpen} /></li>)}</ul>
+    </nav>}
+    {fixture && samples.dungeons.length > 0 && <nav className="sample-replays" aria-label="Sample dungeons">
+      <p className="eyebrow">SAMPLE DUNGEONS</p>
+      <ul>{samples.dungeons.map(run => <li key={run.activityId}><SampleLink view={sample({ kind: 'dungeon', activityId: run.activityId })} label={run.label} onOpen={onOpen} /></li>)}</ul>
     </nav>}
   </>;
 }
@@ -232,9 +237,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     // gateway's chunk and its sample data; the prop alone would keep it (final review Minor 4).
     if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true' && fixture) {
       import('../../lib/api/fixture-gateway')
-        .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_ARENA, FIXTURE_TOURNAMENTS }) => {
+        .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_DUNGEONS, FIXTURE_ARENA, FIXTURE_TOURNAMENTS }) => {
           if (!active) return;
-          setSamples({ replays: FIXTURE_REPLAYS, expeditions: FIXTURE_EXPEDITIONS, arena: FIXTURE_ARENA, tournaments: FIXTURE_TOURNAMENTS });
+          setSamples({ replays: FIXTURE_REPLAYS, expeditions: FIXTURE_EXPEDITIONS, dungeons: FIXTURE_DUNGEONS, arena: FIXTURE_ARENA, tournaments: FIXTURE_TOURNAMENTS });
           setFixtureReads(createFixtureGateway({ resting: previewResting }));
         })
         .catch(() => { if (active) setPreviewError(true); });
@@ -360,6 +365,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   useEffect(() => bridge.on('view-replay', ({ activityId, stageId, from }) => openScene({ kind: 'replay', activityId, ...(stageId ? { stageId } : {}), ...(from ? { from } : {}) })),
     [bridge, openScene]);
   useEffect(() => bridge.on('view-expedition', ({ activityId, from }) => openScene({ kind: 'expedition', activityId, ...(from ? { from } : {}) })), [bridge, openScene]);
+  useEffect(() => bridge.on('view-dungeon', ({ activityId, from }) => openScene({ kind: 'dungeon', activityId, ...(from ? { from } : {}) })), [bridge, openScene]);
   useEffect(() => bridge.on('return-camp', () => closeScene()), [bridge, closeScene]);
   // A scene takes the screen: the profile card closes (the menus stay, to come back to).
   const sceneKey = scene ? sceneKeyOf(scene) : null;
@@ -379,6 +385,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     const filter = boutFilterOf(from);
     if (filter) chooseResults({ view: 'mine', filter });
     else if (from === 'results') chooseResults({ view: 'everyone' });
+    else if (from === 'rewards') chooseResults({ view: 'rewards' });
     const menu = originMenu(from);
     if (menu) show(menu);
   }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey, requestAccount]);
@@ -393,10 +400,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
     document.querySelector<HTMLElement>('[data-away-main]')?.focus({ preventScroll: true });
   }, [scene]);
   // Results open each kept result by its kind: an expedition its expedition, a bout its replay (13.7 review).
-  const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind']) => {
+  const watchResult = useCallback((activityId: string, kind: PublicActivitySummary['resolvedKind'], origin?: 'rewards') => {
     const view = sceneForResult(activityId, kind);
     // Everyone's rows: Back returns to Results, on Everyone.
-    if (view) openScene({ ...view, from: 'results' });
+    if (view) openScene({ ...view, from: origin ?? 'results' });
   }, [openScene]);
   // My bouts' rows: the bout's replay (or the saved outcome of one that is gone), from its chip, which Back returns to.
   const watchBout = useCallback((bout: MyBout, filter: BoutFilter) => openScene({ kind: 'replay', activityId: bout.activityId, from: boutsFrom(filter) }), [openScene]);
@@ -411,8 +418,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
       kept: note => clock.synced() && replayKept(note.summary.replayExpiry, clock.now()),
       open: note => {
         if (!clock.synced() || !replayKept(note.summary.replayExpiry, clock.now()) || note.kind === 'training') return;
-        openScene(note.kind === 'expedition' ? { kind: 'expedition', activityId: note.activityId, play: 'trip', from: 'notifications' }
-          : { kind: 'replay', activityId: note.activityId, from: 'notifications' });
+        const view = sceneForResult(note.activityId, note.kind);
+        if (view) openScene({ ...view, from: 'notifications' });
       },
     },
     load: () => reads.messages(),

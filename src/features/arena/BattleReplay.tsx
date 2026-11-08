@@ -24,6 +24,7 @@ import { replayKept } from '../../lib/replay-retention';
 import { readReplaySpeed, saveReplaySpeed } from '../../lib/replay-speed';
 import { tournamentRound } from '../../lib/tournament-id';
 import { titleLookupOf, type TitleLookup } from '../titles/title-text';
+import { BotTag } from '../character/BotTag';
 import { creatureFor, type Creature } from '../../game/battle-stage';
 import { createSceneBridge, type SceneBridge } from '../../game/bridge';
 import { BattleViewport, BattleViewportWaiting } from '../../game/BattleViewport';
@@ -551,9 +552,10 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   const loser = frame.result ? log.participants.find(p => p.id === frame.result!.loserId) : undefined;
   const tournament = stage.kind === 'bout' && (tournamentRound(stage.label) !== null || league !== null);
   const npc = stage.kind === 'bout' && log.participants.some(p => p.gladiatorId === null);
-  const eyebrow = boutEyebrow(stage, { npc, league, compact }, clockMode);
+  const unranked = stage.kind === 'bout' && (stage.arenaMode === 'unranked' || summary?.arenaMode === 'unranked');
+  const eyebrow = boutEyebrow(stage, { npc, league, compact, unranked }, clockMode);
   // A bracket's bouts show no rewards (spec 2); a run's show on its last chapter.
-  const chips = league !== null ? [] : rewardChips(summary, { fighter, npc, kind: stage.kind === 'encounter' ? 'expedition' : tournament ? 'tournament' : 'arena', last });
+  const chips = league !== null ? [] : rewardChips(summary, { fighter, npc, unranked, kind: stage.kind === 'encounter' ? 'expedition' : tournament ? 'tournament' : 'arena', last });
   const verdict = verdictText(log, compact);
   const step = (name: string, shortcut: string, go: (() => void) | null): BarStep => ({ name, shortcut, disabled: go === null, onClick: () => go?.() });
   const stepping = nav !== null || chapters !== null;
@@ -571,7 +573,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
     <section className={styles.player} aria-labelledby={`${resultId}-title`} onKeyDown={onKeyDown}>
       <header className={styles.header}>
         <p className="eyebrow">{eyebrow}</p>
-        <Heading level={level} id={`${resultId}-title`}>{a.name} vs {b.name}</Heading>
+        <Heading level={level} id={`${resultId}-title`}>{a.name}{a.botTeam && <BotTag />} vs {b.name}{b.botTeam && <BotTag />}</Heading>
         {!compact && nav?.counter && <p className={styles.counter} data-bout-counter="">{nav.counter.wide}</p>}
       </header>
       <div className={styles.arena}>

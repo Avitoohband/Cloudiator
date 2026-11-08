@@ -17,7 +17,7 @@ export type BoutRowText = {
   kept: boolean;
   badge: { letter: 'W' | 'L'; name: 'Won' | 'Lost' } | null;
   name: string;
-  tag: 'NPC' | 'TOURNAMENT' | null;
+  tag: 'NPC' | 'BOT' | 'TOURNAMENT' | null;
   sub: { wide: string; narrow: string };
   action: '▶ Watch' | 'Result' | null;
   label: string;
@@ -54,15 +54,17 @@ export function boutRow(bout: MyBout, nowMs: number | null, clock: ClockMode, ti
   const badge = bout.result === 'victory' ? { letter: 'W', name: 'Won' } as const : bout.result === 'defeat' ? { letter: 'L', name: 'Lost' } as const : null;
   const opponent = kept ? bout.opponent : null;
   const name = opponent ? `vs ${opponent.name}` : GENERIC_NAME[bout.kind];
-  const tag = !opponent ? null : bout.kind === 'tournament' ? 'TOURNAMENT' : opponent.npc ? 'NPC' : null;
+  const unranked = bout.kind === 'arena' && bout.arenaMode === 'unranked';
+  const tag = !opponent ? null : bout.kind === 'tournament' ? 'TOURNAMENT'
+    : unranked && opponent.botTeam === 'ludus-nimbus' ? 'BOT' : opponent.npc ? 'NPC' : null;
   let sub: BoutRowText['sub'];
   if (kept) {
-    const lead = bout.kind === 'tournament' && bout.round ? bout.round : KIND_WORD[bout.kind];
+    const lead = unranked ? 'Unranked Arena' : bout.kind === 'tournament' && bout.round ? bout.round : KIND_WORD[bout.kind];
     const details = [
       time,
       bout.tieBreak ? (bout.result === 'defeat' ? 'lost on a tie-break' : 'won on a tie-break') : '',
       bout.renown > 0 ? `+${bout.renown} renown` : '',
-      bout.ratingDelta ? ratingText(bout.ratingDelta) : '',
+      unranked ? 'Rating unchanged' : bout.ratingDelta ? ratingText(bout.ratingDelta) : '',
     ].filter(Boolean);
     const narrow = lead === KIND_WORD[bout.kind] ? details : [lead, ...details];
     sub = { wide: [lead, ...details].join(SEP), narrow: narrow.join(SEP) };
@@ -82,6 +84,10 @@ export function recentRow(bout: MyBout, nowMs: number | null, clock: ClockMode, 
   const days = nowMs === null ? null : calendarDays(bout.foughtAtMs, nowMs, timeZone);
   const relative = days === 0 ? 'Today' : days !== null && days > 0 && days <= 6 ? day.split(' ')[0] : day;
   const when = [relative, timeOfDay(bout.foughtAtMs, clock, timeZone)].filter(Boolean).join(', ');
+  if (row.kept && bout.arenaMode === 'unranked') {
+    const sub = ['Unranked Arena', when, bout.renown > 0 ? `+${bout.renown} renown` : '', 'Rating unchanged'].filter(Boolean).join(SEP);
+    return { ...row, sub: { wide: sub, narrow: sub } };
+  }
   const detail = !row.kept ? 'replay no longer kept' : bout.ratingDelta ? ratingText(bout.ratingDelta)
     : bout.tieBreak ? (bout.result === 'defeat' ? 'lost on a tie-break' : 'won on a tie-break') : bout.renown > 0 ? `+${bout.renown} renown` : '';
   return { ...row, sub: { wide: [when, detail].filter(Boolean).join(SEP), narrow: [when, row.kept && bout.tieBreak && !bout.ratingDelta ? 'tie-break' : detail].filter(Boolean).join(SEP) } };
@@ -129,7 +135,7 @@ export const RESULT_HINT = 'The result appears when the fight ends, or now with 
  * bracket's league: "TOURNAMENT · BRONZE · FINAL", or "TOURNAMENT · FINAL" for a run whose timeline carries no league. An
  * expedition's encounter keeps today's "Expedition · Encounter 1: Dire Wolf" (it holds no result).
  */
-export function boutEyebrow(stage: RevealedStage, options: { npc: boolean; league: LeagueId | null; compact: boolean }, clock: ClockMode, timeZone?: string): string {
+export function boutEyebrow(stage: RevealedStage, options: { npc: boolean; league: LeagueId | null; compact: boolean; unranked?: boolean }, clock: ClockMode, timeZone?: string): string {
   if (stage.kind === 'encounter') return `Expedition${SEP}${stage.label}`;
   // The bracket supplies a safe round label rather than the run's outcome-bearing stage label.
   const bracketRound = /^Tournament · (Final|Semifinals?|Quarterfinals?|Round [1-9]\d{0,2})$/.exec(stage.label)?.[1];
@@ -138,7 +144,7 @@ export function boutEyebrow(stage: RevealedStage, options: { npc: boolean; leagu
   const day = dayText(stage.startedAtMs, timeZone);
   const time = timeOfDay(stage.startedAtMs, clock, timeZone);
   const when = options.compact ? [day.split(' ')[0], time].filter(Boolean).join(' ') : [day, time].filter(Boolean).join(', ');
-  return ['ARENA', when, options.npc ? (options.compact ? 'NPC' : 'NPC OPPONENT') : ''].filter(Boolean).join(SEP).toUpperCase();
+  return ['ARENA', options.unranked ? 'Unranked' : '', when, options.npc ? (options.compact ? 'NPC' : 'NPC OPPONENT') : ''].filter(Boolean).join(SEP).toUpperCase();
 }
 
 /** A chapter's name on the bar: a tournament run's round ("Quarterfinal"), an expedition encounter's label, else "Bout". */
@@ -169,14 +175,14 @@ export function verdictText(log: BattleLog, compact: boolean): { verdict: string
  * below lists, so its end card shows none.
  */
 export function rewardChips(summary: ActivitySummary | null,
-  options: { fighter: boolean; npc: boolean; kind: 'arena' | 'tournament' | 'expedition'; last: boolean }): string[] {
+  options: { fighter: boolean; npc: boolean; unranked?: boolean; kind: 'arena' | 'tournament' | 'expedition'; last: boolean }): string[] {
   if (!options.fighter || !options.last || options.kind === 'expedition') return [];
   if (!summary) return [`Rewards are credited when the ${options.kind === 'tournament' ? 'tournament' : 'bout'} settles`];
   const { renown, money } = summary.rewards;
   return [
     renown > 0 ? `+${renown} renown` : '',
     money > 0 ? `+${money} gold` : '',
-    options.npc ? 'NPC: no rating change' : summary.ratingDelta ? ratingText(summary.ratingDelta) : '',
+    options.unranked ? 'Rating unchanged' : options.npc ? 'NPC: no rating change' : summary.ratingDelta ? ratingText(summary.ratingDelta) : '',
   ].filter(Boolean);
 }
 

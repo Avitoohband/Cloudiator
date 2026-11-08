@@ -1,7 +1,8 @@
 import { expect, test, type Locator, type Page } from './fixtures';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { DUNGEON_FIXTURES } from '../fixtures/dungeons';
 import { MENUS } from '../../src/features/shell/menus';
-import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { SUPABASE_URL, dungeonLiveData, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
@@ -59,6 +60,37 @@ const noWebGL = () => {
     return /webgl/.test(type) ? null : (original as (...a: unknown[]) => RenderingContext | null).call(this, type, ...args);
   } as typeof original;
 };
+
+test.describe('the camp on a dungeon afternoon', () => {
+  test.beforeEach(() => { test.skip(production, 'The camp departure uses development-only routed snapshots.'); });
+
+  test('walks a member out through the gate and shows the bot team separately', async ({ page, context }) => {
+    const sample = DUNGEON_FIXTURES['full-victory'];
+    const now = sample.startsAtMs + 10 * 60_000;
+    const data = dungeonLiveData('full-victory', { nowMs: now });
+    const actor = data.world.actors[0];
+    const bot = { ...actor, gladiatorId: 'd0700000-0000-4000-8000-000000000051', name: 'Grit',
+      location: 'orientation' as const, activityId: null, botTeam: 'ludus-nimbus' as const, botDuty: 'off-duty' as const };
+    const initial = { ...data.world, revision: 'dungeon-before', actors: [{ ...actor, location: 'camp' as const, activityId: null }, bot] };
+    const live = await routeLiveReads(context, { ...data, world: initial });
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await expect.poll(() => page.evaluate(id => window.__cloudiatorCamp?.state()?.actors.find(unit => unit.id === id)?.marker, bot.gladiatorId)).toBe('BOT');
+    const roster = await openMenu(page, 'Gladiators');
+    const team = roster.getByRole('list', { name: 'Ludus Nimbus' });
+    await expect(team.getByText('BOT', { exact: true })).toBeVisible();
+    await expect(team.getByText('NEW', { exact: true })).toHaveCount(0);
+    await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), now);
+    live.setWorld({ ...data.world, revision: 'dungeon-departed', actors: [actor, bot] });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(roster.getByText(/In Wolf Den/)).toBeVisible();
+    await expect.poll(() => page.evaluate(id => window.__cloudiatorCamp?.state()?.actors.find(unit => unit.id === id)?.walking, actor.gladiatorId)).toBe(true);
+    await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), now + 2 * 60_000);
+    await expect.poll(() => page.evaluate(id => window.__cloudiatorCamp?.state()?.actors.some(unit => unit.id === id), actor.gladiatorId)).toBe(false);
+    await roster.getByRole('button', { name: `Watch ${actor.name}'s dungeon` }).click();
+    await expect(page.getByRole('dialog', { name: 'Dungeon', exact: true }).getByRole('heading', { name: 'Wolf Den' })).toBeVisible();
+  });
+});
 
 test.describe('the camp shell with a pointer', () => {
   test.skip(production, 'The shell checks use the fixture preview.');

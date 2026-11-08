@@ -54,6 +54,24 @@ describe('Arena card header titles (patch 1.7)', () => {
 });
 
 describe('Arena card', () => {
+  it('discloses a registered bot in an unranked bout and uses the credited reward', () => {
+    const activityId = arenaActivityId('ownerHumanWin');
+    const timeline = structuredClone(ARENA_TIMELINES[activityId]);
+    const bout = timeline.stages.find(stage => stage.kind === 'bout')!;
+    bout.arenaMode = 'unranked';
+    bout.battleLog = { ...bout.battleLog!, participants: [bout.battleLog!.participants[0], { ...bout.battleLog!.participants[1], botTeam: 'ludus-nimbus' }] };
+    timeline.summary = { ...timeline.summary!, arenaMode: 'unranked', ratingDelta: 0, rewards: { ...timeline.summary!.rewards, renown: 2 } };
+    const state = renderArenaStage(timeline, timeline.summary.settledAtMs, { entrantId: ARENA_GLADIATORS.aster.id, owner: true });
+    const html = text(card('ownerHumanWin', 85, { state }));
+    expect(html).toContain('Unranked Arena');
+    expect(html).toContain('BOT');
+    expect(html).toContain('Ludus Nimbus');
+    expect(html).toContain('+2 renown');
+    expect(html).toContain('Rating unchanged');
+    expect(html).not.toContain('Current rating');
+    expect(html).not.toContain(NPC_DISCLOSURE);
+  });
+
   it('shows only the warm-up at minute 59, with the replay button disabled', () => {
     const html = card('ownerNpcWin', 59);
     expect(text(html)).toContain('Warming up');

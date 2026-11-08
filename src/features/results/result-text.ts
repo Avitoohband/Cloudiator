@@ -7,6 +7,7 @@ import type { ResultRow } from '@contracts/reads';
 import type { ClockMode } from '../../lib/clock-setting';
 import { replayKept } from '../../lib/replay-retention';
 import { dayText, timeOfDay } from '../../lib/time-format';
+import { dungeonOutcome } from '../dungeon/dungeon-text';
 
 /** The Recent results panel's one line on retention (Task 22.5). */
 export const RETENTION_TEXT = 'Detailed replays are kept for 7 days. Results and credited rewards stay here for 90 days.';
@@ -17,7 +18,7 @@ type Outcome = PublicActivitySummary['result'];
 const WHAT: Record<Kind, Record<Outcome, string>> = {
   arena: { victory: 'won an Arena bout', defeat: 'lost an Arena bout', completed: 'fought an Arena bout' },
   expedition: { victory: 'returned victorious from an expedition', defeat: 'was defeated on an expedition', completed: 'returned from an expedition' },
-  dungeon: { victory: 'Dungeon', defeat: 'Dungeon', completed: 'Dungeon' },
+  dungeon: { victory: 'returned from a dungeon', defeat: 'returned from a dungeon', completed: 'returned from a dungeon' },
   tournament: { victory: 'won a tournament', defeat: 'was knocked out of a tournament', completed: 'fought in a tournament' },
   training: { victory: 'finished training', defeat: 'finished training', completed: 'finished training' },
   rest: { victory: 'finished resting', defeat: 'finished resting', completed: 'finished resting' },
@@ -35,7 +36,8 @@ const replayable = (kind: Kind) => kind !== 'training' && kind !== 'rest';
  */
 export function resultLine(row: ResultRow, serverNowMs: number | null): { text: string; replay: boolean } {
   const { resolvedKind, result, replayExpiry } = row.summary;
-  const text = `${row.name} ${WHAT[resolvedKind][result]}`;
+  const text = (resolvedKind === 'dungeon' ? dungeonOutcome(row.summary, row.name) : null)
+    ?? `${row.name} ${WHAT[resolvedKind][result]}`;
   if (!replayable(resolvedKind) || serverNowMs === null) return { text, replay: false };
   return replayKept(replayExpiry, serverNowMs) ? { text, replay: true } : { text: `${text} · replay no longer kept`, replay: false };
 }

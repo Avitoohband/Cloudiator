@@ -10,7 +10,7 @@ export function TripMarks({ marks, fraction, onFight }: {
   /** How far the trip is (0 to 1): the marks it has passed are drawn as passed. */
   fraction: number;
   /** Opens the whole-trip replay at a fight; absent when no replay can be shown here (the marks are then text only). */
-  onFight?(fight: 1 | 2 | 3): void;
+  onFight?(fight: NonNullable<TripMark['fight']>): void;
 }) {
   const last = Math.max(1, marks.length - 1);
   return <ol className={styles.marks} aria-label="Trip marks">

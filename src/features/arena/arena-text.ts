@@ -73,7 +73,8 @@ export function resultText(result: ArenaResult, names: { entrant: string; oppone
 export function creditedLines(summary: ActivitySummary): string[] {
   const renown = summary.rewards.renown;
   const lines = [renown ? `+${renown} renown` : 'No renown'];
-  if (summary.ratingDelta === undefined) lines.push('No rating change');
+  if (summary.arenaMode === 'unranked') lines.push('Rating unchanged');
+  else if (summary.ratingDelta === undefined) lines.push('No rating change');
   else lines.push(summary.ratingDelta === 0 ? 'Rating unchanged' : `Rating ${summary.ratingDelta > 0 ? '+' : '−'}${Math.abs(summary.ratingDelta)}`);
   return lines;
 }

@@ -30,6 +30,7 @@ import { recentRow } from '../bouts/bout-text';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import { useWatched } from '../bouts/watched';
 import { titleName } from '../titles/title-text';
+import { BotTag } from '../character/BotTag';
 import styles from './ArenaPanel.module.css';
 
 /** Reads the card makes: the activity's timeline and, once revealed, the opponent's public profile. */
@@ -84,7 +85,7 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
       <header className={styles.header}>
         <div>
           <p className="eyebrow">{owner ? 'YOUR ARENA BOUT' : 'ARENA BOUT'}{minute !== null ? ` · MINUTE ${minute} OF ${SLOT_MINUTES}` : ''}</p>
-          <h3 id={titleId} ref={headingRef} tabIndex={-1}>{entrantName}</h3>
+          <h3 id={titleId} ref={headingRef} tabIndex={-1}>{entrantName}{state.entrant?.botTeam && <BotTag />}</h3>
           {model.entrantTitle && <p className={styles.wornTitle} data-worn-title="">{model.entrantTitle}</p>}
         </div>
         {onClose && <button type="button" className={styles.close} onClick={onClose} aria-label="Close the Arena card">Close</button>}
@@ -94,12 +95,13 @@ export function ArenaCardView({ model, onWatch, onClose, headingRef }: { model: 
 
       {opponent && (
         <dl className={styles.opponent} aria-label="Opponent">
-          <div><dt>Opponent</dt><dd>{opponent.name}{opponent.title && <span className={styles.wornTitle} data-worn-title="">{opponent.title}</span>}</dd></div>
+          <div><dt>Opponent</dt><dd>{opponent.name}{state.opponent?.botTeam && <BotTag />}{opponent.title && <span className={styles.wornTitle} data-worn-title="">{opponent.title}</span>}</dd></div>
           <div><dt>Class</dt><dd>{opponent.className}</dd></div>
-          {!state.npcOpponent && <div><dt>Current rating</dt><dd>{opponent.rating ?? 'not available'}</dd></div>}
+          {!state.npcOpponent && !state.opponent?.botTeam && <div><dt>Current rating</dt><dd>{opponent.rating ?? 'not available'}</dd></div>}
         </dl>
       )}
       {state.npcOpponent && <p className={styles.npc}>{NPC_DISCLOSURE}</p>}
+      {state.unranked && <p className={styles.npc}>Unranked Arena · Ludus Nimbus. Rating and standings stay unchanged.</p>}
 
       {result && (
         <section className={styles.result} aria-label="Result">
@@ -192,7 +194,7 @@ function ArenaCard({ selection, focusRequest, bridge, reads, owner, world, clock
     if (passedMark || retry) void read();
   });
 
-  const opponentId = state?.opponent && !state.opponent.npc ? state.opponent.gladiatorId : null;
+  const opponentId = state?.opponent && !state.opponent.npc && !state.opponent.botTeam ? state.opponent.gladiatorId : null;
   useEffect(() => {
     if (!opponentId || !reads.profile || profile?.id === opponentId) return;
     let alive = true;

@@ -18,6 +18,7 @@ export type SceneEvents = {
    * (Arena replays Task 3).
    */
   'view-expedition': { activityId: string; from?: SceneFrom };
+  'view-dungeon': { activityId: string; from?: SceneFrom };
   'view-replay': { activityId: string; stageId?: string | null; from?: SceneFrom };
   'return-camp': Record<string, never>;
   'follow-character': { gladiatorId: string | null };

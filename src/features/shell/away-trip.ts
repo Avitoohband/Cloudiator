@@ -8,7 +8,7 @@
 // `AwayState` is a union on `kind`, and every consumer switches on it (the words, the scene, the progress): a new state (the Arena
 // bout of patch 1.5) is a new member, a new case in `awayText` and `awayScene`, and the compiler names what is missing.
 import type { GameNotification, OwnerState } from '@contracts/reads';
-import type { RevealedTimeline } from '@contracts/events';
+import type { ActivitySummary, RevealedTimeline } from '@contracts/events';
 import { RULES_V1 } from '@domain/rules-v1';
 import { boutEndMs } from '../../game/replay';
 import { ratingText } from '../bouts/bout-text';
@@ -22,10 +22,13 @@ const MINUTE_MS = 60_000;
 /** An expedition fills one slot: minutes of it, and the minutes at which its fights start. */
 const TRIP_MINUTES = SLOT_MS / MINUTE_MS;
 const FIGHT_MINUTES = [20, 40, 60] as const;
+const DUNGEON_FIGHT_MINUTES = [16, 32, 48, 64] as const;
+type FightMinute = typeof FIGHT_MINUTES[number] | typeof DUNGEON_FIGHT_MINUTES[number];
 
 export type AwayState =
-  | { kind: 'running'; activityId: string; name: string; destination: string | null; minute: number; nextFight: 20 | 40 | 60 | null }
-  | { kind: 'back'; activityId: string; name: string; destination: string | null; result: 'success' | 'defeat' | 'processing'; rewards: { money: number; xp: number } | null }
+  | { kind: 'running'; activityId: string; name: string; destination: string | null; minute: number; nextFight: FightMinute | null; dungeon?: true }
+  | { kind: 'back'; activityId: string; name: string; destination: string | null; result: 'success' | 'defeat' | 'processing'; rewards: { money: number; xp: number } | null;
+      dungeon?: true; terminal?: ActivitySummary['dungeon'] }
   | { kind: 'bout'; activityId: string; name: string; opponent: string; won: boolean; rewards: { renown: number; ratingDelta: number | null } | null };
 
 const slotOf = (ms: number) => Math.floor(ms / SLOT_MS);
@@ -47,7 +50,16 @@ export function boutAway({ owner, timeline, nowMs, closed }: {
 
 /** The back state of a trip whose result the owner's notifications hold; `destination` is the trip's own, else the one the caller knows. */
 const settled = (name: string, trip: GameNotification, fallback: string | null): AwayState => ({ kind: 'back', activityId: trip.activityId, name,
-  destination: trip.destination ?? fallback, result: trip.summary.success ? 'success' : 'defeat', rewards: { money: trip.summary.rewards.money, xp: trip.summary.rewards.xp } });
+  destination: trip.destination ?? fallback, result: trip.summary.success ? 'success' : 'defeat',
+  rewards: { money: trip.summary.rewards.money, xp: trip.summary.rewards.xp },
+  ...(trip.kind === 'dungeon' ? { dungeon: true, terminal: trip.summary.dungeon } : {}) });
+
+/** A due safe-point return ends the dungeon's fights, including when the party won the room but nobody stood. */
+export function dungeonSafeReturn(timeline: RevealedTimeline, nowMs: number): boolean {
+  return timeline.stages.some(stage => stage.revealedAtMs <= nowMs && stage.startedAtMs <= nowMs
+    && ((stage.kind === 'return' && stage.startedAtMs < stage.endsAtMs)
+      || (stage.kind === 'room' && stage.endsAtMs <= nowMs && stage.label.endsWith(': defeat'))));
+}
 
 /**
  * What the button shows, or null for nothing.
@@ -68,17 +80,20 @@ export function awayState(input: {
 }): AwayState | null {
   const { owner, destination, nowMs, latestTrip, defeated, closed } = input;
   const current = owner.currentActivity;
-  const trip = latestTrip?.kind === 'expedition' ? latestTrip : null;
-  if (current?.kind === 'expedition') {
+  const trip = latestTrip?.kind === 'expedition' || latestTrip?.kind === 'dungeon' ? latestTrip : null;
+  if (current?.kind === 'expedition' || current?.kind === 'dungeon') {
+    const isDungeon = current.kind === 'dungeon';
+    const location = isDungeon ? { dungeon: true as const } : {};
     if (current.startsAtMs <= nowMs && nowMs < current.endsAtMs) {
       const minute = Math.floor((nowMs - current.startsAtMs) / MINUTE_MS);
-      const nextFight = defeated ? null : FIGHT_MINUTES.find(fight => fight > minute) ?? null;
-      return { kind: 'running', activityId: current.id, name: owner.name, destination, minute, nextFight };
+      const fights = isDungeon ? DUNGEON_FIGHT_MINUTES : FIGHT_MINUTES;
+      const nextFight = defeated ? null : fights.find(fight => fight > minute) ?? null;
+      return { kind: 'running', activityId: current.id, name: owner.name, destination, minute, nextFight, ...location };
     }
     if (current.endsAtMs <= nowMs && nowMs < current.endsAtMs + SLOT_MS) {
       if (closed.has(current.id)) return null;
       if (trip?.activityId === current.id) return settled(owner.name, trip, destination);
-      return { kind: 'back', activityId: current.id, name: owner.name, destination, result: 'processing', rewards: null };
+      return { kind: 'back', activityId: current.id, name: owner.name, destination, result: 'processing', rewards: null, ...location };
     }
   }
   if (trip && slotOf(trip.settledAtMs) === slotOf(nowMs) && !closed.has(trip.activityId)) return settled(owner.name, trip, destination);
@@ -106,14 +121,27 @@ export function awayText(state: AwayState, compact: boolean): AwayText {
     }
     case 'running': {
       const minute = `Minute ${state.minute} of ${TRIP_MINUTES}`;
+      const title = state.dungeon
+        ? compact ? ` · ${state.destination ?? 'in a dungeon'}` : ` is in ${state.destination ?? 'a dungeon'}`
+        : compact ? ` · ${state.destination ?? 'on an expedition'}` : ` is on ${place(state.destination)}`;
       return {
         name: state.name,
-        title: compact ? ` · ${state.destination ?? 'on an expedition'}` : ` is on ${place(state.destination)}`,
+        title,
         sub: compact ? minute : `${minute} · ${state.nextFight === null ? `back at minute ${TRIP_MINUTES}` : `next fight at minute ${state.nextFight}`}`,
         action: compact ? '● Live' : '● Watch live',
       };
     }
     case 'back': {
+      const action = compact ? '▶ Replay' : '▶ Watch the whole trip';
+      if (state.dungeon) {
+        const title = `${compact ? ' · back from' : ' is back from'} ${state.destination ?? 'a dungeon'}`;
+        const result = state.terminal?.partyWon
+          ? state.terminal.terminalFight === 4 ? 'Party cleared' : `Won Room ${state.terminal.terminalFight} · No fighters left`
+          : state.result === 'success' ? 'Success' : 'Party defeated';
+        const sub = state.result === 'processing' ? 'Processing results…'
+          : [result, state.rewards?.money ? `+${state.rewards.money} gold` : '', state.rewards?.xp ? `+${state.rewards.xp} XP` : ''].filter(Boolean).join(' · ');
+        return { name: state.name, title, sub, action };
+      }
       const lostTrip = state.result === 'defeat';
       const title = compact
         ? lostTrip ? ' · back after a defeat' : state.destination ? ` · back from ${state.destination}` : ' · back'
@@ -122,7 +150,7 @@ export function awayText(state: AwayState, compact: boolean): AwayText {
         : lostTrip ? 'No rewards · all gear kept'
           : ['Success', state.rewards?.money ? `+${state.rewards.money} gold` : null, state.rewards?.xp ? `+${state.rewards.xp} XP` : null]
             .filter((part): part is string => part !== null).join(' · ');
-      return { name: state.name, title, sub, action: compact ? '▶ Replay' : '▶ Watch the whole trip' };
+      return { name: state.name, title, sub, action };
     }
   }
 }
@@ -130,8 +158,8 @@ export function awayText(state: AwayState, compact: boolean): AwayText {
 /** The scene the button opens: the live view while the trip runs, the whole-trip replay once it is over. */
 export function awayScene(state: AwayState): SceneView {
   switch (state.kind) {
-    case 'running': return { kind: 'expedition', activityId: state.activityId };
-    case 'back': return { kind: 'expedition', activityId: state.activityId, play: 'trip' };
+    case 'running': return { kind: state.dungeon ? 'dungeon' : 'expedition', activityId: state.activityId };
+    case 'back': return { kind: state.dungeon ? 'dungeon' : 'expedition', activityId: state.activityId, play: 'trip' };
     case 'bout': return { kind: 'replay', activityId: state.activityId };
   }
 }

@@ -1,6 +1,9 @@
 // Words for a gladiator's public actor (the shared world's whitelisted projection), used by the Gladiators list and the
 // profile card: where they are now, their class line and their equipped gear. Nothing here reads private state.
 import type { EquipmentSilhouette, PublicActor } from '@contracts/reads';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import type { ClockMode } from '../../lib/clock-setting';
+import { timeOfDay } from '../../lib/time-format';
 
 const PLACE: Record<string, string> = {
   orientation: 'Arriving at camp', camp: 'At camp', training: 'Training', rest: 'Resting', arena: 'In the arena', tournament: 'In a tournament',
@@ -11,8 +14,14 @@ const GEAR: Record<EquipmentSilhouette, string> = {
 };
 
 export const title = (value: string) => (value ? value[0].toUpperCase() + value.slice(1) : value);
-/** Whether the gladiator is away from the camp on an expedition. */
-export const isAway = (actor: Pick<PublicActor, 'location'>) => actor.location.startsWith('expedition:');
+/** Whether the gladiator is away from the camp on an expedition or in a dungeon. */
+export const isAway = (actor: Pick<PublicActor, 'location'>) => actor.location.startsWith('expedition:') || actor.location.startsWith('dungeon:');
+
+export function dungeonPlace(location: PublicActor['location']): string | null {
+  if (!location.startsWith('dungeon:')) return null;
+  const dungeon = Object.values(CATALOG_V1.dungeons).find(entry => location === `dungeon:${entry.id}`);
+  return dungeon ? `In ${dungeon.name}` : 'In a dungeon';
+}
 /**
  * A gladiator resting at home (Task 23.9; Task 23.8's PublicActor.resting: its owner has sent no activity signal for 14
  * days), as everyone sees it.
@@ -20,9 +29,17 @@ export const isAway = (actor: Pick<PublicActor, 'location'>) => actor.location.s
 export const restingText = (name: string) => `Resting at home: back when ${name}'s owner returns.`;
 /** Where the gladiator is now, from its public location (or that it rests at home). */
 export const placeOf = (actor: Pick<PublicActor, 'location' | 'name' | 'resting'>) => (actor.resting ? restingText(actor.name)
-  : isAway(actor) ? 'On an expedition' : PLACE[actor.location] ?? 'At camp');
+  : dungeonPlace(actor.location) ?? (isAway(actor) ? 'On an expedition' : PLACE[actor.location] ?? 'At camp'));
 /** "Guardian · Level 1 · Bronze league". */
-export const classLine = (actor: Pick<PublicActor, 'classId' | 'level' | 'league'>) => `${title(actor.classId)} · Level ${actor.level} · ${title(actor.league)} league`;
+export const classLine = (actor: Pick<PublicActor, 'classId' | 'level' | 'league' | 'botTeam'>) =>
+  `${title(actor.classId)} · Level ${actor.level}${actor.botTeam ? '' : ` · ${title(actor.league)} league`}`;
+
+export function botDutyText(actor: Pick<PublicActor, 'botDuty' | 'botReturnsAtMs'>, clock: ClockMode): string | null {
+  if (actor.botDuty === 'on-duty') return 'Available for eligible dungeon parties';
+  if (actor.botDuty !== 'off-duty') return null;
+  const returns = actor.botReturnsAtMs == null ? '' : timeOfDay(actor.botReturnsAtMs, clock);
+  return returns ? `Off duty · Back at ${returns}` : 'Off duty';
+}
 /** How many gladiators there are and where they are now (Patch A item 8): every gladiator counts, those resting at home too. */
 export type PlayerCounts = { total: number; inCamp: number; away: number; resting: number };
 

@@ -25,10 +25,12 @@ import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { ProfileRead } from '../../lib/api/reads';
 import type { Point } from '../../game/iso';
+import { useClockMode } from '../../lib/clock-setting';
 import type { MenuId } from '../shell/menus';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import type { Roster } from './RosterPanel';
-import { classLine, gearText, isAway, placeOf } from './actor-text';
+import { botDutyText, classLine, dungeonPlace, gearText, isAway, placeOf } from './actor-text';
+import { BotTag } from './BotTag';
 import { ownRestingText } from './activity-status';
 import { badgeText, seasonName } from '../seasons/season-text';
 import { wornTitleText } from '../titles/title-text';
@@ -84,6 +86,9 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   onOpenMenu(id: MenuId): void;
 }) {
   const reasonId = useId();
+  const clock = useClockMode();
+  const bot = actor.botTeam === 'ludus-nimbus';
+  const duty = bot ? botDutyText(actor, clock) : null;
   const rating = profile ? String(profile.rating) : profileFailed ? 'Not available' : 'Loading…';
   const bout = actor.location === 'arena' ? actor.activityId : null;
   // Season prestige (Task 21.4): the badges newest season first. Patch 1.7: the title line is the title the gladiator wears now (Champion
@@ -103,10 +108,13 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
         <ActorPortrait actor={actor} />
         <div className={styles.who}>
           {own && <p className="eyebrow">YOUR GLADIATOR</p>}
-          <h2 className={styles.name}>{actor.name}</h2>
+          {bot && <p className="eyebrow">Ludus Nimbus</p>}
+          <h2 className={styles.name}>{actor.name}{bot && <BotTag />}</h2>
           {profile?.banner && <p className={styles.banner}><span aria-hidden="true">🚩</span> Arena banner</p>}
           {title && <p className={styles.title}>{title}</p>}
           <p className={styles.class}>{classLine(actor)}</p>
+          {bot && <p className={styles.class}>Unranked · Fixed build</p>}
+          {duty && <p className={styles.class}>{duty}</p>}
           <ClassChips classId={actor.classId} />
           {awards.length > 0 && <ul className={styles.badges} aria-label="Season badges">{awards.map(award => <li key={award.seasonId}>{badgeText(award)}</li>)}</ul>}
         </div>
@@ -142,9 +150,9 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
           <p className="eyebrow">RECORD</p>
           <dl className={styles.facts}>
             <div><dt>Now</dt><dd>{own && actor.resting ? ownPlace ?? ownRestingText(null) : placeOf(actor)}</dd></div>
-            <div><dt>Rating</dt><dd>{rating}</dd></div>
+            {!bot && <div><dt>Rating</dt><dd>{rating}</dd></div>}
             {profile && <div><dt>Titles</dt><dd>{profile.titlesEarned > 0 ? `${profile.titlesEarned.toLocaleString('en-US')} earned` : 'None yet'}</dd></div>}
-            {profile?.arenaRecord && <div><dt>Arena record</dt><dd>{recordText(profile.arenaRecord)}
+            {!bot && profile?.arenaRecord && <div><dt>Arena record</dt><dd>{recordText(profile.arenaRecord)}
               {profile.arenaRecord.wins + profile.arenaRecord.losses > 0 && <small> · all seasons</small>}</dd></div>}
             {record && <div><dt>{record.season ? seasonName(record.season) : 'This season'}</dt><dd>{record.wins}–{record.losses}</dd></div>}
             {since && <div><dt>In camp since</dt><dd>{since}</dd></div>}
@@ -200,7 +208,9 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
   if (sceneStatus === 'unavailable') return 'The camp view is unavailable, so gladiators cannot be shown on the map.';
   if (sceneStatus === 'loading' || !roster) return 'The camp view is still opening.';
   if (!actor.resting && roster.inCamp.includes(actor.gladiatorId)) return null;
-  return isAway(actor) ? `${actor.name} is away on an expedition.` : `${actor.name} is not in the camp right now.`;
+  const dungeon = dungeonPlace(actor.location);
+  return dungeon ? `${actor.name} is away. ${dungeon}.`
+    : isAway(actor) ? `${actor.name} is away on an expedition.` : `${actor.name} is not in the camp right now.`;
 }
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */

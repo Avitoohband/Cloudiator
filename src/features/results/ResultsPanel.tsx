@@ -17,7 +17,7 @@
 // gladiator, sees Everyone alone, with no tabs.
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { PublicActivitySummary } from '@contracts/events';
-import type { ResultRow } from '@contracts/reads';
+import type { GameNotification, ResultRow } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import type { DisplayClock } from '../../game/display-clock';
@@ -28,6 +28,8 @@ import { unwatchedCount } from '../bouts/bout-text';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import { MyBouts } from '../bouts/MyBouts';
 import { useWatched } from '../bouts/watched';
+import { useLoaded } from '../messages/useLoadedList';
+import { DungeonRewardsView } from './DungeonRewards';
 import { RETENTION_TEXT, resultKind, resultLine, resultTime } from './result-text';
 import type { ResultsTab } from './results-choice';
 import styles from './ResultsPanel.module.css';
@@ -39,6 +41,7 @@ const PAGE_ROWS = 50;
 const NO_ROWS: ResultRow[] = [];
 
 export type ResultsReader = Pick<GameGateway, 'recent'>;
+type WatchResult = (activityId: string, kind: PublicActivitySummary['resolvedKind'], origin?: 'rewards') => void;
 export type ResultsList = { rows: ResultRow[]; nextCursor: string | null };
 export type ResultsModel = ResultsList & { status: 'loading' | 'ready' | 'failed' };
 
@@ -95,7 +98,7 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
   serverNowMs: number | null;
   onMore(): void;
   onRetry(): void;
-  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
+  onWatch: WatchResult;
   loadingMore?: boolean;
   moreFailed?: boolean;
   /** Tests only: the time zone of the settlement times (the viewer's own otherwise). */
@@ -134,7 +137,7 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
 
 /** Everyone's results (today's list): the first page when it mounts, then More. */
 function EveryoneResults({ reads, viewerId, clock, onWatch }: {
-  reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
+  reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch: WatchResult;
 }) {
   const [list, setList] = useState<ResultsList | null>(null);
   const [status, setStatus] = useState<ResultsModel['status']>('loading');
@@ -180,26 +183,45 @@ function EveryoneResults({ reads, viewerId, clock, onWatch }: {
 }
 
 const TABS: readonly { id: ResultsTab; label: string }[] = [{ id: 'mine', label: 'My bouts' }, { id: 'everyone', label: 'Everyone' }];
+const OWNER_TABS = [...TABS, { id: 'rewards', label: 'Your rewards' } as const];
+const EMPTY_NOTES: readonly GameNotification[] = [];
+
+function DungeonRewards({ load, clock, onWatch }: {
+  load: GameGateway['notifications']; clock: DisplayClock; onWatch(activityId: string): void;
+}) {
+  const { value, failed, reload } = useLoaded(load, true);
+  const notes = useMemo(() => value?.items.filter(note => note.kind === 'dungeon') ?? EMPTY_NOTES, [value]);
+  const expiries = useMemo(() => notes.map(note => note.summary.replayExpiry), [notes]);
+  const now = useServerTime(clock, expiries);
+  return <>
+    {failed && <div className={styles.failed} role="alert"><p>Dungeon rewards could not be loaded right now.</p><button type="button" onClick={reload}>Try again</button></div>}
+    {value ? <DungeonRewardsView notes={notes} serverNowMs={now} onWatch={onWatch} />
+      : !failed && <p className="muted" role="status">Loading dungeon rewards…</p>}
+  </>;
+}
 
 /**
  * A player's two tabs over the shown one's panel: ARIA tabs (arrow keys, Home and End move between them, as the messages panel's).
  * "My bouts" carries the red count of kept replays not watched on this device ("9+" above 9); its name says the real number.
  */
-export function ResultsTabs({ view, onView, unwatched, children }: { view: ResultsTab; onView(view: ResultsTab): void; unwatched: number; children: ReactNode }) {
+export function ResultsTabs({ view, onView, unwatched, children, rewards = false }: {
+  view: ResultsTab; onView(view: ResultsTab): void; unwatched: number; children: ReactNode; rewards?: boolean;
+}) {
+  const tabs = rewards ? OWNER_TABS : TABS;
   const ids = useId();
   const root = useRef<HTMLDivElement>(null);
   const onKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const target = event.key === 'ArrowRight' ? (index + 1) % TABS.length : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : null;
+    const target = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
     if (target === null) return;
     event.preventDefault();
-    onView(TABS[target].id);
-    root.current?.querySelector<HTMLElement>(`[data-results-tab="${TABS[target].id}"]`)?.focus();
+    onView(tabs[target].id);
+    root.current?.querySelector<HTMLElement>(`[data-results-tab="${tabs[target].id}"]`)?.focus();
   };
   return (
     <div ref={root} className={styles.tabbed}>
       <div role="tablist" aria-label="Results" className={styles.tabs}>
-        {TABS.map((tab, index) => {
+        {tabs.map((tab, index) => {
           const count = tab.id === 'mine' ? unwatched : 0;
           const shown = badgeText(count);
           return <button key={tab.id} id={`${ids}-tab-${tab.id}`} type="button" role="tab" data-results-tab={tab.id} className={styles.tab} aria-selected={view === tab.id}
@@ -215,8 +237,9 @@ export function ResultsTabs({ view, onView, unwatched, children }: { view: Resul
 }
 
 /** A player's Results: the tabs, My bouts (with the chip) or Everyone, and the count of bouts not watched. */
-function PlayerResults({ reads, viewerId, clock, onWatch, bouts, view, onView, filter, onFilter, onWatchBout }: {
-  reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
+function PlayerResults({ reads, viewerId, clock, onWatch, bouts, view, onView, filter, onFilter, onWatchBout, loadRewards }: {
+  reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch: WatchResult;
+  loadRewards?: GameGateway['notifications'];
   bouts: BoutsStore; view: ResultsTab; onView(view: ResultsTab): void; filter: BoutFilter; onFilter(filter: BoutFilter): void;
   onWatchBout(bout: MyBout, filter: BoutFilter): void;
 }) {
@@ -226,22 +249,26 @@ function PlayerResults({ reads, viewerId, clock, onWatch, bouts, view, onView, f
   const expiries = useMemo(() => [...all.rows, ...(shown === all ? [] : shown.rows)].map(bout => bout.replayExpiry), [all, shown]);
   const nowMs = useServerTime(clock, expiries);
   const watched = useWatched();
-  return <ResultsTabs view={view} onView={onView} unwatched={unwatchedCount(all.rows, watched, nowMs)}>
+  return <ResultsTabs view={view} onView={onView} unwatched={unwatchedCount(all.rows, watched, nowMs)} rewards={!!loadRewards}>
     {view === 'mine'
       ? <MyBouts store={bouts} filter={filter} onFilter={onFilter} nowMs={nowMs} onOpen={bout => onWatchBout(bout, filter)} />
-      : <EveryoneResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />}
+      : view === 'rewards' && loadRewards
+        ? <DungeonRewards key={viewerId} load={loadRewards} clock={clock} onWatch={id => onWatch(id, 'dungeon', 'rewards')} />
+        : <EveryoneResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />}
   </ResultsTabs>;
 }
 
 const ignore = () => {};
 
-export function ResultsPanel({ reads, viewerId, clock, onWatch, bouts = null, view = 'mine', onView = ignore, filter = 'all', onFilter = ignore, onWatchBout = ignore }: {
+export function ResultsPanel({ reads, viewerId, clock, onWatch, bouts = null, view = 'mine', onView = ignore, filter = 'all', onFilter = ignore,
+  onWatchBout = ignore, loadRewards }: {
   reads: ResultsReader;
   viewerId: string | null;
   /** The shared display clock: whether each replay is kept is decided by the server's time. */
   clock: DisplayClock;
   /** Watches a result's kept replay. */
-  onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind']): void;
+  onWatch: WatchResult;
+  loadRewards?: GameGateway['notifications'];
   /** The owner's My bouts lists: null for a visitor or a player without a gladiator, who see Everyone alone, with no tabs. */
   bouts?: BoutsStore | null;
   /** The tab shown, and the chip of My bouts (the shell's, so a scene's Back and a reload open them again). */
@@ -253,6 +280,8 @@ export function ResultsPanel({ reads, viewerId, clock, onWatch, bouts = null, vi
   onWatchBout?(bout: MyBout, filter: BoutFilter): void;
 }) {
   if (!bouts) return <EveryoneResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />;
-  return <PlayerResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts} view={view} onView={onView}
-    filter={filter} onFilter={onFilter} onWatchBout={onWatchBout} />;
+  const ownerRead = viewerId ? loadRewards : undefined;
+  return <PlayerResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts}
+    view={view === 'rewards' && !ownerRead ? 'everyone' : view} onView={onView}
+    filter={filter} onFilter={onFilter} onWatchBout={onWatchBout} loadRewards={ownerRead} />;
 }

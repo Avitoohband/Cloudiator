@@ -1112,6 +1112,29 @@ test.describe('the Schedule under the active rules', () => {
     return { flow, schedule };
   }
 
+  test('saves Wolf Den in the v2 afternoon and keeps the other slots dungeon-free', async ({ page, context }, testInfo) => {
+    await page.setViewportSize(testInfo.project.name === 'desktop' ? { width: 1440, height: 900 } : { width: 360, height: 740 });
+    const { flow, schedule } = await openHeld(page, context, MORNING, state => { state.progression.level = 3; }, 'v2');
+    const morning = schedule.getByLabel('morning activity');
+    const afternoon = schedule.getByLabel('afternoon activity');
+    const evening = schedule.getByLabel('evening activity');
+    await expect(morning.locator('option[value^="dungeon:"]')).toHaveCount(0);
+    await expect(evening.locator('option[value^="dungeon:"]')).toHaveCount(0);
+    expect(await schedule.getByText('Dungeons run in the afternoon only.', { exact: true }).count()).toBeGreaterThan(0);
+    await afternoon.selectOption('dungeon:wolf-den');
+    await expect(hintOf(page, 'afternoon')).toHaveText('3 rooms, then the boss. Players group first. Eligible bots and hired fighters fill open seats. Costs 40 base stamina.');
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await reviewShot(page, testInfo, 'dungeon-schedule');
+    await saveDay(page).click();
+    await expect(savedLine(page)).toContainText('Saved.');
+    const [command] = flow.commands;
+    expect(command.kind).toBe('edit-day-schedule');
+    if (command.kind !== 'edit-day-schedule') throw new Error('Expected a schedule command');
+    expect(command.day.afternoon).toEqual({ kind: 'dungeon', dungeonId: 'wolf-den' });
+    await expect(afternoon).toHaveValue('dungeon:wolf-den');
+    await expect(saveDay(page)).toBeDisabled();
+  });
+
   test('says how far the point cap lets Training go, and warns before Save without blocking it', async ({ page, context }, testInfo) => {
     const flow = await planningFlow(context, undefined, { rulesVersion: 'v2' });
     await page.goto('/game/');

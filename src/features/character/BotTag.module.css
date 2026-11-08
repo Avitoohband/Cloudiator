@@ -1,0 +1,10 @@
+.tag {
+  display: inline-block;
+  margin-inline-start: .35em;
+  padding: .05em .38em;
+  border-radius: .24em;
+  background: #a9ddfa;
+  color: #142536;
+  font: bold .7em/1.4 monospace;
+  vertical-align: .1em;
+}

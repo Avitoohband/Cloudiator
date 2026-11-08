@@ -41,6 +41,14 @@ const items = (html: string) => [...html.matchAll(/<(p|li|div|dt)\b[^>]*>((?:(?!
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(m => m[1]);
 
 describe('profile card', () => {
+  it('names a Ludus Nimbus bot and discloses its fixed build and off-duty state', () => {
+    const html = text(card({ actor: { ...LUCILLA, botTeam: 'ludus-nimbus', botDuty: 'off-duty', botReturnsAtMs: null } }));
+    expect(html).toContain('Ludus Nimbus');
+    expect(html).toContain('BOT');
+    expect(html).toContain('Unranked · Fixed build');
+    expect(html).toContain('Off duty');
+    expect(html).not.toContain('Back at');
+  });
   it('renders the public actor at once, before the profile loads', () => {
     const html = text(card());
     expect(html).toContain('Aster');

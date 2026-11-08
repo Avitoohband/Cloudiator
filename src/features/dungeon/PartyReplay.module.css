@@ -42,7 +42,8 @@
 .stage {
   position: relative;
   min-width: 0;
-  height: clamp(296px, 38vw, 368px);
+  /* Keep the 2× silhouettes of tall monsters clear of the row below. */
+  height: clamp(344px, 38vw, 368px);
   overflow: hidden;
   border-radius: 8px;
   outline: 1px solid #76664a;

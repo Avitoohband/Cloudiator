@@ -2,10 +2,10 @@
 // UPDATE_DUNGEON_FIXTURES=1 and tests/domain/dungeon-fixtures.test.ts; never run combat in the preview.
 import type { DungeonId } from '../../supabase/functions/_shared/contracts/commands';
 import type { ActivitySummary, PartyBattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import fullVictory from './dungeons/full-victory.json';
-import soloMajorLost from './dungeons/solo-major-lost.json';
-import roomLost from './dungeons/room-lost.json';
-import memberFell from './dungeons/member-fell-party-cleared.json';
+import fullVictory from './dungeons/full-victory.json' with { type: 'json' };
+import soloMajorLost from './dungeons/solo-major-lost.json' with { type: 'json' };
+import roomLost from './dungeons/room-lost.json' with { type: 'json' };
+import memberFell from './dungeons/member-fell-party-cleared.json' with { type: 'json' };
 
 export type DungeonFightRow = { run_id: string; ordinal: NonNullable<RevealedStage['fight']>['ordinal']; reveal_at_ms: number; log: PartyBattleLog };
 type DungeonFixture = {

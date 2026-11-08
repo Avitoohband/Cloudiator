@@ -4,8 +4,8 @@
 import type { BoutFilter } from '../../lib/api/reads';
 import type { Viewer } from '../character/useGameState';
 
-/** Which of a player's two tabs Results shows. */
-export type ResultsTab = 'mine' | 'everyone';
+/** Which of a player's tabs Results shows. */
+export type ResultsTab = 'mine' | 'everyone' | 'rewards';
 /** Whose choice it is: a player's gladiator id; null for a viewer with no bouts (a visitor, no gladiator, a failed owner read); undefined while the viewer loads. */
 export type ChoiceOwner = string | null | undefined;
 export type ResultsChoice = { account: ChoiceOwner; owner: ChoiceOwner; view: ResultsTab; filter: BoutFilter };

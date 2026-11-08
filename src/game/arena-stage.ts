@@ -32,6 +32,7 @@ export type ArenaFighter = {
   readonly classId: ClassId | null;
   /** An NPC fallback opponent: no gladiator behind it. */
   readonly npc: boolean;
+  readonly botTeam?: RevealedCombatant['botTeam'];
 };
 
 export type ArenaVisibleStage = {
@@ -81,6 +82,7 @@ export type ArenaStageState = {
   readonly entrant: ArenaFighter | null;
   readonly opponent: ArenaFighter | null;
   readonly npcOpponent: boolean;
+  readonly unranked?: true;
   readonly bout: ArenaBout | null;
   /** The expanded replay of the revealed bout, unless its log is known to have expired. */
   readonly replay: { readonly activityId: string; readonly stageId: string } | null;
@@ -114,7 +116,8 @@ function freeze<V>(value: V, shared: ReadonlySet<object>): V {
 }
 
 const fighterOf = (p: Readonly<RevealedCombatant>): ArenaFighter =>
-  ({ id: p.id, gladiatorId: p.gladiatorId, name: p.name, classId: p.classId, npc: p.gladiatorId === null });
+  ({ id: p.id, gladiatorId: p.gladiatorId, name: p.name, classId: p.classId, npc: p.gladiatorId === null,
+    ...(p.botTeam === 'ludus-nimbus' ? { botTeam: p.botTeam } : {}) });
 
 /** The Arena state of one revealed timeline at the display time. */
 export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: number, options: ArenaStageOptions = {}): ArenaStageState {
@@ -160,6 +163,7 @@ export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: numbe
   const completion = timeline.completion && timeline.completion.settledAtMs <= t ? timeline.completion : null;
   const expiry = (owner ? summarySource?.replayExpiry : undefined) ?? completion?.replayExpiry;
   const replayExpired = !!expiry && !replayKept(expiry, t);
+  const unranked = boutStage?.arenaMode === 'unranked' || summary?.arenaMode === 'unranked' || completion?.arenaMode === 'unranked';
   const phase: ArenaPhase = summary ? 'credited'
     : boutStage ? (finished ? 'completed' : 'bout')
       : startMs !== null && t >= startMs + ARENA_REVEAL_MS ? 'preparing'
@@ -175,6 +179,7 @@ export function renderArenaStage(timeline: RevealedTimeline, displayNowMs: numbe
     entrant,
     opponent,
     npcOpponent: !!opponent?.npc,
+    ...(unranked ? { unranked: true as const } : {}),
     bout: boutStage ? {
       stageId: boutStage.id, battleId: log?.battleId ?? null, log, startedAtMs: boutStage.startedAtMs, endsAtMs: boutEnd!,
       elapsedMs: t - boutStage.startedAtMs, finished,

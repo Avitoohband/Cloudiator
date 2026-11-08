@@ -11,19 +11,20 @@ import { useSearchParams } from 'next/navigation';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../../features/character/useGameState';
 import { ActivityReplay, BattleReplay } from '../../features/arena/BattleReplay';
-import { isActivityId } from '../../features/character/expedition-query';
+import { PartyFightReplay } from '../../features/dungeon/PartyReplay';
+import { replayQuery } from '../../features/dungeon/replay-query';
 
 function ReplayShell() {
   const search = useSearchParams();
   const requested = search.get('mode') === 'fixture';
   const fixture = requested && process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true';
-  // A malformed activity id names no fight, as on the expedition page: it is not found, with nothing read (final review Minor 6).
-  const requestedId = search.get('activity');
-  const activityId = requestedId !== null && isActivityId(requestedId) ? requestedId : null;
-  const stageId = search.get('stage');
+  const query = replayQuery(search);
+  const activityId = query.kind === 'activity' ? query.activityId : null;
+  const stageId = query.kind === 'activity' ? query.stageId : null;
   const [loaded, setLoaded] = useState<{ fixture: boolean; reads: GameGateway } | null>(null);
 
   useEffect(() => {
+    if (query.kind === 'unavailable') return;
     let active = true;
     (async () => {
       // The fixture gateway is only reachable when the build enables fixtures, so production exports drop it.
@@ -33,7 +34,7 @@ function ReplayShell() {
       if (active) setLoaded({ fixture, reads });
     })().catch(() => { if (active) setLoaded({ fixture, reads: createLiveGateway() }); });
     return () => { active = false; };
-  }, [fixture]);
+  }, [fixture, query.kind]);
 
   const reads = loaded?.fixture === fixture ? loaded.reads : null;
   // Without a well-formed activity there is nothing to show, so nothing is read or polled. The page needs only the
@@ -52,7 +53,10 @@ function ReplayShell() {
     {fixture && <p className="fixture-banner" role="status">Fixture mode — sample replays from the local preview</p>}
     {requested && !fixture && <p className="notice" role="status">Fixture preview is unavailable in this build.</p>}
     <main id="main" className="replay-page" tabIndex={-1}>
-      {!activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
+      {query.kind === 'party' ? reads
+        ? <PartyFightReplay key={`${fixture}|${query.ref.runId}|${query.ref.ordinal}`} gateway={reads} fight={query.ref} />
+        : <p role="status">Loading the replay…</p>
+        : !activityId ? <BattleReplay view={{ kind: 'unavailable', reason: 'not-found' }} />
         : game.session.status === 'loading' ? <p role="status">Loading the replay…</p>
           : <ActivityReplay key={`${fixture}|${activityId}|${stageId}|${reader}`} reads={reads} activityId={activityId} stageId={stageId} clock={clock}
             viewerId={game.owner?.gladiatorId ?? null} endActions="again" />}

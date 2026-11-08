@@ -15,10 +15,11 @@ import { isActivityId } from '../character/expedition-query';
  * `bouts-won` / `bouts-lost` for the chip it was under), of Everyone's results, the Arena card, a notification, a tournament
  * bracket or the Gladiators list. No origin: the camp itself (a camp button, a shared link, a clicked gladiator).
  */
-export type SceneFrom = 'bouts' | 'bouts-won' | 'bouts-lost' | 'results' | 'arena' | 'notifications' | 'tournaments' | 'gladiators';
+export type SceneFrom = 'bouts' | 'bouts-won' | 'bouts-lost' | 'results' | 'rewards' | 'arena' | 'notifications' | 'tournaments' | 'gladiators';
 export type SceneView =
   | { kind: 'replay'; activityId: string; stageId?: string; from?: SceneFrom }
   | { kind: 'expedition'; activityId: string; play?: 'trip'; from?: SceneFrom }
+  | { kind: 'dungeon'; activityId: string; play?: 'trip'; from?: SceneFrom }
   | { kind: 'bout'; tournamentId: string; boutId: string; from?: SceneFrom };
 /**
  * A scene the address names. As on the expedition page (`expeditionQuery`), its activity id must be UUID-shaped, and a
@@ -27,7 +28,7 @@ export type SceneView =
  */
 export type SceneAddress = SceneView | { kind: SceneView['kind']; activityId: null };
 
-const ORIGINS: readonly SceneFrom[] = ['bouts', 'bouts-won', 'bouts-lost', 'results', 'arena', 'notifications', 'tournaments', 'gladiators'];
+const ORIGINS: readonly SceneFrom[] = ['bouts', 'bouts-won', 'bouts-lost', 'results', 'rewards', 'arena', 'notifications', 'tournaments', 'gladiators'];
 const SCENE_PARAMS = ['view', 'activity', 'stage', 'play', 'tournament', 'bout', 'from'] as const;
 
 /** The address names no scene's parts: a malformed activity or bout. */
@@ -58,10 +59,10 @@ export function sceneOf(search: Pick<URLSearchParams, 'get'>): SceneAddress | nu
       ? { kind: 'bout', tournamentId, boutId, ...originOf(search) } : { kind: 'bout', activityId: null };
   }
   const activityId = search.get('activity');
-  if (!activityId || (view !== 'replay' && view !== 'expedition')) return null;
+  if (!activityId || (view !== 'replay' && view !== 'expedition' && view !== 'dungeon')) return null;
   if (!isActivityId(activityId)) return { kind: view, activityId: null };
   // Only `play=trip` names the whole-trip replay; any other value is ignored, so a mangled link still opens the live view.
-  if (view === 'expedition') return search.get('play') === 'trip' ? { kind: 'expedition', activityId, play: 'trip', ...originOf(search) } : { kind: 'expedition', activityId, ...originOf(search) };
+  if (view !== 'replay') return search.get('play') === 'trip' ? { kind: view, activityId, play: 'trip', ...originOf(search) } : { kind: view, activityId, ...originOf(search) };
   const stageId = search.get('stage');
   return stageId ? { kind: 'replay', activityId, stageId, ...originOf(search) } : { kind: 'replay', activityId, ...originOf(search) };
 }
@@ -104,7 +105,7 @@ export function sceneHref(href: string, view: SceneView): string {
   } else {
     url.searchParams.set('activity', view.activityId);
     if (view.kind === 'replay' && view.stageId) url.searchParams.set('stage', view.stageId);
-    if (view.kind === 'expedition' && view.play === 'trip') url.searchParams.set('play', 'trip');
+    if (view.kind !== 'replay' && view.play === 'trip') url.searchParams.set('play', 'trip');
   }
   if (view.from) url.searchParams.set('from', view.from);
   return `${url.pathname}${url.search}${url.hash}`;
@@ -118,10 +119,11 @@ export function campHref(href: string): string {
 }
 
 /** The name on a scene's back button: the menu it goes back to, or the camp. */
-export function backLabel(from: SceneFrom | undefined): 'My bouts' | 'Results' | 'Arena' | 'Notifications' | 'Tournaments' | 'Gladiators' | 'Camp' {
+export function backLabel(from: SceneFrom | undefined): 'My bouts' | 'Results' | 'Your rewards' | 'Arena' | 'Notifications' | 'Tournaments' | 'Gladiators' | 'Camp' {
   switch (from) {
     case 'bouts': case 'bouts-won': case 'bouts-lost': return 'My bouts';
     case 'results': return 'Results';
+    case 'rewards': return 'Your rewards';
     case 'arena': return 'Arena';
     case 'notifications': return 'Notifications';
     case 'tournaments': return 'Tournaments';
@@ -145,6 +147,6 @@ export function boutsFrom(filter: BoutFilter): Extract<SceneFrom, 'bouts' | 'bou
  * replay. Training and Rest have no replay (Tasks 7, 9), so none.
  */
 export function sceneForResult(activityId: string, kind: PublicActivitySummary['resolvedKind']): SceneView | null {
-  if (kind === 'expedition') return { kind: 'expedition', activityId, play: 'trip' };
+  if (kind === 'expedition' || kind === 'dungeon') return { kind, activityId, play: 'trip' };
   return kind === 'arena' || kind === 'tournament' ? { kind: 'replay', activityId } : null;
 }

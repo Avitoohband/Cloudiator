@@ -20,12 +20,13 @@ import { renderExpeditionStage } from '../../game/expedition-stage';
 import { boutEndMs } from '../../game/replay';
 import type { DisplayClock } from '../../game/display-clock';
 import { RULES_V1 } from '@domain/rules-v1';
-import { awayState, boutAway, closeTrip, readClosedTrips, type AwayState } from './away-trip';
+import { awayState, boutAway, closeTrip, dungeonSafeReturn, readClosedTrips, type AwayState } from './away-trip';
 
 const MINUTE_MS = 60_000;
 /** The expedition the owner's world actor is on (`expedition:woodland`), by its catalog name; null when it is on none. */
 function destinationOf(world: WorldSnapshot | null, gladiatorId: string | null): string | null {
   const location = world?.actors.find(actor => actor.gladiatorId === gladiatorId)?.location;
+  if (location?.startsWith('dungeon:')) return Object.values(CATALOG_V1.dungeons).find(dungeon => location === `dungeon:${dungeon.id}`)?.name ?? null;
   const id = location?.startsWith('expedition:') ? location.slice('expedition:'.length) : null;
   return id !== null && Object.hasOwn(CATALOG_V1.expeditions, id) ? CATALOG_V1.expeditions[id as keyof typeof CATALOG_V1.expeditions].name : null;
 }
@@ -61,7 +62,7 @@ export function useAwayTrip({ reads, owner, world, nowMs: minuteNow, clock }: {
     return () => { latest = false; };
   }, [reads, ownerId, currentId, unseen, scope, slot]);
   const notes = trips?.scope === scope ? trips.items : null;
-  const latestTrip = notes?.find(item => item.kind === 'expedition') ?? null;
+  const latestTrip = notes?.find(item => item.kind === 'expedition' || item.kind === 'dungeon') ?? null;
 
   const recentArena = notes?.filter(item => item.kind === 'arena' && Math.floor(item.settledAtMs / RULES_V1.clock.slotMs) === slot)
     .reduce<GameNotification | null>((latest, item) => !latest || item.settledAtMs > latest.settledAtMs ? item : latest, null);
@@ -104,10 +105,10 @@ export function useAwayTrip({ reads, owner, world, nowMs: minuteNow, clock }: {
   }, [clock, minuteNow, nowMs, arenaStart, endedAt]);
 
   // The timeline of the trip that is running: when the button appears, and in each bucket of minutes after a fight's minute.
-  const running = current?.kind === 'expedition' && current.startsAtMs <= nowMs && nowMs < current.endsAtMs ? current : null;
+  const running = (current?.kind === 'expedition' || current?.kind === 'dungeon') && current.startsAtMs <= nowMs && nowMs < current.endsAtMs ? current : null;
   const runningId = running?.id ?? null;
   const minute = running ? Math.floor((nowMs - running.startsAtMs) / MINUTE_MS) : 0;
-  const afterFight = Math.max(0, Math.floor((minute - 1) / 20));
+  const afterFight = Math.max(0, Math.floor((minute - 1) / (running?.kind === 'dungeon' ? 16 : 20)));
   const [tripTimeline, setTimeline] = useState<{ scope: typeof scope; timeline: RevealedTimeline } | null>(null);
   useEffect(() => {
     if (!reads || runningId === null) return;
@@ -116,8 +117,12 @@ export function useAwayTrip({ reads, owner, world, nowMs: minuteNow, clock }: {
     return () => { latest = false; };
   }, [reads, runningId, afterFight, scope]);
   const timeline = tripTimeline?.scope === scope ? tripTimeline.timeline : null;
-  const defeated = useMemo(() => timeline !== null && timeline.activityId === runningId && renderExpeditionStage(timeline, nowMs).stages.some(stage => stage.outcome === 'defeat'),
-    [timeline, runningId, nowMs]);
+  const isDungeon = running?.kind === 'dungeon';
+  const defeated = useMemo(() => {
+    if (!timeline || timeline.activityId !== runningId) return false;
+    if (isDungeon) return dungeonSafeReturn(timeline, nowMs);
+    return renderExpeditionStage(timeline, nowMs).stages.some(stage => stage.outcome === 'defeat');
+  }, [timeline, runningId, nowMs, isDungeon]);
 
   // The trips this device has closed: read once, and by `close` from then on.
   const [closed, setClosed] = useState<ReadonlySet<string>>(readClosedTrips);

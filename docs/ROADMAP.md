@@ -61,7 +61,8 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 
 - **Friends — Standalone after 1.6, number open.** Friends list and friend requests. Dungeon party invitations and seeing planned dungeon choices within the party follow after 1.8. The current plan reserves M32 for friend parties after the M31 bot label correction.
 - Expand the camp after 1.8. Reserve plots for future facilities, add housing, decorations and achievements, and add more NPCs and guards. Include the Champ, a former Arena champion, and clickable or tappable NPC detail cards.
-- Add pettable cats, dogs, rabbits, and birds. Offer optional paid cosmetic followers with no gameplay bonuses.
+- Add pettable cats, dogs, rabbits, and birds. The first paid release is planned to offer a one-time Supporter Banner and an optional cosmetic pet follower. Both are account-bound cosmetics. Founder remains a separate title. [PayPal sandbox plan](superpowers/plans/2026-11-08-cosmetic-payments-paypal-sandbox.md).
+- Add paid weapon and armor dyes and skins after the first cosmetic shop release. These change equipment appearance only.
 - Run timed events and seasonal camp themes such as Halloween and Christmas. Explore a world tournament with a statue for the winner.
 - Add live Arena and tournament spectating with text commentary. Check the feasibility of a 24/7 YouTube stream.
 - Add music and sound effects with independent volume and mute controls, remembered per device.

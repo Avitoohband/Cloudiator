@@ -25,9 +25,16 @@ camp and the public profile. Both runs kept Edge StartedAt unchanged. All 14 foc
 tests passed. The local operator rehearsal registered five benched bots and 22 items, repeated with the same
 state, and rolled back to zero. Evidence is in parent `logs/p18-m31-20261108/`.
 
-**Production boundary.** M31 is pending full release verification and Avi's separate migration go. The approved
-operation must dry-run exactly M31, with empty seed and role lists and `--skip-vault`, in the release quiet window.
-Recheck Cinder name availability and reserved Auth collisions before any later separately approved registration.
+**Release gate.** Candidate `5905f934900e45807cf59e7ffd412e7147d47fbf` passed all 12 steps on 2026-11-08 at
+15:30:49 UTC. It passed 2,578 unit tests and 634 database tests. Edge StartedAt stayed
+`2026-11-08T14:28:37.168305594Z` throughout the database run. Both 32-shard browser stages covered all 1,398
+case identities. The post-gate fingerprint and access audit matched the clean replay. The gate JSON SHA-256 is
+`1e02975c371d1bd227f942c27a2953aa4ebe910cc58d69f175a8829b1f5a95af`.
+
+**Production boundary.** The read-only hosted fingerprint and 676-row access audit matched M30 with zero findings.
+Cinder was available, with zero registered bots and zero reserved Auth identities. Await Avi's separate M31
+production go. The approved operation must dry-run exactly M31, with empty seed and role lists and `--skip-vault`,
+in the release quiet window. Recheck Cinder and the Auth baseline before any later separately approved registration.
 
 ## Patch 1.8 (M30): party dungeons and Ludus Nimbus
 

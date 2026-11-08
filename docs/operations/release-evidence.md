@@ -1615,3 +1615,11 @@ Avi separately approved the client fast-forward. Production `release` moved from
 - A separate aggregate check found Cinder, Ember and Flint available at 14:06 UTC. Cinder was recommended; no label change was made. The current client and Edge functions use persisted participant names. If Avi approves a new label, the catalog needs a forward migration and the roster shot in the unpublished trailer needs to be updated before release. See `bot-label-alternatives.json`.
 - The proposed linked SQL fallback passed rehearsal on local M30 with rules v1. It registered five benched bots and exactly 22 bound items, produced the same counts on repeat and returned both counts to zero after rollback. See `bot-registration-local-proof.json`. Bot registration, bot activation, the patch note and the patch record require separate production approvals.
 
+## Patch 1.8 Cinder correction verified locally — 2026-11-08
+
+Avi chose Cinder. The reviewed forward M31 migration changes one catalog value and retains the `ash` key.
+The full 12-step release gate passed on `5905f93`; the exact local regression and registration rehearsal passed.
+The post-gate catalog matched the replay. The hosted read-only M30 catalog and ACL matched their baseline, with
+zero bots, zero reserved Auth identities and no Cinder collision. M31 is ready for its separate production go.
+The client, game functions and in-game patch record are at the prior release checkpoint. [Migration evidence](migrations.md#patch-18-rollout-correction-m31-cinder).
+

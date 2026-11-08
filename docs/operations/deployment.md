@@ -1,8 +1,8 @@
 # Deployment checklist
 
-## Patch 1.8 rollout — M30 applied 2026-11-08
+## Patch 1.8 rollout — worker deployed 2026-11-08
 
-Production Supabase is M01–M30 with rules v2 active. The live client and patch record are 1.7.1. The next step is `game-worker` from reviewed candidate `7804b1e`, after Avi's separate go. [Evidence](release-evidence.md#patch-18-m30-applied--2026-11-08).
+Production Supabase is M01–M30 with rules v2 active. Worker v4 from `7804b1e` and command v7 are active. The live client and patch record are 1.7.1. The next step is `game-command` from `7804b1e`, after Avi's separate approval. [Evidence](release-evidence.md#patch-18-worker-deployed--2026-11-08).
 
 ## Patch 1.7.1 LIVE — 2026-11-06
 

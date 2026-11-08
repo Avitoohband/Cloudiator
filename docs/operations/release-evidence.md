@@ -1581,5 +1581,13 @@ Avi explicitly approved M30 with `--skip-vault` after the quiet-window and exact
 - Before the push, the production ref matched the linked project, `release` matched `8828d0a`, and the complete history matched M01–M29. The M29 catalog and access digests matched the documented baseline. The structured dry run listed only `20261107212314_patch_1_8.sql`, with no roles or seeds to apply.
 - The first immediate guard stopped at a migration history read with SQLSTATE `XX000`, before any push. The repeated checks passed. The 10:40 UTC slot was fully published, both cron jobs were active, and the read showed no open boundary, failed attempts in the last 24 hours, overdue/operator jobs, alerts or other transactions older than five seconds. The migration push ran once, from 11:00:46 to 11:00:49 UTC, using the sealed LF file (SHA-256 `48f936823b62ab7cf465cd88dc152b11b3b5f93efdb3aebd0a607f1812a10c3f`).
 - Readback matched all 30 versions. The hosted fingerprint has 1,480 rows, with three live seed rows checked by shape and counted separately from the digest. The access audit matched all 676 expected rows with zero findings. Expected digests derive from the pinned local M29-to-M30 change applied to the previously verified hosted M29 catalog. Readback confirmed v2, a current and healthy scheduler, 37 title rules, 630 bot routines, zero registered bots and zero dungeon runs or public dungeon fights.
-- The Edge baseline is `game-worker` version 3 and `game-command` version 7, both active. The live client and patch record are 1.7.1. The next step is the worker deployment from the same gate candidate, with separate approval.
+- Before the worker deployment, production had active `game-worker` v3 and `game-command` v7. The live client and patch record were 1.7.1.
+
+## Patch 1.8 worker deployed — 2026-11-08
+
+Avi separately approved the `game-worker` deployment from gate candidate `7804b1eeb3f91561cc98ba5d2a9f4190c944f1f8`. The bundle used cached Docker Edge Runtime v1.77.4 with `--network-id none`. Deployment completed at 11:14:14 UTC. Evidence is in parent `logs/p18-m30-production-20261108/`.
+
+- Metadata confirmed active worker v4 replacing v3 and active command v7 with its baseline timestamp. Both worker OPTIONS and POST probes returned `401 unauthenticated`.
+- Production readback showed M30, active rules v2 and a current scheduler with both cron jobs active. There were zero alerts, open boundaries, overdue jobs, operator jobs or failed attempts in the last 24 hours. The first two coordinator ticks after deployment succeeded.
+- The live client and patch record are 1.7.1. The next production step is `game-command` from the same candidate, after Avi's separate explicit approval.
 

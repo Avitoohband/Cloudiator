@@ -1589,5 +1589,15 @@ Avi separately approved the `game-worker` deployment from gate candidate `7804b1
 
 - Metadata confirmed active worker v4 replacing v3 and active command v7 with its baseline timestamp. Both worker OPTIONS and POST probes returned `401 unauthenticated`.
 - Production readback showed M30, active rules v2 and a current scheduler with both cron jobs active. There were zero alerts, open boundaries, overdue jobs, operator jobs or failed attempts in the last 24 hours. The first two coordinator ticks after deployment succeeded.
-- The live client and patch record are 1.7.1. The next production step is `game-command` from the same candidate, after Avi's separate explicit approval.
+- At this checkpoint, the live client and patch record were 1.7.1.
+
+## Patch 1.8 command deployed — 2026-11-08
+
+Avi separately approved the `game-command` deployment from gate candidate `7804b1eeb3f91561cc98ba5d2a9f4190c944f1f8`. The bundle used cached Docker Edge Runtime v1.77.4 with `--network-id none`. Deployment completed at 11:40:07 UTC. Evidence is in parent `logs/p18-m30-production-20261108/` under `command-*` and `functions-after-command.json`.
+
+- Metadata confirmed active command v8 replacing v7 and active worker v4 with its prior timestamp.
+- The canonical site OPTIONS probe returned 204 with the exact allowed origin and a 7,200-second max age. The foreign OPTIONS probe returned 403 with no origin grant. The unauthenticated POST returned `401 unauthenticated`.
+- Production readback showed M30, active rules v2 and a current scheduler with both cron jobs active. There were zero alerts, open boundaries, overdue jobs, operator jobs or failed attempts in the last 24 hours.
+- The client preflight confirmed that production `release` at `8828d0a3863b6319ff32081ffbcc820227828762` is an ancestor of the exact candidate. It retained the successful Pages UUID `38a60f91-38e8-4fef-9eb5-a2ce252f4a77` and the canonical HTML digests and 17 Next asset paths for each of `/` and `/game/`. The production-origin build and six-route static scan passed in native Windows execution, with 112 assets scanned. The initial managed build stopped on `EPERM` when Next created a generated expedition directory. Neither build modified tracked files.
+- The live client and patch record are 1.7.1. The next production step is the `release` fast-forward to the exact gate candidate, after Avi's separate explicit approval.
 

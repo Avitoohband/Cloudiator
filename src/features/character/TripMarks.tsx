@@ -5,15 +5,16 @@
 import type { TripMark } from './trip-text';
 import styles from './ExpeditionView.module.css';
 
-export function TripMarks({ marks, fraction, onFight }: {
+export function TripMarks({ marks, fraction, onFight, dungeon = false }: {
   marks: readonly TripMark[];
   /** How far the trip is (0 to 1): the marks it has passed are drawn as passed. */
   fraction: number;
+  dungeon?: boolean;
   /** Opens the whole-trip replay at a fight; absent when no replay can be shown here (the marks are then text only). */
   onFight?(fight: NonNullable<TripMark['fight']>): void;
 }) {
   const last = Math.max(1, marks.length - 1);
-  return <ol className={styles.marks} aria-label="Trip marks">
+  return <ol className={dungeon ? `${styles.marks} ${styles.dungeonMarks}` : styles.marks} aria-label="Trip marks">
     {marks.map((mark, i) => <li key={mark.id} style={{ left: `${(100 * i) / last}%` }} className={fraction >= i / last ? styles.passed : undefined}>
       {mark.replay && mark.fight && onFight ? <button type="button" className={styles.markButton} title={`Watch the whole trip from fight ${mark.fight}`}
         onClick={() => onFight(mark.fight!)}><span aria-hidden="true">▶ </span>{mark.text.replace(/^▶ /, '')}</button> : mark.text.replace(/^▶ /, '')}

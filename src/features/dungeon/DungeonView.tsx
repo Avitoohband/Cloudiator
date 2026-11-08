@@ -249,7 +249,7 @@ export function DungeonView({ reads, activityId, fixture, startMinute = null, pl
         : live.progress && <div className={styles.progress}>
           <p>Minute {Math.floor(live.progress.minute)} of 80</p>
           <progress max={1} value={live.progress.fraction} aria-label="Dungeon progress" />
-          <TripMarks marks={dungeonTripMarks(live, dungeon.major.name, clock)} fraction={live.progress.fraction} onFight={plan ? watchTrip : undefined} />
+          <TripMarks marks={dungeonTripMarks(live, dungeon.major.name, clock)} fraction={live.progress.fraction} onFight={plan ? watchTrip : undefined} dungeon />
           {plan && <button ref={liveButton} type="button" onClick={() => watchTrip()}>Watch the whole trip</button>}
         </div>}
       {fightRows.length > 0 && <ol className={styles.fights} aria-label="Dungeon fights">{fightRows.map(stage => <li key={stage.id}>

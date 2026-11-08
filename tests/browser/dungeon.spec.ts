@@ -48,6 +48,17 @@ test.describe('the routed dungeon player flow', () => {
     await expect.poll(() => page.evaluate(() => window.__cloudiatorDungeonScene?.debug()?.party.length ?? 0)).toBe(3);
     await expect(run.getByRole('link', { name: 'Watch Room 1' })).toBeVisible();
     await expect(run.getByRole('link', { name: 'Watch Alpha of the Den' })).toHaveCount(0);
+    const marks = run.getByRole('list', { name: 'Trip marks' });
+    const overlaps = await marks.locator('li').evaluateAll(items => {
+      const boxes = items.map(item => item.getBoundingClientRect());
+      return boxes.slice(0, -1).map((box, i) => {
+        const next = boxes[i + 1];
+        // Allow subpixel rounding while rejecting intersecting labels in the same row.
+        return box.right - next.left > 0.5 && next.right - box.left > 0.5
+          && box.bottom - next.top > 0.5 && next.bottom - box.top > 0.5 ? i : -1;
+      }).filter(index => index >= 0);
+    });
+    expect(overlaps, 'Adjacent live trip labels are legible').toEqual([]);
     await expectNamedControls(run, 'dungeon run');
     expect(await noHorizontalScroll(page)).toBe(true);
     await reviewShot(page, testInfo, 'dungeon-live');

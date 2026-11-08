@@ -272,6 +272,20 @@
   color: var(--ink);
 }
 
+@media (min-width: 761px) {
+  .marks.dungeonMarks { height: 3rem; }
+
+  .dungeonMarks li {
+    max-width: 16%;
+    white-space: normal;
+  }
+
+  .dungeonMarks li:first-child,
+  .dungeonMarks li:last-child { max-width: 10%; }
+
+  .dungeonMarks .markButton { white-space: normal; }
+}
+
 .markButton {
   min-height: 1.9rem;
   padding: 0 0.6rem;

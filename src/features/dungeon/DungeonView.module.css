@@ -56,7 +56,21 @@
 }
 
 .progress p { margin: 0 0 .35rem; }
-.progress button { margin-top: .35rem; }
+.progress > button {
+  min-height: 36px;
+  margin-top: .35rem;
+  padding: .3rem .7rem;
+  border: 1px solid #bd995c;
+  border-radius: .35rem;
+  background: #554025;
+  color: #ffe1a3;
+  font: inherit;
+  font-weight: 700;
+}
+
+@media (hover: none) {
+  .progress > button { min-height: 44px; }
+}
 .fights { display: grid; gap: .45rem; list-style: none; padding: 0; }
 .fights li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem .8rem; }
 .fights a { color: #f2d18d; padding-block: .4rem; }

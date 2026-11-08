@@ -17,7 +17,7 @@ import { REPLAY_OUTRO_MS } from './replay';
  */
 export const TRIP_PACE = { travel: 150, walk: 8, campMs: 5_000, restMs: 6_000 } as const;
 
-export type TripChapterId = 'leaving' | 'trail' | 'fight-1' | 'fight-2' | 'fight-3' | 'heading-home' | 'safe-point' | 'back' | 'resting';
+export type TripChapterId = 'leaving' | 'trail' | 'fight-1' | 'fight-2' | 'fight-3' | 'fight-4' | 'heading-home' | 'safe-point' | 'back' | 'resting';
 
 /**
  * One chapter: `startMs` to `endMs` of replay time, which show `displayFromMs` to `displayToMs` of display time. A camp

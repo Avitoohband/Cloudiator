@@ -8,10 +8,10 @@ import { ENCOUNTER_INTERVAL_MS, EXPEDITION_ENCOUNTERS, EXPEDITION_MS, type Exped
 import { slotTimeText } from '../schedule/slot-time';
 
 /**
- * One named mark: `id` is the chapter it stands at ('leaving', 'fight-1' … 'fight-3', 'back'), `fight` its fight's number, and
+ * One named mark: `id` is the chapter it stands at ('leaving', 'fight-1' … 'fight-4', 'back'), `fight` its fight's number, and
  * `replay` whether it is a button into the whole-trip replay at that fight (a revealed fight whose log is still kept).
  */
-export type TripMark = { id: string; text: string; fight: 1 | 2 | 3 | null; replay: boolean };
+export type TripMark = { id: string; text: string; fight: 1 | 2 | 3 | 4 | null; replay: boolean };
 
 /** A camp chapter of the replay: leaving through the gate, back through it, and the rest after it. */
 export type CampKind = 'leaving' | 'back' | 'resting';

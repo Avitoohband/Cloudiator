@@ -546,29 +546,32 @@ with no public bout or reward. Preserve internal idempotency and opponent identi
 **Files:** Create `supabase/migrations/<generated>_patch_1_8.sql`. Update the migration count pins, access and retention
 coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume all Task 4–6D source changes.
 
-- [ ] **Step 1: Write the M30 test** in `tests/db/dungeons.test.ts`: `ships M30 completed from 24-dungeons.sql: functions
+- [x] **Step 1: Write the M30 test** in `tests/db/dungeons.test.ts`: `ships M30 completed from 24-dungeons.sql: functions
   before the CHECKs and triggers that call them, revokes before grants, the source bodies, ACLs, RLS and policies, the
   invoker view and the reload last` (the shape of `tests/db/messages.test.ts`'s M25 test). Run it; expect FAIL (no file).
-- [ ] **Step 2: Generate and complete M30** as in the M28/M29 records: clean M01–M29, apply the final LF source once and
-  capture fingerprint and audit, then `npx --offline --no-install supabase db pull patch_1_8 --local --schema public,private --diff-engine pg-delta --yes`.
+- [x] **Step 2: Generate and complete M30** as in the M28/M29 records: clean M01–M29, apply the final LF source once and
+  capture fingerprint and audit. For future generations, lint the source-applied schema before the pull as recorded in the
+  [migration guide](../../operations/migrations.md#sql-source-iteration-and-deployment-artifact). Generate with
+  `npx --offline --no-install supabase db pull patch_1_8 --local --schema public,private --diff-engine pg-delta --yes`.
   Record the generator's image/cache evidence and compare the draft with the source
   for grants and revokes, RLS and policies, the invoker view, function / trigger / CHECK order, initialisation statements,
   and re-emitted unchanged functions byte-equal to their previous migration; complete every omission (a privilege-only
   omission through `supabase migration new`, the Task 23.1 rule).
-- [ ] **Step 3: Replay:** `npx --offline --no-install supabase db reset --local --no-seed --yes`; inspect the replayed function bodies and
+- [x] **Step 3: Replay:** `npx --offline --no-install supabase db reset --local --no-seed --yes`; inspect the replayed function bodies and
   `search_path`, role ACLs, policies, triggers and the invoker view; the `scripts/schema-fingerprint.sql` output equals the
   source-applied one byte for byte, and again after a second reset; record the line count.
-- [ ] **Step 4: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
-  `npm run test:db` under the DB-test rule, `npx --offline --no-install supabase db lint --local` and the advisors `--local`; expect PASS and no
-  new advisor finding.
-- [ ] **Step 5: Capacity:** rerun the existing 25-of-50 dungeon fixture on the clean M30 replay, with both publications
+- [x] **Step 4: Run** the access audit (`scripts/access-audit.sql`, `tests/db/access-matrix.test.ts`), the full
+  `npm run test:db` under the DB-test rule, `npx --offline --no-install supabase db lint --local` and the advisors `--local`.
+  All 633 tests passed. Avi accepted six new unused-index INFO notices on the empty replay. The M30 record lists each notice.
+- [x] **Step 5: Capacity:** rerun the existing 25-of-50 dungeon fixture on the clean M30 replay, with both publications
   within 120 s by the tick after cutoff and all following settlements accounted for. Combine its physical relation sizes
   with the retained 90-day model, including heap, indexes and TOAST. Model one afternoon per three slots, parties of up
   to three, both temporary plan copies, shared logs and jobs, member stages and summaries, permanent receipts, title
   counts and the approved bot population. Use the measured plan p95 sensitivity and compare the integrated total with
   524,288,000 bytes. Keep all four legacy capacity checks. Run with `CAPACITY_GATE=1`;
   expect PASS. If either fails, stop and report the numbers to the controller (no scope change).
-- [ ] **Step 6: Review and commit** `feat: seal party dungeons and Ludus Nimbus in M30`, with the M30 migration record.
+- [x] **Step 6: Review and commit** `feat: seal party dungeons and Ludus Nimbus in M30`, with the M30 migration record.
+  Independent spec and code review approved `e22dcb0`.
 
 ### Task 7: Client: mockups for Avi, then reads, schedule, results, notifications and camp
 

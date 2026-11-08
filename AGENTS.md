@@ -151,6 +151,14 @@ for the exact guards, observed evidence and limits; vendor caches are unchanged.
 
 ## Generated migration completion — approved local guidance
 
+Avi approved this supplement on 2026-11-08 for **Making and Committing
+Schema Changes**. Lint the source-applied local schema with
+`db lint --local --schema public,private --fail-on warning` before `db pull`.
+Repeat lint after the clean migration-only replay. The first M30 replay
+exposed 12 lint warnings after generation. The corrected replay passed lint.
+The pre-generation placement is an approved workflow change based on that
+observation. See the [migration guide](docs/operations/migrations.md#sql-source-iteration-and-deployment-artifact).
+
 Avi approved this extension on 2026-10-12 for **Making and Committing Schema
 Changes**. With CLI **2.120.0** and its `migra` diff, Task 6 generation omitted
 function/table ACLs and existing-character data backfills, and placed triggers

@@ -41,6 +41,15 @@ describe('Gladiators', () => {
     expect(campActorTag(human)).toBe('NEW');
   });
 
+  it('names a bot’s dungeon without offering a replay of its private activity', () => {
+    const bot: PublicActor = { ...actor('Tullia', 'dungeon:troll-hall'), activityId: 'd0700000-0000-4000-8000-000000000052',
+      botTeam: 'ludus-nimbus', botDuty: 'on-duty' };
+    const html = panel({ world: { ...WORLD, actors: [bot] } });
+    expect(html).toContain('In Troll Hall');
+    expect(button(html, 'Profile: Tullia')).not.toBe('');
+    expect(button(html, 'Watch Tullia&#x27;s dungeon')).toBe('');
+  });
+
   it('gives a gladiator who is neither drawn in the camp nor away a reason for its disabled Find and Follow', () => {
     const html = panel();
     for (const label of ['Find Brutus', 'Follow Brutus']) {

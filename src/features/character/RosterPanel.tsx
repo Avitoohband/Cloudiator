@@ -77,7 +77,8 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
     // never drawn, whatever the roster last said; its row says where it is instead, once.
     const away = isAway(actor);
     const dungeon = dungeonPlace(actor.location);
-    const activityId = actor.activityId;
+    // Bot activities are internal. A public dungeon timeline belongs to a human member.
+    const activityId = actor.botTeam ? null : actor.activityId;
     const duty = actor.botTeam ? botDutyText(actor, clock) : null;
     const resting = actor.resting && !away;
     const absent = !reason && !away && (resting || !inCamp.has(actor.gladiatorId));
@@ -105,7 +106,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
               {dungeon ? 'Watch dungeon' : 'Watch expedition'}
             </button>
           </span>
-        ) : <span className={styles.away}>{dungeon ?? 'On an expedition'}</span>) : (
+        ) : !actor.botTeam && <span className={styles.away}>{dungeon ?? 'On an expedition'}</span>) : (
           <span className={styles.actions}>
             <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Find ${actor.name}`} onClick={() => find(actor.gladiatorId)}>Find</button>
             <button type="button" disabled={!!reason || absent} aria-describedby={describedBy} aria-label={`Follow ${actor.name}`}

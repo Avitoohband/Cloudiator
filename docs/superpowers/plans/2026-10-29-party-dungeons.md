@@ -614,7 +614,7 @@ coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume a
   camp, roster, profile, unranked Arena and replay, at both sizes.
 - [x] **Step 3: Show Avi and wait for his approval in chat.** Record his answer and any change in spec §9 (dated) and
   commit `docs: Avi's dungeon mockup decisions`. No step below and no Task 8 step starts before this approval.
-- [ ] **Step 4: Failing tests:** `dungeon-fixtures.test.ts` `regenerates the dungeon fixtures from planDungeonRun byte
+- [x] **Step 4: Failing tests:** `dungeon-fixtures.test.ts` `regenerates the dungeon fixtures from planDungeonRun byte
   for byte`; `dungeon-read.test.ts` `reads a revealed fight once and serves it from the cache`, `refuses a malformed log
   row as unavailable`, `keeps the fight reference of room and major stages`, `lists a settled dungeon as a notification
   with its dungeon's name`; `schedule-text.test.ts` `offers Wolf Den and Raider Stronghold in the afternoon at level 7 and
@@ -623,15 +623,15 @@ coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume a
   `results-panel` / `notifications` verifies the approved victory and defeat text, including a member knocked out while
   the party cleared. Room pay remains visible to that member. `roster-panel` `says "In Wolf Den" while away`; `locationKind` of
   `dungeon:wolf-den` is `'away'`.
-- [ ] **Step 5: Run** `npx --offline --no-install vitest run tests/domain tests/api tests/features`; expect FAIL.
-- [ ] **Step 6: Implement** the reads, gateway, fixtures, schedule words and result, notification and camp lines. Allowlist
+- [x] **Step 5: Run** `npx --offline --no-install vitest run tests/domain tests/api tests/features`; expect FAIL.
+- [x] **Step 6: Implement** the reads, gateway, fixtures, schedule words and result, notification and camp lines. Allowlist
   a dungeon identifier in the public result, keep owner reward amounts private and preserve the combined look/title read.
-- [ ] **Step 7: Browser tests:** in `planning.spec.ts`, a level-3 player saves a day with Wolf Den in the afternoon and the
+- [x] **Step 7: Browser tests:** in `planning.spec.ts`, a level-3 player saves a day with Wolf Den in the afternoon and the
   command carries `{ kind: 'dungeon', dungeonId: 'wolf-den' }`, the morning select offers no dungeon and shows the note,
   and the panel fits 360 × 740; in `full-screen.spec.ts`, a dungeon member walks out through the gate and the roster line
   reads "In Wolf Den". Cover the BOT tag in every approved surface, including a bot in a mixed dungeon party and in an
   unranked Arena replay. Run with the private Playwright config; expect PASS.
-- [ ] **Step 8: Commit** `feat: dungeon choices, results, notifications and camp lines`.
+- [x] **Step 8: Commit** `feat: dungeon choices, results, notifications and camp lines`.
 
 ### Task 8: Run view and party close-up replay (reusing Patch A)
 
@@ -672,9 +672,9 @@ coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume a
   PartyBattleLog, viewport: { width: number; height: number }): PartyStageLayout` (`{ scale: number; units: { id; x; y;
   scale; facing: 'left' | 'right'; hired: boolean }[] }`).
 
-- [ ] **Step 1: Bind Patch A:** check every name in Consumes against Patch A's merged code and record any rename in the
+- [x] **Step 1: Bind Patch A:** check every name in Consumes against Patch A's merged code and record any rename in the
   task report (use the merged name). If Patch A is not merged, stop and tell the controller.
-- [ ] **Step 2: Failing pure tests:** `dungeon-stage`: `walks the party out at minute 0 and fights at 16, 32, 48 and
+- [x] **Step 2: Failing pure tests:** `dungeon-stage`: `walks the party out at minute 0 and fights at 16, 32, 48 and
   64`, `hides a fight's label while it is fought`, `reads party health from the logs, a fallen member at 0`, `turns to the
   safe point after a lost room`, `never shows a stage after the display time`, `shows the summary only after settlement`;
   `planDungeonTrip`: `plans the nine chapters with the four fights at real speed and walking at TRIP_PACE`, `ends a lost
@@ -683,19 +683,19 @@ coverage, capacity model, `docs/operations/migrations.md` and handoff. Consume a
   logged healthAfter`, `applies a sweep group at once`, `ends with the logged winner side`; `party-stage`: `fits three
   against three on 360 × 740 at an integer scale of at least 2 with no overlap`, `draws the major one integer scale larger
   than the monsters`; `static.test.ts`: `scanner refuses an export without the fixed dungeon page`.
-- [ ] **Step 3: Run** `npx --offline --no-install vitest run tests/domain/dungeon-stage.test.ts tests/domain/party-replay.test.ts tests/domain/party-stage.test.ts tests/domain/away-trip.test.ts tests/static.test.ts tests/deployed.test.ts`; expect FAIL.
-- [ ] **Step 4: Implement** the pure cores, then the scene, view, route and replay as approved in Task 7 step 3.
-- [ ] **Step 5: Browser tests** (`dungeon.spec.ts`, `replay.spec.ts`, fixtures): the watch button opens a running run;
+- [x] **Step 3: Run** `npx --offline --no-install vitest run tests/domain/dungeon-stage.test.ts tests/domain/party-replay.test.ts tests/domain/party-stage.test.ts tests/domain/away-trip.test.ts tests/static.test.ts tests/deployed.test.ts`; expect FAIL.
+- [x] **Step 4: Implement** the pure cores, then the scene, view, route and replay as approved in Task 7 step 3.
+- [x] **Step 5: Browser tests** (`dungeon.spec.ts`, `replay.spec.ts`, fixtures): the watch button opens a running run;
   the party walks and fights at the fixture times; the whole-trip replay plays and its chapters work; a fight opens the
   close-up, which plays, pauses, goes fast, restarts and skips; the `room-lost` run shows the safe point; desktop and
   360 × 740 with no sideways scroll, the longest-fight close-up included (Review Focus 5); reduced motion shows stills;
   Back and Escape return focus; the a11y helpers find no name or contrast issue. Run with the private Playwright config;
   expect PASS.
-- [ ] **Step 6: Commit** `feat: watch dungeon runs and replay party fights`.
+- [x] **Step 6: Commit** `feat: watch dungeon runs and replay party fights`.
 
 ### Task 9: Trailer, gate, review and release
 
-- [ ] **Step 1: Deployed probes:** add to `tests/browser/deployed-checks.ts` the anonymous M30 probes (`dungeon_fights`
+- [x] **Step 1: Deployed probes:** add to `tests/browser/deployed-checks.ts` the anonymous M30 probes (`dungeon_fights`
   returns only revealed rows; the new private tables and functions are refused).
 - [ ] **Step 2: Trailer:** when the test build is playable, read
   `C:/Users/Avi_OP_PC/Documents/Youtube Channel Videos/.agents/skills/cloudiator-patch-video/SKILL.md` and use

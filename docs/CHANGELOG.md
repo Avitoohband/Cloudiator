@@ -30,8 +30,6 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 ### Built
 
-### Planned
-
 - Choose a dungeon for the afternoon: Wolf Den at level 3, Raider Stronghold at level 7, or Troll Hall at level 12.
 - Players group into parties of up to three. Eligible bots take open seats after players, and hired fighters fill the rest.
 - Fight three rooms and a boss in one afternoon. Health carries through the run, and a dungeon costs 40 base stamina.

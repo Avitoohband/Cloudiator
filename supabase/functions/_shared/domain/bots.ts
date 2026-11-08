@@ -44,7 +44,7 @@ function member<Key extends string>(key: Key, name: string, level: number, dunge
 export const BOT_CATALOG = freezeDomain({
   tullia: member('tullia', 'Tullia', 12, 'troll-hall', 'guard'),
   grit: member('grit', 'Grit', 7, 'raider-stronghold', 'striker'),
-  ash: member('ash', 'Ash', 7, 'raider-stronghold', 'skirmisher'),
+  ash: member('ash', 'Cinder', 7, 'raider-stronghold', 'skirmisher'),
   rufus: member('rufus', 'Rufus', 4, 'wolf-den', 'guard'),
   pip: member('pip', 'Pip', 3, 'wolf-den', 'skirmisher'),
 });

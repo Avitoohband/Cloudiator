@@ -28,14 +28,14 @@ parties of up to 3, with eligible bots after human players and hired fighters in
 80-minute afternoon slot; personal rewards where every won fight a member entered pays (a lost major still pays the rooms);
 timed reveals, a run view, a party close-up replay, results, notifications and the camp location; a patch note.
 
-Friend parties and invites, and seeing a friend's planned dungeon, follow in phase 2 (M31; Avi's decisions 5 and 8).
+Friend parties and invites, and seeing a friend's planned dungeon, follow in phase 2 (M32; Avi's decisions 5 and 8).
 Run records and first-clear trophies follow in phase 3. The [title design](2026-10-30-titles-1-7-design.md) separately
 assigns four playable dungeon titles to 1.8. The named bot team is part of the 1.8 release per the later handoff, with
 its own play rules and approval. Preserve existing expedition, Arena, tournament, season, market and replay behavior
 outside that approved bot design. Summoners remain a future class.
 
 **Extension points kept open (not built):**
-- *Friend parties (M31):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
+- *Friend parties (M32):* grouping places pre-formed friend parties first; nothing in the run, rewards or reveals assumes
   strangers. The frozen assignment already records each seat's kind.
 - *Summoners:* the party engine fights *units*, not one unit per member. A spirit is a later unit on the party side with an
   owning seat and no rewards; nothing in the engine, targeting, logs or reveals may assume one unit per seat.
@@ -405,13 +405,15 @@ and record on their own go. Finish the grandiose trailer using the playable test
 
 The archived 2026-10-29 bot-team proposal records Avi's approval of the name, five members, fixed builds, off-duty
 hours, crowd cutoff, tournament exclusion and 20% unranked Arena reward. Avi reaffirmed dungeons and unranked Arena on
-2026-11-07. The production baseline is now v2 and all bot schema ships in M30.
+2026-11-07. The production baseline is v2 and the bot schema shipped in M30. On 2026-11-08, Avi chose Cinder for the
+level 7 skirmisher after the registration preflight found the original label Ash occupied. M31 changes the catalog
+label before registration. The member key is still `ash`.
 
 | Gladiator | Class and stance | Dungeon role | Fixed level |
 | --- | --- | --- | --- |
 | Tullia | Guardian, Defensive | Guard | 12 |
 | Grit | Berserker, Offensive | Striker | 7 |
-| Ash | Duelist, Balanced | Skirmisher | 7 |
+| Cinder | Duelist, Balanced | Skirmisher | 7 |
 | Rufus | Guardian, Defensive | Guard | 4 |
 | Pip | Duelist, Balanced | Skirmisher | 3 |
 
@@ -423,7 +425,7 @@ Precision order. Earned points equal the allocation total. Equipped items use th
 | --- | --- | --- | --- | --- | --- | --- |
 | Tullia | 10 / 0 / 18 / 7 / 3 | `sword:10:common` | `round-shield:10:common` | `iron-helmet:10:common` | `light-armor:10:common` | `light-boots:10:common` |
 | Grit | 13 / 2 / 7 / 0 / 3 | `axe:5:common` | — | `leather-hood:5:common` | `light-armor:5:common` | `light-boots:5:common` |
-| Ash | 5 / 9 / 2 / 0 / 9 | `sword:5:common` | — | `leather-hood:5:common` | `light-armor:5:common` | `light-boots:5:common` |
+| Cinder | 5 / 9 / 2 / 0 / 9 | `sword:5:common` | — | `leather-hood:5:common` | `light-armor:5:common` | `light-boots:5:common` |
 | Rufus | 4 / 0 / 7 / 2 / 1 | `sword:1:common` | `round-shield:1:common` | `iron-helmet:1:common` | `light-armor:1:common` | `light-boots:1:common` |
 | Pip | 3 / 5 / 1 / 0 / 5 | `sword:1:common` | — | `leather-hood:1:common` | `light-armor:1:common` | `light-boots:1:common` |
 
@@ -432,7 +434,7 @@ Precision order. Earned points equal the allocation total. Equipped items use th
   actors stay in camp without a scheduled activity. Show the scheduled return in the viewer's clock when applicable.
   Active bots are exempt from the idle presence rule. The weekly patterns must fit stamina and obey current v2 rules.
 - **Evening rotation.** Avi chose three Arena candidates and two Training bots each on-duty evening on 2026-11-07.
-  Tullia is always a candidate. Rotate the adjacent pair in the circular order Grit, Rufus, Ash, Pip, starting at
+  Tullia is always a candidate. Rotate the adjacent pair in the circular order Grit, Rufus, Cinder, Pip, starting at
   `(UTC weekday from Monday + on-duty game day from 08:00) % 4`. The remaining two train. This keeps two Bronze
   options at different levels alongside Tullia. All five use Rest in the on-duty mornings and are on call in the
   afternoons, subject to ordinary eligibility. For absolute slot `s`, the UTC routine index is

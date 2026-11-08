@@ -59,7 +59,7 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 
 ### Camp, social, and events
 
-- **Friends — Standalone after 1.6, number open.** Friends list and friend requests. Dungeon party invitations and seeing planned dungeon choices within the party follow after 1.8. The dungeon design reserves M31 for friend parties.
+- **Friends — Standalone after 1.6, number open.** Friends list and friend requests. Dungeon party invitations and seeing planned dungeon choices within the party follow after 1.8. The current plan reserves M32 for friend parties after the M31 bot label correction.
 - Expand the camp after 1.8. Reserve plots for future facilities, add housing, decorations and achievements, and add more NPCs and guards. Include the Champ, a former Arena champion, and clickable or tappable NPC detail cards.
 - Add pettable cats, dogs, rabbits, and birds. Offer optional paid cosmetic followers with no gameplay bonuses.
 - Run timed events and seasonal camp themes such as Halloween and Christmas. Explore a world tournament with a statue for the winner.

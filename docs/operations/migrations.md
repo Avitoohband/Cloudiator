@@ -1,5 +1,34 @@
 # Local identity backend and migrations
 
+## Patch 1.8 rollout correction (M31): Cinder
+
+Avi chose **Cinder** for the level 7 skirmisher on 2026-11-08 after the production registration preflight found the
+planned Ash label occupied. `20261108141935_patch_1_8_bot_label.sql` changes only the `name` of member `ash` in
+`private.bot_catalog()`. The migration has SHA-256 `1543c0b9bc045429f4b5641aeeab52a288c87ca8fb19965bc13335784fcb4df2`.
+The private function retains its owner, ACL, invoker mode, volatility and empty search path. All 30 previous
+migrations and `24-dungeons.sql` match the bytes at `7804b1e`. The deployed client and Edge functions already
+read names from stored game data.
+
+**Generation.** Reset the labelled local stack to M30 with `--no-seed` and matched the sealed M30 fingerprint and
+access audit. Applied `supabase/sql/25-bot-label.sql` through the local container's `psql` and passed schema lint.
+CLI 2.120.0 ran `db pull patch_1_8_bot_label --local --schema public,private --diff-engine pg-delta --yes` using
+cached images. The raw draft SHA-256 is `e68d339af2d4da3f7878e510575a2956618f0f431f7129c1055d78619fcde8cf`.
+Kept the generated `SET LOCAL` and completed the single function from the checked source, preserving its body and
+explicit invoker setting. An independent review matched all three bodies and verified the historical bytes.
+
+**Local replay.** Clean `db reset --local --no-seed --yes` produced byte-equal source and replay captures across
+1,483 fingerprint lines and 712 access audit rows. Compared with M30, the catalog function was the only changed
+fingerprint line and the access audit was identical. The replay has 37 title rules, 630 routine cells and zero
+registered bots. Lint passed and the 46 pre-existing informational advisor results matched M30. The regression
+failed with a duplicate name on M30 and passed on M31, preserving the player named Ash and exposing Cinder in
+camp and the public profile. Both runs kept Edge StartedAt unchanged. All 14 focused catalog and registrar unit
+tests passed. The local operator rehearsal registered five benched bots and 22 items, repeated with the same
+state, and rolled back to zero. Evidence is in parent `logs/p18-m31-20261108/`.
+
+**Production boundary.** M31 is pending full release verification and Avi's separate migration go. The approved
+operation must dry-run exactly M31, with empty seed and role lists and `--skip-vault`, in the release quiet window.
+Recheck Cinder name availability and reserved Auth collisions before any later separately approved registration.
+
 ## Patch 1.8 (M30): party dungeons and Ludus Nimbus
 
 **Independently reviewed and applied to production on 2026-11-08.** The generated file is

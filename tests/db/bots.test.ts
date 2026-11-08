@@ -159,6 +159,31 @@ describe('fixed catalog and registry', () => {
     expect(await rowCount()).toEqual({ bots: 1, gladiators: 2, items: 7, receipts: 1, ledger: 1 });
   });
 
+  it('registers and projects Cinder under the ash key while preserving the player named Ash', async () => {
+    const human = await account();
+    const created = await commands.createGladiator({ userId: human.id }, creation('Ash'));
+    if (!created.ok) throw new Error('Human creation control failed');
+    const humanId = created.value.gladiatorId;
+
+    const botOwner = await systemAccount('ash');
+    expect(await registered('ash', botOwner)).toEqual({ created: true, active: false });
+    const botId = await botGladiator('ash');
+    expect(await registered('ash', botOwner)).toEqual({ created: false, active: false });
+    expect(await botGladiator('ash')).toBe(botId);
+    expect(await sql`select owner_id,name,normalized_name from public.gladiators where id=${humanId}`)
+      .toEqual([{ owner_id: human.id, name: 'Ash', normalized_name: 'ash' }]);
+    expect(await sql`select owner_id,name,normalized_name from public.gladiators where id=${botId}`)
+      .toEqual([{ owner_id: botOwner, name: 'Cinder', normalized_name: 'cinder' }]);
+
+    expect(await actor(humanId)).toMatchObject({ gladiatorId: humanId, name: 'Ash' });
+    expect(await actor(humanId)).not.toHaveProperty('botTeam');
+    const botActor = await actor(botId);
+    expect(botActor).toMatchObject({ gladiatorId: botId, name: 'Cinder', botTeam: 'ludus-nimbus' });
+    const { data, error } = await anonymous.from('public_profile_reads').select('profile').eq('gladiator_id', botId).single();
+    expect(error).toBeNull();
+    expect(data?.profile.actor).toEqual(botActor);
+  });
+
   it('benches an existing bot idempotently and an earlier create replay preserves the bench', async () => {
     const id = await systemAccount('tullia');
     await registered('tullia', id);

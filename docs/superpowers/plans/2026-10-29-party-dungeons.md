@@ -20,6 +20,10 @@ close-up replay, and dungeon results, notifications and camp locations.
 `docs/operations/migrations.md`, `docs/operations/verification-gates.md` and `docs/operations/job-leases.md` before Tasks
 4–6.
 
+**2026-11-08 rollout correction.** Avi chose Cinder when production preflight found Ash occupied. Apply the
+separately approved M31 catalog migration before registering the five benched bots. Keep the `ash` member key,
+identity and build. M31 has a separate release gate and production approval. Friend parties move to M32.
+
 **2026-11-07 takeover.** `codex/p18-dungeons` starts in `design` at `5d12d50`, the pushed Patch 1.7.1 line. The live
 client is `8828d0a`, the database is M01–M29 with v2 active, `game-command` is from 1.7.1 and `game-worker` is from 1.6.
 The dungeon MVP, exact v2 reward table and Ludus Nimbus play rules are recorded in the spec. Schedule, Results,

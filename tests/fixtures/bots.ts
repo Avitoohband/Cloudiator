@@ -3,7 +3,7 @@ export const BOT_KITS = [
     ['sword:10:common', 'round-shield:10:common', 'iron-helmet:10:common', 'light-armor:10:common', 'light-boots:10:common'], 84, 39, 115, 'silver'],
   ['grit', 'Grit', 7, 'berserker', 'offensive', 'striker', [13, 2, 7, 0, 3], 25, 38,
     ['axe:5:common', null, 'leather-hood:5:common', 'light-armor:5:common', 'light-boots:5:common'], 46.28, 23, 100, 'bronze'],
-  ['ash', 'Ash', 7, 'duelist', 'balanced', 'skirmisher', [5, 9, 2, 0, 9], 25, 38,
+  ['ash', 'Cinder', 7, 'duelist', 'balanced', 'skirmisher', [5, 9, 2, 0, 9], 25, 38,
     ['sword:5:common', null, 'leather-hood:5:common', 'light-armor:5:common', 'light-boots:5:common'], 48, 23, 100, 'bronze'],
   ['rufus', 'Rufus', 4, 'guardian', 'defensive', 'guard', [4, 0, 7, 2, 1], 14, 26,
     ['sword:1:common', 'round-shield:1:common', 'iron-helmet:1:common', 'light-armor:1:common', 'light-boots:1:common'], 42, 14, 104, 'bronze'],

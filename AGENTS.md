@@ -349,12 +349,15 @@ Observed in Patch 1.8 Task 2: ten loopback and two junction tests failed under
 managed execution. Tested separately: all 2,409 passed in the native offline
 retry with matching source hashes. See the [gate guide](docs/operations/verification-gates.md).
 
-Avi approved the SSR-cache extension on 2026-11-07. If managed Vitest fails
-before test collection with `ENOENT` in its isolated SSR cache, preserve the
-log and rerun the same offline test command natively with `TEMP` and `TMP`
-inside the task's workspace evidence folder. Observed in 1.8 Task 6A: the
-managed cache open failed. Tested separately: the native rerun passed all 33
-focused tests with matching source inputs.
+Avi approved the SSR-cache extension on 2026-11-07 and the managed retry
+first on 2026-11-08. If managed Vitest fails before collection with `ENOENT`
+in its isolated SSR cache, preserve the log and rerun the unchanged offline
+command in managed execution with `TEMP` and `TMP` inside the task's workspace
+evidence folder. If it still fails for the same reason, use a narrowly approved
+native retry with that folder. Task 6A's managed cache open failed and its
+native retry passed 33 focused tests. Task 8's default managed cache open also
+failed. Its managed retry with workspace-local temp passed all 84 focused
+tests.
 
 # Asynchronous browser probes — persistent project override
 

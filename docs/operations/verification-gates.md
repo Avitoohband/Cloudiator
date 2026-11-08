@@ -71,10 +71,13 @@ passed all 2,409 tests. See parent `logs/p18-task2-20261107-ac712d8/`
 for `full-units.log`, `full-units-native.log` and both source manifests.
 
 Use the same evidence rule if managed Vitest fails before test collection
-with `ENOENT` in its isolated SSR cache. Rerun the unchanged offline command
-natively with `TEMP` and `TMP` inside the task's workspace evidence folder.
-In 1.8 Task 6A, the managed SSR-cache open failed and the native rerun passed
-all 33 focused tests. See parent `logs/p18-task6a-20261107-6128c0e/`.
+with `ENOENT` in its isolated SSR cache. Avi approved trying the unchanged
+offline command in managed execution with `TEMP` and `TMP` inside the task's
+workspace evidence folder before a narrowly approved native retry. The
+default managed cache open failed in Patch 1.8 Tasks 6A and 8. Task 6A's
+native retry passed 33 focused tests. Task 8's managed retry with workspace-local
+temp passed 84. See parent `logs/p18-task6a-20261107-6128c0e/` and
+`logs/p18-task8-dungeon-stage/`.
 
 ## Database tests and the local Edge runtime
 

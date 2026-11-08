@@ -24,11 +24,9 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 | `appearance-and-ui-update` | 2026-10-28 | 1.1 and 1.2. It showed 1.3's free look change as "coming soon". It did not show 1.2.1. |
 | `concept-video` | 2026-10-23 | Before 1.0: the concept trailer. |
 
-**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets; 1.7 and 1.7.1 (released 2026-11-06) are new since.
+**Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.8 — Party dungeons and Ludus Nimbus (in progress, not yet released)
-
-### Built
+## 1.8 — Party dungeons and Ludus Nimbus (2026-11-08)
 
 - Choose a dungeon for the afternoon: Wolf Den at level 3, Raider Stronghold at level 7, or Troll Hall at level 12.
 - Players group into parties of up to three. Eligible bots take open seats after players, and hired fighters fill the rest.

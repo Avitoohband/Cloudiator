@@ -1,6 +1,6 @@
 # Cloudiator roadmap
 
-Updated 2026-11-07. Production is **1.7.1**. **1.8** is the next patch in planning. The later items are grouped by area. They have no assigned patch number unless stated.
+Updated 2026-11-08. Production is **1.8**. The later items are grouped by area. They have no assigned patch number unless stated.
 
 ## Patch overview
 
@@ -16,11 +16,11 @@ Updated 2026-11-07. Production is **1.7.1**. **1.8** is the next patch in planni
 | 1.6 | Live | Lower expedition rewards and gear drop rates, salvage at 4 gold, prizes by league, free entry to qualifying tournaments, and profile banners. A third actual Training in one game day becomes Rest, with a warning before saving. The one-time gold switch went live after notice and approval, reducing spendable gold to about a quarter while preserving held fees. |
 | 1.7 | Live | 31 wearable titles, including Founder. Past achievements count, and players can see their title progress and equip a title. |
 | 1.7.1 | Live | Hand-given Game Master and High Ground titles, visible in the picker for holders. |
-| 1.8 | In planning | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
+| 1.8 | Live | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
 
 Release details and dates are in the [changelog](CHANGELOG.md).
 
-## Next release
+## Patch 1.8 details
 
 - **1.8 — Party dungeons.** Wolf Den at level 3, Raider Stronghold at 7, and Troll Hall at 12. Up to three fighters enter for the afternoon, face three rooms and a boss, and keep the rewards from the won fights they entered even if they lose to the boss. Dungeon entry costs 40 base stamina. Avi approved v2 room and boss payouts and a 30% boss chest gear chance.
 - **1.8 — Ludus Nimbus.** Five named fighters marked BOT. Human players take dungeon seats first, then eligible bots, then hired fighters. Bots enter unranked Arena and stay out of tournaments.

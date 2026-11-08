@@ -1677,3 +1677,15 @@ visible message with the exact title, preview, nine body blocks and null action.
 published at 16:29:29.644 UTC. Evidence and payload hashes are in parent `logs/p18-m31-20261108/`.
 The linked patch record requires separate approval.
 
+## Patch 1.8 history record published — 2026-11-08
+
+Avi separately approved the exact history record “Party dungeons and Ludus Nimbus” and its link to
+notification 11. The local rollback rehearsal proved the ordered feature list, the public 1.8
+revision and the visible note link under the anonymous read role. In production, the guarded write
+verified the live client, the quiet window and exact note 11. Readback found one 1.8 record,
+seven exact features in order, and one link to the visible message. The public revision reports
+1.8. The recorded release time is 16:37:31.865 UTC. Evidence is in parent `logs/p18-m31-20261108/`.
+
+The existing Messages and Patch History views use that link for the version badge and the note button.
+Closing and reopening an already open panel fetches the new link.
+

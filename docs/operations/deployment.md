@@ -2,7 +2,7 @@
 
 ## Patch 1.8 rollout — client deployed 2026-11-08
 
-Production serves the 1.8 client from `7804b1e` on Pages deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Supabase has M01–M30, active rules v2, worker v4 and command v8. All 10 anonymous deployed checks passed in 58.6 seconds and GitHub release run `42486998287` passed. The patch record is 1.7.1. Bot registration is on hold because the planned Ash label is occupied. Bot registration, bot activation, the patch note and the patch record each require Avi's separate approval. [Evidence](release-evidence.md#patch-18-client-deployed--2026-11-08).
+Production serves the 1.8 client from `7804b1e` on Pages deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Supabase has M01–M31, active rules v2, worker v4 and command v8. All 10 anonymous deployed checks passed in 58.6 seconds and GitHub release run `42486998287` passed. M31 sets the planned label to Cinder and the roster is empty. The patch record is 1.7.1. Bot registration, bot activation, the patch note and the patch record each require Avi's separate approval. [Evidence](release-evidence.md#patch-18-cinder-correction-applied--2026-11-08).
 
 ## Patch 1.7.1 LIVE — 2026-11-06
 

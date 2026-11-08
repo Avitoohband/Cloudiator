@@ -31,10 +31,13 @@ state, and rolled back to zero. Evidence is in parent `logs/p18-m31-20261108/`.
 case identities. The post-gate fingerprint and access audit matched the clean replay. The gate JSON SHA-256 is
 `1e02975c371d1bd227f942c27a2953aa4ebe910cc58d69f175a8829b1f5a95af`.
 
-**Production boundary.** The read-only hosted fingerprint and 676-row access audit matched M30 with zero findings.
-Cinder was available, with zero registered bots and zero reserved Auth identities. Await Avi's separate M31
-production go. The approved operation must dry-run exactly M31, with empty seed and role lists and `--skip-vault`,
-in the release quiet window. Recheck Cinder and the Auth baseline before any later separately approved registration.
+**Production apply.** Avi separately approved M31. In the quiet window, the structured dry run with
+`--skip-vault` listed exactly M31 with empty seed and role lists. One approved push started at 15:36:56 UTC.
+Readback at 15:37:52 UTC confirmed all 31 migrations, the expected hosted catalog fingerprint
+`fa4c9da12034c56a72038290d9b8913386ef6c7e4670820debe84ed3b3ee86fb` and the unchanged 676-row access audit
+with zero findings. Production retained 37 title rules and 630 routine cells, with zero bots and zero reserved
+Auth identities. The published slot was 373781 and scheduler alerts were zero. Recheck the aggregate label and Auth
+baseline before separately approved registration. See parent `logs/p18-m31-20261108/`.
 
 ## Patch 1.8 (M30): party dungeons and Ludus Nimbus
 

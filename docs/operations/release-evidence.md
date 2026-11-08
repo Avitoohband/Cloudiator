@@ -1623,3 +1623,18 @@ The post-gate catalog matched the replay. The hosted read-only M30 catalog and A
 zero bots, zero reserved Auth identities and no Cinder collision. M31 is ready for its separate production go.
 The client, game functions and in-game patch record are at the prior release checkpoint. [Migration evidence](migrations.md#patch-18-rollout-correction-m31-cinder).
 
+## Patch 1.8 Cinder correction applied — 2026-11-08
+
+Avi separately approved M31 with `--skip-vault` after the native gate passed. The fresh quiet-window and
+structured dry run checks passed, and the one production push listed only
+`20261108141935_patch_1_8_bot_label.sql` with empty seed and role lists. At 15:37:52 UTC, readback confirmed
+31 migrations, the expected 1,480-row catalog fingerprint and unchanged 676-row access audit, 37 title rules,
+630 routine cells, zero registered bots, and a healthy scheduler at published slot 373781. All five planned
+labels and reserved identities were available. The in-game record still displays 1.7.1. Next is the separately
+approved registration of Tullia, Grit, Cinder, Rufus and Pip, all benched. [Migration evidence](migrations.md#patch-18-rollout-correction-m31-cinder).
+
+The exact linked registration statement and aggregate readback were reviewed separately. The local M31 v2
+rehearsal registered five benched actors with 22 bound items, validated the same state on retry, and rolled
+back to its original empty roster. The direct registrar needs a reachable direct database host; the reviewed
+linked transaction uses the same identities and registrar function. See `bot-registration-local-v2-proof.json`.
+

@@ -155,6 +155,8 @@ export function projectDungeonPayload(bytes: DungeonPayloadBytes, runsPerAfterno
  * the rows and bytes it held at the end of the run (used for player, season and singleton tables).
  */
 export type TableMeasure = { regularRows: number; tournamentRows: number; bytesPerRow: number; compactedBytesPerRow?: number; rows: number; totalBytes: number };
+/** Space autovacuum leaves in steady state (autovacuum_vacuum_scale_factor 0.2). */
+export const BLOAT_ALLOWANCE = 1.2;
 export type DatabaseMeasure = {
   players: number;
   /** The database without the game, cron, pg_net and Auth rows (catalogs, extensions, empty relations). */
@@ -172,6 +174,72 @@ export type DatabaseMeasure = {
    */
   commandReceipts: { perPlayerPerDay: number; bytesPerRow: number; summaryBytesPerRow?: number };
 };
+
+export type PhysicalBytes = { heap: number; indexes: number; toast: number };
+export type PhysicalScalePoint = { afternoons: number; bytes: PhysicalBytes };
+
+/** Physical growth per additional afternoon, with fixed relation pages removed by differencing. */
+export function physicalAfternoonSlope(points: readonly PhysicalScalePoint[]) {
+  if (points.length < 3) throw new Error('Expected two late physical growth intervals');
+  const intervals = points.slice(1).map(({ afternoons, bytes }, i) => {
+    const older = points[i];
+    const span = afternoons - older.afternoons;
+    if (span <= 0 || bytes.heap < older.bytes.heap || bytes.indexes < older.bytes.indexes || bytes.toast < older.bytes.toast) {
+      throw new Error('Physical samples must grow monotonically');
+    }
+    return { heap: (bytes.heap - older.bytes.heap) / span, indexes: (bytes.indexes - older.bytes.indexes) / span,
+      toast: (bytes.toast - older.bytes.toast) / span };
+  });
+  const [a, b] = intervals.slice(-2);
+  const perAfternoon = { heap: Math.max(a.heap, b.heap), indexes: Math.max(a.indexes, b.indexes), toast: Math.max(a.toast, b.toast) };
+  return { intervals, perAfternoon };
+}
+
+export type DungeonPhysicalMeasure = {
+  runs: number; frozenPlanRawBytes: number; simulationPlanRawBytes: number;
+  afternoon: Record<string, { full: PhysicalBytes; compacted?: PhysicalBytes }>;
+  bots: { population: number; routineCells: number; roster: PhysicalBytes; duty: PhysicalBytes; arenaHistory: PhysicalBytes };
+};
+const physical = ({ heap, indexes, toast }: PhysicalBytes) => (heap + indexes + toast) * BLOAT_ALLOWANCE;
+
+/** Replace a regular afternoon in every three slots with the measured 25 dungeon / 25 Rest afternoon. */
+export function projectDungeonDatabase(base: DatabaseMeasure, sample: DungeonPhysicalMeasure, p95PlanBytes: number) {
+  const slots = RETENTION.summarySlots;
+  const afternoons = (window: number) => Math.ceil(Math.min(slots, window) / 3);
+  const afternoonDeltaByTable: Record<string, number> = {};
+  for (const [name, measurement] of Object.entries(sample.afternoon)) {
+    const rule = TABLE_CLASSES[name];
+    const kept = rule?.retention === 'detail' ? RETENTION.detailSlots
+      : rule?.retention === 'summary' || rule?.retention === 'permanent' ? slots : undefined;
+    if (kept === undefined) throw new Error(`No afternoon retention window for ${name}`);
+    const old = base.tables[name];
+    const legacyFull = (old?.regularRows ?? 0) * (old?.bytesPerRow ?? 0);
+    const legacyCompact = (old?.regularRows ?? 0) * (old?.compactedBytesPerRow ?? old?.bytesPerRow ?? 0);
+    const full = afternoons(Math.min(kept, rule.compactAfterSlots ?? kept));
+    const compacted = afternoons(kept) - full;
+    if (compacted && !measurement.compacted) throw new Error(`Missing compacted physical sample for ${name}`);
+    afternoonDeltaByTable[name] = full * (physical(measurement.full) - legacyFull)
+      + (measurement.compacted ? compacted * (physical(measurement.compacted) - legacyCompact) : 0);
+  }
+  const p95RawExtra = (size: number, window: number) => sample.runs * afternoons(window) * Math.max(0, p95PlanBytes - size);
+  // Keep the measured compression and actual heap/index/TOAST for the observed plan. Charge the extra bytes at
+  // uncompressed size, plus 10% for TOAST chunks and their index, and the same free-space allowance as the physical sample.
+  const p95ExtraBytes = (p95RawExtra(sample.frozenPlanRawBytes, RETENTION.detailSlots)
+    + p95RawExtra(sample.simulationPlanRawBytes, JOB_PAYLOAD_SLOTS)) * 1.1 * BLOAT_ALLOWANCE;
+  const legacy = projectDatabase(base).at90Days;
+  const rowBytes = (name: string) => base.tables[name]?.bytesPerRow ?? 0;
+  // Up to four extra title rows and four new counters per human. Their retained rows are not in the legacy world.
+  const titleBytes = base.players * 4 * (rowBytes('public.title_counters') + rowBytes('public.gladiator_titles'));
+  // At 50 humans all five registered bots are off duty. At <45 humans the active bots keep the combined load under 50.
+  // Charge five full player-state allowances as a bound on account, inventory and projection storage. The seeded routine
+  // relation is already in the legacy singleton total; add only the measured roster, frozen duty and meeting-history rows.
+  const botFixedBytes = sample.bots.population * (legacy.byClass.player / Math.max(base.players, 1) + base.system.authBytesPerPlayer);
+  const botBytes = botFixedBytes + physical(sample.bots.roster) + physical(sample.bots.duty) + physical(sample.bots.arenaHistory);
+  const measuredBytes = legacy.bytes + Object.values(afternoonDeltaByTable).reduce((sum, bytes) => sum + bytes, 0) + titleBytes + botBytes;
+  return { legacyBytes: legacy.bytes, afternoonDeltaByTable, p95ExtraBytes, titleBytes, botBytes,
+    routineCells: sample.bots.routineCells, routineBytesAlreadyCounted: legacy.byTable['private.bot_routines'] ?? 0,
+    measuredBytes, benchmarkBytes: measuredBytes + p95ExtraBytes, budgetBytes: BUDGETS.databaseBytes };
+}
 
 /** The database after `slots` slots: every class at its retention window, permanent rows and seasons accumulated. */
 export function projectDatabase(m: DatabaseMeasure) {

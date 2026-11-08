@@ -38,7 +38,7 @@ function topLevelStatements(sql: string): string[] {
 
 /** Rows a boundary in progress depends on: its frozen cohort, its jobs and their inputs, snapshots, plans and guards. */
 const IN_PROGRESS = ['private.jobs', 'private.job_dependencies', 'private.activity_snapshots', 'private.boundaries', 'private.boundary_members',
-  'private.boundary_work', 'private.rules_versions', 'private.expedition_plans', 'private.arena_assignments', 'private.arena_assignment_sides',
+  'private.boundary_work', 'private.bot_slot_duty', 'private.rules_versions', 'private.expedition_plans', 'private.arena_assignments', 'private.arena_assignment_sides',
   'private.tournaments', 'private.tournament_entries', 'private.tournament_bouts', 'private.pending_build_preparations', 'private.settled_slots',
   'private.dungeon_runs', 'private.dungeon_run_members', 'private.dungeon_results', 'public.dungeon_fights',
   'public.activities', 'public.activity_stages'];
@@ -93,12 +93,13 @@ describe('in-progress snapshots across migrations', () => {
       alter table "private"."jobs" alter column "input" type text;
       alter table private.jobs disable trigger guard_job;
       update private.jobs set input = '{}' where status <> 'completed';
+      update private.bot_slot_duty set directive = 'rest';
       update public.gladiators set level = 1;
       insert into private.rules_versions(version, active) values ('v2', true);
       drop trigger if exists guard_job on private.jobs;
       drop table private.expedition_plans;
     `).map(f => f.split(':')[0])).toEqual(['removes rows', 'removes rows', 'rewrites a table', 'rewrites a table', 'rewrites a table',
-      'rewrites in-progress state', 'unreviewed backfill', 'changes a rules version', 'drops a guard without its replacement', 'drops a table']);
+      'rewrites in-progress state', 'rewrites in-progress state', 'unreviewed backfill', 'changes a rules version', 'drops a guard without its replacement', 'drops a table']);
     // What migrations do and may: functions whose bodies write (the guarded runtime), additive columns, a replaced guard.
     expect(retentionFindings('m.sql', `
       create or replace function private.f() returns void language plpgsql as $$ begin delete from private.jobs; update private.jobs set status='x'; end $$;

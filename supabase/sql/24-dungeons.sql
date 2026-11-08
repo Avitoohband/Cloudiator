@@ -53,6 +53,10 @@ revoke all on private.bots,private.bot_routines from public,anon,authenticated,s
 -- Only the private invoker coordinator needs the routine join, role and active flag. No API reader gets raw bot data.
 grant select(gladiator_id,member_key,role,active) on private.bots to service_role;
 grant select(member_key,week_index,directive) on private.bot_routines to service_role;
+drop policy if exists backend_read on private.bots;
+create policy backend_read on private.bots for select to service_role using (true);
+drop policy if exists backend_read on private.bot_routines;
+create policy backend_read on private.bot_routines for select to service_role using (true);
 
 with weekly_slots as (
   select j as week_index,j%18 as day_slot,(j/18+(j%18-8)/3)%4 as pair_start
@@ -79,6 +83,7 @@ create table if not exists private.bot_slot_duty (
   returns_at_ms bigint,
   primary key(slot_index,gladiator_id)
 );
+create index if not exists bot_slot_duty_gladiator_idx on private.bot_slot_duty(gladiator_id);
 alter table private.bot_slot_duty drop constraint if exists bot_slot_duty_check,
   add constraint bot_slot_duty_check check (returns_at_ms is null or (directive='off-duty' and returns_at_ms>slot_index*4800000));
 alter table private.bot_slot_duty enable row level security;
@@ -560,6 +565,7 @@ create table if not exists private.bot_arena_history (
   primary key(human_id,bot_id),
   check (human_id<>bot_id)
 );
+create index if not exists bot_arena_history_bot_idx on private.bot_arena_history(bot_id);
 alter table private.bot_arena_history enable row level security;
 revoke all on private.bot_arena_history from public,anon,authenticated,service_role;
 grant select,insert,update on private.bot_arena_history to service_role;
@@ -779,7 +785,7 @@ end $$;
 
 create or replace function private.boundary_pair(target bigint) returns text language plpgsql security invoker set search_path='' as $$
 declare b private.boundaries%rowtype; season bigint; l text; now_ms bigint:=private.planning_now_ms(); seed text; input jsonb; dungeon text; has_arena boolean;
-  required_level integer; humans integer; pool jsonb; chosen uuid[]; used uuid[]:='{}';
+  required_level integer; humans integer; pool jsonb; chosen uuid[]; used uuid[]:='{}'::uuid[];
 begin
   select * into b from private.boundaries where slot_index=target;
   select exists(select 1 from public.activities a join private.activity_snapshots s on s.activity_id=a.id
@@ -861,7 +867,7 @@ create or replace function private.accept_grouping(job uuid,result jsonb) return
 language plpgsql security invoker set search_path='' as $$
 declare j private.jobs%rowtype; dungeon text; expected jsonb; scoped jsonb; entrant jsonb; pool jsonb; next_bot integer:=0;
   run jsonb; seat jsonb; run_number bigint; seat_number bigint; gid text;
-  seen text[]:='{}'; has_human boolean; has_filler boolean; now_ms bigint;
+  seen text[]:='{}'::text[]; has_human boolean; has_filler boolean; now_ms bigint;
 begin
   select * into j from private.jobs where id=job;
   if not found or j.kind is distinct from 'pair' or j.rules_version is distinct from 'v2'
@@ -1096,10 +1102,10 @@ end $$;
 -- 12 * 480 ordinary events + 6 * 120 * 5 additional sweep events + victory. The separate raw serialized cap
 -- also bounds unknown keys and string sizes. It is deliberately larger than the released 3v3 and major logs.
 create or replace function private.safe_party_log(value jsonb) returns jsonb
-language plpgsql immutable security invoker set search_path='' as $$
+language plpgsql stable security invoker set search_path='' as $$
 declare
   participants jsonb:='[]'::jsonb; events jsonb; p jsonb; e jsonb; k text; projected jsonb;
-  ids text[]:='{}'; sides integer[]:='{}'; roles text[]:='{}';
+  ids text[]:='{}'::text[]; sides integer[]:='{}'::integer[]; roles text[]:='{}'::text[];
   duration bigint; elapsed bigint; previous_ms bigint:=0; event_count integer; seq integer:=0;
   attacker integer; defender integer; side integer; party_count integer:=0; hp_index integer:=0;
   participant_keys constant text[]:=array['id','gladiatorId','name','classId','stance','maxHealth','initialHealth',
@@ -1227,7 +1233,7 @@ declare
   f jsonb; stage jsonb; outcome jsonb; reward jsonb; loot jsonb; log jsonb; ref jsonb;
   next_stage integer:=0; fight_count integer; stage_count integer; fight_ordinal integer:=0; member_count integer;
   stage_ms bigint; start_ms bigint; end_ms bigint; previous_end bigint;
-  members_seen text[]:='{}'; terminals uuid[]; bot_terminals uuid[]; entered jsonb; wins jsonb; prior_job uuid; reveal_job uuid;
+  members_seen text[]:='{}'::text[]; terminals uuid[]; bot_terminals uuid[]; entered jsonb; wins jsonb; prior_job uuid; reveal_job uuid;
   bot_seats jsonb;
 begin
   select * into j from private.jobs where id=job;
@@ -2472,7 +2478,7 @@ create or replace function private.create_bot(member_key text, actor_id uuid) re
 language plpgsql security invoker set search_path='' as $$
 declare kit jsonb:=private.bot_catalog()->member_key; gid uuid:=gen_random_uuid(); owner uuid; active boolean;
   now_ms bigint; slot bigint; item record; item_id uuid; stamina bigint;
-  equipped jsonb:='{"weapon":null,"offHand":null,"head":null,"body":null,"feet":null}';
+  equipped jsonb:='{"weapon":null,"offHand":null,"head":null,"body":null,"feet":null}'::jsonb;
 begin
   if kit is null or actor_id is null then
     raise exception 'Unknown bot member or missing identity' using errcode='23514';

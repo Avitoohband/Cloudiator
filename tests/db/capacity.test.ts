@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { sql, resetIdentity } from '../fixtures/db.ts';
 import { CAPACITY, logSection, measureCadence, measureDungeonCapacity, measureSeasonClose, measureStandings, measureWorld, writeSection } from '../fixtures/capacity.ts';
-import { BUDGETS, RETENTION, TABLE_CLASSES, projectDatabase, projectDungeonPayload, projectEgress, projectInvocations, share } from '../performance/capacity-model.ts';
+import { BUDGETS, RETENTION, TABLE_CLASSES, projectDatabase, projectDungeonDatabase, projectDungeonPayload, projectEgress,
+  projectInvocations, share, type DatabaseMeasure } from '../performance/capacity-model.ts';
 
 // Task 23.3 (Review Focus 3): the target load against the free-tier budgets, measured on the local stack.
 // 1. A measurement world of CAPACITY.players characters runs CAPACITY.slots accelerated boundaries (after one warm-up slot)
@@ -32,12 +33,14 @@ const GATE = process.env.CAPACITY_GATE === '1';
  * records those windows, and the report's boundary line gives their verdict.
  */
 const TARGET_CHARACTERS = 50;
+let retained: { mixed: DatabaseMeasure; default: DatabaseMeasure } | undefined;
 
 afterAll(async () => { await resetIdentity(); await sql.end(); });
 
 describe('Task 23.3: capacity against the free-tier budgets', () => {
   it('measures database growth, invocations and egress over accelerated boundaries with the real worker', async () => {
     const world = await measureWorld(CAPACITY);
+    retained = { mixed: world.database, default: world.plainDatabase };
     // Everything is projected and written first, so a failed check below still leaves the whole measurement.
     const database = projectDatabase(world.database);
     const invocations = projectInvocations(world.invocations, { players: CAPACITY.players, commandsPerPlayerPerDay: CAPACITY.commandsPerPlayerPerDay,
@@ -142,15 +145,27 @@ describe('Task 23.3: capacity against the free-tier budgets', () => {
 
   it('publishes an afternoon with 25 of 50 characters in dungeons within 120 s, by the tick after the cutoff', async () => {
     const entrants = 25;
-    const { afternoon, following, flagged, runs, members, fights, bytes, settlements } = await measureDungeonCapacity(TARGET_CHARACTERS, entrants);
+    // The capacity gate's legacy measures already ran above. A focused run or a report at another population still
+    // measures a 50-player base before the dungeon sample, so the projected afternoon always replaces the same load.
+    if (retained?.mixed.players !== TARGET_CHARACTERS) {
+      const base = await measureWorld({ ...CAPACITY, players: TARGET_CHARACTERS });
+      retained = { mixed: base.database, default: base.plainDatabase };
+    }
+    const { afternoon, following, flagged, runs, members, fights, bytes, settlements, physical, physicalRowCounts } =
+      await measureDungeonCapacity(TARGET_CHARACTERS, entrants);
     // Task 2's 50-run Troll Hall benchmark p95 in compact UTF-8. Include this case for each of the two raw plan copies.
     const benchmarkPlanBytes = 85_292;
     const measured = projectDungeonPayload(bytes, runs, members, RETENTION.summarySlots);
     const benchmark = projectDungeonPayload({ ...bytes, frozenPlan: Math.max(bytes.frozenPlan, benchmarkPlanBytes),
       simulationResult: Math.max(bytes.simulationResult, benchmarkPlanBytes) }, runs, members, RETENTION.summarySlots);
+    const integrated = {
+      mixed: projectDungeonDatabase(retained.mixed, physical, benchmarkPlanBytes),
+      default: projectDungeonDatabase(retained.default, physical, benchmarkPlanBytes),
+    };
     const reportWindow = (window: typeof following) => ({ firstTicks: window.firstTicks, previousSettlements: window.previousSettlements,
       settledInCutoffTick: window.settledInCutoffTick, publishedMs: window.publishedMs, statuses: window.statuses });
-    const report = { players: TARGET_CHARACTERS, runs, members, fights, bytes, benchmarkPlanBytes, measured, benchmark, settlements,
+    const report = { players: TARGET_CHARACTERS, runs, members, fights, bytes, benchmarkPlanBytes, measured, benchmark, physical, physicalRowCounts,
+      integrated, settlements,
       afternoon: reportWindow(afternoon), following: reportWindow(following) };
     logSection('dungeons', report);
     writeSection('dungeons', report);
@@ -171,5 +186,14 @@ describe('Task 23.3: capacity against the free-tier budgets', () => {
     }
     for (const size of Object.values(bytes)) expect(size).toBeGreaterThan(0);
     expect(bytes.simulationResult).toBe(bytes.frozenPlan);
-  }, 600_000);
+    expect(physical.bots.routineCells).toBe(630);
+    expect(physicalRowCounts).toEqual({ roster: 5, duty: 630, arenaHistory: 250 });
+    expect(physical.afternoon['private.dungeon_results'].full.toast).toBeGreaterThan(0);
+    expect(physical.afternoon['private.jobs'].full.toast).toBeGreaterThan(0);
+    if (GATE) {
+      for (const [name, projection] of Object.entries(integrated)) {
+        expect.soft(projection.benchmarkBytes, `90-day physical dungeon projection at plan p95, ${name}`).toBeLessThanOrEqual(BUDGETS.databaseBytes);
+      }
+    }
+  }, 1_800_000);
 });

@@ -31,6 +31,14 @@ const line = (r: Row) => [r.section, r.object, r.grantee, r.privilege, r.detail]
 const lines = (rows: Row[]) => rows.map(line).sort();
 const toRows = (result: unknown) => [...(result as Row[])];
 const audit = async () => toRows(await sql.unsafe(AUDIT));
+it('pins the two worker-only SELECT policies on the bot registry and routine', async () => {
+  const policies = (await audit()).filter(r => r.section === 'policy' &&
+    /^(private\.bot_routines|private\.bots)\./.test(r.object));
+  expect(lines(policies)).toEqual([
+    'policy private.bot_routines.backend_read service_role SELECT permissive md5:eb28d87532d6edd9b635727493ef89f7',
+    'policy private.bots.backend_read service_role SELECT permissive md5:eb28d87532d6edd9b635727493ef89f7',
+  ]);
+});
 it('keeps bot operations owner-only and private scheduling scoped to the worker', async () => {
   const functions = ['private.create_bot(text,uuid)', 'private.bench_bot(text)', 'private.activate_bot(text)',
     'private.set_bot_active(text,boolean)', 'private.bot_catalog()'];

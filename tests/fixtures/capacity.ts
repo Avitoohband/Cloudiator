@@ -12,8 +12,9 @@ import { seasonAt } from '../../supabase/functions/_shared/domain/season.ts';
 import type { WorkerReport } from '../../supabase/functions/_shared/domain/types.ts';
 import { readMarket, readOwner, readProfile, readRecent, readRevision, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
   readTournamentLog, readWorld } from '../../src/lib/api/reads.ts';
-import { DISPATCH_PER_MINUTE, TABLE_CLASSES, type DatabaseMeasure, type EgressMeasure, type Encoding, type ReadSize, type RoleSizes,
-  type DungeonPayloadBytes, type TableMeasure } from '../performance/capacity-model.ts';
+import { BLOAT_ALLOWANCE, DISPATCH_PER_MINUTE, RETENTION, TABLE_CLASSES, physicalAfternoonSlope, type DatabaseMeasure, type EgressMeasure,
+  type Encoding, type ReadSize, type RoleSizes, type DungeonPayloadBytes, type DungeonPhysicalMeasure, type PhysicalBytes,
+  type PhysicalScalePoint, type TableMeasure } from '../performance/capacity-model.ts';
 export { logSection, writeSection } from '../performance/harness.ts';
 
 // Task 23.3 measurement harness for tests/db/capacity.test.ts (run through `npm run test:db`, or scripts/resource-report.mjs).
@@ -175,8 +176,6 @@ const LINE_POINTER = 4;
 /** B-tree leaves fill to about 75 % under random (UUID) inserts; MAXALIGN is 8 bytes. */
 const INDEX_FILL = 0.75;
 const align8 = (n: number) => Math.ceil(n / 8) * 8;
-/** Space autovacuum leaves in steady state (autovacuum_vacuum_scale_factor 0.2): rows take 20 % more than their live size. */
-export const BLOAT_ALLOWANCE = 1.2;
 /**
  * The modeled live size of an average row of `table` as stored: its tuple as `pg_column_size(row)` gives it (header and data,
  * TOASTed values at their compressed size), its line pointer, and one entry per index (an 8-byte index tuple header plus
@@ -713,6 +712,102 @@ export async function measureCadence(players: number) {
   return { expeditions: summary(expeditions), arena: summary(arena), flagged: [...expeditions.flagged, ...arena.flagged].length };
 }
 
+const DUNGEON_STORAGE_SCALE = [8, 32, 64, 128] as const;
+const REUSED_IDENTITIES = new Set(['gladiator_id', 'owner_id', 'human_id', 'bot_id', 'worker_id']);
+
+/** Pack real rows with the live indexes and TOAST settings, then measure marginal growth as afternoons accumulate. */
+async function dungeonPhysical(slot: number, runs: number, bytes: DungeonPayloadBytes) {
+  return await sql.begin(async tx => {
+    type Scale = { points: PhysicalScalePoint[]; intervals: PhysicalBytes[] };
+    const details: Record<string, { rows: number; full: PhysicalBytes; compacted?: PhysicalBytes; scale?: Scale; compactedScale?: Scale }> = {};
+    const sizes = async () => {
+      const [row] = await tx<{ total: number; indexes: number; toast: number }[]>`select pg_total_relation_size(c.oid)::float8 as total,
+        pg_indexes_size(c.oid)::float8 as indexes,
+        case when c.reltoastrelid=0 then 0 else pg_total_relation_size(c.reltoastrelid) end::float8 as toast
+        from pg_class c where c.oid=to_regclass('pg_temp.m30_capacity_sample')`;
+      return { heap: row.total - row.indexes - row.toast, indexes: row.indexes, toast: row.toast };
+    };
+    const measure = async (table: string, selection: string, repeatAfternoons = true) => {
+      await tx.unsafe(`create temporary table m30_capacity_sample (like ${quoted(table)} including indexes including storage including compression) on commit drop`);
+      let measured: { rows: number; full: PhysicalBytes; scale?: Scale };
+      if (repeatAfternoons) {
+        const columns = await tx<{ name: string; type: string }[]>`select attname as name, atttypid::regtype::text as type
+          from pg_attribute where attrelid=to_regclass(${table}) and attnum>0 and not attisdropped order by attnum`;
+        const slotDelta = '((copies.replica-1)*3)';
+        const timeDelta = `(${slotDelta}::bigint*${SLOT})`;
+        const columnsForCopy = columns.map(({ name, type }) => {
+          const field = `t.${quoted(name)}`;
+          // Hash only transient IDs. Keep actors/accounts and payloads unchanged so repeated records retain their real widths.
+          if (type === 'uuid' && !REUSED_IDENTITIES.has(name)) return `md5(${field}::text||':'||copies.replica)::uuid`;
+          if (name === 'run_id') return `regexp_replace(${field},'^dungeon:[0-9]+:','dungeon:'||(${slot}+${slotDelta})||':')`;
+          if (name === 'dedupe_key' || name === 'battle_id') return `${field}||':'||copies.replica`;
+          if (name === 'slot_index') return `${field}+${slotDelta}`;
+          if (/_(?:at|after|until)_ms$/.test(name)) return `case when ${field}>0 then ${field}+${timeDelta} else ${field} end`;
+          if (type === 'timestamp with time zone') return `${field}+${timeDelta}*interval '1 millisecond'`;
+          return field;
+        }).join(', ');
+        let prior = 0;
+        let totalRows = 0;
+        const points: PhysicalScalePoint[] = [];
+        for (const afternoons of DUNGEON_STORAGE_SCALE) {
+          const inserted = await tx.unsafe(`insert into pg_temp.m30_capacity_sample select ${columnsForCopy}
+            from (${selection}) t cross join generate_series(${prior + 1},${afternoons}) as copies(replica) order by copies.replica`);
+          if (prior && inserted.count * prior !== totalRows * (afternoons - prior)) throw new Error(`Different copy counts for ${table}`);
+          totalRows += inserted.count;
+          points.push({ afternoons, bytes: await sizes() });
+          prior = afternoons;
+        }
+        const { intervals, perAfternoon } = physicalAfternoonSlope(points);
+        measured = { rows: totalRows / prior, full: perAfternoon, scale: { points, intervals } };
+      } else {
+        const before = await sizes();
+        const inserted = await tx.unsafe(`insert into pg_temp.m30_capacity_sample ${selection}`);
+        const after = await sizes();
+        measured = { rows: inserted.count, full: { heap: after.heap - before.heap, indexes: after.indexes - before.indexes, toast: after.toast - before.toast } };
+      }
+      await tx`drop table pg_temp.m30_capacity_sample`;
+      return measured;
+    };
+    const activity = `select id from public.activities where slot_index=${slot}`;
+    const jobs = `select id from private.jobs where slot_index=${slot}`;
+    const receipts = `select receipt_id from private.settled_slots where slot_index=${slot}`;
+    const filters: Record<string, string> = {
+      'private.activity_snapshots': `activity_id in (${activity})`,
+      'private.arena_assignment_sides': `activity_id in (${activity})`,
+      'private.arena_assignments': `slot_index=${slot}`,
+      'private.arena_results': 'true',
+      'private.dungeon_results': 'true', 'private.dungeon_run_members': 'true', 'private.dungeon_runs': 'true',
+      'private.expedition_plans': `activity_id in (${activity})`,
+      'private.job_attempts': `job_id in (${jobs})`, 'private.job_dependencies': `job_id in (${jobs})`,
+      'private.jobs': `slot_index=${slot}`, 'private.settled_slots': `slot_index=${slot}`,
+      'public.activities': `slot_index=${slot}`, 'public.activity_stages': `activity_id in (${activity})`,
+      'public.dungeon_fights': 'true', 'public.operation_receipts': `receipt_id in (${receipts})`,
+      'public.recent_results': `activity_id in (${activity})`, 'public.wallet_ledger': `receipt_id in (${receipts})`,
+    };
+    for (const [table, filter] of Object.entries(filters)) {
+      details[table] = await measure(table, `select * from ${quoted(table)} where ${filter}`);
+    }
+    const compactedJobs = await measure('private.jobs', `select (jsonb_populate_record(null::private.jobs, to_jsonb(j) ||
+      jsonb_build_object('input','{"compacted":true}'::jsonb,'result','{"ok":true,"compacted":true}'::jsonb))).*
+      from private.jobs j where j.slot_index=${slot}`);
+    if (compactedJobs.rows !== details['private.jobs'].rows) throw new Error('Compacted job sample changed row count');
+    details['private.jobs'].compacted = compactedJobs.full;
+    details['private.jobs'].compactedScale = compactedJobs.scale;
+    // These upper-bound samples charge every registered bot every detail slot, and one last meeting for every human/bot
+    // pair. Use the real roster and indexed table layouts without creating any live bot or changing the 25-of-50 workload.
+    const bots = `select member_key, md5('capacity-bot:'||member_key)::uuid as id, kit->>'role' as role
+      from jsonb_each(private.bot_catalog()) as roster(member_key,kit)`;
+    const roster = await measure('private.bots', `select member_key,'ludus-nimbus',id,role,false from (${bots}) b`, false);
+    const duty = await measure('private.bot_slot_duty', `select s,id,'off-duty',role,null::bigint from (${bots}) b
+      cross join generate_series(0,${RETENTION.detailSlots - 1}) s`, false);
+    const arenaHistory = await measure('private.bot_arena_history', `select g.id,b.id,${slot} from public.gladiators g cross join (${bots}) b`, false);
+    const [{ routineCells }] = await tx<{ routineCells: number }[]>`select count(*)::int as "routineCells" from private.bot_routines`;
+    const physical: DungeonPhysicalMeasure = { runs, frozenPlanRawBytes: bytes.frozenPlan, simulationPlanRawBytes: bytes.simulationResult,
+      afternoon: details, bots: { population: roster.rows, routineCells, roster: roster.full, duty: duty.full, arenaHistory: arenaHistory.full } };
+    return { physical, physicalRowCounts: { roster: roster.rows, duty: duty.rows, arenaHistory: arenaHistory.rows } };
+  });
+}
+
 /** One v2 dungeon afternoon plus the following boundary, which must finish the shared reveals and all member settlements. */
 export async function measureDungeonCapacity(players: number, entrants: number) {
   const slot = 301;
@@ -757,7 +852,8 @@ export async function measureDungeonCapacity(players: number, entrants: number) 
       join public.activities a on a.id=r.activity_id where a.slot_index=${slot} and a.resolved_kind='dungeon') as "publicSummary",
     (select avg(octet_length(o.result::text))::float8 from public.operation_receipts o
       join private.settled_slots s using(receipt_id) where s.slot_index=${slot} and s.resolved_kind='dungeon') as "receiptSummary"`;
-  return { ...windows, runs, members, fights, bytes, settlements };
+  const stored = await dungeonPhysical(slot, runs, bytes);
+  return { ...windows, runs, members, fights, bytes, settlements, ...stored };
 }
 
 // ---- Season close and standings ----------------------------------------------------------------------------------------

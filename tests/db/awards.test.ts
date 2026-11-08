@@ -314,7 +314,7 @@ it('ships M29 completed from 23-awards.sql: the rules before their grants, the s
   expect(files).toHaveLength(1);
   expect(files[0]).toMatch(/^\d{14}_patch_1_7_1\.sql$/);
   // The 29th migration, after M28 (Patch 1.7, wearable titles).
-  expect(all).toHaveLength(29);
+  expect(all).toHaveLength(30);
   expect(all[27]).toBe('20261106064426_patch_1_7.sql');
   expect(all[28]).toBe(files[0]);
   const m29 = readFileSync(new URL(files[0], dir), 'utf8');

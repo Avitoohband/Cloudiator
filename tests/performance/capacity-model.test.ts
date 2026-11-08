@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { WORKER_LIMITS } from '../../supabase/functions/_shared/backend/jobs.ts';
-import { BUDGETS, JOB_PAYLOAD_SLOTS, MONTHS, RETENTION, TABLE_CLASSES, projectDatabase, projectDungeonPayload, projectEgress, projectInvocations, share,
+import { BUDGETS, JOB_PAYLOAD_SLOTS, MONTHS, RETENTION, TABLE_CLASSES, physicalAfternoonSlope, projectDatabase, projectDungeonDatabase, projectDungeonPayload, projectEgress, projectInvocations, share,
   tournamentsIn } from './capacity-model.ts';
 
 // Task 23.3: the arithmetic that turns the measured run into monthly figures, pinned on small synthetic inputs.
@@ -65,6 +65,41 @@ describe('Task 23.3: capacity projections', () => {
     expect(projectDungeonPayload(bytes, 2, 5, 2_000)).toEqual({
       detail: 42 * detailPerAfternoon, simulationJobs: 7 * 200, summaries: 540 * summaryPerAfternoon,
       total: 42 * detailPerAfternoon + 7 * 200 + 540 * summaryPerAfternoon,
+    });
+  });
+
+  it('replaces legacy afternoon rows and retains the two physical plan copies for different windows', () => {
+    const part = (heap: number, indexes = 0, toast = 0) => ({ heap, indexes, toast });
+    const projected = projectDungeonDatabase({ players: 0, baselineBytes: 0, slotsPerSeason: 504,
+      tables: {
+        'public.activities': { regularRows: 50, tournamentRows: 50, bytesPerRow: 10, rows: 0, totalBytes: 0 },
+        'private.jobs': { regularRows: 1, tournamentRows: 1, bytesPerRow: 100, compactedBytesPerRow: 10, rows: 0, totalBytes: 0 },
+        'private.bot_routines': { regularRows: 0, tournamentRows: 0, bytesPerRow: 0, rows: 630, totalBytes: 8192 },
+      }, system: { cronBytesPerRow: 0, netBytes: 0, authBytesPerPlayer: 0 }, commandReceipts: { perPlayerPerDay: 0, bytesPerRow: 0 },
+    }, { runs: 2, frozenPlanRawBytes: 80, simulationPlanRawBytes: 60,
+      afternoon: { 'public.activities': { full: part(500, 100, 100) }, 'private.jobs': { full: part(200, 25, 25), compacted: part(50) },
+        'private.dungeon_results': { full: part(100, 10, 90) } },
+      bots: { population: 5, routineCells: 630, roster: part(100), duty: part(200), arenaHistory: part(300) },
+    }, 100);
+    expect(projected.afternoonDeltaByTable).toEqual({ 'public.activities': 183_600, 'private.jobs': 3150, 'private.dungeon_results': 10_080 });
+    // Packed samples carry the measured payloads. The p95 extra covers two copies (42 and 7 afternoons), plus TOAST overhead.
+    expect(projected.p95ExtraBytes).toBeCloseTo(2956.8);
+    expect(projected.botBytes).toBe(720);
+    expect(projected.benchmarkBytes).toBeCloseTo(projected.legacyBytes + 183_600 + 3150 + 10_080 + 720 + 2956.8);
+  });
+
+  it('excludes fixed page allocation from repeated growth and keeps the larger late slope for each storage part', () => {
+    // The fixed 8 KiB page in each storage part must never become a recurring per-afternoon cost. The late samples
+    // have different index growth rates, so using the final slope alone would undercount that measured component.
+    const points = [
+      { afternoons: 8, bytes: { heap: 8352, indexes: 8272, toast: 8672 } },
+      { afternoons: 32, bytes: { heap: 8832, indexes: 8512, toast: 10112 } },
+      { afternoons: 64, bytes: { heap: 9472, indexes: 8896, toast: 12032 } },
+      { afternoons: 128, bytes: { heap: 10752, indexes: 9536, toast: 15872 } },
+    ];
+    expect(physicalAfternoonSlope(points)).toEqual({
+      intervals: [{ heap: 20, indexes: 10, toast: 60 }, { heap: 20, indexes: 12, toast: 60 }, { heap: 20, indexes: 10, toast: 60 }],
+      perAfternoon: { heap: 20, indexes: 12, toast: 60 },
     });
   });
 

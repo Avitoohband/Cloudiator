@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { TransactionSql } from 'postgres';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,6 +32,59 @@ async function selectRules(tx: TransactionSql, version: 'v1' | 'v2') {
 beforeEach(() => resetWorld(TARGET - 1));
 afterEach(() => sql.begin(tx => selectRules(tx, 'v1')));
 afterAll(async () => { await resetIdentity(); await sql.end(); });
+
+it('ships M30 completed from 24-dungeons.sql: functions before the CHECKs and triggers that call them, revokes before grants, the source bodies, ACLs, RLS and policies, the invoker view and the reload last', () => {
+  const dir = new URL('../../supabase/migrations/', import.meta.url);
+  const all = readdirSync(dir).filter(name => name.endsWith('.sql')).sort();
+  const files = all.filter(name => /^\d{14}_patch_1_8\.sql$/.test(name));
+  expect(files, 'M30 generated migration').toHaveLength(1);
+  expect(all.slice(27, 30)).toEqual(['20261106064426_patch_1_7.sql', '20261106200416_patch_1_7_1.sql', files[0]]);
+  const migration = readFileSync(new URL(files[0], dir), 'utf8');
+  const source = readFileSync(new URL('../../supabase/sql/24-dungeons.sql', import.meta.url), 'utf8');
+  expect(migration).not.toMatch(/\r|^\uFEFF|pg-delta:\s*transaction\s*=\s*false|supabase:transaction-mode/i);
+  const header = migration.split(/\n(?!--)/, 1)[0];
+  expect(header).toContain('Supabase CLI 2.120.0');
+  expect(header).toContain('npx.cmd --offline --no-install supabase db pull patch_1_8 --local --schema public,private --diff-engine pg-delta --yes');
+  expect(header).toContain('supabase/sql/24-dungeons.sql on M01–M29');
+
+  // The source and generated artifact use ordinary SQL strings and dollar-quoted routines.
+  // Separate top-level statements without splitting comments, strings, or stored function bodies.
+  const statements = (sql: string) => {
+    const tokens = /\$(\w*)\$[^]*?\$\1\$|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[^]*?\*\/|;/g;
+    const result: string[] = [];
+    let start = 0;
+    let statement = '';
+    for (const match of sql.matchAll(tokens)) {
+      statement += sql.slice(start, match.index);
+      start = match.index + match[0].length;
+      if (match[0] === ';') { result.push(statement.trim()); statement = ''; }
+      else if (!/^--|^\/\*/.test(match[0])) statement += match[0];
+      else statement += ' ';
+    }
+    expect((statement + sql.slice(start)).trim(), 'unterminated SQL').toBe('');
+    return result;
+  };
+  const from = statements(source);
+  const shipped = statements(migration);
+  expect(from.shift()).toBe('begin');
+  expect(from.pop()).toBe('commit');
+  expect(shipped.shift()?.toLowerCase()).toBe('set local check_function_bodies = off');
+  expect(shipped.at(-1)).toMatch(/^notify pgrst,\s*'reload schema'$/i);
+
+  const routine = (statement: string) => {
+    if (!/^create or replace function\s/i.test(statement)) return null;
+    const match = /^(create or replace function\s+[^]*?)\s+as\s+\$(\w*)\$([^]*)\$\2\$$/i.exec(statement);
+    expect(match, statement.slice(0, 100)).not.toBeNull();
+    const [, declaration, , body] = match!;
+    const signature = declaration.toLowerCase().replace(/\s+/g, ' ').replace(/\s*([(),])\s*/g, '$1')
+      .replace(/ security invoker\b/, '').replace(/set search_path\s*(?:=|to)\s*/, 'set search_path=');
+    return { signature, body };
+  };
+  const shape = (statement: string) => routine(statement) ?? statement;
+  // Replaying the source order preserves CHECK/trigger dependencies, revoke-then-grant semantics,
+  // the routine initializer, invoker view and final reload. Only routine formatting may differ.
+  expect(shipped.map(shape)).toEqual(from.map(shape));
+});
 
 it.each(['edit_schedule', 'edit_day_schedule'] as const)('validates fresh dungeon %s after consulting its receipt', async wrapper => {
   const owner = await fighter({ firstSlot: TARGET });

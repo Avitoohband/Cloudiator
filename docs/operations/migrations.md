@@ -1,5 +1,81 @@
 # Local identity backend and migrations
 
+## Patch 1.8 (M30): party dungeons and Ludus Nimbus
+
+**Verified local candidate, pending independent review.** The generated file is
+`supabase/migrations/20261107212314_patch_1_8.sql` (SHA-256
+`48f936823b62ab7cf465cd88dc152b11b3b5f93efdb3aebd0a607f1812a10c3f`). It carries the reviewed
+`supabase/sql/24-dungeons.sql` source (`ddb210ec31a5527d5d4057e2792a6c575b51b6cb850d857554c2086fe4896734`)
+for v2 dungeon groups, simulations, reveals, settlement and retention, four dungeon titles, and the private
+Ludus Nimbus roster, duty and Arena history. M01–M29 are byte-unchanged.
+
+**Generation and completion.** On 2026-11-07, reset the labelled local Cloudiator database explicitly to M29 with
+`--no-seed`; its 1,357-line fingerprint and 671-row access audit matched the previous M29 proof. Applied the reviewed
+LF SQL24 once through labelled `psql` stdin. CLI 2.120.0 ran
+`npx.cmd --offline --no-install supabase db pull patch_1_8 --local --schema public,private --diff-engine pg-delta --yes`
+at 21:23:13–21:23:20 UTC. The cached image inventory was unchanged and no image event occurred. The pull recorded
+M30 in local migration history. The separate replays below replaced that database. The 211,666-byte raw draft has
+SHA-256 `c34cd5c10fd9086bc8760c4841360fc0a41db01ccf2f3d3642f80b5780ee653b`.
+
+- Kept the generated `SET LOCAL` and all 38 routines (11 new, 27 changed), each with its reviewed source body
+  and settings, in the source's dependency order. No unchanged historical body was re-emitted.
+- Restated the source's tables, constraints and indexes, including the bot catalog before its CHECKs; the
+  triggers after their tables and functions; the RLS and policies; and the scoped revokes and grants in order.
+  Used `CREATE OR REPLACE ... security_invoker=true` for `owner_state`, preserving its existing ACL in place.
+- Restored the source's initializer for the 630 routine cells and kept the PostgREST reload last. Supabase owns
+  the transaction. The completion map accounts for all 161 raw statements, including the excluded view ACL churn.
+
+**Replay evidence.** Two `db reset --local --no-seed --yes` runs applied migrations alone. Each replay matched the
+source-applied database byte for byte across 1,483 fingerprint lines, 712 access audit rows and the 121-line read-only
+inspection. The audit adds 41 rows (7 column, 6 function, 9 policy, 19 relation), removes none and reports zero
+findings. The inspection confirms invoker routines with empty search paths, validated constraints, enabled
+triggers including the dungeon ledger predicate, the invoker view, 37 title rules, 630 routine cells and no bot
+registrations. `tests/db/dungeons.test.ts` failed for the missing M30, failed on the raw draft's missing provenance,
+and passed on the first completed candidate. Each run kept the same Edge start time after a 30-second quiet period and the
+worker's own 401. Exact inputs, byte comparisons and logs for both candidates are in parent `logs/p18-task6e-20261107-7375fae/`.
+
+**Gate findings.** The first candidate produced 12 lint warnings and eight new advisor INFO findings. Corrected seven
+implicit casts and the volatility of `safe_party_log` after checking that it has no catalog dependents. Indexed the
+two bot foreign keys and added service-role-only SELECT policies for the bot registry and routine, without broadening
+their column grants. The regenerated candidate's `db lint --local --schema public,private --fail-on warning` is clean.
+Fresh M30 has 46 INFO findings against M29's 40 and zero WARN or ERROR. Avi approved these exact six fresh-database
+`unused_index` notices for the local M30 gate on 2026-11-08:
+
+- `private.bot_slot_duty.bot_slot_duty_gladiator_idx`
+- `private.bot_arena_history.bot_arena_history_bot_idx`
+- `private.dungeon_runs.dungeon_runs_grouping_job_idx`
+- `private.dungeon_runs.dungeon_runs_slot_idx`
+- `private.dungeon_results.dungeon_results_simulation_job_idx`
+- `public.dungeon_fights.dungeon_fights_reveal_idx`
+
+After the full suite, advisors reported eight INFO findings. Three were M30 additions on the approved list:
+`bot_slot_duty_gladiator_idx`, `bot_arena_history_bot_idx` and `dungeon_fights_reveal_idx`. There were no new
+findings outside that list and no warnings or errors.
+
+**Full database and capacity gate.** On 2026-11-08, `CAPACITY_GATE=1 npm run test:db` passed 633/633 tests in
+35 files on a clean M30 replay, including the final artifact, access matrix and both M28 historical title variants.
+The Edge worker returned its own 401 after a 30.849-second quiet period and kept `2026-11-08T06:51:10.763350546Z`
+as its exact start time throughout the 505.35-second suite. The catalog, access audit and inspection remained byte
+equal after the run, including all seven historical title triggers and the dungeon ledger predicate. A final clean
+reset replayed M01–M30 alone and again matched all three captures. The full native offline unit suite passed
+2,480/2,480 tests, and TypeScript passed.
+
+The 25 dungeon and 25 Rest fixture produced nine parties and 21 fights. The two boundaries published in 752 ms
+and 61,505 ms. All 20 worker responses were HTTP 200, and all 50 prior activities settled in the cutoff tick, with
+the last settlement at 1,460 ms. All four legacy capacity cases passed. The integrated 90-day p95 projection was
+451,651,222 bytes mixed and 394,449,954 bytes default against the 524,288,000-byte limit. The mixed projection
+is above the existing 400 MiB monitoring threshold. The estimate includes the retained two plan copies, shared
+rows, member stages and summaries, permanent settlement records, title counts, and five bots. The 630 routine
+cells are already in the singleton allowance.
+
+The first guarded run passed 632/633 tests and failed the two physical storage assertions in the dungeon case.
+Its single-afternoon sample projected 613,463,142 bytes mixed and 555,878,041 bytes default at p95 by repeating
+the first heap and index allocations. The final measurement sampled 8, 32, 64 and 128 copies of the realized
+afternoon with live indexes and TOAST. It used the larger per-component growth rate across the two late intervals.
+The two late total rates differed by at most 5.88% across the sampled relations. The model retained the approved
+workload, retention, budget and p95 allowance. Detailed physical points, arithmetic, and both raw test runs are
+preserved under parent `logs/p18-task6e-20261107-7375fae/round2/`.
+
 ## Patch 1.7.1 (M29): hand-given titles
 
 M29 is `supabase/migrations/20261106200416_patch_1_7_1.sql`, Patch 1.7.1's one database change (Avi: one database change per

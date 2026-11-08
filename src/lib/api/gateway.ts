@@ -1,18 +1,18 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
-import type { BattleLog, RevealedTimeline } from '@contracts/events';
+import type { BattleLog, PartyBattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
 import type { MarketPage, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, readBouts, readLooks, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readLooks, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
   readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
 export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
- * tournament, tournament log, recent results) can be read without a session. `owner()`, `notifications()`, `bouts()`, `command()` and
+ * tournament, tournament log, dungeon fight, recent results) can be read without a session. `owner()`, `notifications()`, `bouts()`, `command()` and
  * `sendPresence()` require a signed-in account.
  */
 export interface GameGateway {
@@ -63,6 +63,8 @@ export interface GameGateway {
    * (Task 23.4, C7); callers share it and must not change it.
    */
   tournamentLog(boutId: string): Promise<BattleLog>;
+  /** An immutable, revealed party log, loaded on demand by the run and fight ordinal in its timeline pointer. */
+  dungeonFight(runId: string, ordinal: 1 | 2 | 3 | 4): Promise<PartyBattleLog>;
   recent(cursor?: string): Promise<ResultsPage>;
   /**
    * The looks chosen at creation (`Appearance`, or null for the legacy look) of up to 16 gladiators, in one public read; a
@@ -91,8 +93,8 @@ export interface GameGateway {
    */
   patches(beforeSortKey?: number): Promise<{ items: PatchEntry[]; more: boolean }>;
   /**
-   * The owner's newest 20 settled results (training, expedition, Arena, tournament; never a rest) as notifications, newest first,
-   * each with its credited summary, an expedition's destination and the level it reached when it raised the level. Owner-only: it needs
+   * The owner's newest 20 settled results (training, expedition, Arena, tournament, dungeon; never a rest) as notifications, newest first,
+   * each with its credited summary, the expedition or dungeon name and the level it reached when it raised the level. Owner-only: it needs
    * a signed-in account, and a result appears only once it is revealed (settled at or before the server's now). Whether each is new is
    * the owner read's `inbox` (`notificationsSeenMs`); a `see-notifications` command moves that mark. Load it when the Notifications tab opens.
    * `newestSettledMs` is the newest settled time of every row the read fetched, a row the list leaves out included (null when there
@@ -123,6 +125,26 @@ const isRefusal = (result: object): result is { ok: false; code: ApiErrorCode; r
  * slot's logs (a 50-entrant tournament has 49 bouts, in each of four leagues) for the rest of the session.
  */
 export const TOURNAMENT_LOG_CACHE_LIMIT = 64;
+/** Party logs are larger than Arena logs; four runs fit while a long viewing session stays bounded. */
+const DUNGEON_LOG_CACHE_LIMIT = 16;
+
+/** Store pending and successful reads in least to most recently used order. Failed reads may be retried. */
+function cachedLog<T>(cache: Map<string, Promise<T>>, limit: number, key: string, load: () => Promise<T>): Promise<T> {
+  const cached = cache.get(key);
+  if (cached) {
+    cache.delete(key);
+    cache.set(key, cached);
+    return cached;
+  }
+  const pending = load();
+  cache.set(key, pending);
+  for (const oldest of cache.keys()) {
+    if (cache.size <= limit) break;
+    cache.delete(oldest);
+  }
+  pending.catch(() => { if (cache.get(key) === pending) cache.delete(key); });
+  return pending;
+}
 
 /**
  * Data API reads. The server enforces ownership and reveal authorization: the public projections are readable without a
@@ -136,6 +158,7 @@ export function createLiveGateway(): GameGateway {
    * dropped first. A failed load is forgotten so it can be asked again.
    */
   const logs = new Map<string, Promise<BattleLog>>();
+  const dungeonLogs = new Map<string, Promise<PartyBattleLog>>();
   /** An owner read: needs a session, and fails `unauthenticated` if the account changes while it runs. */
   async function read<T>(load: (client: BrowserClient) => Promise<T>): Promise<T> {
     const client = getBrowserClient();
@@ -201,7 +224,7 @@ export function createLiveGateway(): GameGateway {
         const next = session?.user.id ?? null;
         if (event === 'INITIAL_SESSION') { account = next; return; }
         if (next === account) return;
-        account = next; epoch++; logs.clear(); listener();
+        account = next; epoch++; logs.clear(); dungeonLogs.clear(); listener();
       });
       return () => data.subscription.unsubscribe();
     },
@@ -265,23 +288,13 @@ export function createLiveGateway(): GameGateway {
     standings: (league, cursor, seasonId) => publicRead(client => readStandings(client, league, cursor, seasonId)),
     standingOf: (league, gladiatorId) => publicRead(client => readStandingOf(client, league, gladiatorId)),
     tournament: id => publicRead(client => readTournament(client, id)),
-    tournamentLog: boutId => {
-      // A due log is public and immutable, so a cached one is served without a session check; an account change clears the cache.
-      const cached = logs.get(boutId);
-      if (cached) {
-        logs.delete(boutId);
-        logs.set(boutId, cached);
-        return cached;
-      }
-      const pending = publicRead(client => readTournamentLog(client, boutId));
-      logs.set(boutId, pending);
-      // Dropping a log still loading only means its next caller reads it again; this one still gets it.
-      for (const oldest of logs.keys()) {
-        if (logs.size <= TOURNAMENT_LOG_CACHE_LIMIT) break;
-        logs.delete(oldest);
-      }
-      pending.catch(() => { if (logs.get(boutId) === pending) logs.delete(boutId); });
-      return pending;
+    // A due log is public and immutable; an account change clears both caches.
+    tournamentLog: boutId => cachedLog(logs, TOURNAMENT_LOG_CACHE_LIMIT, boutId, () => publicRead(client => readTournamentLog(client, boutId))),
+    dungeonFight: (runId, ordinal) => {
+      const ref = parseDungeonFightRef(runId, ordinal);
+      if (!ref) return Promise.reject(new GatewayReadError('unavailable'));
+      return cachedLog(dungeonLogs, DUNGEON_LOG_CACHE_LIMIT, `${ref.runId}:${ref.ordinal}`,
+        () => publicRead(client => readDungeonFight(client, ref.runId, ref.ordinal)));
     },
     market: (cursor, seller) => publicRead(client => readMarket(client, cursor, seller)),
   };

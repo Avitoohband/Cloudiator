@@ -6,10 +6,12 @@
 // Google), and its PKCE exchange signs in `LiveTransport.googleUser`.
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
-import type { ActivitySummary, PartyBattleLog, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import type { GameMessage, MarketListing, OwnerState, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import type { ActivitySummary, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { GameMessage, MarketListing, OwnerState, PublicActor, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 import type { PatchEntry } from '../../src/lib/patch';
+import { DUNGEON_FIXTURES, type DungeonFightRow, type DungeonFixtureKey } from '../fixtures/dungeons';
 
 export const SUPABASE_URL = 'http://127.0.0.1:54321';
 /** The development server's test-only publishable key (playwright.config.ts); a visitor's request carries it as its bearer. */
@@ -68,7 +70,7 @@ export type LiveData = {
   /** Activity timelines by activity id: their stages, public completion and (for a signed-in reader) owner summary. */
   timelines?: Readonly<Record<string, RevealedTimeline>>;
   /** Revealed dungeon fights as stored by the public read model. */
-  dungeonFights?: readonly { run_id: string; ordinal: 1 | 2 | 3 | 4; reveal_at_ms: number; log: PartyBattleLog }[];
+  dungeonFights?: readonly DungeonFightRow[];
   /** Recent public results, newest first. */
   recent?: readonly ResultRow[];
   /** Open marketplace offers (the public `market_offers` projection), in any order. */
@@ -99,6 +101,8 @@ export type LiveData = {
   bouts?: readonly RevealedTimeline[];
   /** The signed-in reader's owner state; null or absent is an account with no gladiator. */
   owner?: OwnerState | null;
+  /** When set, only this account can see the fixture owner and its activities. Other signed-in readers receive no owner rows. */
+  ownerAccountId?: string;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
   serverNowMs?: () => number;
   /**
@@ -109,6 +113,29 @@ export type LiveData = {
   /** The account a Google sign-in through the test-only consent page signs in (a new `testUser` by default). */
   googleUser?: TestUser;
 };
+
+/** One engine-generated dungeon as a live, settled, or pruned Data API scenario, with a fixed server clock. */
+export function dungeonLiveData(key: DungeonFixtureKey, options: { nowMs?: number; expired?: boolean; owner?: OwnerState | null; ownerAccountId?: string } = {}): LiveData {
+  const { activityId, dungeonId, gladiatorId, name, level, startsAtMs, timeline, fights } = DUNGEON_FIXTURES[key];
+  const dungeon = CATALOG_V1.dungeons[dungeonId], endsAtMs = timeline.completion.settledAtMs;
+  const expiry = timeline.completion.replayExpiry;
+  const now = options.nowMs ?? (options.expired && expiry.state === 'available' ? expiry.expiresAtMs : timeline.serverNowMs);
+  const active = startsAtMs <= now && now < endsAtMs;
+  const replayExpiry = options.expired ? { state: 'expired' as const } : expiry;
+  const summary = { ...timeline.summary, replayExpiry }, completion = { ...timeline.completion, replayExpiry };
+  const participant = fights[0].log.participants.find(p => p.gladiatorId === gladiatorId)!;
+  const actor: PublicActor = { gladiatorId, name, level, classId: participant.classId!, equipmentSilhouettes: [...participant.equipmentSilhouettes] as PublicActor['equipmentSilhouettes'],
+    appearance: null, league: options.owner?.progression.league ?? 'bronze', phase: 'afternoon', location: active ? `dungeon:${dungeonId}` : 'camp',
+    activityId: active ? activityId : null, activityStatus: active ? 'active' : 'idle', startsAtMs: active ? startsAtMs : null,
+    endsAtMs: active ? endsAtMs : null, visibleStage: null, resting: false };
+  const owner: OwnerState | null = options.owner ? { ...options.owner, gladiatorId, name,
+    progression: { ...options.owner.progression, level },
+    currentActivity: active ? { id: activityId, kind: 'dungeon', status: 'active', startsAtMs, endsAtMs, label: `Dungeon: ${dungeon.name}` } : null } : null;
+  return { world: { ...emptyWorld(now), actors: [actor] }, rulesVersion: 'v2', serverNowMs: () => now, owner, ownerAccountId: options.ownerAccountId,
+    timelines: { [activityId]: { ...timeline, serverNowMs: now, visibleThroughMs: now, stages: options.expired ? [] : timeline.stages, completion,
+      summary: owner ? summary : undefined } },
+    recent: [{ gladiatorId, name, summary: completion }], notifications: owner ? [{ summary }] : [], dungeonFights: options.expired ? [] : fights };
+}
 
 /** One Data API request: its table, reader and query, and `at`, the test runner's Date.now() when the route received it. */
 export type LiveRequest = { table: string; reader: string | null; query: URLSearchParams; at: number };
@@ -366,6 +393,7 @@ export function liveRows(table: string, params: URLSearchParams, state: LiveStat
 
 /** The Data API objects the app reads, as rows, with their reveal-time row filters applied at the server time `now`. */
 function tables({ world, owner, now, reader, data }: LiveState): Record<string, Table> {
+  const ownsRows = data.ownerAccountId === undefined || reader === data.ownerAccountId;
   // The owner's bouts are timelines too (their stages and summaries); one timeline per activity id, a bout replacing a timeline of the same id.
   const timelines = [...new Map([...Object.values(data.timelines ?? {}), ...(data.bouts ?? [])].map(t => [t.activityId, t] as const)).values()];
   const actorOf = (activityId: string) => world.actors.find(a => a.activityId === activityId);
@@ -440,11 +468,11 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
       patch_features: p.features.map((text, i) => ({ position: i + 1, text })).reverse() })) },
     patch_features: { rows: (data.patches ?? []).flatMap(p => p.features.map((text, i) => ({ patch: p.number, position: i + 1, text }))) },
     // Owner-only: RLS shows a signed-in reader its own rows; `anon` has no grant at all.
-    owner_state: { private: true, rows: reader !== null && owner ? [{ state: owner }] : [] },
+    owner_state: { private: true, rows: reader !== null && ownsRows && owner ? [{ state: owner }] : [] },
     // The timelines' owner summaries, the owner's settled results as `readNotifications` selects them (the kind, the slot, the expedition
     // asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the server's now:
     // none here, every result a spec lists has been revealed) and the owner's bouts as `readBouts` selects them.
-    activities: { private: true, rows: activityRows(timelines, owner, data) },
+    activities: { private: true, rows: ownsRows ? activityRows(timelines, owner, data) : [] },
   };
 }
 

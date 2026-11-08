@@ -53,9 +53,9 @@ test('reads the owner\'s newest 20 settled results from the server\'s now, newes
   expect(requests.map(r => r.table)).toEqual(['world_revision', 'activities']);
   const query = requests[1].query;
   expect(query.get('select')).toBe('id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))');
-  // Completed and revealed (settled at or before the server's now), never a rest, in the four kinds that earn something, with a summary.
+  // Completed and revealed (settled at or before the server's now), never a rest, in the five kinds that earn something, with a summary.
   expect(query.get('status')).toBe('eq.completed');
-  expect(query.get('resolved_kind')).toBe('in.(training,expedition,arena,tournament)');
+  expect(query.get('resolved_kind')).toBe('in.(training,expedition,arena,tournament,dungeon)');
   expect(query.get('summary')).toBe('not.is.null');
   expect(query.get('settled_at_ms')).toBe(`lte.${SERVER_NOW}`);
   expect(query.get('order')).toBe('settled_at_ms.desc,slot_index.desc');
@@ -72,6 +72,16 @@ test('reads the owner\'s newest 20 settled results from the server\'s now, newes
   // The newest settled time of the rows fetched (the "seen" mark's upper bound); none fetched, none.
   expect(newestSettledMs).toBe(SERVER_NOW - 1000);
   expect(await readNotifications(api(serve([]), SESSION).client)).toEqual({ items: [], newestSettledMs: null });
+});
+
+test('names a dungeon from its retained catalog ID and keeps only valid owner notification summaries', async () => {
+  const dungeon = { id: 'wolf-den', terminalFight: 4, partyWon: true } as const;
+  const summary = summaryOf(1, 'dungeon', { money: 1, xp: 6 }, { dungeon, success: false, result: 'defeat' });
+  const unknown = { ...summary, dungeon: { ...dungeon, id: 'constructor' } };
+  const { client } = api(serve([row(1, 'dungeon', {}, { summary }), row(2, 'dungeon', {}, { summary: unknown })]), SESSION);
+  expect((await readNotifications(client)).items).toEqual([
+    { activityId: summary.activityId, kind: 'dungeon', settledAtMs: summary.settledAtMs, summary, destination: 'Wolf Den', levelAfter: null },
+  ]);
 });
 
 test('names the destination from the catalog: the three expeditions, and null for an id it does not know or none', async () => {

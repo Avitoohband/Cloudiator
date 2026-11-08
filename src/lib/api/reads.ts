@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActivityId, Attributes, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
-import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PublicActivitySummary, RevealedTimeline } from '@contracts/events';
+import type { ActivityId, Attributes, DungeonId, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
+import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PartyBattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '@contracts/events';
 import type {
   EarnedTitle, GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
@@ -180,6 +180,50 @@ export async function readProfile(client: SupabaseClient, id: GladiatorId): Prom
   return { ...profile, actor: withTitle(profile.actor), titlesEarned: count(titlesEarned) ? titlesEarned : 0, prestige: prestige.map(prestigeAward), build: publicBuildOf(build), joinedAtMs: count(joinedAtMs) ? joinedAtMs : null,
     arenaRecord: count(wins) && count(losses) ? { wins, losses } : null, banner: banner === true };
 }
+
+type DungeonFightRef = NonNullable<RevealedStage['fight']>;
+const dungeonIdOf = (value: unknown): DungeonId | null =>
+  typeof value === 'string' && Object.hasOwn(CATALOG_V1.dungeons, value) ? value as DungeonId : null;
+const fightOrdinal = (value: unknown): value is DungeonFightRef['ordinal'] => value === 1 || value === 2 || value === 3 || value === 4;
+/** A run key is `dungeon:<slot>:<catalog id>:<positive run number>`, not a member's activity UUID. */
+export function parseDungeonFightRef(runId: unknown, ordinal: unknown): DungeonFightRef | null {
+  if (typeof runId !== 'string' || !fightOrdinal(ordinal)) return null;
+  const match = /^dungeon:(0|[1-9]\d{0,15}):([a-z-]+):([1-9]\d{0,15})$/.exec(runId);
+  return match && match[0] === runId && dungeonIdOf(match[2]) && count(Number(match[1])) && count(Number(match[3])) ? { runId, ordinal } : null;
+}
+
+function dungeonOutcome(value: unknown): NonNullable<PublicActivitySummary['dungeon']> | null {
+  if (!record(value)) return null;
+  const id = dungeonIdOf(value.id);
+  return id && fightOrdinal(value.terminalFight) && typeof value.partyWon === 'boolean'
+    ? { id, terminalFight: value.terminalFight, partyWon: value.partyWon } : null;
+}
+
+const RESULT_KINDS: readonly unknown[] = ['training', 'rest', 'expedition', 'arena', 'tournament', 'dungeon'];
+const RESULTS: readonly unknown[] = ['completed', 'victory', 'defeat'];
+/** Public completions contain only outcome and replay metadata, even when a signed-in owner reads them. */
+function publicCompletion(value: unknown): PublicActivitySummary | undefined {
+  if (!record(value) || typeof value.activityId !== 'string' || !RESULT_KINDS.includes(value.resolvedKind)
+    || !RESULTS.includes(value.result) || typeof value.success !== 'boolean' || !count(value.settledAtMs) || !record(value.replayExpiry)) return undefined;
+  const expiry = value.replayExpiry;
+  const replayExpiry: PublicActivitySummary['replayExpiry'] | null = expiry.state === 'expired' ? { state: 'expired' }
+    : expiry.state === 'available' && count(expiry.expiresAtMs) ? { state: 'available', expiresAtMs: expiry.expiresAtMs } : null;
+  if (!replayExpiry) return undefined;
+  const { activityId, success, settledAtMs } = value;
+  const resolvedKind = value.resolvedKind as PublicActivitySummary['resolvedKind'], result = value.result as PublicActivitySummary['result'];
+  const dungeon = resolvedKind === 'dungeon' ? dungeonOutcome(value.dungeon) : null;
+  return { activityId, resolvedKind, result, success, settledAtMs, replayExpiry,
+    ...(dungeon ? { dungeon } : {}), ...(resolvedKind === 'arena' && value.arenaMode === 'unranked' ? { arenaMode: 'unranked' } : {}) };
+}
+
+function timelineStage(stage: RevealedStage): RevealedStage {
+  const { kind, fight, id, label, revealedAtMs, startedAtMs, endsAtMs } = stage;
+  if (kind !== 'room' && kind !== 'major') return stage;
+  const ref = parseDungeonFightRef(fight?.runId, fight?.ordinal);
+  // Room and major stages keep only a pointer. No fight data is loaded or copied into the timeline.
+  return { id, kind, label, revealedAtMs, startedAtMs, endsAtMs,
+    ...(ref && (ref.ordinal === 4) === (kind === 'major') ? { fight: ref } : {}) };
+}
 /**
  * One activity's revealed timeline: its due stages and its public completion, which anyone may read. With `ownerSummary`
  * it also asks `activities` for the owner's credited summary; that table is owner-only, so a visitor's read must pass
@@ -193,13 +237,14 @@ export async function readTimeline(client: SupabaseClient, id: ActivityId, optio
   for (;;) {
     const rows = checked(await client.from('visible_events').select('ordinal,stage').eq('activity_id', id)
       .lte('reveal_at_ms', clock.serverNowMs).gt('ordinal', ordinal).order('ordinal').limit(50));
-    result.stages.push(...rows.map(row => row.stage));
+    result.stages.push(...rows.map(row => timelineStage(row.stage)));
     if (rows.length < 50) break;
     ordinal = rows.at(-1)!.ordinal;
   }
   const publicResult = await client.from('recent_results').select('summary').eq('activity_id', id).lte('reveal_at_ms', clock.serverNowMs).maybeSingle();
   if (publicResult.error) checked(publicResult);
-  if (publicResult.data) result.completion = publicResult.data.summary;
+  const completion = publicCompletion(publicResult.data?.summary);
+  if (completion) result.completion = completion;
   if (!options.ownerSummary) return result;
   // This separate query remains owner-only through activities RLS; no privileged fallback.
   const owner = await client.from('activities').select('summary').eq('id', id).eq('status', 'completed').lte('settled_at_ms', clock.serverNowMs).maybeSingle();
@@ -223,7 +268,10 @@ export async function readRecent(client: SupabaseClient, cursor?: string): Promi
   const after = parseResultsCursor(cursor);
   if (after) query = query.or(`reveal_at_ms.lt.${after.time},and(reveal_at_ms.eq.${after.time},activity_id.gt.${after.id})`);
   const rows = checked(await query);
-  return { rows: rows.map(row => ({ gladiatorId: row.gladiator_id, name: row.name, summary: row.summary })),
+  return { rows: rows.flatMap(row => {
+    const summary = publicCompletion(row.summary);
+    return summary ? [{ gladiatorId: row.gladiator_id, name: row.name, summary }] : [];
+  }),
     nextCursor: rows.length === 50 ? `${rows.at(-1)!.reveal_at_ms}:${rows.at(-1)!.activity_id}` : null };
 }
 const MARKET_PAGE = 50;
@@ -406,7 +454,7 @@ export const NOTIFICATIONS_PAGE = 20;
 /** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */
 export type NotificationsRead = { items: GameNotification[]; newestSettledMs: number | null };
 type NotificationRow = { id: unknown; settled_at_ms: unknown; summary: unknown; destination: unknown; gladiators?: unknown };
-const NOTIFICATION_KINDS: readonly string[] = ['training', 'expedition', 'arena', 'tournament'];
+const NOTIFICATION_KINDS: readonly string[] = ['training', 'expedition', 'arena', 'tournament', 'dungeon'];
 const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 /**
  * The owner's own credited summary as the notification text needs it, or null for one it cannot show faithfully: a kind that earns
@@ -419,7 +467,8 @@ function notifiableSummary(value: unknown): ActivitySummary | null {
   if (typeof summary.resolvedKind !== 'string' || !NOTIFICATION_KINDS.includes(summary.resolvedKind) || !['completed', 'victory', 'defeat'].includes(summary.result as string)
     || typeof rewards !== 'object' || rewards === null || !whole(rewards.money) || !whole(rewards.renown) || !whole(rewards.xp) || !whole(rewards.attributePoints)
     || !whole(rewards.overflowMoney) || !Array.isArray(rewards.items) || (summary.ratingDelta !== undefined && !Number.isSafeInteger(summary.ratingDelta))
-    || (summary.arenaMode !== undefined && (summary.resolvedKind !== 'arena' || summary.arenaMode !== 'unranked'))) return null;
+    || (summary.arenaMode !== undefined && (summary.resolvedKind !== 'arena' || summary.arenaMode !== 'unranked'))
+    || (summary.resolvedKind === 'dungeon' && !dungeonOutcome(summary.dungeon))) return null;
   const itemsFit = rewards.items.every(item => typeof item === 'object' && item !== null && typeof item.catalogId === 'string' && typeof item.rarity === 'string'
     && Number.isSafeInteger(item.tier) && whole(item.quantity));
   return itemsFit ? summary as ActivitySummary : null;
@@ -456,13 +505,14 @@ function levelsReached(awards: readonly (number | null)[], now: { level: number;
  * settled at or before the server's now (the timeline's own reveal rule, so an Arena or tournament result is not listed before it
  * is due), from the owner-only `activities` table (row security shows a signed-in reader its own; a visitor has no access). One
  * request also names the gladiator's level and XP now, so the level each result reached (`levelAfter`) comes from one snapshot, and
- * the expedition id the destination is named from (`destination`). The gladiator's numbers include the XP of every result settled, so
+ * the expedition id its destination is named from (`destination`); a dungeon names its destination from the settled summary.
+ * The gladiator's numbers include the XP of every result settled, so
  * they are used only when no result settled after the server's now: the same request counts those (`gladiators.newer`, with the same
  * bound), because one committed between the clock read and this read is not in the list but its XP is in the level. A count that is not
- * zero (or not there) leaves every `levelAfter` null. Only those columns cross: never a seed, snapshot or receipt. A row this client
+ * zero (or not there) leaves every `levelAfter` null. Only those columns cross: never a seed, snapshot or receipt record. A row this client
  * cannot show (an unknown kind, a summary it cannot read) is left out rather than failing the list, and the levels of the older
  * results are then unknown (null), never guessed. `newestSettledMs` is the newest settled time of EVERY row fetched, left-out rows
- * included: the badge counts every result of the four kinds, so the "seen" mark must reach the newest fetched row, not the newest one
+ * included: the badge counts every result of the five kinds, so the "seen" mark must reach the newest fetched row, not the newest one
  * shown (null when no row was fetched).
  */
 export async function readNotifications(client: SupabaseClient): Promise<NotificationsRead> {
@@ -486,8 +536,10 @@ export async function readNotifications(client: SupabaseClient): Promise<Notific
   shown.forEach((row, i) => {
     if (!row) return;
     const kind = row.summary.resolvedKind as GameNotification['kind'];
-    const destination = kind === 'expedition' && typeof row.destination === 'string' && Object.hasOwn(CATALOG_V1.expeditions, row.destination)
-      ? CATALOG_V1.expeditions[row.destination as keyof typeof CATALOG_V1.expeditions].name : null;
+    const dungeon = kind === 'dungeon' ? dungeonOutcome(row.summary.dungeon) : null;
+    const destination = dungeon ? CATALOG_V1.dungeons[dungeon.id].name
+      : kind === 'expedition' && typeof row.destination === 'string' && Object.hasOwn(CATALOG_V1.expeditions, row.destination)
+        ? CATALOG_V1.expeditions[row.destination as keyof typeof CATALOG_V1.expeditions].name : null;
     list.push({ activityId: row.id, kind, settledAtMs: row.settledAtMs, summary: row.summary, destination, levelAfter: levels[i] });
   });
   return { items: list, newestSettledMs };
@@ -903,4 +955,68 @@ export async function readTournamentLog(client: SupabaseClient, boutId: string):
     .eq('bout_id', boutId).lte('reveal_at_ms', clock.serverNowMs).maybeSingle());
   if (!row.battleLog || typeof row.battleLog !== 'object') throw new GatewayReadError('not-found');
   return row.battleLog;
+}
+
+const VICTORY_REASONS: readonly unknown[] = ['defeat', 'health-fraction', 'tie-break'];
+const PARTY_STANCES: readonly unknown[] = ['balanced', 'defensive', 'offensive'];
+const PARTY_CLASSES: readonly unknown[] = [null, 'berserker', 'guardian', 'duelist'];
+const PARTY_STATS = ['strength', 'agility', 'vitality', 'endurance', 'precision'];
+const positiveCount = (value: unknown): value is number => count(value) && value > 0;
+
+/** Check the public log's structure before caching or replaying it. The server already projects the log's allowed keys. */
+function isPartyLog(value: unknown, ref: DungeonFightRef): value is PartyBattleLog {
+  if (!record(value) || value.battleId !== `${ref.runId}:fight:${ref.ordinal}` || typeof value.rulesVersion !== 'string' || !value.rulesVersion
+    || !count(value.durationMs) || value.durationMs > 120_000 || (value.winnerSide !== 0 && value.winnerSide !== 1)
+    || !VICTORY_REASONS.includes(value.victoryReason) || (value.tieBreakReason !== null && !TIE_BREAKS.includes(value.tieBreakReason))
+    || (value.victoryReason === 'tie-break') !== (value.tieBreakReason !== null)
+    || !Array.isArray(value.participants) || value.participants.length < 2 || value.participants.length > 12
+    || !Array.isArray(value.finalHp) || value.finalHp.length !== value.participants.length
+    || !Array.isArray(value.events) || value.events.length < 1 || value.events.length > 9_361) return false;
+  const participants = new Map<string, { side: 0 | 1; role: string }>();
+  const sideSizes = [0, 0];
+  for (const [index, player] of value.participants.entries()) {
+    const hp: unknown = value.finalHp[index];
+    if (!record(player) || typeof player.id !== 'string' || !player.id || participants.has(player.id)
+      || typeof player.name !== 'string' || !player.name || (player.gladiatorId !== null && typeof player.gladiatorId !== 'string')
+      || (player.side !== 0 && player.side !== 1) || (player.seat !== null && player.seat !== 0 && player.seat !== 1 && player.seat !== 2)
+      || !PARTY_CLASSES.includes(player.classId) || !PARTY_STANCES.includes(player.stance)
+      || !positiveCount(player.maxHealth) || !positiveCount(player.initialHealth) || player.initialHealth > player.maxHealth
+      || !count(hp) || hp > player.initialHealth || !positiveCount(player.efficiencyBasisPoints) || !count(player.attackIntervalMs) || player.attackIntervalMs < 250
+      || !finite(player.armor) || !finite(player.weaponDamage) || !record(player.attributes)
+      || !Array.isArray(player.equipmentSilhouettes) || !player.equipmentSilhouettes.every(x => typeof x === 'string')) return false;
+    const attributes = player.attributes;
+    if (!PARTY_STATS.every(stat => finite(attributes[stat]))) return false;
+    const { side, role } = player;
+    if (typeof role !== 'string' || (side === 0 ? !['gladiator', 'bot', 'hireling'].includes(role)
+      : (role !== 'monster' && role !== 'major') || player.seat !== null)
+      || (role === 'bot' && (player.seat === null || player.gladiatorId !== player.id))
+      || (player.botTeam !== undefined && (role !== 'bot' || player.botTeam !== 'ludus-nimbus'))) return false;
+    participants.set(player.id, { side, role });
+    sideSizes[side]++;
+  }
+  if (sideSizes.some(size => size < 1 || size > 6)) return false;
+  let elapsed = 0;
+  for (const [index, event] of value.events.entries()) {
+    if (!record(event) || event.sequence !== index || !count(event.elapsedMs) || event.elapsedMs < elapsed || event.elapsedMs > value.durationMs) return false;
+    elapsed = event.elapsedMs;
+    if (index === value.events.length - 1) {
+      if (event.kind !== 'victory' || elapsed !== value.durationMs || event.winnerSide !== value.winnerSide || event.reason !== value.victoryReason) return false;
+    } else {
+      if (event.kind !== 'attack' || typeof event.attackerId !== 'string' || typeof event.defenderId !== 'string'
+        || ![event.hit, event.critical, event.defend, event.evade, event.sweep].every(flag => typeof flag === 'boolean')
+        || !count(event.damage) || !count(event.healthBefore) || !count(event.healthAfter)) return false;
+      const attacker = participants.get(event.attackerId), defender = participants.get(event.defenderId);
+      if (!attacker || !defender || attacker.side === defender.side || (event.sweep && attacker.role !== 'major')) return false;
+    }
+  }
+  return true;
+}
+
+/** Only the exact requested fight, with reveal enforced by the table's public server-clock RLS. */
+export async function readDungeonFight(client: SupabaseClient, runId: string, ordinal: number): Promise<PartyBattleLog> {
+  const ref = parseDungeonFightRef(runId, ordinal);
+  if (!ref) throw new GatewayReadError('unavailable');
+  const { log } = checked<{ log: unknown }>(await client.from('dungeon_fights').select('log').eq('run_id', ref.runId).eq('ordinal', ref.ordinal).maybeSingle());
+  if (!isPartyLog(log, ref)) throw new GatewayReadError('unavailable');
+  return log;
 }

@@ -4,9 +4,10 @@ import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
 import type { GameGateway } from './gateway';
-import { BOUTS_PAGE, GatewayReadError, boutOf, nextBoutsCursor, parseBoutsRead, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout } from './reads';
+import { BOUTS_PAGE, GatewayReadError, boutOf, nextBoutsCursor, parseBoutsRead, parseDungeonFightRef, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout } from './reads';
 import { replayKept } from '../replay-retention';
 import { worldFixture } from '../../../tests/fixtures/domain';
+import { DUNGEON_BY_ACTIVITY, DUNGEON_BY_RUN, DUNGEON_SAMPLES } from '../../../tests/fixtures/dungeons';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_FIXTURES, EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
 import { EXPEDITION_GLADIATORS } from '../../../tests/fixtures/expedition-ids';
@@ -27,6 +28,8 @@ import { FIXTURE_TITLES } from '../../game/demo-world';
 
 /** Sample replays the fixture game page links to. */
 export const FIXTURE_REPLAYS: readonly { activityId: string; label: string }[] = REPLAY_SAMPLES;
+/** Sample party runs the fixture game page can link to. */
+export const FIXTURE_DUNGEONS: readonly { activityId: string; label: string }[] = DUNGEON_SAMPLES;
 /** Sample expeditions the fixture game page links to. */
 export const FIXTURE_EXPEDITIONS: readonly { activityId: string; label: string }[] = EXPEDITION_SAMPLES;
 /** Sample Arena activities the fixture game page opens in its Arena card, with each entrant's gladiator. */
@@ -147,7 +150,11 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
       latestPatch: PATCH, rulesVersion: RULES_V2.version }),
     // Sample timelines with engine-generated battle logs; every other activity stays unavailable. Expedition and Arena
     // samples hold every stage of their slot (no clock here): views show only the stages revealed by their display time.
-    timeline: async id => (Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable()),
+    timeline: async id => {
+      const dungeon = DUNGEON_BY_ACTIVITY.get(id);
+      if (dungeon) return structuredClone(dungeon.timeline);
+      return Object.hasOwn(FIXTURE_TIMELINES, id) ? structuredClone(FIXTURE_TIMELINES[id]) : unavailable();
+    },
     // A replay's fighters' looks, from the fixture world's own actors (no network): a gladiator the preview does not know is absent.
     looks: async (ids, onTitles) => {
       const known = world.actors.filter(a => ids.includes(a.gladiatorId));
@@ -190,6 +197,14 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
       const log = TOURNAMENT_VIEWS_BY_ID[id].bouts.find(b => b.id === boutId)?.revealedResult?.battleLog;
       if (!log) throw Object.assign(new Error('This bout has no revealed log in the fixture preview.'), { code: 'not-found' as const });
       return structuredClone(log);
+    },
+    dungeonFight: async (runId, ordinal) => {
+      const ref = parseDungeonFightRef(runId, ordinal);
+      if (!ref) throw new GatewayReadError('unavailable');
+      const fixture = DUNGEON_BY_RUN.get(ref.runId);
+      const row = fixture?.fights.find(fight => fight.ordinal === ref.ordinal && fight.reveal_at_ms <= fixture.timeline.serverNowMs);
+      if (!row) throw new GatewayReadError('not-found');
+      return structuredClone(row.log);
     },
     // Settled results from the fixture timelines, newest first, paged as the live read is, with its cursor rules: none (absent,
     // null or empty) starts the list, a malformed cursor is refused as `unavailable`, and a well-formed one that no page issued

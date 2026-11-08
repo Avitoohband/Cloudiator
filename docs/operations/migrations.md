@@ -2,7 +2,7 @@
 
 ## Patch 1.8 (M30): party dungeons and Ludus Nimbus
 
-**Verified local candidate, pending independent review.** The generated file is
+**Independently reviewed and applied to production on 2026-11-08.** The generated file is
 `supabase/migrations/20261107212314_patch_1_8.sql` (SHA-256
 `48f936823b62ab7cf465cd88dc152b11b3b5f93efdb3aebd0a607f1812a10c3f`). It carries the reviewed
 `supabase/sql/24-dungeons.sql` source (`ddb210ec31a5527d5d4057e2792a6c575b51b6cb850d857554c2086fe4896734`)

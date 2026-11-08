@@ -1574,3 +1574,12 @@ Hand-given titles. Avi's go 2026-11-06 21:58 UTC ("Go now"; Patch history "Show 
 | Record | `record_patch('1.7.1', 'Hand-given titles', …, null)` at ~22:03:30 UTC (no note); `latest_patch` 1.7.1. |
 | Grants | `give_title` Indigo → `game-master` and Tommy → `high-ground` (22:04 UTC; ids read by exact name, Avi's go): both `{ok, given:true, worn}`. Read-back: exactly two `award` rows (null activity), both worn; the camp actors show the titles; profiles 11 and 9 titles; 0 mismatches. |
 
+## Patch 1.8 M30 applied — 2026-11-08
+
+Avi explicitly approved M30 with `--skip-vault` after the quiet-window and exact dry-run checks. The linked `claude` checkout was clean and detached at gate candidate `7804b1eeb3f91561cc98ba5d2a9f4190c944f1f8`. That candidate passed all 12 steps, including 2,578 unit tests, 633 DB tests and both native Chrome shard inventories. Release evidence is in parent `logs/p18-m30-production-20261108/`.
+
+- Before the push, the production ref matched the linked project, `release` matched `8828d0a`, and the complete history matched M01–M29. The M29 catalog and access digests matched the documented baseline. The structured dry run listed only `20261107212314_patch_1_8.sql`, with no roles or seeds to apply.
+- The first immediate guard stopped at a migration history read with SQLSTATE `XX000`, before any push. The repeated checks passed. The 10:40 UTC slot was fully published, both cron jobs were active, and the read showed no open boundary, failed attempts in the last 24 hours, overdue/operator jobs, alerts or other transactions older than five seconds. The migration push ran once, from 11:00:46 to 11:00:49 UTC, using the sealed LF file (SHA-256 `48f936823b62ab7cf465cd88dc152b11b3b5f93efdb3aebd0a607f1812a10c3f`).
+- Readback matched all 30 versions. The hosted fingerprint has 1,480 rows, with three live seed rows checked by shape and counted separately from the digest. The access audit matched all 676 expected rows with zero findings. Expected digests derive from the pinned local M29-to-M30 change applied to the previously verified hosted M29 catalog. Readback confirmed v2, a current and healthy scheduler, 37 title rules, 630 bot routines, zero registered bots and zero dungeon runs or public dungeon fights.
+- The Edge baseline is `game-worker` version 3 and `game-command` version 7, both active. The live client and patch record are 1.7.1. The next step is the worker deployment from the same gate candidate, with separate approval.
+

@@ -1599,5 +1599,18 @@ Avi separately approved the `game-command` deployment from gate candidate `7804b
 - The canonical site OPTIONS probe returned 204 with the exact allowed origin and a 7,200-second max age. The foreign OPTIONS probe returned 403 with no origin grant. The unauthenticated POST returned `401 unauthenticated`.
 - Production readback showed M30, active rules v2 and a current scheduler with both cron jobs active. There were zero alerts, open boundaries, overdue jobs, operator jobs or failed attempts in the last 24 hours.
 - The client preflight confirmed that production `release` at `8828d0a3863b6319ff32081ffbcc820227828762` is an ancestor of the exact candidate. It retained the successful Pages UUID `38a60f91-38e8-4fef-9eb5-a2ce252f4a77` and the canonical HTML digests and 17 Next asset paths for each of `/` and `/game/`. The production-origin build and six-route static scan passed in native Windows execution, with 112 assets scanned. The initial managed build stopped on `EPERM` when Next created a generated expedition directory. Neither build modified tracked files.
-- The live client and patch record are 1.7.1. The next production step is the `release` fast-forward to the exact gate candidate, after Avi's separate explicit approval.
+- At this checkpoint, the live client and patch record were 1.7.1.
+
+## Patch 1.8 client deployed — 2026-11-08
+
+Avi separately approved the client fast-forward. Production `release` moved from `8828d0a3863b6319ff32081ffbcc820227828762` to exact gate candidate `7804b1eeb3f91561cc98ba5d2a9f4190c944f1f8`, verified at 13:52:09 UTC. Evidence is in parent `logs/p18-m30-production-20261108/`.
+
+- The exact-SHA Pages check `128751206386` succeeded for deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Success was first observed at 13:55:15 UTC. The canonical site and `https://62eb6655.cloudiator-arena.pages.dev` matched byte for byte on HTML and 23 distinct Next assets across `/`, `/game/` and `/dungeon/`. Both `/` and `/game/` had changed HTML and Next asset paths compared with the pre-push baseline. See `client-push-result.json`, `client-pages-first-success.json` and `client-content-proof.json`.
+- Read-only production checks confirmed M30, active rules v2 and published slot 373780 with both cron jobs active. Open boundaries, overdue jobs, operator jobs, alerts and failed attempts in the last 24 hours were all zero. The patch record is 1.7.1. See `client-after-health.json`.
+- All 10 anonymous deployed checks passed in 58.6 seconds. The 26 base probes and eight M30 private probes were denied as expected. Both M30 public fight counts returned 200 and zero rows. The exact-SHA GitHub release run `42486998287` is pending. See `client-deployed-checks.log`.
+
+## Patch 1.8 bot registration preflight — 2026-11-08
+
+- Aggregate production preflight found one conflicting gladiator display name, zero conflicts with reserved Auth identities and zero registered bots. An exact comparison against the unique normalized name confirmed that the planned Ash label is the only one occupied. No player records were returned. No registration was attempted; Avi was asked whether to prepare a forward migration for a different bot label. See `bot-registration-production-preflight.json` and `bot-label-availability.json` in the same evidence directory.
+- The proposed linked SQL fallback passed rehearsal on local M30 with rules v1. It registered five benched bots and exactly 22 bound items, produced the same counts on repeat and returned both counts to zero after rollback. See `bot-registration-local-proof.json`. Bot registration, bot activation, the patch note and the patch record require separate production approvals.
 

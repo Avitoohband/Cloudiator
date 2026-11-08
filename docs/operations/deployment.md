@@ -1,8 +1,8 @@
 # Deployment checklist
 
-## Patch 1.8 rollout — command deployed 2026-11-08
+## Patch 1.8 rollout — client deployed 2026-11-08
 
-Production Supabase is M01–M30 with rules v2 active. Worker v4 and command v8 from `7804b1e` are active. The live client and patch record are 1.7.1. The next step is the `release` fast-forward to the exact tested SHA `7804b1eeb3f91561cc98ba5d2a9f4190c944f1f8`, after Avi's separate approval. [Evidence](release-evidence.md#patch-18-command-deployed--2026-11-08).
+Production serves the 1.8 client from `7804b1e` on Pages deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Supabase has M01–M30, active rules v2, worker v4 and command v8. All 10 anonymous deployed checks passed in 58.6 seconds. GitHub release run `42486998287` is pending. The patch record is 1.7.1. Bot registration preflight found one gladiator display-name conflict. Bot registration, bot activation, the patch note and the patch record each require Avi's separate approval. [Evidence](release-evidence.md#patch-18-client-deployed--2026-11-08).
 
 ## Patch 1.7.1 LIVE — 2026-11-06
 

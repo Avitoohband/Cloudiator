@@ -1638,3 +1638,19 @@ rehearsal registered five benched actors with 22 bound items, validated the same
 back to its original empty roster. The direct registrar needs a reachable direct database host; the reviewed
 linked transaction uses the same identities and registrar function. See `bot-registration-local-v2-proof.json`.
 
+## Patch 1.8 Ludus Nimbus registered — 2026-11-08
+
+Avi approved registration alone. After slot 373782 published, fresh M31/v2 health, target, catalog, name and
+Auth checks passed. The linked operator ran the reviewed single transaction once at 16:02:22 UTC. The
+16:02:46 UTC aggregate readback found all five members, five off-duty camp actors and five off-duty public
+profiles. It confirmed five banned system identities with no login methods, 22 bound equipped starter items,
+five zero-balance wallets and zero wallet ledger rows, Founder titles, ranked ratings or tournament entries.
+Active bots were zero. The scheduler reported no alerts, failures or open boundaries.
+
+The separate activation statement was independently reviewed and rehearsed locally under v2. It activated all
+five in one transaction, preserved the current off-duty projections, and rolled back to the original state.
+Its SHA-256 is `827bef91915f9665020545e7dee71881711647c5bacfb299201f8945ac7ccf47`. The activation statement
+rechecks the production quiet window and frozen slot under locks. It requires its own go before execution.
+Evidence is in parent `logs/p18-m31-20261108/`, including `register-readback-summary.json` and
+`bot-activation-local-proof.json`.
+

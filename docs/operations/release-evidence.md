@@ -1654,3 +1654,17 @@ rechecks the production quiet window and frozen slot under locks. It requires it
 Evidence is in parent `logs/p18-m31-20261108/`, including `register-readback-summary.json` and
 `bot-activation-local-proof.json`.
 
+## Patch 1.8 Ludus Nimbus activated — 2026-11-08
+
+Avi approved activation alone in the 18:20–18:59 Israel window and confirmed it could continue during his
+break. Fresh M31/v2 health, frozen-slot and five-member roster checks passed. The sealed linked transaction
+activated all five together. Aggregate readback at 16:20:45 UTC confirmed five active registry rows,
+five safe identities, 22 starter items, no ranked or tournament effects and a healthy scheduler. The five
+camp actors and profiles retained their off-duty display for the already-published slot 373782.
+
+The first eligible dungeon boundary is slot 373783 at 17:20 UTC (19:20 Israel time). The 45-human cap,
+dungeon eligibility and demand determine assignments. The in-game patch record still shows 1.7.1. Review
+`PATCH-NOTE-REVIEW.md` and approve the note and linked record separately. The trailer still needs its
+00:40.000–00:41.867 roster shot refreshed for Cinder. Readback and the exact draft are in parent
+`logs/p18-m31-20261108/`.
+

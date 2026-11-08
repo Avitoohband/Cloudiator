@@ -112,6 +112,14 @@ time, no default Vault write or hosted release with this flag had been tested;
 the rule is adopted from the documented help, not a verified release fix.
 See the [M26 release steps](docs/operations/migrations.md).
 
+Avi approved structured migration checks on 2026-11-08. For scripted
+migration-only dry runs and pushes, use `--agent no --output-format json`.
+Before pushing, require `dryRun` true, `upToDate` false, exactly the approved
+migration filename, and empty `seeds` and `roles`. After the push, verify the
+applied migration against linked history. CLI 2.120.0 printed the dry-run
+filename on stderr in text mode. The JSON checks and linked history readback
+passed for M30. See the [M30 release evidence](docs/operations/release-evidence.md#patch-18-m30-applied--2026-11-08).
+
 ## Managed Windows Supabase CLI — approved local guidance
 
 Avi approved this supplement on 2026-11-07 for **Supabase CLI**. If managed

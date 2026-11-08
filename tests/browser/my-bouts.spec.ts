@@ -339,7 +339,14 @@ test('the Arena menu lists my three latest bouts and links to all of them', asyn
   test('Everyone is today’s list one tab away, and a visitor sees only Everyone', async ({ page }, testInfo) => {
     await openCamp(page);
     const results = await myBouts(page);
+    const tabs = results.getByRole('tablist', { name: 'Results', exact: true }).getByRole('tab');
+    const mine = myBoutsTab(results);
     const everyone = results.getByRole('tab', { name: 'Everyone', exact: true });
+    const rewards = results.getByRole('tab', { name: 'Your rewards', exact: true });
+    await expect(tabs).toHaveCount(3);
+    await expect(tabs.nth(0)).toHaveAccessibleName(/^My bouts(?:, \d+ not watched)?$/);
+    await expect(tabs.nth(1)).toHaveAccessibleName('Everyone');
+    await expect(tabs.nth(2)).toHaveAccessibleName('Your rewards');
     await everyone.click();
     await expect(everyone).toHaveAttribute('aria-selected', 'true');
     await expect(results.getByText('RECENT RESULTS', { exact: true })).toBeVisible();
@@ -349,22 +356,25 @@ test('the Arena menu lists my three latest bouts and links to all of them', asyn
     await expect(results.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', (await everyone.getAttribute('id'))!);
     await settled(page);
     await shot(page, testInfo, 'my-bouts-everyone');
-    // ARIA tabs: the arrow keys, Home and End move between them, the focus with the selection.
+    // Arrow keys, Home and End move focus and selection across the owner tabs.
     await everyone.focus();
     await page.keyboard.press('ArrowLeft');
-    await expect(myBoutsTab(results)).toBeFocused();
-    await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true');
+    await expect(mine).toBeFocused();
+    await expect(mine).toHaveAttribute('aria-selected', 'true');
     await expect(rows(results)).toHaveCount(8);
     await page.keyboard.press('End');
-    await expect(everyone).toBeFocused();
-    await expect(everyone).toHaveAttribute('aria-selected', 'true');
+    await expect(rewards).toBeFocused();
+    await expect(rewards).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Home');
-    await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true');
+    await expect(mine).toBeFocused();
+    await expect(mine).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('ArrowRight');
+    await expect(everyone).toBeFocused();
     await expect(everyone).toHaveAttribute('aria-selected', 'true');
     // Only the selected tab is in the Tab order.
     await expect(everyone).toHaveAttribute('tabindex', '0');
-    await expect(myBoutsTab(results)).toHaveAttribute('tabindex', '-1');
+    await expect(mine).toHaveAttribute('tabindex', '-1');
+    await expect(rewards).toHaveAttribute('tabindex', '-1');
 
     // A visitor: Everyone alone, with no tabs, no chips and no bouts.
     await openCamp(page, '/game/?mode=fixture&as=visitor');
@@ -500,9 +510,10 @@ test('the Arena menu lists my three latest bouts and links to all of them', asyn
     expect(sheet.x).toBeGreaterThanOrEqual(0);
     expect(sheet.x + sheet.width).toBeLessThanOrEqual(360);
     // Every row's button, chip and tab is a 44 px target, and lies inside the sheet.
-    const targets = results.locator('[data-bout-row] button, [role="tab"]').or(results.getByRole('group', { name: 'Show bouts' }).getByRole('button'));
-    const count = await targets.count();
-    expect(count).toBe(8 + 2 + 3);
+    const targets = results.locator('[data-bout-row] button').or(results.getByRole('tab'))
+      .or(results.getByRole('group', { name: 'Show bouts' }).getByRole('button'));
+    const count = 8 + 3 + 3;
+    await expect(targets).toHaveCount(count);
     for (let i = 0; i < count; i += 1) {
       const target = targets.nth(i);
       await target.scrollIntoViewIfNeeded();

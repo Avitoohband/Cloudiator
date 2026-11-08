@@ -64,6 +64,7 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 - Add pettable cats, dogs, rabbits, and birds. The first paid release is planned to offer a one-time Supporter Banner and an optional cosmetic pet follower. Both are account-bound cosmetics. Founder remains a separate title. [PayPal sandbox plan](superpowers/plans/2026-11-08-cosmetic-payments-paypal-sandbox.md).
 - Add paid weapon and armor dyes and skins after the first cosmetic shop release. These change equipment appearance only.
 - Run timed events and seasonal camp themes such as Halloween and Christmas. Explore a world tournament with a statue for the winner.
+- Add a small group of townsfolk behind the Arena spectators every evening, with a different arrangement each game day. [Evening Arena crowd preview plan](superpowers/specs/2026-11-08-evening-arena-crowd-design.md).
 - Add live Arena and tournament spectating with text commentary. Check the feasibility of a 24/7 YouTube stream.
 - Add music and sound effects with independent volume and mute controls, remembered per device.
 - Add in-game player support with request categories and triage.

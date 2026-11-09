@@ -20,11 +20,11 @@ const ASTER: PublicBuild = { stance: 'balanced', allocations: { strength: 2, agi
 
 describe('profile card data', () => {
   it('computes the stats a fight uses, in the card\'s words', () => {
-    expect(statRows(cardStats('guardian', LUCILLA)!)).toEqual([['Health', '197'], ['Damage', '15'], ['Speed', 'every 1.13 s'],
+    expect(statRows(cardStats('guardian', LUCILLA)!)).toEqual([['Health', '197'], ['Damage', '15'], ['Attack speed', 'every 1.13 s'],
       ['Armor', '12.3 · blocks 25%'], ['Critical', '7% of hits']]);
-    expect(statRows(cardStats('guardian', XANTHE)!)).toEqual([['Health', '207'], ['Damage', '21'], ['Speed', 'every 1.3 s'],
+    expect(statRows(cardStats('guardian', XANTHE)!)).toEqual([['Health', '207'], ['Damage', '21'], ['Attack speed', 'every 1.3 s'],
       ['Armor', '8.2 · blocks 16%'], ['Critical', '7% of hits']]);
-    expect(statRows(cardStats('guardian', ASTER)!)).toEqual([['Health', '123'], ['Damage', '4'], ['Speed', 'every 0.94 s'],
+    expect(statRows(cardStats('guardian', ASTER)!)).toEqual([['Health', '123'], ['Damage', '4'], ['Attack speed', 'every 0.94 s'],
       ['Armor', 'None'], ['Critical', '7% of hits']]);
     expect(overloadLine(cardStats('guardian', LUCILLA)!)).toBeNull();
     const heavy: PublicBuild = { stance: 'balanced', allocations: ZERO, equipment: { weapon: gear('axe:1:common'),
@@ -33,9 +33,9 @@ describe('profile card data', () => {
     expect(cardStats('guardian', { ...LUCILLA, stance: 'reckless' as Stance })).toBeNull();
     // Speed rounds half up to hundredths (fix round: 1005 ms is 1.01 s, where 1.005 × 100 in binary would round down).
     const base = { health: 100, hit: 5, armor: 0, blocks: 0, critical: 0.07, efficiency: 1, load: 0, capacity: 10 };
-    expect(statRows({ ...base, intervalMs: 1005 })[2]).toEqual(['Speed', 'every 1.01 s']);
-    expect(statRows({ ...base, intervalMs: 1296 })[2]).toEqual(['Speed', 'every 1.3 s']);
-    expect(statRows({ ...base, intervalMs: 935 })[2]).toEqual(['Speed', 'every 0.94 s']);
+    expect(statRows({ ...base, intervalMs: 1005 })[2]).toEqual(['Attack speed', 'every 1.01 s']);
+    expect(statRows({ ...base, intervalMs: 1296 })[2]).toEqual(['Attack speed', 'every 1.3 s']);
+    expect(statRows({ ...base, intervalMs: 935 })[2]).toEqual(['Attack speed', 'every 0.94 s']);
   });
 
   it('lists the build\'s points with the class bonus', () => {

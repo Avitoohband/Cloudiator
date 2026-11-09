@@ -233,7 +233,7 @@ describe('profile card', () => {
   // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card in sections.
   it('shows the look, the class chips, the attributes, the stats, the gear and the record, in that order', () => {
     const html = card({ actor: LUCILLA, profile: LUCILLA_PROFILE });
-    const order = ['ATTRIBUTES · 22 POINTS', 'Vitality +5% 9', 'STATS · DEFENSIVE STANCE', 'Health 197', 'Damage 15', 'Speed every 1.13 s',
+    const order = ['ATTRIBUTES · 22 POINTS', 'Vitality +5% 9', 'STATS · DEFENSIVE STANCE', 'Health 197', 'Damage 15', 'Attack speed every 1.13 s',
       'Armor 12.3 · blocks 25%', 'Critical 7% of hits', 'GEAR', 'Weapon Spear · Level 5 · uncommon', 'Off-hand Two-handed weapon', 'RECORD', 'Rating 1040',
       'Titles 9 earned', 'Arena record 9–5 · all seasons', 'In camp since 2 Oct · 8 days'];
     const shown = items(html);

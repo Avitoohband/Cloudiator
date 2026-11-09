@@ -50,14 +50,30 @@ export function cardStats(classId: ClassId, build: PublicBuild): CardStats | nul
 /** A number as the card writes it: at most `places` decimals, trailing zeros dropped (12.30 is "12.3", 20.50 is "20.5"). */
 const decimals = (value: number, places: number) => String(Math.round(value * 10 ** places) / 10 ** places);
 
-/** The five stats rows: Health, Damage, Speed, Armor and Critical. */
-export function statRows(stats: CardStats): [label: string, value: string][] {
+export const statHelp = {
+  Health: 'Maximum health in combat. Vitality raises it.',
+  Damage: 'Damage from a normal hit before the target’s defenses. Weapon damage, Strength, stance, and gear overload affect it.',
+  'Attack speed': 'Time between attacks. Your weapon sets the base speed. Agility speeds up attacks, and gear overload slows them.',
+  Armor: 'Equipped armor reduces the damage you take from landed hits.',
+  Critical: 'Chance for a landed hit to deal extra damage. Precision raises it.',
+} as const;
+
+export const attributeHelp: Record<keyof Attributes, string> = {
+  strength: 'Increases damage per hit.',
+  agility: 'Speeds up attacks and makes you harder to hit.',
+  vitality: 'Increases maximum health.',
+  endurance: 'Increases maximum stamina and how much gear you can wear before becoming overloaded.',
+  precision: 'Raises your chances to hit and to land a critical hit.',
+};
+
+/** The five combat stats in profile order. */
+export function statRows(stats: CardStats): [label: keyof typeof statHelp, value: string][] {
   return [
     ['Health', String(stats.health)],
     // Avi, 2026-11-04: just the number, as Health is.
     ['Damage', String(stats.hit)],
     // Half up to hundredths: 1005 ms is 1.01 s (1.005 × 100 in binary is 100.49…, which Math.round would take down).
-    ['Speed', `every ${String(Math.round(stats.intervalMs / 10) / 100)} s`],
+    ['Attack speed', `every ${String(Math.round(stats.intervalMs / 10) / 100)} s`],
     ['Armor', stats.armor > 0 ? `${decimals(stats.armor, 1)} · blocks ${stats.blocks}%` : 'None'],
     ['Critical', `${Math.round(stats.critical * 100)}% of hits`],
   ];

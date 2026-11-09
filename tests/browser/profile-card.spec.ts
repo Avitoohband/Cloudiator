@@ -51,7 +51,7 @@ test.describe('the richer profile card', () => {
     expect(await lucilla.getByTestId('profile-look').locator('[data-layer]').count()).toBeGreaterThanOrEqual(3);
     await expect(lucilla.getByTestId('profile-look')).toHaveAttribute('aria-hidden', 'true');
     for (const label of ['Attributes', 'Stats', 'Gear', 'Record']) await expect(section(page, 'Lucilla', label)).toBeVisible();
-    await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Speed', 'Armor', 'Critical']);
+    await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Attack speed', 'Armor', 'Critical']);
     // Avi, 2026-11-04: Damage is a number, as Health is.
     await expect(section(page, 'Lucilla', 'Stats').getByRole('definition').nth(1)).toHaveText(/^\d+$/);
     // Patch 1.6: Lucilla owns no Arena banner, so her card has no banner pill.
@@ -70,6 +70,50 @@ test.describe('the richer profile card', () => {
     await expectNamedControls(lucilla, 'the profile card');
     expect(await contrastIssues(lucilla), 'the profile card').toEqual([]);
     await shot(page, testInfo, 'lucilla');
+  });
+
+  test('explains profile stats and attributes with a pointer, keyboard or tap', async ({ page }, testInfo) => {
+    const phone = testInfo.project.name === 'mobile';
+    await page.setViewportSize(phone ? { width: 360, height: 740 } : { width: 1440, height: 900 });
+    await openCamp(page);
+    const lucilla = await openFromList(page, 'Lucilla');
+    const speed = lucilla.getByRole('button', { name: 'Attack speed', exact: true });
+    const agility = lucilla.getByRole('button', { name: 'Agility', exact: true });
+    const tip = lucilla.getByRole('tooltip');
+    await expect(tip).toHaveCount(0);
+    if (phone) {
+      await page.setViewportSize({ width: 360, height: 500 });
+      await speed.evaluate(button => {
+        const body = button.closest<HTMLElement>('[data-testid="profile-body"]')!;
+        const row = button.closest('[data-profile-stat-help]')!;
+        body.scrollTop += row.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom + 5;
+      });
+      await speed.tap();
+      await expect(tip).toContainText(/weapon.*Agility.*overload/i);
+      await expect(tip).toBeInViewport({ ratio: 1 });
+      await agility.tap();
+      await expect(tip).toContainText(/speeds up attacks.*harder to hit/i);
+      await agility.tap();
+      await expect(tip).toHaveCount(0);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    } else {
+      await speed.hover();
+      await expect(tip).toContainText(/weapon.*Agility.*overload/i);
+      await tip.hover();
+      await expect(tip).toBeVisible();
+      await lucilla.getByRole('heading', { name: 'Lucilla' }).hover();
+      await expect(tip).toHaveCount(0);
+      await lucilla.getByRole('button', { name: 'Strength', exact: true }).focus();
+      await page.keyboard.press('Tab');
+      await expect(agility).toBeFocused();
+      await expect(tip).toContainText(/speeds up attacks.*harder to hit/i);
+      await expect(agility).toHaveAccessibleDescription(/harder to hit/i);
+      await speed.hover();
+      await expect(tip).toContainText(/speeds up attacks.*harder to hit/i);
+      await page.keyboard.press('Escape');
+      await expect(tip).toHaveCount(0);
+      await expect(lucilla).toBeVisible();
+    }
   });
 
   test('adds the season record from a standings row', async ({ page }, testInfo) => {

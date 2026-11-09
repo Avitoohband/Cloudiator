@@ -20,7 +20,7 @@
 //
 // Patch 1.6 (spec "The Arena banner"): a gladiator who owns the Arena banner (the profile read's `banner`) shows the pill "🚩 Arena banner"
 // right after the name line, its flag decorative; every viewer sees the same card.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { ProfileRead } from '../../lib/api/reads';
@@ -36,7 +36,7 @@ import { badgeText, seasonName } from '../seasons/season-text';
 import { wornTitleText } from '../titles/title-text';
 import { ActorPortrait } from './ActorPortrait';
 import { ClassChips } from './ClassCard';
-import { attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statRows } from './profile-card';
+import { attributeHelp, attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows } from './profile-card';
 import styles from './ProfileCard.module.css';
 
 /**
@@ -59,6 +59,7 @@ export type ProfileTarget = {
 };
 
 const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare: styles.rRare } as const;
+type ProfileHint = { label: string; source: 'hover' | 'focus' | 'press' };
 
 export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
   onWatch, onOpenMenu }: {
@@ -86,6 +87,76 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   onOpenMenu(id: MenuId): void;
 }) {
   const reasonId = useId();
+  const hintId = useId();
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const [hint, setHint] = useState<ProfileHint | null>(null);
+  const hintOpen = hint !== null;
+  const openLabel = hint?.label;
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    const tooltip = tooltipRef.current;
+    const row = tooltip?.closest('[data-profile-stat-help]');
+    if (!body || !tooltip || !row) return;
+
+    const update = () => {
+      const scrollport = getComputedStyle(body).overflowY === 'auto' ? body : body.closest<HTMLElement>('[data-profile-card]') ?? body;
+      const top = scrollport.getBoundingClientRect().top + scrollport.clientTop;
+      const bounds = row.getBoundingClientRect();
+      const below = Math.min(window.innerHeight, top + scrollport.clientHeight) - bounds.bottom;
+      const above = bounds.top - Math.max(0, top);
+      tooltip.classList.toggle(styles.hintAbove, below < tooltip.offsetHeight && above > below);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [openLabel]);
+  useEffect(() => {
+    if (!hintOpen) return;
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || (event.target instanceof Element && event.target.closest('dialog[open]'))) return;
+      event.preventDefault();
+      setHint(null);
+    };
+    const dismissOutside = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest('[data-profile-stat-help]')) setHint(null);
+    };
+    document.addEventListener('keydown', dismissOnEscape, true);
+    document.addEventListener('pointerdown', dismissOutside, true);
+    return () => {
+      document.removeEventListener('keydown', dismissOnEscape, true);
+      document.removeEventListener('pointerdown', dismissOutside, true);
+    };
+  }, [hintOpen]);
+
+  const hintRow = (label: string) => ({
+    'data-profile-stat-help': '',
+    onPointerEnter: (event: PointerEvent<HTMLElement>) => {
+      if (event.pointerType === 'mouse' && window.matchMedia('(any-hover: hover)').matches) {
+        setHint(current => current && (current.label === label || current.source !== 'hover') ? current : { label, source: 'hover' });
+      }
+    },
+    onPointerLeave: () => setHint(current => current?.label === label && current.source === 'hover' ? null : current),
+  });
+  const hintLabel = (label: string, description: string) => {
+    const open = hint?.label === label;
+    const id = `${hintId}-${label.toLowerCase().replaceAll(' ', '-')}`;
+    return <>
+      <button type="button" className={styles.hintButton} aria-expanded={open} aria-describedby={open ? id : undefined}
+        onFocus={event => {
+          if (event.currentTarget.matches(':focus-visible')) setHint({ label, source: 'focus' });
+        }}
+        onBlur={() => setHint(current => current?.label === label ? null : current)}
+        onClick={() => setHint(current => current?.label === label && current.source === 'press' ? null : { label, source: 'press' })}
+      >{label}</button>
+      {open && <span ref={tooltipRef} id={id} role="tooltip" className={styles.hint}>{description}</span>}
+    </>;
+  };
+
   const clock = useClockMode();
   const bot = actor.botTeam === 'ludus-nimbus';
   const duty = bot ? botDutyText(actor, clock) : null;
@@ -103,7 +174,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   const overload = stats ? overloadLine(stats) : null;
   const since = profile && profile.joinedAtMs !== null ? sinceText(profile.joinedAtMs, nowMs) : '';
   return <>
-    <div className={styles.body} data-testid="profile-body">
+    <div ref={bodyRef} className={styles.body} data-testid="profile-body">
       <div className={styles.head}>
         <ActorPortrait actor={actor} />
         <div className={styles.who}>
@@ -123,8 +194,8 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
         <section className={styles.section} aria-label="Attributes">
           <p className="eyebrow">{build ? `ATTRIBUTES · ${pointsTotal(build.allocations)} POINTS` : 'ATTRIBUTES'}</p>
           {build ? <ul className={styles.attributes}>
-            {attributeRows(actor.classId, build.allocations).map(row => <li key={row.attribute}>
-              <span>{row.label}{row.bonus && <span className={styles.bonus}> {row.bonus}</span>}</span>
+            {attributeRows(actor.classId, build.allocations).map(row => <li key={row.attribute} {...hintRow(row.label)}>
+              <span>{hintLabel(row.label, attributeHelp[row.attribute])}{row.bonus && <span className={styles.bonus}> {row.bonus}</span>}</span>
               <span className={styles.bar} aria-hidden="true"><i style={{ width: `${row.width * 100}%` }} /></span>
               <b>{row.points}</b>
             </li>)}
@@ -133,7 +204,9 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
         <section className={styles.section} aria-label="Stats">
           <p className="eyebrow">{stats && build ? `STATS · ${build.stance.toUpperCase()} STANCE` : 'STATS'}</p>
           {stats ? <>
-            <dl className={`${styles.facts} ${styles.stats}`}>{statRows(stats).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+            <dl className={`${styles.facts} ${styles.stats}`}>{statRows(stats).map(([label, value]) => <div key={label} className={styles.statRow} {...hintRow(label)}>
+              <dt>{hintLabel(label, statHelp[label])}</dt><dd>{value}</dd>
+            </div>)}</dl>
             {overload && <p className={styles.overload}>{overload}</p>}
           </> : <p className={styles.state}>{missing}</p>}
         </section>
@@ -272,7 +345,7 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
     <section ref={card} className={styles.card} role="dialog" aria-label={`Profile: ${name}`} tabIndex={-1} style={style} data-profile-card="">
       <button type="button" className={styles.close} aria-label="Close profile" onClick={onClose}>×</button>
       {actor ? (
-        <ProfileCard actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
+        <ProfileCard key={id} actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
           followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} nowMs={nowMs} onFollow={onFollow}
           onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} />
       ) : <div className={styles.body} data-testid="profile-body">

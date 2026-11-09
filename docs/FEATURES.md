@@ -221,6 +221,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | New arrivals | Everyone sees a banner when a gladiator arrives; Find goes to the gate, and newcomers come first in the Gladiators list with a NEW tag. | 1.4 | Live | Fixture camp (it always shows a banner) → Find | — |
 | Players count | The Gladiators list shows how many players there are and where they are now. | 1.4 | Live | Fixture camp → Gladiators, the line on top | — |
 | Richer profile card | Click a gladiator's name to open a bigger card: their look, class bonuses, attributes, stats, gear with level and rarity, Arena record and days in camp. | 1.4 | Live | Fixture camp → Gladiators → a name (Lucilla has a sample build); a click on a gladiator in the camp opens it too | — |
+| Profile stat hints | Attack speed has a clear label, and each combat stat or attribute explains what it does when hovered, focused, or tapped. | 1.8.1 | Built | Fixture camp → Gladiators → Lucilla → Attack speed or Agility | — |
 | Arena banner on the profile | A bought Arena banner shows on your profile card. | 1.6 | Live | Fixture camp → Gladiators → Aster (she owns it): the 🚩 Arena banner pill under her name; Inventory → Armorer: the shop's banner lines | 1.6 update |
 | Bot gladiators | A named team of bot gladiators fills dungeon seats and lives in the camp. | 1.8 | Planned 1.8 | Being designed | — |
 

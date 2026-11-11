@@ -3,8 +3,9 @@
 // Task 13.7: what the shell does with clicks in the camp world. A click on a gladiator (`select-character`) opens their
 // profile card beside them, and a list row opens the same card with the focus (which goes back to that row when the
 // card closes). One surface at a time: a menu that opens, closes or changes closes the card, so an Arena entrant's click
-// shows its Arena card. A click on a merchant (`open-merchant`) opens Inventory and shops at that merchant for a player,
-// counted so every click opens the shops there again, and My gladiator's sign-in prompt for anyone else.
+// shows its Arena card. A click on a merchant's stall (`open-merchant`) opens Inventory and shops at that merchant for a
+// player, counted so every click opens the shops there again, and My gladiator's sign-in prompt for anyone else. Since
+// Patch 1.9 (Task 11) a click on Brutus or Livia themselves talks, as every camp NPC does; only their stalls open the shops.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { Merchant } from '@domain/inventory';

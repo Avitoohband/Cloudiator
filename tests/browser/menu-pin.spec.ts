@@ -10,7 +10,8 @@ const intersects = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.widt
 const rail = (page: Page) => page.getByTestId('menu-rail');
 const settings = (page: Page) => menuDialog(page, 'Settings');
 const pinSwitch = (page: Page) => settings(page).getByRole('switch', { name: 'Keep the menu open' });
-const placeRadio = (page: Page, place: 'Left' | 'Right' | 'Bottom') => settings(page).getByRole('radiogroup', { name: 'Menu position' }).getByRole('radio', { name: place, exact: true });
+const positions = (page: Page) => settings(page).getByRole('radiogroup', { name: 'Menu position' });
+const placeRadio = (page: Page, place: 'Left' | 'Right' | 'Bottom') => positions(page).getByRole('radio', { name: place, exact: true });
 const banner = (page: Page) => page.getByTestId('arrival-banner');
 const notices = (page: Page) => page.locator('[data-notices]');
 const settled = async (locator: Locator) => { await locator.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished))); return locator; };
@@ -61,12 +62,14 @@ test.describe('the menu pin and position (pointer layout)', () => {
     const reset = await boxOf(rail(page).getByRole('button', { name: 'Reset zoom', exact: true }));
     expect(gear.y).toBeGreaterThan(reset.y);
     // Ordered by where the menu goes: Left, Bottom, Right.
-    expect(await settings(page).getByRole('radio').evaluateAll(els => els.map(e => (e as HTMLInputElement).value))).toEqual(['left', 'bottom', 'right']);
+    expect(await positions(page).getByRole('radio').evaluateAll(els => els.map(e => (e as HTMLInputElement).value))).toEqual(['left', 'bottom', 'right']);
     await expect(settings(page).getByText('Off: it slides away when you move off it.')).toBeVisible();
     await expect(settings(page).getByText('Saved in this browser. Changes apply at once.')).toBeVisible();
     await expect(settings(page).getByRole('heading', { name: 'Menu', exact: true })).toBeVisible();
     await expect(pinSwitch(page)).not.toBeChecked();
-    await expect(settings(page).getByRole('radio')).toHaveCount(3);
+    await expect(positions(page).getByRole('radio')).toHaveCount(3);
+    // Task 11: the Names and Titles choices follow in their own section.
+    await expect(settings(page).getByRole('radio')).toHaveCount(3 + 6);
     await expect(placeRadio(page, 'Left')).toBeChecked();
   });
 
@@ -207,7 +210,9 @@ test.describe('the phone layout', () => {
     await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(settings(page).getByText('Menu options are available with a mouse or trackpad.')).toBeVisible();
     await expect(settings(page).getByRole('switch')).toHaveCount(0);
-    await expect(settings(page).getByRole('radio')).toHaveCount(0);
+    await expect(positions(page)).toHaveCount(0);
+    // Task 11: Names and titles work on phones too.
+    await expect(settings(page).getByRole('radiogroup', { name: 'Names', exact: true }).getByRole('radio')).toHaveCount(3);
   });
 });
 

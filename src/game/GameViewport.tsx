@@ -18,13 +18,19 @@
 // leagues that share reveal times lay out their rings the same whichever view arrives first, and a failed ring log is
 // asked for again after 2 s, backing off to 30 s (C9); and at most two Arena timelines are read at once, skipping a
 // partner whose bout a landed timeline already shows (Task 17 review M7).
+//
+// Patch 1.9, Task 11: the camp draws names and titles by the page's `labels` (the Settings choices), and a click on an NPC
+// shows its line in a speech bubble over the view (`TalkBubble`, also announced to screen readers); Escape on the camp view
+// closes it.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { GameGateway } from '../lib/api/gateway';
 import type { Point } from './iso';
 import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
-import type { CampDebugState, CampSceneHandle, PropDebug } from './camp-scene';
+import type { CampDebugState, CampSceneHandle, PropDebug, TalkFrame } from './camp-scene';
+import { DEFAULT_LABEL_PREFS, type LabelPrefs } from './labels';
+import { TalkBubble } from './TalkBubble';
 import { arenaFightButton, arenaPartnersShown, arenaReadsDue, type ArenaRead } from './arena-layout';
 import {
   TOURNAMENT_LOG_WINDOW_MS, campTournamentIds, recordTournamentRead, ringLogRetryDelay, tournamentLogsDue, tournamentReadsDue, type TournamentRead,
@@ -116,7 +122,8 @@ declare global {
   interface Window { __cloudiatorCamp?: CampTestHook }
 }
 
-export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus, chrome = 'framed', paused = false }: {
+export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus, chrome = 'framed', paused = false,
+  labels = DEFAULT_LABEL_PREFS }: {
   world: WorldSnapshot | null;
   bridge: SceneBridge;
   focusGladiatorId?: string | null;
@@ -145,6 +152,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
    * drawing until it is uncovered, from where its display clock has moved on (Task 23.4, C8). Reads go on meanwhile.
    */
   paused?: boolean;
+  /** When names and titles show over the camp (the Settings choices, Task 11); When zoomed in for both by default. */
+  labels?: LabelPrefs;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
@@ -172,6 +181,11 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   const statusId = useId();
 
   useEffect(() => { focus.current = focusGladiatorId; }, [focusGladiatorId]);
+  // The Settings choices apply at once, to a running scene and to the next one.
+  const labelPrefs = useRef(labels);
+  useEffect(() => { labelPrefs.current = labels; handle.current?.setLabelPrefs(labels); }, [labels]);
+  /** Where the scene hands the talking NPC's bubble (`TalkBubble` listens while mounted). */
+  const talkSink = useRef<((frame: TalkFrame | null) => void) | null>(null);
   const statusListener = useRef(onStatus);
   useEffect(() => { statusListener.current = onStatus; }, [onStatus]);
   useEffect(() => { statusListener.current?.(status.kind); }, [status.kind]);
@@ -379,6 +393,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
         bridge,
         focusId: () => focus.current,
         reducedMotion: prefersReducedMotion(),
+        labels: labelPrefs.current,
+        onTalk: frame => talkSink.current?.(frame),
         now: () => clock.current.now(),
         onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },
         onError: (reason, message) => fail(reason, reason === 'assets' ? `The camp art could not load (${message}). Management panels still work.` : `The camp view stopped: ${message}`),
@@ -438,6 +454,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
       cancelled = true;
       handle.current?.dispose();
       handle.current = null;
+      talkSink.current?.(null);
       game?.destroy();
       game = null;
       running.current = null;
@@ -463,6 +480,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return; // leave browser zoom and shortcuts alone
+    // Escape closes an NPC's speech bubble first (and nothing else then: the shell's Escape stands down).
+    if (event.key === 'Escape' && handle.current?.endTalk()) { event.preventDefault(); return; }
     const step = 64;
     const pan: Record<string, [number, number]> = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
     if (pan[event.key]) { bridge.emit('camera-pan', { dx: pan[event.key][0], dy: pan[event.key][1] }); event.preventDefault(); }
@@ -512,6 +531,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
             <button type="button" className={styles.reload} onClick={reload}>Reload</button>
           </div>
           : <p id={statusId} className={styles.status} role="status">{status.kind === 'loading' ? 'Opening the camp…' : ''}</p>}
+        {!unavailable && <TalkBubble sink={talkSink} hud={!framed} />}
       </div>
       {/* Keyboard and touch equivalents of clicking a fighting pair, below the view so they never cover it. */}
       {framed && !unavailable && fights.length > 0 && (

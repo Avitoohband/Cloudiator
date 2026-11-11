@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from './fixtures';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { worldToScreen } from '../../src/game/iso';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { OwnerState, PublicActor, ResultRow } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
@@ -8,7 +10,7 @@ import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSess
 import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
-// list and the standings), the merchants' shortcuts into Inventory and shops, and the owner's pending build through a
+// list and the standings), the merchants' stalls as shortcuts into Inventory and shops, and the owner's pending build through a
 // slot end (the old plan's Task 13 Step 1). Cards and Results show public fields only.
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -46,6 +48,34 @@ async function clickInCamp(page: Page, id: string, clearOf?: Locator) {
   return { x: box.x + at.x, y: box.y + at.y };
 }
 const boxOf = async (locator: Locator) => (await locator.boundingBox())!;
+const campProps = (JSON.parse(readFileSync('public/assets/camp/map.json', 'utf8')) as { props: { frame: string; x: number; y: number }[] }).props;
+/**
+ * Clicks a merchant's stall on its awning, above anyone at the counter, centred at zoom 2 (a click on the merchant talks
+ * since Patch 1.9, Task 11). With `clearOf`, the camp is first panned so the awning is beside that panel.
+ */
+async function clickStall(page: Page, frame: 'stall-weapons' | 'stall-armor', clearOf?: Locator) {
+  const prop = campProps.find(p => p.frame === frame)!;
+  await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: prop.x + 1.5, y: prop.y + 1 });
+  await nextFrames(page);
+  const awning = async () => {
+    const { camera } = await page.evaluate(() => window.__cloudiatorCamp!.state()!);
+    const a = worldToScreen(prop.x, prop.y);
+    return { x: (a.x + 14 - camera.worldView.x) * camera.zoom, y: (a.y - 23 - camera.worldView.y) * camera.zoom };
+  };
+  const box = (await page.locator('canvas').boundingBox())!;
+  let at = await awning();
+  if (clearOf) {
+    const panel = (await clearOf.boundingBox())!;
+    const dx = panel.x + panel.width + 24 - (box.x + at.x);
+    if (dx > 0) {
+      await page.evaluate(shift => window.__cloudiatorCamp!.emit('camera-pan', { dx: shift, dy: 0 }), dx);
+      await nextFrames(page);
+      at = await awning();
+    }
+  }
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) instanceof HTMLCanvasElement, { x: box.x + at.x, y: box.y + at.y })).toBe(true);
+  await page.mouse.click(box.x + at.x, box.y + at.y);
+}
 
 test.describe('profile cards and merchants in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');
@@ -155,12 +185,12 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(menuDialog(page, 'My gladiator')).toBeVisible();
   });
 
-  test('opens Inventory and shops at the merchant’s shop filter when a merchant is clicked', async ({ page }) => {
+  test('opens Inventory and shops at the merchant’s shop filter when a merchant’s stall is clicked', async ({ page }) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
     // Hold the camp still so the merchants stay where they are drawn.
     await page.evaluate(() => window.__cloudiatorCamp!.freezeClock(window.__cloudiatorShell!.clock.now()));
-    await clickInCamp(page, 'npc:smith');
+    await clickStall(page, 'stall-weapons');
     const inventory = menuDialog(page, 'Inventory and shops');
     await expect(inventory).toBeVisible();
     // Patch 1.9: the merchant chooses the shop's filter (Weapons or Armor) and its first piece.
@@ -168,20 +198,20 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(shopFilters.getByRole('button', { pressed: true })).toHaveText(['Weapons']);
     await expect(inventory.getByTestId('offer-sword:1:common')).toHaveAttribute('aria-pressed', 'true');
     await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
-    // On desktop pan the merchant into the camp beside the open panel. Close the phone sheet before tapping camp.
+    // On desktop pan the stall into the camp beside the open panel. Close the phone sheet before tapping camp.
     const touch = await touchLayout(page);
     if (touch) await closeMenu(page);
-    await clickInCamp(page, 'npc:armorer', touch ? undefined : inventory);
+    await clickStall(page, 'stall-armor', touch ? undefined : inventory);
     await expect(inventory).toBeVisible();
     await expect(shopFilters.getByRole('button', { pressed: true })).toHaveText(['Armor']);
     await expect(inventory.getByTestId('offer-round-shield:1:common')).toHaveAttribute('aria-pressed', 'true');
     await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
   });
 
-  test('opens My gladiator’s sign-in prompt when a visitor clicks a merchant', async ({ page }) => {
+  test('opens My gladiator’s sign-in prompt when a visitor clicks a merchant’s stall', async ({ page }) => {
     await openCamp(page, '/game/?mode=fixture&as=visitor');
     await page.evaluate(() => window.__cloudiatorCamp!.freezeClock(window.__cloudiatorShell!.clock.now()));
-    await clickInCamp(page, 'npc:smith');
+    await clickStall(page, 'stall-weapons');
     const mine = menuDialog(page, 'My gladiator');
     await expect(mine).toBeVisible();
     await expect(mine.getByRole('button', { name: 'Sign in with Google to create your gladiator' })).toBeVisible();

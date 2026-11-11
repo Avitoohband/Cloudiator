@@ -6,6 +6,9 @@
 // Tournament entrants wait in staging, fight their revealed bouts in the same rings (scheduled from
 // the fight summary, the log played once it has loaded) and, once eliminated, watch from spectator
 // spots outside the arena wall (src/game/tournament-camp.ts).
+// Patch 1.9, Task 11: camp NPCs talk (src/game/npc-talk.ts): a click on one shows its next line in a speech bubble the page
+// draws over the camp (`onTalk`), and they show a pointer and a gold ring on hover; Brutus and Livia talk too, and their
+// stalls open the shops. Names and titles follow the Settings choices, with Tidy overlaps (src/game/labels.ts).
 import type * as PhaserNS from 'phaser';
 import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/reads';
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
@@ -25,6 +28,8 @@ import { findPath, gridFromMap, pathLength, pointAlong, type Grid } from './path
 import { lightingAt } from './lighting';
 import { drawSlices, hidesActor, type PlacedImage } from './depth';
 import type { ArenaFightSummary, SceneBridge } from './bridge';
+import { DEFAULT_LABEL_PREFS, FADED_LABEL_ALPHA, labelScale, labelsShown as namesShown, tidyLabels, type LabelPrefs, type TidyItem } from './labels';
+import { NPC_LINES, TALK_FADE_MS, TalkLines, talkHoldMs } from './npc-talk';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
@@ -42,8 +47,21 @@ export type CampSceneDeps = {
   /** Gladiator to centre on when the first world arrives (the owner); the arena otherwise. */
   focusId?: () => string | null;
   reducedMotion?: boolean;
+  /** When names and titles show (the Settings choices); When zoomed in for both when absent. */
+  labels?: LabelPrefs;
+  /** Hears the talking NPC's bubble each frame while one talks, then null once (Task 11; the page draws the bubble). */
+  onTalk?: (frame: TalkFrame | null) => void;
   onReady: () => void;
   onError: (reason: 'assets' | 'error', message: string) => void;
+};
+
+/**
+ * The line an NPC is saying, and where to draw it this frame (canvas-relative CSS px): its x, the top of its name (or its
+ * head when no name shows) and its feet. `seq` counts the lines said, so a repeated line is still a new one.
+ */
+export type TalkFrame = {
+  seq: number; npcId: string; name: string; line: string; index: number; count: number;
+  x: number; top: number; feet: number; visible: boolean; fading: boolean;
 };
 
 export type CampSceneHandle = {
@@ -58,6 +76,10 @@ export type CampSceneHandle = {
    */
   ringSchedule(): ReadonlyMap<string, RingSlot>;
   setReducedMotion(reduced: boolean): void;
+  /** The Settings choices for names and titles, applied at once. */
+  setLabelPrefs(prefs: LabelPrefs): void;
+  /** Closes the speech bubble (Escape); true when one was open. */
+  endTalk(): boolean;
   /** Removes the scene's bridge listeners. Idempotent; also runs when the game destroys the scene. */
   dispose(): void;
   debug(): CampDebugState;
@@ -83,6 +105,8 @@ export type CampDebugActor = {
   title: { text: string; visible: boolean; box: Rect } | null;
   /** An ambient NPC's art now (the wall patrols wear the night watch's in the evening), else null. */
   look: string | null;
+  /** The name over the head as drawn now: its opacity (Tidy fades names behind to 0.3) and scale; null while it is hidden. */
+  nameplate: { alpha: number; scale: number } | null;
   /** The light of the torch an NPC carries, where and how bright it is drawn now (patch 1.5.1's night watch), else null. */
   torch: { x: number; y: number; alpha: number } | null;
 };
@@ -112,6 +136,13 @@ export type CampDebugState = {
   };
   /** Tournament entrants' roles in camp, the champion and who stands at a spectator spot. */
   tournament: { roles: Record<string, CampTournamentRole['role']>; champion: string | null; spectators: string[] };
+  /** The Settings choices for names and titles the scene applies. */
+  labels: LabelPrefs;
+  /** The NPC talking now: its line, which of its four, and whether the bubble is fading out. */
+  talk: { npcId: string; index: number; line: string; fading: boolean } | null;
+  /** The actor under the pointer (its name is drawn full and on top), and the NPC whose gold hover ring shows. */
+  hover: string | null;
+  hoverRing: string | null;
 };
 export type CampDebugFight = {
   battleId: string; ring: number; status: FightStatus; positionMs: number; fighters: [string | null, string | null];
@@ -123,6 +154,10 @@ export type PropDebug = { id: string; frame: string; x: number; y: number; occlu
 
 const BG = 0x1c3f24;
 const FADED_ALPHA = 0.45;
+/** Names and titles draw over the evening tint and the torch glows; a faded name under a full one, a hovered one on top. */
+const NAME_DEPTH = 2_000_002;
+const NAME_DEPTH_FADED = 2_000_001.5;
+const NAME_DEPTH_HOVER = 2_000_002.5;
 /** Wheel delta (CSS px) per zoom step: one mouse notch, or a short trackpad swipe. */
 const WHEEL_STEP = 100;
 /** CSS px per wheel line (deltaMode 1), so a three-line notch makes one step. */
@@ -255,6 +290,22 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   let overlay: PhaserNS.GameObjects.Rectangle | null = null;
   let ring: PhaserNS.GameObjects.Ellipse | null = null;
   let ringDepth = NaN;
+  // Task 11: the Settings choices for names and titles, the actor under the pointer and the gold ring under a hovered NPC,
+  // and the NPC talking now (its line, when it began on the display clock, and how long it holds).
+  let labelPrefs: LabelPrefs = deps.labels ?? DEFAULT_LABEL_PREFS;
+  let hovered: string | null = null;
+  let hoverRing: PhaserNS.GameObjects.Ellipse | null = null;
+  const talkLines = new TalkLines();
+  let talk: { id: string; npcId: string; name: string; index: number; line: string; at: number; holdMs: number; seq: number } | null = null;
+  let talkSeq = 0;
+  /** A press this frame that an NPC answered, so the scene's own pointer-up leaves its bubble open. */
+  let talkClicked = false;
+  // Tidy's reused scratch (no per-frame allocation): the names shown this frame, their views, the answers and the order.
+  const tidyPool: TidyItem[] = [];
+  const tidyItems: TidyItem[] = [];
+  const tidyViews: ActorView[] = [];
+  const tidyFaded: boolean[] = [];
+  const tidyOrder: number[] = [];
   let groundChunks: { rt: PhaserNS.GameObjects.RenderTexture; left: number; top: number; tiles: { frame: string; left: number; top: number }[] }[] = [];
   // Arena: revealed bouts of the entrants in camp, their ring windows and what is drawn for them.
   const rings: ArenaRing[] = arenaRings(map);
@@ -319,6 +370,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         // Large enough to cover the view at minimum zoom wherever the clamped camera sits.
         overlay = this.add.rectangle(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width + 8000, bounds.height + 8000, 0xffffff, 0).setDepth(2_000_000);
         ring = this.add.ellipse(0, 0, 30, 14).setStrokeStyle(2, 0xffe48f).setVisible(false);
+        hoverRing = this.add.ellipse(0, 0, 32, 12).setStrokeStyle(2, 0xf2c66b).setAlpha(0.95).setVisible(false);
         this.buildNpcs();
         this.setupInput();
         this.scale.on(P.Scale.Events.RESIZE, () => this.syncCamera());
@@ -399,10 +451,16 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         }
         if (p.interact === 'merchant-weapons' || p.interact === 'merchant-armor') {
           const merchant = p.interact === 'merchant-weapons' ? 'weapons' : 'armor';
-          for (const image of group.images) {
-            image.setInteractive({ useHandCursor: true });
+          group.images.forEach((image, i) => {
+            // Each slice answers only on its own drawn pixels (its crop of the frame, where opaque), so a click on the merchant
+            // standing in front of the stall reaches the merchant, who talks (Task 11); the stall itself opens the shop.
+            const area = new P.Geom.Rectangle(group.slices[i].left + f.anchorX, 0, group.slices[i].width, f.h);
+            image.setInteractive({
+              hitArea: area, useHandCursor: true,
+              hitAreaCallback: (rect: PhaserNS.Geom.Rectangle, x: number, y: number) => P.Geom.Rectangle.Contains(rect, x, y) && this.opaqueAt(p.frame, x, y),
+            });
             image.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer)) deps.bridge.emit('open-merchant', { merchant }); });
-          }
+          });
         }
       }
     }
@@ -455,13 +513,30 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
     }
 
-    makeContainer(sprites: Sprite[]) {
+    /** An actor's body: clickable over the drawn actor, with a pointer (`hand`) for the NPCs who talk. */
+    makeContainer(sprites: Sprite[], id: string, hand = false) {
       const container = this.add.container(0, 0, sprites);
       container.setSize(26, 46);
       // Phaser offsets container hit tests by the display origin (half the size), so this covers the body from
       // 13 px left to 13 px right of the feet and 46 px up: the drawn actor, not a box above and left of it.
-      container.setInteractive(new P.Geom.Rectangle(0, -23, 26, 46), P.Geom.Rectangle.Contains);
+      container.setInteractive({ hitArea: new P.Geom.Rectangle(0, -23, 26, 46), hitAreaCallback: P.Geom.Rectangle.Contains, useHandCursor: hand });
+      // The actor under the pointer: its name comes back at full strength, on top (Tidy), and an NPC shows its gold ring.
+      container.on('pointerover', () => { hovered = id; });
+      container.on('pointerout', () => { if (hovered === id) hovered = null; });
       return container;
+    }
+
+    /** A click on an NPC: its next line in the bubble (one bubble at a time; the same NPC again says its next line). */
+    talkTo(id: string) {
+      const v = views.get(id);
+      const npcId = v?.npcRoutine?.npcId;
+      const lines = npcId ? NPC_LINES[npcId] : undefined;
+      if (!v || !npcId || !lines) return;
+      talkClicked = true;
+      const index = talkLines.next(npcId);
+      const line = lines[index];
+      talkSeq += 1;
+      talk = { id, npcId, name: v.name, index, line, at: deps.now(), holdMs: talkHoldMs(line), seq: talkSeq };
     }
 
     /** One view per round (`npc:<npcId>`), in the round's art and name; several guards share the Gate Guard's art. */
@@ -472,10 +547,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (!npc) continue;
         const name = routine.name ?? npc.name;
         const sprite = this.add.sprite(0, 0, npc.atlas, manifest.animations[npc.animations.idle!.se].frames[0]);
-        const container = this.makeContainer([sprite]);
-        const merchant = npc.role === 'merchant-weapons' ? 'weapons' : npc.role === 'merchant-armor' ? 'armor' : undefined;
-        container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer) && merchant) deps.bridge.emit('open-merchant', { merchant }); });
         const id = `npc:${routine.npcId}`;
+        const container = this.makeContainer([sprite], id, true);
+        // A click talks, for players and visitors alike; Brutus and Livia too (their stalls open the shops, Task 11).
+        container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => { if (!dragged(pointer)) this.talkTo(id); });
         views.set(id, {
           id, kind: 'npc', name, container, layers: [{ id: 'npc', sprite }], look: '', label: this.makeLabel(name).setColor('#ffe48f'),
           x: 0, y: 0, action: 'idle', facing: 'se', offsetMs: 0, walk: null, placement: null, location: null,
@@ -518,7 +593,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
 
     createPlayer(actor: PublicActor, placement: Placement): ActorView {
       const layers = this.playerSprites(placement);
-      const container = this.makeContainer(layers.map(l => l.sprite));
+      const container = this.makeContainer(layers.map(l => l.sprite), actor.gladiatorId);
       const v: ActorView = {
         id: actor.gladiatorId, kind: 'player', name: actor.name, container, layers, look: lookKey(placement),
         label: this.makeLabel(actor.name), x: placement.x + 0.5, y: placement.y + 0.5, action: placement.action, facing: placement.facing,
@@ -626,6 +701,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       for (const [battleId, npc] of npcFighters) if (npc === v) npcFighters.delete(battleId);
       if (selected === v.id) selected = null;
       if (following === v.id) stopFollowing();
+      if (hovered === v.id) hovered = null;
     }
 
     setupInput() {
@@ -655,7 +731,13 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         view = panBy(view, pointer.x - pointer.prevPosition.x, pointer.y - pointer.prevPosition.y, bounds);
         this.syncCamera();
       });
-      this.input.on(P.Input.Events.POINTER_UP, () => { pinch = null; dragging = false; });
+      this.input.on(P.Input.Events.POINTER_UP, (pointer: PhaserNS.Input.Pointer) => {
+        pinch = null;
+        dragging = false;
+        // A click anywhere else on the camp closes the speech bubble; a click on an NPC has just given it the next line.
+        if (talk && !talkClicked && !dragged(pointer)) endTalk();
+        talkClicked = false;
+      });
       this.input.on(P.Input.Events.POINTER_WHEEL, (pointer: PhaserNS.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
         if (!dy) return; // horizontal scroll never zooms
         const at = performance.now();
@@ -716,6 +798,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
 
       const viewRect = cam.worldView;
       const margin = 80;
+      const nameScale = labelScale(cam.zoom, labelPrefs);
       for (const v of views.values()) {
         if (v.pose) {
           // A fighter in a ring: drawn from the battle log (updateArena), never walked.
@@ -746,26 +829,37 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const visible = s.x > viewRect.x - margin && s.x < viewRect.right + margin && s.y > viewRect.y - margin && s.y < viewRect.bottom + margin * 1.5;
         if (v.container.visible !== visible) v.container.setVisible(visible);
         if (v.torch) this.carryTorch(v, now, s, viewRect, torch);
-        const showLabel = visible && (v.kind !== 'npc' ? cam.zoom >= 1.4 || selected === v.id || following === v.id : cam.zoom >= 2);
-        if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
-        if (showLabel) v.label.setPosition(s.x, s.y - PLATE_LIFT);
-        // The title sits on the name's top edge when the name shows and the camera is close (or this one is selected or followed).
+        // Names and titles by the Settings choices (src/game/labels.ts); When zoomed in is the camp before Patch 1.9.
         const title = v.titleLabel;
-        const showTitle = !!title && showLabel && (cam.zoom >= 2 || selected === v.id || following === v.id);
+        const shown = namesShown({ npc: v.kind === 'npc', focused: selected === v.id || following === v.id, hasTitle: !!title }, cam.zoom, labelPrefs);
+        const showLabel = visible && shown.name;
+        if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
+        if (showLabel) {
+          if (v.label.scaleX !== nameScale) v.label.setScale(nameScale);
+          v.label.setPosition(s.x, s.y - PLATE_LIFT);
+        }
+        // The title sits on the name's top edge when both show.
+        const showTitle = !!title && showLabel && shown.title;
         if (title) {
           if (title.visible !== showTitle) title.setVisible(showTitle);
-          if (showTitle) title.setPosition(s.x, s.y - PLATE_LIFT - v.label.displayHeight);
+          if (showTitle) {
+            if (title.scaleX !== nameScale) title.setScale(nameScale);
+            title.setPosition(s.x, s.y - PLATE_LIFT - v.label.displayHeight);
+          }
         }
         if (v.marker) {
           if (v.marker.visible !== visible) v.marker.setVisible(visible);
           // A tag never covers a title: with one showing, the tag stands on the title's top edge.
-          if (visible) v.marker.setPosition(s.x, s.y - (showTitle ? PLATE_LIFT + v.label.displayHeight + title!.displayHeight : showLabel ? TAG_LIFT : PLATE_LIFT));
+          if (visible) v.marker.setPosition(s.x, s.y - (showTitle ? PLATE_LIFT + v.label.displayHeight + title!.displayHeight : showLabel ? tagLift(v.label) : PLATE_LIFT));
         }
         if (visible) {
           if (pose) this.applyPose(v, pose);
           else this.updateFrames(v, now);
         }
       }
+      this.tidyNames(cam.zoom);
+      this.updateHoverRing();
+      this.updateTalk(now);
       const focus = following ?? selected;
       const fv = focus ? views.get(focus) : undefined;
       if (ring) {
@@ -788,6 +882,80 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         }
       }
       this.updateOccluders(fv);
+    }
+
+    /**
+     * Tidy (Task 11): of the names shown this frame, the nearer wins and a name that would overlap one already drawn fades to
+     * 30%, under the full ones. Your gladiator, a selected or followed one and the talking NPC never fade; the actor under
+     * the pointer shows its name full and on top.
+     */
+    tidyNames(zoom: number) {
+      const owner = deps.focusId?.() ?? null;
+      let n = 0;
+      for (const v of views.values()) {
+        if (!v.label.visible) continue;
+        const t = v.titleLabel?.visible ? v.titleLabel : null;
+        const width = Math.max(v.label.displayWidth, t?.displayWidth ?? 0);
+        const height = v.label.displayHeight + (t?.displayHeight ?? 0);
+        const item = tidyPool[n] ?? (tidyPool[n] = { x: 0, y: 0, width: 0, height: 0, depth: 0, pinned: false });
+        item.x = v.label.x - width / 2;
+        item.y = v.label.y - height;
+        item.width = width;
+        item.height = height;
+        item.depth = v.depth;
+        item.pinned = v.id === owner || v.id === selected || v.id === following || v.id === talk?.id;
+        tidyItems[n] = item;
+        tidyViews[n] = v;
+        n += 1;
+      }
+      tidyItems.length = n;
+      tidyViews.length = n;
+      // The touching allowance is one and two screen px, whatever the zoom.
+      tidyTolerance.x = 1 / zoom;
+      tidyTolerance.y = 2 / zoom;
+      tidyLabels(tidyItems, tidyFaded, tidyTolerance, tidyOrder);
+      for (let i = 0; i < n; i += 1) {
+        const v = tidyViews[i];
+        const hot = v.id === hovered;
+        const alpha = hot || !tidyFaded[i] ? 1 : FADED_LABEL_ALPHA;
+        const depth = hot ? NAME_DEPTH_HOVER : tidyFaded[i] ? NAME_DEPTH_FADED : NAME_DEPTH;
+        drawName(v.label, alpha, depth);
+        if (v.titleLabel) drawName(v.titleLabel, alpha, depth);
+      }
+    }
+
+    /** The thin gold ring under the NPC the pointer is over, so players can tell NPCs talk. */
+    updateHoverRing() {
+      if (!hoverRing) return;
+      const v = hovered ? views.get(hovered) : undefined;
+      const show = !!v && v.kind === 'npc' && v.container.visible;
+      if (hoverRing.visible !== show) hoverRing.setVisible(show);
+      if (!v || !show) return;
+      const s = worldToScreen(v.x, v.y);
+      hoverRing.setPosition(s.x, s.y);
+      if (hoverRing.depth !== s.y - 0.4) hoverRing.setDepth(s.y - 0.4);
+    }
+
+    /**
+     * The talking NPC's bubble: where it is drawn now, told to the page every frame (it follows the NPC as it walks). The
+     * line holds for its time on the display clock, fades for 0.4 s, then closes.
+     */
+    updateTalk(now: number) {
+      if (!talk) return;
+      const v = views.get(talk.id);
+      if (!v) { endTalk(); return; }
+      // A clock that moved back (a resync) starts the line's time again rather than holding it longer.
+      if (now < talk.at) talk.at = now;
+      const elapsed = now - talk.at;
+      if (elapsed >= talk.holdMs + TALK_FADE_MS) { endTalk(); return; }
+      const cam = this.cameras.main;
+      const s = worldToScreen(v.x, v.y);
+      const top = v.label.visible ? v.label.y - v.label.displayHeight : s.y - PLATE_LIFT;
+      deps.onTalk?.({
+        seq: talk.seq, npcId: talk.npcId, name: talk.name, line: talk.line, index: talk.index, count: NPC_LINES[talk.npcId]?.length ?? 4,
+        x: (s.x - cam.worldView.x) * cam.zoom, top: (top - cam.worldView.y) * cam.zoom, feet: (s.y - cam.worldView.y) * cam.zoom,
+        visible: v.container.visible, fading: elapsed >= talk.holdMs,
+      });
     }
 
     /**
@@ -1026,7 +1194,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (l.tint !== null) sprite.setTint(l.tint);
         return { id: l.id, sprite };
       });
-      const container = this.makeContainer(layers.map(l => l.sprite));
+      const container = this.makeContainer(layers.map(l => l.sprite), id);
       const entrant = fight.fighters[1 - side];
       container.on('pointerup', (pointer: PhaserNS.Input.Pointer) => {
         if (dragged(pointer)) return;
@@ -1069,7 +1237,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       for (const g of hiding) if (!faded.has(g)) { for (const image of g.images) image.setAlpha(FADED_ALPHA); faded.add(g); }
     }
 
-    /** Alpha of a prop frame, read once from the atlas the first time it might hide someone. */
+    /** Whether a prop frame's pixel at (x, y), frame-relative, is drawn (not transparent). */
+    opaqueAt(frameName: string, x: number, y: number): boolean {
+      const mask = this.alphaMask(frameName);
+      const col = Math.floor(x), row = Math.floor(y);
+      return col >= 0 && row >= 0 && col < mask.width && row * mask.width + col < mask.alpha.length && mask.alpha[row * mask.width + col] > 0;
+    }
+
+    /** Alpha of a prop frame, read once from the atlas the first time it might hide someone (or is clicked). */
     alphaMask(frameName: string) {
       let mask = alphaMasks.get(frameName);
       if (mask) return mask;
@@ -1096,6 +1271,28 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
       if (flip !== v.flip) { v.container.setScale(flip ? -1 : 1, 1); v.flip = flip; }
     }
+  }
+
+  /** The touching allowance Tidy uses, in world px (reused each frame). */
+  const tidyTolerance = { x: 1, y: 2 };
+
+  /** A name's or title's opacity and depth, set only when they change. */
+  function drawName(text: PhaserNS.GameObjects.Text, alpha: number, depth: number) {
+    if (text.alpha !== alpha) text.setAlpha(alpha);
+    if (text.depth !== depth) text.setDepth(depth);
+  }
+
+  /** Where an NPC tag stands over a name drawn at its scale: today's lift at zoom-1 size, higher for a larger name. */
+  function tagLift(label: PhaserNS.GameObjects.Text): number {
+    return PLATE_LIFT + (TAG_LIFT - PLATE_LIFT) * label.scaleY;
+  }
+
+  /** Closes the speech bubble; true when one was open. */
+  function endTalk(): boolean {
+    if (!talk) return false;
+    talk = null;
+    deps.onTalk?.(null);
+    return true;
   }
 
   /** Dragging or panning ends a follow; tell the UI so its Follow toggle stays truthful. */
@@ -1134,7 +1331,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     const plate = title ?? name;
     if (!v.marker) return plate;
     // The tag stands on the title's top edge when a title shows, else at its usual lift over the name.
-    return Math.min(plate, (title ?? feetY - TAG_LIFT) - v.marker.displayHeight);
+    return Math.min(plate, (title ?? feetY - tagLift(v.label)) - v.marker.displayHeight);
   }
 
   /**
@@ -1256,6 +1453,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     if (disposed) return;
     disposed = true;
     for (const off of unsubscribe.splice(0)) off();
+    talk = null;
   }
 
   /** Canvas-relative CSS pixel position of an actor's body (20 art px above its feet), or null without a live camera. */
@@ -1283,6 +1481,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     setReducedMotion(reduced) {
       reducedMotion = reduced;
     },
+    setLabelPrefs(prefs) {
+      labelPrefs = prefs;
+    },
+    endTalk,
     dispose,
     debug() {
       const cam = live() ? scene.cameras.main : undefined;
@@ -1307,6 +1509,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           plates: [v.label, v.marker].filter((t): t is PhaserNS.GameObjects.Text => !!t && t.visible).map(t => { const b = t.getBounds(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }),
           look: v.npcLook ?? null,
           torch: v.torch?.visible ? { x: v.torch.x, y: v.torch.y, alpha: v.torch.alpha } : null,
+          nameplate: v.label.visible ? { alpha: v.label.alpha, scale: v.label.scaleX } : null,
         })),
         selected,
         following,
@@ -1318,6 +1521,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           champion: [...tournamentRoles].find(([, r]) => r.role === 'champion')?.[0] ?? null,
           spectators: [...views.values()].filter(v => v.spectator).map(v => v.id),
         },
+        labels: labelPrefs,
+        talk: talk ? { npcId: talk.npcId, index: talk.index, line: talk.line, fading: now - talk.at >= talk.holdMs } : null,
+        hover: hovered,
+        hoverRing: hoverRing?.visible ? hovered : null,
       };
     },
     props() {

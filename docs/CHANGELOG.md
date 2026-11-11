@@ -44,6 +44,8 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Mark messages and notifications as read, one by one or all at once.
 - An XP bar shows your progress and whether your next expedition can level you up.
 - My gladiator explains each attribute and stat when you hover, focus or tap it.
+- Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
+- Choose in Settings when names and titles show over the camp: Off, When zoomed in, or Always, even zoomed out.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

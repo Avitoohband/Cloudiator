@@ -13,7 +13,7 @@
 // stops being a player (sign-out, expiry, another account), a private menu that is open closes. A cancelled or failed
 // sign-in comes back as `?signin=cancelled|failed` (plan Decision 6): the shell shows a short message and removes it.
 //
-// Task 13.7: clicks on gladiators and merchants in the camp (`useCampClicks`) open profile cards and the shops; the
+// Task 13.7: clicks on gladiators and merchants' stalls in the camp (`useCampClicks`) open profile cards and the shops; the
 // Gladiators list and the standings open the same cards. Escape closes the card first when it has the focus or no menu
 // is open. Results lists the recent results.
 //
@@ -84,7 +84,7 @@ import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { SettingsPanel } from './SettingsPanel';
-import { DEFAULT_MENU_PREFS, useMenuPrefs } from './menu-prefs';
+import { DEFAULT_MENU_PREFS, useLabelPrefs, useMenuPrefs } from './menu-prefs';
 import { MenuSurface } from './MenuSurface';
 import { PatchNotice, reloadPage } from './PatchNotice';
 import { modalOpen, useModalOpen } from './modal';
@@ -509,6 +509,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // The pin and the edge are the pointer layout's (Settings); the touch layout always has its ☰ button.
   const [savedPrefs, setPrefs] = useMenuPrefs();
   const prefs = compact ? DEFAULT_MENU_PREFS : savedPrefs;
+  // When the camp shows names and titles (Settings, Task 11): the same on phones, applied to the camp at once.
+  const [labels, setLabels] = useLabelPrefs();
   const railShown = railVisible(rail, prefs.pinned);
   const [patchLater, setPatchLater] = useState<string | null>(null);
   const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen || titleOpen,
@@ -556,7 +558,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
-      case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} compact={compact} />;
+      case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} labels={labels} onLabels={setLabels} compact={compact} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;
@@ -613,7 +615,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
           if (start && isClick(event.clientX - start.x, event.clientY - start.y)) { send('camp-click'); closeCard(false); }
         }}>
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
-          onStatus={game.setSceneStatus} paused={scene !== null} />
+          onStatus={game.setSceneStatus} paused={scene !== null} labels={labels} />
       </main>
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} tournamentSamples={samples.tournaments} onReplace={replaceScene}
         onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}

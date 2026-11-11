@@ -4,7 +4,7 @@ The Wiki explains live features only, so none of this goes into `wiki.draft.json
 
 ## Shops (shops topic)
 
-Each shop shows its goods as a grid of icons. Select an icon to see its card with the price, stats, and weight, then buy it. Use the filters for Weapons, Armor, and the gold or renown view. Click the Weaponsmith or Armorer in camp to open the shop on that filter. The Arena banner is sold by the Armorer and shows in the Renown view.
+Each shop shows its goods as a grid of icons. Select an icon to see its card with the price, stats, and weight, then buy it. Use the filters for Weapons, Armor, and the gold or renown view. Click the Weaponsmith's or Armorer's stall in camp to open the shop on that filter. The Arena banner is sold by the Armorer and shows in the Renown view.
 
 ## Search and sort (inventory and shops topics)
 
@@ -34,13 +34,13 @@ Press the tick on a message to mark it read, or Mark all to clear every message.
 
 On desktop, pin the menu and choose whether it sits on the left, on the right, or along the bottom. Your choice is saved in this browser only, so another device can differ.
 
-## Name and title toggles (camp topic; only if approved for 1.9)
+## Names and titles (camp and interface topics)
 
-Turn on always-visible names and titles above gladiators in camp. They are off until you choose them.
+In Settings, under Names and titles, choose when names and titles show over the camp: Off, When zoomed in, or Always. When zoomed in shows gladiators' names from zoom 1.4 and NPC names and titles from zoom 2, and your selected gladiator's always. Always shows them at any zoom, even zoomed out. Where names overlap, the nearer one stays and the ones behind fade; point at a gladiator to bring its name back. Your choice is saved in this browser and works on phones too.
 
-## Talking NPCs (camp topic; only if approved for 1.9)
+## Talking NPCs (camp topic)
 
-Click or tap an NPC in camp to hear a line about themselves.
+Click or tap an NPC in camp to hear a line from them, and again for their next one. Each has four. Brutus and Livia talk too; click their stalls to open the shops.
 
 ## Also
 

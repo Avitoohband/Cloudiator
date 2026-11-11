@@ -101,6 +101,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | More guards | Five guards in all: two at the gate, a lookout at the watchtower and two patrols walking along the inside of the walls. | 1.5.1 | Live | Fixture camp: zoom in at the gate (east side) and follow a wall; names show from zoom 2 | — |
 | Night watch | In the evening the two wall patrols carry torches, and the light goes with them along the walls. | 1.5.1 | Live | An evening part (torches lit; see Filming kit); the fixture camp opens in a morning | — |
 | New camp NPCs | Petra the water carrier, Felix the herald, Quintus the porter (a crate on his shoulder) and Silva the forester (an axe) walk their rounds through the camp. | 1.5.1 | Live | Fixture camp, zoomed in: the well and training yard, the Arena gate, the stalls, the wooded corners | — |
+| Talking NPCs | Click or tap any of the 14 camp NPCs: a pixel speech bubble with their name and one of their four lines; click again for the next. Brutus and Livia talk too; their stalls open the shops. | 1.9 | Built | Fixture camp: hover an NPC (pointer and a gold ring), click Doctore Cassius in the training yard, then again; the bubble follows a walking NPC and fades after 4 to 6 s | — |
 
 ### Your gladiator: creation, looks, class, attributes and build
 
@@ -248,6 +249,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Clearer busy buttons | While a button sends its command, it dims and keeps the keyboard focus, and pressing it again does nothing. | 1.2.1 | Live | Wear, Buy or Queue build (test player) | — |
 | 12- or 24-hour clock | Choose a 12-hour or 24-hour clock in the menu under your name; every time in the game follows it. | 1.4 | Live | Menu under your name → Clock; watch the times in Results change | — |
 | Phone status bar | On a phone, tap your name to see stamina, gold, renown and the time to the next slot. | 1.4 | Live | Fixture camp at phone width → tap your name | — |
+| Names and titles | Settings → Names and titles: Off, When zoomed in (as before) or Always, for names and for titles; names that overlap fade behind the nearer one. Saved in this browser, phones too. | 1.9 | Built | Fixture camp → Settings (the gear) → Names: Always, then zoom out: every name, at its zoom-1 size; hover a faded name to bring it back | — |
 | Replay keys | Space or K plays and pauses, the arrows skip 5 s, N and P change bout, F the speed, R restarts. | 1.5 | Live | Open a replay and use its keys | — |
 
 ### Under the hood

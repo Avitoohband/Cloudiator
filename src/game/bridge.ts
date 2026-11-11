@@ -9,7 +9,10 @@ export type SceneEvents = {
    * the profile card can open beside it; null when it is not placed.
    */
   'select-character': { gladiatorId: string; screen: Point | null };
-  /** Scene to UI: a click on a merchant's stall or the merchant (Task 13.7 opens that merchant's shop tab). */
+  /**
+   * Scene to UI: a click on a merchant's stall (Task 13.7 opens that merchant's shop tab). A click on the merchant talks
+   * instead, since Patch 1.9 (Task 11).
+   */
   'open-merchant': { merchant: 'weapons' | 'armor' };
   /**
    * Scene or UI to the shell (Task 13.8): open an expedition, or a battle replay (at one stage, or the first), as a

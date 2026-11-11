@@ -62,9 +62,11 @@ export function renderGladiator() {
     for (const view of def.views) {
       const dir = VIEW_DIR[view];
       const names = [];
+      // An action with its own anchor (sleep, Task 11b) gives it to each of its frames; build-assets.mjs keeps it.
+      const anchor = def.anchor ? { anchorX: def.anchor.x, anchorY: def.anchor.y } : {};
       def.frames.forEach((pose, i) => {
         const layers = renderLayers(pose, view, PAINTERS);
-        for (const layer of GLADIATOR_LAYERS) frames.push({ name: `${layer.id}/${action}/${dir}/${i}`, canvas: layers[layer.id] });
+        for (const layer of GLADIATOR_LAYERS) frames.push({ name: `${layer.id}/${action}/${dir}/${i}`, canvas: layers[layer.id], ...anchor });
         names.push(`body/${action}/${dir}/${i}`);
       });
       animations[`gladiator/${action}/${dir}`] = { atlas: 'gladiators', frames: names, durationsMs: def.durations, loop: def.loop };

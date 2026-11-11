@@ -121,6 +121,7 @@ export function body(skin = SKIN.light, figure = 'male') {
       c.stamp(L.head, lit(skin));
       if (view === 'front') face(c, T, skin, pose.face, figure);
       else { c.set(...T.H(DIMS.headRx - 0.8, 0.6), skin.lo); c.set(...T.H(-DIMS.headRx + 0.8, 0.6), skin.lo); }
+      if (pose.face === 'sleep') eyeCover(c, T, L.head);
     });
   };
 }
@@ -162,7 +163,7 @@ function face(c, T, skin, state, figure = 'male') {
   c.set(...P(-1.8, 1.4), skin.lo);
   if (female) c.set(...P(-1.8, 2.4), 'gold1'); // earring
   c.set(...P(5.5, 0.8), skin.lo); // nose
-  if (state === 'closed') {
+  if (state === 'closed' || state === 'sleep') {
     c.set(...P(2.4, 0), skin.deep); c.set(...P(3.4, 0), skin.deep);
     if (female) c.set(...P(4.4, -0.6), skin.deep); // lash
   } else if (state === 'hurt' || state === 'strain') {
@@ -176,6 +177,19 @@ function face(c, T, skin, state, figure = 'male') {
   if (state === 'shout' || state === 'hurt') { c.set(...P(3.4, 3), 'outline'); c.set(...P(3.4, 3.9), 'outline'); }
   else if (state === 'strain') { c.set(...P(2.6, 3.3), skin.deep); c.set(...P(3.6, 3.3), skin.deep); }
   else c.set(...P(3.4, 3.3), female ? 'crimson2' : skin.deep);
+}
+
+/**
+ * A sleeper's eye cover (face 'sleep'; Avi, 2026-11-11): a small dark band over the closed eyes, from the brow to the cheek
+ * and from the face's front to just behind the eye, with a lit edge toward the light. It paints only inside the head mask,
+ * so the head's 1 px outline stays, and the female body (the same mask) keeps the male silhouette.
+ */
+function eyeCover(c, T, head) {
+  head.forEach((x, y) => {
+    const [lx, ly] = T.headLocal(x, y);
+    if (lx < 1.4 || ly < -1.8 || ly > 0.6) return;
+    c.set(x, y, ly < -0.8 ? 'gray4' : 'shadow');
+  });
 }
 
 // ---------------------------------------------------------------- cloth

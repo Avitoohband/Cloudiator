@@ -1,0 +1,149 @@
+// Patch 1.9, Task 11b (Avi, 2026-11-11): a floating "ZzZ" over every sleeping gladiator in the camp and in the trip replay's
+// Resting chapter: small pixel letters (a big Z, a small z, a big Z) rising from the head and fading, in a loop. The loop runs
+// on the scene's own clock with a phase fixed per actor, so it is the same for everyone, holds when the scene is paused and never
+// moves in step with a neighbour's; with reduced motion it holds still. The letters stay clear of the lying body, and the name
+// sits over their whole climb, so nothing shifts as they rise.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { decodePng } from '../../assets/source/tools/png.mjs';
+import { loadAssetManifest } from '@/game/assets';
+import {
+  SLEEP_NAME_LIFT, ZZZ_CYCLE_MS, ZZZ_GLYPHS, ZZZ_TOP, zzzLetters, zzzPhase, zzzPixels, type ZzzLetter,
+} from '@/game/sleep-zzz';
+
+const STEP = 10;
+const times = Array.from({ length: ZZZ_CYCLE_MS / STEP }, (_, i) => i * STEP);
+const box = (l: ZzzLetter) => ({ left: l.left, right: l.left + ZZZ_GLYPHS[l.glyph].width, top: l.bottom - ZZZ_GLYPHS[l.glyph].height, bottom: l.bottom });
+
+describe('the ZzZ letters', () => {
+  it('are three, a big Z, a small z and a big Z, at whole art pixels', () => {
+    for (const t of times) {
+      const letters = zzzLetters(t, 0, false, false);
+      expect(letters.map(l => l.glyph)).toEqual(['Z', 'z', 'Z']);
+      for (const l of letters) {
+        expect(Number.isInteger(l.left) && Number.isInteger(l.bottom), `${t}`).toBe(true);
+        expect(l.alpha).toBeGreaterThanOrEqual(0);
+        expect(l.alpha).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('loop: each letter rises and drifts toward the feet over its life, fading in at the head and out at the top', () => {
+    expect(zzzLetters(1234, 0, false, false)).toEqual(zzzLetters(1234 + ZZZ_CYCLE_MS, 0, false, false));
+    expect(zzzLetters(-500, 0, false, false)).toEqual(zzzLetters(ZZZ_CYCLE_MS - 500, 0, false, false));
+    // Follow the first letter through one life: born invisible at the head, then up and to the right, then gone.
+    const life = times.map(t => zzzLetters(t, 0, false, false)[0]);
+    expect(life[0].alpha).toBe(0);
+    expect(Math.max(...life.map(l => l.alpha))).toBe(1);
+    expect(life.at(-1)!.alpha).toBeLessThan(0.05);
+    for (let i = 1; i < life.length; i += 1) {
+      expect(life[i].bottom, `${times[i]}`).toBeLessThanOrEqual(life[i - 1].bottom);
+      expect(life[i].left, `${times[i]}`).toBeGreaterThanOrEqual(life[i - 1].left);
+    }
+    expect(life[0].bottom - life.at(-1)!.bottom).toBeGreaterThanOrEqual(15);
+    // The three are a third of a life apart: one is always near the head, one halfway, one near the top.
+    const now = zzzLetters(0, 0, false, false).map(l => l.bottom).sort((a, b) => a - b);
+    expect(now[1] - now[0]).toBeGreaterThanOrEqual(5);
+    expect(now[2] - now[1]).toBeGreaterThanOrEqual(5);
+  });
+
+  it('are deterministic per actor, out of step between actors, and depend only on the clock given (a paused scene holds them)', () => {
+    expect(zzzPhase('glad-1')).toBe(zzzPhase('glad-1'));
+    const phases = new Set(Array.from({ length: 12 }, (_, i) => zzzPhase(`glad-${i}`)));
+    expect(phases.size).toBeGreaterThan(8);
+    for (const p of phases) { expect(p).toBeGreaterThanOrEqual(0); expect(p).toBeLessThan(ZZZ_CYCLE_MS); }
+    const phase = zzzPhase('glad-3');
+    expect(zzzLetters(4000, phase, false, false)).toEqual(zzzLetters(4000, phase, false, false));
+    expect(zzzLetters(4000, phase, false, false)).toEqual(zzzLetters(4000 + phase - zzzPhase('glad-3'), zzzPhase('glad-3'), false, false));
+    expect(zzzLetters(4000, zzzPhase('glad-3'), false, false)).not.toEqual(zzzLetters(4000, zzzPhase('glad-4'), false, false));
+  });
+
+  it('mirror with a sleeper facing south-west', () => {
+    for (const t of [0, 700, 1900]) {
+      const se = zzzLetters(t, 0, false, false);
+      const sw = zzzLetters(t, 0, true, false);
+      sw.forEach((l, i) => expect({ ...l, left: -l.left - ZZZ_GLYPHS[l.glyph].width }).toEqual(se[i]));
+    }
+  });
+
+  it('hold still, fully drawn, with reduced motion', () => {
+    const still = zzzLetters(0, 0, false, true);
+    expect(still.map(l => l.alpha)).toEqual([1, 1, 1]);
+    for (const t of [1, 999, 2500, 77_777]) expect(zzzLetters(t, zzzPhase('x'), false, true)).toEqual(still);
+    // Read top-down they spell "ZzZ".
+    expect([...still].sort((a, b) => a.bottom - b.bottom).map(l => l.glyph).join('')).toBe('ZzZ');
+  });
+
+  it('never cover one another', () => {
+    for (const t of times) {
+      const boxes = zzzLetters(t, 0, false, false).filter(l => l.alpha > 0).map(box);
+      for (let i = 0; i < boxes.length; i += 1) for (let j = i + 1; j < boxes.length; j += 1) {
+        // Their fills (inside the 1 px outline) never overlap; the outlines may touch.
+        const [a, b] = [boxes[i], boxes[j]];
+        const overlap = a.left + 1 < b.right - 1 && b.left + 1 < a.right - 1 && a.top + 1 < b.bottom - 1 && b.top + 1 < a.bottom - 1;
+        expect(overlap, `${t}: letters ${i} and ${j}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe('the ZzZ pixel glyphs', () => {
+  it('are a 5 px Z and a 4 px z in the palette, each with its own 1 px outline', () => {
+    expect([ZZZ_GLYPHS.Z.width, ZZZ_GLYPHS.Z.height]).toEqual([7, 7]);
+    expect([ZZZ_GLYPHS.z.width, ZZZ_GLYPHS.z.height]).toEqual([6, 6]);
+    const manifest = loadAssetManifest();
+    for (const glyph of ['Z', 'z'] as const) {
+      const { width, height } = ZZZ_GLYPHS[glyph];
+      const px = zzzPixels(glyph);
+      expect(px).toHaveLength(width * height);
+      const at = (x: number, y: number) => (x < 0 || y < 0 || x >= width || y >= height ? null : px[y * width + x]);
+      for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+        const p = at(x, y);
+        if (p === 'fill') for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) expect(at(x + dx, y + dy), `${glyph} ${x},${y}`).not.toBeNull();
+        if (p === 'outline') expect([[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].some(([dx, dy]) => at(x + dx, y + dy) === 'fill'), `${glyph} ${x},${y}`).toBe(true);
+      }
+      expect(px.filter(p => p === 'fill').length).toBeGreaterThanOrEqual(glyph === 'Z' ? 13 : 10);
+    }
+    // The colours are the palette's (the same cream and outline as the camp's names).
+    expect(manifest.palette.canvas1).toBeDefined();
+    expect(manifest.palette.outline).toBeDefined();
+  });
+});
+
+describe('where the ZzZ sits', () => {
+  const manifest = loadAssetManifest();
+  const gladiator = manifest.actors.gladiator;
+  const atlas = manifest.atlases[gladiator.atlas];
+  const image = decodePng(readFileSync(join(__dirname, '..', '..', 'public', 'assets', atlas.image)));
+
+  it('stays clear of the lying body in every layer and both sleep frames, facing either way', () => {
+    // Every opaque pixel of every sleep frame, relative to the frame's own anchor (the sleeper's feet).
+    const body: { x: number; y: number }[] = [];
+    for (const name of Object.keys(atlas.frames).filter(n => /\/sleep\/se\/\d$/.test(n))) {
+      const f = atlas.frames[name];
+      for (let y = 0; y < f.h; y += 1) for (let x = 0; x < f.w; x += 1) {
+        if (image.rgba[((f.y + y) * image.width + f.x + x) * 4 + 3]) body.push({ x: x - f.anchorX, y: y - f.anchorY });
+      }
+    }
+    expect(body.length).toBeGreaterThan(1000);
+    for (const flip of [false, true]) for (const t of times) {
+      for (const l of zzzLetters(t, 0, flip, false)) {
+        if (l.alpha === 0) continue;
+        const b = box(l);
+        const hit = body.find(p => (flip ? -p.x : p.x) >= b.left && (flip ? -p.x : p.x) < b.right && p.y >= b.top - 1 && p.y < b.bottom + 1);
+        expect(hit, `${flip ? 'sw' : 'se'} ${t}: ${l.glyph} at ${l.left},${l.bottom}`).toBeUndefined();
+      }
+    }
+  });
+
+  it('rises from over the head (its first column of body pixels) and keeps under the name', () => {
+    expect(ZZZ_TOP).toBe(Math.min(...times.flatMap(t => [false, true].flatMap(flip => zzzLetters(t, 0, flip, false).map(l => box(l).top))), ...zzzLetters(0, 0, false, true).map(l => box(l).top)));
+    // The name's bottom edge sits SLEEP_NAME_LIFT over the feet, with one clear row over the highest letter.
+    expect(SLEEP_NAME_LIFT).toBe(-ZZZ_TOP + 2);
+    expect(SLEEP_NAME_LIFT).toBeLessThanOrEqual(46);
+    const start = zzzLetters(0, 0, false, false)[0];
+    expect(box(start).left).toBeLessThan(2);
+    expect(box(start).right).toBeGreaterThan(-6);
+  });
+});

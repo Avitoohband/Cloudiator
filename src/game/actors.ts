@@ -202,17 +202,36 @@ function stationMatches(station: MapStation, variant: Variant): boolean {
   return station.kind === variant;
 }
 
+const BED_TILES = new WeakMap<MapData, Set<string>>();
 /**
- * Free walkable tiles of a zone, excluding NPC posts and, for the arena, everything outside the wall and the
+ * Every tile of a bed: the floor prop whose first tile is a sleep station, and the rest of its footprint. A sleeper lies along
+ * its bed onto the foot tile (Task 11b), so no overflow gladiator is put on a bed.
+ */
+function bedTiles(map: MapData): Set<string> {
+  let tiles = BED_TILES.get(map);
+  if (tiles) return tiles;
+  tiles = new Set();
+  const sleep = new Set(map.zones.flatMap(z => z.stations).filter(s => s.kind === 'sleep').map(s => `${s.x},${s.y}`));
+  for (const p of map.props) {
+    if (p.layer !== 'floor' || !sleep.has(`${p.x},${p.y}`)) continue;
+    for (let dy = 0; dy < p.d; dy += 1) for (let dx = 0; dx < p.w; dx += 1) tiles.add(`${p.x + dx},${p.y + dy}`);
+  }
+  BED_TILES.set(map, tiles);
+  return tiles;
+}
+
+/**
+ * Free walkable tiles of a zone, excluding NPC posts, beds and, for the arena, everything outside the wall and the
  * sparring-ring tiles, which stay free for revealed bouts.
  */
 function freeTiles(map: MapData, zoneId: ZoneId, taken: Set<string>): { x: number; y: number }[] {
   const zone = map.zones.find(z => z.id === zoneId)!;
   const rings = zoneId === 'arena' ? new Set(zone.stations.filter(s => s.kind === 'arena-ring').map(s => `${s.x},${s.y}`)) : null;
+  const beds = bedTiles(map);
   const tiles: { x: number; y: number }[] = [];
   const { x: bx, y: by, w, h } = zone.bounds;
   for (let y = by; y < by + h; y += 1) for (let x = bx; x < bx + w; x += 1) {
-    if (map.walkable[y]?.[x] !== '1' || taken.has(`${x},${y}`) || rings?.has(`${x},${y}`)) continue;
+    if (map.walkable[y]?.[x] !== '1' || taken.has(`${x},${y}`) || rings?.has(`${x},${y}`) || beds.has(`${x},${y}`)) continue;
     if (zoneId === 'arena' && map.arena && Math.hypot(x + 0.5 - map.arena.centre[0], y + 0.5 - map.arena.centre[1]) > map.arena.radius - 1.1) continue;
     tiles.push({ x, y });
   }

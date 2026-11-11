@@ -308,6 +308,22 @@ describe('actor routines', () => {
     }
   });
 
+  it('never puts an overflow gladiator on a bed (Task 11b: a sleeper now lies along its bed, onto the foot tile)', () => {
+    // Beds are walkable floor props, so overflow could once land on a bed's free foot tile, over its sleeper's legs. With the
+    // 50-row public world it never reaches them (the free rows in front of the tents come first); a bigger crowd still must not.
+    const bedTiles = new Set(camp.props.filter(p => p.frame.startsWith('bedroll-')).flatMap(p => Array.from({ length: p.w * p.d }, (_, i) => `${p.x + (i % p.w)},${p.y + Math.floor(i / p.w)}`)));
+    expect(bedTiles.size).toBe(24);
+    const actors = Array.from({ length: 100 }, (_, i) => actor(i, 'rest'));
+    const { placements } = layoutCamp(actors, camp, SLOT, { reserved: npcPostTiles() });
+    expect(placements.size).toBe(100);
+    for (const p of placements.values()) {
+      if (p.stationId) continue;
+      expect(bedTiles.has(`${p.x},${p.y}`), `overflow at ${p.x},${p.y}`).toBe(false);
+    }
+    // The beds' head tiles are still every sleep station.
+    expect([...placements.values()].filter(p => p.stationId?.startsWith('sleep-'))).toHaveLength(12);
+  });
+
   it('pairs sparring partners face to face and keeps a mixed camp unique', () => {
     // A stress layout beyond the 50-row public world: 50 in camp plus 6 away.
     const world = createDemoWorld(1_791_592_800_000, 50, 6);

@@ -76,6 +76,14 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
   Add a color to the palette before you use it.
 - **Frame sizes.** Actor frames are 64×64 with a 1px transparent border, and the ground-contact
   anchor is at (32, 58). Ground tiles are 64×32 diamonds.
+- **Per-frame anchors (sleep).** The gladiator's sleep frames carry their own anchor, (16, 50): the bed's head tile centre
+  inside the frame (Task 11b, Avi approved on 2026-11-11). The sleeper lies straight along its bed, which runs along map x
+  (2:1 down to the right on screen), with its head on the pillow and its feet on the foot tile; the 64 px frame has too few
+  rows under (32, 58) for that, so the frame moves instead of the scene. A pose's action sets it with `anchor` (`poses.mjs`),
+  `gladiator.mjs` gives it to each frame and `build-assets.mjs` keeps it in `anchorPx` and `pivot`; every other frame stands
+  on (32, 58), which `manifest.actors.gladiator.anchor` still names. Always place an actor frame by its own `anchorPx` or
+  `pivot` (Phaser does on `setFrame`; mirroring a sw-facing actor around its anchor keeps working), never by the
+  manifest's anchor. The rig's `shear` (after the lying rotation) is what lays the body along the 2:1 diagonal.
 - **Reusable body.** Every gladiator layer has a frame for every body frame
   (`<layer>/<action>/<dir>/<i>`). Draw the layers in manifest order. The rig clips each layer part
   by the body parts in front of it, so a fixed draw order always gives correct depth.

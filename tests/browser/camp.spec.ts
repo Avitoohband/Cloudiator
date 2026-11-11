@@ -10,6 +10,7 @@ import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
+import { SLEEP_NAME_LIFT } from '../../src/game/sleep-zzz';
 import { closeMenu, openMenu, revealRail, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -279,6 +280,42 @@ test.describe('living isometric camp', () => {
     expect(new Set(players.map(a => a.action)).size).toBeGreaterThanOrEqual(5);
   });
 
+  test('lays sleepers along their beds under a rising ZzZ, names over it, and answers a click on the legs (Task 11b)', async ({ page }, testInfo) => {
+    await openCamp(page);
+    // A gladiator asleep on a bed: its station is a bed's head tile (x 14, 16 or 18; y 35, 36, 39 or 40).
+    const onBed = (a: { x: number; y: number }) => [14, 16, 18].includes(Math.floor(a.x)) && [35, 36, 39, 40].includes(Math.floor(a.y));
+    const sleepers = (await campState(page)).actors.filter(a => a.kind === 'player' && a.action === 'sleep' && !a.walking && onBed(a));
+    expect(sleepers.length, 'the fixture camp has gladiators asleep on beds').toBeGreaterThan(0);
+    const sleeper = sleepers[0];
+    await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 3), { x: sleeper.x, y: sleeper.y });
+    await nextFrames(page);
+    const read = async () => (await campState(page)).actors.find(a => a.id === sleeper.id)!;
+    const now = await read();
+    const feet = worldToScreen(now.x, now.y);
+    // Its name's bottom edge sits SLEEP_NAME_LIFT over the feet, the ZzZ between it and the body (which reaches 16 px up).
+    expect(now.plates[0].y + now.plates[0].height).toBeCloseTo(feet.y - SLEEP_NAME_LIFT, 0);
+    expect(now.zzz.length).toBeGreaterThanOrEqual(2);
+    for (const z of now.zzz) {
+      expect(z.y + z.height, `${z.glyph} over the body`).toBeLessThanOrEqual(feet.y - 17);
+      expect(z.y, `${z.glyph} under the name`).toBeGreaterThan(feet.y - SLEEP_NAME_LIFT);
+    }
+    // The letters rise in a loop on the camp's clock; a standing gladiator has none.
+    await page.waitForTimeout(450);
+    await nextFrames(page);
+    expect((await read()).zzz).not.toEqual(now.zzz);
+    for (const a of (await campState(page)).actors.filter(x => x.action !== 'sleep')) expect(a.zzz, a.name).toEqual([]);
+    // Its click box covers the whole lying body, from behind the head to the feet on the bed's foot tile.
+    expect(now.hit).toEqual({ x: feet.x - 14, y: feet.y - 17, width: 48, height: 27 });
+    await page.screenshot({ path: testInfo.outputPath('camp-sleepers.png') });
+    const box = (await page.locator('canvas').boundingBox())!;
+    const zoom = (await campState(page)).camera.zoom;
+    const at = (await page.evaluate(id => window.__cloudiatorCamp!.screenOf(id), sleeper.id))!;
+    // The legs: 26 art px toward the feet and 4 px under them (screenOf is 20 art px over the feet).
+    await page.mouse.click(box.x + at.x + 26 * zoom, box.y + at.y + (20 + 4) * zoom);
+    expect((await campState(page)).selected).toBe(sleeper.id);
+    await expect(page.getByRole('dialog', { name: `Profile: ${sleeper.name}`, exact: true })).toBeVisible();
+  });
+
   test('sorts every prop slice and actor by the shared depth rule', async ({ page }) => {
     await openCamp(page);
     const props = await page.evaluate(() => window.__cloudiatorCamp!.props());
@@ -538,6 +575,15 @@ test.describe('living isometric camp', () => {
     expect(await npcs()).toEqual(first);
     expect(first.every(n => n.action !== 'walk')).toBe(true);
     expect((await campState(page)).lighting.torchAlpha).toBe(torch);
+    // Task 11b: a sleeper's ZzZ holds still too, all three letters drawn.
+    const sleeper = (await campState(page)).actors.find(a => a.kind === 'player' && a.action === 'sleep')!;
+    await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: sleeper.x, y: sleeper.y });
+    await nextFrames(page);
+    const zzz = async () => (await campState(page)).actors.find(a => a.id === sleeper.id)!.zzz;
+    const still = await zzz();
+    expect(still.map(z => [z.glyph, z.alpha])).toEqual([['Z', 1], ['z', 1], ['Z', 1]]);
+    await page.waitForTimeout(800);
+    expect(await zzz()).toEqual(still);
   });
 
   test('re-entering the game keeps one canvas and the camera still responds', async ({ page }) => {

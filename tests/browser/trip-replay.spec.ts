@@ -11,6 +11,7 @@ import { stageWalks, type JourneyPoint } from '../../src/game/expedition-stage';
 import { pathLength } from '../../src/game/paths';
 import { planTrip, tripPositionOf, type TripChapterId } from '../../src/game/trip-replay';
 import { bedFor } from '../../src/game/trip-vignette';
+import { SLEEP_NAME_LIFT } from '../../src/game/sleep-zzz';
 import { worldToScreen } from '../../src/game/iso';
 import type { MapData } from '../../src/game/assets';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
@@ -131,7 +132,8 @@ const drawn = (page: Page) => page.evaluate(() => {
 });
 /**
  * The camp scene's gladiator is whole inside the world rectangle its camera shows: its feet at least 32 world px from the sides
- * (a lying body reaches 29 px left of them), its head (44 px over the feet) and its feet inside the top and bottom.
+ * (a body lying along its bed reaches 32 px right of them, Task 11b), its head (44 px over the feet) and its feet inside the top
+ * and bottom.
  */
 const campInView = async (page: Page) => {
   const { camp } = await drawn(page);
@@ -725,8 +727,21 @@ test.describe('the whole-trip replay', () => {
       await expect.poll(async () => (await drawn(page)).camp?.kind).toBe('resting');
       const bed = bedFor(CAMP_MAP, ASTER.id);
       expect((await drawn(page)).camp!.gladiator).toMatchObject({ action: 'sleep', x: bed.x + 0.5, y: bed.y + 0.5, alpha: 1, layers: look });
-      // Fix round 2, Minor 2: the name sits just over the lying body (16 px tall), not 46 px up over the next bed.
-      expect((await drawn(page)).camp!.gladiator!.nameLift).toBe(20);
+      // Task 11b: a "ZzZ" rises from the sleeper's head, between the lying body (16 px tall) and the name, which sits just over
+      // the letters' whole climb (SLEEP_NAME_LIFT), as in the camp. The replay is paused here, so the letters hold.
+      await nextFrames(page);
+      const asleep = (await drawn(page)).camp!.gladiator!;
+      expect(asleep.nameLift).toBe(SLEEP_NAME_LIFT);
+      const feetAt = worldToScreen(asleep.x, asleep.y);
+      expect(asleep.zzz.length).toBeGreaterThanOrEqual(2);
+      for (const z of asleep.zzz) {
+        expect(z.y + z.height, `${z.glyph} over the body`).toBeLessThanOrEqual(feetAt.y - 17);
+        expect(z.y, `${z.glyph} under the name`).toBeGreaterThan(feetAt.y - SLEEP_NAME_LIFT);
+        expect(Math.abs(z.x + z.width / 2 - feetAt.x), `${z.glyph} over the head`).toBeLessThan(10);
+      }
+      await page.waitForTimeout(600);
+      await nextFrames(page);
+      expect((await drawn(page)).camp!.gladiator!.zzz).toEqual(asleep.zzz);
       await expect(sceneBanner(page)).toHaveText(/^Resting/);
       await sceneInView(page);
       await shot(page, testInfo, 'camp-resting');

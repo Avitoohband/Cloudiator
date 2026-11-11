@@ -7,7 +7,11 @@ const crouch = { nearLeg: [-6, -22], farLeg: [16, -26] };
 const seated = { seat: 49, nearLeg: [84, -84], farLeg: [78, -78] };
 const rest = { weapon: 'stowed', offhand: 'back' };
 
-/** @type {Record<string, { loop: boolean, views: ('front'|'back')[], durations: number[], frames: object[] }>} */
+/**
+ * `anchor`, when an action has one, is its frames' own ground-contact point (pixels in the 64 px frame); other actions use the
+ * rig's ANCHOR (32, 58).
+ * @type {Record<string, { loop: boolean, views: ('front'|'back')[], durations: number[], frames: object[], anchor?: { x: number, y: number } }>}
+ */
 export const GLADIATOR_ACTIONS = {
   idle: {
     loop: true, views: ['front', 'back'], durations: [260, 220, 260, 220],
@@ -72,11 +76,18 @@ export const GLADIATOR_ACTIONS = {
       { ...rest, ...seated, held: 'bowl', farArm: [28, 72], nearArm: [60, 75] },
     ],
   },
+  // Task 11b (Avi approved the after picture, 2026-11-11): the sleeper lies straight along its bed, which runs along map x (2:1
+  // down to the right on screen), with its head on the pillow and its feet on the foot tile, and wears a dark eye cover (face
+  // 'sleep'). The station, walking and depth stay on the bed's head tile, so the frames carry their own anchor: the head tile's
+  // centre inside the frame, half a tile (16, 8 px) up and to the left of the bed's middle. Scenes place a sprite by its frame's
+  // pivot and mirror a sw-facing actor around it, so no scene code changes. Avi on the first draft: "their neck on the bed looks
+  // weird. can you angle it lower a bit?": the head rests 2.5 px lower and 1 px nearer the shoulders (`head`), so the neck no
+  // longer rises from the shoulders to a raised head.
   sleep: {
-    loop: true, views: ['front'], durations: [1000, 900],
+    loop: true, views: ['front'], durations: [1000, 900], anchor: { x: 16, y: 50 },
     frames: [
-      { weapon: 'none', offhand: 'none', rotate: -90, face: 'closed', nearLeg: [0, 0], farLeg: [6, -4], nearArm: [10, 10], farArm: [6, 12] },
-      { weapon: 'none', offhand: 'none', rotate: -90, face: 'closed', breath: 1, nearLeg: [0, 0], farLeg: [6, -4], nearArm: [12, 10], farArm: [8, 12] },
+      { weapon: 'none', offhand: 'none', rotate: -90, shear: 0.5, shiftX: -1, air: -2, head: [-2.5, 1], face: 'sleep', nearLeg: [0, 0], farLeg: [6, -4], nearArm: [10, 10], farArm: [6, 12] },
+      { weapon: 'none', offhand: 'none', rotate: -90, shear: 0.5, shiftX: -1, air: -2, head: [-2.5, 1], face: 'sleep', breath: 1, nearLeg: [0, 0], farLeg: [6, -4], nearArm: [12, 10], farArm: [8, 12] },
     ],
   },
   // Avi, 2026-10-29: the 1.3 s loop read as squats. Crouch and look at the ground (settle, then hold), then stand and

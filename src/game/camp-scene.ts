@@ -30,6 +30,7 @@ import { drawSlices, hidesActor, type PlacedImage } from './depth';
 import type { ArenaFightSummary, SceneBridge } from './bridge';
 import { DEFAULT_LABEL_PREFS, FADED_LABEL_ALPHA, labelScale, labelsShown as namesShown, tidyLabels, type LabelPrefs, type TidyItem } from './labels';
 import { NPC_LINES, TALK_FADE_MS, TalkLines, talkHoldMs } from './npc-talk';
+import { SLEEP_NAME_LIFT, createZzz, destroyZzz, drawZzz, ensureZzzTexture, zzzDebug, type ZzzSprites } from './sleep-zzz';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
@@ -109,6 +110,10 @@ export type CampDebugActor = {
   nameplate: { alpha: number; scale: number } | null;
   /** The light of the torch an NPC carries, where and how bright it is drawn now (patch 1.5.1's night watch), else null. */
   torch: { x: number; y: number; alpha: number } | null;
+  /** Task 11b: the "ZzZ" letters drawn over a sleeper now, as world-space boxes with their opacity (empty when none). */
+  zzz: { glyph: string; x: number; y: number; width: number; height: number; alpha: number }[];
+  /** The world-space box a click or hover on the actor answers in (a sleeper's covers its whole lying body). */
+  hit: Rect;
 };
 export type CampDebugState = {
   ready: boolean;
@@ -167,9 +172,21 @@ const WHEEL_IDLE_MS = 250;
 /** Pointer travel (CSS px) before a press becomes a drag: the shell's camp-click travel too (13.7 review). */
 const DRAG_THRESHOLD = CLICK_TRAVEL_PX;
 const LABEL_COLORS: Record<LabelPose['kind'], string> = { damage: '#ffffff', critical: '#ffe48f', guard: '#8edcf4', miss: '#d4d4d8' };
-/** Nameplates sit this far over the feet, and an NPC tag this far when its nameplate shows too (art px). */
+/**
+ * Nameplates sit this far over the feet, and an NPC tag this far when its nameplate shows too (art px). A sleeper's name sits
+ * SLEEP_NAME_LIFT over its feet instead, just over the "ZzZ" rising from its head (src/game/sleep-zzz.ts, Task 11b).
+ */
 const PLATE_LIFT = 46;
 const TAG_LIFT = 58;
+/**
+ * An actor's click and hover box, in Phaser's container hit coordinates (its display origin, half the 26 x 46 size, is added):
+ * standing, 13 px left and right of the feet and 46 px up; lying asleep along its bed (Task 11b), the whole body, head to feet,
+ * from 14 px behind the feet to 33 px ahead and from 17 px over them to 10 px under (the sleep frames reach x -13 to 32 and
+ * y -16 to 9 from the feet). A sw-facing actor is mirrored, and its hit test with it.
+ */
+const STAND_HIT = { x: 0, y: -23, width: 26, height: 46 };
+const SLEEP_HIT = { x: -1, y: 6, width: 48, height: 27 };
+const HIT_ORIGIN = { x: 13, y: 23 };
 /** The title's own lettering: one size under the name (patch 1.7). */
 const TITLE_STYLE = { fontFamily: 'monospace', fontSize: '9px', fontStyle: 'italic', color: '#f2c66b', stroke: '#1a1423', strokeThickness: 3 };
 /** Fight damage labels keep this gap over their target's nameplate or NPC tag. */
@@ -226,6 +243,10 @@ type ActorView = {
   marker?: PhaserNS.GameObjects.Text;
   /** The spectator spot an eliminated tournament entrant stands at. */
   spectator?: SpectatorSpot | null;
+  /** Lying asleep at its station (Task 11b): its name sits over the ZzZ, and its click box covers the lying body. */
+  sleeping?: boolean;
+  /** The "ZzZ" over it while it sleeps, made the first time it sleeps in view. */
+  zzz?: ZzzSprites | null;
 };
 
 type PropGroup = Omit<PlacedImage, 'slices'> & {
@@ -371,6 +392,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         this.buildGround();
         this.buildProps();
         this.buildLights();
+        ensureZzzTexture(this, manifest.palette);
         // Large enough to cover the view at minimum zoom wherever the clamped camera sits.
         overlay = this.add.rectangle(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width + 8000, bounds.height + 8000, 0xffffff, 0).setDepth(2_000_000);
         ring = this.add.ellipse(0, 0, 30, 14).setStrokeStyle(2, 0xffe48f).setVisible(false);
@@ -522,8 +544,9 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       const container = this.add.container(0, 0, sprites);
       container.setSize(26, 46);
       // Phaser offsets container hit tests by the display origin (half the size), so this covers the body from
-      // 13 px left to 13 px right of the feet and 46 px up: the drawn actor, not a box above and left of it.
-      container.setInteractive({ hitArea: new P.Geom.Rectangle(0, -23, 26, 46), hitAreaCallback: P.Geom.Rectangle.Contains, useHandCursor: hand });
+      // 13 px left to 13 px right of the feet and 46 px up: the drawn actor, not a box above and left of it (STAND_HIT).
+      const { x, y, width, height } = STAND_HIT;
+      container.setInteractive({ hitArea: new P.Geom.Rectangle(x, y, width, height), hitAreaCallback: P.Geom.Rectangle.Contains, useHandCursor: hand });
       // The actor under the pointer: its name comes back at full strength, on top (Tidy), and an NPC shows its gold ring.
       container.on('pointerover', () => { overId = id; });
       container.on('pointerout', () => { if (overId === id) overId = null; });
@@ -701,6 +724,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       v.titleLabel?.destroy();
       v.marker?.destroy();
       v.torch?.destroy();
+      destroyZzz(v.zzz);
       views.delete(v.id);
       for (const [battleId, npc] of npcFighters) if (npc === v) npcFighters.delete(battleId);
       if (selected === v.id) selected = null;
@@ -839,6 +863,17 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         const visible = s.x > viewRect.x - margin && s.x < viewRect.right + margin && s.y > viewRect.y - margin && s.y < viewRect.bottom + margin * 1.5;
         if (v.container.visible !== visible) v.container.setVisible(visible);
         if (v.torch) this.carryTorch(v, now, s, viewRect, torch);
+        // Task 11b: a gladiator lying asleep at its station has a "ZzZ" rising from its head, its name just over it, and a
+        // click box over its whole lying body (src/game/sleep-zzz.ts).
+        const sleeping = v.kind === 'player' && !pose && !v.walk && v.action === 'sleep';
+        if (sleeping !== !!v.sleeping) {
+          v.sleeping = sleeping;
+          const hit = sleeping ? SLEEP_HIT : STAND_HIT;
+          (v.container.input?.hitArea as PhaserNS.Geom.Rectangle | undefined)?.setTo(hit.x, hit.y, hit.width, hit.height);
+        }
+        if (sleeping && visible) drawZzz(v.zzz ??= createZzz(this, v.id), true, s, now, v.facing === 'sw' || v.facing === 'nw', reducedMotion);
+        else if (v.zzz) drawZzz(v.zzz, false, s, now, false, reducedMotion);
+        const lift = sleeping ? SLEEP_NAME_LIFT : PLATE_LIFT;
         // Names and titles by the Settings choices (src/game/labels.ts); When zoomed in is the camp before Patch 1.9.
         const title = v.titleLabel;
         const shown = namesShown({ npc: v.kind === 'npc', focused: selected === v.id || following === v.id, hasTitle: !!title }, cam.zoom, labelPrefs);
@@ -846,7 +881,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (v.label.visible !== showLabel) v.label.setVisible(showLabel);
         if (showLabel) {
           if (v.label.scaleX !== nameScale) v.label.setScale(nameScale);
-          v.label.setPosition(s.x, s.y - PLATE_LIFT);
+          v.label.setPosition(s.x, s.y - lift);
         }
         // The title sits on the name's top edge when both show.
         const showTitle = !!title && showLabel && shown.title;
@@ -854,13 +889,13 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           if (title.visible !== showTitle) title.setVisible(showTitle);
           if (showTitle) {
             if (title.scaleX !== nameScale) title.setScale(nameScale);
-            title.setPosition(s.x, s.y - PLATE_LIFT - v.label.displayHeight);
+            title.setPosition(s.x, s.y - lift - v.label.displayHeight);
           }
         }
         if (v.marker) {
           if (v.marker.visible !== visible) v.marker.setVisible(visible);
           // A tag never covers a title: with one showing, the tag stands on the title's top edge.
-          if (visible) v.marker.setPosition(s.x, s.y - (showTitle ? PLATE_LIFT + v.label.displayHeight + title!.displayHeight : showLabel ? tagLift(v.label) : PLATE_LIFT));
+          if (visible) v.marker.setPosition(s.x, s.y - (showTitle ? lift + v.label.displayHeight + title!.displayHeight : showLabel ? tagLift(v.label, lift) : lift));
         }
         if (visible) {
           if (pose) this.applyPose(v, pose);
@@ -1312,9 +1347,12 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     if (text.depth !== depth) text.setDepth(depth);
   }
 
-  /** Where an NPC tag stands over a name drawn at its scale: today's lift at zoom-1 size, higher for a larger name. */
-  function tagLift(label: PhaserNS.GameObjects.Text): number {
-    return PLATE_LIFT + (TAG_LIFT - PLATE_LIFT) * label.scaleY;
+  /**
+   * Where an NPC tag stands over a name drawn at its scale: today's lift at zoom-1 size, higher for a larger name; `lift` is
+   * where the name sits (a sleeper's is lower, Task 11b).
+   */
+  function tagLift(label: PhaserNS.GameObjects.Text, lift = PLATE_LIFT): number {
+    return lift + (TAG_LIFT - PLATE_LIFT) * label.scaleY;
   }
 
   /** Closes the speech bubble; true when one was open. */
@@ -1486,6 +1524,14 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     talk = null;
   }
 
+  /** The world-space box an actor's clicks and hovers answer in: its hit area around the feet, mirrored with the actor. */
+  function hitBox(v: ActorView): Rect {
+    const r = (v.container.input?.hitArea as PhaserNS.Geom.Rectangle | undefined) ?? STAND_HIT;
+    const left = r.x - HIT_ORIGIN.x;
+    const x = v.container.scaleX < 0 ? -(left + r.width) : left;
+    return { x: v.container.x + x, y: v.container.y + r.y - HIT_ORIGIN.y, width: r.width, height: r.height };
+  }
+
   /** Canvas-relative CSS pixel position of an actor's body (20 art px above its feet), or null without a live camera. */
   function screenOfView(v: ActorView): Point | null {
     if (!live()) return null;
@@ -1540,6 +1586,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           look: v.npcLook ?? null,
           torch: v.torch?.visible ? { x: v.torch.x, y: v.torch.y, alpha: v.torch.alpha } : null,
           nameplate: v.label.visible ? { alpha: v.label.alpha, scale: v.label.scaleX } : null,
+          zzz: zzzDebug(v.zzz),
+          hit: hitBox(v),
         })),
         selected,
         following,

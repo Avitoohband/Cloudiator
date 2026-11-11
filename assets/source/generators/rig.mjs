@@ -28,7 +28,7 @@ export const SLOT_ORDER = {
 const BODY_SLOTS = new Set(['farLeg', 'nearLeg', 'farArm', 'torso', 'head', 'nearArm']);
 
 const DEFAULT_POSE = {
-  lean: 0, breath: 0, air: 0, shiftX: 0, head: [0, 0], rotate: 0, seat: null,
+  lean: 0, breath: 0, air: 0, shiftX: 0, head: [0, 0], rotate: 0, shear: 0, seat: null,
   nearArm: [15, 35], farArm: [25, 50], nearLeg: [-6, 0], farLeg: [8, 0],
   weapon: 'hand', weaponAngle: 140, offhand: 'guard', held: null, face: 'normal',
 };
@@ -80,6 +80,10 @@ export function skeleton(rawPose, view, scale = 1) {
       p[key] = [x * c - y * sn, x * sn + y * c];
     }
   }
+  // Lying along the camp's isometric diagonal (a bed runs along map x; Task 11b, Avi 2026-11-11): each point moves down by
+  // `shear` times its x offset from the hip, so a body rotated flat follows the 2:1 slope instead of the screen's horizontal.
+  // Unlike a plain rotation to -63.4 degrees, a shear keeps verticals vertical, as the isometric projection does.
+  if (pose.shear) for (const key of Object.keys(p)) p[key] = [p[key][0], p[key][1] + pose.shear * p[key][0]];
   let dy;
   if (pose.seat != null) {
     dy = pose.seat;

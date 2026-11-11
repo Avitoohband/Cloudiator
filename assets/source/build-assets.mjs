@@ -78,7 +78,8 @@ function addAtlas(key, path, frames, kind, generator, opts, inputs = []) {
   emitJson(data, json, generator, inputs);
   atlases[key] = { image, data, width: sheet.width, height: sheet.height, kind };
 }
-const actorFrames = list => list.map(f => ({ ...f, anchorX: ANCHOR.x, anchorY: ANCHOR.y }));
+// Actor frames stand on the rig's anchor (32, 58), unless a frame carries its own (the gladiator's sleep frames, Task 11b).
+const actorFrames = list => list.map(f => ({ ...f, anchorX: f.anchorX ?? ANCHOR.x, anchorY: f.anchorY ?? ANCHOR.y }));
 const propFrames = list => list.map(({ name, canvas, anchorX, anchorY, ...meta }) => ({ name, canvas, anchorX, anchorY, meta }));
 
 // ----------------------------------------------------------------- actors
@@ -164,7 +165,7 @@ const manifest = {
       animations: actionMap('gladiator', [...REQUIRED_ACTIONS, ...Object.values(ATTACK_VARIANTS)], ['idle', 'walk']),
       attackVariants: ATTACK_VARIANTS,
       walk: { tilesPerSecond: WALK_TILES_PER_SECOND },
-      notes: 'Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Draw one body (body, or body-female for a female body) with its clothes (cloth, or cloth-female) and at most one hair layer (hair is short; hair-long, hair-ponytail; none when bald). Multiply-tint layers by their tint key (skin, cloth, hair) per player. Two-handed weapons hide offhand-shield; head gear hides every hair layer; head-helmet-crest only with head-helmet; accent is always drawn.',
+      notes: 'Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Draw one body (body, or body-female for a female body) with its clothes (cloth, or cloth-female) and at most one hair layer (hair is short; hair-long, hair-ponytail; none when bald). Multiply-tint layers by their tint key (skin, cloth, hair) per player. Two-handed weapons hide offhand-shield; head gear hides every hair layer; head-helmet-crest only with head-helmet; accent is always drawn. Frames stand on anchor, except the sleep frames, which carry their own (each frame\'s anchorPx and pivot: the bed\'s head tile centre, so the body lies along the bed); place every frame by its own pivot.',
     },
     npcs: NPCS.map(n => ({ id: n.id, name: n.name, role: n.role, atlas: 'npcs', animations: actionMap(`npc-${n.id}`, ['idle', 'walk', 'talk', 'tend'], ['idle', 'walk']) })),
     creatures: CREATURES.map(c => ({ id: c.id, name: c.name, expedition: c.expedition, atlas: 'creatures', animations: actionMap(`creature-${c.id}`, CREATURE_ACTIONS, []) })),

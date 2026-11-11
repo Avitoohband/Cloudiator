@@ -128,16 +128,51 @@ describe('camp beds (Task 7c)', () => {
       const feet = worldToScreen(s.x + 0.5, s.y + 0.5); // the sleeper stands at the tile centre
       for (const name of manifest.animations[gladiator.animations.sleep!.se].frames.filter(f => f.startsWith('body/'))) {
         const body = opaque(gladiator.atlas, name);
+        // Task 11b: the sleep frames carry their own anchor (the head tile's centre inside the frame), so read it per frame.
         for (let y = 0; y < body.frame.h; y += 1) for (let x = 0; x < body.frame.w; x += 1) {
           if (!body.at(x, y)) continue;
-          const bx = Math.floor(feet.x - gladiator.anchor.x + x - (anchor.x - props[bed.frame].anchorX));
-          const by = Math.floor(feet.y - gladiator.anchor.y + y - (anchor.y - props[bed.frame].anchorY));
+          const bx = Math.floor(feet.x - body.frame.anchorX + x - (anchor.x - props[bed.frame].anchorX));
+          const by = Math.floor(feet.y - body.frame.anchorY + y - (anchor.y - props[bed.frame].anchorY));
           expect(bedArt.at(bx, by), `sleeper ${i} (${name}) pixel ${x},${y} is off the bed`).toBe(true);
           checked += 1;
         }
       }
     }
     expect(checked).toBeGreaterThan(12 * 2 * 400);
+  });
+
+  it('lays the sleeper along the bed (Task 11b): head on the pillow, feet on the foot tile, the body on the 2:1 diagonal', () => {
+    // Avi, 2026-11-11: "could you make the character sleep straight on the bed". A bed runs along map x, which slopes down to the
+    // right at 2:1 on screen; the pillow is at u 0.17-0.44 of the head tile and the gold band at u 1.31-1.37 (props.mjs bedroll).
+    // A body pixel is taken to lie on the blanket's top, 8 px over the ground (the bed's top plus one), and is projected to the
+    // bed's own (u along, v across) tile coordinates from the station's tile centre, (0.5, 0.5).
+    const SURFACE = 8;
+    const bedLocal = (dx: number, dy: number) => ({ u: 0.5 + (dx / 32 + (dy + SURFACE) / 16) / 2, v: 0.5 + ((dy + SURFACE) / 16 - dx / 32) / 2 });
+    const gladiator = manifest.actors.gladiator;
+    const names = manifest.animations[gladiator.animations.sleep!.se].frames.filter(f => f.startsWith('body/'));
+    expect(names).toHaveLength(2);
+    for (const name of names) {
+      const body = opaque(gladiator.atlas, name);
+      const px: { x: number; y: number }[] = [];
+      for (let y = 0; y < body.frame.h; y += 1) for (let x = 0; x < body.frame.w; x += 1) if (body.at(x, y)) px.push({ x: x - body.frame.anchorX, y: y - body.frame.anchorY });
+      const minX = Math.min(...px.map(p => p.x));
+      const maxX = Math.max(...px.map(p => p.x));
+      const centre = (list: { x: number; y: number }[]) => ({ x: list.reduce((s, p) => s + p.x, 0) / list.length, y: list.reduce((s, p) => s + p.y, 0) / list.length });
+      // Facing south-east the head is the body's left end (its first 10 columns), the feet its right end (the last 4).
+      const head = centre(px.filter(p => p.x <= minX + 9));
+      const feet = centre(px.filter(p => p.x >= maxX - 3));
+      const h = bedLocal(head.x + 0.5, head.y + 0.5);
+      const f = bedLocal(feet.x + 0.5, feet.y + 0.5);
+      expect(h.u, `${name}: head along the bed`).toBeGreaterThan(0.1);
+      expect(h.u, `${name}: head along the bed`).toBeLessThan(0.7);
+      expect(f.u, `${name}: feet along the bed`).toBeGreaterThan(1.15);
+      expect(f.u, `${name}: feet along the bed`).toBeLessThan(1.6);
+      for (const [part, at] of [['head', h], ['feet', f]] as const) expect(Math.abs(at.v - 0.5), `${name}: ${part} across the bed`).toBeLessThan(0.25);
+      // The spine follows the bed's 2:1 slope (1 px down for every 2 px right), not the screen's horizontal.
+      const slope = (feet.y - head.y) / (feet.x - head.x);
+      expect(slope, `${name}: slope`).toBeGreaterThan(0.35);
+      expect(slope, `${name}: slope`).toBeLessThan(0.65);
+    }
   });
 
   it('lets a gladiator walk from the rest path node to every sleep station', () => {

@@ -18,6 +18,7 @@ import { ZOOM_STEP } from './camera';
 import { worldToScreen } from './iso';
 import { NAME_LABEL_DEPTH, NAME_LABEL_STYLE, createMapCamera, createMapLayer, type MapCamera, type MapLayer } from './map-layer';
 import { vignettePose, type VignettePose } from './trip-vignette';
+import { SLEEP_NAME_LIFT, createZzz, destroyZzz, drawZzz, ensureZzzTexture, zzzDebug, type ZzzSprites } from './sleep-zzz';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
@@ -34,8 +35,14 @@ export type TripCampDebug = {
   failed: boolean;
   /** The camp chapter drawn last frame (null: none, the scene draws no gladiator). */
   kind: TripVignette['kind'] | null;
-  /** `nameLift`: how far the name's bottom edge sits over the gladiator's feet (screen px). */
-  gladiator: { x: number; y: number; action: string; alpha: number; layers: string[]; nameLift: number } | null;
+  /**
+   * `nameLift`: how far the name's bottom edge sits over the gladiator's feet (screen px). `zzz`: the "ZzZ" letters drawn over
+   * it asleep (Task 11b), as world-space boxes with their opacity; empty otherwise.
+   */
+  gladiator: {
+    x: number; y: number; action: string; alpha: number; layers: string[]; nameLift: number;
+    zzz: { glyph: string; x: number; y: number; width: number; height: number; alpha: number }[];
+  } | null;
   /** The camera: whether it follows the gladiator (the viewport's Follow toggle), its zoom, and the world rectangle it shows. */
   following: boolean;
   zoom: number;
@@ -67,10 +74,12 @@ export type TripCampSceneDeps = {
 const BG = 0x1c3f24;
 /** As the expedition scene: one actor fills more of the view than in the busy camp. */
 const DEFAULT_ZOOM = ZOOM_STEP ** 2;
-/** The name sits this far over the gladiator's feet, as in the expedition scene. */
+/**
+ * The name sits this far over the gladiator's feet, as in the expedition scene. Asleep on its bed it sits SLEEP_NAME_LIFT over
+ * them (src/game/sleep-zzz.ts), as in the camp: just over the "ZzZ" rising from the head (Task 11b), which replaced the lower
+ * lift (20) that kept it just over the lying body, not over the bed behind.
+ */
 const NAME_LIFT = 46;
-/** Lying down, the body reaches 16 px over the feet: the name sits just over it, not over the bed behind. */
-const SLEEP_NAME_LIFT = 20;
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -89,7 +98,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
   let reducedMotion = deps.reducedMotion;
   let look = deps.look;
   let layer: MapLayer | null = null;
-  let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text } | null = null;
+  let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text; zzz: ZzzSprites } | null = null;
   /**
    * What the last frame drew; `snap` puts the camera on the gladiator at once (a new chapter, or the scene woke); `lightMs` is the
    * time the map was last lit at (the chapter's display time, on by its elapsed time).
@@ -126,6 +135,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
       try {
         this.cameras.main.setBackgroundColor(BG);
         layer = createMapLayer(P, this, manifest, map);
+        ensureZzzTexture(this, manifest.palette);
         this.buildHero();
         camera.start(worldToScreen(gate.x + 0.5, gate.y + 0.5));
         ready = true;
@@ -151,8 +161,10 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
       });
       const container = this.add.container(0, 0, layers.map(l => l.sprite)).setVisible(false);
       const label = this.add.text(0, 0, look.name, NAME_LABEL_STYLE).setOrigin(0.5, 1).setDepth(NAME_LABEL_DEPTH).setResolution(2).setVisible(false);
-      if (hero) { hero.container.destroy(); hero.label.destroy(); }
-      hero = { container, layers, label };
+      // The ZzZ's loop phase is the gladiator's own, as in the camp.
+      const zzz = createZzz(this, look.key);
+      if (hero) { hero.container.destroy(); hero.label.destroy(); destroyZzz(hero.zzz); }
+      hero = { container, layers, label, zzz };
       last = { ...last, frames: '', flip: false };
     }
 
@@ -191,12 +203,17 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
         if (frames.join('|') !== last.frames) { hero.layers.forEach((l, i) => l.sprite.setFrame(frames[i])); last.frames = frames.join('|'); }
         if (flip !== last.flip || hero.container.scaleX !== (flip ? -1 : 1)) { hero.container.setScale(flip ? -1 : 1, 1); last.flip = flip; }
         hero.container.setPosition(feet.x, feet.y).setDepth(feet.y);
-        hero.label.setText(look.name).setPosition(feet.x, feet.y - (pose.action === 'sleep' ? SLEEP_NAME_LIFT : NAME_LIFT));
+        const asleep = pose.action === 'sleep';
+        hero.label.setText(look.name).setPosition(feet.x, feet.y - (asleep ? SLEEP_NAME_LIFT : NAME_LIFT));
+        // Asleep on its bed: the ZzZ rises on the chapter's own time, so a paused replay holds it (Task 11b).
+        drawZzz(hero.zzz, shown && asleep, feet, vignette.elapsedMs, flip, reducedMotion);
         // A following camera keeps the gladiator in the middle. A free one is placed once, when a chapter opens (or the scene
         // wakes), on the middle of the chapter's whole walk, so the walk stays in view from its start to its end.
         if (camera.following()) camera.follow(feet, snap);
         else if (snap) camera.follow(walkMiddle(vignette), true);
         last.snap = false;
+      } else {
+        drawZzz(hero.zzz, false, { x: 0, y: 0 }, 0, false, reducedMotion);
       }
       // Props fade only for a gladiator in view.
       layer?.occlude(pose && shown ? worldToScreen(pose.x, pose.y) : null);
@@ -244,7 +261,10 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
         failed,
         kind: last.kind,
         gladiator: hero && pose
-          ? { x: pose.x, y: pose.y, action: pose.action, alpha: hero.container.alpha, layers: hero.layers.map(l => l.id), nameLift: hero.container.y - hero.label.y }
+          ? {
+            x: pose.x, y: pose.y, action: pose.action, alpha: hero.container.alpha, layers: hero.layers.map(l => l.id), nameLift: hero.container.y - hero.label.y,
+            zzz: zzzDebug(hero.zzz),
+          }
           : null,
         following: camera.following(),
         zoom: camera.view().zoom,

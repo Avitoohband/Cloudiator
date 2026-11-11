@@ -32,7 +32,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 - Open Game Info from camp to read the Wiki, with guides to combat, attributes, stamina, Training, the Arena and dungeons.
 - The Future Updates tab shows the public plans for upcoming patches.
-- Browse a square grid of pixel-art items in Inventory and shops. Select a tile to check its details, wear it, or manage it.
+- Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
 - In My gladiator, hover, focus, or tap worn gear and replacements to see stats, attribute bonuses, and weight.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
